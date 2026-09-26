@@ -439,11 +439,11 @@ def m_unit_label(base):
 # ---------------------------------------------------------------- document
 TITLE_RE = re.compile(
     r"MARKET RATES SYSTEM \(MRS\),?\s*(\w+)\s*BI-?\s*ANNUAL-?\s*(\d{4})\s*"
-    r"\((\d{2})\.(\d{2})\.(\d{4})\s*to\s*(\d{2})\.(\d{2})\.(\d{4})\)\s*DISTRICT\s+([A-Za-z .]+?)\s*$", re.I)
+    r"\(\s*(\d{2})\.(\d{2})\.(\d{4})\s*to\s*(\d{2})\.(\d{2})\.(\d{4})\s*\)\s*DISTRICT\s+([A-Za-z .]+?)\s*$", re.I)
 
 
 def doc_meta(pdf):
-    for p in pdf.pages[:5]:
+    for p in pdf.pages[:10]:
         for line in (p.extract_text() or "").splitlines():
             m = TITLE_RE.search(re.sub(r"\s+", " ", line).strip())
             if m:
