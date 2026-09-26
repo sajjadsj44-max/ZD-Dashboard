@@ -77,7 +77,7 @@ budget, the floor becomes 44,000 ÷ 26 = 1,692.
 | SAND-CH | 80 (Phoenix GRN RCP-316, 07-Sep-2026) | 70 | own purchase this month beats a web list |
 | SAND-RV | 52 (Phoenix GRN RCP-310, 27-Aug-2026) | 47.5 | same |
 | STL60 | 242 (Phoenix GRN RCP-312, 30-Aug-2026) | 260 | Part 1 flags its own figure low-confidence |
-| CRSH-SG | 185 (supplied by Sajjad, 04-Sep-2026) | 137.5 | **26% gap — confirm with a Sargodha crush supplier** |
+| CRSH-SG | 185 (supplied by Sajjad, 04-Sep-2026) | 137.5 | Kept (Sajjad, 26-Sep-2026): a Lahore market list of Feb-2026 gives Sargodha ½" down A-grade 180 and Margalla 200 per cft (therealtimeofficial.com); 137.5 is a national-listing low outlier. A supplier quote is still worth getting |
 | BLK-S4 / H6 / H8 | 140 / 165 / 210 (Lahore quotation / GRN, Sep-2026) | 60 / 110 / 147.5 | Part 1 figures are national ex-factory, June-2026 |
 | P-PUMP | 28.32 (Phoenix GRN RCP-259) | 25.49 | Part 1 is a benchmark site, not a supplier |
 | QE-PLY-SH | 4,000 | 4,000 | same figure; the source page contradicts itself |
