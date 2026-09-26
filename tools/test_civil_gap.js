@@ -36,7 +36,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
     const calc = {}; cv.concat(RA.items.filter(i => ["FN-560", "EW-950", "EW-960"].includes(i.id)))
       .forEach(i => { const c = raCalc(i); calc[i.id] = {rate: c.rate, gaps: c.gaps}; });
     return {rev: D.rev, civRev: RA.civRev, want: D.items.length, have: cv.length, calc,
-            helper: R["L-HELPER"].rate, brk2: R["BRK-2"].rate,
+            helper: R["L-HELPER"].rate, brk2: R["BRK-2"].rate, brk1: R["BRK-1"].rate, lcarp: R["L-CARP"].rate,
             fn560: RA.items.find(i => i.id === "FN-560").M.map(r => r.ref),
             ew950: RA.items.find(i => i.id === "EW-950").M.map(r => r.ref),
             ew960: RA.items.find(i => i.id === "EW-960").M.length,
@@ -51,7 +51,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   const open = Object.keys(fresh.calc).filter(k => fresh.calc[k].gaps > 0);
   ok(open.length === 1 && open[0] === "CV-128", "only CV-128 (topsoil) is left unpriced — " + open.join(", "));
   ok(Object.keys(fresh.calc).every(k => fresh.calc[k].rate > 0), "every item has a rate above 0");
-  ok(fresh.helper === 1538 && fresh.brk2 === 12.5, "L-HELPER 1,538 and BRK-2 12.5 applied");
+  ok(fresh.helper === 1538 && fresh.brk2 === 13 && fresh.brk1 === 17.5 && fresh.lcarp === 2400, "L-HELPER 1,538, BRK-2 13, BRK-1 17.5, L-CARP 2,400 applied");
   ok(fresh.fn560.includes("GRN-QUA-STR-000134"), "FN-560 carries the GI door frame");
   ok(fresh.ew950[0] === "PAVER-60", "EW-950 carries the paver block");
   ok(fresh.ew960 > 10, "EW-960 carries its materials");
@@ -75,7 +75,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   const up = await page.evaluate(() => {
     const R = {}; RA.rates.forEach(r => R[r.code] = r);
     return {civRev: RA.civRev, n: RA.items.filter(i => /^CV-/.test(i.id)).length,
-            cv34: RA.items.find(i => i.id === "CV-034"), helper: R["L-HELPER"].rate, brk2: R["BRK-2"].rate,
+            cv34: RA.items.find(i => i.id === "CV-034"), helper: R["L-HELPER"].rate, brk2: R["BRK-2"].rate, brk1: R["BRK-1"].rate, lcarp: R["L-CARP"].rate,
             fn560: RA.items.find(i => i.id === "FN-560").M.map(r => r.ref),
             ew950: RA.items.find(i => i.id === "EW-950").M.map(r => r.ref + ":" + r.qty)};
   });

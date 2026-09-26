@@ -218,14 +218,39 @@ def build(c):
     # ---------------- rate lines that are not MRS / GRN / library -----------------------------
     X.add({"code": "L-HELPER", "kind": "L", "name": "Helper / unskilled labourer", "unit": "Day", "rate": 1538,
            "loc": "Lahore",
-           "src": "Punjab Minimum Wages notification, 01-May-2026 — unskilled adult worker PKR 40,000 per month "
-                  "÷ 26 working days = 1,538.46 per day (statutory floor; found by web search 26-Sep-2026, "
-                  "legalpk.com / labourlawhelp.com / SGCMS regulatory updates). Replaces the 1,300 assumption, which "
-                  "was below the legal minimum", "date": "2026-05-01", "vs": "I"})
-    X.add({"code": "BRK-2", "kind": "M", "name": "Brick — 2nd class", "unit": "Nos", "rate": 12.5, "loc": "Lahore",
-           "src": f"Web search {dmy(SEARCH)} — Lahore B-class bricks PKR 11,000–14,000 per 1,000, September 2026 "
-                  "(themsquare.com.pk / woodenboxtrading.com; one Lahore list gives 11,500); mid 12,500 ÷ 1,000",
-           "date": SEARCH, "vs": "I"})
+           "src": "Punjab minimum wage, 01-Jul-2025 — unskilled adult worker PKR 40,000 per month ÷ 26 working days "
+                  "= 1,538.46 per day (statutory floor; WageIndicator.org Punjab page, valid Jun-2026; confirmed by "
+                  "Claude chat research 26-Sep-2026). The 10% rise announced in the 2026-27 federal budget has not "
+                  "been notified for Punjab yet — if it is, the floor becomes 44,000 ÷ 26 = 1,692. Replaces the 1,300 "
+                  "assumption, which was below the legal minimum; market helper wages quoted online (1,000–1,200, "
+                  "ConcretesMath) are below the floor too", "date": "2025-07-01", "vs": "I"})
+    part1 = "Claude chat research (Part 1), 26-Sep-2026 — "
+    X.add({"code": "BRK-2", "kind": "M", "name": "Brick — 2nd class", "unit": "Nos", "rate": 13, "loc": "Lahore",
+           "src": part1 + "Lahore B-class bricks Rs 12–14 each (Wooden Box Trading, 'last updated Sep 2026'); "
+                  "cross-checks: The M Square 23-Jan-2026 Rs 12–14, MaterialRate.pk 12-Apr-2026 Rs 11,500 per 1,000, "
+                  "own web search 26-Sep-2026 Rs 11,000–14,000 per 1,000", "date": SEARCH, "vs": "I"})
+    X.add({"code": "BRK-1", "kind": "M", "name": "Brick — 1st class machine made", "unit": "Nos", "rate": 17.5,
+           "loc": "Lahore",
+           "src": part1 + "Lahore A-class bricks Rs 16,000–19,000 per 1,000 (Wooden Box Trading, 'last updated Sep "
+                  "2026'); cross-check The M Square 23-Jan-2026 Rs 18–19. Raiwind kiln to central Lahore delivery adds "
+                  "Rs 2,000–4,000 per 10,000. Replaces 18 (20-May-2026)", "date": SEARCH, "vs": "I"})
+    X.add({"code": "GRAVEL-SB", "kind": "M", "name": "Gravel — sub-base", "unit": "Cft", "rate": 100, "loc": "Lahore",
+           "src": "PropertyDealer.pk bajri rate, 24-Sep-2026 — C-grade sub-base / road crush Rs 95–105 per Cft, "
+                  "Lahore (found by Claude chat research 26-Sep-2026); single source, grading not stated. Replaces Phoenix GRN RCP-149 of 30-Apr-2025 "
+                  "(120), which is over 12 months old", "date": "2026-09-24", "vs": "I"})
+    cm = ("ConcretesMath labour cost guide, 11-Oct-2025 — Lahore column of its 2026 daily-wage table "
+          "(8-hour day, excluding contractor mark-up and EOBI), found by Claude chat research 26-Sep-2026; single "
+          "source, no second Lahore wage list found. ")
+    for code, name, rate, lo, hi in [("L-PLMASON", "Mason — plaster / finishing", 2150, 1900, 2400),
+                                     ("L-CARP", "Carpenter / shuttering fixer", 2400, 2200, 2600),
+                                     ("L-STEEL", "Steel fixer", 2450, 2200, 2700),
+                                     ("L-TILE", "Tile / marble fixer", 2500, 2200, 2800),
+                                     ("L-ELEC", "Electrician", 2800, 2400, 3200),
+                                     ("L-PLUMB", "Plumber", 2600, 2200, 3000),
+                                     ("L-FORE", "Foreman / supervisor", 3750, 3000, 4500)]:
+        X.add({"code": code, "kind": "L", "name": name, "unit": "Day", "rate": rate, "loc": "Lahore",
+               "src": cm + f"Range {lo:,}–{hi:,}, mid {rate:,}. Replaces an undated assumption", "date": "2025-10-11",
+               "vs": "I"})
     bit = X.W("BITUMEN", "M", "Bitumen 60/70 penetration grade, bulk / drum", "Kg", 197.5,
               "60/70 bitumen PKR 185,000–210,000 per ton in Pakistan (lakhwa.com, 2026); mid 197,500 ÷ 1,000 kg")
     fab = X.W("BRK-FLYASH", "M", "Fly-ash brick 9\"×4½\"×3\"", "Nos", 15.5,
@@ -902,9 +927,18 @@ SEED_M = {  # the seed items' material rows as shipped (raSeed / RA_LIB_SEED)
     "EW-950": [["SAND-CH", 0.12]],
     "EW-960": [],
 }
-PREV_RATES = {  # published versions of library lines this block moves on
+PREV_RATES = {  # published versions of library lines this block moves on (a rate typed by hand is kept)
     "L-HELPER": [[1300, "2026-09-23"]],
     "BRK-2": [[15, "2026-09-23"]],
+    "BRK-1": [[18, "2026-05-20"]],
+    "GRAVEL-SB": [[120, "2025-04-30"]],
+    "L-PLMASON": [[2100, "2026-09-23"]],
+    "L-CARP": [[2300, "2026-09-23"]],
+    "L-STEEL": [[2200, "2026-09-23"]],
+    "L-TILE": [[2500, "2026-09-23"]],
+    "L-ELEC": [[2200, "2026-09-23"]],
+    "L-PLUMB": [[2200, "2026-09-23"]],
+    "L-FORE": [[3000, "2026-09-23"]],
 }
 
 

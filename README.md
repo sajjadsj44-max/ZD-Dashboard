@@ -436,9 +436,13 @@ rate side by side with the list, is in [`docs/civil-gap-rate-review.md`](docs/ci
   the paver block. EW-960 gains the materials of a 3 × 3 ft × 5 ft brick manhole. The gypsum items
   (FN-550, QS-GYP-P01) stay incomplete, because no dated board or GI-section price was found.
 - **Shared lines moved:**
-  - `L-HELPER` 1,300 → 1,538 per day (Punjab minimum wage notification, 01-May-2026: 40,000 per month
-    ÷ 26 days). This raises almost every civil item.
-  - `BRK-2` 15 → 12.5 (Lahore B-class bricks, web search 26-Sep-2026).
+  - `L-HELPER` 1,300 → 1,538 per day (Punjab minimum wage 40,000 per month from 01-Jul-2025 ÷ 26 days).
+    This raises almost every civil item.
+  - From the Part 1 research (Claude chat, 26-Sep-2026): `BRK-1` 18 → 17.5, `BRK-2` 15 → 13,
+    `GRAVEL-SB` 120 → 100, and seven trade wages that were assumptions (plaster mason, carpenter, steel
+    fixer, tile fixer, electrician, plumber, foreman).
+  - The Punjab "September" MRS on Drive is the Layyah district edition, so the Rawalpindi edition stays as
+    the MRS basis until the Lahore 2nd Bi-Annual 2026 file is loaded.
 
 Saved libraries pick the block up on their next load, the same way as the MEP block (`raSyncBlk`,
 revision key `civRev`):

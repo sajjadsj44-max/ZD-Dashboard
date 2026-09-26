@@ -14,8 +14,7 @@ analyses, 3 repair analyses and 5 seed items to repair. Result: **133 new Item L
    30-Aug-2026). The list's figures come from a planning index (finishes.pk, 21-Aug-2026) that could not be
    opened from here; the library's rates were kept.
 2. **Helper wage below the legal minimum.** The list uses 1,400 / day and the library used 1,300. Punjab's
-   minimum wage notification of 01-May-2026 sets PKR 40,000 per month for an unskilled adult = 1,538 per day
-   (26 days). `L-HELPER` is now 1,538 (applied only where the line still holds the published 1,300).
+   minimum wage is PKR 40,000 per month for an unskilled adult from 01-Jul-2025 = 1,538 per day (26 days). `L-HELPER` is now 1,538 (applied only where the line still holds the published 1,300).
 3. **Arithmetic.** Item 1 (dismantling brickwork) shows 0.055 mason-day × 2,400 + 0.020 helper-day × 1,400
    = 160, but prices it at 55. Item 8 prices a PC200-class excavator at 1,000 cft per day, which is a small
    fraction of its output; the MRS 2026 composite for machine excavation 5–15 ft is 13.02 per cft, not 60.
@@ -55,13 +54,48 @@ opened from the build environment (egress policy), so figures come from search s
 
 ## Shared lines changed
 
+Each line moves only while it still holds its published value; a rate typed by hand is kept.
+
 | Line | Was | Now | Source |
 |---|---|---|---|
-| L-HELPER | 1,300 / day (ASSUMPTION) | 1,538 / day | Punjab Minimum Wages notification, 01-May-2026 |
-| BRK-2 | 15 / Nos (ASSUMPTION) | 12.5 / Nos | Web search 26-Sep-2026 — Lahore B-class 11,000–14,000 per 1,000 |
+| L-HELPER | 1,300 / day (ASSUMPTION) | 1,538 / day | Punjab minimum wage PKR 40,000 / month from 01-Jul-2025 ÷ 26 (WageIndicator, valid Jun-2026) |
+| BRK-1 | 18 (20-May-2026) | 17.5 | Wooden Box Trading, Sep-2026; The M Square 23-Jan-2026 |
+| BRK-2 | 15 (ASSUMPTION) | 13 | Wooden Box Trading, Sep-2026; The M Square; MaterialRate.pk |
+| GRAVEL-SB | 120 (GRN 30-Apr-2025, over 12 months) | 100 | PropertyDealer.pk, 24-Sep-2026 |
+| L-PLMASON / L-CARP / L-STEEL | 2,100 / 2,300 / 2,200 (ASSUMPTION) | 2,150 / 2,400 / 2,450 | ConcretesMath labour guide, Lahore column (11-Oct-2025, table labelled 2026) |
+| L-TILE / L-ELEC / L-PLUMB / L-FORE | 2,500 / 2,200 / 2,200 / 3,000 (ASSUMPTION) | 2,500 / 2,800 / 2,600 / 3,750 | same |
 
 `L-HELPER` is used by nearly every civil item, so their rates rise by 238 × the helper-days in each
-(e.g. +11.74 per cft on RCC-RMC-4000). Both lines move only if they still hold the published value.
+(e.g. +11.74 per cft on RCC-RMC-4000). If Punjab notifies the 10% rise announced in the 2026-27 federal
+budget, the floor becomes 44,000 ÷ 26 = 1,692.
+
+### Part 1 research (Claude chat, 26-Sep-2026) — kept as they are
+
+| Line | Library | Part 1 | Why the library rate stays |
+|---|---:|---:|---|
+| CEM | 1,575 (Lahore market dashboard, 05-Sep-2026) | 1,560 | within 1%; Part 1 figure is a national brand list |
+| SAND-CH | 80 (Phoenix GRN RCP-316, 07-Sep-2026) | 70 | own purchase this month beats a web list |
+| SAND-RV | 52 (Phoenix GRN RCP-310, 27-Aug-2026) | 47.5 | same |
+| STL60 | 242 (Phoenix GRN RCP-312, 30-Aug-2026) | 260 | Part 1 flags its own figure low-confidence |
+| CRSH-SG | 185 (supplied by Sajjad, 04-Sep-2026) | 137.5 | **26% gap — confirm with a Sargodha crush supplier** |
+| BLK-S4 / H6 / H8 | 140 / 165 / 210 (Lahore quotation / GRN, Sep-2026) | 60 / 110 / 147.5 | Part 1 figures are national ex-factory, June-2026 |
+| P-PUMP | 28.32 (Phoenix GRN RCP-259) | 25.49 | Part 1 is a benchmark site, not a supplier |
+| QE-PLY-SH | 4,000 | 4,000 | same figure; the source page contradicts itself |
+| L-MASON / L-PAINT | 2,200 / 2,100 | 2,200 / 2,000 | same source band |
+
+Not found in Part 1 (need written quotes): all ready-mix grades, Grade 72 steel, admixtures, fly ash, tanker
+water, timber, props, mould oil, nails, binding wire, 4 block sizes, HVAC technician and operator wages, and
+all plant hire.
+
+### Punjab MRS "September" file
+
+`Punjab September Rate.pdf` (Google Drive, 26-Sep-2026) is the **2nd Bi-Annual 2026 (01-Jul to 31-Dec-2026),
+District LAYYAH** — not Lahore. It parses cleanly (1,617 lines, 1,530 confirmed by its own metric column;
+the loader's title pattern was widened for this edition's "( 01.07.2026" spacing). Compared with the
+Rawalpindi 1st Bi-Annual edition the analyses use, Layyah labour is 1–2.5% lower and brick composites
+9–11% lower, and 11 of the 64 item numbers used here moved. The Rawalpindi edition stays as the basis; load
+the Lahore 2nd Bi-Annual file with `tools/mrs_register.py` when it is available, then re-run
+`tools/civil_gap_data.py` (it stops on any MRS line whose number moved).
 
 ## Seed items repaired
 
@@ -94,7 +128,7 @@ overheads and 10% profit.
 | CV-011 | Shoring / sheet piling to excavation sides including walers and struts | Sft 2,500 | Sft | 2,500.00 | 2,950.00 | Assumption (your figure) |
 | CV-012 | Compaction of natural sub-grade in 6" depth | Sft 35 | Sft | 5.57 | 6.57 | Built-up |
 | CV-013 | Supplying and filling Ravi sand under floors in 6" layers | Cft 95 | Cft | 76.22 | 89.94 | Built-up |
-| CV-014 | Dry brick soling of 1st class bricks laid flat on ½" sand bed | Sft 105 | Sft | 92.93 | 109.66 | Built-up |
+| CV-014 | Dry brick soling of 1st class bricks laid flat on ½" sand bed | Sft 105 | Sft | 91.21 | 107.63 | Built-up |
 | CV-015 | Providing and laying polythene sheet 1000 gauge (0.01" thick) under PC | Sft 25 | Sft | 15.27 | 18.01 | Built-up |
 | CV-016 | Providing and laying ready-mix lean concrete (≈1:4:8) in blinding / su | Cft 520 | Cft | 394.64 | 465.67 | Built-up |
 | CV-017 | Providing and laying reinforced cement concrete 4000 psi ready-mix in  | Cft 850 | Cft | 506.95 | 598.20 | Built-up |
@@ -105,37 +139,37 @@ overheads and 10% profit.
 | CV-022 | Providing | Sft 300 | Sft | 371.76 | 438.67 | Built-up |
 | CV-023 | Providing and laying cement concrete 1:2:4 floor topping 2" thick | Sft 155 | Sft | 150.73 | 177.86 | Built-up |
 | CV-024 | Power-trowel finishing of concrete floor with dry-shake metallic / qua | Sft 240 | Sft | 240.00 | 283.20 | Assumption (your figure) |
-| CV-025 | Formwork to lintels | Sft 75 | Sft | 174.53 | 205.95 | Built-up |
-| CV-026 | Formwork to water-tank walls including through-ties | Sft 90 | Sft | 145.08 | 171.19 | Built-up |
-| CV-027 | Formwork to slab edges up to 9" deep | Rft 100 | Rft | 85.41 | 100.78 | Built-up |
+| CV-025 | Formwork to lintels | Sft 75 | Sft | 177.53 | 209.49 | Built-up |
+| CV-026 | Formwork to water-tank walls including through-ties | Sft 90 | Sft | 147.48 | 174.02 | Built-up |
+| CV-027 | Formwork to slab edges up to 9" deep | Rft 100 | Rft | 86.60 | 102.19 | Built-up |
 | CV-028 | Formwork to circular columns with purpose-made curved shutters | Sft 130 | Sft | 130.00 | 153.40 | Assumption (your figure) |
 | CV-029 | Steel panel formwork including hire / depreciation | Sft 105 | Sft | 105.00 | 123.90 | Assumption (your figure) |
 | CV-030 | Fair-face formwork with film-faced plywood for exposed concrete | Sft 110 | Sft | 110.00 | 129.80 | Assumption (your figure) |
 | CV-031 | Supplying and fixing welded wire mesh / reinforcement fabric including | Kg 285 | Kg | 285.00 | 336.30 | Assumption (your figure) |
 | CV-032 | Supplying and installing mechanical rebar couplers including threading | No 900 | Nos | 900.00 | 1,062.00 | Assumption (your figure) |
 | CV-033 | Drilling and chemically anchoring rebar dowels with injection epoxy | No 750 | Nos | 750.00 | 885.00 | Assumption (your figure) |
-| CV-034 | Providing and laying 1st class brick masonry in ground-floor walls 9"  | Cft 350 | Cft | 369.88 | 436.46 | Built-up |
-| CV-035 | Providing and laying 1st class brick masonry in foundation and plinth | Cft 340 | Cft | 359.59 | 424.32 | Built-up |
-| CV-036 | Providing and laying 1st class brick masonry in walls | Cft 410 | Cft | 395.62 | 466.83 | Built-up |
-| CV-037 | Providing and laying 1st class brick masonry in walls | Cft 370 | Cft | 375.60 | 443.21 | Built-up |
-| CV-038 | Providing and laying 1st class brick masonry in parapet walls (separat | Cft 350 | Cft | 369.88 | 436.46 | Built-up |
-| CV-039 | Providing and laying 1st class brick masonry in ledge / low walls (sep | Cft 360 | Cft | 369.88 | 436.46 | Built-up |
+| CV-034 | Providing and laying 1st class brick masonry in ground-floor walls 9"  | Cft 350 | Cft | 363.53 | 428.96 | Built-up |
+| CV-035 | Providing and laying 1st class brick masonry in foundation and plinth | Cft 340 | Cft | 353.24 | 416.82 | Built-up |
+| CV-036 | Providing and laying 1st class brick masonry in walls | Cft 410 | Cft | 389.26 | 459.33 | Built-up |
+| CV-037 | Providing and laying 1st class brick masonry in walls | Cft 370 | Cft | 369.25 | 435.71 | Built-up |
+| CV-038 | Providing and laying 1st class brick masonry in parapet walls (separat | Cft 350 | Cft | 363.53 | 428.96 | Built-up |
+| CV-039 | Providing and laying 1st class brick masonry in ledge / low walls (sep | Cft 360 | Cft | 363.53 | 428.96 | Built-up |
 | CV-040 | Providing and laying AAC / lightweight block masonry in thin-bed adhes | Cft 520 | Cft | 520.00 | 613.60 | Assumption (your figure) |
 | CV-041 | Providing and laying fly-ash brick masonry in cement sand mortar 1:6 | Cft 300 | Cft | 338.11 | 398.97 | Built-up |
-| CV-042 | Providing and laying 2nd class brick masonry in cement sand mortar 1:6 | Cft 245 | Cft | 300.00 | 354.00 | Built-up |
+| CV-042 | Providing and laying 2nd class brick masonry in cement sand mortar 1:6 | Cft 245 | Cft | 306.35 | 361.49 | Built-up |
 | CV-043 | Providing and laying perforated (honeycomb) 1st class brick walling ha | Cft 270 | Sft | 149.52 | 176.43 | MRS 2026 composite |
-| CV-044 | Providing and laying brick-on-edge work in cement sand mortar 1:6 over | Cft 290 | Sft | 186.54 | 220.12 | Built-up |
+| CV-044 | Providing and laying brick-on-edge work in cement sand mortar 1:6 over | Cft 290 | Sft | 184.02 | 217.15 | Built-up |
 | CV-045 | Providing and laying random rubble stone masonry (uncoursed) in cement | Cft 650 | Cft | 351.33 | 414.57 | MRS 2026 composite |
 | CV-046 | Cement pointing struck joints 1:3 on brick walls up to 20 ft height in | Sft 80 | Sft | 50.89 | 60.05 | MRS 2026 composite |
 | CV-047 | Providing and laying damp proof course 1½" thick cement concrete 1:2:4 | Sft 145 | Sft | 136.29 | 160.83 | Built-up |
-| CV-048 | Providing and applying two-coat cementitious waterproofing coating to  | Sft 95 | Sft | 69.89 | 82.47 | Built-up |
+| CV-048 | Providing and applying two-coat cementitious waterproofing coating to  | Sft 95 | Sft | 70.14 | 82.77 | Built-up |
 | CV-049 | Providing and applying liquid PU waterproofing membrane with primer an | Sft 140 | Sft | 140.00 | 165.20 | Assumption (your figure) |
 | CV-050 | Basement tanking with bituminous membrane | Sft 280 | Sft | 280.00 | 330.40 | Assumption (your figure) |
 | CV-051 | Mud phuska roof treatment: 4" earth | Sft 280 | Sft | 339.85 | 401.03 | MRS 2026 composite |
 | CV-052 | Roof insulation with 1" thermopore sheet under a single layer of brick | Sft 240 | Sft | 197.52 | 233.07 | MRS 2026 composite |
-| CV-053 | Providing and fixing PVC water stopper 8" wide in construction joints  | Rft 450 | Rft | 225.81 | 266.45 | Built-up |
+| CV-053 | Providing and fixing PVC water stopper 8" wide in construction joints  | Rft 450 | Rft | 226.81 | 267.63 | Built-up |
 | CV-054 | Filling expansion joints ½"–1" wide with backer rod and sealant | Rft 250 | Rft | 197.01 | 232.47 | Built-up |
-| CV-055 | Providing and applying crystalline waterproofing slurry two coats to c | Sft 180 | Sft | 84.60 | 99.83 | Built-up |
+| CV-055 | Providing and applying crystalline waterproofing slurry two coats to c | Sft 180 | Sft | 84.85 | 100.13 | Built-up |
 | CV-056 | Crack / leakage injection grouting with PU or epoxy resin through port | Rft 1,200 | Rft | 1,200.00 | 1,416.00 | Assumption (your figure) |
 | CV-057 | Cement sand plaster 1:4 | Sft 75 | Sft | 54.96 | 64.85 | Built-up |
 | CV-058 | External cement sand plaster 1:5 | Sft 78 | Sft | 72.89 | 86.01 | Built-up |
@@ -144,7 +178,7 @@ overheads and 10% profit.
 | CV-061 | Providing and fixing MS diamond wire mesh 6" wide over RCC / masonry j | Rft 55 | Rft | 26.55 | 31.33 | MRS 2026 composite |
 | CV-062 | Making grooves in plaster with ½"×½" aluminium trim | Rft 80 | Rft | 67.95 | 80.18 | MRS 2026 composite |
 | CV-063 | Providing and applying textured silica-sand coating / colorcrete to ex | Sft 120 | Sft | 179.50 | 211.81 | MRS 2026 composite |
-| CV-064 | Applying SBR bonding coat (SBR-cement slurry) on concrete before plast | Sft 55 | Sft | 26.74 | 31.56 | Built-up |
+| CV-064 | Applying SBR bonding coat (SBR-cement slurry) on concrete before plast | Sft 55 | Sft | 26.89 | 31.73 | Built-up |
 | CV-065 | Ready-mix gypsum plaster ½" thick | Sft 120 | Sft | 120.00 | 141.60 | Assumption (your figure) |
 | CV-066 | Double scaffolding for external elevation work including erection | Sft 75 | Sft | 75.00 | 88.50 | Assumption (your figure) |
 | CV-067 | Cement sand screed 1:4 | Sft 110 | Sft | 110.31 | 130.16 | Built-up |
@@ -167,7 +201,7 @@ overheads and 10% profit.
 | CV-084 | Providing and fixing MS angle 1½"×1½"×¼" edge-protector nosing to stai | Rft 500 | Rft | 424.80 | 501.26 | MRS 2026 composite |
 | CV-085 | Providing and fixing deodar wood chowkat 4½"×3" wrought | Rft 520 | Rft | 1,344.89 | 1,586.97 | MRS 2026 composite |
 | CV-086 | Providing and fixing 1st class deodar wood panelled door 1¾" thick wit | Sft 2,500 | Sft | 2,998.95 | 3,538.76 | MRS 2026 composite |
-| CV-087 | Supplying and fixing steel fire-rated door 60 min 3'-0"×7'-0" with fra | Sft 4,500 | Sft | 3,225.68 | 3,806.31 | Built-up |
+| CV-087 | Supplying and fixing steel fire-rated door 60 min 3'-0"×7'-0" with fra | Sft 4,500 | Sft | 3,229.68 | 3,811.03 | Built-up |
 | CV-088 | Providing and fixing MS single-leaf door of angle-iron frame and MS sh | Sft 1,300 | Sft | 1,083.75 | 1,278.83 | MRS 2026 composite |
 | CV-089 | Supplying and installing uPVC sliding window with clear glass and hard | Sft 2,800 | Sft | 2,850.00 | 3,363.00 | Web installed rate |
 | CV-090 | Providing and fixing premium uPVC door with uPVC chowkat and hardware | Sft 3,800 | Sft | 1,719.55 | 2,029.07 | MRS 2026 composite |
@@ -200,7 +234,7 @@ overheads and 10% profit.
 | CV-117 | Providing and fixing MS double-leaf main gate of angle-iron frame and  | Sft 1,800 | Sft | 1,480.80 | 1,747.34 | MRS 2026 composite |
 | CV-118 | Boundary wall 9" brick with plaster both sides and paint | Sft 1,200 | Sft | 1,200.00 | 1,416.00 | Assumption (your figure) |
 | CV-119 | Providing and fixing precast K-2 edge kerb stone embedded in PCC 1:2:4 | Rft 900 | Rft | 571.05 | 673.84 | MRS 2026 composite |
-| CV-120 | Road sub-base of compacted gravel in 6" layers | Cft 180 | Cft | 166.43 | 196.39 | Built-up |
+| CV-120 | Road sub-base of compacted gravel in 6" layers | Cft 180 | Cft | 142.43 | 168.07 | Built-up |
 | CV-121 | Road base of graded crushed aggregate in 6" layers | Cft 230 | Cft | 258.01 | 304.45 | Built-up |
 | CV-122 | Asphalt wearing course 2" compacted with tack coat | Sft 280 | Sft | 280.00 | 330.40 | Assumption (your figure) |
 | CV-123 | RCC road slab 6" with mesh reinforcement | Sft 650 | Sft | 650.00 | 767.00 | Assumption (your figure) |
@@ -214,9 +248,9 @@ overheads and 10% profit.
 | CV-R01 | Crack treatment to plaster / concrete: chasing | Rft 180 | Rft | 180.00 | 212.40 | Assumption (your figure) |
 | CV-R02 | Epoxy injection crack repair through injection ports | Rft 1,200 | Rft | 1,200.00 | 1,416.00 | Assumption (your figure) |
 | CV-R03 | Hacking old plaster and re-plastering external walls with cement sand  | Sft 120 | Sft | 64.69 | 76.33 | Built-up |
-| FN-560 (repaired) | Supply and fix wooden flush door shutter with frame, hardware and fini | — | Sft | 1,951.95 | 2,303.30 | Built-up |
+| FN-560 (repaired) | Supply and fix wooden flush door shutter with frame, hardware and fini | — | Sft | 1,955.95 | 2,308.02 | Built-up |
 | EW-950 (repaired) | Supply and lay concrete paver block on sand bed, including edge restra | — | Sft | 234.54 | 276.76 | Built-up |
-| EW-960 (repaired) | Construct brick masonry manhole with RCC cover, plastered internally | — | Nos | 47,097.50 | 55,575.05 | Built-up |
+| EW-960 (repaired) | Construct brick masonry manhole with RCC cover, plastered internally | — | Nos | 46,740.14 | 55,153.36 | Built-up |
 
 ## Quotations needed first
 
