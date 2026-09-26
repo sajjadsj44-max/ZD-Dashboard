@@ -100,14 +100,27 @@ class CivilGapData(unittest.TestCase):
         self.assertEqual(self.d["prevRates"]["L-HELPER"], [[1300, "2026-09-23"]])
         self.assertEqual(self.rates["L-HELPER"]["rate"], 1538)
         self.assertEqual(self.d["prevItems"]["FN-560"], [[["DOOR-W", 1], ["DOOR-HW", 0.055]]])
+        self.assertEqual(self.d["set"], {"jointBrk": [0.25, 0.375]})
+        self.assertIn("jointBrk:.375,brkL:9,brkW:4.5,brkH:3,", self.html, "Settings default is the house brick basis")
+
+    def test_brick_items_are_generated_from_settings(self):
+        """Every brick-and-mortar item carries a cvbrick generator whose rows equal what the page computes."""
+        want = {"CV-034", "CV-035", "CV-036", "CV-037", "CV-038", "CV-039", "CV-041", "CV-042", "CV-044", "EW-960"}
+        have = {i["id"] for i in self.d["items"] + self.d["upd"] if (i.get("gen") or {}).get("k") == "cvbrick"}
+        self.assertEqual(have, want)
+        for i in self.d["items"] + self.d["upd"]:
+            g = i.get("gen")
+            if g and g["k"] == "cvbrick":
+                rows, _ = cg.cvbrick(g["ref"], g["mortar"], v=g["v"], mode=g["mode"], xM=g["xM"])
+                self.assertEqual([[r["ref"], r["qty"]] for r in rows], [[r["ref"], r["qty"]] for r in i["M"]], i["id"])
 
     def test_worked_examples(self):
         bricks, mortar = cg.brick_cft()
-        self.assertAlmostEqual(bricks, 12.101, places=3)       # 1 ÷ (9.25 × 4.75 × 3.25 ÷ 1728)
-        self.assertAlmostEqual(mortar, 0.14914, places=4)       # wet mortar per cft of brickwork
+        self.assertAlmostEqual(bricks, 11.203, places=3)       # 1 ÷ (9.375 × 4.875 × 3.375 ÷ 1728)
+        self.assertAlmostEqual(mortar, 0.21226, places=4)       # wet mortar per cft of brickwork
         cv34 = next(i for i in self.d["items"] if i["id"] == "CV-034")
         cem = next(r for r in cv34["M"] if r["ref"] == "CEM")["qty"]
-        self.assertAlmostEqual(cem, 0.14914 * 1.3 / 7 / 1.25, places=4)
+        self.assertAlmostEqual(cem, 0.21226 * 1.3 / 7 / 1.25, places=4)
         dpc = next(i for i in self.d["items"] if i["id"] == "CV-047")
         bit = next(r for r in dpc["M"] if r["ref"] == "BITUMEN")["qty"]
         self.assertAlmostEqual(bit, 34 / 100 * 0.4536, places=5)  # 34 lb per 100 Sft

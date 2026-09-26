@@ -97,6 +97,62 @@ Rawalpindi 1st Bi-Annual edition the analyses use, Layyah labour is 1–2.5% low
 the Lahore 2nd Bi-Annual file with `tools/mrs_register.py` when it is available, then re-run
 `tools/civil_gap_data.py` (it stops on any MRS line whose number moved).
 
+## Brick basis (26-Sep-2026)
+
+**Basis:** bare brick 9" × 4½" × 3" with a ⅜" joint → 1,728 ÷ (9.375 × 4.875 × 3.375) = **11.203 bricks per cft**
+and **0.212 cft wet mortar per cft** (1 − 11.203 × 121.5 ÷ 1,728).
+
+* **Why 9 × 4½ × 3 is the bare brick:** Punjab MRS 2026, Ch.7 note 3 — "Permissible tolerance of 5/16", 3/16"
+  & 1/8" for length, width & thickness of bricks … against standard size 9" × 4½" × 3"". The tolerance applies
+  to the brick itself, so this is not a with-mortar size. A supplier website's 8½ × 4 × 2½ was not used.
+* **Why ⅜" and not ¼":** the ¼" joint gave 0.149 cft mortar per cft, 40% below the MRS allowance of 25 cft wet
+  mortar per 100 cft of brick masonry (Ch.5 p.33, "including wastage"). ⅜" gives 0.212, and 0.223 with the
+  house 5% wastage — about 11% below the MRS 0.25, which also covers bulking and loss.
+* **Measure and replace:** the MRS allows bricks up to 5/16" short. When the 20-brick site sample (10 A-class,
+  10 B-class, averaged to 3 dp) is in, set the measured size in **Settings → Brick length / width / height**
+  and the specified joint in **Brick joint**. Every brick item follows.
+
+**How it is wired:** the basis is the dashboard's Settings (`raDefaults`: `brkL 9, brkW 4.5, brkH 3,
+jointBrk .375`). The CV brick items (CV-034 … CV-039, CV-041, CV-042, CV-044) and EW-960 are now generated
+from Settings (`gen.k = "cvbrick"`, `raGenCvBrick`), the same way as the seed BRK-* items, so Regenerate
+rebuilds them from the current Settings. Before this change they had the ¼" basis fixed in the data.
+A saved library still on the ¼" joint is moved to ⅜" on its next load, and every brick item still exactly as
+generated is rebuilt; a brick item edited by hand is left alone (it keeps its own joint).
+
+**Before / after** (brick prices unchanged: BRK-1 17.5, BRK-2 13; labour unchanged):
+
+| Item | Unit | Bricks before | Bricks after | Direct before | Direct after | Change | After, with OH 8% + profit 10% |
+|---|---|---:|---:|---:|---:|---:|---:|
+| EW-960 | Nos | 680.687 | 630.154 | 46,740.14 | 47,017.17 | +0.6% | 55,480.26 |
+| BRK-45-14 | Sft | 4.538 | 4.201 | 200.59 | 204.74 | +2.1% | 241.59 |
+| BRK-45-16 | Sft | 4.400 | 4.201 | 192.91 | 197.41 | +2.3% | 232.95 |
+| BRK-9-14 | Sft | 9.076 | 8.402 | 308.39 | 316.69 | +2.7% | 373.70 |
+| BRK-9-16 | Sft | 9.076 | 8.402 | 298.10 | 302.04 | +1.3% | 356.41 |
+| BRK-135-14 | Sft | 13.614 | 12.603 | 416.19 | 428.65 | +3.0% | 505.80 |
+| BRK-135-16 | Sft | 13.614 | 12.603 | 400.75 | 406.66 | +1.5% | 479.86 |
+| CV-034 | Cft | 12.101 | 11.203 | 363.53 | 368.45 | +1.4% | 434.77 |
+| CV-035 | Cft | 12.101 | 11.203 | 353.24 | 358.16 | +1.4% | 422.63 |
+| CV-036 | Cft | 12.101 | 11.203 | 389.26 | 405.09 | +4.1% | 478.01 |
+| CV-037 | Cft | 12.101 | 11.203 | 369.25 | 376.59 | +2.0% | 444.38 |
+| CV-038 | Cft | 12.101 | 11.203 | 363.53 | 368.45 | +1.4% | 434.77 |
+| CV-039 | Cft | 12.101 | 11.203 | 363.53 | 368.45 | +1.4% | 434.77 |
+| CV-041 | Cft | 12.101 | 11.203 | 338.11 | 344.93 | +2.0% | 407.01 |
+| CV-042 | Cft | 12.101 | 11.203 | 306.35 | 315.52 | +3.0% | 372.31 |
+| CV-044 | Sft | 4.790 | 4.551 | 184.02 | 185.33 | +0.7% | 218.69 |
+
+The seed BRK-* items rise although they hold fewer bricks, because the thicker joint roughly adds 40% more
+mortar. CV-036 (1:3 mortar) rises most, +4.1%, because richer mortar has more cement. EW-960 rises +0.6%:
+its brickwork is only part of the manhole.
+
+### Mortar dry-mix basis: house standard kept, differs from the MRS
+
+MRS Ch.5 gives, per 100 cft of wet 1:6 cement-sand mortar, **13.61 bags cement and 100 cft sand**. Worked
+back: sand at 6/7 of the dry volume means a dry volume of 116.7 cft (**dry factor ≈ 1.17**), and 16.67 cft of
+cement in 13.61 bags means **1.225 cft per bag**. The house standard (Settings `dryM 1.3`, `bagCft 1.25`) gives
+14.86 bags and 111.4 cft sand per 100 cft — about **9% more cement and 11% more sand** than the MRS.
+The house standard governs and is **not** changed here. Do not "correct" the mortar to the MRS figures
+without deciding to change the house standard.
+
 ## Seed items repaired
 
 * **FN-560** flush door — adds the galvanised steel door frame for a 9" wall (Quadrangle GRN RCP-2682,
@@ -148,17 +204,17 @@ overheads and 10% profit.
 | CV-031 | Supplying and fixing welded wire mesh / reinforcement fabric including | Kg 285 | Kg | 285.00 | 336.30 | Assumption (your figure) |
 | CV-032 | Supplying and installing mechanical rebar couplers including threading | No 900 | Nos | 900.00 | 1,062.00 | Assumption (your figure) |
 | CV-033 | Drilling and chemically anchoring rebar dowels with injection epoxy | No 750 | Nos | 750.00 | 885.00 | Assumption (your figure) |
-| CV-034 | Providing and laying 1st class brick masonry in ground-floor walls 9"  | Cft 350 | Cft | 363.53 | 428.96 | Built-up |
-| CV-035 | Providing and laying 1st class brick masonry in foundation and plinth | Cft 340 | Cft | 353.24 | 416.82 | Built-up |
-| CV-036 | Providing and laying 1st class brick masonry in walls | Cft 410 | Cft | 389.26 | 459.33 | Built-up |
-| CV-037 | Providing and laying 1st class brick masonry in walls | Cft 370 | Cft | 369.25 | 435.71 | Built-up |
-| CV-038 | Providing and laying 1st class brick masonry in parapet walls (separat | Cft 350 | Cft | 363.53 | 428.96 | Built-up |
-| CV-039 | Providing and laying 1st class brick masonry in ledge / low walls (sep | Cft 360 | Cft | 363.53 | 428.96 | Built-up |
+| CV-034 | Providing and laying 1st class brick masonry in ground-floor walls 9"  | Cft 350 | Cft | 368.45 | 434.77 | Built-up |
+| CV-035 | Providing and laying 1st class brick masonry in foundation and plinth | Cft 340 | Cft | 358.16 | 422.63 | Built-up |
+| CV-036 | Providing and laying 1st class brick masonry in walls | Cft 410 | Cft | 405.09 | 478.01 | Built-up |
+| CV-037 | Providing and laying 1st class brick masonry in walls | Cft 370 | Cft | 376.59 | 444.38 | Built-up |
+| CV-038 | Providing and laying 1st class brick masonry in parapet walls (separat | Cft 350 | Cft | 368.45 | 434.77 | Built-up |
+| CV-039 | Providing and laying 1st class brick masonry in ledge / low walls (sep | Cft 360 | Cft | 368.45 | 434.77 | Built-up |
 | CV-040 | Providing and laying AAC / lightweight block masonry in thin-bed adhes | Cft 520 | Cft | 520.00 | 613.60 | Assumption (your figure) |
-| CV-041 | Providing and laying fly-ash brick masonry in cement sand mortar 1:6 | Cft 300 | Cft | 338.11 | 398.97 | Built-up |
-| CV-042 | Providing and laying 2nd class brick masonry in cement sand mortar 1:6 | Cft 245 | Cft | 306.35 | 361.49 | Built-up |
+| CV-041 | Providing and laying fly-ash brick masonry in cement sand mortar 1:6 | Cft 300 | Cft | 344.93 | 407.01 | Built-up |
+| CV-042 | Providing and laying 2nd class brick masonry in cement sand mortar 1:6 | Cft 245 | Cft | 315.52 | 372.31 | Built-up |
 | CV-043 | Providing and laying perforated (honeycomb) 1st class brick walling ha | Cft 270 | Sft | 149.52 | 176.43 | MRS 2026 composite |
-| CV-044 | Providing and laying brick-on-edge work in cement sand mortar 1:6 over | Cft 290 | Sft | 184.02 | 217.15 | Built-up |
+| CV-044 | Providing and laying brick-on-edge work in cement sand mortar 1:6 over | Cft 290 | Sft | 185.33 | 218.69 | Built-up |
 | CV-045 | Providing and laying random rubble stone masonry (uncoursed) in cement | Cft 650 | Cft | 351.33 | 414.57 | MRS 2026 composite |
 | CV-046 | Cement pointing struck joints 1:3 on brick walls up to 20 ft height in | Sft 80 | Sft | 50.89 | 60.05 | MRS 2026 composite |
 | CV-047 | Providing and laying damp proof course 1½" thick cement concrete 1:2:4 | Sft 145 | Sft | 136.29 | 160.83 | Built-up |
@@ -250,7 +306,7 @@ overheads and 10% profit.
 | CV-R03 | Hacking old plaster and re-plastering external walls with cement sand  | Sft 120 | Sft | 64.69 | 76.33 | Built-up |
 | FN-560 (repaired) | Supply and fix wooden flush door shutter with frame, hardware and fini | — | Sft | 1,955.95 | 2,308.02 | Built-up |
 | EW-950 (repaired) | Supply and lay concrete paver block on sand bed, including edge restra | — | Sft | 234.54 | 276.76 | Built-up |
-| EW-960 (repaired) | Construct brick masonry manhole with RCC cover, plastered internally | — | Nos | 46,740.14 | 55,153.36 | Built-up |
+| EW-960 (repaired) | Construct brick masonry manhole with RCC cover, plastered internally | — | Nos | 47,017.17 | 55,480.26 | Built-up |
 
 ## Quotations needed first
 

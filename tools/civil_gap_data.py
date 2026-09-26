@@ -51,9 +51,13 @@ FILE = "Sajjad's benchmark file QS_Rate_Analysis_Lahore_2026_All_Missing, 26-Sep
 
 # library constants (raDefaults): dry-volume factors and cement bag volume
 DRY_C, DRY_M, BAG = 1.54, 1.3, 1.25
-# 9" × 4.5" × 3" brick with 1/4" joint (raGenBrick)
-BRICK_CFT = (9.25 * 4.75 * 3.25) / 1728
-BRICK_VOL = 9 * 4.5 * 3 / 1728
+# House brick basis (dashboard Settings, raDefaults): bare brick 9" × 4½" × 3" — the Punjab MRS standard size
+# (Ch.7 note 3, sizes with tolerances are for the brick itself) — with a 3/8" joint. Changed 26-Sep-2026 from the
+# 1/4" joint, which gave 0.149 cft of mortar per cft against the MRS allowance of 0.25 (Ch.5, incl. wastage).
+SET = {"brkL": 9, "brkW": 4.5, "brkH": 3, "jointBrk": 0.375, "dryM": 1.3, "bagCft": 1.25, "sand": "SAND-CH"}
+SET_MOVES = {"jointBrk": [0.25, 0.375]}   # saved libraries still on the old joint are moved (and brick items rebuilt)
+BRICK_CFT = (SET["brkL"] + SET["jointBrk"]) * (SET["brkW"] + SET["jointBrk"]) * (SET["brkH"] + SET["jointBrk"]) / 1728
+BRICK_VOL = SET["brkL"] * SET["brkW"] * SET["brkH"] / 1728
 
 
 def r5(v):
@@ -147,7 +151,7 @@ class Ctx:
         return self.add({"code": code, "kind": kind, "name": name, "unit": unit, "rate": rate, "loc": "Lahore",
                          "src": f"{NOSRC}. {evidence}", "date": "", "vs": "A"})
 
-    def item(self, code, qc, qs, desc, spec, unit, M=(), L=(), P=(), wast=5, note="", cat=None):
+    def item(self, code, qc, qs, desc, spec, unit, M=(), L=(), P=(), wast=5, note="", cat=None, gen=None):
         legacy = cat or {"C01": "Civil / Structural", "C02": "Civil / Structural", "C03": "Civil / Structural",
                          "C04": "Civil / Structural", "C05": "Civil / Structural", "C06": "Finishing",
                          "C07": "Civil / Structural", "C08": "Finishing", "C09": "Finishing", "C10": "Finishing",
@@ -159,7 +163,7 @@ class Ctx:
                     sys.exit(f"{code}: rate line {r['ref']} is neither new nor a library line")
         self.items.append({"id": code, "code": code, "cat": legacy, "sub": qs, "qc": qc, "qs": qs, "desc": desc,
                            "spec": spec, "unit": unit, "M": list(M), "L": list(L), "P": list(P), "wast": wast,
-                           "oh": 8, "prof": 10, "acc": 0, "trans": 0, "gen": None, "note": note})
+                           "oh": 8, "prof": 10, "acc": 0, "trans": 0, "gen": gen, "note": note})
 
 
 def row(ref, qty, note=""):
@@ -201,9 +205,30 @@ def mortar(ratio, wet, sand="SAND-CH", what="mortar"):
 
 
 def brick_cft():
-    """Bricks and wet mortar in 1 cft of brickwork (9"×4½"×3" brick, ¼" joint — raGenBrick)."""
+    """Bricks and wet mortar in 1 cft of brickwork at the house basis (SET)."""
     n = 1 / BRICK_CFT
     return n, 1 - n * BRICK_VOL
+
+
+def cvbrick(ref, ratio, v=1, mode="cft", xM=(), L=(), P=(), st=SET):
+    """Brick + mortar rows exactly as the dashboard's raGenCvBrick computes them from Settings (same float
+    operations, no rounding), and the gen object that lets the item be rebuilt when Settings change."""
+    a, n, r, s = st["jointBrk"], st["brkL"], st["brkW"], st["brkH"]
+    d = n * r * s / 1728
+    p = [float(x) for x in ratio.split(":")]
+    u = p[0] + p[1]
+    if mode == "edge":
+        l = 144 / ((n + a) * (s + a))
+        m = .75 / 12 + max(r / 12 - l * d, 0)
+    else:
+        i = (n + a) * (r + a) * (s + a) / 1728
+        l = v / i
+        m = max(v - l * d, 0)
+    A = m * st["dryM"]
+    rows = [{"ref": ref, "qty": l}, {"ref": "CEM", "qty": A * p[0] / u / st["bagCft"]},
+            {"ref": st["sand"], "qty": A * p[1] / u}] + list(xM)
+    gen = {"k": "cvbrick", "ref": ref, "mortar": ratio, "v": v, "mode": mode, "xM": list(xM), "L": list(L), "P": list(P)}
+    return rows, gen
 
 
 def file_note(rate, unit, status, extra=""):
@@ -213,7 +238,6 @@ def file_note(rate, unit, status, extra=""):
 # =========================================================================== items
 def build(c):
     X = c  # shorthand
-    nb, mw = brick_cft()
 
     # ---------------- rate lines that are not MRS / GRN / library -----------------------------
     X.add({"code": "L-HELPER", "kind": "L", "name": "Helper / unskilled labourer", "unit": "Day", "rate": 1538,
@@ -496,8 +520,9 @@ def build(c):
 
     # ======================================================= 7 Masonry
     def brick(ref, ratio, lab):
-        return ([row(ref, 1 / BRICK_CFT, "1 ÷ (9.25 × 4.75 × 3.25 ÷ 1728) Nos per cft")] + mortar(ratio, mw),
-                [row(X.M(lab), 1, "MRS labour per cft")])
+        lab_rows = [row(X.M(lab), 1, "MRS labour per cft")]
+        m, g = cvbrick(ref, ratio, L=lab_rows)
+        return m, lab_rows, g
 
     for code, desc, ratio, lab, fr in [
             ("CV-034", "in ground-floor walls 9\" and thicker", "1:6", "C7-5-5", 350),
@@ -506,21 +531,21 @@ def build(c):
             ("CV-037", "in walls, cement sand mortar 1:5", "1:5", "C7-5-4", 370),
             ("CV-038", "in parapet walls (separate item)", "1:6", "C7-5-5", 350),
             ("CV-039", "in ledge / low walls (separate item)", "1:6", "C7-5-5", 360)]:
-        m, l = brick("BRK-1", ratio, lab)
+        m, l, g = brick("BRK-1", ratio, lab)
         X.item(code, "C05", "Brick masonry", f"Providing and laying 1st class brick masonry {desc} in cement sand "
                f"mortar {ratio}, jointed and cured, complete in all respects", "Measured in cft (9\" and thicker)",
-               "Cft", M=m, L=l, note=file_note(fr, "Cft", "CALC-2026"))
+               "Cft", M=m, L=l, gen=g, note=file_note(fr, "Cft", "CALC-2026"))
     X.item("CV-040", "C05", "Block masonry", "Providing and laying AAC / lightweight block masonry in thin-bed adhesive, "
            "complete in all respects", "Block brand and size to be confirmed", "Cft",
            M=[row(bm("040", "AAC block masonry in thin-bed adhesive", "Cft", 520, "ASSUMP-2026"), 1)], wast=0,
            note="No Pakistan AAC block price found (only a Sheikhupura-road manufacturer, no rates).")
-    m, l = brick(fab, "1:6", "C7-5-5")
+    m, l, g = brick(fab, "1:6", "C7-5-5")
     X.item("CV-041", "C05", "Brick masonry", "Providing and laying fly-ash brick masonry in cement sand mortar 1:6, "
-           "jointed and cured, complete in all respects", "9\"×4½\"×3\" fly-ash bricks", "Cft", M=m, L=l,
+           "jointed and cured, complete in all respects", "9\"×4½\"×3\" fly-ash bricks", "Cft", M=m, L=l, gen=g,
            note=file_note(300, "Cft", "CALC-2026"))
-    m, l = brick("BRK-2", "1:6", "C7-5-5")
+    m, l, g = brick("BRK-2", "1:6", "C7-5-5")
     X.item("CV-042", "C05", "Brick masonry", "Providing and laying 2nd class brick masonry in cement sand mortar 1:6, "
-           "jointed and cured, complete in all respects", "Boundary / non-load-bearing use", "Cft", M=m, L=l,
+           "jointed and cured, complete in all respects", "Boundary / non-load-bearing use", "Cft", M=m, L=l, gen=g,
            note=file_note(245, "Cft", "CALC-2026"))
     X.item("CV-043", "C05", "Brick masonry", "Providing and laying perforated (honeycomb) 1st class brick walling half "
            "brick thick in cement sand mortar 1:6, complete in all respects", "Measured in Sft of wall face", "Sft",
@@ -529,9 +554,8 @@ def build(c):
            "composite used (material at Jan-2026 prices).")
     X.item("CV-044", "C05", "Brick masonry", "Providing and laying brick-on-edge work in cement sand mortar 1:6 over "
            "¾\" bed of 1:6 mortar, complete in all respects", "Flooring / coping, measured in Sft", "Sft",
-           M=[row("BRK-1", "144/(9.25*3.25)", "Nos per Sft, bricks on edge with ¼\" joint")]
-           + mortar("1:6", round(0.75 / 12 + (4.5 / 12 - 144 / (9.25 * 3.25) * BRICK_VOL), 6),
-                    what="bed ¾\" + joints"),
+           M=cvbrick("BRK-1", "1:6", mode="edge", L=[row(X.M("C10-10-1"), 1, "MRS labour per Sft")])[0],
+           gen=cvbrick("BRK-1", "1:6", mode="edge", L=[row(X.M("C10-10-1"), 1, "MRS labour per Sft")])[1],
            L=[row(X.M("C10-10-1"), 1, "MRS labour per Sft")],
            note=file_note(290, "Cft", "CALC-2026 — per cft") + "Brick-on-edge work is measured by area.")
     X.item("CV-045", "C05", "Stone masonry", "Providing and laying random rubble stone masonry (uncoursed) in cement "
@@ -895,6 +919,15 @@ def build(c):
            P=[row("P-CRADLE", 0.0015, "as PLS-E")], note=file_note(120, "Sft", "ASSUMP-2026"))
 
     # ======================================================= seed items repaired
+    ew_x = (conc("1:4:8", 10.125, what="base PCC 4.5 × 4.5 × 0.5 ft")
+            + mortar("1:4", round(69 * 0.5 / 12, 6), what="plaster ½\" on 69 Sft")
+            + conc("1:2:4", round(4 * 4 * 4 / 12, 6), what="RCC cover slab 4 × 4 ft × 4\"")
+            + [row("STL60", "5.333333*0.01*490*0.4536", "cover slab steel ≈1% of volume"),
+               row(mcover, 1, "C.I. manhole cover 24\" with frame")])
+    ew_l = [row("L-MASON", 1.6), row("L-HELPER", 2.4),
+            row(X.M("C7-4-5"), 56.25, "MRS brickwork labour × 56.25 cft"),
+            row(X.M("C11-9-2"), 69, "MRS plaster labour × 69 Sft")]
+    ew_m, ew_g = cvbrick("BRK-1", "1:6", v=56.25, xM=ew_x, L=ew_l)
     fix = {
         "FN-560": {"M": [row("DOOR-W", 1), row("DOOR-HW", 0.055),
                          row(giframe, "1/21", "1 frame ÷ 21 Sft (3'-0\" × 7'-0\" leaf)")],
@@ -903,20 +936,10 @@ def build(c):
         "EW-950": {"M": [row(paver, 1.03, "+3% cutting"), row("SAND-CH", 0.12)],
                    "note": "Paver block added 26-Sep-2026 (civil gap review); the seed item priced only sand, labour "
                            "and compactor. MRS 2026 composite for 2⅜\" tuff pavers is 216.10 per Sft."},
-        "EW-960": {"M": ([row("BRK-1", 56.25 / BRICK_CFT, "9\" walls: 4 × 3.75 ft centre-line × 0.75 × 5 ft = 56.25 cft "
-                                                        "× 12.101 bricks per cft")]
-                         + mortar("1:6", round(56.25 * mw, 6), what="brickwork mortar")
-                         + conc("1:4:8", 10.125, what="base PCC 4.5 × 4.5 × 0.5 ft")
-                         + mortar("1:4", round(69 * 0.5 / 12, 6), what="plaster ½\" on 69 Sft")
-                         + conc("1:2:4", round(4 * 4 * 4 / 12, 6), what="RCC cover slab 4 × 4 ft × 4\"")
-                         + [row("STL60", "5.333333*0.01*490*0.4536", "cover slab steel ≈1% of volume"),
-                            row(mcover, 1, "C.I. manhole cover 24\" with frame")]),
-                   "L": [row("L-MASON", 1.6), row("L-HELPER", 2.4),
-                         row(X.M("C7-4-5"), 56.25, "MRS brickwork labour × 56.25 cft"),
-                         row(X.M("C11-9-2"), 69, "MRS plaster labour × 69 Sft")],
-                   "P": [],
+        "EW-960": {"M": ew_m, "gen": ew_g,
+                   "L": ew_l, "P": [],
                    "note": "Materials added 26-Sep-2026 (civil gap review) for a 3 × 3 ft internal, 5 ft deep brick "
-                           "manhole: 9\" brick walls 1:6, 6\" PCC 1:4:8 base, ½\" plaster inside, RCC cover slab and "
+                           "manhole: 9\" brick walls 1:6 (4 × 3.75 ft centre-line × 0.75 × 5 ft = 56.25 cft), 6\" PCC 1:4:8 base, ½\" plaster inside, RCC cover slab and "
                            "C.I. cover. The seed item carried labour only."},
     }
     return fix
@@ -942,6 +965,10 @@ PREV_RATES = {  # published versions of library lines this block moves on (a rat
 }
 
 
+def _sig(rows):
+    return [[r["ref"], r["qty"]] for r in rows]
+
+
 def make(html, as_of):
     c = Ctx(html, as_of)
     fix = build(c)
@@ -949,13 +976,49 @@ def make(html, as_of):
     items = c.items
     upd = []
     for iid, f in fix.items():
-        upd.append({"id": iid, "M": f["M"], "note": f["note"], **({"L": f["L"], "P": f["P"], "full": True}
-                                                                  if "L" in f else {})})
-    body = json.dumps({"rates": rates, "items": items, "upd": upd}, ensure_ascii=False, sort_keys=True)
+        u = {"id": iid, "M": f["M"], "note": f["note"]}
+        if "gen" in f:
+            u["gen"] = f["gen"]
+        if "L" in f:
+            u.update({"L": f["L"], "P": f["P"], "full": True})
+        upd.append(u)
+    # Earlier published versions (the block already in the page): a saved library still holding one of them is moved
+    # to the new version; anything edited by hand matches none and is left alone.
+    old = block_in(html) or {}
+    prev_r = {k: [list(x) for x in v] for k, v in PREV_RATES.items()}
+    for k, v in (old.get("prevRates") or {}).items():
+        for x in v:
+            if list(x) not in prev_r.setdefault(k, []):
+                prev_r[k].append(list(x))
+    new_r = {r["code"]: r for r in rates}
+    for r in old.get("rates") or []:
+        n = new_r.get(r["code"])
+        if n and (n["rate"], n["date"]) != (r["rate"], r["date"]):
+            x = [r["rate"], r["date"]]
+            if x not in prev_r.setdefault(r["code"], []):
+                prev_r[r["code"]].append(x)
+    prev_i = {k: [v] for k, v in SEED_M.items()}
+    for k, v in (old.get("prevItems") or {}).items():
+        for x in v:
+            if x not in prev_i.setdefault(k, []):
+                prev_i[k].append(x)
+    new_i = {i["id"]: i for i in items + upd}
+    for i in (old.get("items") or []) + (old.get("upd") or []):
+        n = new_i.get(i["id"])
+        if n and _sig(n["M"]) != _sig(i["M"]):
+            x = _sig(i["M"])
+            if x not in prev_i.setdefault(i["id"], []):
+                prev_i[i["id"]].append(x)
+    body = json.dumps({"rates": rates, "items": items, "upd": upd, "set": SET_MOVES}, ensure_ascii=False, sort_keys=True)
     rev = f"{as_of.isoformat()}-{hashlib.sha1(body.encode()).hexdigest()[:8]}"
     return {"rev": rev, "source": "Civil gap review of " + FILE + " (docs/civil-gap-rate-review.md)",
-            "rates": rates, "items": items, "upd": upd,
-            "prevRates": PREV_RATES, "prevItems": {k: [v] for k, v in SEED_M.items()}}
+            "rates": rates, "items": items, "upd": upd, "set": SET_MOVES,
+            "prevRates": prev_r, "prevItems": prev_i}
+
+
+def block_in(html):
+    m = BLOCK_RE.search(html)
+    return json.loads(m.group(2)) if m else None
 
 
 def main():

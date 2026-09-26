@@ -432,6 +432,12 @@ rate side by side with the list, is in [`docs/civil-gap-rate-review.md`](docs/ci
   - 9 use a **dated web installed rate**.
   - 41 keep the list's figure as a `BM-CV-<n>` line marked **`ASSUMPTION — no dated source`**, so they
     show as Assumed until a quotation replaces them.
+- **Brick basis (26-Sep-2026):** bare brick 9" × 4½" × 3" (Punjab MRS standard size) with a ⅜" joint =
+  11.203 bricks and 0.212 cft wet mortar per cft, set in Settings (`jointBrk` 0.25 → 0.375). The CV brick
+  items and EW-960 are generated from Settings (`cvbrick`), like the seed BRK-* items. Saved libraries on the
+  ¼" joint are moved and their untouched brick items rebuilt. Replace the size with the site-measured average
+  when available. The house mortar dry factor (1.3, 1.25 cft per bag) is kept; it is about 9–11% richer than
+  the MRS mortar table — see the review.
 - **Seed items repaired:** FN-560 gains its galvanised steel door frame (Quadrangle GRN). EW-950 gains
   the paver block. EW-960 gains the materials of a 3 × 3 ft × 5 ft brick manhole. The gypsum items
   (FN-550, QS-GYP-P01) stay incomplete, because no dated board or GI-section price was found.

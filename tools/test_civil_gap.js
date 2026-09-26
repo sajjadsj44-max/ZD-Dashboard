@@ -5,6 +5,10 @@
      node tools/test_civil_gap.js             # needs playwright (npm i -g playwright)
 
    QE_URL  page to test (default http://127.0.0.1:8765/zameen-developments/index.html)
+   QE_PREV previously published page on the same origin (optional), e.g.
+           git show origin/main:zameen-developments/index.html > zameen-developments/_prev.html
+           QE_PREV=http://127.0.0.1:8765/zameen-developments/_prev.html node tools/test_civil_gap.js
+           — a library saved on it must upgrade to exactly what a fresh library holds, hand edits aside
 
    Checks: a fresh library carries all CV items priced, with no unpriced gaps except the ones
    the block leaves open on purpose (TOPSOIL); the seed repairs (FN-560 frame, EW-950 paver,
@@ -86,6 +90,32 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   ok(up.brk2 === 16, "BRK-2 typed by the user (16) is kept");
   ok(up.fn560.includes("GRN-QUA-STR-000134"), "seed FN-560 gets its frame");
   ok(up.ew950.length === 1 && up.ew950[0] === "SAND-CH:0.14", "edited EW-950 is left alone");
+
+  const bricks = await page.evaluate(() => {
+    const it = RA.items.find(i => i.id === "CV-035"), g = it.gen;
+    return {j: RA.set.jointBrk, k: g && g.k, n: it.M[0].qty};
+  });
+  ok(bricks.j === 0.375 && bricks.k === "cvbrick" && Math.abs(bricks.n - 11.2027) < 1e-4,
+     "brick basis 9×4½×3 + 3/8\" joint: CV-035 generated from Settings, 11.203 bricks per cft");
+
+  if (process.env.QE_PREV) {
+    const snap = () => { const o = {}; RA.items.filter(i => /^(BRK-|CV-0(3[4-9]|4[0-4])|EW-960)/.test(i.id))
+      .forEach(i => { o[i.id] = raCalc(i).sub; }); return {o, j: RA.set.jointBrk}; };
+    await page.evaluate(() => localStorage.clear());
+    await load();
+    const fresh = await page.evaluate(snap);
+    await page.evaluate(() => localStorage.clear());
+    await page.goto(process.env.QE_PREV, {waitUntil: "domcontentloaded"}); await page.waitForTimeout(3500);
+    await page.evaluate(() => { RA.items.find(i => i.id === "BRK-45-16").M[0].qty = 4.4; raPersist(); });
+    await page.waitForTimeout(300);
+    await load();
+    const up = await page.evaluate(snap);
+    console.log("Library saved on the previously published page");
+    ok(up.j === 0.375, "Settings brick joint moved 1/4\" → 3/8\"");
+    const diff = Object.keys(fresh.o).filter(k => k !== "BRK-45-16" && Math.abs(fresh.o[k] - up.o[k]) > 1e-6);
+    ok(diff.length === 0, "every untouched brick item equals a fresh library" + (diff.length ? ": " + diff.join(", ") : ""));
+    ok(Math.abs(up.o["BRK-45-16"] - fresh.o["BRK-45-16"]) > 1, "the hand-edited brick item is left alone");
+  }
 
   ok(errors.length === 0, "no page errors" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();
