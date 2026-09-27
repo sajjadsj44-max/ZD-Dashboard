@@ -49,7 +49,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   ok(fresh.missing.length === 0, "every row points at an existing rate line" + (fresh.missing.length ? ": " + fresh.missing.join(", ") : ""));
   ok(fresh.unsourced.length === 0, "every new line names a dated source or ASSUMPTION" + (fresh.unsourced.length ? ": " + fresh.unsourced : ""));
   const open = Object.keys(fresh.calc).filter(k => fresh.calc[k].gaps > 0);
-  ok(open.length === 1 && open[0] === "CV-128", "only CV-128 (topsoil) is left unpriced — " + open.join(", "));
+  ok(open.length === 0, "no CV item is left unpriced (TOPSOIL is an assumption since the Master RA Rev07a block) — " + open.join(", "));
   ok(Object.keys(fresh.calc).every(k => fresh.calc[k].rate > 0), "every item has a rate above 0");
   ok(fresh.helper === 1538 && fresh.brk2 === 13 && fresh.brk1 === 17.5 && fresh.lcarp === 2400, "L-HELPER 1,538, BRK-2 13, BRK-1 17.5, L-CARP 2,400 applied");
   ok(fresh.fn560.includes("GRN-QUA-STR-000134"), "FN-560 carries the GI door frame");
