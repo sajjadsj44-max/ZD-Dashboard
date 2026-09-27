@@ -461,6 +461,37 @@ python3 -m http.server 8765 &                       # then, with playwright inst
 node tools/test_civil_gap.js                        # 18 browser checks: fresh and saved-library merge
 ```
 
+## Master Rate Analysis Rev07 (Rate Analysis)
+
+Added 27-Sep-2026 from `RA_Master_Pakistan_FINAL_Rev06_2026-09-27.xlsx` (125 analyses). The updated workbook is
+[`docs/RA_Master_Pakistan_FINAL_Rev07_2026-09-27.xlsx`](docs/RA_Master_Pakistan_FINAL_Rev07_2026-09-27.xlsx) and the
+full revision / validation report is [`docs/master-rate-analysis-rev07.md`](docs/master-rate-analysis-rev07.md).
+
+- **160 Item Library items under the workbook codes** (`CIV-CON-001` … `MISC-SGN-001`): the 125 workbook analyses
+  plus 35 new ones (floor-level extras from Punjab MRS, HDPE pipe, landing valve, signage, and vendor items for
+  gaps in both libraries — mobilization, site office, testing, FR / metal ceilings, carpet, wallpaper, GRC, EIFS,
+  canopy, skylight, urinal, CPVC, access control, fire stopping, escalator, irrigation, VRF, MDB). Each carries the
+  same description, unit, resource rows and 8% OH / 10% profit as the workbook; row quantities are the workbook's
+  adjusted quantities (consumption × (1 + wastage)). Sheet 18 of the workbook reconciles all 160 against the page.
+- **One rate per shared resource**: 36 workbook resources use the dashboard's own Rate Database line (CEM, SAND-*,
+  CRSH-*, STL60, BLK-*, BRK-1, RMC-*, L-* …). Workbook inputs moved to the dated dashboard rate for 11 of them;
+  the dashboard moved `QE-TIMB-CFT` to the workbook's Phoenix GRN (3,680/cft).
+- **Crew productivity** (workbook sheet 13) checked against Punjab MRS 2026 labour shares, MAK installation rates
+  (÷ 1.18) and ConcretesMath Lahore piece rates; kept within ±35%, otherwise reset. 27 outputs corrected; 8 with no
+  dated benchmark stay marked as assumptions.
+- **Dashboard corrections**: ST-200/205/210 rebar labour (36.80 → 11.08 per kg); brick generator labour now scales
+  with wall thickness; plaster generator labour by thickness (MRS); saved libraries are migrated on their next
+  load unless the item was edited by hand.
+
+Data: the `<script type="application/json" id="raMasterData">` block, merged by `raSyncBlk` (key `masRev`) and
+`raSyncMaster`. To rebuild after entering quotations in the workbook's 16 RFQ sheet:
+
+```sh
+python3 -m http.server 8765 &                                   # repo root; needs LibreOffice Calc + playwright
+tools/ra_master_build.sh RA_Master_Pakistan_FINAL_Rev06_2026-09-27.xlsx docs/
+python3 -m unittest tools/test_ra_master_data.py
+```
+
 ## Calculator tab
 
 Sidebar → **Calculator** (after Admin) is a QS / civil / structural / MEP calculator
@@ -639,6 +670,14 @@ tools/civil_gap_data.py             build the civil gap-analysis data block (CV 
 tools/test_civil_gap_data.py        tests for the civil gap data block
 tools/test_civil_gap.js             browser tests for the civil gap merge (playwright)
 docs/civil-gap-rate-review.md       review of the missing-items rate list, with every rate side by side
+tools/ra_master_config.py           decisions for the Master Rate Analysis Rev07 (shared lines, rates, productivity, new items)
+tools/ra_master_excel.py            update the Master Rate Analysis workbook (Rev06 -> Rev07) and add sheets 17-19
+tools/ra_master_data.py             build the dashboard block #raMasterData from the Rev07 workbook
+tools/ra_master_build.sh            run the whole Rev07 build (workbook, recalculation, block, reconciliation, tests)
+tools/test_ra_master_data.py        tests for the block and the workbook
+tools/test_ra_master.js             browser tests for the Master Rate Analysis merge (playwright)
+docs/master-rate-analysis-rev07.md  revision and validation report of the Master Rate Analysis Rev07
+docs/RA_Master_Pakistan_FINAL_Rev07_2026-09-27.xlsx  the Rev07 workbook
 tools/calc_data.py                  build the Calculator tab's section / pipe / material data block
 .github/workflows/rate-watch.yml    runs the rate watch daily and offers updates as a pull request
 .github/workflows/deploy-pages.yml  deploy to Pages + mirror main onto gh-pages
