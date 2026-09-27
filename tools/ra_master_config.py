@@ -471,3 +471,134 @@ def legacy_cat(code):
         if code.startswith(p):
             return cat, qc
     return "Miscellaneous", "C19"
+
+
+# --------------------------------------------------------------------------- Rev07a assumptions (27-Sep-2026)
+# Requested by Sajjad (27-Sep-2026): every rate still blank gets an assumed value so that every item prices.
+# None of these has a dated source. Each is written into the remarks as "ASSUMPTION — no dated source" with the
+# basis of the figure, stays a red / "Assumed" input, and should be replaced by a quotation (workbook sheet 16 col H,
+# or the dashboard Rate Database). Figures derived from a dated line say so; the rest are Claude's Lahore market
+# estimates for Sep-2026.
+ASSUME_DATE = "2026-09-27"
+EST = "Claude estimate for Lahore, Sep-2026"
+_GYP = ("calibrated so board + frame + accessories ≈ the Punjab MRS 2026 Ch.9 item 49(ii) gypsum-ceiling system "
+        "material (176.10/Sft)")
+ASSUMED = {  # workbook resource code -> (rate, basis)
+    "MAT-GYP-12": (3550, "web B2B listing 27-Sep-2026 (tradekey.com, undated): Pakistan gypsum board 3,550–3,600 per "
+                         "sheet; low end"),
+    "MAT-GYP-MR": (4600, "standard board 3,550 + ≈30% moisture-resistant premium (" + EST + ")"),
+    "MAT-GI-FC": (45, _GYP), "MAT-GI-MC": (60, _GYP), "MAT-GI-WA": (35, _GYP), "MAT-JTAPE": (3, _GYP),
+    "MAT-JCMP": (120, _GYP),
+    "MAT-SHOIL": (400, "same as the dashboard's MOULD assumption – set near diesel 392/Ltr (Phoenix GRN RCP-311, "
+                       "28-Aug-2026)"),
+    "MAT-VADH": (700, "20 kg pail about 14,000 (" + EST + ")"),
+    "MAT-SND-ZDP": (70, "between Ravi 52 (Phoenix GRN RCP-310, 27-Aug-2026) and Chenab 80 (RCP-316, 07-Sep-2026)"),
+    "MAT-MDF-18": (11000, "18 mm laminated MDF 8×4 sheet (" + EST + "; plain sheet about 7,500–8,500)"),
+    "MAT-ACP": (500, "4 mm PVDF ACP supply only (" + EST + "); dashboard CV-099 installed benchmark 885/Sft"),
+    "MAT-ALSF": (1300, "aluminium extrusion sections per kg (" + EST + ")"),
+    "MAT-BRKT": (350, "GI / aluminium bracket with anchor (" + EST + ")"),
+    "MAT-FSTOP": (350, "fire-stop sealant / smoke seal per Rft of joint (" + EST + ")"),
+    "MAT-SSANC": (450, "SS 316 cladding anchor set (" + EST + ")"),
+    "MAT-FFFIT": (0, "superseded in Rev07a by the size-specific lines MAT-FFFIT-100/200/400"),
+    "MAT-FFFIT-100": (149.54, "fittings share 0.483 × pipe value (MS fittings-to-pipe ratio of the Quadrangle receipts, "
+                              "see README MEP section) × MAT-BSP-100 309.60"),
+    "MAT-FFFIT-200": (314.88, "fittings share 0.483 × MAT-BSP-200 651.92 (Quadrangle receipts ratio)"),
+    "MAT-FFFIT-400": (907.39, "fittings share 0.483 × MAT-BSP-400 1,878.66 (Quadrangle receipts ratio)"),
+    "MAT-LIFT": (8500000, "passenger lift 8-person, 1.0 m/s, about 5 stops, supplied & installed (" + EST + "); "
+                          "vendor quote essential"),
+    "MAT-PPR-075-EL": (38, "≈70% of the ¾\" elbow 54.50 (Popular PPR-100 list 08-Sep-2026)"),
+    "MAT-PPR-075-SO": (27, "≈70% of the ¾\" socket 38.50 (Popular PPR-100 list 08-Sep-2026)"),
+    "MAT-PPR-075-TE": (50, "≈70% of the ¾\" tee 71.50 (Popular PPR-100 list 08-Sep-2026)"),
+    "MAT-GYP-SYSMR": (212.19, "MRS system material 176.10 + MR board premium (4,600 − 3,550) ÷ 32 × 1.10"),
+    "MAT-GYP-SYSFR": (224.91, "MRS system material 176.10 + fire-rated board premium 40% × 3,550 ÷ 32 × 1.10"),
+    "MAT-MOB": (500000, "mobilization + demobilization of a mid-size building contract (" + EST + ")"),
+    "MAT-SITEOFF": (1500000, "porta-cabin site office, store, toilets and security cabin, established & removed "
+                             "(" + EST + ")"),
+    "MAT-TEMPSVC": (150000, "temporary water + electricity per month incl. running (" + EST + ")"),
+    "MAT-CUBE": (4500, "set of 3 cylinders sampled, cured and tested at 1,500 each (" + EST + ")"),
+    "MAT-CLEAN": (6, "final builder's clean per Sft of floor (" + EST + ")"),
+    "MAT-MCLG": (450, "aluminium clip-in 2'×2' ceiling with grid, supplied & installed (" + EST + ")"),
+    "MAT-ACCP": (6500, "2'×2' ceiling access panel supplied & installed (" + EST + ")"),
+    "MAT-CPT": (350, "carpet tiles with adhesive, supplied & installed (" + EST + ")"),
+    "MAT-WPP": (180, "vinyl wallpaper supplied & installed (" + EST + ")"),
+    "MAT-ACPNL": (900, "acoustic wall panel system supplied & installed (" + EST + ")"),
+    "MAT-GLDR": (120000, "12 mm toughened glass 21 Sft ≈ 21,000 (dashboard GLASS-12 1,000/Sft) + floor spring, patch "
+                         "fittings, handle and fixing (" + EST + ")"),
+    "MAT-GRC": (1200, "GRC panel with stainless fixings, supplied & installed (" + EST + ")"),
+    "MAT-EIFS": (650, "EIFS system supplied & applied (" + EST + ")"),
+    "MAT-CNPY": (3500, "steel-framed glass canopy per Sft of plan (" + EST + ")"),
+    "MAT-SKYL": (2500, "skylight glazing on aluminium frame per Sft (" + EST + ")"),
+    "MAT-URN": (25000, "wall-hung urinal with flush valve and trap, supply only (" + EST + ")"),
+    "MAT-CPVC-100": (180, "¾\" CPVC SDR-11 with fittings, supply only; PPR ¾\" is 145.38 + fittings (" + EST + ")"),
+    "MAT-ACS": (85000, "one-door access control set incl. controller share and cabling (" + EST + ")"),
+    "MAT-ESC": (22000000, "standard escalator, supplied & installed (" + EST + "); vendor quote essential"),
+    "MAT-IRR": (80, "drip / sprinkler irrigation per Sft of landscaped area (" + EST + ")"),
+    "MAT-VRF": (300000, "VRF system per TR, supplied & installed with piping and controls (" + EST + ")"),
+    "MAT-MDB": (2000000, "main distribution board about 800 A with incomer, outgoing breakers and metering (" + EST +
+                         ")"),
+    "EQ-BP": (45, "batching plant + transit mixer per cft (" + EST + ")"),
+    "EQ-CRADLE": (3.75, "dashboard P-CRADLE assumption 2,500/day × 0.0015 day per Sft"),
+    "EQ-MIX": (3500, "same as the dashboard P-MIXER assumption (1-bag mixer with fuel, per day)"),
+    "EQ-PROP": (10, "same as the dashboard PROPS assumption; web 2026 (civilconstructionguide.com, undated) gives "
+                    "15–25 per Sft for complete steel shuttering hire"),
+    "EQ-TORCH": (800, "gas torch & burner set per day (" + EST + ")"),
+}
+NEW_RES.update({
+    "MAT-FFFIT-100": ("M", "FF fittings & couplings allowance for 1\" pipe", "Rft"),
+    "MAT-FFFIT-200": ("M", "FF fittings & couplings allowance for 2\" pipe", "Rft"),
+    "MAT-FFFIT-400": ("M", "FF fittings & couplings allowance for 4\" pipe", "Rft"),
+})
+FFFIT = {"FF-PIP-100": "MAT-FFFIT-100", "FF-PIP-200": "MAT-FFFIT-200", "FF-PIP-400": "MAT-FFFIT-400"}
+
+_W = "Pakistan Cables suggested retail list 03-Jun-2026 less 30% (dashboard MEP-W1C4 / MEP-E1C16)"
+_MS = "scaled by pipe weight from MS Sch-40 4\" 1,878.66/Rft (Quadrangle GRN RCP-1903, Aug-2024, old)"
+DASH_ASSUMED = {  # dashboard-only lines at 0 -> (rate, basis)
+    "TOPSOIL": (40, "sweet earth delivered per cft (" + EST + ")"),
+    "QE-GYP-BD12": (3550, ASSUMED["MAT-GYP-12"][1]), "QE-GYP-FC": (45, _GYP), "QE-GYP-MC": (60, _GYP),
+    "QE-GYP-WA": (35, _GYP), "QE-GYP-TAPE": (3, _GYP), "QE-GYP-JC": (120, _GYP),
+    "QE-GYP-CON": (15, "main-to-furring connector clip (" + EST + ")"),
+    "QE-GYP-HNG": (60, "hanger bracket / soffit cleat with nut (" + EST + ")"),
+    "QE-GYP-STUD": (70, "GI stud per Rft (" + EST + ")"), "QE-GYP-TRK": (60, "GI track per Rft (" + EST + ")"),
+    "QE-INS-RW": (95, "2\" infill ≈ ⅔ of 3\" rockwool 139.42/Sft (Quadrangle GRN RCP, 18-Aug-2025)"),
+    "QE-TSPACER": (1.7, "GRN 168 per pack (Quadrangle RCP-2632, 23-Jul-2025) assuming 100 pieces per pack"),
+    "MEP-Z-2C4": (140, f"2 × 1C 4 mm² 61.66 × 1.15 sheath ({_W})"),
+    "MEP-Z-3C16": (800, f"3 × 1C 16 mm² 241.30 × 1.10 sheath ({_W})"),
+    "MEP-Z-3C4": (210, f"3 × 1C 4 mm² 61.66 × 1.15 sheath ({_W})"),
+    "MEP-Z-AAV": (1800, EST), "MEP-Z-ABL": (6500, EST), "MEP-Z-ALF": (450, EST), "MEP-Z-ARMAW": (350, EST),
+    "MEP-Z-BELL": (1500, EST), "MEP-Z-BFAN": (9000, EST + "; 56\" ceiling fan 9,900 on Phoenix GRN 07-Sep-2026"),
+    "MEP-Z-BOOST": (6000, EST), "MEP-Z-BULK": (1800, EST), "MEP-Z-BV050": (650, EST), "MEP-Z-BV125": (1800, EST),
+    "MEP-Z-BV150": (2500, EST), "MEP-Z-CAM4": (16000, EST + "; 2 MP bullet 9,200 on Quadrangle GRN RCP-2444, Apr-2025"),
+    "MEP-Z-COND6": (900, EST), "MEP-Z-CT4": (280, EST + "; dashboard CTRAY assumption 310/Rft for a general tray"),
+    "MEP-Z-CUSTRIP": (650, "30 × 2 mm copper = 0.164 kg/Rft × about 3,500/kg + clips (" + EST + ")"),
+    "MEP-Z-DCOCK": (900, EST), "MEP-Z-DIFF": (1200, EST), "MEP-Z-DL20": (1800, EST), "MEP-Z-DLSQ": (4500, EST),
+    "MEP-Z-DND": (6000, EST), "MEP-Z-EXT": (9000, EST + " (6 kg DCP)"), "MEP-Z-EXTC": (12000, EST),
+    "MEP-Z-FDC": (450, EST), "MEP-Z-FOB": (3500, EST), "MEP-Z-FX075": (3500, EST), "MEP-Z-FX100": (4200, EST),
+    "MEP-Z-FX125": (5000, EST), "MEP-Z-FX150": (6000, EST), "MEP-Z-FX200": (7500, EST),
+    "MEP-Z-GI1": (650, EST), "MEP-Z-GI2": (1300, EST), "MEP-Z-GTRAP": (60000, EST),
+    "MEP-Z-GV075": (2200, EST), "MEP-Z-GV10": (185000, EST), "MEP-Z-GV125": (4500, EST), "MEP-Z-GV8": (125000, EST),
+    "MEP-Z-IPS32": (6500, EST), "MEP-Z-KEYCARD": (8500, EST), "MEP-Z-MAST": (12000, EST), "MEP-Z-MAT": (250, EST),
+    "MEP-Z-MESH": (120, EST), "MEP-Z-MIRROR": (450, EST),
+    "MEP-Z-MS075": (240, "≈78% of MS Sch-40 1\" 309.60 (Quadrangle GRN RCP-1903, Aug-2024, old)"),
+    "MEP-Z-MS8": (4974, _MS + ": 42.55 ÷ 16.07 kg/m"), "MEP-Z-MS10": (7048, _MS + ": 60.29 ÷ 16.07 kg/m"),
+    "MEP-Z-MS12": (8625, _MS + ": 73.78 ÷ 16.07 kg/m"),
+    "MEP-Z-MV075": (28000, EST), "MEP-Z-MV100": (32000, EST), "MEP-Z-MV125": (38000, EST), "MEP-Z-MV150": (45000, EST),
+    "MEP-Z-MV200": (55000, EST),
+    "MEP-Z-NBR13": (206, "≈70% of ¾\" NBR 294.87/Sft (Quadrangle GRN RCP-2472, 24-Apr-2025)"),
+    "MEP-Z-PCORD": (450, EST), "MEP-Z-PE6": (60, EST), "MEP-Z-PICV075": (45000, EST), "MEP-Z-PICV100": (52000, EST),
+    "MEP-Z-PICV125": (65000, EST), "MEP-Z-PICV150": (80000, EST), "MEP-Z-PICV200": (110000, EST),
+    "MEP-Z-PP24": (12000, EST), "MEP-Z-PP32": (16000, EST), "MEP-Z-PP8": (5000, EST),
+    "MEP-Z-PPR75": (1346.85, "Popular PPR-100 PN-20 2½\" (75 mm) list price 08-Sep-2026 per Rft (workbook MAT-PPR-250)"),
+    "MEP-Z-PRV32": (25000, EST), "MEP-Z-PRV50": (45000, EST), "MEP-Z-PRV63": (65000, EST),
+    "MEP-Z-RACK12": (25000, EST), "MEP-Z-RACK24": (55000, EST), "MEP-Z-RACK42": (110000, EST),
+    "MEP-Z-RLG": (1200, EST), "MEP-Z-ROPE": (150, EST), "MEP-Z-SHAVER": (7500, EST), "MEP-Z-SINK": (18000, EST),
+    "MEP-Z-SOAPD": (3500, EST), "MEP-Z-SPK20": (12000, EST), "MEP-Z-SPK6": (5500, EST), "MEP-Z-SPLIT": (1200, EST),
+    "MEP-Z-SPRSW": (2500, EST + "; upright K5.6 1,935 on Quadrangle GRN RCP-2105, Oct-2024"),
+    "MEP-Z-STRIP": (180, EST), "MEP-Z-SW32": (200000, EST + " (managed PoE switch)"), "MEP-Z-TAP": (2500, EST),
+    "MEP-Z-UE1": (120, EST), "MEP-Z-UE2": (300, EST), "MEP-Z-UE3": (600, EST), "MEP-Z-UPVC12": (5500, EST),
+    "MEP-Z-VOLC": (6000, EST), "MEP-Z-WAP": (22000, EST), "MEP-Z-WASH": (18000, EST), "MEP-Z-WPSKT": (3500, EST),
+    "MEP-Z-YS075": (2000, EST), "MEP-Z-YS100": (2600, EST), "MEP-Z-YS125": (3800, EST), "MEP-Z-YS150": (5000, EST),
+    "MEP-Z-YS200": (7000, EST),
+}
+SOURCES.append(("SRC-49", "Rev07a assumptions register – blank rates assumed on request (Sajjad, 27-Sep-2026)",
+                "tools/ra_master_config.py ASSUMED / DASH_ASSUMED", ASSUME_DATE, "Lahore",
+                "No dated source: estimates or derivations stated per line. Replace each with a quotation (16 RFQ col H)"))

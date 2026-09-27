@@ -126,7 +126,9 @@ def build(wb_f, wb_v, html, as_of):
         label = "; ".join(srcs) or "Master Rate Analysis Rev07"
         st = x["status"].upper()
         body = f"{label}, {dmy_s(date)} — {x['note']} [Master RA {C.REV} {code}, status {x['status']}]" if date else ""
-        if not x["rate"] or not date:
+        if x["note"].startswith("ASSUMPTION") and x["rate"]:
+            src, vs = f"{x['note']} [Master RA {C.REV} {code}]", "A"
+        elif not x["rate"] or not date:
             src, vs = f"{NOSRC}. {x['note'] or 'Enter a quotation'} [Master RA {C.REV} {code}]", "A"
         elif "ASSUM" in st or "PROXY" in x["note"].upper():
             src, vs = f"ASSUMPTION — {body}", "A"
@@ -179,7 +181,10 @@ def build(wb_f, wb_v, html, as_of):
             if fm.startswith("="):
                 pr = re.search(r"13 PRODUCTIVITY LIBRARY'!([DEF])(\d+)", fm)
                 note += " — crew output from sheet 13" if pr else f" — workbook formula {fm[1:60]}"
-            it[KIND[comp]].append({"ref": ref, "qty": round(adj, 8), "note": note})
+            row = {"ref": ref, "qty": round(adj, 8), "note": note}
+            if rc in res and res[rc]["status"].lower() == "included":  # priced inside another line of the item
+                row["opt"], row["note"] = True, note + " — included in the composite line, rate 0 by design"
+            it[KIND[comp]].append(row)
         xrows = [[r["ref"], r["qty"]] for k in "MLP" for r in it[k]]
         items.append(it)
         excel[code] = {"unit": it["unit"], "desc": it["desc"], "rows": xrows,
@@ -188,6 +193,14 @@ def build(wb_f, wb_v, html, as_of):
     for code, u in C.DASH_RATE_UPDATES.items():
         d = dict(cur[code])
         d.update({k: v for k, v in u.items() if k != "prev"})
+        rates[code] = d
+    for code, (val, basis) in C.DASH_ASSUMED.items():
+        d = dict(cur[code])
+        if num(d["rate"]):
+            sys.exit(f"{code} is no longer blank on the page ({d['rate']})")
+        d.update({"rate": val, "date": C.ASSUME_DATE, "vs": "A",
+                  "src": f"ASSUMPTION — no dated source ({C.ASSUME_DATE}, assumed on request): {basis}. "
+                         "Replace with a quotation or GRN"})
         rates[code] = d
     # seed rebar items: labour to the MRS benchmark (only while still as seeded)
     q = round(1 / 360, 8)
@@ -213,7 +226,8 @@ def build(wb_f, wb_v, html, as_of):
     data = {"rev": rev, "source": f"Master Rate Analysis {C.DOC} (reconciled with this library, docs/"
                                    "master-rate-analysis-rev07.md)",
             "rates": rates_l, "items": items, "upd": upd,
-            "prevRates": {k: v["prev"] for k, v in C.DASH_RATE_UPDATES.items()}, "prevItems": prev_items}
+            "prevRates": {**{k: v["prev"] for k, v in C.DASH_RATE_UPDATES.items()},
+                          **{k: [[0, ""]] for k in C.DASH_ASSUMED}}, "prevItems": prev_items}
     xr = {code: x["rate"] for code, x in res.items()}
     return data, {"excel": excel, "excelRates": xr}
 

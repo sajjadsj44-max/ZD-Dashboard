@@ -330,6 +330,192 @@ Found and **flagged, not changed** (need a quotation or a decision):
 * **Plumbing & sanitary** (4): MAT-CLMP, MAT-PPR-075-EL, MAT-PPR-075-SO, MAT-PPR-075-TE
 * **Vendor / sub-contract** (23): MAT-MOB, MAT-SITEOFF, MAT-TEMPSVC, MAT-CUBE, MAT-CLEAN, MAT-GYP-SYSFR, MAT-MCLG, MAT-ACCP, MAT-CPT, MAT-WPP, MAT-ACPNL, MAT-GLDR, MAT-GRC, MAT-EIFS, MAT-CNPY, MAT-SKYL, MAT-URN, MAT-CPVC-100, MAT-ACS, MAT-ESC, MAT-IRR, MAT-VRF, MAT-MDB
 
+
+## Rev07a — assumed rates for every blank input (27-Sep-2026)
+
+On request (Sajjad, 27-Sep-2026) every rate that was still blank now carries an **assumed** value, so every item in both
+files prices. None of these has a dated source: each line's remarks start with `ASSUMPTION — no dated source`
+and give the basis; the workbook shows them red with status ASSUMED (a quote typed in 16 RFQ col H overrides the
+assumption automatically), and the dashboard marks them *Assumed* (source SRC-49). Replace each with a quotation
+before a tender. Items that are still marked INCOMPLETE in 03 (34) are priced; they carry at least one GRN older
+than 12 months (admixture, clamps, membrane, cementitious coating, black-steel pipe, DB).
+
+**Check before use:** FAC-ACP-001 now prices at about 2,137/Sft because the Rev06 build-up carries 0.8 kg of
+aluminium sub-frame per Sft (≈8.6 kg/m²), which looks high for ACP cladding; the dashboard's CV-099 benchmark is 885/Sft.
+
+### Workbook inputs (also on the dashboard under the same code)
+
+| Code | Assumed rate | Basis |
+|---|---:|---|
+| MAT-GYP-12 | 3,550.00 | web B2B listing 27-Sep-2026 (tradekey.com, undated): Pakistan gypsum board 3,550–3,600 per sheet; low end |
+| MAT-GYP-MR | 4,600.00 | standard board 3,550 + ≈30% moisture-resistant premium (Claude estimate for Lahore, Sep-2026) |
+| MAT-GI-FC | 45.00 | calibrated so board + frame + accessories ≈ the Punjab MRS 2026 Ch.9 item 49(ii) gypsum-ceiling system material (176.10/Sft) |
+| MAT-GI-MC | 60.00 | calibrated so board + frame + accessories ≈ the Punjab MRS 2026 Ch.9 item 49(ii) gypsum-ceiling system material (176.10/Sft) |
+| MAT-GI-WA | 35.00 | calibrated so board + frame + accessories ≈ the Punjab MRS 2026 Ch.9 item 49(ii) gypsum-ceiling system material (176.10/Sft) |
+| MAT-JTAPE | 3.00 | calibrated so board + frame + accessories ≈ the Punjab MRS 2026 Ch.9 item 49(ii) gypsum-ceiling system material (176.10/Sft) |
+| MAT-JCMP | 120.00 | calibrated so board + frame + accessories ≈ the Punjab MRS 2026 Ch.9 item 49(ii) gypsum-ceiling system material (176.10/Sft) |
+| MAT-SHOIL | 400.00 | same as the dashboard's MOULD assumption – set near diesel 392/Ltr (Phoenix GRN RCP-311, 28-Aug-2026) |
+| MAT-VADH | 700.00 | 20 kg pail about 14,000 (Claude estimate for Lahore, Sep-2026) |
+| MAT-SND-ZDP | 70.00 | between Ravi 52 (Phoenix GRN RCP-310, 27-Aug-2026) and Chenab 80 (RCP-316, 07-Sep-2026) |
+| MAT-MDF-18 | 11,000.00 | 18 mm laminated MDF 8×4 sheet (Claude estimate for Lahore, Sep-2026; plain sheet about 7,500–8,500) |
+| MAT-ACP | 500.00 | 4 mm PVDF ACP supply only (Claude estimate for Lahore, Sep-2026); dashboard CV-099 installed benchmark 885/Sft |
+| MAT-ALSF | 1,300.00 | aluminium extrusion sections per kg (Claude estimate for Lahore, Sep-2026) |
+| MAT-BRKT | 350.00 | GI / aluminium bracket with anchor (Claude estimate for Lahore, Sep-2026) |
+| MAT-FSTOP | 350.00 | fire-stop sealant / smoke seal per Rft of joint (Claude estimate for Lahore, Sep-2026) |
+| MAT-SSANC | 450.00 | SS 316 cladding anchor set (Claude estimate for Lahore, Sep-2026) |
+| MAT-FFFIT | 0.00 | superseded in Rev07a by the size-specific lines MAT-FFFIT-100/200/400 |
+| MAT-FFFIT-100 | 149.54 | fittings share 0.483 × pipe value (MS fittings-to-pipe ratio of the Quadrangle receipts, see README MEP section) × MAT-BSP-100 309.60 |
+| MAT-FFFIT-200 | 314.88 | fittings share 0.483 × MAT-BSP-200 651.92 (Quadrangle receipts ratio) |
+| MAT-FFFIT-400 | 907.39 | fittings share 0.483 × MAT-BSP-400 1,878.66 (Quadrangle receipts ratio) |
+| MAT-LIFT | 8,500,000.00 | passenger lift 8-person, 1.0 m/s, about 5 stops, supplied & installed (Claude estimate for Lahore, Sep-2026); vendor quote essential |
+| MAT-PPR-075-EL | 38.00 | ≈70% of the ¾" elbow 54.50 (Popular PPR-100 list 08-Sep-2026) |
+| MAT-PPR-075-SO | 27.00 | ≈70% of the ¾" socket 38.50 (Popular PPR-100 list 08-Sep-2026) |
+| MAT-PPR-075-TE | 50.00 | ≈70% of the ¾" tee 71.50 (Popular PPR-100 list 08-Sep-2026) |
+| MAT-GYP-SYSMR | 212.19 | MRS system material 176.10 + MR board premium (4,600 − 3,550) ÷ 32 × 1.10 |
+| MAT-GYP-SYSFR | 224.91 | MRS system material 176.10 + fire-rated board premium 40% × 3,550 ÷ 32 × 1.10 |
+| MAT-MOB | 500,000.00 | mobilization + demobilization of a mid-size building contract (Claude estimate for Lahore, Sep-2026) |
+| MAT-SITEOFF | 1,500,000.00 | porta-cabin site office, store, toilets and security cabin, established & removed (Claude estimate for Lahore, Sep-2026) |
+| MAT-TEMPSVC | 150,000.00 | temporary water + electricity per month incl. running (Claude estimate for Lahore, Sep-2026) |
+| MAT-CUBE | 4,500.00 | set of 3 cylinders sampled, cured and tested at 1,500 each (Claude estimate for Lahore, Sep-2026) |
+| MAT-CLEAN | 6.00 | final builder's clean per Sft of floor (Claude estimate for Lahore, Sep-2026) |
+| MAT-MCLG | 450.00 | aluminium clip-in 2'×2' ceiling with grid, supplied & installed (Claude estimate for Lahore, Sep-2026) |
+| MAT-ACCP | 6,500.00 | 2'×2' ceiling access panel supplied & installed (Claude estimate for Lahore, Sep-2026) |
+| MAT-CPT | 350.00 | carpet tiles with adhesive, supplied & installed (Claude estimate for Lahore, Sep-2026) |
+| MAT-WPP | 180.00 | vinyl wallpaper supplied & installed (Claude estimate for Lahore, Sep-2026) |
+| MAT-ACPNL | 900.00 | acoustic wall panel system supplied & installed (Claude estimate for Lahore, Sep-2026) |
+| MAT-GLDR | 120,000.00 | 12 mm toughened glass 21 Sft ≈ 21,000 (dashboard GLASS-12 1,000/Sft) + floor spring, patch fittings, handle and fixing (Claude estimate for Lahore, Sep-2026) |
+| MAT-GRC | 1,200.00 | GRC panel with stainless fixings, supplied & installed (Claude estimate for Lahore, Sep-2026) |
+| MAT-EIFS | 650.00 | EIFS system supplied & applied (Claude estimate for Lahore, Sep-2026) |
+| MAT-CNPY | 3,500.00 | steel-framed glass canopy per Sft of plan (Claude estimate for Lahore, Sep-2026) |
+| MAT-SKYL | 2,500.00 | skylight glazing on aluminium frame per Sft (Claude estimate for Lahore, Sep-2026) |
+| MAT-URN | 25,000.00 | wall-hung urinal with flush valve and trap, supply only (Claude estimate for Lahore, Sep-2026) |
+| MAT-CPVC-100 | 180.00 | ¾" CPVC SDR-11 with fittings, supply only; PPR ¾" is 145.38 + fittings (Claude estimate for Lahore, Sep-2026) |
+| MAT-ACS | 85,000.00 | one-door access control set incl. controller share and cabling (Claude estimate for Lahore, Sep-2026) |
+| MAT-ESC | 22,000,000.00 | standard escalator, supplied & installed (Claude estimate for Lahore, Sep-2026); vendor quote essential |
+| MAT-IRR | 80.00 | drip / sprinkler irrigation per Sft of landscaped area (Claude estimate for Lahore, Sep-2026) |
+| MAT-VRF | 300,000.00 | VRF system per TR, supplied & installed with piping and controls (Claude estimate for Lahore, Sep-2026) |
+| MAT-MDB | 2,000,000.00 | main distribution board about 800 A with incomer, outgoing breakers and metering (Claude estimate for Lahore, Sep-2026) |
+| EQ-BP | 45.00 | batching plant + transit mixer per cft (Claude estimate for Lahore, Sep-2026) |
+| EQ-CRADLE | 3.75 | dashboard P-CRADLE assumption 2,500/day × 0.0015 day per Sft |
+| EQ-MIX | 3,500.00 | same as the dashboard P-MIXER assumption (1-bag mixer with fuel, per day) |
+| EQ-PROP | 10.00 | same as the dashboard PROPS assumption; web 2026 (civilconstructionguide.com, undated) gives 15–25 per Sft for complete steel shuttering hire |
+| EQ-TORCH | 800.00 | gas torch & burner set per day (Claude estimate for Lahore, Sep-2026) |
+
+### Dashboard-only lines (MEP components from the MAK build, gypsum / drywall components, topsoil)
+
+| Code | Assumed rate | Basis |
+|---|---:|---|
+| TOPSOIL | 40.00 | sweet earth delivered per cft (Claude estimate for Lahore, Sep-2026) |
+| QE-GYP-BD12 | 3,550.00 | web B2B listing 27-Sep-2026 (tradekey.com, undated): Pakistan gypsum board 3,550–3,600 per sheet; low end |
+| QE-GYP-FC | 45.00 | calibrated so board + frame + accessories ≈ the Punjab MRS 2026 Ch.9 item 49(ii) gypsum-ceiling system material (176.10/Sft) |
+| QE-GYP-MC | 60.00 | calibrated so board + frame + accessories ≈ the Punjab MRS 2026 Ch.9 item 49(ii) gypsum-ceiling system material (176.10/Sft) |
+| QE-GYP-WA | 35.00 | calibrated so board + frame + accessories ≈ the Punjab MRS 2026 Ch.9 item 49(ii) gypsum-ceiling system material (176.10/Sft) |
+| QE-GYP-TAPE | 3.00 | calibrated so board + frame + accessories ≈ the Punjab MRS 2026 Ch.9 item 49(ii) gypsum-ceiling system material (176.10/Sft) |
+| QE-GYP-JC | 120.00 | calibrated so board + frame + accessories ≈ the Punjab MRS 2026 Ch.9 item 49(ii) gypsum-ceiling system material (176.10/Sft) |
+| QE-GYP-CON | 15.00 | main-to-furring connector clip (Claude estimate for Lahore, Sep-2026) |
+| QE-GYP-HNG | 60.00 | hanger bracket / soffit cleat with nut (Claude estimate for Lahore, Sep-2026) |
+| QE-GYP-STUD | 70.00 | GI stud per Rft (Claude estimate for Lahore, Sep-2026) |
+| QE-GYP-TRK | 60.00 | GI track per Rft (Claude estimate for Lahore, Sep-2026) |
+| QE-INS-RW | 95.00 | 2" infill ≈ ⅔ of 3" rockwool 139.42/Sft (Quadrangle GRN RCP, 18-Aug-2025) |
+| QE-TSPACER | 1.70 | GRN 168 per pack (Quadrangle RCP-2632, 23-Jul-2025) assuming 100 pieces per pack |
+| MEP-Z-2C4 | 140.00 | 2 × 1C 4 mm² 61.66 × 1.15 sheath (Pakistan Cables suggested retail list 03-Jun-2026 less 30% (dashboard MEP-W1C4 / MEP-E1C16)) |
+| MEP-Z-3C16 | 800.00 | 3 × 1C 16 mm² 241.30 × 1.10 sheath (Pakistan Cables suggested retail list 03-Jun-2026 less 30% (dashboard MEP-W1C4 / MEP-E1C16)) |
+| MEP-Z-3C4 | 210.00 | 3 × 1C 4 mm² 61.66 × 1.15 sheath (Pakistan Cables suggested retail list 03-Jun-2026 less 30% (dashboard MEP-W1C4 / MEP-E1C16)) |
+| MEP-Z-AAV | 1,800.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-ABL | 6,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-ALF | 450.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-ARMAW | 350.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-BELL | 1,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-BFAN | 9,000.00 | Claude estimate for Lahore, Sep-2026; 56" ceiling fan 9,900 on Phoenix GRN 07-Sep-2026 |
+| MEP-Z-BOOST | 6,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-BULK | 1,800.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-BV050 | 650.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-BV125 | 1,800.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-BV150 | 2,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-CAM4 | 16,000.00 | Claude estimate for Lahore, Sep-2026; 2 MP bullet 9,200 on Quadrangle GRN RCP-2444, Apr-2025 |
+| MEP-Z-COND6 | 900.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-CT4 | 280.00 | Claude estimate for Lahore, Sep-2026; dashboard CTRAY assumption 310/Rft for a general tray |
+| MEP-Z-CUSTRIP | 650.00 | 30 × 2 mm copper = 0.164 kg/Rft × about 3,500/kg + clips (Claude estimate for Lahore, Sep-2026) |
+| MEP-Z-DCOCK | 900.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-DIFF | 1,200.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-DL20 | 1,800.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-DLSQ | 4,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-DND | 6,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-EXT | 9,000.00 | Claude estimate for Lahore, Sep-2026 (6 kg DCP) |
+| MEP-Z-EXTC | 12,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-FDC | 450.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-FOB | 3,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-FX075 | 3,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-FX100 | 4,200.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-FX125 | 5,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-FX150 | 6,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-FX200 | 7,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-GI1 | 650.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-GI2 | 1,300.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-GTRAP | 60,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-GV075 | 2,200.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-GV10 | 185,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-GV125 | 4,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-GV8 | 125,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-IPS32 | 6,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-KEYCARD | 8,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-MAST | 12,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-MAT | 250.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-MESH | 120.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-MIRROR | 450.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-MS075 | 240.00 | ≈78% of MS Sch-40 1" 309.60 (Quadrangle GRN RCP-1903, Aug-2024, old) |
+| MEP-Z-MS8 | 4,974.00 | scaled by pipe weight from MS Sch-40 4" 1,878.66/Rft (Quadrangle GRN RCP-1903, Aug-2024, old): 42.55 ÷ 16.07 kg/m |
+| MEP-Z-MS10 | 7,048.00 | scaled by pipe weight from MS Sch-40 4" 1,878.66/Rft (Quadrangle GRN RCP-1903, Aug-2024, old): 60.29 ÷ 16.07 kg/m |
+| MEP-Z-MS12 | 8,625.00 | scaled by pipe weight from MS Sch-40 4" 1,878.66/Rft (Quadrangle GRN RCP-1903, Aug-2024, old): 73.78 ÷ 16.07 kg/m |
+| MEP-Z-MV075 | 28,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-MV100 | 32,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-MV125 | 38,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-MV150 | 45,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-MV200 | 55,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-NBR13 | 206.00 | ≈70% of ¾" NBR 294.87/Sft (Quadrangle GRN RCP-2472, 24-Apr-2025) |
+| MEP-Z-PCORD | 450.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-PE6 | 60.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-PICV075 | 45,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-PICV100 | 52,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-PICV125 | 65,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-PICV150 | 80,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-PICV200 | 110,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-PP24 | 12,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-PP32 | 16,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-PP8 | 5,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-PPR75 | 1,346.85 | Popular PPR-100 PN-20 2½" (75 mm) list price 08-Sep-2026 per Rft (workbook MAT-PPR-250) |
+| MEP-Z-PRV32 | 25,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-PRV50 | 45,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-PRV63 | 65,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-RACK12 | 25,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-RACK24 | 55,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-RACK42 | 110,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-RLG | 1,200.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-ROPE | 150.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-SHAVER | 7,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-SINK | 18,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-SOAPD | 3,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-SPK20 | 12,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-SPK6 | 5,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-SPLIT | 1,200.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-SPRSW | 2,500.00 | Claude estimate for Lahore, Sep-2026; upright K5.6 1,935 on Quadrangle GRN RCP-2105, Oct-2024 |
+| MEP-Z-STRIP | 180.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-SW32 | 200,000.00 | Claude estimate for Lahore, Sep-2026 (managed PoE switch) |
+| MEP-Z-TAP | 2,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-UE1 | 120.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-UE2 | 300.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-UE3 | 600.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-UPVC12 | 5,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-VOLC | 6,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-WAP | 22,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-WASH | 18,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-WPSKT | 3,500.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-YS075 | 2,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-YS100 | 2,600.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-YS125 | 3,800.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-YS150 | 5,000.00 | Claude estimate for Lahore, Sep-2026 |
+| MEP-Z-YS200 | 7,000.00 | Claude estimate for Lahore, Sep-2026 |
+
 ## Validation
 
 | Check | Result |

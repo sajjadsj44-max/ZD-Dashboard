@@ -240,6 +240,38 @@ def update(wb, lines):
         rr += 1
     w16.auto_filter.ref = f"A4:L{rr - 1}"
 
+    # ---- Rev07a: assumed values for every blank input (fallback behind the RFQ quote cell)
+    rfq = {w16.cell(r, 2).value: r for r in range(5, last_row(w16) + 1)}
+    for code, (val, basis) in C.ASSUMED.items():
+        note = (f"ASSUMPTION — no dated source ({C.ASSUME_DATE}, assumed on request): {basis}. "
+                f"Replace with a quotation in 16 RFQ col H.")
+        rr = rfq.get(code)
+        ws, (cin, cst, csrc, cnote, cdate) = next(
+            (wb[s_], cols) for s_, cols in ((S05, (14, 10, 11, 12, 9)), (S06, (13, 9, 10, 11, 8)),
+                                            (S07, (9, 5, 6, 7, None))) if find_row(wb[s_], code))
+        r = find_row(ws, code)
+        old = ws.cell(r, cin).value
+        if rr:
+            ws.cell(r, cin).value = f"=IF(ISNUMBER({Q(S16)}!H{rr}),{Q(S16)}!H{rr},{val})"
+            ws.cell(r, cst).value = f'=IF(ISNUMBER({Q(S16)}!H{rr}),"Vendor quote","ASSUMED")'
+            w16.cell(rr, 6).value, w16.cell(rr, 7).value = val, "ASSUMED" if val else "SUPERSEDED"
+            w16.cell(rr, 12).value = basis
+        else:
+            ws.cell(r, cin).value, ws.cell(r, cst).value = val, "ASSUMED"
+        ws.cell(r, csrc).value, ws.cell(r, cnote).value = "SRC-49", note
+        if cdate:
+            ws.cell(r, cdate).value = C.ASSUME_DATE
+        ws.cell(r, cin).fill = RED
+        log.append(("Assumption", code, None if isinstance(old, str) else old, val, basis))
+    # FF pipe items: one fittings line per pipe size
+    for item, code in C.FFFIT.items():
+        for r in parse_blocks(w04)[item]["rows"]:
+            if w04.cell(r, 3).value == "MAT-FFFIT":
+                g, k = fmla_res("M", 0, code)
+                w04.cell(r, 3).value, w04.cell(r, 7).value, w04.cell(r, 11).value = code, g, k
+                w04.cell(r, 4).value = f"Fittings & couplings – {code}"
+        log.append(("Relink", item, "MAT-FFFIT", code, "size-specific fittings allowance"))
+
     # ---- 13 productivity
     wages = {}
     for r in range(5, last_row(w06) + 1):

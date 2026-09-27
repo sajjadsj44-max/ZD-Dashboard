@@ -483,6 +483,13 @@ full revision / validation report is [`docs/master-rate-analysis-rev07.md`](docs
   with wall thickness; plaster generator labour by thickness (MRS); saved libraries are migrated on their next
   load unless the item was edited by hand.
 
+- **Rev07a assumptions (27-Sep-2026, on request)**: every rate that was still blank — 53 workbook inputs (gypsum
+  board and channels, MDF, ACP, props / mixer hire, release oil, lift, escalator, VRF, MDB, vendor items …) and 110
+  dashboard lines (97 MEP components of the MAK build, gypsum / drywall components, topsoil) — now carries an
+  assumed value whose remarks start with `ASSUMPTION — no dated source` and state the basis. Nothing in either file is
+  left unpriced; replace each with a quotation (workbook 16 RFQ col H, or the Rate Database). The full list is in the
+  report.
+
 Data: the `<script type="application/json" id="raMasterData">` block, merged by `raSyncBlk` (key `masRev`) and
 `raSyncMaster`. To rebuild after entering quotations in the workbook's 16 RFQ sheet:
 
