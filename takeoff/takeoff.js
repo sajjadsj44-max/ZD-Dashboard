@@ -224,7 +224,7 @@ async function gotoPage(fileId, pageNo){
   S.fileId = fileId; S.pageNo = pageNo; S.key = keyOf(fileId, pageNo);
   S.page = await d.getPage(pageNo);
   S.base = S.page.getViewport({scale: 1});
-  S.draft = []; S.measure = null; S.measures = []; S.snap = null;
+  S.draft = []; S.measure = null; S.measures = []; S.snap = null; S.autoShow = null;
   P.proj.last = {file: fileId, page: pageNo}; save();
   $("pageSel").value = fileId + "|" + pageNo;
   showDrop(false);
@@ -243,11 +243,19 @@ function fit(){
   S.view = {s: s > 0 ? s : 1, tx: (w - S.base.width * s) / 2, ty: (h - S.base.height * s) / 2};
   applyView();
 }
+/* line weights off: every stroke drawn 1 device pixel wide, whatever the PDF says (as Bluebeam's toggle) */
+const LW = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "lineWidth");
+function thinLines(ctx){
+  if (!S.thin) return ctx;
+  const stroke = ctx.stroke;
+  ctx.stroke = function(){ const m = this.getTransform(), s = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1; LW.set.call(this, 1 / s); return stroke.apply(this, arguments); };
+  return ctx;
+}
 async function renderLow(){
   const longSide = Math.max(S.base.width, S.base.height), sc = Math.min(3, 3000 / longSide);
   const vp = S.page.getViewport({scale: sc}), c = $("low");
   c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
-  const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+  const ctx = thinLines(c.getContext("2d")); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
   S.low = {s: sc};
   try { await S.page.render({canvasContext: ctx, viewport: vp}).promise; } catch (e) {}
   applyView();
@@ -261,7 +269,7 @@ function renderHi(now){
     const st = stage(), dpr = Math.min(window.devicePixelRatio || 1, 2), c = $("hi"), v = Object.assign({}, S.view);
     const w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
     const off = document.createElement("canvas"); off.width = w; off.height = h;
-    const ctx = off.getContext("2d");
+    const ctx = thinLines(off.getContext("2d"));
     const task = S.page.render({canvasContext: ctx, viewport: S.page.getViewport({scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]});
     S.renderTask = task;
     try { await task.promise; } catch (e) { return; }
@@ -424,7 +432,7 @@ function snapAt(q){
    (the room's core). The core is grown back out over the thin lines to the wall faces, pockets narrower than the
    furniture setting are filled (furniture against a wall), and the outline is traced, squared up when the room is
    rectilinear (the bulge through a door opening is dropped there) and snapped onto the wall lines. */
-const AUTO_DEF = {gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, skipDash: true, wall: null};
+const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, skipDash: true, wall: null, show: false};
 const autoOpt = () => Object.assign({}, AUTO_DEF, (P.proj && P.proj.auto) || {});
 function segsIn(g, x0, y0, x1, y1){
   const c = g.cell, ids = new Set();
@@ -507,6 +515,32 @@ function closeMask(m, W, H, R){   // morphological closing with a disc of radius
   edt2(f, W, H);
   for (let i = 0; i < N; i++) if (f[i] > R2) m[i] = 1;
 }
+/* pockets: with the walls right round the room counted as room, whatever is then fully enclosed — furniture or a
+   wardrobe against a wall, a door swing — is a pocket of this room and is added (up to maxPx pixels). The next room is
+   never enclosed: its own walls, further off, join it to the outside. */
+function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx){
+  const N = W * H, f = new Float32Array(N);
+  for (let i = 0; i < N; i++) f[i] = m[i] ? 0 : 1e20;
+  edt2(f, W, H);
+  const solid = new Uint8Array(N), w2 = wallPx * wallPx;
+  for (let i = 0; i < N; i++) solid[i] = m[i] || (ink[i] && f[i] <= w2) ? 1 : 0;
+  const seen = new Uint8Array(N), st = new Int32Array(N);
+  for (let i0 = 0; i0 < N; i0++) {
+    if (solid[i0] || seen[i0]) continue;
+    const comp = []; let top = 0, open = false, touch = 0; seen[i0] = 1; st[top++] = i0;
+    while (top) { const i = st[--top], x = i % W, y = (i - x) / W; comp.push(i);
+      if (x === 0 || y === 0 || x === W - 1 || y === H - 1) open = true;
+      if (f[i] <= 64) touch++;   // within 8 px of the room: only an outline between
+      if (x > 0 && !solid[i - 1] && !seen[i - 1]) { seen[i - 1] = 1; st[top++] = i - 1; }
+      if (x < W - 1 && !solid[i + 1] && !seen[i + 1]) { seen[i + 1] = 1; st[top++] = i + 1; }
+      if (y > 0 && !solid[i - W] && !seen[i - W]) { seen[i - W] = 1; st[top++] = i - W; }
+      if (y < H - 1 && !solid[i + W] && !seen[i + W]) { seen[i + W] = 1; st[top++] = i + W; } }
+    if (!open && touch >= minTouch && comp.length >= minPx && comp.length <= maxPx) comp.forEach(i => { m[i] = 1; });   // gaps in a wall's hatching are smaller
+  }
+  // the room's own ink inside it (furniture outlines, text) is part of the floor too
+  for (let i = 0; i < N; i++) if (!m[i] && ink[i]) { const x = i % W; let n = 0;
+    if (x > 0 && m[i - 1]) n++; if (x < W - 1 && m[i + 1]) n++; if (i >= W && m[i - W]) n++; if (i + W < N && m[i + W]) n++; if (n >= 3) m[i] = 1; }
+}
 function outerLoop(m, W, H){   // boundary of the mask along pixel edges, region on the right; the largest outer loop, in pixel corners
   const N = W + 1, nx = new Map();
   const add = (ax, ay, bx, by) => { const a = ay * N + ax, b = by * N + bx, e = nx.get(a); if (e) e.push(b); else nx.set(a, [b]); };
@@ -587,10 +621,11 @@ function offsetPoly(Q, d){   // every edge moved outward by d
     if (Math.abs(den) < 1e-6) return [q[0] + B.n[0] * d, q[1] + B.n[1] * d];
     const t = ((B.p[0] - A.p[0]) * B.u[1] - (B.p[1] - A.p[1]) * B.u[0]) / den; return [A.p[0] + A.u[0] * t, A.p[1] + A.u[1] * t]; });
 }
-function snapToWalls(Q, g, ids, tol, k){   // rectilinear outline: each edge onto the nearest parallel drawing line it runs along
-  const E = orthoEdges(Q);
+function snapToWalls(Q, g, ids, tol, k, slack){   // rectilinear outline: each edge onto the nearest parallel drawing line it runs along —
+  const E = orthoEdges(Q), sgn = signedArea(Q) > 0 ? 1 : -1;   // on the outward side first: a wall face is outside the room, furniture inside
   if (E.some(e => e.o === "D")) return Q;
   E.forEach(e => {
+    const out = e.o === "H" ? -sgn * e.dir : sgn * e.dir;   // outward normal of this edge along y (H) or x (V)
     const lo = Math.min(e.o === "H" ? e.a[0] : e.a[1], e.o === "H" ? e.b[0] : e.b[1]), hi = Math.max(e.o === "H" ? e.a[0] : e.a[1], e.o === "H" ? e.b[0] : e.b[1]);
     let best = null;
     ids.forEach(i => { const s = g.segs[i], h = Math.abs(s[3] - s[1]) <= 0.02 * Math.abs(s[2] - s[0]), v = Math.abs(s[2] - s[0]) <= 0.02 * Math.abs(s[3] - s[1]);
@@ -598,25 +633,71 @@ function snapToWalls(Q, g, ids, tol, k){   // rectilinear outline: each edge ont
       const c = e.o === "H" ? (s[1] + s[3]) / 2 : (s[0] + s[2]) / 2, d = Math.abs(c - e.c); if (d > tol) return;
       const a0 = Math.min(e.o === "H" ? s[0] : s[1], e.o === "H" ? s[2] : s[3]), a1 = Math.max(e.o === "H" ? s[0] : s[1], e.o === "H" ? s[2] : s[3]);
       if (Math.min(hi, a1) - Math.max(lo, a0) < Math.min(0.3 * (hi - lo), 1 * k)) return;
-      if (!best || d < best.d) best = {c, d}; });
+      const o = (c - e.c) * out >= -(slack || 0) ? 0 : 1;
+      if (!best || o < best.o || (o === best.o && d < best.d)) best = {c, d, o}; });
     if (best) e.c = best.c;
   });
   return edgesToPoly(E);
 }
-function autoRoom(seed){   // -> {pts} or {err}
-  const k = curScale(), g = S.geo[S.key];
+/* walls from the rendered drawing (what is seen on screen): every non-white pixel is ink; small separate marks (text,
+   dashes of dashed lines, dots of stipple, dashed door swings) are dropped. Works for any PDF, scans included. */
+async function inkMask(x0, y0, W, H, px, minPx){
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  await S.page.render({canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}).promise;
+  const d = ctx.getImageData(0, 0, W, H).data, N = W * H, m = new Uint8Array(N);
+  for (let i = 0; i < N; i++) m[i] = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) < 190 ? 1 : 0;
+  const seen = new Uint8Array(N), st = new Int32Array(N);
+  const comps = (mask, fn) => {   // 8-connected marks of the mask -> fn(pixels, bbox width, bbox height)
+    seen.fill(0);
+    for (let i0 = 0; i0 < N; i0++) {
+      if (!mask[i0] || seen[i0]) continue;
+      let top = 0, x0c = W, x1c = 0, y0c = H, y1c = 0; const comp = []; seen[i0] = 1; st[top++] = i0;
+      while (top) { const i = st[--top], x = i % W, y = (i - x) / W; comp.push(i);
+        if (x < x0c) x0c = x; if (x > x1c) x1c = x; if (y < y0c) y0c = y; if (y > y1c) y1c = y;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue; const j = yy * W + xx; if (mask[j] && !seen[j]) { seen[j] = 1; st[top++] = j; } } }
+      fn(comp, x1c - x0c, y1c - y0c);
+    }
+  };
+  // small separate marks go first: letters, dashes of dashed lines, stipple dots, dashed door swings
+  comps(m, (c, w, h) => { if (Math.max(w, h) < minPx) c.forEach(i => { m[i] = 0; }); });
+  // then ink closer than ~0.4 ft fuses (hatching into a solid wall, so no fill runs between its strokes), 1 px thicker
+  // so an 8-neighbour step cannot slip between diagonal pixels
+  const rc = Math.max(1.5, 0.2 * curScale() / px), f = new Float32Array(N);
+  for (let i = 0; i < N; i++) f[i] = m[i] ? 0 : 1e20;
+  edt2(f, W, H);
+  const dil = new Uint8Array(N); for (let i = 0; i < N; i++) dil[i] = f[i] <= rc * rc ? 1 : 0;
+  for (let i = 0; i < N; i++) f[i] = dil[i] ? 1e20 : 0;
+  edt2(f, W, H);
+  const thin = new Uint8Array(N), keep = (rc - 1) * (rc - 1);
+  for (let i = 0; i < N; i++) thin[i] = m[i] || f[i] > keep ? 1 : 0;
+  // the wall network: marks spanning 8 ft or more. Loose marks inside a room (a word, a tag, a free-standing bed) bound
+  // the room but must not split its core when openings are closed
+  const big = new Uint8Array(N), bigPx = 8 * curScale() / px;
+  comps(thin, (c, w, h) => { if (Math.max(w, h) >= bigPx) c.forEach(i => { big[i] = 1; }); });
+  return {thin, big};
+}
+function widen(m, W, H, r){   // every ink pixel widened to a disc of radius r px
+  const N = W * H, f = new Float32Array(N), out = new Uint8Array(N), r2 = r * r;
+  for (let i = 0; i < N; i++) f[i] = m[i] ? 0 : 1e20;
+  edt2(f, W, H);
+  for (let i = 0; i < N; i++) out[i] = f[i] <= r2 ? 1 : 0;
+  return out;
+}
+async function autoRoom(seed){   // -> {pts} or {err}
+  const k = curScale(), g = S.geo[S.key] || {segs: [], grid: new Map(), cell: 24, styles: []};
   if (!k) return {err: "Set the page scale first (K) — the door gap and wall offsets are in feet."};
-  if (!g || !g.segs.length) return {err: "Auto area needs a vector PDF (exported from CAD). This page has no drawing lines to follow — draw the area instead."};
-  const o = autoOpt();
+  const o = autoOpt(), img = o.src !== "vector";
+  if (!img && !g.segs.length) return {err: "This page has no vector lines — switch Auto area settings (⚙) to ‘walls from the drawing image’."};
   for (const [half, pxFt] of [[45, 0.06], [110, 0.14]]) {
     const px = pxFt * k, W = Math.ceil(2 * half * k / px), H = W, x0 = seed[0] - half * k, y0 = seed[1] - half * k;
     const ids = barrierIds(g, segsIn(g, x0, y0, x0 + W * px, y0 + H * px), k, o);
-    const raster = lw => {   // barrier lines (and door openings) stroked lw (pt) wide -> 1 = blocked
+    const raster = (lw, doorsOnly) => {   // barrier lines (and door openings) stroked lw (pt) wide -> 1 = blocked
       const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
       const ctx = cv.getContext("2d", {willReadFrequently: true});
       ctx.setTransform(1 / px, 0, 0, 1 / px, -x0 / px, -y0 / px);
       ctx.lineWidth = lw; ctx.lineCap = "round"; ctx.strokeStyle = "#000"; ctx.beginPath();
-      ids.forEach(i => { const s = g.segs[i]; ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); });
+      if (!doorsOnly) ids.forEach(i => { const s = g.segs[i]; ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); });
       ids.doors.forEach(s => { ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); });
       ctx.stroke();
       const img = ctx.getImageData(0, 0, W, H).data, b = new Uint8Array(W * H);
@@ -637,7 +718,13 @@ function autoRoom(seed){   // -> {pts} or {err}
         for (const j of [i - 1, i + 1, i - W, i + W]) if (!m[j] && !bar[j]) { m[j] = 1; st[top++] = j; } }
       return {m, edge};
     };
-    const rpx = Math.ceil(o.gap * k / px / 2) + 2, thin = raster(2 * px), bar = raster(Math.max(o.gap * k, 2 * px));
+    const rpx = Math.ceil(o.gap * k / px / 2) + 2;
+    let thin, bar;
+    if (img) { const ink = await inkMask(x0, y0, W, H, px, Math.max(o.minLen, 1) * k / px); thin = ink.thin;   // a solid door swing stays in: its area is a pocket, added back
+      if (ids.doors.length) { const dl = raster(2 * px, true); for (let i = 0; i < N; i++) if (dl[i]) { thin[i] = 1; ink.big[i] = 1; } }
+      bar = widen(ink.big, W, H, o.gap * k / px / 2); }
+    else { thin = raster(2 * px); bar = raster(Math.max(o.gap * k, 2 * px)); }
+    if (o.show) S.autoShow = {key: S.key, x0, y0, px, W, H, url: maskUrl(thin, W, H)};
     // B: every line widened to the door gap, so all openings close — the room's core — grown back out to the wall faces
     const sb = seedIn(bar, rpx), sa = seedIn(thin, 4);
     let m;
@@ -670,16 +757,21 @@ function autoRoom(seed){   // -> {pts} or {err}
       if (!A) return {err: "This space is narrower than the door gap (" + f3(o.gap) + " ft) and is not closed — lower ‘Close gaps’ in the auto-area settings (⚙), or draw it."};
       m = A.m;
     }
-    if (o.pocket > 0) closeMask(m, W, H, o.pocket * k / px / 2);
+    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
     const loop = outerLoop(m, W, H); if (!loop || loop.length < 4) return {err: "No closed space found at that point."};
     let Q = dpClosed(loop.map(p => [x0 + p[0] * px, y0 + p[1] * px]), 1.6 * px);
     const sq = squareUp(Q, 3 * px, o.gap * k, Math.max(o.gap, o.pocket) * k);
-    Q = sq ? snapToWalls(sq, g, ids, Math.max(4 * px, 0.35 * k), k) : offsetPoly(Q, px);
+    Q = sq ? (ids.length ? snapToWalls(sq, g, ids, Math.max(4 * px, 0.35 * k), k, px) : offsetPoly(sq, (img ? 1.5 : 1) * px)) : offsetPoly(Q, (img ? 1.5 : 1) * px);
     Q = cleanPoly(Q);
     if (Q.length < 3 || polyArea(Q) < 1e-6) return {err: "No closed space found at that point."};
     return {pts: Q, rect: !!sq};
   }
   return {err: "The space leaks — an opening wider than the door gap (" + f3(autoOpt().gap) + " ft) joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it."};
+}
+function maskUrl(m, W, H){   // what auto area treated as walls, for the "show detected walls" overlay
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d"), im = ctx.createImageData(W, H);
+  for (let i = 0; i < m.length; i++) if (m[i]) { im.data[i * 4] = 255; im.data[i * 4 + 1] = 0; im.data[i * 4 + 2] = 140; im.data[i * 4 + 3] = 170; }
+  ctx.putImageData(im, 0, 0); return cv.toDataURL();
 }
 async function autoAt(p){
   const c = S.cond ? cond(S.cond) : null; if (!c) return;
@@ -687,7 +779,7 @@ async function autoAt(p){
     return toast("Already measured — this point is inside an area of " + c.name);
   busy("Finding the room…");
   await new Promise(r => setTimeout(r, 20));
-  let res; try { res = autoRoom(p); } catch (e) { res = {err: "Auto area failed: " + (e.message || e)}; }
+  let res; try { res = await autoRoom(p); } catch (e) { res = {err: "Auto area failed: " + (e.message || e)}; }
   busy("");
   if (res.err) return toast(res.err, 6000);
   const id = uid("I");
@@ -698,19 +790,21 @@ async function autoAt(p){
 async function autoSettings(){
   const o = autoOpt();
   const v = await ask("Auto area settings", `<div class="grid">
+    <div class="fg w2"><label>Find walls from</label><select id="aoSrc"><option value="image"${o.src !== "vector" ? " selected" : ""}>The drawing as seen on screen (recommended — works with any PDF)</option><option value="vector"${o.src === "vector" ? " selected" : ""}>The PDF's vector lines (CAD exports only)</option></select></div>
     <div class="fg"><label>Close gaps up to (ft)</label><input type="text" id="aoGap" value="${f3(o.gap)}"><span class="small">door openings — set to the widest door</span></div>
     <div class="fg"><label>Ignore furniture / recesses narrower than (ft)</label><input type="text" id="aoPk" value="${f3(o.pocket)}"><span class="small">0 = follow every notch</span></div>
-    <div class="fg"><label>Ignore lines shorter than (ft)</label><input type="text" id="aoMin" value="${f3(o.minLen)}"><span class="small">text strokes, hatching</span></div>
+    <div class="fg"><label>Ignore marks smaller than (ft)</label><input type="text" id="aoMin" value="${f3(o.minLen)}"><span class="small">text, dashes, hatching (image: at least 1 ft)</span></div>
     <div class="fg"><label>Wall lines</label><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="small" id="aoWall">${o.wall ? "colour " + esc(o.wall.split("|")[0]) + ", " + esc(o.wall.split("|")[1]) + " pt and heavier" : "any drawing line"}</span>
       <button class="btn sm" id="aoPick" type="button">Pick a wall…</button>${o.wall ? '<button class="btn sm" id="aoClr" type="button">Any line</button>' : ""}</div></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDoor" style="width:auto"${o.skipDoors ? " checked" : ""}> Ignore door swings and door leaves</label></div>
-    <div class="fg w2"><label><input type="checkbox" id="aoDash" style="width:auto"${o.skipDash ? " checked" : ""}> Ignore dashed lines (beams, slab edges overhead)</label></div></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoDash" style="width:auto"${o.skipDash ? " checked" : ""}> Ignore dashed lines (beams, slab edges overhead)</label></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoShow" style="width:auto"${o.show ? " checked" : ""}> Show the detected walls (pink) after each auto area — to see why a room leaks</label></div></div>
     <p class="small" style="margin-top:10px">If furniture or fixtures are drawn in the same pen as the walls, <b>Pick a wall</b> so only lines of that colour and weight bound the room.</p>`, "Save", () => {
       const gap = parseFt($("aoGap").value), pocket = parseFt($("aoPk").value || "0"), minLen = parseFt($("aoMin").value || "0");
       if (!(gap > 0.2 && gap < 30)) return "Close gaps: a width in ft, e.g. 4";
       if (isNaN(pocket) || isNaN(minLen)) return "Enter decimal feet";
-      return {gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, skipDash: $("aoDash").checked}; }, "aoGap");
-  if (v) { P.proj.auto = Object.assign({}, P.proj.auto || {}, v); save(); toast("Auto area settings saved"); }
+      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, skipDash: $("aoDash").checked, show: $("aoShow").checked}; }, "aoGap");
+  if (v) { P.proj.auto = Object.assign({}, P.proj.auto || {}, v); if (!v.show) S.autoShow = null; save(); draw(); toast("Auto area settings saved"); }
 }
 document.addEventListener("click", e => {   // auto-area dialog: pick / clear the wall pen
   if (e.target.id === "aoPick") { $("dlgCancel").click(); S.pickWall = true; setTool("auto"); toast("Click a wall line on the drawing", 4000); }
@@ -733,8 +827,8 @@ const UNITS = {area: ["Sft", "cft"], linear: ["ft", "Sft", "cft"], count: ["Nos"
 function rowsOf(it, k){
   const c = cond(it.cond); if (!c || !k) return [];
   const nos = +it.nos || 1, sign = it.kind === "shape" ? 1 : -1, ft = p => [p[0] / k, p[1] / k];
-  const R = (o) => Object.assign({it: it.id, sign, nos: null, L: null, W: null, H: null, unit: c.unit, below: false}, o);
-  const qty = r => r.sign * [r.nos, r.L, r.W, r.H].filter(v => v != null).reduce((a, v) => a * v, 1);
+  const R = (o) => Object.assign({it: it.id, sign, nos: null, A: null, L: null, W: null, H: null, unit: c.unit, below: false}, o);
+  const qty = r => r.sign * [r.nos, r.A, r.L, r.W, r.H].filter(v => v != null).reduce((a, v) => a * v, 1);
   let rows = [];
   if (c.type === "count") rows = [R({nos: it.pts.length * nos, desc: "count"})];
   else if (c.type === "linear") {
@@ -750,11 +844,11 @@ function rowsOf(it, k){
       r.runs = runs; rows = [r];
     }
   } else {
+    // one measured shape = one row: a plain rectangle as L × W, any other outline as its plan area (by coordinates)
     const F = it.pts.map(ft), tol = 0.002 * Math.max(1, Math.sqrt(polyArea(F)));
-    let parts = rectilinear(F, tol), how = "rect";
-    if (!parts) { how = "tri"; parts = triangles(F).map(t => ({L: t.base, W: t.height, half: true})); }
-    const H = c.unit === "cft" ? r3(+c.t || 0) : null;
-    rows = parts.map((p, i) => R({nos: p.half ? 0.5 * nos : nos, L: r3(p.L), W: r3(p.W), H, part: parts.length > 1 ? i + 1 : 0, how}));
+    const parts = rectilinear(F, tol), H = c.unit === "cft" ? r3(+c.t || 0) : null;
+    rows = parts && parts.length === 1 ? [R({nos, L: r3(parts[0].L), W: r3(parts[0].W), H, how: "rect"})]
+         : [R({nos, A: r3(polyArea(F)), H, how: "poly", sides: F.length})];
     if (it.kind === "ded") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0); if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }
   }
   rows.forEach(r => { r.qty = r.below ? 0 : qty(r); });
@@ -771,7 +865,7 @@ function condTotals(c){
   return out;
 }
 function dimText(r){
-  const parts = [r.nos, r.L, r.W, r.H].map((v, i) => v == null ? null : i === 0 ? (Number.isInteger(v) ? String(v) : String(v)) : f3(v)).filter(v => v != null);
+  const parts = [r.nos, r.A, r.L, r.W, r.H].map((v, i) => v == null ? null : i === 0 ? String(v) : i === 1 ? f3(v) + " Sft" : f3(v)).filter(v => v != null);
   return parts.join(" × ");
 }
 
@@ -779,8 +873,13 @@ function dimText(r){
 function setTool(t){
   if (t !== "select") { S.sel = null; S.selPt = -1; }
   const c = S.cond ? cond(S.cond) : null;
-  if (["draw", "rect", "ded", "open", "auto"].indexOf(t) >= 0 && !c) { toast("Pick or create a condition first (left panel)"); t = "select"; S.pickWall = false; }
+  if (["draw", "rect", "ded", "open", "auto"].indexOf(t) >= 0 && !c && t !== "count") { toast("Pick or create a condition first (left panel)"); t = "select"; S.pickWall = false; }
   if (t === "rect" && c && c.type !== "area") { toast("Rectangle is for area conditions"); t = "draw"; }
+  if (t === "count") {   // the count tool works on a count condition: the active one, else the first, else a new "Count"
+    let cc = c && c.type === "count" ? c : P.proj && P.proj.conds.find(x => x.type === "count");
+    if (!cc && P.proj) { cc = {id: uid("C"), name: "Count", type: "count", unit: "Nos", color: COLORS[P.proj.conds.length % COLORS.length], h: "", t: "", faces: 1, dedMin: 0}; P.proj.conds.push(cc); save(); renderConds(); }
+    if (cc) S.cond = cc.id;
+  }
   if (t === "auto" && c && c.type !== "area" && !S.pickWall) { toast("Auto area is for area conditions (floor, ceiling, slab…)"); t = "draw"; }
   if (t === "open" && c && !(c.type === "linear")) { toast("Openings are deducted from a wall (length) condition"); t = "draw"; }
   if (t === "ded" && c && c.type === "count") { toast("Counts have no deductions — select a point and press Delete"); t = "draw"; }
@@ -794,7 +893,7 @@ function hint(){
   const c = S.cond ? cond(S.cond) : null, t = S.tool;
   const H = {select: "Click a measurement to select it; drag its points to edit; Delete removes it.", pan: "Drag to pan; scroll to zoom.",
     draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." : c.type === "linear" ? "Click along the run; Enter, double-click or right-click to finish." : "Click each item to count it; Esc when done.",
-    rect: "Click two opposite corners.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.", ded: c && c.type === "area" ? "Draw the void / cut-out to deduct; Enter to close." : "Draw the length to deduct; Enter to finish.",
+    rect: "Click two opposite corners.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.", ded: c && c.type === "area" ? "Draw the void / cut-out to deduct; Enter to close." : "Draw the length to deduct; Enter to finish.",
     open: "Click both sides of the opening, then enter its height.", measure: "Click points; double-click, right-click or Enter ends a measurement (it stays on screen). Esc clears. Nothing is saved.",
     cal: "Click both ends of a known dimension, then enter its length."};
   $("stHint").textContent = H[t] || "";
@@ -937,11 +1036,13 @@ function drawNow(){
   const k = curScale(), h = [];
   h.push('<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="rgba(208,59,59,.08)"/><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(208,59,59,.55)" stroke-width="1.5"/></pattern></defs>');
   const ptsS = P => P.map(p => toScr(p).map(v => v.toFixed(1)).join(",")).join(" ");
+  const A = S.autoShow; if (A && A.key === S.key) { const q = toScr([A.x0, A.y0]); h.push(`<image href="${A.url}" x="${q[0].toFixed(1)}" y="${q[1].toFixed(1)}" width="${(A.W * A.px * S.view.s).toFixed(1)}" height="${(A.H * A.px * S.view.s).toFixed(1)}" preserveAspectRatio="none" style="image-rendering:pixelated"/>`); }
   P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).forEach(it => {
     const c = cond(it.cond); if (!c) return;
     const col = c.color, sel = it.id === S.sel;
     if (c.type === "count") {
-      it.pts.forEach((p, i) => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${sel && i === S.selPt ? 8 : 6}" fill="${col}" stroke="#fff" stroke-width="2"/>`); });
+      it.pts.forEach((p, i) => { const q = toScr(p), r = sel && i === S.selPt ? 13 : 11;
+        h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${r}" fill="${col}" fill-opacity=".35" stroke="${col}" stroke-width="2.5"/><text x="${q[0].toFixed(1)}" y="${(q[1] + 4).toFixed(1)}" text-anchor="middle" font-size="11.5" font-weight="700" fill="#0b0b0b">${i + 1}</text>`); });
       return;
     }
     if (it.kind === "open") {
@@ -1037,7 +1138,7 @@ function renderSheet(){
       if (!k) { h += `<tr class="it${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${++n}</td><td>${esc(it.label || kindName(it, c))}<div class="ds">${esc(pg)} · scale not set</div></td><td class="n">—</td><td class="n">—</td></tr>`; return; }
       rowsOf(it, k).forEach((r, i) => {
         const desc = (r.sign < 0 ? "Ded. " : "") + (it.label || kindName(it, c)) + (r.part ? " — part " + String.fromCharCode(96 + r.part) : "");
-        const sub = [pg, r.runs && r.runs.length > 1 ? "runs " + r.runs.map(f3).join(" + ") : "", r.how === "tri" && i === 0 ? "irregular: triangles ½ × base × height" : "",
+        const sub = [pg, r.runs && r.runs.length > 1 ? "runs " + r.runs.map(f3).join(" + ") : "", r.how === "poly" ? "plan area of the " + r.sides + "-sided outline" : "",
                      c.type === "linear" && c.unit === "Sft" && (+c.faces || 1) > 1 && it.kind !== "ded" ? "Nos includes " + c.faces + " faces" : "",
                      r.below ? "≤ " + f2(+c.dedMin || 0) + " " + (c.unit === "cft" && c.type === "area" ? "cft" : "Sft") + " — not deducted (house rule)" : ""].filter(Boolean).join(" · ");
         h += `<tr class="it${r.sign < 0 ? " ded" : ""}${r.below ? " below" : ""}${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${i === 0 ? ++n : ""}</td><td>${esc(desc)}${i === 0 ? `<button class="rn" title="Rename (e.g. Bedroom 1)" data-rename="${esc(it.id)}">&#9998;</button>` : ""}<div class="ds">${esc(sub)}</div></td>
@@ -1201,7 +1302,7 @@ function sheetRows(){
 function loadExcel(){ return window.ExcelJS ? Promise.resolve(window.ExcelJS) : new Promise((ok, bad) => { const s = document.createElement("script"); s.src = EXCELJS; s.onload = () => ok(window.ExcelJS); s.onerror = () => bad(new Error("Excel library could not be loaded (offline?) — use CSV")); document.head.appendChild(s); }); }
 function saveBlob(blob, name){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); }
 const fileBase = () => (P.proj.name || "takeoff").replace(/[^A-Za-z0-9]+/g, "_") + "_" + today();
-function rowDesc(x){ const {r, it, i} = x, c = cond(it.cond); return (r.sign < 0 ? "Ded. " : "") + (it.label || kindName(it, c)) + (r.part ? " — part " + String.fromCharCode(96 + r.part) : "") + (r.below ? " (≤ " + f2(+c.dedMin || 0) + " — not deducted)" : "") + (r.how === "tri" && i === 0 ? " (triangles ½ × base × height)" : ""); }
+function rowDesc(x){ const {r, it, i} = x, c = cond(it.cond); return (r.sign < 0 ? "Ded. " : "") + (it.label || kindName(it, c)) + (r.part ? " — part " + String.fromCharCode(96 + r.part) : "") + (r.below ? " (≤ " + f2(+c.dedMin || 0) + " — not deducted)" : "") + (r.how === "poly" ? " (plan area, " + r.sides + "-sided outline — area in the L column)" : ""); }
 async function exportExcel(){
   busy("Building Excel…");
   try {
@@ -1214,7 +1315,7 @@ async function exportExcel(){
     ws.mergeCells("A2:I2"); ws.getCell("A2").value = "PDF takeoff · " + dmy(today()) + " · decimal feet · Qty = Nos × L × W × H (blank = not used) · deductions as negative rows";
     ws.getCell("A2").font = {size: 9, color: {argb: "FF52514E"}};
     ws.mergeCells("A3:I3"); ws.getCell("A3").value = "Blue = measured / input · green = formula · grey = totals · yellow = check (see Assumptions)"; ws.getCell("A3").font = {size: 9, color: {argb: "FF52514E"}};
-    const hr = ws.getRow(4); hr.values = ["S.No", "Description", "Drawing / page", "Nos", "L (ft)", "W (ft)", "H (ft)", "Qty", "Unit"];
+    const hr = ws.getRow(4); hr.values = ["S.No", "Description", "Drawing / page", "Nos", "L (ft) / Area", "W (ft)", "H (ft)", "Qty", "Unit"];
     hr.font = {bold: true, color: {argb: "FFFFFFFF"}}; hr.eachCell(c => { c.fill = HEAD; });
     let row = 5, sn = 0; const totals = [];
     for (const g of sheetRows()) {
@@ -1226,7 +1327,7 @@ async function exportExcel(){
         rr.getCell(1).value = i === 0 ? ++sn : null;
         rr.getCell(2).value = rowDesc(x);
         rr.getCell(3).value = pageName(it);
-        [r.nos, r.L, r.W, r.H].forEach((v, j) => {
+        [r.nos, r.A != null ? r.A : r.L, r.W, r.H].forEach((v, j) => {
           const cell = rr.getCell(4 + j);
           if (j === 1 && r.runs && r.runs.length > 1) cell.value = {formula: r.runs.map(f3).join("+"), result: r.L};
           else cell.value = v == null ? null : v;
@@ -1269,9 +1370,9 @@ async function exportExcel(){
   busy("");
 }
 function exportCsv(){
-  const rows = [["S.No", "Condition", "Description", "Drawing / page", "Nos", "L (ft)", "W (ft)", "H (ft)", "Qty", "Unit"]];
+  const rows = [["S.No", "Condition", "Description", "Drawing / page", "Nos", "L (ft) / Area (Sft)", "W (ft)", "H (ft)", "Qty", "Unit"]];
   let sn = 0;
-  sheetRows().forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.L == null ? "" : f3(r.L), r.W == null ? "" : f3(r.W), r.H == null ? "" : f3(r.H), (r.qty).toFixed(2), r.unit]); });
+  sheetRows().forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.A != null ? f3(r.A) : r.L == null ? "" : f3(r.L), r.W == null ? "" : f3(r.W), r.H == null ? "" : f3(r.H), (r.qty).toFixed(2), r.unit]); });
     rows.push(["", g.c.name, "Total " + g.c.name, "", "", "", "", "", g.t.net.toFixed(2), g.c.unit]); });
   const t = rows.map(r => r.map(v => { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
   saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Measurement.csv");
@@ -1337,6 +1438,8 @@ function wire(){
   $("bZi").onclick = () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2);
   $("bZo").onclick = () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2);
   $("bFit").onclick = () => { fit(); renderHi(); };
+  $("bDim").onclick = () => setDim(!S.dim);
+  $("bLw").onclick = () => setThin(!S.thin);
   $("bUndo").onclick = undo; $("bRedo").onclick = redo;
   $("bExport").onclick = exportMenu;
   $("scaleChip").onclick = scaleDialog;
@@ -1366,7 +1469,8 @@ function wire(){
     const ey = e.target.closest("[data-eye]"); if (ey) { const c = cond(ey.dataset.eye); c.hidden = !c.hidden; if (c.hidden && S.sel && P.proj.items.some(i => i.id === S.sel && i.cond === c.id)) S.sel = null; save(); refresh(); return; }
     const co = e.target.closest("[data-color]"); if (co) return colorPop(co, cond(co.dataset.color));
     const c = e.target.closest("[data-cond]"); if (!c) return;
-    S.cond = c.dataset.cond; S.sel = null; setTool(S.tool === "select" || S.tool === "pan" || S.tool === "measure" || S.tool === "cal" ? "draw" : S.tool); refresh();
+    S.cond = c.dataset.cond; S.sel = null; const ct = cond(S.cond).type;
+    setTool(S.tool === "select" || S.tool === "pan" || S.tool === "measure" || S.tool === "cal" || (S.tool === "count" && ct !== "count") || (S.tool === "auto" && ct !== "area") ? (ct === "count" ? "count" : "draw") : S.tool); refresh();
   });
   $("sheet").addEventListener("click", async e => {
     const rn = e.target.closest("[data-rename]");
@@ -1405,7 +1509,7 @@ function wire(){
     if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); return redo(); }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === " ") { S.space = true; stage().classList.add("pan"); e.preventDefault(); return; }
-    if (e.key === "Escape") { if (S.pickWall) { S.pickWall = false; hint(); } else if (S.draft.length) { S.draft = []; } else if (S.measures.length || S.measure) { S.measures = []; S.measure = null; } else if (S.sel) { S.sel = null; } else setTool("select"); refresh(); return; }
+    if (e.key === "Escape") { if (S.autoShow) { S.autoShow = null; } if (S.pickWall) { S.pickWall = false; hint(); } else if (S.draft.length) { S.draft = []; } else if (S.measures.length || S.measure) { S.measures = []; S.measure = null; } else if (S.sel) { S.sel = null; } else setTool("select"); refresh(); return; }
     if (e.key === "Enter") {
       if (S.tool === "measure" && S.verify && S.measure && S.measure.length > 1) return verifyMeasure();
       if (S.draft.length) endDraft();
@@ -1420,7 +1524,7 @@ function wire(){
         S.sel = null; S.selPt = -1; refresh(); }
       return;
     }
-    const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", d: "ded", o: "open", m: "measure", k: "cal"};
+    const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", c: "count", d: "ded", o: "open", m: "measure", k: "cal"};
     if (T[k]) { setTool(T[k]); return; }
     if (k === "s") { $("snapOn").checked = !$("snapOn").checked; toast("Snap " + ($("snapOn").checked ? "on" : "off")); return; }
     if (k === "f") { fit(); renderHi(); return; }
@@ -1437,11 +1541,16 @@ function stepPage(d){
   if (n && n.indexOf("|") > 0) { const [f, p] = n.split("|"); gotoPage(f, +p); }
 }
 
+function pref(k, v){ try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+function setDim(on){ S.dim = on; stage().classList.toggle("dim", on); $("bDim").classList.toggle("on", on); pref("zdTakeoffDim", on ? "1" : "0"); }
+function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); if (S.page) { renderLow(); renderHi(true); } }
+
 /* ------------------------------------------------------------------ start */
 (async function init(){
   wire();
+  setDim(pref("zdTakeoffDim") === "1"); setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject};   // for tests and the console
+  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
