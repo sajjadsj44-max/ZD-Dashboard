@@ -53,7 +53,20 @@ header a.back{color:#cfe0f5;font-size:12px;text-decoration:none;white-space:nowr
 .cond{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #f0f4f8;cursor:pointer}
 .cond:hover{background:#f8fbff}
 .cond.on{background:#f1eefc;box-shadow:inset 3px 0 0 var(--purple)}
-.cond .sw{width:12px;height:12px;border-radius:3px;flex:none}
+.cond .sw{width:14px;height:14px;border-radius:3px;flex:none;border:1px solid rgba(0,0,0,.15);cursor:pointer;padding:0}
+.cond .sw:hover{outline:2px solid var(--purple);outline-offset:1px}
+.cond.off .nm,.cond.off .q{opacity:.45}
+.cond .eye{font-size:12px}
+#pop{position:fixed;z-index:15;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 24px rgba(15,41,66,.22);padding:8px;width:220px;display:none}
+#pop.on{display:block}
+.swg{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.swb{width:22px;height:22px;border-radius:4px;border:1px solid rgba(0,0,0,.15);cursor:pointer;padding:0}
+.swb.on{outline:2px solid #0b0b0b;outline-offset:1px}
+.swb:hover{transform:scale(1.12)}
+.cust{display:flex;align-items:center;gap:6px;font-size:11px!important;color:var(--muted);margin-top:6px;text-transform:none!important;letter-spacing:0!important}
+.cust input{width:34px;height:24px;border:1px solid #c9d6e4;border-radius:4px;padding:0;background:#fff;cursor:pointer}
+table.sh .rn{border:0;background:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 4px;margin-left:4px}
+table.sh .rn:hover{color:var(--purple)}
 .cond .nm{flex:1;min-width:0}
 .cond .nm b{display:block;font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cond .nm span{font-size:10.5px;color:var(--muted)}
@@ -189,9 +202,9 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
     <div class="ph"><h3>Conditions</h3><button class="btn sm pri" id="bNewCond">+ New</button></div>
     <div class="pb" id="condList"></div>
     <div class="keys">
-      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
+      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
       <span><kbd>M</kbd> measure</span><span><kbd>K</kbd> set scale</span><span><kbd>V</kbd> select</span><span><kbd>Space</kbd> pan</span>
-      <span><kbd>Enter</kbd> finish</span><span><kbd>Esc</kbd> cancel</span><span><kbd>&#9003;</kbd> last point</span><span><kbd>S</kbd> snap</span>
+      <span><kbd>Enter</kbd> / right-click finish</span><span><kbd>Esc</kbd> cancel</span><span><kbd>&#9003;</kbd> last point</span><span><kbd>S</kbd> snap</span>
       <span><kbd>Shift</kbd> 0° / 90°</span><span><kbd>1</kbd>–<kbd>9</kbd> condition</span>
     </div>
   </aside>
@@ -202,6 +215,8 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
       <button class="tool" data-tool="pan" title="Pan (H or hold Space)">&#9995; Pan <kbd>H</kbd></button>
       <button class="tool" data-tool="draw" title="Draw with the active condition (A)">&#9998; Draw <kbd>A</kbd></button>
       <button class="tool" data-tool="rect" title="Rectangle area (R)">&#9645; Rect <kbd>R</kbd></button>
+      <button class="tool" data-tool="auto" title="Auto area — click inside a room; its area is traced from the walls (W)">&#10024; Auto area <kbd>W</kbd></button>
+      <button class="tool" id="bAutoSet" title="Auto area settings: door gap, furniture, wall lines">&#9881;</button>
       <button class="tool" data-tool="ded" title="Deduction for the active condition (D)">&minus; Deduct <kbd>D</kbd></button>
       <button class="tool" data-tool="open" title="Door / window opening in a wall (O)">&#9707; Opening <kbd>O</kbd></button>
       <button class="tool" data-tool="measure" title="Quick measure — not saved (M)">&#8596; Measure <kbd>M</kbd></button>
@@ -241,6 +256,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 </div></div>
 
 <div id="dlgBack"><div class="dlg" role="dialog" aria-modal="true"><div class="dh" id="dlgT"></div><div class="db" id="dlgB"></div><div class="df" id="dlgF"></div></div></div>
+<div id="pop"></div>
 <div id="toast"></div>
 
 <script type="module" src="takeoff.js"></script>

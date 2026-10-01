@@ -6,7 +6,9 @@
    Nothing leaves the browser: PDFs and projects are kept in IndexedDB. */
 const PDFJS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/";
 const EXCELJS = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
-const COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+const COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948",
+                "#00a3c4", "#8e44ad", "#c0392b", "#d35400", "#16a085", "#7f8c8d", "#2c3e50", "#b8860b",
+                "#ff1493", "#6b8e23", "#1e90ff", "#a0522d", "#20b2aa", "#9acd32", "#ff6347", "#000000"];
 const SNAP_PX = 11, HIT_PX = 7;
 let pdfjs = null;
 
@@ -123,11 +125,12 @@ const S = {                           // session state (not saved)
   tool: "select", cond: null, draft: [], cursor: null, snap: null, sel: null, selPt: -1,
   geo: {},                            // "fileId:page" -> {segs, grid, cell, n}
   texts: {},                          // "fileId:page" -> [{s, x, y}]
-  undo: [], redo: [], drag: null, space: false, measure: null, pinch: null
+  undo: [], redo: [], drag: null, space: false, measure: null, measures: [], pinch: null
 };
 const keyOf = (f, p) => f + ":" + p;
 const curScale = () => P.proj && P.proj.scales[S.key] ? P.proj.scales[S.key].ptPerFt : 0;
 const cond = id => P.proj.conds.find(c => c.id === id) || null;
+const hiddenItem = it => { const c = cond(it.cond); return !!(c && c.hidden); };
 
 /* ------------------------------------------------------------------ project lifecycle */
 function newProject(name){
@@ -221,7 +224,7 @@ async function gotoPage(fileId, pageNo){
   S.fileId = fileId; S.pageNo = pageNo; S.key = keyOf(fileId, pageNo);
   S.page = await d.getPage(pageNo);
   S.base = S.page.getViewport({scale: 1});
-  S.draft = []; S.measure = null; S.snap = null;
+  S.draft = []; S.measure = null; S.measures = []; S.snap = null;
   P.proj.last = {file: fileId, page: pageNo}; save();
   $("pageSel").value = fileId + "|" + pageNo;
   showDrop(false);
@@ -294,23 +297,42 @@ async function indexPage(){
   if (!S.geo[key]) {
     busy("Reading drawing lines…");
     try {
-      const ops = await page.getOperatorList(), O = pdfjs.OPS, segs = [], stack = [];
-      let ctm = base.transform.slice(), images = 0;
-      const push = (a, b) => { if (Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) > 0.05 && segs.length < 600000) segs.push([a[0], a[1], b[0], b[1]]); };
+      const ops = await page.getOperatorList(), O = pdfjs.OPS, segs = [], stack = [], styles = [], styleIx = new Map();
+      let ctm = base.transform.slice(), images = 0, lw = 1, dash = false, sCol = "0,0,0", fCol = "0,0,0", sp = 0, pend = -1, pendCtm = ctm, cur = null, start = null;
+      const push = (a, b, fl) => { if (Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) > 0.05 && segs.length < 600000) segs.push([a[0], a[1], b[0], b[1], fl || 0, sp, -1]); };
+      const colKey = a => typeof a[0] === "string" ? a[0] : Array.from(a || []).slice(0, 3).map(v => Math.round(v)).join(",");
+      const style = (col, w) => { const key = col + "|" + (Math.round(w * 10) / 10); let i = styleIx.get(key); if (i == null) { i = styles.length; styles.push(key); styleIx.set(key, i); } return i; };
+      const paint = (stroke, fill) => {   // the paint operator after a path says how its lines were drawn (stroked, filled, or only a clip)
+        if (pend < 0) return;
+        const st = style(stroke ? sCol : fCol, stroke ? lw * Math.sqrt(Math.abs(pendCtm[0] * pendCtm[3] - pendCtm[1] * pendCtm[2])) : 0);
+        for (let i = pend; i < segs.length; i++) { const s = segs[i]; s[6] = st; if (!stroke && !fill) s[4] |= 8; else if (!stroke) s[4] |= 4; if (stroke && dash) s[4] |= 2; }
+        pend = -1;
+      };
+      const PAINT = new Map([[O.stroke, [1, 0]], [O.closeStroke, [1, 0]], [O.fill, [0, 1]], [O.eoFill, [0, 1]], [O.fillStroke, [1, 1]], [O.eoFillStroke, [1, 1]],
+        [O.closeFillStroke, [1, 1]], [O.closeEOFillStroke, [1, 1]], [O.endPath, [0, 0]]]);
+      const gs = () => ({ctm, lw, dash, sCol, fCol});
+      const setGs = g => { if (g) ({ctm, lw, dash, sCol, fCol} = g); };
       for (let i = 0; i < ops.fnArray.length; i++) {
         const fn = ops.fnArray[i], ar = ops.argsArray[i];
-        if (fn === O.save) stack.push(ctm);
-        else if (fn === O.restore) ctm = stack.pop() || ctm;
+        if (fn === O.save) stack.push(gs());
+        else if (fn === O.restore) setGs(stack.pop());
         else if (fn === O.transform) ctm = mul(ctm, ar);
-        else if (fn === O.paintFormXObjectBegin) { stack.push(ctm); if (ar[0]) ctm = mul(ctm, ar[0]); }
-        else if (fn === O.paintFormXObjectEnd) ctm = stack.pop() || ctm;
+        else if (fn === O.paintFormXObjectBegin) { stack.push(gs()); if (ar[0]) ctm = mul(ctm, ar[0]); }
+        else if (fn === O.paintFormXObjectEnd) setGs(stack.pop());
         else if (fn === O.paintImageXObject || fn === O.paintInlineImageXObject) images++;
+        else if (fn === O.setLineWidth) lw = +ar[0] || 0;
+        else if (fn === O.setDash) dash = Array.isArray(ar[0]) && ar[0].some(v => v > 0);
+        else if (fn === O.setStrokeRGBColor) sCol = colKey(ar);
+        else if (fn === O.setFillRGBColor) fCol = colKey(ar);
+        else if (fn === O.setGState) (ar[0] || []).forEach(([k, v]) => { if (k === "LW") lw = +v || 0; else if (k === "D") dash = !!(v && Array.isArray(v[0]) && v[0].some(x => x > 0)); });
+        else if (PAINT.has(fn)) { const [st, fi] = PAINT.get(fn); if ((fn === O.closeStroke || fn === O.closeFillStroke || fn === O.closeEOFillStroke) && cur && start) push(cur, start); paint(st, fi); }
         else if (fn === O.constructPath) {
-          const [po, c] = ar; let k = 0, cur = null, start = null;
+          const [po, c] = ar; let k = 0;
+          if (pend < 0) { pend = segs.length; pendCtm = ctm; }
           for (const op of po) {
-            if (op === O.moveTo) { cur = start = app(ctm, c[k++], c[k++]); }
+            if (op === O.moveTo) { sp++; cur = start = app(ctm, c[k++], c[k++]); }
             else if (op === O.lineTo) { const p = app(ctm, c[k++], c[k++]); if (cur) push(cur, p); cur = p; }
-            else if (op === O.rectangle) { const x = c[k++], y = c[k++], w = c[k++], h = c[k++]; const q = [app(ctm, x, y), app(ctm, x + w, y), app(ctm, x + w, y + h), app(ctm, x, y + h)];
+            else if (op === O.rectangle) { sp++; const x = c[k++], y = c[k++], w = c[k++], h = c[k++]; const q = [app(ctm, x, y), app(ctm, x + w, y), app(ctm, x + w, y + h), app(ctm, x, y + h)];
               push(q[0], q[1]); push(q[1], q[2]); push(q[2], q[3]); push(q[3], q[0]); cur = start = q[0]; }
             else if (op === O.curveTo || op === O.curveTo2 || op === O.curveTo3) {
               let p1, p2, p3;
@@ -321,7 +343,7 @@ async function indexPage(){
               const P0 = cur, P1 = p1 ? app(ctm, p1[0], p1[1]) : P0, P3 = app(ctm, p3[0], p3[1]), P2 = p2 ? app(ctm, p2[0], p2[1]) : P3;
               let prev = P0;
               for (let t = 1; t <= 8; t++) { const u = t / 8, a = (1 - u) ** 3, b = 3 * u * (1 - u) ** 2, cc = 3 * u * u * (1 - u), d = u ** 3;
-                const q = [a * P0[0] + b * P1[0] + cc * P2[0] + d * P3[0], a * P0[1] + b * P1[1] + cc * P2[1] + d * P3[1]]; push(prev, q); prev = q; }
+                const q = [a * P0[0] + b * P1[0] + cc * P2[0] + d * P3[0], a * P0[1] + b * P1[1] + cc * P2[1] + d * P3[1]]; push(prev, q, 1); prev = q; }
               cur = P3;
             }
             else if (op === O.closePath) { if (cur && start) push(cur, start); cur = start; }
@@ -334,8 +356,8 @@ async function indexPage(){
         if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4000) return;   // page borders / hatch fills are not useful snap targets at this cost
         for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) { const k = x + "," + y; let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(i); }
       });
-      S.geo[key] = {segs, grid, cell, images};
-    } catch (e) { S.geo[key] = {segs: [], grid: new Map(), cell: 24, images: 0, err: String(e)}; }
+      S.geo[key] = {segs, grid, cell, images, styles};
+    } catch (e) { S.geo[key] = {segs: [], grid: new Map(), cell: 24, images: 0, styles: [], err: String(e)}; }
     busy("");
   }
   if (!S.texts[key]) {
@@ -380,7 +402,7 @@ function snapAt(q){
   const take = (p, type, pri) => { const d = dist(p, q); if (d <= r && (!best || pri < best.pri || (pri === best.pri && d < best.d))) best = {p, type, pri, d}; };
   // points already measured rank with the drawing's endpoints (nearest wins); of the shape being drawn only its first
   // point is a target (closing an area) — never the last one, which would make a zero-length run
-  (P.proj.items || []).forEach(it => { if (it.file === S.fileId && it.page === S.pageNo) it.pts.forEach(p => take(p, "point", 1)); });
+  (P.proj.items || []).forEach(it => { if (it.file === S.fileId && it.page === S.pageNo && !hiddenItem(it)) it.pts.forEach(p => take(p, "point", 1)); });
   if (S.draft.length >= 2 && isAreaDraft()) take(S.draft[0], "first point", 0);
   if ($("snapOn").checked && g && g.segs.length) {
     const c = g.cell, x0 = Math.floor((q[0] - r) / c), x1 = Math.floor((q[0] + r) / c), y0 = Math.floor((q[1] - r) / c), y1 = Math.floor((q[1] + r) / c), ids = new Set();
@@ -393,6 +415,315 @@ function snapAt(q){
     near.forEach(([a, b]) => take(projSeg(q, a, b), "on line", 3));
   }
   return best;
+}
+
+/* ------------------------------------------------------------------ auto area: one click inside a room
+   The room is found from the drawing's own vector lines. Lines that do not bound a room are left out first: door swings
+   (curves, or short-segment arcs) with their leaves, dashed lines, clip paths and short strokes (text, hatch). The rest
+   are drawn on a raster widened to the door gap, so door openings close, and the space is flood-filled from the click
+   (the room's core). The core is grown back out over the thin lines to the wall faces, pockets narrower than the
+   furniture setting are filled (furniture against a wall), and the outline is traced, squared up when the room is
+   rectilinear (the bulge through a door opening is dropped there) and snapped onto the wall lines. */
+const AUTO_DEF = {gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, skipDash: true, wall: null};
+const autoOpt = () => Object.assign({}, AUTO_DEF, (P.proj && P.proj.auto) || {});
+function segsIn(g, x0, y0, x1, y1){
+  const c = g.cell, ids = new Set();
+  for (let x = Math.floor(x0 / c); x <= Math.floor(x1 / c); x++) for (let y = Math.floor(y0 / c); y <= Math.floor(y1 / c); y++) (g.grid.get(x + "," + y) || []).forEach(i => ids.add(i));
+  return [...ids].sort((a, b) => a - b);
+}
+function doorSymbols(g, ids, k){   // -> Set of segment ids that are door swings or door leaves
+  const skip = new Set(), arcs = [], G = g.segs, len = i => Math.hypot(G[i][2] - G[i][0], G[i][3] - G[i][1]);
+  const chains = []; let ch = null;
+  ids.forEach(i => { const s = G[i], p = ch && G[ch[ch.length - 1]];
+    if (p && p[5] === s[5] && (p[4] & 1) === (s[4] & 1) && Math.abs(p[2] - s[0]) + Math.abs(p[3] - s[1]) < 0.01) ch.push(i); else chains.push(ch = [i]); });
+  chains.forEach(c => {
+    const a = G[c[0]], b = G[c[c.length - 1]], A = [a[0], a[1]], B = [b[2], b[3]];
+    let arc = (a[4] & 1) === 1;
+    if (!arc && c.length >= 4) {   // a curve exported as many short straight pieces turning one way
+      const tot = c.reduce((t, i) => t + len(i), 0); let turn = 0, sign = 0, ok = tot > 0.8 * k && tot < 15 * k && c.every(i => len(i) < 0.35 * tot);
+      for (let j = 1; j < c.length && ok; j++) { const p = G[c[j - 1]], q = G[c[j]];
+        let t = Math.atan2(q[3] - q[1], q[2] - q[0]) - Math.atan2(p[3] - p[1], p[2] - p[0]); while (t > Math.PI) t -= 2 * Math.PI; while (t < -Math.PI) t += 2 * Math.PI;
+        if (Math.abs(t) > 0.6 || Math.abs(t) < 0.004 || (sign && Math.sign(t) !== sign)) ok = false; sign = Math.sign(t); turn += Math.abs(t); }
+      arc = ok && turn > 0.7;
+    }
+    if (arc) { c.forEach(i => skip.add(i)); if (dist(A, B) > 0.8 * k) { const mi = G[c[Math.floor(c.length / 2)]]; arcs.push([A, B, [mi[0], mi[1]]]); } }
+  });
+  // a door leaf runs from the hinge to one end of the swing, as long as the swing's radius (hinge to the other end)
+  if (arcs.length) ids.forEach(i => {
+    if (skip.has(i)) return; const s = G[i], p = [s[0], s[1]], q = [s[2], s[3]], L = dist(p, q);
+    if (L < 1.2 * k || L > 7 * k) return;
+    for (const [A, B] of arcs) for (const [tip, hinge] of [[p, q], [q, p]]) for (const [T, J] of [[A, B], [B, A]])
+      if (dist(tip, T) < 0.35 * k && Math.abs(dist(hinge, J) - L) < 0.2 * L) { skip.add(i); return; }
+  });
+  // the door opening: from the swing's centre (hinge) to the end of the swing that lies on the wall face, i.e. the end
+  // whose line has the wall continuing behind the hinge and beyond the jamb
+  const lines = [], wallNear = (pt, u) => ids.some(i => { if (skip.has(i)) return false; const s = G[i], l = Math.hypot(s[2] - s[0], s[3] - s[1]); if (l < 0.3 * k) return false;
+    return Math.abs(u[0] * (s[3] - s[1]) - u[1] * (s[2] - s[0])) / l < 0.12 && distSeg(pt, [s[0], s[1]], [s[2], s[3]]) < 0.25 * k; });
+  arcs.forEach(([A, B, M]) => {
+    const C = circumcentre(A, M, B); if (!C) return;
+    const R = (dist(C, A) + dist(C, B)) / 2; if (R < 1.2 * k || R > 6 * k) return;
+    const sc = X => { const u = [(X[0] - C[0]) / R, (X[1] - C[1]) / R]; return (wallNear([C[0] - u[0] * 0.5 * k, C[1] - u[1] * 0.5 * k], u) ? 1 : 0) + (wallNear([X[0] + u[0] * 0.5 * k, X[1] + u[1] * 0.5 * k], u) ? 1 : 0); };
+    const a = sc(A), b = sc(B);
+    if (a >= b) lines.push([C[0], C[1], A[0], A[1]]); if (b >= a) lines.push([C[0], C[1], B[0], B[1]]);
+  });
+  skip.lines = lines;
+  return skip;
+}
+function circumcentre(a, b, c){
+  const d = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1])); if (Math.abs(d) < 1e-9) return null;
+  const A = a[0] * a[0] + a[1] * a[1], B = b[0] * b[0] + b[1] * b[1], C = c[0] * c[0] + c[1] * c[1];
+  return [(A * (b[1] - c[1]) + B * (c[1] - a[1]) + C * (a[1] - b[1])) / d, (A * (c[0] - b[0]) + B * (a[0] - c[0]) + C * (b[0] - a[0])) / d];
+}
+function barrierIds(g, ids, k, o){
+  const door = o.skipDoors ? doorSymbols(g, ids, k) : new Set(), minL = o.minLen * k;
+  const wall = o.wall ? {col: o.wall.split("|")[0], w: +o.wall.split("|")[1] || 0} : null;
+  const out = ids.filter(i => { const s = g.segs[i];
+    if (door.has(i) || (s[4] & 8) || (o.skipDash && (s[4] & 2))) return false;
+    if (Math.hypot(s[2] - s[0], s[3] - s[1]) < minL) return false;
+    if (wall) { const st = (g.styles[s[6]] || "|0").split("|"); if (st[0] !== wall.col || +st[1] < 0.9 * wall.w) return false; }
+    return true; });
+  out.doors = door.lines || [];
+  return out;
+}
+function edt2(f, W, H){   // squared Euclidean distance transform in place (Felzenszwalb & Huttenlocher); f = 0 on features, 1e20 elsewhere
+  const n = Math.max(W, H), g = new Float64Array(n), d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
+  const one = len => {
+    let k = 0; v[0] = 0; z[0] = -Infinity; z[1] = Infinity;
+    for (let q = 1; q < len; q++) {
+      let s = ((g[q] + q * q) - (g[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (s <= z[k]) { k--; s = ((g[q] + q * q) - (g[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+      k++; v[k] = q; z[k] = s; z[k + 1] = Infinity;
+    }
+    k = 0; for (let q = 0; q < len; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) * (q - v[k]) + g[v[k]]; }
+  };
+  for (let x = 0; x < W; x++) { for (let y = 0; y < H; y++) g[y] = f[y * W + x]; one(H); for (let y = 0; y < H; y++) f[y * W + x] = d[y]; }
+  for (let y = 0; y < H; y++) { for (let x = 0; x < W; x++) g[x] = f[y * W + x]; one(W); for (let x = 0; x < W; x++) f[y * W + x] = d[x]; }
+}
+function closeMask(m, W, H, R){   // morphological closing with a disc of radius R px: fills pockets and notches narrower than 2R
+  const N = W * H, f = new Float32Array(N), R2 = R * R;
+  for (let i = 0; i < N; i++) f[i] = m[i] ? 0 : 1e20;
+  edt2(f, W, H);
+  for (let i = 0; i < N; i++) { const x = i % W, y = (i - x) / W, dil = f[i] <= R2 && x > 0 && y > 0 && x < W - 1 && y < H - 1; f[i] = dil ? 1e20 : 0; }
+  edt2(f, W, H);
+  for (let i = 0; i < N; i++) if (f[i] > R2) m[i] = 1;
+}
+function outerLoop(m, W, H){   // boundary of the mask along pixel edges, region on the right; the largest outer loop, in pixel corners
+  const N = W + 1, nx = new Map();
+  const add = (ax, ay, bx, by) => { const a = ay * N + ax, b = by * N + bx, e = nx.get(a); if (e) e.push(b); else nx.set(a, [b]); };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { if (!m[y * W + x]) continue;
+    if (y === 0 || !m[(y - 1) * W + x]) add(x, y, x + 1, y);
+    if (x === W - 1 || !m[y * W + x + 1]) add(x + 1, y, x + 1, y + 1);
+    if (y === H - 1 || !m[(y + 1) * W + x]) add(x + 1, y + 1, x, y + 1);
+    if (x === 0 || !m[y * W + x - 1]) add(x, y + 1, x, y); }
+  let best = null, bestA = 0;
+  const xy = v => [v % N, Math.floor(v / N)];
+  while (nx.size) {
+    const v0 = nx.keys().next().value, loop = []; let cur = v0, pd = null, guard = 0;
+    do {
+      const outs = nx.get(cur); if (!outs) break;
+      let j = 0;
+      if (outs.length > 1 && pd) { const c = xy(cur); j = outs.findIndex(o => { const p = xy(o), d = [p[0] - c[0], p[1] - c[1]]; return pd[0] * d[1] - pd[1] * d[0] > 0; }); if (j < 0) j = 0; }
+      const nv = outs.splice(j, 1)[0]; if (!outs.length) nx.delete(cur);
+      const c = xy(cur), p = xy(nv); pd = [p[0] - c[0], p[1] - c[1]];
+      loop.push(c); cur = nv;
+    } while (cur !== v0 && ++guard < 4e6);
+    let a = 0; for (let i = 0, j = loop.length - 1; i < loop.length; j = i++) a += loop[j][0] * loop[i][1] - loop[i][0] * loop[j][1];
+    if (a > bestA) { bestA = a; best = loop; }
+  }
+  if (!best) return null;
+  return best.filter((p, i) => { const a = best[(i + best.length - 1) % best.length], b = best[(i + 1) % best.length]; return (p[0] - a[0]) * (b[1] - p[1]) - (p[1] - a[1]) * (b[0] - p[0]) !== 0; });
+}
+function dpOpen(P, eps){
+  if (P.length < 3) return P.slice();
+  let idx = 0, dm = 0; for (let i = 1; i < P.length - 1; i++) { const d = distSeg(P[i], P[0], P[P.length - 1]); if (d > dm) { dm = d; idx = i; } }
+  if (dm <= eps) return [P[0], P[P.length - 1]];
+  return dpOpen(P.slice(0, idx + 1), eps).slice(0, -1).concat(dpOpen(P.slice(idx), eps));
+}
+function dpClosed(P, eps){
+  let a = 0, dm = 0; P.forEach((p, i) => { const d = dist(P[0], p); if (d > dm) { dm = d; a = i; } });
+  let b = 0; dm = 0; P.forEach((p, i) => { const d = dist(P[a], p); if (d > dm) { dm = d; b = i; } });
+  const R = P.slice(a).concat(P.slice(0, a)), m = (b - a + P.length) % P.length;
+  return dpOpen(R.slice(0, m + 1), eps).slice(0, -1).concat(dpOpen(R.slice(m).concat([R[0]]), eps).slice(0, -1));
+}
+function signedArea(Q){ let s = 0; for (let i = 0; i < Q.length; i++) { const a = Q[i], b = Q[(i + 1) % Q.length]; s += a[0] * b[1] - b[0] * a[1]; } return s / 2; }
+function orthoEdges(Q){ return Q.map((a, i) => { const b = Q[(i + 1) % Q.length], dx = b[0] - a[0], dy = b[1] - a[1], ang = Math.atan2(Math.abs(dy), Math.abs(dx)) * 180 / Math.PI;
+  const o = ang <= 15 ? "H" : ang >= 75 ? "V" : "D"; return {o, c: o === "H" ? (a[1] + b[1]) / 2 : (a[0] + b[0]) / 2, L: Math.hypot(dx, dy), dir: o === "H" ? Math.sign(dx) : Math.sign(dy), a, b}; }); }
+function edgesToPoly(E){
+  const V = [];
+  for (let i = 0; i < E.length; i++) { const e = E[i], f = E[(i + 1) % E.length];
+    if (e.o !== f.o) V.push(e.o === "H" ? [f.c, e.c] : [e.c, f.c]);
+    else { const t = e.o === "H" ? (e.b[0] + f.a[0]) / 2 : (e.b[1] + f.a[1]) / 2; if (e.o === "H") V.push([t, e.c], [t, f.c]); else V.push([e.c, t], [f.c, t]); } }
+  return cleanPoly(V);
+}
+function cleanPoly(V){
+  let Q = V.filter((p, i) => dist(p, V[(i + 1) % V.length]) > 1e-6), changed = true;
+  while (changed && Q.length > 3) { changed = false;
+    for (let i = 0; i < Q.length; i++) { const a = Q[(i + Q.length - 1) % Q.length], p = Q[i], b = Q[(i + 1) % Q.length];
+      if (Math.abs((p[0] - a[0]) * (b[1] - p[1]) - (p[1] - a[1]) * (b[0] - p[0])) < 1e-6 * Math.max(1, dist(a, b) ** 2)) { Q.splice(i, 1); changed = true; break; } } }
+  return Q;
+}
+function squareUp(Q, tol, gap, maxD){   // near-rectilinear outline -> rectilinear; detours shorter than the gap (door bulges) dropped
+  const all = orthoEdges(Q), tot = all.reduce((a, e) => a + e.L, 0);
+  let E = all.filter(e => e.o !== "D");
+  // slanted pieces may only be the short rounding left at inside corners and door openings, never a real slanted wall
+  if (E.reduce((a, e) => a + e.L, 0) < 0.6 * tot || all.some(e => e.o === "D" && e.L > 1.6 * maxD) || E.length < 4) return null;
+  let changed = true;
+  while (changed && E.length > 4) { changed = false;
+    for (let i = 0; i < E.length && !changed; i++) for (let s = 1; s <= 5 && s < E.length - 1 && !changed; s++) {
+      const e = E[i], f = E[(i + s) % E.length]; if (e.o !== f.o || e.dir !== f.dir || Math.abs(e.c - f.c) > tol) continue;
+      let mid = 0; for (let t = 1; t < s; t++) mid += E[(i + t) % E.length].L;
+      if (mid > 2.5 * gap) continue;
+      const m = {o: e.o, c: e.L >= f.L ? e.c : f.c, L: e.L + f.L + mid, dir: e.dir, a: e.a, b: f.b}, drop = new Set();
+      for (let t = 1; t <= s; t++) drop.add((i + t) % E.length);
+      E = E.map((x, j) => j === i ? m : x).filter((_, j) => !drop.has(j)); changed = true;
+    } }
+  return E.length >= 4 ? edgesToPoly(E) : null;
+}
+function offsetPoly(Q, d){   // every edge moved outward by d
+  const n = Q.length, s = signedArea(Q) > 0 ? 1 : -1, L = [];
+  for (let i = 0; i < n; i++) { const a = Q[i], b = Q[(i + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, nn = [s * dy / l, -s * dx / l];
+    L.push({p: [a[0] + nn[0] * d, a[1] + nn[1] * d], u: [dx / l, dy / l], n: nn}); }
+  return Q.map((q, i) => { const A = L[(i + n - 1) % n], B = L[i], den = A.u[0] * B.u[1] - A.u[1] * B.u[0];
+    if (Math.abs(den) < 1e-6) return [q[0] + B.n[0] * d, q[1] + B.n[1] * d];
+    const t = ((B.p[0] - A.p[0]) * B.u[1] - (B.p[1] - A.p[1]) * B.u[0]) / den; return [A.p[0] + A.u[0] * t, A.p[1] + A.u[1] * t]; });
+}
+function snapToWalls(Q, g, ids, tol, k){   // rectilinear outline: each edge onto the nearest parallel drawing line it runs along
+  const E = orthoEdges(Q);
+  if (E.some(e => e.o === "D")) return Q;
+  E.forEach(e => {
+    const lo = Math.min(e.o === "H" ? e.a[0] : e.a[1], e.o === "H" ? e.b[0] : e.b[1]), hi = Math.max(e.o === "H" ? e.a[0] : e.a[1], e.o === "H" ? e.b[0] : e.b[1]);
+    let best = null;
+    ids.forEach(i => { const s = g.segs[i], h = Math.abs(s[3] - s[1]) <= 0.02 * Math.abs(s[2] - s[0]), v = Math.abs(s[2] - s[0]) <= 0.02 * Math.abs(s[3] - s[1]);
+      if (e.o === "H" ? !h : !v) return;
+      const c = e.o === "H" ? (s[1] + s[3]) / 2 : (s[0] + s[2]) / 2, d = Math.abs(c - e.c); if (d > tol) return;
+      const a0 = Math.min(e.o === "H" ? s[0] : s[1], e.o === "H" ? s[2] : s[3]), a1 = Math.max(e.o === "H" ? s[0] : s[1], e.o === "H" ? s[2] : s[3]);
+      if (Math.min(hi, a1) - Math.max(lo, a0) < Math.min(0.3 * (hi - lo), 1 * k)) return;
+      if (!best || d < best.d) best = {c, d}; });
+    if (best) e.c = best.c;
+  });
+  return edgesToPoly(E);
+}
+function autoRoom(seed){   // -> {pts} or {err}
+  const k = curScale(), g = S.geo[S.key];
+  if (!k) return {err: "Set the page scale first (K) — the door gap and wall offsets are in feet."};
+  if (!g || !g.segs.length) return {err: "Auto area needs a vector PDF (exported from CAD). This page has no drawing lines to follow — draw the area instead."};
+  const o = autoOpt();
+  for (const [half, pxFt] of [[45, 0.06], [110, 0.14]]) {
+    const px = pxFt * k, W = Math.ceil(2 * half * k / px), H = W, x0 = seed[0] - half * k, y0 = seed[1] - half * k;
+    const ids = barrierIds(g, segsIn(g, x0, y0, x0 + W * px, y0 + H * px), k, o);
+    const raster = lw => {   // barrier lines (and door openings) stroked lw (pt) wide -> 1 = blocked
+      const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+      const ctx = cv.getContext("2d", {willReadFrequently: true});
+      ctx.setTransform(1 / px, 0, 0, 1 / px, -x0 / px, -y0 / px);
+      ctx.lineWidth = lw; ctx.lineCap = "round"; ctx.strokeStyle = "#000"; ctx.beginPath();
+      ids.forEach(i => { const s = g.segs[i]; ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); });
+      ids.doors.forEach(s => { ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); });
+      ctx.stroke();
+      const img = ctx.getImageData(0, 0, W, H).data, b = new Uint8Array(W * H);
+      for (let i = 0; i < b.length; i++) b[i] = img[i * 4 + 3] > 24 ? 1 : 0;
+      return b;
+    };
+    const N = W * H, seedIn = (bar, rmax) => {   // nearest open pixel to the click
+      const sx = Math.floor((seed[0] - x0) / px), sy = Math.floor((seed[1] - y0) / px);
+      for (let r = 0; r <= rmax; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; const x = sx + dx, y = sy + dy; if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !bar[y * W + x]) return y * W + x; }
+      return -1;
+    };
+    const fill = (bar, si, stopAtEdge) => {   // -> {m, edge}; null when it reaches the window edge and stopAtEdge
+      const m = new Uint8Array(N), st = new Int32Array(N); let top = 0, edge = false;
+      m[si] = 1; st[top++] = si;
+      while (top) { const i = st[--top], x = i % W, y = (i - x) / W;
+        if (x === 0 || y === 0 || x === W - 1 || y === H - 1) { if (stopAtEdge) return null; edge = true; continue; }
+        for (const j of [i - 1, i + 1, i - W, i + W]) if (!m[j] && !bar[j]) { m[j] = 1; st[top++] = j; } }
+      return {m, edge};
+    };
+    const rpx = Math.ceil(o.gap * k / px / 2) + 2, thin = raster(2 * px), bar = raster(Math.max(o.gap * k, 2 * px));
+    // B: every line widened to the door gap, so all openings close — the room's core — grown back out to the wall faces
+    const sb = seedIn(bar, rpx), sa = seedIn(thin, 4);
+    let m;
+    if (sb >= 0) {
+      const B = fill(bar, sb, true); if (!B) continue;
+      m = B.m; let front = []; for (let i = 0; i < N; i++) if (m[i]) front.push(i);
+      for (let layer = 0; layer < rpx && front.length; layer++) {
+        const nf = [];
+        front.forEach(i => { const x = i % W; for (const j of [i - 1, i + 1, i - W, i + W, i - W - 1, i - W + 1, i + W - 1, i + W + 1]) {
+          if (j < 0 || j >= N || m[j] || thin[j]) continue; if (Math.abs(j % W - x) > 1) continue; m[j] = 1; nf.push(j); } });
+        front = nf;
+      }
+      // A: the thin lines with the door swings' openings closed. What A reaches beyond B is added back where it is too
+      // narrow to be a room of its own (the strip beside a bed or a wardrobe); a part with an open core of its own is the
+      // next room, through an opening with no door drawn, and stays out.
+      const A = sa >= 0 ? fill(thin, sa, false) : null;
+      if (A) {
+        const seen = new Uint8Array(N), st = new Int32Array(N);
+        for (let i0 = 0; i0 < N; i0++) {
+          if (!A.m[i0] || m[i0] || seen[i0]) continue;
+          const comp = []; let top = 0, room = false; seen[i0] = 1; st[top++] = i0;
+          while (top) { const i = st[--top], x = i % W, y = (i - x) / W; comp.push(i);
+            if (!bar[i] || x === 0 || y === 0 || x === W - 1 || y === H - 1) room = true;
+            for (const j of [i - 1, i + 1, i - W, i + W]) if (j >= 0 && j < N && A.m[j] && !m[j] && !seen[j] && Math.abs(j % W - x) <= 1) { seen[j] = 1; st[top++] = j; } }
+          if (!room) comp.forEach(i => { m[i] = 1; });
+        }
+      }
+    } else {   // narrower than the gap all over (a passage): the thin-line fill alone, if it stays closed
+      const A = sa >= 0 ? fill(thin, sa, true) : null;
+      if (!A) return {err: "This space is narrower than the door gap (" + f3(o.gap) + " ft) and is not closed — lower ‘Close gaps’ in the auto-area settings (⚙), or draw it."};
+      m = A.m;
+    }
+    if (o.pocket > 0) closeMask(m, W, H, o.pocket * k / px / 2);
+    const loop = outerLoop(m, W, H); if (!loop || loop.length < 4) return {err: "No closed space found at that point."};
+    let Q = dpClosed(loop.map(p => [x0 + p[0] * px, y0 + p[1] * px]), 1.6 * px);
+    const sq = squareUp(Q, 3 * px, o.gap * k, Math.max(o.gap, o.pocket) * k);
+    Q = sq ? snapToWalls(sq, g, ids, Math.max(4 * px, 0.35 * k), k) : offsetPoly(Q, px);
+    Q = cleanPoly(Q);
+    if (Q.length < 3 || polyArea(Q) < 1e-6) return {err: "No closed space found at that point."};
+    return {pts: Q, rect: !!sq};
+  }
+  return {err: "The space leaks — an opening wider than the door gap (" + f3(autoOpt().gap) + " ft) joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it."};
+}
+async function autoAt(p){
+  const c = S.cond ? cond(S.cond) : null; if (!c) return;
+  if (P.proj.items.some(it => it.cond === c.id && it.file === S.fileId && it.page === S.pageNo && it.kind === "shape" && c.type === "area" && pointInPoly(p, it.pts)))
+    return toast("Already measured — this point is inside an area of " + c.name);
+  busy("Finding the room…");
+  await new Promise(r => setTimeout(r, 20));
+  let res; try { res = autoRoom(p); } catch (e) { res = {err: "Auto area failed: " + (e.message || e)}; }
+  busy("");
+  if (res.err) return toast(res.err, 6000);
+  const id = uid("I");
+  mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: ""}); });
+  S.sel = id; draw(); renderSheet();
+  const k = curScale(); toast("Room " + f2(polyArea(res.pts) / k / k) + " Sft" + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
+}
+async function autoSettings(){
+  const o = autoOpt();
+  const v = await ask("Auto area settings", `<div class="grid">
+    <div class="fg"><label>Close gaps up to (ft)</label><input type="text" id="aoGap" value="${f3(o.gap)}"><span class="small">door openings — set to the widest door</span></div>
+    <div class="fg"><label>Ignore furniture / recesses narrower than (ft)</label><input type="text" id="aoPk" value="${f3(o.pocket)}"><span class="small">0 = follow every notch</span></div>
+    <div class="fg"><label>Ignore lines shorter than (ft)</label><input type="text" id="aoMin" value="${f3(o.minLen)}"><span class="small">text strokes, hatching</span></div>
+    <div class="fg"><label>Wall lines</label><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="small" id="aoWall">${o.wall ? "colour " + esc(o.wall.split("|")[0]) + ", " + esc(o.wall.split("|")[1]) + " pt and heavier" : "any drawing line"}</span>
+      <button class="btn sm" id="aoPick" type="button">Pick a wall…</button>${o.wall ? '<button class="btn sm" id="aoClr" type="button">Any line</button>' : ""}</div></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoDoor" style="width:auto"${o.skipDoors ? " checked" : ""}> Ignore door swings and door leaves</label></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoDash" style="width:auto"${o.skipDash ? " checked" : ""}> Ignore dashed lines (beams, slab edges overhead)</label></div></div>
+    <p class="small" style="margin-top:10px">If furniture or fixtures are drawn in the same pen as the walls, <b>Pick a wall</b> so only lines of that colour and weight bound the room.</p>`, "Save", () => {
+      const gap = parseFt($("aoGap").value), pocket = parseFt($("aoPk").value || "0"), minLen = parseFt($("aoMin").value || "0");
+      if (!(gap > 0.2 && gap < 30)) return "Close gaps: a width in ft, e.g. 4";
+      if (isNaN(pocket) || isNaN(minLen)) return "Enter decimal feet";
+      return {gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, skipDash: $("aoDash").checked}; }, "aoGap");
+  if (v) { P.proj.auto = Object.assign({}, P.proj.auto || {}, v); save(); toast("Auto area settings saved"); }
+}
+document.addEventListener("click", e => {   // auto-area dialog: pick / clear the wall pen
+  if (e.target.id === "aoPick") { $("dlgCancel").click(); S.pickWall = true; setTool("auto"); toast("Click a wall line on the drawing", 4000); }
+  if (e.target.id === "aoClr") { if (P.proj.auto) P.proj.auto.wall = null; save(); $("aoWall").textContent = "any drawing line"; e.target.remove(); }
+});
+function pickWallAt(sp){
+  S.pickWall = false;
+  const g = S.geo[S.key], q = toBase(sp[0], sp[1]), r = HIT_PX / S.view.s; if (!g) return;
+  let best = null; segsIn(g, q[0] - r, q[1] - r, q[0] + r, q[1] + r).forEach(i => { const s = g.segs[i], d = distSeg(q, [s[0], s[1]], [s[2], s[3]]); if (d <= r && s[6] >= 0 && !(s[4] & 8) && (!best || d < best.d)) best = {d, i}; });
+  if (!best) return toast("No line there — zoom in and click right on a wall line");
+  const key = g.styles[g.segs[best.i][6]];
+  P.proj.auto = Object.assign({}, P.proj.auto || {}, {wall: key}); save();
+  toast("Wall lines set: colour " + key.split("|")[0] + ", " + key.split("|")[1] + " pt and heavier — now click inside a room", 5000);
 }
 
 /* ------------------------------------------------------------------ quantities (house measurement rules) */
@@ -448,10 +779,12 @@ function dimText(r){
 function setTool(t){
   if (t !== "select") { S.sel = null; S.selPt = -1; }
   const c = S.cond ? cond(S.cond) : null;
-  if (["draw", "rect", "ded", "open"].indexOf(t) >= 0 && !c) { toast("Pick or create a condition first (left panel)"); t = "select"; }
+  if (["draw", "rect", "ded", "open", "auto"].indexOf(t) >= 0 && !c) { toast("Pick or create a condition first (left panel)"); t = "select"; S.pickWall = false; }
   if (t === "rect" && c && c.type !== "area") { toast("Rectangle is for area conditions"); t = "draw"; }
+  if (t === "auto" && c && c.type !== "area" && !S.pickWall) { toast("Auto area is for area conditions (floor, ceiling, slab…)"); t = "draw"; }
   if (t === "open" && c && !(c.type === "linear")) { toast("Openings are deducted from a wall (length) condition"); t = "draw"; }
   if (t === "ded" && c && c.type === "count") { toast("Counts have no deductions — select a point and press Delete"); t = "draw"; }
+  if (t !== "auto") S.pickWall = false;
   S.tool = t; S.draft = []; S.measure = t === "measure" ? S.measure : null;
   document.querySelectorAll("#tools .tool").forEach(b => b.classList.toggle("on", b.dataset.tool === t));
   stage().className = t === "pan" ? "pan" : t === "select" ? "" : "draw";
@@ -460,9 +793,9 @@ function setTool(t){
 function hint(){
   const c = S.cond ? cond(S.cond) : null, t = S.tool;
   const H = {select: "Click a measurement to select it; drag its points to edit; Delete removes it.", pan: "Drag to pan; scroll to zoom.",
-    draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point or press Enter to close." : c.type === "linear" ? "Click along the run; Enter or double-click to finish." : "Click each item to count it; Esc when done.",
-    rect: "Click two opposite corners.", ded: c && c.type === "area" ? "Draw the void / cut-out to deduct; Enter to close." : "Draw the length to deduct; Enter to finish.",
-    open: "Click both sides of the opening, then enter its height.", measure: "Click points to measure; Esc clears. Nothing is saved.",
+    draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." : c.type === "linear" ? "Click along the run; Enter, double-click or right-click to finish." : "Click each item to count it; Esc when done.",
+    rect: "Click two opposite corners.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.", ded: c && c.type === "area" ? "Draw the void / cut-out to deduct; Enter to close." : "Draw the length to deduct; Enter to finish.",
+    open: "Click both sides of the opening, then enter its height.", measure: "Click points; double-click, right-click or Enter ends a measurement (it stays on screen). Esc clears. Nothing is saved.",
     cal: "Click both ends of a known dimension, then enter its length."};
   $("stHint").textContent = H[t] || "";
 }
@@ -484,8 +817,11 @@ function onDown(e){
     const ids = Object.keys(S.touches);
     if (ids.length === 2) { const a = S.touches[ids[0]], b = S.touches[ids[1]]; S.pinch = {d: dist(a, b), c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], v: Object.assign({}, S.view)}; S.drag = null; return; }
   }
+  if (e.button === 2 && S.draft.length && ["draw", "ded", "measure"].indexOf(S.tool) >= 0) { e.preventDefault(); return endDraft(); }   // right-click ends the line / area
   if (e.button === 1 || S.space || S.tool === "pan" || (e.button === 2)) { S.drag = {pan: true, sp, v: Object.assign({}, S.view)}; stage().classList.add("panning"); e.preventDefault(); return; }
   if (e.button !== 0) return;
+  if (S.pickWall) return pickWallAt(sp);
+  if (S.tool === "auto") return autoAt(toBase(sp[0], sp[1]));
   const {p} = cursorPoint(e, sp);
   if (S.tool === "select") return selectAt(sp, e);
   if (S.tool === "count" || (S.tool === "draw" && cond(S.cond).type === "count")) return addCount(p);
@@ -497,6 +833,12 @@ function onDown(e){
     S.draft.push(p); if (S.tool === "measure") S.measure = S.draft.slice(); draw(); return;
   }
   if (S.tool === "open" || S.tool === "cal") { S.draft.push(p); if (S.draft.length === 2) finish(S.draft.slice()); draw(); }
+}
+function endDraft(){   // finish the line / area / measurement being drawn (Enter, double-click, right-click)
+  const D = S.draft.slice();
+  while (D.length > 1 && dist(toScr(D[D.length - 1]), toScr(D[D.length - 2])) <= HIT_PX / 2) D.pop();   // the extra click of a double-click
+  if (isAreaDraft() ? D.length >= 3 : D.length >= 2) return finish(D);
+  S.draft = D; draw();
 }
 function isAreaDraft(){ const c = S.cond ? cond(S.cond) : null; return c && c.type === "area" && (S.tool === "draw" || S.tool === "ded"); }
 function onMove(e){
@@ -523,7 +865,7 @@ function onUp(e){
   S.drag = null; stage().classList.remove("panning");
 }
 function selectAt(sp, e){
-  const items = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo);
+  const items = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i));
   const sel = items.find(i => i.id === S.sel);
   if (sel) {   // grab a point of the selected measurement
     const vi = sel.pts.findIndex(p => dist(toScr(p), sp) <= HIT_PX);
@@ -555,7 +897,7 @@ function addCount(p){
 async function finish(pts){
   const c = S.cond ? cond(S.cond) : null, t = S.tool;
   S.draft = [];
-  if (t === "measure") { S.measure = pts; draw(); return; }
+  if (t === "measure") { S.measure = pts; S.measures.push(pts); draw(); return; }
   if (t === "cal") {
     const d = dist(pts[0], pts[1]); if (d < 1) { draw(); return; }
     const v = await ask("Set the scale", `<p>The two points are <b>${d.toFixed(2)} pt</b> apart on the sheet. Enter the real length they measure.</p>
@@ -595,7 +937,7 @@ function drawNow(){
   const k = curScale(), h = [];
   h.push('<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="rgba(208,59,59,.08)"/><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(208,59,59,.55)" stroke-width="1.5"/></pattern></defs>');
   const ptsS = P => P.map(p => toScr(p).map(v => v.toFixed(1)).join(",")).join(" ");
-  P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo).forEach(it => {
+  P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).forEach(it => {
     const c = cond(it.cond); if (!c) return;
     const col = c.color, sel = it.id === S.sel;
     if (c.type === "count") {
@@ -633,10 +975,12 @@ function drawNow(){
         live = isAreaDraft() && D.length >= 3 ? f2(polyArea(D) / k / k) + " Sft · perimeter " + f3(polyLen(D, true) / k) + " ft" : (D.length > 2 ? "run " + f3(seg) + " · total " : "") + f3(L) + " ft"; }
       else if (S.tool === "cal") live = (dist(D[0], D[D.length - 1])).toFixed(2) + " pt";
     }
-  } else if (S.measure && S.measure.length > 1) {
-    h.push(`<polyline points="${ptsS(S.measure)}" fill="none" stroke="#0b0b0b" stroke-width="2" stroke-dasharray="6 3"/>`);
-    if (k) { const q = toScr(S.measure[S.measure.length - 1]); h.push(label([q[0] + 8, q[1] - 10], f3(polyLen(S.measure) / k) + " ft", "#0b0b0b")); }
   }
+  S.measures.forEach(m => {   // finished measurements stay until Esc
+    h.push(`<polyline points="${ptsS(m)}" fill="none" stroke="#0b0b0b" stroke-width="2" stroke-dasharray="6 3"/>`);
+    m.forEach(p => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="2.5" fill="#0b0b0b"/>`); });
+    if (k) { const q = toScr(m[m.length - 1]); h.push(label([q[0] + 8, q[1] - 10], f3(polyLen(m) / k) + " ft", "#0b0b0b")); }
+  });
   if (S.snap && cur && S.tool !== "select" && S.tool !== "pan") {
     const q = toScr(S.snap.p), t = S.snap.type;
     if (/endpoint|point/.test(t)) h.push(`<rect x="${q[0] - 6}" y="${q[1] - 6}" width="12" height="12" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
@@ -670,8 +1014,8 @@ function renderConds(){
   if (!P.proj) { L.innerHTML = ""; return; }
   if (!P.proj.conds.length) { L.innerHTML = '<div class="empty">A <b>condition</b> is what you are measuring — e.g. <i>9" brick wall</i>, <i>floor tiles</i>, <i>doors</i>. Create one, then draw on the drawing.<br><br><button class="btn pri" id="bFirstCond">+ New condition</button></div>'; return; }
   L.innerHTML = P.proj.conds.map((c, i) => { const t = condTotals(c);
-    return `<div class="cond${c.id === S.cond ? " on" : ""}" data-cond="${esc(c.id)}"><span class="sw" style="background:${c.color}"></span><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}</span></div>
-      <div class="q">${f2(t.net)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; }).join("");
+    return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}</span></div>
+      <div class="q">${f2(t.net)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; }).join("");
 }
 function renderSheet(){
   const el = $("sheet");
@@ -696,7 +1040,7 @@ function renderSheet(){
         const sub = [pg, r.runs && r.runs.length > 1 ? "runs " + r.runs.map(f3).join(" + ") : "", r.how === "tri" && i === 0 ? "irregular: triangles ½ × base × height" : "",
                      c.type === "linear" && c.unit === "Sft" && (+c.faces || 1) > 1 && it.kind !== "ded" ? "Nos includes " + c.faces + " faces" : "",
                      r.below ? "≤ " + f2(+c.dedMin || 0) + " " + (c.unit === "cft" && c.type === "area" ? "cft" : "Sft") + " — not deducted (house rule)" : ""].filter(Boolean).join(" · ");
-        h += `<tr class="it${r.sign < 0 ? " ded" : ""}${r.below ? " below" : ""}${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${i === 0 ? ++n : ""}</td><td>${esc(desc)}<div class="ds">${esc(sub)}</div></td>
+        h += `<tr class="it${r.sign < 0 ? " ded" : ""}${r.below ? " below" : ""}${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${i === 0 ? ++n : ""}</td><td>${esc(desc)}${i === 0 ? `<button class="rn" title="Rename (e.g. Bedroom 1)" data-rename="${esc(it.id)}">&#9998;</button>` : ""}<div class="ds">${esc(sub)}</div></td>
           <td class="n">${dimText(r)}</td><td class="n">${r.below ? "0.00" : f2(r.qty)}</td></tr>`;
       });
     });
@@ -720,6 +1064,18 @@ function renderProps(){
     <button class="btn dng" data-act="delItem">Delete</button></div>
     ${c.type === "count" && S.selPt >= 0 ? '<div style="margin-top:8px"><button class="btn sm dng" data-act="delPoint">Remove this point</button></div>' : ""}`;
   el.classList.add("on");
+}
+
+/* ------------------------------------------------------------------ colour picker (condition swatch) */
+function swatches(cur){ return COLORS.map(x => `<button type="button" class="swb${x === cur ? " on" : ""}" data-sw="${x}" style="background:${x}" title="${x}"></button>`).join(""); }
+function colorPop(anchor, c){
+  const pop = $("pop"), r = anchor.getBoundingClientRect();
+  pop.innerHTML = `<div class="swg">${swatches(c.color)}</div><label class="cust">Custom <input type="color" id="popCustom" value="${/^#[0-9a-f]{6}$/i.test(c.color) ? c.color : "#2a78d6"}"></label>`;
+  pop.style.left = Math.min(r.left, window.innerWidth - 230) + "px"; pop.style.top = (r.bottom + 6) + "px"; pop.classList.add("on");
+  const set = col => { if (col && col !== c.color) mutate(() => { c.color = col; }); };
+  pop.onclick = e => { const b = e.target.closest("[data-sw]"); if (b) { set(b.dataset.sw); pop.classList.remove("on"); } };
+  $("popCustom").onchange = e => { set(e.target.value); pop.classList.remove("on"); };
+  setTimeout(() => document.addEventListener("pointerdown", function off(e){ if (!pop.contains(e.target)) { pop.classList.remove("on"); document.removeEventListener("pointerdown", off, true); } }, true), 0);
 }
 
 /* ------------------------------------------------------------------ dialogs */
@@ -764,7 +1120,7 @@ async function editCond(c){
      <div class="fg"><label>Thickness T (ft)</label><input type="text" id="cT" value="${d.t ? f3(+d.t) : ""}" placeholder="9&quot; = 0.75"></div>
      <div class="fg"><label>Faces</label><input type="number" id="cF" min="1" max="2" step="1" value="${+d.faces || 1}"></div>
      <div class="fg"><label>Deduct openings / voids over</label><input type="text" id="cD" value="${f2(+d.dedMin || 0)}"></div>
-     <div class="fg"><label>Colour</label><select id="cC">${COLORS.map(x => `<option value="${x}"${x === d.color ? " selected" : ""} style="background:${x};color:#fff">${x}</option>`).join("")}</select></div></div>
+     <div class="fg w2"><label>Colour</label><input type="hidden" id="cC" value="${esc(d.color)}"><div class="swg" id="cSw">${swatches(d.color)}<label class="cust">Custom <input type="color" id="cCx" value="${/^#[0-9a-f]{6}$/i.test(d.color) ? d.color : "#2a78d6"}"></label></div></div></div>
      <p class="small" style="margin-top:10px">Area → Sft, or cft with T (slab, screed). Length → ft; Sft with H (plaster, 4.5" partition — 2 faces for internal plaster); cft with H and T (9" and thicker walls).
      House thresholds: masonry and plaster openings 1.00 Sft, formwork 5.00 Sft, concrete voids 0.50 cft.</p>`;
   const v = await ask(isNew ? "New condition" : "Edit condition", body, isNew ? "Create" : "Save", () => {
@@ -782,7 +1138,12 @@ async function editCond(c){
   });
   if (isNew) setTool("draw");
 }
+document.addEventListener("click", e => {   // dialog: colour swatches
+  const b = e.target.closest("#cSw [data-sw]"); if (!b) return;
+  $("cC").value = b.dataset.sw; $("cSw").querySelectorAll(".swb").forEach(x => x.classList.toggle("on", x === b));
+});
 document.addEventListener("change", e => {   // dialog: preset and type change
+  if (e.target.id === "cCx") { $("cC").value = e.target.value; $("cSw").querySelectorAll(".swb").forEach(x => x.classList.remove("on")); }
   if (e.target.id === "cPre" && e.target.value !== "") {
     const p = PRESETS[+e.target.value];
     $("cName").value = p.name; $("cType").value = p.type; $("cUnit").innerHTML = UNITS[p.type].map(u => `<option${u === p.unit ? " selected" : ""}>${u}</option>`).join("");
@@ -924,7 +1285,7 @@ async function exportPng(){
     const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
     await S.page.render({canvasContext: ctx, viewport: vp}).promise;
     const k = curScale(), T = p => [p[0] * sc, p[1] * sc];
-    P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo).forEach(it => {
+    P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).forEach(it => {
       const c = cond(it.cond); if (!c) return;
       ctx.lineWidth = 2 * sc / 2; ctx.strokeStyle = it.kind === "shape" ? c.color : "#d03b3b"; ctx.fillStyle = c.color;
       if (c.type === "count") { it.pts.forEach(p => { const q = T(p); ctx.beginPath(); ctx.arc(q[0], q[1], 5 * sc / 2, 0, 7); ctx.fill(); }); return; }
@@ -960,14 +1321,15 @@ function wire(){
   st.addEventListener("pointermove", onMove);
   st.addEventListener("pointerup", onUp); st.addEventListener("pointercancel", onUp);
   st.addEventListener("contextmenu", e => e.preventDefault());
-  st.addEventListener("dblclick", e => { if (["draw", "ded"].indexOf(S.tool) >= 0 && S.draft.length) { const c = cond(S.cond); if (c && (c.type === "linear" ? S.draft.length >= 2 : S.draft.length >= 3)) finish(S.draft.slice()); } });
+  st.addEventListener("dblclick", e => { if (["draw", "ded", "measure"].indexOf(S.tool) >= 0 && S.draft.length) endDraft(); });
   st.addEventListener("wheel", e => { if (!S.page) return; e.preventDefault(); const sp = evPos(e); zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018)), sp[0], sp[1]); }, {passive: false});
   st.addEventListener("pointerleave", () => { S.cursor = null; S.snap = null; draw(); });
   st.addEventListener("dragover", e => { e.preventDefault(); $("drop").classList.add("over"); });
   st.addEventListener("dragleave", () => $("drop").classList.remove("over"));
   st.addEventListener("drop", e => { e.preventDefault(); $("drop").classList.remove("over"); if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files]); });
   new ResizeObserver(() => { if (S.page) { applyView(); renderHi(); } }).observe(st);
-  document.querySelectorAll("#tools .tool").forEach(b => b.addEventListener("click", () => setTool(b.dataset.tool)));
+  document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.addEventListener("click", () => setTool(b.dataset.tool)));
+  $("bAutoSet").onclick = () => P.proj && autoSettings();
   $("bAdd").onclick = () => $("fileIn").click();
   $("fileIn").onchange = e => { addFiles([...e.target.files]); e.target.value = ""; };
   $("pageSel").onchange = e => { const [f, p] = e.target.value.split("|"); if (f && p) gotoPage(f, +p); };
@@ -1001,10 +1363,17 @@ function wire(){
   $("condList").addEventListener("click", e => {
     if (e.target.id === "bFirstCond") return editCond(null);
     const ed = e.target.closest("[data-edit]"); if (ed) return editCond(cond(ed.dataset.edit));
+    const ey = e.target.closest("[data-eye]"); if (ey) { const c = cond(ey.dataset.eye); c.hidden = !c.hidden; if (c.hidden && S.sel && P.proj.items.some(i => i.id === S.sel && i.cond === c.id)) S.sel = null; save(); refresh(); return; }
+    const co = e.target.closest("[data-color]"); if (co) return colorPop(co, cond(co.dataset.color));
     const c = e.target.closest("[data-cond]"); if (!c) return;
     S.cond = c.dataset.cond; S.sel = null; setTool(S.tool === "select" || S.tool === "pan" || S.tool === "measure" || S.tool === "cal" ? "draw" : S.tool); refresh();
   });
   $("sheet").addEventListener("click", async e => {
+    const rn = e.target.closest("[data-rename]");
+    if (rn) { const it = P.proj.items.find(i => i.id === rn.dataset.rename); if (!it) return;
+      const v = await ask("Name this measurement", `<div class="fg w2"><label>Name as it should read on the sheet</label><input type="text" id="dlgLbl" value="${esc(it.label)}" placeholder="e.g. Bedroom 1, Lounge, Kitchen"></div>
+        <p class="small" style="margin-top:8px">Leave blank to show the default (“${esc(kindName(it, cond(it.cond)))}”).</p>`, "Save", () => ({v: $("dlgLbl").value.trim()}), "dlgLbl");
+      if (v) mutate(() => { it.label = v.v; }); return; }
     const tr = e.target.closest("[data-item]"); if (!tr) return;
     const it = P.proj.items.find(i => i.id === tr.dataset.item); if (!it) return;
     if (it.file !== S.fileId || it.page !== S.pageNo) await gotoPage(it.file, it.page);
@@ -1036,10 +1405,10 @@ function wire(){
     if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); return redo(); }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === " ") { S.space = true; stage().classList.add("pan"); e.preventDefault(); return; }
-    if (e.key === "Escape") { if (S.draft.length) { S.draft = []; } else if (S.measure) S.measure = null; else if (S.sel) { S.sel = null; } else setTool("select"); refresh(); return; }
+    if (e.key === "Escape") { if (S.pickWall) { S.pickWall = false; hint(); } else if (S.draft.length) { S.draft = []; } else if (S.measures.length || S.measure) { S.measures = []; S.measure = null; } else if (S.sel) { S.sel = null; } else setTool("select"); refresh(); return; }
     if (e.key === "Enter") {
       if (S.tool === "measure" && S.verify && S.measure && S.measure.length > 1) return verifyMeasure();
-      if (S.draft.length) { const c = S.cond ? cond(S.cond) : null; if (isAreaDraft() ? S.draft.length >= 3 : S.draft.length >= 2) finish(S.draft.slice()); }
+      if (S.draft.length) endDraft();
       return;
     }
     if (e.key === "Backspace" || e.key === "Delete") {
@@ -1051,7 +1420,7 @@ function wire(){
         S.sel = null; S.selPt = -1; refresh(); }
       return;
     }
-    const T = {v: "select", h: "pan", a: "draw", r: "rect", d: "ded", o: "open", m: "measure", k: "cal"};
+    const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", d: "ded", o: "open", m: "measure", k: "cal"};
     if (T[k]) { setTool(T[k]); return; }
     if (k === "s") { $("snapOn").checked = !$("snapOn").checked; toast("Snap " + ($("snapOn").checked ? "on" : "off")); return; }
     if (k === "f") { fit(); renderHi(); return; }
