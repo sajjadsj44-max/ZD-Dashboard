@@ -799,11 +799,17 @@ async function autoRoom(seed){   // -> {pts} or {err}
       return {m, edge};
     };
     const rpx = Math.ceil(o.gap * k / px / 2) + 2;
+    const fences = (P.proj.marks || []).filter(m => m.type === "fence" && m.file === S.fileId && m.page === S.pageNo);
+    const fenceMask = () => { const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d", {willReadFrequently: true});
+      ctx.setTransform(1 / px, 0, 0, 1 / px, -x0 / px, -y0 / px); ctx.lineWidth = 2.5 * px; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = "#000"; ctx.beginPath();
+      fences.forEach(f => f.pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke();
+      const d = ctx.getImageData(0, 0, W, H).data, b = new Uint8Array(W * H); for (let i = 0; i < b.length; i++) b[i] = d[i * 4 + 3] > 24 ? 1 : 0; return b; };
     let thin, bar;
     if (img) { const ink = await inkMask(x0, y0, W, H, px, Math.max(o.minLen, 1) * k / px, o.dashBound, k); thin = ink.thin;   // a solid door swing stays in: its area is a pocket, added back
       if (ids.doors.length) { const dl = raster(2 * px, true); for (let i = 0; i < N; i++) if (dl[i]) { thin[i] = 1; ink.big[i] = 1; } }
       bar = widen(ink.big, W, H, o.gap * k / px / 2); }
     else { thin = raster(2 * px); bar = raster(Math.max(o.gap * k, 2 * px)); }
+    if (fences.length) { const fm = fenceMask(); for (let i = 0; i < N; i++) if (fm[i]) { thin[i] = 1; bar[i] = 1; } }   // the user's fences close what the drawing leaves open
     if (o.show) S.autoShow = {key: S.key, x0, y0, px, W, H, url: maskUrl(thin, W, H)};
     // B: every line widened to the door gap, so all openings close — the room's core — grown back out to the wall faces
     const sb = seedIn(bar, rpx), sa = seedIn(thin, 4);
@@ -1076,7 +1082,7 @@ function hint(){
   const c = S.cond ? cond(S.cond) : null, t = S.tool;
   const H = {select: "Click a measurement to select it; drag its points to edit; Delete removes it.", pan: "Drag to pan; scroll to zoom.",
     draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." : c.type === "linear" ? "Click along the run; Enter, double-click or right-click to finish." : "Click each item to count it; Esc when done.",
-    vsearch: "Box one symbol (two corners) — every matching symbol is counted.", note: "Click where the note goes, then type it.", cloud: "Click two opposite corners of the area to cloud.", arrow: "Click the tail, then the head of the arrow.", hilite: "Click two opposite corners to highlight.",
+    fence: "Draw a line across the opening where Auto area leaks (click points; double-click, right-click or Enter to finish). It counts as a wall for Auto area only.", vsearch: "Box one symbol (two corners) — every matching symbol is counted.", note: "Click where the note goes, then type it.", cloud: "Click two opposite corners of the area to cloud.", arrow: "Click the tail, then the head of the arrow.", hilite: "Click two opposite corners to highlight.",
     rect: "Click two opposite corners.", circle: "Click the centre, then a point on the edge.", vp: "Click two opposite corners of the detail drawn at another scale.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.", ded: c && c.type === "area" ? "Draw the void / cut-out to deduct; Enter to close." : "Draw the length to deduct; Enter to finish.",
     open: "Click both sides of the opening, then enter its height.", measure: "Click points; double-click, right-click or Enter ends a measurement (it stays on screen). Esc clears. Nothing is saved.",
     cal: "Click both ends of a known dimension, then enter its length."};
@@ -1086,7 +1092,7 @@ function evPos(e){ const r = stage().getBoundingClientRect(); return [e.clientX 
 function cursorPoint(e, sp){
   const raw = toBase(sp[0], sp[1]);
   let p = raw, s = null;
-  if (["draw", "rect", "ded", "open", "measure", "cal", "circle", "vp", "arrow"].indexOf(S.tool) >= 0 || S.drag) { s = snapAt(raw); if (s) p = s.p; }
+  if (["draw", "rect", "ded", "open", "measure", "cal", "circle", "vp", "arrow", "fence"].indexOf(S.tool) >= 0 || S.drag) { s = snapAt(raw); if (s) p = s.p; }
   const last = S.drag ? null : S.draft[S.draft.length - 1];
   if (e.shiftKey && last) { const dx = Math.abs(p[0] - last[0]), dy = Math.abs(p[1] - last[1]); p = dx >= dy ? [p[0], last[1]] : [last[0], p[1]]; if (s) s = Object.assign({}, s, {type: s.type + " + straight"}); }
   return {p, s};
@@ -1100,7 +1106,7 @@ function onDown(e){
     const ids = Object.keys(S.touches);
     if (ids.length === 2) { const a = S.touches[ids[0]], b = S.touches[ids[1]]; S.pinch = {d: dist(a, b), c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], v: Object.assign({}, S.view)}; S.drag = null; return; }
   }
-  if (e.button === 2 && S.draft.length && ["draw", "ded", "measure"].indexOf(S.tool) >= 0) { e.preventDefault(); return endDraft(); }   // right-click ends the line / area
+  if (e.button === 2 && S.draft.length && ["draw", "ded", "measure", "fence"].indexOf(S.tool) >= 0) { e.preventDefault(); return endDraft(); }   // right-click ends the line / area
   if (e.button === 1 || S.space || S.tool === "pan" || (e.button === 2)) { S.drag = {pan: true, sp, v: Object.assign({}, S.view)}; stage().classList.add("panning"); e.preventDefault(); return; }
   if (e.button !== 0) return;
   if (S.pickWall) return pickWallAt(sp);
@@ -1109,7 +1115,7 @@ function onDown(e){
   if (S.tool === "select") return selectAt(sp, e);
   if (S.tool === "count" || (S.tool === "draw" && cond(S.cond).type === "count")) return addCount(p);
   if (S.tool === "rect") { if (!S.draft.length) S.draft = [p]; else { const a = S.draft[0]; finish([a, [p[0], a[1]], p, [a[0], p[1]]]); } draw(); return; }
-  if (S.tool === "draw" || S.tool === "ded" || S.tool === "measure") {
+  if (S.tool === "draw" || S.tool === "ded" || S.tool === "measure" || S.tool === "fence") {
     const closeArea = isAreaDraft() && S.draft.length >= 3 && dist(toScr(S.draft[0]), toScr(p)) <= SNAP_PX;
     if (closeArea) return finish(S.draft.slice());
     if (S.draft.length && dist(S.draft[S.draft.length - 1], p) < 1e-6) return;
@@ -1189,6 +1195,7 @@ async function finish(pts){
   const c = S.cond ? cond(S.cond) : null, t = S.tool;
   S.draft = [];
   if (t === "measure") { S.measure = pts; S.measures.push(pts); draw(); return; }
+  if (t === "fence") { if (pts.length >= 2) mutate(() => { (P.proj.marks = P.proj.marks || []).push({id: uid("M"), type: "fence", file: S.fileId, page: S.pageNo, pts, text: "", color: "#ff7a00", at: new Date().toISOString()}); }); draw(); return; }
   if (t === "vp") {
     const r = [Math.min(pts[0][0], pts[1][0]), Math.min(pts[0][1], pts[1][1]), Math.max(pts[0][0], pts[1][0]), Math.max(pts[0][1], pts[1][1])];
     if (r[2] - r[0] < 2 || r[3] - r[1] < 2) { draw(); return; }
@@ -1297,7 +1304,7 @@ function drawNow(){
     if (S.tool === "rect") { const a = S.draft[0]; const R = [a, [cur[0], a[1]], cur, [a[0], cur[1]]]; h.push(`<polygon points="${ptsS(R)}" fill="${c.color}" fill-opacity=".15" stroke="${c.color}" stroke-width="2"/>`);
       if (k) live = f3(Math.abs(cur[0] - a[0]) / k) + " × " + f3(Math.abs(cur[1] - a[1]) / k) + " ft = " + f2(Math.abs(cur[0] - a[0]) * Math.abs(cur[1] - a[1]) / k / k) + " Sft"; }
     else {
-      const col = S.tool === "ded" || S.tool === "open" ? "#d03b3b" : S.tool === "measure" || S.tool === "cal" ? "#0b0b0b" : c ? c.color : "#0b0b0b";
+      const col = S.tool === "fence" ? "#ff7a00" : S.tool === "ded" || S.tool === "open" ? "#d03b3b" : S.tool === "measure" || S.tool === "cal" ? "#0b0b0b" : c ? c.color : "#0b0b0b";
       if (isAreaDraft() && D.length >= 3) h.push(`<polygon points="${ptsS(D)}" fill="${col}" fill-opacity=".12" stroke="none"/>`);
       h.push(`<polyline points="${ptsS(D)}" fill="none" stroke="${col}" stroke-width="2" stroke-dasharray="${S.tool === "measure" || S.tool === "cal" ? "6 3" : "none"}"/>`);
       S.draft.forEach(p => { const q = toScr(p); h.push(`<circle cx="${q[0]}" cy="${q[1]}" r="3.5" fill="#fff" stroke="${col}" stroke-width="2"/>`); });
@@ -1551,7 +1558,7 @@ async function findText(q){
 }
 
 /* ------------------------------------------------------------------ markups: notes, clouds, arrows, highlights (no quantity) */
-const MARK_TOOLS = {note: "Note", cloud: "Cloud", arrow: "Arrow", hilite: "Highlight"};
+const MARK_TOOLS = {note: "Note", cloud: "Cloud", arrow: "Arrow", hilite: "Highlight", fence: "Fence (auto-area wall)"};
 function cloudPath(a, b, r){   // scalloped rectangle between screen points a and b
   const x0 = Math.min(a[0], b[0]), y0 = Math.min(a[1], b[1]), x1 = Math.max(a[0], b[0]), y1 = Math.max(a[1], b[1]);
   const side = (p, q) => { const L = dist(p, q), n = Math.max(1, Math.round(L / (2 * r))), out = []; for (let i = 1; i <= n; i++) { const t = i / n; out.push(`A ${(L / n / 2).toFixed(1)} ${(L / n / 2).toFixed(1)} 0 0 1 ${(p[0] + (q[0] - p[0]) * t).toFixed(1)} ${(p[1] + (q[1] - p[1]) * t).toFixed(1)}`); } return out.join(" "); };
@@ -1559,6 +1566,8 @@ function cloudPath(a, b, r){   // scalloped rectangle between screen points a an
 }
 function markSvg(m, T, z){   // T: base -> screen; z: px per screen unit (1 on screen)
   const col = m.color || "#d03b3b", sel = m.id === S.selMark;
+  if (m.type === "fence") { const d = m.pts.map(p => T(p).map(v => v.toFixed(1)).join(",")).join(" ");
+    return `<polyline points="${d}" fill="none" stroke="#ff7a00" stroke-width="${(sel ? 4 : 3) * z}" stroke-dasharray="${6 * z} ${3 * z}" stroke-linecap="round"/>`; }
   if (m.type === "hilite") { const a = T(m.pts[0]), b = T(m.pts[1]); return `<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="#ffe14d" fill-opacity=".38" stroke="${sel ? "#0b0b0b" : "none"}"/>`; }
   if (m.type === "cloud") { const a = T(m.pts[0]), b = T(m.pts[1]); return `<path d="${cloudPath(a, b, 9 * z)}" fill="none" stroke="${col}" stroke-width="${(sel ? 3 : 2) * z}"/>` + (m.text ? label([Math.max(a[0], b[0]), Math.min(a[1], b[1]) - 12 * z], m.text, col) : ""); }
   if (m.type === "arrow") { const a = T(m.pts[0]), b = T(m.pts[1]), ang = Math.atan2(b[1] - a[1], b[0] - a[0]), hl = 12 * z;
@@ -1573,6 +1582,7 @@ function markAt(sp){
     const a = toScr(m.pts[0]), b = m.pts[1] ? toScr(m.pts[1]) : null;
     if (m.type === "note") return sp[0] >= a[0] - 4 && sp[0] <= a[0] + Math.min(320, (m.text || "Note").length * 6.6 + 14) && Math.abs(sp[1] - a[1]) <= 12;
     if (m.type === "arrow") return distSeg(sp, a, b) <= HIT_PX;
+    if (m.type === "fence") { for (let i = 1; i < m.pts.length; i++) if (distSeg(sp, toScr(m.pts[i - 1]), toScr(m.pts[i])) <= HIT_PX) return true; return false; }
     const inR = sp[0] >= Math.min(a[0], b[0]) - 4 && sp[0] <= Math.max(a[0], b[0]) + 4 && sp[1] >= Math.min(a[1], b[1]) - 4 && sp[1] <= Math.max(a[1], b[1]) + 4;
     return m.type === "hilite" ? inR : inR && (Math.abs(sp[0] - a[0]) < 10 || Math.abs(sp[0] - b[0]) < 10 || Math.abs(sp[1] - a[1]) < 10 || Math.abs(sp[1] - b[1]) < 10);
   }) || null;
@@ -1861,7 +1871,7 @@ function wire(){
   st.addEventListener("pointermove", onMove);
   st.addEventListener("pointerup", onUp); st.addEventListener("pointercancel", onUp);
   st.addEventListener("contextmenu", e => e.preventDefault());
-  st.addEventListener("dblclick", e => { if (["draw", "ded", "measure"].indexOf(S.tool) >= 0 && S.draft.length) endDraft(); });
+  st.addEventListener("dblclick", e => { if (["draw", "ded", "measure", "fence"].indexOf(S.tool) >= 0 && S.draft.length) endDraft(); });
   st.addEventListener("wheel", e => { if (!S.page) return; e.preventDefault(); const sp = evPos(e); zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018)), sp[0], sp[1]); }, {passive: false});
   st.addEventListener("pointerleave", () => { S.cursor = null; S.snap = null; draw(); });
   st.addEventListener("dragover", e => { e.preventDefault(); $("drop").classList.add("over"); });
