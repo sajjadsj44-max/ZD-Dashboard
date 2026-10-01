@@ -592,8 +592,8 @@ dashboard sidebar (QS Cost Control → PDF Takeoff) and the landing page.
   (`M`, not saved), select and drag points (`V`), undo / redo, Nos multiplier per measurement.
 - **Measurement sheet** in the house format: every row `Nos × L × W × H` in decimal feet (3 dp), Sft / cft
   (2 dp), ft, Nos; a quantity is the product of the dimensions as printed, so the sheet re-measures from its
-  own figures. Rectangles are one row; other right-angled shapes split into rectangles (part a, b …); any other
-  shape into triangles `½ × base × height`; a run lists its legs (`12.000 + 14.000 + …`). Deductions are their
+  own figures. Rectangles are one row `L × W`; any other outline is one row with its plan area by coordinates;
+  a run lists its legs (`12.000 + 14.000 + …`). Deductions are their
   own negative rows; openings / voids at or under the condition's threshold (masonry and plaster 1.00 Sft,
   formwork 5.00 Sft, concrete 0.50 cft) are listed but not deducted, saying why. Internal plaster carries both
   faces in Nos.
@@ -601,6 +601,48 @@ dashboard sidebar (QS Cost Control → PDF Takeoff) and the landing page.
   `=-PRODUCT(…)` for deductions, a run's length as `=12.000+14.000+…`; grey `SUM` totals; sheet protected) with
   Summary, Scale & audit (how each page's scale was set and checked) and Assumptions (unverified scales,
   heights / thicknesses and opening heights to confirm); CSV; the marked-up page as PNG; the project as JSON.
+
+**QS controls** (added 01-Oct-2026):
+
+- **Lossless project file, version 2.** Import keeps every property of the file (viewports, markups, auto-area
+  settings, layers, sheet info, opening schedule, and any key it does not know) and upgrades version-1 files in
+  place. After an import a **Project Import Validation** table compares the file and the imported project (PDFs,
+  conditions, measurements, scales, viewports, markups …, measurements pointing to a missing condition or PDF,
+  PDFs still to re-attach) with PASS / WARNING / FAIL.
+- **Scale status** per page — ✓ Verified / ✓ Calibrated / ⚠ From note / ⚠ Inherited / ✕ Unknown — on the scale chip
+  and the page list. **Copy scale to…** replaces "use on every page": tick pages (quick picks: this PDF, same
+  paper size, same scale note); copies are *inherited, not verified*, and a page that already has a scale asks first.
+- **Typical floors**: copies are previewed first. *Same place* checks each target sheet by its own text (share of
+  words at the same position) and warns before copying onto a different layout; *Align by two reference points*
+  takes two points on the source and the same two on each target (move, turn, rescale), shows the copies dashed
+  and copies on **Copy here**. Every copy is marked *Copied — not checked*.
+- **Skirting less doors**: assembly variables `PD` (perimeter less the door openings on the outline) and `D`
+  (door widths). Doors are openings whose schedule type is door, labelled `D…`, or 6 ft or taller, within 1.25 ft
+  of the room outline (either wall face); a typed value on the measurement overrides.
+- **Location**: Sheet info (ⓘ Sheet: sheet no., title, revision, discipline, building, floor) per page;
+  measurements take the sheet's building and floor unless given their own, plus zone / apartment and room. The
+  bill groups by building / floor; Excel has a *By location* sheet.
+- **QA** per measurement: Measured / Checked (by whom, when) / Recheck required, with AI-generated and copied
+  flags; a QA bar over the sheet (checked, pending, recheck, AI / copied to check, missing rate, unverified scale)
+  filters the sheet, and **✓ Check this page** signs off a page. Moving a checked outline resets it.
+- **Check before export**: missing or unverified scale, missing H / T, opening height, negative or zero quantity,
+  BOQ code, rate (or rate without a dated source), formula errors, unchecked AI / copied / recheck measurements,
+  no floor — shown as PASS / WARNING / ERROR in Export and on the Excel *Validation* sheet.
+- **BOQ / WBS code and Rate Analysis code** on each condition and assembly line. An RA code takes the item's
+  built-up rate from the Rate Analysis library kept in the same browser (SAJ QSCOST, `SAJ_QSCOST_v1`), worked out
+  exactly as Rate Analysis does (materials + wastage + labour + plant + access + transport, + OH, + profit); the
+  source reads `ZD Rate Analysis <code>, DD-Mon-YYYY — built-up rate …` and counts assumed rows. A code not in the
+  library, priced in another unit, or with unrated rows gives **RATE NOT AVAILABLE** — never a guess. Open the
+  dashboard and the takeoff on the same host (Netlify or GitHub Pages) — browser storage is per host.
+- **Opening schedule**: marks (D1, W2 …) with type, width and height, entered once; the Opening tool picks a
+  mark (its size wins over the clicked width) or adds a new one, and can keep placing the same mark. Changing a
+  size updates every opening with that mark.
+- **Revision quantity compare** (Bill → Revision compare): old sheets against new sheets (picked from Sheet info),
+  per condition and assembly line — old, new, variance, %, cost impact where the line has a rate — and a
+  **Change Management CSV** with the log's columns (Log ID left blank to assign) plus item, BOQ code, old / new
+  qty, variance and rate.
+- **Backups**: the last 10 copies of each project in this browser — on opening, every 10 minutes while working,
+  on demand, and before a restore. Restore (Projects → Backups, or Export → Backups…) always asks first.
 
 Phase 2 (planned): click-inside room areas with door gaps closed, walls found by thickness, symbol counting,
 a command bar, typical-floor multipliers and sending quantities to the Project BOQ. Phase 3: room tags and
@@ -611,7 +653,7 @@ CDN. Tests use a hand-written 3-page vector PDF with known dimensions (`tools/ta
 
 ```sh
 python3 -m http.server 8765 &
-TK_LIBS=/path/with/pdfjs-dist+exceljs node tools/test_takeoff.js   # 52 browser checks
+TK_LIBS=/path/with/pdfjs-dist+exceljs node tools/test_takeoff.js   # 93 browser checks
 ```
 
 ## Calculator tab

@@ -58,7 +58,18 @@ header .btn.tg2.on{background:#fff;color:var(--navy);border-color:#fff}
 table.sh.bill td:first-child{width:52%}
 table.sh tr.ch2 td{background:#f7f9fc;font-weight:600;border-top:1px solid var(--line)}
 table.asm{width:100%;border-collapse:collapse;font-size:11.5px}table.asm th{font-size:9.5px;text-align:left;color:var(--muted);padding:3px}table.asm td{padding:2px}table.asm input{width:100%;min-width:0;padding:4px 5px;font-size:11.5px}
-.dlg:has(table.asm){width:min(760px,100%)}
+.dlg:has(table.asm){width:min(980px,100%)}
+.dlg:has(.wide){width:min(860px,100%)}
+.pk{display:flex!important;gap:6px;align-items:center;padding:3px 0;text-transform:none!important;letter-spacing:0!important;font-size:12px!important;font-weight:400!important;color:var(--txt)!important}.pk input{width:auto}
+#qaBar{display:flex;gap:4px;flex-wrap:wrap;align-items:center;padding:6px 10px;border-bottom:1px solid var(--line);background:#fbfcfe}
+.qa{border:1px solid var(--line);background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;color:#3c4c60;cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums}
+span.qa{cursor:default}.qa.g{color:var(--green)}.qa.a{color:#8a5a00;border-color:#f3d998;background:#fff9ec}.qa.r{color:var(--red);border-color:#f0b4b4;background:#fff5f5}
+.qa.on{outline:2px solid var(--purple);outline-offset:-1px}
+.tag{display:inline-block;font-size:9.5px;font-weight:700;border-radius:3px;padding:0 4px;margin-left:4px;vertical-align:1px;border:1px solid}
+.tag.g{color:var(--green);border-color:#a8dcbf;background:#effaf3}.tag.a{color:#8a5a00;border-color:#f3d998;background:#fff9ec}.tag.r{color:var(--red);border-color:#f0b4b4;background:#fff5f5}
+.boq{font-size:10px;font-weight:700;color:var(--purple);background:#f1eefc;border-radius:3px;padding:0 4px}
+.billbar{display:flex;gap:6px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--line);flex-wrap:wrap}.billbar select{padding:2px 4px;font-size:11.5px}
+table.sh tr.grp td{background:#12263f;color:#fff;font-weight:700;font-size:11.5px}
 #findIn{width:170px}
 #findRes{position:fixed;top:46px;width:340px;max-height:60vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(15,41,66,.22);z-index:12;display:none;color:var(--txt)}
 #findRes.on{display:block}
@@ -210,6 +221,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   .panel.right{order:3;border-left:0}
   .pb{max-height:50vh}
   #projName{width:120px}
+  .rz{display:none}
 }
 @media print{body{overflow:visible}}
 </style>
@@ -227,6 +239,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <button class="btn sm" id="bPrev" title="Previous page (PgUp)">&lsaquo;</button>
   <select id="pageSel" aria-label="Page"></select>
   <button class="btn sm" id="bNext" title="Next page (PgDn)">&rsaquo;</button>
+  <button class="btn sm" id="bSheet" title="Sheet info: sheet no., title, revision, building and floor of this page">&#9432; Sheet</button>
   <div class="sep"></div>
   <button class="btn sm" id="bZo" title="Zoom out (-)">&minus;</button>
   <span id="zoomPct">—</span>
@@ -304,6 +317,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
     <div class="rz" id="rzR" title="Drag to resize"></div>
     <div class="warnbar" id="warnbar"></div>
     <div class="ph"><h3>Measurement sheet</h3><span class="seg"><button class="btn sm on" id="vSheet">Sheet</button><button class="btn sm" id="vBill">Bill</button></span><span class="ds" id="shInfo" style="font-size:10.5px;color:var(--muted)"></span><button class="hidebtn" id="hideR" title="Hide this panel">&#10217;</button></div>
+    <div id="qaBar"></div>
     <div class="pb" id="sheet"></div>
     <div class="pb" id="bill" style="display:none"></div>
     <div class="props" id="props"></div>
