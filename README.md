@@ -490,6 +490,12 @@ full revision / validation report is [`docs/master-rate-analysis-rev07.md`](docs
   left unpriced; replace each with a quotation (workbook 16 RFQ col H, or the Rate Database). The full list is in the
   report.
 
+- **Rev07b remark dates (01-Oct-2026)**: every dated Rate Database line now reads `<source>, DD-Mon-YYYY — <details>`
+  with its Effective date as the only date before the dash. 62 price-list lines are dated by the list's effective
+  date instead of the day it was read (27-Sep-2026); GRN lines cite the receipt (`Quadrangle GRN RCP-n, date — …`);
+  MRS edition periods and other dated brackets moved behind the dash; four seed lines reworded. No rate changed.
+  Details in the report's Rev07b section.
+
 Data: the `<script type="application/json" id="raMasterData">` block, merged by `raSyncBlk` (key `masRev`) and
 `raSyncMaster`. To rebuild after entering quotations in the workbook's 16 RFQ sheet:
 

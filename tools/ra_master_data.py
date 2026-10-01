@@ -69,6 +69,60 @@ def fmt(v):
     return s or "0"
 
 
+DATE = r"\d{2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{4}"
+GRN_RCP = re.compile(rf"^((?:Quadrangle|Phoenix) GRN RCP-\d+(?: & (?:Quadrangle|Phoenix) RCP-\d+)*)(?:, ({DATE}))? [–—-] (.*)$",
+                     re.S)
+
+
+def iso_dmy(s):
+    return dt.datetime.strptime(s, "%d-%b-%Y").date().isoformat()
+
+
+def canon_source(label, date, note):
+    """(label, date, note) -> (source, date, details) for a remark in the CLAUDE.md form
+    `<source>, DD-Mon-YYYY — <details>`, with the rate's own date the only date before the dash:
+      * price list "X (effective D)": D is the rate's date (the workbook may hold the day the list was read);
+      * GRN Price Register: the receipt the note cites ("Quadrangle GRN RCP-n") is the source and the
+        register goes to the details; a pair / set / average of receipts keeps the register as the source;
+      * Punjab MRS "edition (01-Jul to 31-Dec-2026), District X": the period goes to the details."""
+    extra = []
+    m = re.match(rf"^(.*?) \(effective ({DATE})\)$", label)
+    if m:
+        label, eff = m.group(1), iso_dmy(m.group(2))
+        if eff < date:
+            extra.append(f"list read {dmy_s(date)}")
+            date = eff
+    m = re.match(rf"^(.*?) \((\d{{2}}-[A-Z][a-z]{{2}} to {DATE})\)(, District .*)?$", label)
+    if m:
+        label = m.group(1) + (m.group(3) or "")
+        extra.append(f"edition period {m.group(2)}")
+    m = re.match(r"^(.*GRN Price Register) \((.*)\)$", label)
+    if m:
+        reg = m.group(1).replace("SAJ QSCOST dashboard – ", "SAJ QSCOST ")
+        r = GRN_RCP.match(note)
+        if r:
+            if r.group(2) and iso_dmy(r.group(2)) != date:
+                sys.exit(f"GRN note date {r.group(2)} != rate date {date}: {note}")
+            label, note = r.group(1), r.group(3)
+            extra.append(f"read from the {reg} ({m.group(2)})")
+        else:
+            label = reg
+            extra.append(f"register: {m.group(2)}")
+    m = re.match(rf"^(.*?) \(([^()]*{DATE}[^()]*)\)$", label)  # any other dated bracket, e.g. "(Sajjad, 27-Sep-2026)"
+    if m:
+        label, inner = m.group(1), m.group(2)
+        if re.fullmatch(DATE, inner):
+            if iso_dmy(inner) != date:
+                extra.append(f"source dated {inner}")
+        else:
+            extra.append(inner)
+    if re.search(DATE, label):
+        sys.exit(f"a second date is left before the dash: {label!r}")
+    details = "; ".join([p for p in [note.strip().rstrip(".")] + extra if p]) or (
+        ("list price; " if "price list" in label.lower() else "") + "no working note in the workbook")
+    return label, date, details + "."
+
+
 def dash_lines(html):
     """Rate Database lines a fresh library ends up with (seed, then the blocks in the page's load order)."""
     out = {}
@@ -90,6 +144,31 @@ def dash_lines(html):
             if f.get("code") in out and isinstance(f.get("to"), dict):
                 out[f["code"]].update(f["to"])
     return out
+
+
+def prev_rates(html, rates_l):
+    """Versions a saved library may still hold, per line: [rate, date] or [rate, date, remark]. raSyncBlk moves
+    a saved line to the new version only while it equals one of these (a hand edit is kept). Besides the
+    config's own, every line that differs from the block already in the page gets its published version
+    added, with its remark, so a remark-only correction cannot overwrite a remark someone edited."""
+    prev = {k: list(v["prev"]) for k, v in C.DASH_RATE_UPDATES.items()}
+    prev.update({k: [[0, ""]] for k in C.DASH_ASSUMED})
+    pub = BLOCK_RE.search(html)
+    if not pub:
+        return prev
+    old = json.loads(pub.group(2))
+    for code, vs in (old.get("prevRates") or {}).items():
+        for v in vs:
+            if v not in prev.setdefault(code, []):
+                prev[code].append(v)
+    oldr = {r["code"]: r for r in old["rates"]}
+    for r in rates_l:
+        o = oldr.get(r["code"])
+        if o and o != r:
+            v = [o["rate"], o.get("date") or "", o.get("src") or ""]
+            if v not in prev.setdefault(r["code"], []):
+                prev[r["code"]].append(v)
+    return prev
 
 
 def build(wb_f, wb_v, html, as_of):
@@ -125,17 +204,19 @@ def build(wb_f, wb_v, html, as_of):
         srcs = [reg.get(s.strip(), s.strip()) for s in str(x["srcid"] or "").split(";") if s.strip() not in ("", "—")]
         label = "; ".join(srcs) or "Master Rate Analysis Rev07"
         st = x["status"].upper()
-        body = f"{label}, {dmy_s(date)} — {x['note']} [Master RA {C.REV} {code}, status {x['status']}]" if date else ""
         if x["note"].startswith("ASSUMPTION") and x["rate"]:
             src, vs = f"{x['note']} [Master RA {C.REV} {code}]", "A"
         elif not x["rate"] or not date:
             src, vs = f"{NOSRC}. {x['note'] or 'Enter a quotation'} [Master RA {C.REV} {code}]", "A"
-        elif "ASSUM" in st or "PROXY" in x["note"].upper():
-            src, vs = f"ASSUMPTION — {body}", "A"
-        elif "GRN" in st or "QUOTE" in st:
-            src, vs = body, "V"
         else:
-            src, vs = body, "I"
+            label, date, details = canon_source(label, date, x["note"])
+            body = f"{label}, {dmy_s(date)} — {details} [Master RA {C.REV} {code}, status {x['status']}]"
+            if "ASSUM" in st or "PROXY" in x["note"].upper():
+                src, vs = f"ASSUMPTION — {body}", "A"
+            elif "GRN" in st or "QUOTE" in st:
+                src, vs = body, "V"
+            else:
+                src, vs = body, "I"
         return {"code": code, "kind": x["kind"], "name": x["name"], "unit": x["unit"], "rate": round(x["rate"], 4),
                 "loc": "Lahore", "src": src, "date": date if x["rate"] else "", "vs": vs}
 
@@ -226,8 +307,7 @@ def build(wb_f, wb_v, html, as_of):
     data = {"rev": rev, "source": f"Master Rate Analysis {C.DOC} (reconciled with this library, docs/"
                                    "master-rate-analysis-rev07.md)",
             "rates": rates_l, "items": items, "upd": upd,
-            "prevRates": {**{k: v["prev"] for k, v in C.DASH_RATE_UPDATES.items()},
-                          **{k: [[0, ""]] for k in C.DASH_ASSUMED}}, "prevItems": prev_items}
+            "prevRates": prev_rates(html, rates_l), "prevItems": prev_items}
     xr = {code: x["rate"] for code, x in res.items()}
     return data, {"excel": excel, "excelRates": xr}
 

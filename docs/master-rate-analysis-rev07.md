@@ -516,6 +516,37 @@ aluminium sub-frame per Sft (≈8.6 kg/m²), which looks high for ACP cladding; 
 | MEP-Z-YS150 | 5,000.00 | Claude estimate for Lahore, Sep-2026 |
 | MEP-Z-YS200 | 7,000.00 | Claude estimate for Lahore, Sep-2026 |
 
+## Rev07b — remark dates (01-Oct-2026)
+
+A review found 104 dated Rate Database lines whose remarks did not start with their own date, so a reader
+(or a check that takes the first date) saw a different date from the Effective date. Only 2 (CRSH-MG, TILEADH)
+had a different date right before the dash; 62 carried the wrong date for a price list; the rest were correctly
+dated but had another date in front. The same patterns in assumption-flagged lines were fixed too, and 24 remarks
+with an empty details part now say "no working note in the workbook" — 118 lines in all. No rate, unit or
+verification status changed.
+
+| Lines | What was wrong | Now |
+|---|---|---|
+| 62 price-list lines (Popular Pipes PPR-100 33, uPVC conduit 21, uPVC SWV 5; Fast Cables 3) | Dated **27-Sep-2026**, the day the list was read, so they looked newer than they are (Fast Cables: list of 10-Jan-2026) | Dated by the list's effective date — 08-Sep-2026, 14-Sep-2026 or 10-Jan-2026 — in the workbook (05 col I, logged in 19) and on the dashboard |
+| 29 GRN lines | `SAJ QSCOST dashboard – GRN Price Register (… merged 23-Sep-2026), <date> — …` | The receipt is the source: `Quadrangle GRN RCP-2676 & Phoenix RCP-179, 13-Aug-2025 — Deltamethrin …; read from the SAJ QSCOST GRN Price Register (…)`. Pair / set / average notes keep the register as the source |
+| 16 Punjab MRS lines | Edition period `(01-Jul to 31-Dec-2026)` ahead of the date | Period moved behind the dash (`edition period …`) |
+| 6 lines with a dated bracket in the source name, e.g. `(26-Sep-2026)` | Two dates before the dash | Bracket moved behind the dash (dropped when it repeats the date) |
+| CRSH-MG, TILEADH (seed) | Remark led with the search date 23-Sep-2026; Effective date is the month of the price page (Jul / Jun-2026) | Remark leads with 01-Jul-2026 / 01-Jun-2026 and says the page gives only the month |
+| SAND-LP, CRSH-SG (seed) | No ` — ` separator | `Market rate supplied by Sajjad, 04-Sep-2026 — …` with the SRC-40 details |
+
+The 30 lines citing a GRN receipt were checked against the GRN Price Register: every RCP number exists at that
+site on that date, at the same rate or at the unit conversion the note states (e.g. 5,000 per 18 L bucket →
+1,011.11 per gallon).
+
+Saved libraries: each changed line's published version, **with its remark**, is in the block's `prevRates`
+(`[rate, date, remark]`; `raSyncBlk` now compares the remark when a third element is given), so a saved line is
+moved only while rate, date and remark are all as published — a remark or rate edited by hand is kept.
+
+The rules are in the build, so a rebuild keeps them: `list_dates` in `tools/ra_master_excel.py` (workbook dates),
+`canon_source` and `prev_rates` in `tools/ra_master_data.py` (remark form, previous versions);
+`test_ra_master_data.py` checks that every dated line has exactly one date before the dash, equal to its
+Effective date.
+
 ## Validation
 
 | Check | Result |

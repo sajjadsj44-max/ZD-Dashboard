@@ -115,6 +115,26 @@ DASH_RATE_UPDATES = {
                     "src": "Phoenix GRN RCP-277, 10-Jun-2026 — Taha International, wooden planks 1.5\"×9\"×10' at "
                            "3,450 each ÷ 0.9375 cft = 3,680 per cft (species not stated on the GRN). Adopted from "
                            "the Master Rate Analysis Rev07 (MAT-TIM-CHR); replaces the undated 3,000 assumption"},
+    # Rev07b (01-Oct-2026): remarks put in the `<source>, DD-Mon-YYYY — <details>` form with the effective date
+    # as the only date before the dash. Rates and dates unchanged; the old remark is the third element of
+    # "prev", so a remark someone edited by hand is kept.
+    "SAND-LP": {"src": "Market rate supplied by Sajjad, 04-Sep-2026 — Lawrencepur sand 240 per cft, delivered "
+                       "(source register SRC-40)",
+                "prev": [[240, "2026-09-04", "Market rate supplied by Sajjad, 04-Sep-2026"]]},
+    "CRSH-SG": {"src": "Market rate supplied by Sajjad, 04-Sep-2026 — Sargodha crush 1/2\" and 3/8\" 185 per cft, "
+                       "delivered; same rate both sizes (source register SRC-40)",
+                "prev": [[185, "2026-09-04", "Market rate supplied by Sajjad, 04-Sep-2026; same rate both sizes"]]},
+    "CRSH-MG": {"src": "Margalla crush market pages (web search), 01-Jul-2026 — about 180/cft on July-2026 pages; the "
+                       "pages give no day, so 01-Jul-2026 is used; found by web search 23-Sep-2026. Lahore delivery "
+                       "may add 30–80/cft. Earlier logged 330/cft still unconfirmed",
+                "prev": [[180, "2026-07-01", "Web search 23-Sep-2026 — Margalla crush about 180/cft (July-2026 "
+                                             "market pages). Lahore delivery may add 30–80/cft. Earlier logged "
+                                             "330/cft still unconfirmed"]]},
+    "TILEADH": {"src": "priceinfo.pk tile bond listing (web search), 01-Jun-2026 — 20 kg tile bond 600–780 per bag on "
+                       "a June-2026 page; no day given, so 01-Jun-2026 is used; found by web search 23-Sep-2026 → "
+                       "about 690 ÷ 20 = 34.5/kg",
+                "prev": [[35, "2026-06-01", "Web search 23-Sep-2026 — 20 kg tile bond 600–780 per bag (priceinfo.pk, "
+                                            "June-2026) → about 690 ÷ 20 = 34.5/kg"]]},
 }
 
 # --------------------------------------------------------------------------- productivity
