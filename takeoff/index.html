@@ -210,7 +210,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 .aimsg.wait{align-self:flex-start;color:var(--muted);font-style:italic;background:none;padding:2px 0}
 #aiPanel .aif{border-top:1px solid var(--line);padding:8px 12px;display:flex;flex-direction:column;gap:6px}
 #aiIn{width:100%;resize:vertical;border:1px solid #c9d6e4;border-radius:6px;padding:6px 8px;font:inherit;min-height:44px}
-#aiPanel .aib{display:flex;gap:6px;align-items:center}
+#aiPanel .aib{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 @media (max-width:1280px){.app{grid-template-columns:220px minmax(0,1fr) 360px}}
 @media (max-width:1100px){.app{grid-template-columns:200px minmax(0,1fr) 320px}}
 @media (max-width:860px){
@@ -247,6 +247,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <button class="btn sm" id="bFit" title="Fit page (F)">Fit</button>
   <span class="dimw"><button class="btn sm tg2" id="bDim" title="Dimmer — fade the drawing so the takeoff stands out">&#9728; Dimmer</button><input type="range" id="dimPct" min="0" max="90" step="5" value="50" title="Dimming %"><span id="dimLbl">0%</span></span>
   <button class="btn sm tg2" id="bLw" title="Line weights are on — click to draw every line thin">&#9472; Line weights</button>
+  <span class="seg"><button class="btn sm tg2" id="bLbl" title="Show / hide measurement labels (L)">&#127991; Labels</button><button class="btn sm" id="bLblSet" title="What the labels show: name, quantity, area, perimeter, length, L × W, segment lengths…">&#9662;</button></span>
   <div class="sep"></div>
   <div class="findw"><input type="search" id="findIn" placeholder="Find text (Ctrl+F)" aria-label="Find text on the drawings"><div id="findRes"></div></div>
   <button class="btn sm" id="bCompare" title="Overlay another revision in colour to see what changed">&#9681; Compare</button>
@@ -297,6 +298,8 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
       <button class="tool" data-tool="cloud" title="Revision cloud (U)">&#9729; Cloud</button>
       <button class="tool" data-tool="arrow" title="Arrow with comment">&#10142; Arrow</button>
       <button class="tool" data-tool="hilite" title="Highlight an area">&#9641; Highlight</button>
+      <span class="tsep"></span>
+      <button class="tool" id="bDel" title="Delete the selected measurement, count point or markup (Delete)" disabled>&#128465; Delete</button>
       <span class="sp"></span>
       <label class="tg" title="Snap to drawing lines (S)"><input type="checkbox" id="snapOn" checked> Snap</label>
     </div>
@@ -345,7 +348,8 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <div id="aiLog"></div>
   <div class="aif"><textarea id="aiIn" rows="2" placeholder="e.g. measure every bedroom, or: the lounge outline is wrong, redo it"></textarea>
     <div class="aib"><button class="btn sm" id="aiRead" title="API key: send a picture of the view on screen with your message">&#128065; Read this view</button><span class="sp"></span><button class="btn sm pri" id="aiSend">Send</button></div>
-    <div class="aib"><span class="small">Free:</span><button class="btn sm pri" id="aiDetails" title="No key: read this page's text — rooms, sizes, tags, levels — and give the agent tasks">&#128203; Drawing details</button><button class="btn sm" id="aiCopy" title="Copy the view and instructions for your own Claude.ai chat — no API key">Copy for Claude</button><button class="btn sm" id="aiImport" title="Paste Claude.ai's reply to draw the measurements">&#8615; Import from Claude</button></div></div>
+    <div class="aib"><span class="small">Agents:</span><button class="btn sm pri" id="agRooms" title="Rooms agent (free, instant): auto-trace every room named on this page and check it against its written size">&#127968; Rooms</button><button class="btn sm pri" id="agWalls" title="Walls agent (free, instant): find walls from their two parallel face lines and mark them on the centre line">&#129521; Walls</button><button class="btn sm pri" id="agTags" title="Tags agent (free, instant): count door / window / ventilator tags written on the drawing">&#128682; Doors / windows</button><button class="btn sm" id="aiDetails" title="Read this page's text — rooms, sizes, tags, levels — and list tasks">&#128203; Details</button></div>
+    <div class="aib"><span class="small">Claude.ai chat:</span><button class="btn sm" id="aiCopy" title="Copy the view and instructions for your own Claude.ai chat — no API key">Copy for Claude</button><button class="btn sm" id="aiImport" title="Paste Claude.ai's reply to draw the measurements">&#8615; Import from Claude</button></div></div>
 </aside>
 <div id="toast"></div>
 
