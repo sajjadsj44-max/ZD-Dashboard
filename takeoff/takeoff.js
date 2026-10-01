@@ -231,11 +231,42 @@ function buildPageSel(){
 }
 function showDrop(on){ $("drop").style.display = on ? "flex" : "none"; }
 
+/* ------------------------------------------------------------------ PDF layers (optional content, e.g. AutoCAD layers)
+   One visibility config per PDF, passed to every render — screen, auto area, find similar, exports, Claude — so a
+   layer switched off (furniture, text, hatch) is gone everywhere. Switched-off layers are saved by name. */
+const lay = fileId => S.ocgs && S.ocgs[fileId] ? {optionalContentConfigPromise: Promise.resolve(S.ocgs[fileId])} : {};
+async function loadLayers(fileId){
+  S.ocgs = S.ocgs || {};
+  if (S.ocgs[fileId] !== undefined) return S.ocgs[fileId];
+  let cfg = null;
+  try { cfg = await (await doc(fileId)).getOptionalContentConfig(); if (!cfg || !cfg.getGroups()) cfg = null; } catch (e) { cfg = null; }
+  if (cfg) { const off = new Set(((P.proj.layersOff || {})[fileId]) || []); Object.entries(cfg.getGroups()).forEach(([id, g]) => { if (off.has(g.name)) cfg.setVisibility(id, false); }); }
+  S.ocgs[fileId] = cfg; return cfg;
+}
+function renderLayers(){
+  const el = $("layerList"); if (!el) return;
+  const cfg = S.ocgs && S.ocgs[S.fileId];
+  if (!S.page) { el.innerHTML = ""; return; }
+  if (!cfg) { el.innerHTML = '<div class="empty">This PDF has no layers. AutoCAD keeps them when you plot with <b>DWG To PDF.pc3</b> and “Include layer information” ticked (Page Setup → PDF Options).</div>'; return; }
+  const G = Object.entries(cfg.getGroups()).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  el.innerHTML = `<div class="lyrbar"><button class="btn sm" data-lall="1">All on</button><button class="btn sm" data-lall="0">All off</button><input type="search" id="lyrQ" placeholder="Filter layers"></div>` +
+    G.map(([id, g]) => `<label class="lyr" data-name="${esc(g.name.toLowerCase())}"><input type="checkbox" data-lid="${esc(id)}"${cfg.isVisible(id) ? " checked" : ""}> ${esc(g.name)}</label>`).join("");
+}
+let layT = null;
+function setLayer(ids, on){
+  const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return;
+  ids.forEach(id => cfg.setVisibility(id, on));
+  P.proj.layersOff = P.proj.layersOff || {};
+  P.proj.layersOff[S.fileId] = Object.entries(cfg.getGroups()).filter(([id]) => !cfg.isVisible(id)).map(([, g]) => g.name);
+  save(); clearTimeout(layT); layT = setTimeout(() => { renderLow(); renderHi(true); }, 60);
+}
+
 async function gotoPage(fileId, pageNo){
   let d;
   try { d = await doc(fileId); } catch (e) { toast(e.message, 6000); showDrop(true); return; }
   pageNo = Math.max(1, Math.min(d.numPages, pageNo));
   if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) {} S.renderTask = null; }
+  await loadLayers(fileId);
   S.fileId = fileId; S.pageNo = pageNo; S.key = keyOf(fileId, pageNo);
   S.page = await d.getPage(pageNo);
   S.base = S.page.getViewport({scale: 1});
@@ -243,7 +274,7 @@ async function gotoPage(fileId, pageNo){
   P.proj.last = {file: fileId, page: pageNo}; save();
   $("pageSel").value = fileId + "|" + pageNo;
   showDrop(false);
-  fit();
+  fit(); renderLayers();
   await renderLow();
   renderHi(true);
   indexPage();   // vector lines + scale note, in the background
@@ -278,7 +309,7 @@ async function overlayCmp(ctx, w, h, scale, tx, ty){
   tint(ctx, w, h, true);
   const o = document.createElement("canvas"); o.width = w; o.height = h;
   const c2 = o.getContext("2d", {willReadFrequently: true}); c2.fillStyle = "#fff"; c2.fillRect(0, 0, w, h);
-  try { await S.cmp.pg.render({canvasContext: thinLines(c2), viewport: S.cmp.pg.getViewport({scale}), transform: [1, 0, 0, 1, tx + S.cmp.dx * scale, ty + S.cmp.dy * scale]}).promise; } catch (e) { return; }
+  try { await S.cmp.pg.render({...lay(S.cmp.file), canvasContext: thinLines(c2), viewport: S.cmp.pg.getViewport({scale}), transform: [1, 0, 0, 1, tx + S.cmp.dx * scale, ty + S.cmp.dy * scale]}).promise; } catch (e) { return; }
   tint(c2, w, h, false);
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "multiply"; ctx.drawImage(o, 0, 0); ctx.restore();
 }
@@ -292,7 +323,7 @@ async function compareDialog(){
   if (!v) return;
   if (v.v === "off") { S.cmp = null; $("cmpLegend").style.display = "none"; renderLow(); renderHi(true); return; }
   const o = opts[+v.v];
-  try { S.cmp = {file: o.f.id, page: o.i, pg: await (await doc(o.f.id)).getPage(o.i), dx: 0, dy: 0, name: o.f.name.replace(/\.pdf$/i, "") + " p." + o.i}; } catch (e) { return toast(e.message, 5000); }
+  try { await loadLayers(o.f.id); S.cmp = {file: o.f.id, page: o.i, pg: await (await doc(o.f.id)).getPage(o.i), dx: 0, dy: 0, name: o.f.name.replace(/\.pdf$/i, "") + " p." + o.i}; } catch (e) { return toast(e.message, 5000); }
   $("cmpLegend").innerHTML = `<b style="color:#2a52d6">■ this page</b> · <b style="color:#d03b3b">■ ${esc(S.cmp.name)}</b> · dark = same <button class="btn sm" id="cmpOff">Off</button>`; $("cmpLegend").style.display = "flex";
   $("cmpOff").onclick = () => { S.cmp = null; $("cmpLegend").style.display = "none"; renderLow(); renderHi(true); };
   renderLow(); renderHi(true);
@@ -303,7 +334,7 @@ async function renderLow(){
   c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
   const ctx = thinLines(c.getContext("2d")); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
   S.low = {s: sc};
-  try { await S.page.render({canvasContext: ctx, viewport: vp}).promise; } catch (e) {}
+  try { await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp}).promise; } catch (e) {}
   await overlayCmp(ctx, c.width, c.height, sc, 0, 0);
   applyView();
 }
@@ -317,7 +348,7 @@ function renderHi(now){
     const w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
     const off = document.createElement("canvas"); off.width = w; off.height = h;
     const ctx = thinLines(off.getContext("2d"));
-    const task = S.page.render({canvasContext: ctx, viewport: S.page.getViewport({scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]});
+    const task = S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]});
     S.renderTask = task;
     try { await task.promise; } catch (e) { return; }
     if (S.renderTask !== task) return;
@@ -420,7 +451,7 @@ async function indexPage(){
   if (!S.texts[key]) {
     try {
       const tc = await page.getTextContent();
-      S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: t.str, x: p[0], y: p[1]}; });
+      S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: t.str, x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
     } catch (e) { S.texts[key] = []; }
   }
   if (key === S.key && P.proj && !P.proj.scales[key]) {
@@ -700,7 +731,7 @@ function snapToWalls(Q, g, ids, tol, k, slack){   // rectilinear outline: each e
 async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft){
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  await S.page.render({canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}).promise;
+  await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}).promise;
   const d = ctx.getImageData(0, 0, W, H).data, N = W * H, m = new Uint8Array(N);
   for (let i = 0; i < N; i++) m[i] = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) < 190 ? 1 : 0;
   const seen = new Uint8Array(N), st = new Int32Array(N);
@@ -1272,8 +1303,7 @@ function drawNow(){
     const col = c.color, sel = it.id === S.sel, k = itemScale(it), pts0 = it.pts;
     if (it.shape === "circle") it = Object.assign({}, it, {pts: itemPoly(it), _pts: pts0});
     if (c.type === "count") {
-      it.pts.forEach((p, i) => { const q = toScr(p), r = sel && i === S.selPt ? 13 : 11;
-        h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${r}" fill="${col}" fill-opacity=".35" stroke="${col}" stroke-width="2.5"/><text x="${q[0].toFixed(1)}" y="${(q[1] + 4).toFixed(1)}" text-anchor="middle" font-size="11.5" font-weight="700" fill="#0b0b0b">${i + 1}</text>`); });
+      h.push(countSvg(c, it.pts, toScr, 1, sel ? S.selPt : -1));
       return;
     }
     if (it.kind === "open") {
@@ -1411,6 +1441,27 @@ function renderProps(){
   el.classList.add("on");
 }
 
+/* ------------------------------------------------------------------ count markers (Bluebeam-style symbols and captions) */
+const SYMS = {check: "Check ✓", circle: "Circle", square: "Square", triangle: "Triangle", diamond: "Diamond", cross: "Cross ✕", dot: "Dot"};
+function countSvg(c, pts, T, z, selIdx){
+  const sym = c.sym || "circle", cap = c.cap || "seq", r = ({s: 7, m: 10, l: 14}[c.sz || "m"]) * z, col = c.color, out = [];
+  pts.forEach((p, i) => {
+    const q = T(p), x = q[0], y = q[1], w = (i === selIdx ? 3.5 : 2.5) * z, fo = 'fill-opacity=".3"';
+    if (sym === "check") out.push(`<path d="M${x - r} ${y}L${x - r * 0.3} ${y + r * 0.7}L${x + r} ${y - r * 0.8}" fill="none" stroke="${col}" stroke-width="${w + z}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    else if (sym === "square") out.push(`<rect x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}"/>`);
+    else if (sym === "triangle") out.push(`<path d="M${x} ${y - r}L${x + r} ${y + r * 0.8}L${x - r} ${y + r * 0.8}Z" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}"/>`);
+    else if (sym === "diamond") out.push(`<path d="M${x} ${y - r}L${x + r} ${y}L${x} ${y + r}L${x - r} ${y}Z" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}"/>`);
+    else if (sym === "cross") out.push(`<path d="M${x - r * 0.8} ${y - r * 0.8}L${x + r * 0.8} ${y + r * 0.8}M${x + r * 0.8} ${y - r * 0.8}L${x - r * 0.8} ${y + r * 0.8}" stroke="${col}" stroke-width="${w + z}" stroke-linecap="round"/>`);
+    else if (sym === "dot") out.push(`<circle cx="${x}" cy="${y}" r="${r * 0.55}" fill="${col}" stroke="#fff" stroke-width="${z}"/>`);
+    else out.push(`<circle cx="${x}" cy="${y}" r="${r}" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}"/>`);
+    const t = cap === "seq" ? String(i + 1) : cap === "name" ? c.name : cap === "text" ? (c.capText || "") : "";
+    if (t) { const inside = cap === "seq" && ["circle", "square", "diamond"].indexOf(sym) >= 0 && t.length <= 3;
+      out.push(inside ? `<text x="${x}" y="${y + 4 * z}" text-anchor="middle" font-size="${11.5 * z}" font-weight="700" fill="#0b0b0b">${esc(t)}</text>`
+        : `<text x="${x + r + 3 * z}" y="${y + 4 * z}" font-size="${11 * z}" font-weight="700" fill="${col}" stroke="#fff" stroke-width="${3 * z}" paint-order="stroke">${esc(t)}</text>`); }
+  });
+  return out.join("");
+}
+
 /* ------------------------------------------------------------------ copy / paste, typical floors */
 function copySel(){
   const it = S.sel && P.proj.items.find(i => i.id === S.sel);
@@ -1458,7 +1509,7 @@ function rot90(m, w, h){ const o = new Uint8Array(w * h); for (let y = 0; y < h;
 async function renderInk(page, sc){
   const vp = page.getViewport({scale: sc}), W = Math.ceil(vp.width), H = Math.ceil(vp.height), cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  await page.render({canvasContext: ctx, viewport: vp}).promise;
+  await page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp}).promise;
   return {m: inkOf(ctx, W, H), W, H};
 }
 function matchInk(I, W, H, T, tw, th, thr){
@@ -1536,7 +1587,7 @@ async function pageTexts(fileId, pageNo){
   if (S.texts[key]) return S.texts[key];
   try {
     const pg = await (await doc(fileId)).getPage(pageNo), base = pg.getViewport({scale: 1}), tc = await pg.getTextContent();
-    S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: t.str, x: p[0], y: p[1]}; });
+    S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: t.str, x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
   } catch (e) { S.texts[key] = []; }
   return S.texts[key];
 }
@@ -1549,12 +1600,36 @@ async function findText(q){
   for (const f of P.proj.files) for (let i = 1; i <= f.pages && hits.length < 300; i++) {
     (await pageTexts(f.id, i)).forEach(t => { if (t.s.toLowerCase().includes(ql) && hits.length < 300) hits.push({f, i, t}); });
   }
-  box.innerHTML = hits.length ? `<div class="fr small">${hits.length}${hits.length >= 300 ? "+" : ""} found</div>` + hits.map((h, n) => `<div class="fr" data-hit="${n}"><b>${esc(h.t.s.trim().slice(0, 60))}</b><span class="small">${esc(h.f.name.replace(/\.pdf$/i, ""))} p.${h.i}</span></div>`).join("")
+  box.innerHTML = hits.length ? `<div class="fr small" style="flex-direction:row;align-items:center;gap:6px;cursor:default">${hits.length}${hits.length >= 300 ? "+" : ""} found <span style="flex:1"></span><button class="btn sm pri" data-cntall="1" title="Put a count marker on every hit">&#10003; Count all</button></div>` + hits.map((h, n) => `<div class="fr" data-hit="${n}" style="flex-direction:row;align-items:center;gap:6px"><span style="flex:1;display:flex;flex-direction:column"><b>${esc(h.t.s.trim().slice(0, 60))}</b><span class="small">${esc(h.f.name.replace(/\.pdf$/i, ""))} p.${h.i}</span></span><button class="btn sm" data-cnt1="${n}" title="Count this one">+1</button></div>`).join("")
     : '<div class="fr small">Not found in the text of these PDFs (scanned drawings have no text).</div>';
-  box.onclick = async e => { const r = e.target.closest("[data-hit]"); if (!r) return; const h = hits[+r.dataset.hit];
+  box.onclick = async e => {
+    const ca = e.target.closest("[data-cntall],[data-cnt1]");
+    if (ca) { e.stopPropagation(); return countTextHits(q, ca.dataset.cntall ? hits : [hits[+ca.dataset.cnt1]]); }
+    const r = e.target.closest("[data-hit]"); if (!r) return; const h = hits[+r.dataset.hit];
     if (h.f.id !== S.fileId || h.i !== S.pageNo) await gotoPage(h.f.id, h.i);
     const s2 = Math.max(S.view.s, 2.5), st = stage(); S.view = {s: s2, tx: st.clientWidth / 2 - h.t.x * s2, ty: st.clientHeight / 2 - h.t.y * s2}; applyView(); renderHi();
     S.flash = {key: S.key, p: [h.t.x, h.t.y], until: Date.now() + 2500}; draw(); setTimeout(draw, 2600); };
+}
+
+async function countTextHits(q, hits){   // text found on the drawings -> count markers (one count condition, per page)
+  const ex = P.proj.conds.filter(x => x.type === "count");
+  const v = await ask("Count “" + q + "”", `<p>${hits.length} marker${hits.length > 1 ? "s go" : " goes"} on the found text, page by page.</p>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Count into</label><select id="ctC"><option value="">+ New count condition “${esc(q.toUpperCase())}”</option>${ex.map(c => `<option value="${esc(c.id)}"${c.id === S.cond ? " selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
+    <div class="fg"><label>Symbol (new condition)</label><select id="ctS">${Object.entries(SYMS).map(([k2, v2]) => `<option value="${k2}"${k2 === "check" ? " selected" : ""}>${v2}</option>`).join("")}</select></div>
+    <div class="fg"><label>Caption (new condition)</label><select id="ctP"><option value="seq">Number</option><option value="name">Name</option><option value="none">None</option></select></div></div>`, "Count",
+    () => ({c: $("ctC").value, sym: $("ctS").value, cap: $("ctP").value}));
+  if (!v) return;
+  let added = 0;
+  mutate(() => {
+    let c = v.c ? cond(v.c) : null;
+    if (!c) { c = {id: uid("C"), name: q.toUpperCase(), type: "count", unit: "Nos", color: COLORS[P.proj.conds.length % COLORS.length], h: "", t: "", faces: 1, dedMin: 0, sym: v.sym, cap: v.cap}; P.proj.conds.push(c); }
+    hits.forEach(h => { let it = P.proj.items.find(i => i.cond === c.id && i.file === h.f.id && i.page === h.i && i.kind === "shape");
+      if (!it) { it = {id: uid("I"), cond: c.id, file: h.f.id, page: h.i, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
+      const p = [h.t.x, h.t.y - 4]; if (!it.pts.some(o => dist(o, p) < 2)) { it.pts.push(p); added++; } });
+    S.cond = c.id;
+  });
+  $("findRes").classList.remove("on");
+  toast(added + " counted" + (added < hits.length ? " (" + (hits.length - added) + " already had a marker)" : ""), 4000);
 }
 
 /* ------------------------------------------------------------------ markups: notes, clouds, arrows, highlights (no quantity) */
@@ -1651,17 +1726,33 @@ async function editCond(c){
      <div class="fg"><label>Thickness T (ft)</label><input type="text" id="cT" value="${d.t ? f3(+d.t) : ""}" placeholder="9&quot; = 0.75"></div>
      <div class="fg"><label>Faces</label><input type="number" id="cF" min="1" max="2" step="1" value="${+d.faces || 1}"></div>
      <div class="fg"><label>Deduct openings / voids over</label><input type="text" id="cD" value="${f2(+d.dedMin || 0)}"></div>
+     <div class="fg cntonly"><label>Count symbol</label><select id="cSym">${Object.entries(SYMS).map(([k2, v2]) => `<option value="${k2}"${(d.sym || "circle") === k2 ? " selected" : ""}>${v2}</option>`).join("")}</select></div>
+     <div class="fg cntonly"><label>Caption</label><select id="cCap"><option value="seq"${(d.cap || "seq") === "seq" ? " selected" : ""}>Number 1, 2, 3…</option><option value="name"${d.cap === "name" ? " selected" : ""}>Condition name</option><option value="text"${d.cap === "text" ? " selected" : ""}>Custom label</option><option value="none"${d.cap === "none" ? " selected" : ""}>None</option></select></div>
+     <div class="fg cntonly"><label>Custom label</label><input type="text" id="cCapT" value="${esc(d.capText || "")}" placeholder="e.g. LGT-EM"></div>
+     <div class="fg cntonly"><label>Size</label><select id="cSz"><option value="s"${d.sz === "s" ? " selected" : ""}>Small</option><option value="m"${(d.sz || "m") === "m" ? " selected" : ""}>Medium</option><option value="l"${d.sz === "l" ? " selected" : ""}>Large</option></select></div>
      <div class="fg w2"><label>Colour</label><input type="hidden" id="cC" value="${esc(d.color)}"><div class="swg" id="cSw">${swatches(d.color)}<label class="cust">Custom <input type="color" id="cCx" value="${/^#[0-9a-f]{6}$/i.test(d.color) ? d.color : "#2a78d6"}"></label></div></div></div>
      <p class="small" style="margin-top:10px">Area → Sft, or cft with T (slab, screed). Length → ft; Sft with H (plaster, 4.5" partition — 2 faces for internal plaster); cft with H and T (9" and thicker walls).
      House thresholds: masonry and plaster openings 1.00 Sft, formwork 5.00 Sft, concrete voids 0.50 cft.</p>`;
-  const v = await ask(isNew ? "New condition" : "Edit condition", body, isNew ? "Create" : "Save", () => {
+  const pr = ask(isNew ? "New condition" : "Edit condition", body, isNew ? "Create" : "Save", () => {
     const name = $("cName").value.trim(), type = $("cType").value, unit = $("cUnit").value, H = $("cH").value.trim() ? parseFt($("cH").value) : 0, T = $("cT").value.trim() ? parseFt($("cT").value) : 0;
     if (!name) return "Give the condition a name";
     if (isNaN(H) || isNaN(T)) return "Height and thickness are decimal feet (or ft-in like 10'-6\")";
     if (type === "linear" && unit !== "ft" && !(H > 0)) return "A wall measured in " + unit + " needs its height H";
     if (unit === "cft" && !(T > 0)) return "A quantity in cft needs the thickness T";
-    return {name, type, unit, h: H || "", t: T || "", faces: Math.max(1, Math.min(2, +$("cF").value || 1)), dedMin: Math.max(0, parseFloat($("cD").value) || 0), color: $("cC").value};
+    return {name, type, unit, h: H || "", t: T || "", faces: Math.max(1, Math.min(2, +$("cF").value || 1)), dedMin: Math.max(0, parseFloat($("cD").value) || 0), color: $("cC").value,
+      sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value};
   }, "cName");
+  const showCnt = () => document.querySelectorAll(".dlg .cntonly").forEach(el => { el.style.display = $("cType").value === "count" ? "" : "none"; });
+  showCnt(); $("cType").addEventListener("change", showCnt);
+  let del = false;
+  if (!isNew) { const b = document.createElement("button"); b.className = "btn dng"; b.textContent = "Delete condition"; b.style.marginRight = "auto"; b.onclick = () => { del = true; $("dlgCancel").click(); }; $("dlgF").prepend(b); }
+  const v = await pr;
+  if (del) {
+    const n = P.proj.items.filter(i => i.cond === c.id).length;
+    const ok = await ask("Delete condition", `<p>Delete <b>${esc(c.name)}</b>${n ? ` and its <b>${n}</b> measurement${n > 1 ? "s" : ""}` : ""}? Undo (Ctrl+Z) brings it back.</p>`, "Delete");
+    if (ok) { mutate(() => { P.proj.items = P.proj.items.filter(i => i.cond !== c.id); P.proj.conds = P.proj.conds.filter(x => x.id !== c.id); }); if (S.cond === c.id) S.cond = (P.proj.conds[0] || {}).id || null; S.sel = null; refresh(); }
+    return;
+  }
   if (!v) return;
   mutate(() => {
     if (isNew) { const nc = Object.assign({id: uid("C")}, v); P.proj.conds.push(nc); S.cond = nc.id; }
@@ -1820,6 +1911,38 @@ function exportCsv(){
   const t = rows.map(r => r.map(v => { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
   saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Measurement.csv");
 }
+/* the takeoff of one page as an SVG over the page at scale sc (pt -> px): areas, lengths, counts, labels, markups, legend */
+function pageOverlaySvg(file, page, sc, W, H, legend){
+  const T = p => [p[0] * sc, p[1] * sc], z = Math.max(1, sc / 1.6), h = [];
+  const lab = (p, text, col) => { const w = (text.length * 6.4 + 10) * z; return `<g><rect x="${(p[0] - w / 2).toFixed(1)}" y="${(p[1] - 9 * z).toFixed(1)}" width="${w.toFixed(1)}" height="${18 * z}" rx="${4 * z}" fill="rgba(255,255,255,.88)"/><text x="${p[0].toFixed(1)}" y="${(p[1] + 4 * z).toFixed(1)}" text-anchor="middle" font-family="Segoe UI,Arial" font-size="${11.5 * z}" font-weight="600" fill="${col}">${esc(text)}</text></g>`; };
+  const ps = P => P.map(p => T(p).map(v => v.toFixed(1)).join(",")).join(" ");
+  const tot = {};
+  P.proj.items.filter(i => i.file === file && i.page === page && !hiddenItem(i)).forEach(it => {
+    const c = cond(it.cond); if (!c) return;
+    const k = itemScale(it), rows = k ? rowsOf(it, k) : [], q = rows.reduce((a, r) => a + r.qty, 0), col = c.color, ded = it.kind === "ded";
+    tot[c.id] = (tot[c.id] || 0) + q;
+    if (c.type === "count") { h.push(countSvg(c, it.pts, T, z, -1)); return; }
+    if (it.kind === "open") { const a = T(it.pts[0]), b = T(it.pts[1]); h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${4 * z}" stroke-linecap="round"/>`); return; }
+    const poly = itemPoly(it);
+    if (c.type === "area") {
+      h.push(`<polygon points="${ps(poly)}" fill="${ded ? "#d03b3b" : col}" fill-opacity="${ded ? 0.14 : 0.22}" stroke="${ded ? "#d03b3b" : col}" stroke-width="${1.8 * z}" ${ded ? `stroke-dasharray="${5 * z} ${3 * z}"` : ""}/>`);
+      if (k) { const scr = poly.map(T); h.push(lab([scr.reduce((a, p) => a + p[0], 0) / scr.length, scr.reduce((a, p) => a + p[1], 0) / scr.length], (it.label ? it.label + ": " : "") + f2(q) + " " + c.unit, ded ? "#9b2222" : "#0b0b0b")); }
+    } else {
+      h.push(`<poly${it.shape === "circle" ? "gon" : "line"} points="${ps(poly)}" fill="none" stroke="${ded ? "#d03b3b" : col}" stroke-width="${3 * z}" stroke-linejoin="round" stroke-linecap="round" ${ded ? `stroke-dasharray="${7 * z} ${4 * z}"` : ""}/>`);
+      if (k && rows[0] && rows[0].L != null) { const e = T(poly[poly.length - 1]); h.push(lab([e[0] + 30 * z, e[1] - 10 * z], (it.label ? it.label + " " : "") + f3(rows[0].L) + " ft", "#0b0b0b")); }
+    }
+  });
+  (P.proj.marks || []).filter(m => m.file === file && m.page === page && m.type !== "fence").forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
+  if (legend) {
+    const lines = [[P.proj.name + " — " + pageName({file, page}), "#0b0b0b", ""]].concat(P.proj.conds.filter(c => tot[c.id] !== undefined).map(c => [c.name + ": " + f2(tot[c.id]) + " " + c.unit, "#0b0b0b", c.color]));
+    const lw = Math.max(...lines.map(l => l[0].length)) * 6.6 * z + 30 * z;
+    h.push(`<rect x="${8 * z}" y="${8 * z}" width="${lw}" height="${(lines.length * 17 + 10) * z}" fill="rgba(255,255,255,.93)" stroke="#c9d6e4"/>`);
+    lines.forEach((l, i) => { const y = (24 + i * 17) * z; if (l[2]) h.push(`<rect x="${16 * z}" y="${y - 9 * z}" width="${9 * z}" height="${9 * z}" fill="${l[2]}"/>`);
+      h.push(`<text x="${(l[2] ? 30 : 16) * z}" y="${y}" font-family="Segoe UI,Arial" font-size="${12 * z}" font-weight="${i ? 400 : 700}" fill="${l[1]}">${esc(l[0])}</text>`); });
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${h.join("")}</svg>`;
+}
+async function svgOnto(ctx, svg){ const img = new Image(); img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); await img.decode(); ctx.drawImage(img, 0, 0); }
 async function exportPng(){
   if (!S.page) return;
   busy("Rendering marked-up page…");
@@ -1827,41 +1950,54 @@ async function exportPng(){
     const sc = Math.min(4, 6000 / Math.max(S.base.width, S.base.height)), vp = S.page.getViewport({scale: sc}), cv = document.createElement("canvas");
     cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
     const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
-    await S.page.render({canvasContext: ctx, viewport: vp}).promise;
-    const k = curScale(), T = p => [p[0] * sc, p[1] * sc];
-    P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).forEach(it => {
-      const c = cond(it.cond); if (!c) return;
-      ctx.lineWidth = 2 * sc / 2; ctx.strokeStyle = it.kind === "shape" ? c.color : "#d03b3b"; ctx.fillStyle = c.color;
-      if (c.type === "count") { it.pts.forEach(p => { const q = T(p); ctx.beginPath(); ctx.arc(q[0], q[1], 5 * sc / 2, 0, 7); ctx.fill(); }); return; }
-      ctx.beginPath(); it.pts.forEach((p, i) => { const q = T(p); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); });
-      if (c.type === "area") { ctx.closePath(); ctx.globalAlpha = it.kind === "shape" ? 0.22 : 0.12; ctx.fillStyle = it.kind === "shape" ? c.color : "#d03b3b"; ctx.fill(); ctx.globalAlpha = 1; }
-      ctx.setLineDash(it.kind === "shape" ? [] : [6 * sc / 2, 4 * sc / 2]); ctx.stroke(); ctx.setLineDash([]);
-    });
-    (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo).forEach(m => {   // markups, drawn from the same SVG
-      const z = sc / 2, svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${cv.width}" height="${cv.height}">${markSvg(Object.assign({}, m, {id: ""}), T, z)}</svg>`;
-      S._mk = (S._mk || []).concat([svg]);
-    });
-    for (const svg of S._mk || []) { const img = new Image(); img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); await img.decode().catch(() => {}); ctx.drawImage(img, 0, 0); }
-    S._mk = [];
-    let y = 14 * sc / 2; ctx.font = `${12 * sc / 2}px Segoe UI, Arial`;
-    const lines = [P.proj.name + " — " + pageName({file: S.fileId, page: S.pageNo}) + (k ? "" : " (scale not set)")].concat(P.proj.conds.map(c => c.name + ": " + f2(condTotals(c).net) + " " + c.unit));
-    const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + 16 * sc / 2;
-    ctx.fillStyle = "rgba(255,255,255,.92)"; ctx.fillRect(8, 8, w, lines.length * 17 * sc / 2 + 8);
-    lines.forEach((l, i) => { ctx.fillStyle = i ? (P.proj.conds[i - 1].color) : "#0b0b0b"; ctx.fillRect(14, y + 4, i ? 8 * sc / 2 : 0, 8 * sc / 2); ctx.fillStyle = "#0b0b0b"; ctx.fillText(l, 14 + (i ? 12 * sc / 2 : 0), y + 12 * sc / 2); y += 17 * sc / 2; });
+    await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp}).promise;
+    await svgOnto(ctx, pageOverlaySvg(S.fileId, S.pageNo, sc, cv.width, cv.height, true));
     cv.toBlob(b => saveBlob(b, fileBase() + "_p" + S.pageNo + "_markup.png"), "image/png");
   } catch (e) { toast(e.message || String(e), 5000); }
+  busy("");
+}
+/* marked-up PDF: the original page stays vector (sharp at any zoom); the takeoff goes on top as a transparent image.
+   Rotated pages are flattened to an image instead. */
+const PDFLIB = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
+function loadPdfLib(){ return window.PDFLib ? Promise.resolve(window.PDFLib) : new Promise((ok, bad) => { const s2 = document.createElement("script"); s2.src = PDFLIB; s2.onload = () => ok(window.PDFLib); s2.onerror = () => bad(new Error("PDF library could not be loaded (offline?)")); document.head.appendChild(s2); }); }
+async function exportPdf(all){
+  if (!S.page) return;
+  busy("Building marked-up PDF…");
+  try {
+    const L = await loadPdfLib(), out = await L.PDFDocument.create();
+    const pages = all ? [...new Set(P.proj.items.concat(P.proj.marks || []).map(i => i.file + "|" + i.page))].map(x => x.split("|")).map(([f, p]) => ({f, p: +p}))
+      .sort((a, b) => P.proj.files.findIndex(x => x.id === a.f) - P.proj.files.findIndex(x => x.id === b.f) || a.p - b.p) : [{f: S.fileId, p: S.pageNo}];
+    if (!pages.length) throw new Error("Nothing measured yet");
+    const srcCache = {};
+    for (const {f, p} of pages) {
+      busy("Building marked-up PDF… page " + (pages.findIndex(x => x.f === f && x.p === p) + 1) + " of " + pages.length);
+      const pg = await (await doc(f)).getPage(p), base = pg.getViewport({scale: 1}), sc = Math.min(3, 4000 / Math.max(base.width, base.height));
+      const W = Math.ceil(base.width * sc), H = Math.ceil(base.height * sc), cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+      const ctx = cv.getContext("2d");
+      const flat = pg.rotate % 360 !== 0;
+      if (flat) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); await loadLayers(f); await pg.render({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})}).promise; }
+      await svgOnto(ctx, pageOverlaySvg(f, p, sc, W, H, true));
+      const png = await out.embedPng(await (await new Promise(r => cv.toBlob(r, "image/png"))).arrayBuffer());
+      if (flat) { const np = out.addPage([base.width, base.height]); np.drawImage(png, {x: 0, y: 0, width: base.width, height: base.height}); continue; }
+      if (!srcCache[f]) { const rec = await dbGet("pdfs", f); srcCache[f] = await L.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); }
+      const [cp] = await out.copyPages(srcCache[f], [p - 1]); out.addPage(cp);
+      const vb = pg.view;   // [x0, y0, x1, y1] of the shown box, in PDF space
+      cp.drawImage(png, {x: vb[0], y: vb[1], width: vb[2] - vb[0], height: vb[3] - vb[1]});
+    }
+    saveBlob(new Blob([await out.save()], {type: "application/pdf"}), fileBase() + (all ? "_takeoff" : "_p" + S.pageNo + "_markup") + ".pdf");
+  } catch (e) { toast("PDF export failed: " + (e.message || e), 6000); }
   busy("");
 }
 function exportJson(){ saveBlob(new Blob([JSON.stringify(Object.assign({format: "zd-takeoff", exported: new Date().toISOString()}, P.proj), null, 1)], {type: "application/json"}), fileBase() + ".takeoff.json"); }
 async function exportMenu(){
   if (!P.proj) return;
   $("dlgT").textContent = "Export"; $("dlgB").innerHTML = `<p>Measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as rows).</p>`;
-  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="exJson">Project (.json)</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
+  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="exJson">Project (.json)</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA">All marked-up pages (.pdf)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
   $("dlgBack").classList.add("on");
   const close = () => $("dlgBack").classList.remove("on");
   $("dlgCancel").onclick = close;
   $("exXls").onclick = () => { close(); exportExcel(); }; $("exCsv").onclick = () => { close(); exportCsv(); };
-  $("exPng").onclick = () => { close(); exportPng(); }; $("exJson").onclick = () => { close(); exportJson(); };
+  $("exPng").onclick = () => { close(); exportPng(); }; $("exPdf1").onclick = () => { close(); exportPdf(false); }; $("exPdfA").onclick = () => { close(); exportPdf(true); }; $("exJson").onclick = () => { close(); exportJson(); };
 }
 
 /* ------------------------------------------------------------------ events */
@@ -1888,7 +2024,13 @@ function wire(){
   $("bZo").onclick = () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2);
   $("bFit").onclick = () => { fit(); renderHi(); };
   $("bDim").onclick = () => setDim(!S.dim);
+  $("dimPct").oninput = e => setDim(+e.target.value);
   $("bTypical").onclick = () => P.proj && copyPageDialog();
+  const leftTab = t => { $("condList").style.display = t ? "none" : ""; $("layerList").style.display = t ? "" : "none"; $("tCond").classList.toggle("on", !t); $("tLay").classList.toggle("on", t); $("bNewCond").style.display = t ? "none" : ""; if (t) renderLayers(); };
+  $("tCond").onclick = () => leftTab(false); $("tLay").onclick = () => leftTab(true);
+  $("layerList").addEventListener("change", e => { if (e.target.dataset.lid) setLayer([e.target.dataset.lid], e.target.checked); });
+  $("layerList").addEventListener("click", e => { const b = e.target.closest("[data-lall]"); if (!b) return; const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; setLayer(Object.keys(cfg.getGroups()), b.dataset.lall === "1"); renderLayers(); });
+  $("layerList").addEventListener("input", e => { if (e.target.id !== "lyrQ") return; const q = e.target.value.toLowerCase(); document.querySelectorAll("#layerList .lyr").forEach(l => { l.style.display = l.dataset.name.includes(q) ? "" : "none"; }); });
   $("bCompare").onclick = () => P.proj && compareDialog();
   const view = b => { S.billView = b; $("sheet").style.display = b ? "none" : ""; $("bill").style.display = b ? "" : "none"; $("vSheet").classList.toggle("on", !b); $("vBill").classList.toggle("on", b); if (b) renderBill(); };
   $("vSheet").onclick = () => view(false); $("vBill").onclick = () => view(true);
@@ -1903,6 +2045,7 @@ function wire(){
   $("aiNew").onclick = () => { AI.history = []; AI.view = null; $("aiLog").innerHTML = ""; aiToggle(true); };
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
+  $("aiDetails").onclick = () => agentCmd("drawing details");
   $("aiRead").onclick = () => aiSend($("aiIn").value.trim() || "Measure the floor area of every room in this view.", true).then(() => { $("aiIn").value = ""; });
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
@@ -2080,7 +2223,7 @@ async function aiSnapshot(){   // the part of the page on screen, long side 1600
   const w = bx1 - bx0, h = by1 - by0, sc = Math.min(1600 / Math.max(w, h), 8), W = Math.max(1, Math.round(w * sc)), H = Math.max(1, Math.round(h * sc));
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  await S.page.render({canvasContext: ctx, viewport: S.page.getViewport({scale: sc}), transform: [1, 0, 0, 1, -bx0 * sc, -by0 * sc]}).promise;
+  await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: sc}), transform: [1, 0, 0, 1, -bx0 * sc, -by0 * sc]}).promise;
   return {data: cv.toDataURL("image/png").split(",")[1], x0: bx0, y0: by0, sc, W, H, key: S.key};
 }
 const aiToPx = (V, p) => [Math.round((p[0] - V.x0) * V.sc), Math.round((p[1] - V.y0) * V.sc)];
@@ -2154,7 +2297,7 @@ async function aiSend(text, fresh){
   if (!S.page) return aiLog("err", "Open a PDF page first.");
   let client;
   try { client = await aiClient(); } catch (e) { return aiLog("err", esc(e.message)); }
-  if (!client) { aiShowKey(true); return aiLog("err", "Add your Anthropic API key first (above)."); }
+  if (!client) return agentCmd(text);   // no API key: the free, rule-based drawing agent
   AI.busy = true; $("aiSend").disabled = true; $("aiRead").disabled = true;
   aiLog("user", esc(text));
   const wait = aiLog("wait", "Claude is reading the drawing…");
@@ -2263,19 +2406,199 @@ async function freeImport(){
 function aiShowKey(on){ $("aiKeyRow").style.display = on ? "flex" : "none"; if (on) $("aiKey").value = pref("zdTakeoffApiKey") || ""; }
 function aiToggle(on){
   $("aiPanel").classList.toggle("on", on); $("bClaude").classList.toggle("on", on);
-  if (on) { aiShowKey(false); if (!$("aiLog").children.length) aiLog("bot", "I read the part of the drawing on screen and measure rooms, walls and counts. Zoom to the area you want and type what to measure, e.g. <i>measure every bedroom</i>.<br><b>With an API key:</b> press <b>Read this view</b>.<br><b>Free, with your Claude.ai plan:</b> press <b>Copy for Claude</b>, paste in a claude.ai chat, then <b>Import from Claude</b>."); setTimeout(() => $("aiIn").focus(), 0); }
+  if (on) { aiShowKey(false); if (!$("aiLog").children.length) aiLog("bot", "I read the drawing and measure rooms, walls and counts.<br><b>Free, no key:</b> press <b>Drawing details</b> — I list the rooms, sizes, door/window tags, levels and stairs, and you give me tasks (or type <i>measure all rooms</i>, <i>count doors</i>, <i>help</i>).<br><b>With an API key:</b> zoom to an area and press <b>Read this view</b>.<br><b>Free, with your Claude.ai plan:</b> press <b>Copy for Claude</b>, paste in a claude.ai chat, then <b>Import from Claude</b>."); setTimeout(() => $("aiIn").focus(), 0); }
 }
 
+/* ------------------------------------------------------------------ free drawing agent (no API key)
+   Reads the PDF's own text: room names with their written sizes, door / window tags, levels, scale, unit types, stairs.
+   Tasks: measure every room (auto area seeded at its name, checked against the written size), count tags, schedule. */
+const ROOM_RX = /\b(MASTER\s+)?(BED\s*ROOM|BED|LOUNGE|LIVING|DRAWING|DINING|FAMILY|TV|KITCHEN|KIT|PANTRY|BATH|TOILET|W\.?C|POWDER|WASH|DRESS(ING)?|WARDROBE|W\.?I\.?C|STORE|LAUNDRY|UTILITY|SERVANT|MAID|DRIVER|GUARD|LOBBY|FOYER|ENTRANCE|PASSAGE|CORRIDOR|GALLERY|BALCONY|TERRACE|VERANDAH?|PORCH|LAWN|GARAGE|PARKING|STUDY|OFFICE|PRAYER|GYM|HALL|RECEPTION|STAIR(CASE|S)?|LIFT|LOBBY|DUCT|SHAFT|ELECTRIC(AL)?\s+ROOM|PLANT|SHOP|ROOM)\b/i;
+const SIZE_RX = /(\d+(?:\.\d+)?\s*'\s*-?\s*(?:\d+(?:\.\d+)?)?(?:\s*\d\/\d)?\s*(?:"|'')?)\s*[xX×*]\s*(\d+(?:\.\d+)?\s*'\s*-?\s*(?:\d+(?:\.\d+)?)?(?:\s*\d\/\d)?\s*(?:"|'')?)/;
+const TAG_RX = /^(D|W|V|DW|SD|FD|WD|MD|GD|CW|SW|V)\s*-?\s*(\d{1,3}[A-Z]?)$/i;
+function textLines(T){   // pdf text pieces -> lines {s, x, y, w, h, parts}
+  const t = T.slice().sort((a, b) => a.y - b.y || a.x - b.x), out = [];
+  t.forEach(p => {
+    const L = TAG_RX.test(p.s.trim().replace(/\s+/g, "")) ? null : out.find(l => !l.tag && Math.abs(l.y - p.y) < 0.45 * Math.max(l.h, p.h) && p.x - (l.x + l.w) < 1.6 * l.h && p.x - (l.x + l.w) > -0.3 * l.h);
+    if (L) { L.s += (p.x - (L.x + L.w) > 0.25 * L.h && !/\s$/.test(L.s) ? " " : "") + p.s; L.w = Math.max(L.w, p.x + p.w - L.x); L.parts.push(p); }
+    else out.push({s: p.s, x: p.x, y: p.y, w: p.w || p.s.length * p.h * 0.55, h: p.h, parts: [p], tag: TAG_RX.test(p.s.trim().replace(/\s+/g, ""))});   // a door / window tag stays on its own
+  });
+  out.forEach(l => { l.s = l.s.replace(/\s+/g, " ").trim(); });
+  return out;
+}
+async function drawingFacts(fileId, pageNo){
+  const lines = textLines(await pageTexts(fileId, pageNo)), rooms = [], tags = {}, levels = new Set(), types = new Set(), scales = new Set(), notes = new Set();
+  const sizes = lines.map(l => ({l, m: SIZE_RX.exec(l.s)})).filter(o => o.m).map(o => ({l: o.l, txt: o.m[0].replace(/\s+/g, ""), a: sizeArea(o.m[1] + "x" + o.m[2])})).filter(o => o.a > 0);
+  const used = new Set();
+  lines.forEach(l => {
+    const u = l.s.toUpperCase();
+    let m;
+    if ((m = TAG_RX.exec(u.replace(/\s+/g, "")))) { const k = m[1].toUpperCase() + m[2].toUpperCase(); (tags[k] = tags[k] || []).push([l.x + l.w / 2, l.y - l.h / 2]); return; }
+    if ((m = /SCALE\s*[:=-]?\s*(\d+\/\d+"\s*=\s*1'\s*-?\s*0"?|1"\s*=\s*\d+'\s*-?\s*0"?|1\s*:\s*\d+)/i.exec(l.s))) scales.add(m[1].replace(/\s+/g, ""));
+    if ((m = /(?:^|\s)([+\-±]\s*\d+'\s*-\s*\d+(?:\s*\d\/\d)?"?)/.exec(l.s)) || /\b(F\.?F\.?L|LVL|LEVEL)\b/i.test(l.s)) levels.add((m ? m[1] : l.s).replace(/\s+/g, " ").trim().slice(0, 40));
+    if ((m = /\b(TYPE\s*[-–]?\s*[A-Z0-9]{1,3}|\d\s*BED(ROOM)?S?\b(?!\s*ROOM\s*\d)|STUDIO|PENTHOUSE|\d{3,5}\s*S\.?\s*FT|\d{3,5}\s*SQ\.?\s*FT)/i.exec(l.s)) && !SIZE_RX.test(l.s)) types.add(l.s.slice(0, 50));
+    if (/\b(STAIR|STAIRCASE|LIFT|RAMP|UP|DN|DOWN)\b/i.test(l.s) && /STAIR|LIFT|RAMP|\bUP\b|\bDN\b/i.test(l.s)) notes.add(l.s.slice(0, 60));
+    if (ROOM_RX.test(l.s) && !SIZE_RX.test(l.s) && l.s.length <= 32 && !/\bSCALE\b|PLAN\b|DETAIL|SECTION|ELEVATION|NOTE|TYPE\b|TYPE-|S\.?\s*FT|SQ\.?\s*FT|\bUP\b|\bDN\b|\bDOWN\b|^\d+\s*BED/i.test(l.s)) {
+      const cx = l.x + l.w / 2;
+      const near = sizes.filter(z => !used.has(z) && Math.abs(z.l.x + z.l.w / 2 - cx) < Math.max(3 * l.h, l.w) && z.l.y > l.y - 0.2 * l.h && z.l.y - l.y < 3.2 * l.h).sort((a, b) => a.l.y - b.l.y)[0];
+      if (near) used.add(near);
+      rooms.push({name: l.s, x: l.x, y: l.y, w: l.w, h: l.h, size: near ? near.txt : "", sft: near ? near.a : 0, sizeY: near ? near.l.y : null});
+    } else if (ROOM_RX.test(l.s) && SIZE_RX.test(l.s)) {   // name and size on one line
+      const z = sizes.find(o => o.l === l); used.add(z);
+      rooms.push({name: l.s.replace(SIZE_RX, "").trim(), x: l.x, y: l.y, w: l.w, h: l.h, size: z.txt, sft: z.a, sizeY: null});
+    }
+  });
+  return {rooms, tags, levels: [...levels], types: [...types], scales: [...scales], notes: [...notes], textCount: lines.length};
+}
+async function agentCmd(text){
+  if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
+  aiLog("user", esc(text));
+  const t = text.toLowerCase().trim();
+  try {
+    if (/^(help|\?)$/.test(t)) return agentHelp();
+    if (/measure|area|trace/.test(t)) { const w = t.replace(/\b(measure|auto|area|areas|trace|all|every|each|the|rooms?|of|floor|please|on|this|page)\b/g, " ").trim(); return agentMeasure(w); }
+    if (/count|tag/.test(t)) { const w = t.replace(/\b(count|all|every|each|the|tags?|of|on|this|page|please|marks?)\b/g, " ").trim(); return agentCount(w); }
+    if (/schedule|list|table|export|csv/.test(t)) return agentSchedule();
+    return agentDetails();
+  } catch (e) { busy(""); aiLog("err", esc(e.message || String(e))); }
+}
+function agentHelp(){
+  aiLog("bot", `<b>Free drawing agent</b> — no API key. It reads the text inside the PDF (so not scanned drawings) and works on the page you have open. Try:<br>
+    • <i>drawing details</i> — rooms, sizes, door/window tags, levels, scale, unit types, stairs<br>
+    • <i>measure all rooms</i> or <i>measure bedroom</i> — auto area at each room name, checked against its written size<br>
+    • <i>count doors</i>, <i>count windows</i>, <i>count D1</i>, <i>count all tags</i><br>
+    • <i>room schedule</i> — the room list as a table you can copy`);
+}
+const tagKind = k => /^(D|DW|SD|FD|MD|GD)\d/.test(k) ? "Doors" : /^(W|WD|CW|SW)\d/.test(k) ? "Windows" : /^V\d/.test(k) ? "Ventilators" : "Tags";
+async function agentDetails(){
+  const F = await drawingFacts(S.fileId, S.pageNo), k = curScale();
+  if (!F.textCount) return aiLog("err", "This page has no text layer (scanned or exported as outlines) — the free agent cannot read it. Use <b>Copy for Claude</b> or an API key instead.");
+  const groups = {}; Object.entries(F.tags).forEach(([t2, pts]) => { (groups[tagKind(t2)] = groups[tagKind(t2)] || []).push([t2, pts.length]); });
+  const tot = F.rooms.reduce((a, r) => a + r.sft, 0);
+  const sec = (title, body) => body ? `<div style="margin-top:6px"><b>${title}</b><br>${body}</div>` : "";
+  const tasks = [];
+  if (F.rooms.length) tasks.push(["measure", `Measure all ${F.rooms.length} rooms with auto area and check them against the written sizes`]);
+  Object.keys(groups).forEach(g => tasks.push(["count:" + g, `Count ${g.toLowerCase()} (${groups[g].reduce((a, x) => a + x[1], 0)} tags: ${groups[g].map(x => x[0]).join(", ")})`]));
+  if (F.rooms.length) tasks.push(["schedule", "Make the room schedule (copy to Excel)"]);
+  const d = aiLog("bot", `<b>Drawing details — ${esc(pageName({file: S.fileId, page: S.pageNo}))}</b>
+    ${sec("Scale", (F.scales.length ? "Written: " + F.scales.map(esc).join(", ") : "No scale text found") + " · set: " + (k ? "yes" : "<span style='color:#b3261e'>not set — press K</span>"))}
+    ${sec("Unit / type", F.types.map(esc).join("<br>"))}
+    ${sec("Rooms (" + F.rooms.length + ")", F.rooms.map(r => `${esc(r.name)}${r.size ? ` — ${esc(r.size)} = <b>${f2(r.sft)} Sft</b>` : ""}`).join("<br>") + (tot ? `<br><span class="small">Written sizes total ${f2(tot)} Sft (inside dimensions, not the covered area)</span>` : ""))}
+    ${Object.entries(groups).map(([g, l]) => sec(g + " (" + l.reduce((a, x) => a + x[1], 0) + " Nos)", l.sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})).map(x => `${esc(x[0])} × ${x[1]}`).join(" · "))).join("")}
+    ${sec("Levels", F.levels.map(esc).join(" · "))}
+    ${sec("Stairs / lifts", F.notes.map(esc).join("<br>"))}
+    ${tasks.length ? `<div style="margin-top:8px"><b>Tasks</b> — give one to the agent:</div>` + tasks.map(([id, l2]) => `<div style="display:flex;gap:6px;align-items:center;margin-top:4px"><span style="flex:1">☐ ${esc(l2)}</span><button class="btn sm pri" data-task="${esc(id)}">Do it</button></div>`).join("") : ""}`);
+  d.addEventListener("click", e => { const b = e.target.closest("[data-task]"); if (!b) return; const id = b.dataset.task; b.disabled = true; b.textContent = "Done ✓";
+    b.parentElement.firstElementChild.textContent = b.parentElement.firstElementChild.textContent.replace("☐", "☑");
+    if (id === "measure") agentMeasure(""); else if (id === "schedule") agentSchedule(); else if (id.startsWith("count:")) agentCount(id.slice(6).toLowerCase()); });
+}
+async function agentMeasure(filter){
+  const k = curScale(); if (!k) return aiLog("err", "Set the page scale first (K) — then I can measure.");
+  const F = await drawingFacts(S.fileId, S.pageNo);
+  const words = filter.split(/\s+/).filter(Boolean).map(w => w.replace(/s$/, ""));
+  const rooms = F.rooms.filter(r => !words.length || words.some(w => r.name.toLowerCase().replace(/\s+/g, "").includes(w.replace(/\s+/g, ""))));
+  if (!rooms.length) return aiLog("err", F.rooms.length ? "No room name on this page matches “" + esc(filter) + "”." : "I found no room names in this page's text.");
+  const done = new Set(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo).map(i => (i.label || "").toLowerCase()));
+  const c = aiAreaCond(), got = []; let ok = 0, chk = 0, same2 = 0;
+  for (const [n, r] of rooms.entries()) {
+    busy(`Measuring ${n + 1} of ${rooms.length}: ${r.name}…`); await new Promise(q => setTimeout(q, 10));
+    const cx = r.x + r.w / 2, below = r.sizeY != null ? r.sizeY : r.y;
+    const seeds = [[cx, r.y - r.h * 1.7], [cx, below + r.h * 0.9], [r.x - r.h, r.y - r.h / 2], [r.x + r.w + r.h, r.y - r.h / 2], [cx, below + r.h * 2.5], [cx, r.y - r.h * 3.5]];
+    let best = null;
+    for (const sd of seeds) {
+      const res = await autoRoom(sd); if (!res.pts) continue;
+      const a = polyArea(res.pts) / k / k; if (!(a > 4)) continue;
+      const err = r.sft ? Math.abs(a - r.sft) / r.sft : 0;
+      if (!best || err < best.err) best = {pts: res.pts, a, err};
+      if (err <= 0.05) break;
+    }
+    if (!best) { aiLog("err", `${esc(r.name)}: auto area could not close the room — use the Fence tool on the open side, or draw it`); continue; }
+    const cen = q => [q.reduce((a, v) => a + v[0], 0) / q.length, q.reduce((a, v) => a + v[1], 0) / q.length];
+    const same = got.find(o => Math.abs(o.a - best.a) / best.a < 0.005 && dist(cen(o.pts), cen(best.pts)) < k);
+    if (same) { same2++; aiLog("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${f2(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
+    got.push({name: r.name, a: best.a, pts: best.pts});
+    const dup = done.has(r.name.toLowerCase());
+    mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, label: r.name.slice(0, 60)}); });
+    const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;
+    aiLog("tool", `${esc(r.name)}: <b>${f2(best.a)} Sft</b> <span class="small">${r.sft ? "written " + esc(r.size) + " = " + f2(r.sft) + " Sft" + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > r.sft ? "+" : "") + f2(best.a - r.sft) + ")</b>" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
+  }
+  busy(""); refresh();
+  aiLog("bot", `Measured ${ok + chk} of ${rooms.length} into <b>${esc(c.name)}</b>${chk ? ` — <b>${chk} to check</b> (more than 5% off the written size: fix with Fence, or the room is not a rectangle)` : ""}${same2 ? ` — <b>${same2}</b> leaked into a neighbour, not added` : ""}. Undo (Ctrl+Z) removes them one by one.`);
+}
+async function agentCount(filter){
+  const F = await drawingFacts(S.fileId, S.pageNo), f = filter.replace(/\s+/g, "").toUpperCase();
+  const pick = Object.keys(F.tags).filter(t2 => !f || f === "ALL" || f === "TAGS" ? true : /^DOORS?$/.test(f) ? tagKind(t2) === "Doors" : /^WINDOWS?$/.test(f) ? tagKind(t2) === "Windows" : /^VENT/.test(f) ? tagKind(t2) === "Ventilators" : t2 === f);
+  if (!pick.length) {
+    if (f && !/^(DOORS?|WINDOWS?|VENT\w*|ALL|TAGS)$/.test(f)) { const T = await pageTexts(S.fileId, S.pageNo), hits = T.filter(x => x.s.trim().toUpperCase() === f);   // any other exact word
+      if (hits.length) { let it; const c = condByName(f, "count"); if (!c.sym) c.sym = "circle";
+        mutate(() => { it = P.proj.items.find(i => i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && i.kind === "shape"); if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
+          hits.forEach(h => { const p = [h.x + (h.w || 0) / 2, h.y - (h.h || 6) / 2]; if (!it.pts.some(o => dist(o, p) < 2)) it.pts.push(p); }); });
+        refresh(); return aiLog("tool", `${esc(f)}: <b>${hits.length} Nos</b> counted`); } }
+    return aiLog("err", "No matching tags on this page" + (Object.keys(F.tags).length ? " — tags found: " + Object.keys(F.tags).map(esc).join(", ") : "") + ".");
+  }
+  pick.sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+  const lines = [];
+  mutate(() => pick.forEach(t2 => {
+    const c = condByName(t2, "count"); if (!c.sym) { c.sym = tagKind(t2) === "Doors" ? "square" : tagKind(t2) === "Windows" ? "diamond" : "circle"; c.cap = "seq"; }
+    let it = P.proj.items.find(i => i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && i.kind === "shape");
+    if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
+    let n = 0; F.tags[t2].forEach(p => { if (!it.pts.some(o => dist(o, p) < 2)) { it.pts.push(p); n++; } });
+    lines.push(`${esc(t2)}: <b>${F.tags[t2].length} Nos</b>${n < F.tags[t2].length ? ` <span class="small">(${F.tags[t2].length - n} already marked)</span>` : ""}`);
+  }));
+  refresh();
+  aiLog("tool", lines.join("<br>") + `<br><span class="small">One count condition per tag — markers sit on the tags. A tag written once for several doors needs its Nos edited.</span>`);
+}
+async function agentSchedule(){
+  const F = await drawingFacts(S.fileId, S.pageNo), k = curScale();
+  if (!F.rooms.length) return aiLog("err", "I found no room names in this page's text.");
+  const meas = name => { if (!k) return null; const its = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && (i.label || "").toLowerCase() === name.toLowerCase() && cond(i.cond) && cond(i.cond).type === "area"); if (!its.length) return null; return its.reduce((a, i) => a + polyArea(itemPoly(i)) / k / k, 0); };
+  const rows = F.rooms.map((r, i) => { const m = meas(r.name); return [i + 1, r.name, r.size, r.sft ? r.sft.toFixed(3) : "", m == null ? "" : m.toFixed(3), m != null && r.sft ? (m - r.sft).toFixed(3) : ""]; });
+  const tsv = [["No", "Room", "Written size", "Written Sft", "Measured Sft", "Diff Sft"]].concat(rows).map(r => r.join("\t")).join("\n");
+  const d = aiLog("bot", `<b>Room schedule</b> <button class="btn sm" data-cp="1">Copy for Excel</button><table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px"><tr><th align="left">Room</th><th align="left">Size</th><th align="right">Written</th><th align="right">Measured</th></tr>${rows.map(r => `<tr><td>${esc(r[1])}</td><td>${esc(r[2])}</td><td align="right">${r[3]}</td><td align="right">${r[4]}</td></tr>`).join("")}</table><span class="small">Sft, 3 dp.</span>`);
+  d.querySelector("[data-cp]").onclick = async () => { try { await navigator.clipboard.writeText(tsv); toast("Copied — paste into Excel"); } catch (e) { toast("Could not copy"); } };
+}
+
+/* side panels: drag the inner edge to resize, ⟨ ⟩ to hide; sizes kept per browser */
+function setPanels(){
+  const app = $("app"), sw = document.querySelector(".app > .stagewrap"), rp = document.querySelector(".app > aside.panel.right"), wide = window.innerWidth > 860;
+  sw.style.gridColumn = wide ? "2" : ""; rp.style.gridColumn = wide ? "3" : "";   // a hidden panel must not pull the drawing into its column
+  document.querySelector(".app > aside.panel:not(.right)").style.display = S.lHide ? "none" : "";
+  rp.style.display = S.rHide ? "none" : "";
+  $("openL").style.display = S.lHide ? "" : "none"; $("openR").style.display = S.rHide ? "" : "none";
+  const lw = S.lHide ? 0 : S.lw, rw = S.rHide ? 0 : S.rw;
+  app.style.gridTemplateColumns = wide ? `${lw}px minmax(0,1fr) ${rw}px` : "";
+  pref("zdTakeoffPanels", JSON.stringify({lw: S.lw, rw: S.rw, lHide: !!S.lHide, rHide: !!S.rHide}));
+  if (S.page) { applyView(); renderHi(); }
+}
+function wirePanels(){
+  try { Object.assign(S, {lw: 250, rw: 420}, JSON.parse(pref("zdTakeoffPanels") || "{}")); } catch (e) { S.lw = 250; S.rw = 420; }
+  const drag = (el, side) => el.addEventListener("pointerdown", e => {
+    e.preventDefault(); el.setPointerCapture(e.pointerId); const x0 = e.clientX, w0 = side === "l" ? S.lw : S.rw;
+    const mv = ev => { const d = ev.clientX - x0; if (side === "l") S.lw = Math.max(160, Math.min(520, w0 + d)); else S.rw = Math.max(260, Math.min(820, w0 - d)); setPanels(); };
+    const up = () => { el.removeEventListener("pointermove", mv); el.removeEventListener("pointerup", up); };
+    el.addEventListener("pointermove", mv); el.addEventListener("pointerup", up); });
+  drag($("rzL"), "l"); drag($("rzR"), "r");
+  $("hideL").onclick = () => { S.lHide = true; setPanels(); }; $("hideR").onclick = () => { S.rHide = true; setPanels(); };
+  $("openL").onclick = () => { S.lHide = false; setPanels(); }; $("openR").onclick = () => { S.rHide = false; setPanels(); };
+  window.addEventListener("resize", () => setPanels());
+  setPanels();
+}
 function pref(k, v){ try { if (v === undefined) return localStorage.getItem(k); if (v === "") localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
-function setDim(on){ S.dim = on; stage().classList.toggle("dim", on); $("bDim").classList.toggle("on", on); pref("zdTakeoffDim", on ? "1" : "0"); }
+function setDim(on){   // on = true/false, or a dimming level 0-90 %
+  if (typeof on === "number") S.dimPct = Math.max(0, Math.min(90, on)); else if (on && !S.dimPct) S.dimPct = 50;
+  S.dim = typeof on === "number" ? on > 0 : on;
+  const d = S.dim ? S.dimPct / 100 : 0, c = 1 - d, b = 1 / (0.5 + 0.5 * c);
+  stage().style.setProperty("--dimf", d ? `contrast(${c.toFixed(3)}) brightness(${b.toFixed(3)})` : "none");
+  $("bDim").classList.toggle("on", S.dim); $("dimPct").value = S.dimPct || 50; $("dimLbl").textContent = (S.dim ? S.dimPct : 0) + "%";
+  pref("zdTakeoffDim", S.dim ? String(S.dimPct) : "0");
+}
 function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); if (S.page) { renderLow(); renderHi(true); } }
 
 /* ------------------------------------------------------------------ start */
 (async function init(){
-  wire();
-  setDim(pref("zdTakeoffDim") === "1"); setThin(pref("zdTakeoffThin") === "1");
+  wire(); wirePanels();
+  { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, freeV: () => AI.freeView};   // for tests and the console
+  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
