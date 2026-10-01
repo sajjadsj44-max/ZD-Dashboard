@@ -2567,7 +2567,7 @@ function wire(){
   $("aiClose").onclick = () => aiToggle(false);
   $("aiKeyBtn").onclick = () => aiShowKey($("aiKeyRow").style.display === "none");
   $("aiKeySave").onclick = () => { const v = $("aiKey").value.trim(); pref("zdTakeoffApiKey", v); AI.client = null; aiShowKey(!v); aiLog("bot", v ? "Key saved in this browser." : "Key removed."); };
-  $("aiNew").onclick = () => { AI.history = []; AI.view = null; $("aiLog").innerHTML = ""; aiToggle(true); };
+  $("aiNew").onclick = () => { if (AI.stop) AI.stop.abort(); AI.plan = []; AI.history = []; AI.view = null; $("aiLog").innerHTML = ""; aiToggle(true); };
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
   $("aiDetails").onclick = () => agentCmd("drawing details");
@@ -2742,11 +2742,11 @@ async function aiClient(){
   AI.client = new Anthropic({apiKey: key, dangerouslyAllowBrowser: true}); AI.key = key;
   return AI.client;
 }
-async function aiSnapshot(){   // the part of the page on screen, long side 1600 px at most
+async function aiSnapshot(maxMp){   // the part of the page on screen, long side 1600 px at most (and maxMp pixels, if given)
   const st = stage(), v = S.view;
   const bx0 = Math.max(0, -v.tx / v.s), by0 = Math.max(0, -v.ty / v.s);
   const bx1 = Math.min(S.base.width, (st.clientWidth - v.tx) / v.s), by1 = Math.min(S.base.height, (st.clientHeight - v.ty) / v.s);
-  const w = bx1 - bx0, h = by1 - by0, sc = Math.min(1600 / Math.max(w, h), 8), W = Math.max(1, Math.round(w * sc)), H = Math.max(1, Math.round(h * sc));
+  const w = bx1 - bx0, h = by1 - by0, sc = Math.min(1600 / Math.max(w, h), 8, maxMp ? Math.sqrt(maxMp / (w * h)) : 8), W = Math.max(1, Math.round(w * sc)), H = Math.max(1, Math.round(h * sc));
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
   await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: sc}), transform: [1, 0, 0, 1, -bx0 * sc, -by0 * sc]}).promise;
@@ -2823,7 +2823,7 @@ async function aiSend(text, fresh){
   if (!S.page) return aiLog("err", "Open a PDF page first.");
   let client;
   try { client = await aiClient(); } catch (e) { return aiLog("err", esc(e.message)); }
-  if (!client) return agentCmd(text);   // no API key: the free, rule-based drawing agent
+  if (!client) { const smp = await aiSampler(); return smp ? aiSendPlan(smp, text) : agentCmd(text); }   // no API key: Claude through claude.ai, else the free rule-based agent
   AI.busy = true; $("aiSend").disabled = true; $("aiRead").disabled = true;
   aiLog("user", esc(text));
   const wait = aiLog("wait", "Claude is reading the drawing…");
@@ -2864,6 +2864,61 @@ async function aiSend(text, fresh){
     while (AI.history.length && AI.history[AI.history.length - 1].role === "user" && !(AI.history[AI.history.length - 1].content || []).some(x => x.type === "tool_result")) AI.history.pop();
   }
   wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
+}
+/* the claude.ai route: when this page is opened as a Claude artifact, Claude runs on the viewer's own Claude plan through
+   the artifact's `sample` capability — no API key. Same tools as above; each message sends a fresh picture of the view
+   (kept under the platform's 1.2 MP limit so the pixel coordinates Claude reads are the ones the tools use). */
+let aiSamplerP = null;
+function aiSampler(){
+  if (!aiSamplerP) aiSamplerP = (async () => {
+    if (!window.claude || typeof window.claude.use !== "function") return null;
+    try {
+      const smp = await window.claude.use("sample"); if (!smp) return null;
+      const lim = await smp.limits().catch(() => null);
+      return lim && lim.images && lim.tools ? smp : null;
+    } catch (e) { return null; }
+  })();
+  return aiSamplerP;
+}
+async function aiSendPlan(smp, text){
+  AI.busy = true; $("aiSend").disabled = true; $("aiRead").disabled = true;
+  aiLog("user", esc(text));
+  const ctl = new AbortController(); AI.stop = ctl;
+  const wait = aiLog("wait", `Claude is reading the drawing… <a href="#" class="aiStop">Stop</a>`);
+  wait.querySelector(".aiStop").onclick = e => { e.preventDefault(); ctl.abort(); };
+  let bubble = null, said = "", from = 0;   // text after a tool step goes in a new bubble below it
+  try {
+    AI.view = await aiSnapshot(1150000);
+    const blob = await (await fetch("data:image/png;base64," + AI.view.data)).blob();
+    const tools = AI_TOOLS.map(t => ({name: t.name, description: t.description, inputSchema: t.input_schema,
+      execute: async input => {
+        if (ctl.signal.aborted) throw new Error("Stopped by the user.");
+        const b = {name: t.name, input: input || {}};
+        let out; try { out = await aiRunTool(b); } catch (e) { out = {err: e.message || String(e)}; }
+        aiLog("tool", out.ok ? (out.ok.deleted ? "Deleted an area" : out.ok.length_ft != null ? `${esc(b.input.condition)} ${esc(b.input.name || "")}: <b>${f3(out.ok.length_ft)} ft</b>` : out.ok.count_on_page != null ? `${esc(out.ok.name)}: <b>${out.ok.count_on_page} Nos</b> on this page` : `${esc(b.input.name || "")}: <b>${f2(out.ok.area_sft)} Sft</b>`) + ` <span class="small">(${esc(t.name.replace("_", " "))})</span>` : `${esc(b.input.name || t.name)}: ${esc(out.err)}`);
+        bubble = null; from = said.length; refresh();
+        if (!out.ok) throw new Error(out.err);
+        return out.ok;
+      }}));
+    AI.plan = (AI.plan || []).slice(-8);
+    const turn = `${aiContext(AI.view)}\n\nThe attached image is the view on screen now; tool coordinates are pixels of this image.\n\n${text}`;
+    const input = [{role: "user", content: AI_SYSTEM}, ...AI.plan, {role: "user", content: turn}];
+    const res = await smp(input, {images: blob, tools, signal: ctl.signal,
+      onText: ({text: t}) => { said = t; const part = t.slice(from).trim(); if (!part) return; if (!bubble) bubble = aiLog("bot", ""); bubble.innerHTML = aiText(part); $("aiLog").scrollTop = 1e9; }});
+    if (!said) aiLog("bot", aiText(res.text));
+    if (res.truncated) aiLog("err", "The answer was cut short. Ask for fewer rooms at a time.");
+    AI.plan.push({role: "user", content: text}, {role: "assistant", content: res.text});
+  } catch (e) {
+    const c = e && e.code, m = {
+      cancelled: "Stopped.", not_granted: "Claude was not allowed for this page. Reload and press Allow to use it.",
+      sampling_disabled: "Claude is not available on this account.", rate_limited: "Your Claude usage limit was reached. Try again later.",
+      session_expired: "Sign in to claude.ai again.", refused: "Claude declined this request. Rephrase it.",
+      prompt_too_large: "Too much on screen. Zoom in to fewer rooms.", image_rejected: "The picture of the view was not accepted. Zoom in and try again."};
+    if (bubble && e && e.text == null && c === "refused") bubble.remove();
+    aiLog(c === "cancelled" ? "bot" : "err", esc(m[c] || "Request failed: " + ((e && e.message) || e)));
+    if (["not_granted", "sampling_disabled", "capability_disabled", "not_declared", "tools_unavailable", "images_unavailable"].includes(c)) aiSamplerP = Promise.resolve(null);
+  }
+  AI.stop = null; wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
 }
 /* the free route: the user's own Claude.ai chat does the reading. The view goes out as a picture plus instructions; the
    reply (JSON) comes back here. Each room is traced from Claude's point; if the trace disagrees with the size written
@@ -2932,7 +2987,7 @@ async function freeImport(){
 function aiShowKey(on){ $("aiKeyRow").style.display = on ? "flex" : "none"; if (on) $("aiKey").value = pref("zdTakeoffApiKey") || ""; }
 function aiToggle(on){
   $("aiPanel").classList.toggle("on", on); $("bClaude").classList.toggle("on", on);
-  if (on) { aiShowKey(false); if (!$("aiLog").children.length) aiLog("bot", "I read the drawing and measure rooms, walls and counts.<br><b>Free, no key:</b> press <b>Drawing details</b> — I list the rooms, sizes, door/window tags, levels and stairs, and you give me tasks (or type <i>measure all rooms</i>, <i>count doors</i>, <i>help</i>).<br><b>With an API key:</b> zoom to an area and press <b>Read this view</b>.<br><b>Free, with your Claude.ai plan:</b> press <b>Copy for Claude</b>, paste in a claude.ai chat, then <b>Import from Claude</b>."); setTimeout(() => $("aiIn").focus(), 0); }
+  if (on) { aiShowKey(false); if (!$("aiLog").children.length) aiLog("bot", "I read the drawing and measure rooms, walls and counts.<br><b>Free, no key:</b> press <b>Drawing details</b> — I list the rooms, sizes, door/window tags, levels and stairs, and you give me tasks (or type <i>measure all rooms</i>, <i>count doors</i>, <i>help</i>).<br><b>With an API key:</b> zoom to an area and press <b>Read this view</b>.<br><b>Free, with your Claude.ai plan:</b> press <b>Copy for Claude</b>, paste in a claude.ai chat, then <b>Import from Claude</b>."); aiSampler().then(smp => { if (smp && !pref("zdTakeoffApiKey")) aiLog("bot", "<b>Connected to Claude through claude.ai — no API key needed.</b> Zoom to an area, type what to measure (e.g. <i>9\" walls on this floor, count doors D1</i>) and press <b>Read this view</b>. It runs on your Claude plan; the first time, press Allow."); }); setTimeout(() => $("aiIn").focus(), 0); }
 }
 
 /* ------------------------------------------------------------------ free drawing agent (no API key)
