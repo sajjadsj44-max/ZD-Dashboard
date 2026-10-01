@@ -43,6 +43,21 @@ header > *{flex:none}
 header .sp{flex:1}
 header .btn.tg2.on{background:#fff;color:var(--navy);border-color:#fff}
 #stage.dim canvas{filter:contrast(.35) brightness(1.48)}
+.findw{position:relative}
+#cmpLegend{position:absolute;top:8px;right:8px;z-index:4;display:none;gap:6px;align-items:center;background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:11.5px;box-shadow:0 2px 8px rgba(15,41,66,.15)}
+.seg{display:inline-flex}.seg .btn{border-radius:0}.seg .btn:first-child{border-radius:6px 0 0 6px}.seg .btn:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
+.seg .btn.on{background:var(--purple);border-color:var(--purple);color:#fff}
+table.sh.bill td:first-child{width:52%}
+table.sh tr.ch2 td{background:#f7f9fc;font-weight:600;border-top:1px solid var(--line)}
+table.asm{width:100%;border-collapse:collapse;font-size:11.5px}table.asm th{font-size:9.5px;text-align:left;color:var(--muted);padding:3px}table.asm td{padding:2px}table.asm input{width:100%;min-width:0;padding:4px 5px;font-size:11.5px}
+.dlg:has(table.asm){width:min(760px,100%)}
+#findIn{width:170px}
+#findRes{position:fixed;top:46px;width:340px;max-height:60vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(15,41,66,.22);z-index:12;display:none;color:var(--txt)}
+#findRes.on{display:block}
+#findRes .fr{padding:6px 10px;border-bottom:1px solid #f0f4f8;display:flex;flex-direction:column;cursor:pointer;font-size:12px}
+#findRes .fr:hover{background:#f6f8fc}
+#findRes .small{font-size:10.5px;color:var(--muted)}
+.tools .tsep{width:1px;height:20px;background:var(--line);margin:0 2px}
 header a.back{color:#cfe0f5;font-size:12px;text-decoration:none;white-space:nowrap}
 
 /* layout */
@@ -212,6 +227,9 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <button class="btn sm tg2" id="bDim" title="Dimmer — fade the drawing so the takeoff stands out">&#9728; Dimmer</button>
   <button class="btn sm tg2" id="bLw" title="Line weights are on — click to draw every line thin">&#9472; Line weights</button>
   <div class="sep"></div>
+  <div class="findw"><input type="search" id="findIn" placeholder="Find text (Ctrl+F)" aria-label="Find text on the drawings"><div id="findRes"></div></div>
+  <button class="btn sm" id="bCompare" title="Overlay another revision in colour to see what changed">&#9681; Compare</button>
+  <button class="btn sm" id="bTypical" title="Copy this page's takeoff to other pages (typical floors)">&#10697; Typical</button>
   <span class="chip bad" id="scaleChip" title="Page scale — click to set or check"><i></i><span>Scale not set</span></span>
   <div class="sp"></div>
   <button class="btn sm" id="bUndo" title="Undo (Ctrl+Z)">&#8630;</button>
@@ -226,7 +244,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
     <div class="ph"><h3>Conditions</h3><button class="btn sm pri" id="bNewCond">+ New</button></div>
     <div class="pb" id="condList"></div>
     <div class="keys">
-      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>C</kbd> count</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
+      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>C</kbd> count</span><span><kbd>E</kbd> circle</span><span><kbd>N</kbd> note</span><span><kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy</span><span><kbd>Ctrl</kbd>+<kbd>F</kbd> find</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
       <span><kbd>M</kbd> measure</span><span><kbd>K</kbd> set scale</span><span><kbd>V</kbd> select</span><span><kbd>Space</kbd> pan</span>
       <span><kbd>Enter</kbd> / right-click finish</span><span><kbd>Esc</kbd> cancel</span><span><kbd>&#9003;</kbd> last point</span><span><kbd>S</kbd> snap</span>
       <span><kbd>Shift</kbd> 0° / 90°</span><span><kbd>1</kbd>–<kbd>9</kbd> condition</span>
@@ -241,11 +259,18 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
       <button class="tool" data-tool="rect" title="Rectangle area (R)">&#9645; Rect <kbd>R</kbd></button>
       <button class="tool" data-tool="auto" title="Auto area — click inside a room; its area is traced from the walls (W)">&#10024; Auto area <kbd>W</kbd></button>
       <button class="tool" id="bAutoSet" title="Auto area settings: door gap, furniture, wall lines">&#9881;</button>
+      <button class="tool" data-tool="circle" title="Circle — round slab, column, tank: centre then edge (E)">&#9711; Circle <kbd>E</kbd></button>
       <button class="tool" data-tool="count" title="Count — click each item; numbered markers (C)">&#9737; Count <kbd>C</kbd></button>
+      <button class="tool" data-tool="vsearch" title="Find similar — box one symbol; every matching symbol on the page or PDF is counted">&#128269; Find similar</button>
       <button class="tool" data-tool="ded" title="Deduction for the active condition (D)">&minus; Deduct <kbd>D</kbd></button>
       <button class="tool" data-tool="open" title="Door / window opening in a wall (O)">&#9707; Opening <kbd>O</kbd></button>
       <button class="tool" data-tool="measure" title="Quick measure — not saved (M)">&#8596; Measure <kbd>M</kbd></button>
       <button class="tool" data-tool="cal" title="Set scale from a known length (K)">&#128207; Scale <kbd>K</kbd></button>
+      <span class="tsep"></span>
+      <button class="tool" data-tool="note" title="Note — a text markup on the drawing (N)">&#128221; Note</button>
+      <button class="tool" data-tool="cloud" title="Revision cloud (U)">&#9729; Cloud</button>
+      <button class="tool" data-tool="arrow" title="Arrow with comment">&#10142; Arrow</button>
+      <button class="tool" data-tool="hilite" title="Highlight an area">&#9641; Highlight</button>
       <span class="sp"></span>
       <label class="tg" title="Snap to drawing lines (S)"><input type="checkbox" id="snapOn" checked> Snap</label>
     </div>
@@ -255,6 +280,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
       <svg id="ov" xmlns="http://www.w3.org/2000/svg"></svg>
       <div id="tip"></div>
       <div id="busy"></div>
+      <div id="cmpLegend"></div>
       <div id="drop"><div class="box"><b style="font-size:15px;color:var(--navy)">Drop a PDF drawing here</b><br>or use <b>+ PDF</b> above.<br>
         <span style="font-size:11.5px">The PDF opens in this browser only — it is not uploaded anywhere.</span></div></div>
     </div>
@@ -263,8 +289,9 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 
   <aside class="panel right">
     <div class="warnbar" id="warnbar"></div>
-    <div class="ph"><h3>Measurement sheet</h3><span class="ds" id="shInfo" style="font-size:10.5px;color:var(--muted)"></span></div>
+    <div class="ph"><h3>Measurement sheet</h3><span class="seg"><button class="btn sm on" id="vSheet">Sheet</button><button class="btn sm" id="vBill">Bill</button></span><span class="ds" id="shInfo" style="font-size:10.5px;color:var(--muted)"></span></div>
     <div class="pb" id="sheet"></div>
+    <div class="pb" id="bill" style="display:none"></div>
     <div class="props" id="props"></div>
   </aside>
 </div>
@@ -289,7 +316,8 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
     <div class="small">Your own key, from console.anthropic.com. Kept in this browser only and sent only to api.anthropic.com. Each request is billed to your Anthropic account.</div></div>
   <div id="aiLog"></div>
   <div class="aif"><textarea id="aiIn" rows="2" placeholder="e.g. measure every bedroom, or: the lounge outline is wrong, redo it"></textarea>
-    <div class="aib"><button class="btn sm" id="aiRead" title="Send a picture of the view on screen with your message">&#128065; Read this view</button><span class="sp"></span><button class="btn sm pri" id="aiSend">Send</button></div></div>
+    <div class="aib"><button class="btn sm" id="aiRead" title="API key: send a picture of the view on screen with your message">&#128065; Read this view</button><span class="sp"></span><button class="btn sm pri" id="aiSend">Send</button></div>
+    <div class="aib"><span class="small">Free:</span><button class="btn sm" id="aiCopy" title="Copy the view and instructions for your own Claude.ai chat — no API key">&#128203; Copy for Claude</button><button class="btn sm" id="aiImport" title="Paste Claude.ai's reply to draw the measurements">&#8615; Import from Claude</button></div></div>
 </aside>
 <div id="toast"></div>
 
