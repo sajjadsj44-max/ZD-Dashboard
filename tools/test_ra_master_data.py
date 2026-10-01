@@ -2,6 +2,7 @@
 
     python3 -m unittest tools/test_ra_master_data.py
 """
+import datetime as dt
 import json
 import re
 import sys
@@ -30,6 +31,23 @@ class Block(unittest.TestCase):
                 self.assertTrue(r["date"], r["code"])
             if not r["date"]:
                 self.assertTrue(r["src"].startswith("ASSUMPTION"), r["code"])
+
+    def test_remark_date_is_effective_date(self):
+        """CLAUDE.md form `<source>, DD-Mon-YYYY — <details>`: one date before the dash, equal to the line's
+        effective date (a price list is dated by its effective date, not the day it was read)."""
+        for r in BLOCK["rates"]:
+            if r["src"].startswith("ASSUMPTION") or not r["date"]:
+                continue
+            self.assertIn(" — ", r["src"], r["code"])
+            head = DATED.findall(r["src"].split(" — ")[0])
+            self.assertEqual(len(head), 1, f"{r['code']}: {r['src'][:90]}")
+            self.assertEqual(dt.datetime.strptime(head[0], "%d-%b-%Y").date().isoformat(), r["date"], r["code"])
+
+    def test_workbook_price_list_dates(self):
+        w05 = openpyxl.load_workbook(WB, data_only=True)["05 MATERIAL RATE LIBRARY"]
+        for r in range(5, w05.max_row + 1):
+            if str(w05.cell(r, 11).value or "") in ("SRC-25", "SRC-26"):  # Popular Pipes conduit / Fast Cables
+                self.assertLessEqual(str(w05.cell(r, 9).value), "2026-09-14", w05.cell(r, 1).value)
 
     def test_rows_point_at_lines(self):
         codes = {r["code"] for r in BLOCK["rates"]} | set(dash_lines(HTML))

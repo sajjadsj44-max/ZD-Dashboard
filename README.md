@@ -490,6 +490,12 @@ full revision / validation report is [`docs/master-rate-analysis-rev07.md`](docs
   left unpriced; replace each with a quotation (workbook 16 RFQ col H, or the Rate Database). The full list is in the
   report.
 
+- **Rev07b remark dates (01-Oct-2026)**: every dated Rate Database line now reads `<source>, DD-Mon-YYYY — <details>`
+  with its Effective date as the only date before the dash. 62 price-list lines are dated by the list's effective
+  date instead of the day it was read (27-Sep-2026); GRN lines cite the receipt (`Quadrangle GRN RCP-n, date — …`);
+  MRS edition periods and other dated brackets moved behind the dash; four seed lines reworded. No rate changed.
+  Details in the report's Rev07b section.
+
 Data: the `<script type="application/json" id="raMasterData">` block, merged by `raSyncBlk` (key `masRev`) and
 `raSyncMaster`. To rebuild after entering quotations in the workbook's 16 RFQ sheet:
 
@@ -497,6 +503,65 @@ Data: the `<script type="application/json" id="raMasterData">` block, merged by 
 python3 -m http.server 8765 &                                   # repo root; needs LibreOffice Calc + playwright
 tools/ra_master_build.sh RA_Master_Pakistan_FINAL_Rev06_2026-09-27.xlsx docs/
 python3 -m unittest tools/test_ra_master_data.py
+```
+
+## RFQ Tracker (Rate Analysis)
+
+Added 01-Oct-2026. QS Cost Control → **RFQ Tracker** turns the lines that need a dated quotation into
+enquiries, and the quotes received into Rate Database rates with their source and date.
+
+- **Needs a quotation**: every Rate Database line used in an analysis that has no rate, is an assumption,
+  or is dated more than the staleness limit ago (Settings, default 12 months). Most-used first, with the QS
+  category it is mainly used in and any open RFQ it is already on. Tick lines → **Create RFQ**.
+- **RFQ**: items (Rate Database unit, optional qty and spec), reply-by date, delivery and terms; vendors
+  invited, with the date each enquiry went out. Vendors who supplied similar items before are suggested
+  from the GRN Price Register. **Print enquiry** makes one letter per vendor; **Copy enquiry text** gives the
+  same as plain text to paste into WhatsApp or an email; **Enquiry Excel** for vendors who fill a sheet.
+  Nothing is sent from the page.
+- **Quotes**: vendor, quotation reference, date (not in the future), validity, terms and the rate per item.
+- **Comparative statement**: lowest per item in green; the lowest is awarded unless another is picked, which
+  needs a reason. **Apply** writes each awarded rate to its Rate Database line after a confirmation listing
+  old → new: rate, the quotation date as Effective date, status Verified, and the source
+  `<Vendor> quotation <ref>, DD-Mon-YYYY — RFQ-2026-001 <title>: lowest of 3 quotes (range); <terms>; valid to …
+  Applied <date> by <name>` (CLAUDE.md form). Every change goes to the rate change log with the analyses it
+  re-priced; **Revert** puts a line back while nobody has edited it since.
+- Status per RFQ: Draft → Sent → Quotes in → Awarded (or Closed / Cancelled); **Overdue** when the reply date
+  passes with no quote. Open and overdue RFQs also show on the Executive Dashboard.
+
+Records are kept in the rate library (`RA.rfq`, browser storage `SAJ_QSCOST_v1`) and travel with Backup JSON,
+like the Lab Rate Analysis records. The code is the `<!--zd:rfq-->` block of `zameen-developments/index.html`.
+
+```sh
+python3 -m http.server 8765 &
+node tools/test_rfq_tracker.js        # 38 browser checks (QE_LIBS=… for the offline Excel check)
+```
+
+## Price Trends (Rate Analysis)
+
+Added 01-Oct-2026. QS Cost Control → **Price Trends**, read-only, three tabs:
+
+- **Price trend**: every GRN receipt of a material over time, Quadrangle and Phoenix in their own colours,
+  the monthly median, and the Rate Database line it should agree with. Groups: OPC cement (per bag), Grade 60
+  steel (per Kg; receipts per Ton ÷ 1,000), Sargodha crush, Chenab / Lawrencepur / local sand, ready-mix
+  4000 / 4500 / 6000 psi, solid and hollow blocks — or any single GRN item. Receipts are in the house unit the
+  GRN Price Register uses; items in another unit are left out and listed, and every unit reading is stated
+  (e.g. GRN "Each" read as one bag). Tiles: latest receipt, change over 12 months (monthly medians a year
+  apart), the Rate Database rate against the latest receipt, receipts and vendors. Site and period filters,
+  table view and CSV.
+- **Rate DB vs latest GRN**: every line that is a GRN line, or whose remark names a GRN receipt as its own
+  source (before the dash) or as a `Last / Replaces … GRN RCP-n` cross-check, against the latest receipt of
+  the same item. A receipt has to match the line by rate or by name; assumptions and composites that only
+  mention a receipt are not linked; receipts in another unit are listed as not comparable. Flags: off by more
+  than the tolerance (default ±10%) and newer GRN available. Ticked lines go straight to a new RFQ.
+- **Staleness map**: Rate Database lines by kind of source (assumption, RFQ quotation, GRN, price list, MRS,
+  MAK bill, other quotation, web) × age of the source date (≤ 3, 3–6, 6–12, 12–24, > 24 months, none);
+  click a cell for its lines, tick them into an RFQ.
+
+The code is the `<!--zd:pt-->` block of `zameen-developments/index.html`; charts use Chart.js from the CDN
+(the receipts table is shown when it cannot load).
+
+```sh
+node tools/test_price_trends.js       # 29 browser checks, worked against the page's own GRN block
 ```
 
 ## Calculator tab
@@ -685,6 +750,8 @@ tools/test_ra_master_data.py        tests for the block and the workbook
 tools/test_ra_master.js             browser tests for the Master Rate Analysis merge (playwright)
 docs/master-rate-analysis-rev07.md  revision and validation report of the Master Rate Analysis Rev07
 docs/RA_Master_Pakistan_FINAL_Rev07_2026-09-27.xlsx  the Rev07 workbook
+tools/test_rfq_tracker.js           browser tests for the RFQ Tracker (playwright)
+tools/test_price_trends.js          browser tests for Price Trends & Staleness (playwright)
 tools/calc_data.py                  build the Calculator tab's section / pipe / material data block
 .github/workflows/rate-watch.yml    runs the rate watch daily and offers updates as a pull request
 .github/workflows/deploy-pages.yml  deploy to Pages + mirror main onto gh-pages

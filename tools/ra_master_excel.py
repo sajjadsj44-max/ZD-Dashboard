@@ -112,6 +112,32 @@ def ymd(d):
     return d.isoformat() if isinstance(d, (dt.date, dt.datetime)) else (d or "")
 
 
+EFFECTIVE = re.compile(r"\(effective (\d{2}-[A-Z][a-z]{2}-\d{4})\)")
+
+
+def list_dates(wb, log):
+    """A resource priced from a price list is dated by the list's effective date, not the day the list
+    was read (CLAUDE.md: the rate's source and its date). 05 col I is moved to the "(effective DD-Mon-YYYY)"
+    date of its 09 source where that is earlier. Returns the number of rows moved."""
+    w05, w09 = wb[S05], wb["09 SOURCE REGISTER"]
+    reg = {str(w09.cell(r, 1).value).strip(): str(w09.cell(r, 2).value or "")
+           for r in range(5, w09.max_row + 1) if w09.cell(r, 1).value}
+    n = 0
+    for r in range(5, w05.max_row + 1):
+        code, sid, d = w05.cell(r, 1).value, w05.cell(r, 11).value, ymd(w05.cell(r, 9).value)
+        hits = [reg[s.strip()] for s in str(sid or "").split(";") if EFFECTIVE.search(reg.get(s.strip(), ""))]
+        effs = {EFFECTIVE.search(h).group(1) for h in hits}
+        if not code or len(effs) != 1 or not re.match(r"^\d{4}-\d{2}-\d{2}$", str(d)):
+            continue
+        eff = dt.datetime.strptime(effs.pop(), "%d-%b-%Y").date().isoformat()
+        if d > eff:
+            w05.cell(r, 9).value = eff
+            log.append(("Date", code, d, eff, f"Rate date moved to the price list's effective date "
+                                              f"({hits[0]}); {d} was the day the list was read"))
+            n += 1
+    return n
+
+
 def last_row(ws, col=1):
     r = ws.max_row
     while r > 1 and ws.cell(r, col).value in (None, ""):
@@ -186,6 +212,7 @@ def update(wb, lines):
             w09.cell(r0 + i, j + 1, v)
         style_like(w09, r0 - 1, r0 + i, 6)
     w09["A2"] = "Searched 2026-09-27 (Rev06) and reconciled with the dashboard 2026-09-27 (Rev07, SRC-39..48)."
+    list_dates(wb, log)
 
     # ---- new resources in 05 / 06 (+08 rows)
     r08 = last_row(w08) + 1
