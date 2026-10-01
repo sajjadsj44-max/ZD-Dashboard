@@ -103,8 +103,11 @@ function triangles(P){
 let DB = null;
 function openDB(){
   return new Promise((ok, bad) => {
-    const rq = indexedDB.open("zdTakeoff", 1);
-    rq.onupgradeneeded = () => { const db = rq.result; db.createObjectStore("projects", {keyPath: "id"}); db.createObjectStore("pdfs"); };
+    const rq = indexedDB.open("zdTakeoff", 2);
+    rq.onupgradeneeded = () => { const db = rq.result, has = n => db.objectStoreNames.contains(n);
+      if (!has("projects")) db.createObjectStore("projects", {keyPath: "id"});
+      if (!has("pdfs")) db.createObjectStore("pdfs");
+      if (!has("backups")) db.createObjectStore("backups", {keyPath: "id"}).createIndex("pid", "pid"); };
     rq.onsuccess = () => ok(rq.result); rq.onerror = () => bad(rq.error);
   });
 }
@@ -148,24 +151,39 @@ const cond = id => P.proj.conds.find(c => c.id === id) || null;
 const hiddenItem = it => { const c = cond(it.cond); return !!(c && c.hidden); };
 
 /* ------------------------------------------------------------------ project lifecycle */
+/* project file version. v1: files scales conds items last (+ viewports marks auto layersOff added over time).
+   v2: + sheets (sheet no / title / revision / building / floor per page), openings (door & window schedule); items may
+   carry location (bldg floor zone room), QA (qa qaBy qaAt qaNote), ai / copied flags, sch (schedule mark), doorW.
+   migrate() upgrades any older file in place and never drops a property it does not know. */
+const SCHEMA = 2;
 function newProject(name){
-  return {id: uid("P"), name: name || "Untitled takeoff", created: new Date().toISOString(), updated: new Date().toISOString(), v: 1,
-          files: [], scales: {}, conds: [], items: [], last: {}};
+  return {id: uid("P"), name: name || "Untitled takeoff", created: new Date().toISOString(), updated: new Date().toISOString(), v: SCHEMA,
+          files: [], scales: {}, conds: [], items: [], last: {}, viewports: {}, marks: [], sheets: {}, openings: []};
+}
+function migrate(p){
+  const from = +p.v || 1, obj = v => v && typeof v === "object" && !Array.isArray(v), arr = Array.isArray;
+  if (!arr(p.files)) p.files = []; if (!arr(p.conds)) p.conds = []; if (!arr(p.items)) p.items = []; if (!arr(p.marks)) p.marks = []; if (!arr(p.openings)) p.openings = [];
+  if (!obj(p.scales)) p.scales = {}; if (!obj(p.viewports)) p.viewports = {}; if (!obj(p.last)) p.last = {}; if (!obj(p.sheets)) p.sheets = {};
+  p.items.forEach(it => { if (it.nos == null) it.nos = 1; if (it.label == null) it.label = ""; if (!it.kind) it.kind = "shape"; });
+  p.v = SCHEMA;
+  return from;
 }
 let saveT = null;
 function save(){ if (!P.proj) return; P.proj.updated = new Date().toISOString(); clearTimeout(saveT); saveT = setTimeout(() => dbPut("projects", P.proj).catch(e => toast("Could not save: " + e.message, 5000)), 300); }
-function snapshot(){ return JSON.stringify({conds: P.proj.conds, items: P.proj.items, scales: P.proj.scales, viewports: P.proj.viewports || {}, marks: P.proj.marks || []}); }
+const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "openings"];
+function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 function mutate(fn){
   S.undo.push(snapshot()); if (S.undo.length > 100) S.undo.shift(); S.redo = [];
   fn(); save(); refresh();
 }
 function undo(){ if (!S.undo.length) return; S.redo.push(snapshot()); restore(S.undo.pop()); }
 function redo(){ if (!S.redo.length) return; S.undo.push(snapshot()); restore(S.redo.pop()); }
-function restore(js){ const o = JSON.parse(js); P.proj.conds = o.conds; P.proj.items = o.items; P.proj.scales = o.scales; P.proj.viewports = o.viewports || {}; P.proj.marks = o.marks || []; if (S.sel && !P.proj.items.some(i => i.id === S.sel)) S.sel = null; save(); refresh(); }
+function restore(js){ const o = JSON.parse(js); UNDO_KEYS.forEach(k => { if (o[k] !== undefined) P.proj[k] = o[k]; }); migrate(P.proj); if (S.sel && !P.proj.items.some(i => i.id === S.sel)) S.sel = null; save(); refresh(); }
 
 async function openProject(id){
   const pr = await dbGet("projects", id);
   if (!pr) return toast("Project not found");
+  if ((+pr.v || 1) < SCHEMA) { const from = migrate(pr); await dbPut("projects", pr); toast("Project upgraded from file version " + from + " to " + SCHEMA, 3000); } else migrate(pr);
   Object.values(S.docs).forEach(d => d.destroy && d.destroy());
   P.proj = pr; S.docs = {}; S.geo = {}; S.texts = {}; S.undo = []; S.redo = []; S.sel = null; S.draft = []; S.page = null; S.fileId = null;
   S.cond = (pr.conds[0] || {}).id || null;
@@ -177,12 +195,13 @@ async function openProject(id){
   if (first) await gotoPage(first.file, first.page || 1); else showDrop(true);
   setTool(S.cond ? "draw" : "select");
   refresh();
+  backupNow("opened").catch(() => {});
 }
 async function showStart(){
   const all = (await dbAll("projects")).sort((a, b) => b.updated.localeCompare(a.updated));
   $("projList").innerHTML = all.length ? '<table class="plist"><thead><tr><th>Project</th><th>PDFs</th><th>Measurements</th><th>Last changed</th><th></th></tr></thead><tbody>' +
     all.map(p => `<tr><td><a data-open="${esc(p.id)}">${esc(p.name)}</a></td><td>${p.files.length}</td><td>${p.items.length}</td><td>${dmy(p.updated)}</td>
-      <td style="text-align:right;white-space:nowrap"><button class="btn sm" data-dup="${esc(p.id)}">Duplicate</button> <button class="btn sm dng" data-del="${esc(p.id)}">Delete</button></td></tr>`).join("") + "</tbody></table>"
+      <td style="text-align:right;white-space:nowrap"><button class="btn sm" data-bak="${esc(p.id)}">Backups</button> <button class="btn sm" data-dup="${esc(p.id)}">Duplicate</button> <button class="btn sm dng" data-del="${esc(p.id)}">Delete</button></td></tr>`).join("") + "</tbody></table>"
     : '<div class="empty">No projects yet — start one with <b>+ New project</b>, then drop a PDF drawing on it.</div>';
   $("start").classList.add("on");
 }
@@ -956,7 +975,7 @@ function rowsOf(it, k){
   }
   else if (c.type === "linear") {
     if (it.kind === "open") {
-      const w = it.ow ? +it.ow : r3(dist(it.pts[0], it.pts[1]) / k), h = +it.oh || 0, faces = c.unit === "Sft" ? (+c.faces || 1) : 1;
+      const sch = schOf(it.sch), w = sch ? +sch.w : it.ow ? +it.ow : r3(dist(it.pts[0], it.pts[1]) / k), h = sch ? +sch.h : +it.oh || 0, faces = c.unit === "Sft" ? (+c.faces || 1) : 1;
       const r = c.unit === "ft" ? R({nos, L: r3(w), desc: "opening"}) : c.unit === "Sft" ? R({nos: nos * faces, L: r3(w), H: r3(h), desc: "opening"}) : R({nos, L: r3(w), W: r3(+c.t || 0), H: r3(h), desc: "opening"});
       if (c.unit !== "ft" && r3(w) * r3(h) <= (+c.dedMin || 0)) r.below = true;
       rows = [r];
@@ -989,17 +1008,19 @@ function condTotals(c){
 }
 /* ------------------------------------------------------------------ assemblies and the bill
    A condition's measured quantity drives derived items by formula (PlanSwift-style assemblies), each with a rate.
-   Variables: Q net quantity in the condition's unit · A net plan area Sft · P perimeter ft of its areas · L net length
-   ft · N count · H height ft · T thickness ft. Functions: ceil floor round min max abs sqrt. Rates carry a source and
-   a date; a rate without them is flagged, never assumed. */
-function condVars(c){
-  const v = {Q: 0, A: 0, P: 0, L: 0, N: 0, H: +c.h || 0, T: +c.t || 0};
-  P.proj.items.filter(i => i.cond === c.id).forEach(it => {
+   Variables: Q net quantity in the condition's unit · A net plan area Sft · P perimeter ft of its areas · PD that
+   perimeter less the door openings on it (skirting) · D the door widths taken off · L net length ft · N count · H height
+   ft · T thickness ft. Functions: ceil floor round min max abs sqrt. Rates carry a source and a date (typed, or the
+   built-up rate of a Rate Analysis code); a rate without them is flagged, never assumed.
+   only(it) limits everything to some measurements (one revision's sheets, one floor). */
+function condVars(c, only){
+  const v = {Q: 0, A: 0, P: 0, PD: 0, D: 0, L: 0, N: 0, H: +c.h || 0, T: +c.t || 0};
+  P.proj.items.filter(i => i.cond === c.id && (!only || only(i))).forEach(it => {
     const k = itemScale(it); if (!k) return;
     const rows = rowsOf(it, k), sg = it.kind === "shape" ? 1 : -1, nos = +it.nos || 1;
     rows.forEach(r => { v.Q += r.qty; if (r.below) return;
       if (c.type === "area") v.A += r.sign * (r.nos || 1) * (r.A != null ? r.A : (r.L || 0) * (r.W || 0)); });
-    if (c.type === "area" && it.kind === "shape") v.P += nos * polyLen(itemPoly(it), true) / k;
+    if (c.type === "area" && it.kind === "shape") { const per = polyLen(itemPoly(it), true) / k, dr = Math.min(per, doorsOn(it).ft); v.P += nos * per; v.D += nos * dr; v.PD += nos * (per - dr); }
     if (c.type === "linear" && it.kind !== "open") v.L += sg * nos * (it.shape === "circle" ? Math.PI * 2 * dist(it.pts[0], it.pts[1]) : polyLen(it.pts)) / k;
     if (c.type === "count") v.N += it.pts.length * nos; else if (it.kind === "shape") v.N += nos;
   });
@@ -1031,46 +1052,63 @@ function evalFormula(src, vars){   // + - * / ^ ( ) numbers, variables, function
   if (!isFinite(v)) throw new Error("Result is not a number");
   return v;
 }
-function billLines(){   // [{c, kind:"cond"|"asm", a, name, unit, qty, rate, src, date, f, err}]
+function billLines(only){   // [{c, kind:"cond"|"asm", a, name, unit, qty, rate, src, date, ra, na, boq, f, err}]
   const out = [];
   P.proj.conds.forEach(c => {
-    const vars = condVars(c);
-    if (!P.proj.items.some(i => i.cond === c.id) && !(c.asm || []).length) return;
-    out.push({c, kind: "cond", name: c.name, unit: c.unit, qty: vars.Q, rate: +c.rate || 0, src: c.rateSrc || "", date: c.rateDate || ""});
+    const vars = condVars(c, only);
+    if (!P.proj.items.some(i => i.cond === c.id && (!only || only(i))) && (only || !(c.asm || []).length)) return;
+    out.push(Object.assign({c, kind: "cond", name: c.name, unit: c.unit, qty: vars.Q, boq: c.boq || ""}, rateOf(c, c.unit)));
     (c.asm || []).forEach(a => { let qty = 0, err = ""; try { qty = evalFormula(a.f || "0", vars); } catch (e) { err = e.message; }
-      out.push({c, kind: "asm", a, name: a.name, unit: a.unit, qty, rate: +a.rate || 0, src: a.src || "", date: a.date || "", f: a.f, err}); });
+      out.push(Object.assign({c, kind: "asm", a, name: a.name, unit: a.unit, qty, f: a.f, err, boq: a.boq || ""}, rateOf(a, a.unit))); });
   });
   return out;
 }
-const rateOk = l => !(l.rate > 0) || (l.src && l.date);
+const rateOk = l => !l.na && (!(l.rate > 0) || !!(l.src && l.date));
+const rateNote = l => l.na ? '<span style="color:var(--red)">' + esc(l.na) + "</span>" : !rateOk(l) ? '<span style="color:var(--red)">rate: ASSUMPTION — no dated source</span>'
+  : l.rate > 0 ? (l.ra ? "RA " + esc(l.ra) + (l.cached ? " (last read " + esc(dmy(l.date)) + ")" : "") + (l.assumed ? ' · <span style="color:var(--amber)">' + l.assumed + " assumed row" + (l.assumed > 1 ? "s" : "") + "</span>" : "") : "rate: " + esc(l.src) + ", " + esc(dmy(l.date))) : "rate not set";
 function renderBill(){
   const el = $("bill"); if (!P.proj) { el.innerHTML = ""; return; }
-  const L = billLines(); let tot = 0, n = 0;
-  if (!L.length) { el.innerHTML = '<div class="empty">The bill lists every condition with its quantity, plus the items each one drives (open a condition’s <b>Assembly</b> — e.g. floor tiles from the floor area, skirting from its perimeter). Rates are entered by you with their source and date.</div>'; return; }
-  let h = '<table class="sh bill"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount PKR</th></tr></thead><tbody>';
-  L.forEach(l => {
-    const amt = l.qty * l.rate; tot += amt;
-    const flag = !rateOk(l) ? '<span style="color:var(--red)">rate: ASSUMPTION — no dated source</span>' : l.rate > 0 ? "rate: " + esc(l.src) + ", " + esc(dmy(l.date)) : "rate not set";
-    h += `<tr class="${l.kind === "cond" ? "ch2" : "it"}"><td>${l.kind === "asm" ? "↳ " : `${++n}. <span class="sw" style="background:${l.c.color}"></span>`}${esc(l.name)}${l.kind === "cond" ? ` <button class="rn" data-asm="${esc(l.c.id)}" title="Items this condition drives, and rates">&#9881; Assembly</button>` : ""}
-      <div class="ds">${l.kind === "asm" ? (l.err ? '<span style="color:var(--red)">' + esc(l.err) + "</span>" : "= " + esc(l.f)) : "measured"} · ${flag}</div></td>
-      <td class="n">${f2(l.qty)}<div class="ds">${esc(l.unit)}</div></td><td class="n">${l.rate ? f2(l.rate) : "—"}</td><td class="n">${l.rate ? f2(amt) : "—"}</td></tr>`;
+  const bar = `<div class="billbar"><label class="small">Group <select id="billGrp"><option value="">— none —</option><option value="floor"${S.billGrp === "floor" ? " selected" : ""}>by building / floor</option></select></label><span style="flex:1"></span>
+    <button class="btn sm" data-bact="open" title="Door and window marks with their sizes">Opening schedule</button><button class="btn sm" data-bact="rev" title="Old revision against new: quantity and cost variance">Revision compare</button></div>`;
+  const groups = S.billGrp === "floor" ? floorGroups() : [{name: "", only: null}];
+  let all = 0, any = false, h = "";
+  groups.forEach(g => {
+    const L = billLines(g.only); if (!L.length) return; any = true;
+    let tot = 0, n = 0;
+    if (g.name) h += `<tr class="grp"><td colspan="4">${esc(g.name)}</td></tr>`;
+    L.forEach(l => {
+      const amt = l.qty * l.rate; tot += amt;
+      h += `<tr class="${l.kind === "cond" ? "ch2" : "it"}"><td>${l.kind === "asm" ? "↳ " : `${++n}. <span class="sw" style="background:${l.c.color}"></span>`}${l.boq ? `<span class="boq">${esc(l.boq)}</span> ` : ""}${esc(l.name)}${l.kind === "cond" ? ` <button class="rn" data-asm="${esc(l.c.id)}" title="Items this condition drives, and rates">&#9881; Assembly</button>` : ""}
+        <div class="ds">${l.kind === "asm" ? (l.err ? '<span style="color:var(--red)">' + esc(l.err) + "</span>" : "= " + esc(l.f)) : "measured"} · ${rateNote(l)}</div></td>
+        <td class="n">${f2(l.qty)}<div class="ds">${esc(l.unit)}</div></td><td class="n">${l.rate ? f2(l.rate) : "—"}</td><td class="n">${l.rate ? f2(amt) : "—"}</td></tr>`;
+    });
+    all += tot;
+    h += `<tr class="tot"><td>Total${g.name ? " " + esc(g.name) : ""}</td><td></td><td></td><td class="n">${f2(tot)}</td></tr>`;
   });
-  h += `<tr class="tot"><td>Total</td><td></td><td></td><td class="n">${f2(tot)}</td></tr></tbody></table>`;
-  el.innerHTML = h;
+  if (!any) { el.innerHTML = bar + '<div class="empty">The bill lists every condition with its quantity, plus the items each one drives (open a condition’s <b>Assembly</b> — e.g. floor tiles from the floor area, skirting from its perimeter less doors, PD). Rates are typed with their source and date, or linked to a Rate Analysis code.</div>'; return; }
+  if (groups.length > 1) h += `<tr class="tot"><td>Grand total</td><td></td><td></td><td class="n">${f2(all)}</td></tr>`;
+  el.innerHTML = bar + '<table class="sh bill"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount PKR</th></tr></thead><tbody>' + h + "</tbody></table>";
+}
+function floorGroups(){   // one group per building / floor found, plus the measurements with no floor
+  const keyL = it => { const L = locOf(it); return [L.bldg, L.floor].filter(Boolean).join(" · "); }, names = [...new Set(P.proj.items.map(keyL))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+  return names.map(n => ({name: n || "No floor given", only: it => keyL(it) === n}));
 }
 async function asmDialog(c){
   const rows = JSON.parse(JSON.stringify(c.asm || [])), vars = condVars(c);
   const row = (a, n) => `<tr data-r="${n}"><td><input type="text" data-k="name" value="${esc(a.name || "")}" placeholder="e.g. Floor tiles"></td><td><input type="text" data-k="unit" value="${esc(a.unit || "")}" style="width:52px" placeholder="Sft"></td>
-    <td><input type="text" data-k="f" value="${esc(a.f || "")}" placeholder="A*1.05"></td><td><input type="number" data-k="rate" value="${a.rate || ""}" style="width:80px" placeholder="0"></td>
+    <td><input type="text" data-k="f" value="${esc(a.f || "")}" placeholder="A*1.05"></td><td><input type="text" data-k="boq" value="${esc(a.boq || "")}" style="width:78px" placeholder="BOQ code"></td><td><input type="text" data-k="ra" value="${esc(a.ra || "")}" style="width:92px" placeholder="RA code" list="dlRa2"></td><td><input type="number" data-k="rate" value="${a.rate || ""}" style="width:80px" placeholder="0"></td>
     <td><input type="text" data-k="src" value="${esc(a.src || "")}" placeholder="source"></td><td><input type="date" data-k="date" value="${esc(a.date || "")}"></td><td><button class="btn sm dng" data-del="${n}" type="button">&times;</button></td></tr>`;
-  const body = () => `<p class="small">Now: Q = ${f2(vars.Q)} ${esc(c.unit)}${c.type === "area" ? ` · A = ${f2(vars.A)} Sft · P = ${f3(vars.P)} ft` : ""}${c.type === "linear" ? ` · L = ${f3(vars.L)} ft` : ""} · N = ${vars.N}${vars.H ? " · H = " + f3(vars.H) : ""}${vars.T ? " · T = " + f3(vars.T) : ""}.
-    Formulas use Q A P L N H T and ceil floor round min max abs sqrt, e.g. <code>A*1.05</code>, <code>P</code>, <code>ceil(A/4)</code>.</p>
+  const cr = rateOf(c, c.unit);
+  const body = () => `<p class="small">Now: Q = ${f2(vars.Q)} ${esc(c.unit)}${c.type === "area" ? ` · A = ${f2(vars.A)} Sft · P = ${f3(vars.P)} ft · PD = ${f3(vars.PD)} ft (P less ${f3(vars.D)} ft of doors)` : ""}${c.type === "linear" ? ` · L = ${f3(vars.L)} ft` : ""} · N = ${vars.N}${vars.H ? " · H = " + f3(vars.H) : ""}${vars.T ? " · T = " + f3(vars.T) : ""}.
+    Formulas use Q A P PD D L N H T and ceil floor round min max abs sqrt, e.g. <code>A*1.05</code>, <code>PD</code> (skirting), <code>ceil(A/4)</code>.</p>
+    ${c.ra ? `<p class="small" style="margin-top:6px">${esc(c.name)} is linked to Rate Analysis <b>${esc(c.ra)}</b> (condition editor): ${cr.na ? `<span style="color:var(--red)">${esc(cr.na)}</span>` : "PKR " + f2(cr.rate) + " / " + esc(c.unit) + " — the typed rate below is not used"}.</p>` : ""}
     <div class="grid" style="margin:8px 0"><div class="fg"><label>Rate for ${esc(c.name)} (PKR / ${esc(c.unit)})</label><input type="number" id="crRate" value="${c.rate || ""}" placeholder="0"></div>
     <div class="fg"><label>Rate source</label><input type="text" id="crSrc" value="${esc(c.rateSrc || "")}" placeholder="e.g. Phoenix GRN RCP-312"></div><div class="fg"><label>Rate date</label><input type="date" id="crDate" value="${esc(c.rateDate || "")}"></div></div>
-    <table class="asm"><thead><tr><th>Item it drives</th><th>Unit</th><th>Formula</th><th>Rate PKR</th><th>Source</th><th>Date</th><th></th></tr></thead><tbody id="asmB">${rows.map(row).join("")}</tbody></table>
+    <datalist id="dlRa2">${raLib().o ? [...raLib().items.values()].map(i => `<option value="${esc(i.code || i.id)}">${esc(String(i.desc || "").slice(0, 60) + " (" + i.unit + ")")}</option>`).join("") : ""}</datalist>
+    <table class="asm"><thead><tr><th>Item it drives</th><th>Unit</th><th>Formula</th><th>BOQ code</th><th>RA code</th><th>Rate PKR</th><th>Source</th><th>Date</th><th></th></tr></thead><tbody id="asmB">${rows.map(row).join("")}</tbody></table>
     <button class="btn sm" id="asmAdd" type="button" style="margin-top:6px">+ Item</button>
-    <p class="small" style="margin-top:8px">No rate is assumed: leave it 0 if there is no dated source. A rate without source and date is shown as an assumption.</p>`;
-  const read = () => document.querySelectorAll("#asmB tr").forEach(tr => { const a = rows[+tr.dataset.r]; tr.querySelectorAll("[data-k]").forEach(inp => { a[inp.dataset.k] = inp.dataset.k === "rate" ? (+inp.value || 0) : inp.value.trim(); }); });
+    <p class="small" style="margin-top:8px">No rate is assumed: leave it 0 if there is no dated source. A rate without source and date is shown as an assumption. An RA code takes the item's built-up rate from the Rate Analysis library instead of the typed rate; if the code is missing, in another unit or not fully priced the line shows RATE NOT AVAILABLE.</p>`;
+  const read = () => document.querySelectorAll("#asmB tr").forEach(tr => { const a = rows[+tr.dataset.r]; tr.querySelectorAll("[data-k]").forEach(inp => { a[inp.dataset.k] = inp.dataset.k === "rate" ? (+inp.value || 0) : inp.dataset.k === "ra" ? inp.value.trim().toUpperCase() : inp.value.trim(); }); });
   const p = ask("Assembly — " + c.name, body(), "Save", () => {
     read(); for (const a of rows) { if (!a.name) return "Every item needs a name"; try { evalFormula(a.f || "0", vars); } catch (e) { return a.name + ": " + e.message; } }
     return {rows, rate: +$("crRate").value || 0, src: $("crSrc").value.trim(), date: $("crDate").value};
@@ -1104,6 +1142,8 @@ function setTool(t){
   if (t === "open" && c && !(c.type === "linear")) { toast("Openings are deducted from a wall (length) condition"); t = "draw"; }
   if (t === "ded" && c && c.type === "count") { toast("Counts have no deductions — select a point and press Delete"); t = "draw"; }
   if (t !== "auto") S.pickWall = false;
+  if (t !== "open") S.openMark = null;
+  if (t !== "typref" && S.typ) { S.typ = null; $("cmpLegend").style.display = "none"; toast("Typical copy stopped — nothing copied"); }
   S.tool = t; S.draft = []; S.measure = t === "measure" ? S.measure : null;
   document.querySelectorAll("#tools .tool").forEach(b => b.classList.toggle("on", b.dataset.tool === t));
   stage().className = t === "pan" ? "pan" : t === "select" ? "" : "draw";
@@ -1115,7 +1155,8 @@ function hint(){
     draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." : c.type === "linear" ? "Click along the run; Enter, double-click or right-click to finish." : "Click each item to count it; Esc when done.",
     fence: "Draw a line across the opening where Auto area leaks (click points; double-click, right-click or Enter to finish). It counts as a wall for Auto area only.", vsearch: "Box one symbol (two corners) — every matching symbol is counted.", note: "Click where the note goes, then type it.", cloud: "Click two opposite corners of the area to cloud.", arrow: "Click the tail, then the head of the arrow.", hilite: "Click two opposite corners to highlight.",
     rect: "Click two opposite corners.", circle: "Click the centre, then a point on the edge.", vp: "Click two opposite corners of the detail drawn at another scale.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.", ded: c && c.type === "area" ? "Draw the void / cut-out to deduct; Enter to close." : "Draw the length to deduct; Enter to finish.",
-    open: "Click both sides of the opening, then enter its height.", measure: "Click points; double-click, right-click or Enter ends a measurement (it stays on screen). Esc clears. Nothing is saved.",
+    open: schOf(S.openMark) ? "Placing " + schOf(S.openMark).mark + " (" + f3(schOf(S.openMark).w) + " × " + f3(schOf(S.openMark).h) + ") — click both sides of each opening. Esc stops." : "Click both sides of the opening, then enter its height or pick its schedule mark.",
+    typref: S.typ ? (S.key === S.typ.src ? "Typical copy: click reference point " + (S.typ.a.length + 1) + " of 2 on this (source) sheet." : "Typical copy: click the same reference point " + (S.typ.b.length + 1) + " of 2 on this sheet.") : "", measure: "Click points; double-click, right-click or Enter ends a measurement (it stays on screen). Esc clears. Nothing is saved.",
     cal: "Click both ends of a known dimension, then enter its length."};
   $("stHint").textContent = H[t] || "";
 }
@@ -1123,13 +1164,13 @@ function evPos(e){ const r = stage().getBoundingClientRect(); return [e.clientX 
 function cursorPoint(e, sp){
   const raw = toBase(sp[0], sp[1]);
   let p = raw, s = null;
-  if (["draw", "rect", "ded", "open", "measure", "cal", "circle", "vp", "arrow", "fence"].indexOf(S.tool) >= 0 || S.drag) { s = snapAt(raw); if (s) p = s.p; }
+  if (["draw", "rect", "ded", "open", "measure", "cal", "circle", "vp", "arrow", "fence", "typref"].indexOf(S.tool) >= 0 || S.drag) { s = snapAt(raw); if (s) p = s.p; }
   const last = S.drag ? null : S.draft[S.draft.length - 1];
   if (e.shiftKey && last) { const dx = Math.abs(p[0] - last[0]), dy = Math.abs(p[1] - last[1]); p = dx >= dy ? [p[0], last[1]] : [last[0], p[1]]; if (s) s = Object.assign({}, s, {type: s.type + " + straight"}); }
   return {p, s};
 }
 function onDown(e){
-  if (!S.page) return;
+  if (!S.page || (e.target.closest && e.target.closest("#cmpLegend"))) return;   // the floating bar's own buttons
   const sp = evPos(e);
   stage().setPointerCapture(e.pointerId);
   if (e.pointerType === "touch") {
@@ -1143,6 +1184,7 @@ function onDown(e){
   if (S.pickWall) return pickWallAt(sp);
   if (S.tool === "auto") return autoAt(toBase(sp[0], sp[1]));
   const {p} = cursorPoint(e, sp);
+  if (S.tool === "typref") { if (!(S.typ && S.typ.T)) typClick(p).then(hint); return; }
   if (S.tool === "select") return selectAt(sp, e);
   if (S.tool === "count" || (S.tool === "draw" && cond(S.cond).type === "count")) return addCount(p);
   if (S.tool === "rect") { if (!S.draft.length) S.draft = [p]; else { const a = S.draft[0]; finish([a, [p[0], a[1]], p, [a[0], p[1]]]); } draw(); return; }
@@ -1186,7 +1228,7 @@ function onMove(e){
 function onUp(e){
   if (S.touches) { delete S.touches[e.pointerId]; if (Object.keys(S.touches).length < 2) S.pinch = null; }
   if (S.drag && S.drag.mark && S.drag.moved) { const m = (P.proj.marks || []).find(x => x.id === S.drag.mark), pts = m.pts; m.pts = S.drag.orig; mutate(() => { m.pts = pts; }); }
-  if (S.drag && S.drag.vertex != null && S.drag.moved) { const it = P.proj.items.find(i => i.id === S.drag.item), pts = it.pts.slice(); it.pts = S.drag.orig; mutate(() => { it.pts = pts; }); }
+  if (S.drag && S.drag.vertex != null && S.drag.moved) { const it = P.proj.items.find(i => i.id === S.drag.item), pts = it.pts.slice(); it.pts = S.drag.orig; mutate(() => { it.pts = pts; if (it.qa === "checked") { it.qa = ""; it.qaNote = "outline changed after it was checked"; } }); }
   S.drag = null; stage().classList.remove("panning");
 }
 function selectAt(sp, e){
@@ -1253,25 +1295,47 @@ async function finish(pts){
     }
     const v = await ask("Set the scale", `<p>The two points are <b>${d.toFixed(2)} pt</b> apart on the sheet. Enter the real length they measure.</p>
       <div class="grid" style="margin-top:10px"><div class="fg w2"><label>Real length (ft, or ft-in like 12'-6")</label><input type="text" id="dlgLen" autocomplete="off"></div>
-      <div class="fg w2"><label><input type="checkbox" id="dlgAll" style="width:auto"> Use this scale on every page of this PDF</label></div></div>`, "Set scale",
+      <div class="fg w2"><label><input type="checkbox" id="dlgAll" style="width:auto"> Then choose other pages to copy it to (Copy scale to…)</label></div></div>`, "Set scale",
       () => { const ft = parseFt($("dlgLen").value); if (!(ft > 0)) return "Enter a length, e.g. 12.5 or 12'-6\""; return {ft, all: $("dlgAll").checked}; }, "dlgLen");
     if (v) mutate(() => {
-      const k = d / v.ft, keys = v.all ? Array.from({length: (P.proj.files.find(f => f.id === S.fileId) || {pages: 1}).pages}, (_, i) => keyOf(S.fileId, i + 1)) : [S.key];
-      keys.forEach(kk => { P.proj.scales[kk] = {ptPerFt: k, how: "calibrated", text: f3(v.ft) + " ft over " + d.toFixed(2) + " pt", cal: {a: pts[0], b: pts[1], ft: v.ft, page: S.key}, verified: true, at: new Date().toISOString()}; });
-      toast("Scale set: 1 ft = " + k.toFixed(4) + " pt" + (v.all ? " on every page" : ""));
+      const k = d / v.ft;
+      P.proj.scales[S.key] = {ptPerFt: k, how: "calibrated", text: f3(v.ft) + " ft over " + d.toFixed(2) + " pt", cal: {a: pts[0], b: pts[1], ft: v.ft, page: S.key}, verified: true, at: new Date().toISOString()};
+      toast("Scale set: 1 ft = " + k.toFixed(4) + " pt");
     });
-    setTool("select"); return;
+    setTool("select");
+    if (v && v.all) copyScaleDialog();
+    return;
   }
   if (!c) return;
   if (t === "open") {
-    const ko = hereScale(pts[0]), w = ko ? dist(pts[0], pts[1]) / ko : 0;
-    const v = await ask("Opening", `<div class="grid"><div class="fg"><label>Width (ft)</label><input type="text" id="dlgW" value="${w ? f3(w) : ""}"></div>
+    const ko = hereScale(pts[0]), w = ko ? dist(pts[0], pts[1]) / ko : 0, sticky = schOf(S.openMark);
+    if (sticky) { mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "open", pts, nos: 1, label: sticky.mark, sch: sticky.id, oh: sticky.h, ow: sticky.w}); }); draw(); return; }
+    const OP = P.proj.openings || [];
+    const pr = ask("Opening", `<div class="grid"><div class="fg w2"><label>Schedule mark</label><select id="dlgSch"><option value="">— new / not in the schedule —</option>${OP.map(o => `<option value="${esc(o.id)}">${esc(o.mark)} — ${f3(o.w)} × ${f3(o.h)} ft · ${esc(o.type)}</option>`).join("")}</select></div>
+      <div class="fg"><label>Width (ft)</label><input type="text" id="dlgW" value="${w ? f3(w) : ""}"></div>
       <div class="fg"><label>Height (ft)</label><input type="text" id="dlgH" value="${P.proj.last.oh ? f3(P.proj.last.oh) : ""}" autocomplete="off"></div>
-      <div class="fg w2"><label>Label</label><input type="text" id="dlgLbl" placeholder="e.g. D1 / W2"></div></div>
-      <p class="small" style="margin-top:8px">Deducted from <b>${esc(c.name)}</b> as its own row. Openings of ${f2(+c.dedMin || 0)} Sft or less are listed but not deducted (house rule).</p>`, "Add opening",
-      () => { const W = parseFt($("dlgW").value), H = parseFt($("dlgH").value); if (!(W > 0)) return "Enter the width"; if (c.unit !== "ft" && !(H > 0)) return "Enter the height"; return {W, H, lbl: $("dlgLbl").value.trim()}; }, "dlgH");
-    if (v) mutate(() => { P.proj.last.oh = v.H; P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "open", pts, nos: 1, label: v.lbl, oh: v.H, ow: Math.abs(v.W - w) > 0.0005 ? v.W : 0}); });
-    draw(); return;
+      <div class="fg"><label>Label / mark</label><input type="text" id="dlgLbl" placeholder="e.g. D1 / W2"></div>
+      <div class="fg"><label>Type</label><select id="dlgTyp"><option>door</option><option>window</option><option>other</option></select></div>
+      <div class="fg w2"><label><input type="checkbox" id="dlgSave" style="width:auto"> Add this mark to the opening schedule</label><label><input type="checkbox" id="dlgKeep" style="width:auto"> Keep placing this mark without asking (Esc or another tool stops)</label></div></div>
+      <p class="small" style="margin-top:8px">Deducted from <b>${esc(c.name)}</b> as its own row. Openings of ${f2(+c.dedMin || 0)} Sft or less are listed but not deducted (house rule). A schedule mark's size wins over the clicked width.</p>`, "Add opening",
+      () => { const sch = schOf($("dlgSch").value), W = parseFt($("dlgW").value), H = parseFt($("dlgH").value), lbl = $("dlgLbl").value.trim();
+        if (sch) return {sch, W: sch.w, H: sch.h, lbl: sch.mark, keep: $("dlgKeep").checked};
+        if (!(W > 0)) return "Enter the width"; if (c.unit !== "ft" && !(H > 0)) return "Enter the height";
+        if ($("dlgSave").checked) { if (!lbl) return "Give the mark (e.g. D1) to add it to the schedule"; if (!(H > 0)) return "Enter the height for the schedule"; if (OP.some(o => o.mark.toUpperCase() === lbl.toUpperCase())) return lbl + " is already in the schedule — pick it above"; }
+        return {W, H, lbl, add: $("dlgSave").checked, type: $("dlgTyp").value, keep: $("dlgKeep").checked}; }, "dlgH");
+    const syncSch = () => { const s = schOf($("dlgSch").value); ["dlgW", "dlgH", "dlgLbl", "dlgTyp", "dlgSave"].forEach(id => { $(id).disabled = !!s; }); if (s) { $("dlgW").value = f3(s.w); $("dlgH").value = f3(s.h); $("dlgLbl").value = s.mark; $("dlgTyp").value = s.type; } };
+    $("dlgSch").onchange = syncSch;
+    $("dlgLbl").oninput = () => { const l = $("dlgLbl").value.trim(); $("dlgSave").checked = !!l && !OP.some(o => o.mark.toUpperCase() === l.toUpperCase()); if (/^d/i.test(l)) $("dlgTyp").value = "door"; else if (/^[wv]/i.test(l)) $("dlgTyp").value = "window"; };
+    const v = await pr;
+    if (v) mutate(() => {
+      let sch = v.sch; if (!sch && v.add) { sch = {id: uid("O"), mark: v.lbl, type: v.type, w: r3(v.W), h: r3(v.H)}; P.proj.openings.push(sch); }
+      P.proj.last.oh = v.H;
+      const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "open", pts, nos: 1, label: v.lbl, oh: v.H, ow: Math.abs(v.W - w) > 0.0005 ? v.W : 0};
+      if (sch) { it.sch = sch.id; it.ow = sch.w; it.oh = sch.h; }
+      P.proj.items.push(it);
+      if (v.keep && sch) S.openMark = sch.id;
+    });
+    hint(); draw(); return;
   }
   if (t === "circle") { if (dist(pts[0], pts[1]) < 0.5) { draw(); return; } mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", shape: "circle", pts, nos: 1, label: ""}); }); return; }
   const area = c.type === "area";
@@ -1294,6 +1358,13 @@ function drawNow(){
     h.push(`<rect x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="none" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`);
     h.push(label([a[0] + 6 + (v.name.length + 14) * 3.2, a[1] + 12], v.name + " · " + (v.ptPerFt ? v.text || "own scale" : "scale not set"), "#4b3b8f")); });
   (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo).forEach(m => h.push(markSvg(m, toScr, 1)));
+  if (S.typ) {   // typical copy: reference points, and the copies placed by them (dashed) before they are confirmed
+    const T = S.typ;
+    if (T.T && S.key !== T.src) T.mine.forEach(it => { const c = cond(it.cond), Q = (it.shape === "circle" ? itemPoly(it) : it.pts).map(T.T.f);
+      if (c && c.type === "count") Q.forEach(p => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="7" fill="none" stroke="#7b5ce0" stroke-width="2" stroke-dasharray="3 2"/>`); });
+      else h.push(`<${c && c.type === "area" || it.shape === "circle" ? "polygon" : "polyline"} points="${ptsS(Q)}" fill="${c && c.type === "area" ? "rgba(123,92,224,.10)" : "none"}" stroke="#7b5ce0" stroke-width="2" stroke-dasharray="7 4"/>`); });
+    (S.key === T.src ? T.a : T.b).forEach((p, i) => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="9" fill="rgba(255,45,85,.15)" stroke="#ff2d55" stroke-width="2"/><text x="${(q[0] + 12).toFixed(1)}" y="${(q[1] - 10).toFixed(1)}" font-size="13" font-weight="700" fill="#ff2d55" stroke="#fff" stroke-width="3" paint-order="stroke">${i + 1}</text>`); });
+  }
   if (S.tool === "vsearch" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); h.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(42,120,214,.08)" stroke="#2a78d6" stroke-width="1.5" stroke-dasharray="4 3"/>`); }
   if (["cloud", "hilite", "arrow"].indexOf(S.tool) >= 0 && S.draft.length && S.cursor) h.push(markSvg({type: S.tool, pts: [S.draft[0], S.cursor], color: "#d03b3b"}, toScr, 1));
   if (S.flash && S.flash.key === S.key && Date.now() < S.flash.until) { const q = toScr(S.flash.p); h.push(`<circle cx="${q[0]}" cy="${q[1] - 5}" r="26" fill="none" stroke="#ff2d55" stroke-width="3"><animate attributeName="r" values="18;30;18" dur="1s" repeatCount="indefinite"/></circle>`); }
@@ -1367,14 +1438,30 @@ function label(p, text, col){
 }
 
 /* ------------------------------------------------------------------ panels */
-function refresh(){ renderConds(); renderSheet(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); draw(); $("bUndo").disabled = !S.undo.length; $("bRedo").disabled = !S.redo.length; }
+function refresh(){ S.doorIx = null; renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); draw(); $("bUndo").disabled = !S.undo.length; $("bRedo").disabled = !S.redo.length; }
 let sheetT = null;
 function refreshSheetSoon(){ clearTimeout(sheetT); sheetT = setTimeout(() => { renderSheet(); renderConds(); }, 120); }
 function renderScaleChip(){
   const ch = $("scaleChip"), sc = P.proj && P.proj.scales[S.key];
   if (!S.page) { ch.className = "chip bad"; ch.lastElementChild.textContent = "No page"; return; }
   if (!sc) { ch.className = "chip bad"; ch.lastElementChild.textContent = "Scale not set — press K"; }
-  else { ch.className = "chip " + (sc.verified ? "ok" : "warn"); ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · calibrated") + (sc.verified ? " · verified" : " · not verified"); }
+  else { ch.className = "chip " + (sc.verified ? "ok" : "warn"); ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "inherited" ? "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · inherited from " + keyName(sc.from) : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · calibrated") + (sc.verified ? " · verified" : " · not verified"); }
+  markPageSel();
+}
+/* a page's scale status: Verified / Calibrated (both checked against a known length), Inherited (copied from another page,
+   not yet checked), From note (read from the drawing's note, not yet checked), Unknown */
+function scaleState(sc){
+  if (!sc) return {k: "bad", ic: "✕", t: "Unknown"};
+  if (sc.how === "inherited") return sc.verified ? {k: "ok", ic: "✓", t: "Inherited · verified"} : {k: "warn", ic: "⚠", t: "Inherited from " + keyName(sc.from)};
+  if (sc.how === "calibrated") return {k: "ok", ic: "✓", t: "Calibrated"};
+  return sc.verified ? {k: "ok", ic: "✓", t: "Verified"} : {k: "warn", ic: "⚠", t: "From note — not verified"};
+}
+function keyName(key){ if (!key) return "?"; const [f, p] = String(key).split(":"); return pageName({file: f, page: +p}); }
+function markPageSel(){
+  if (!P.proj) return;
+  [...$("pageSel").options].forEach(o => { const [f, p] = o.value.split("|"); if (!p) return; const sh = (P.proj.sheets || {})[keyOf(f, +p)] || {}, st = scaleState(P.proj.scales[keyOf(f, +p)]);
+    const t = (sh.no ? sh.no + (sh.rev ? " " + sh.rev : "") + " · " : "") + ((P.proj.files.find(x => x.id === f) || {name: "?"}).name.replace(/\.pdf$/i, "")) + " — p." + p + "  " + st.ic;
+    if (o.textContent !== t) o.textContent = t; o.title = "Scale: " + st.t; });
 }
 function scaleLabel(sc){ const c = (S.texts[S.key] ? scaleCandidates(S.key) : []).find(x => Math.abs(x.ptPerFt - sc.ptPerFt) < 1e-6); return c ? c.label : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt"; }
 function renderConds(){
@@ -1389,26 +1476,27 @@ function renderSheet(){
   const el = $("sheet");
   if (!P.proj) { el.innerHTML = ""; return; }
   const missing = P.proj.items.filter(it => !itemScale(it)).length;
-  const unv = Object.values(P.proj.scales).filter(s => !s.verified).length;
+  const unv = Object.values(P.proj.scales).filter(s => !s.verified && s.how !== "inherited").length, inh = Object.values(P.proj.scales).filter(s => !s.verified && s.how === "inherited").length;
   const wb = $("warnbar"), msgs = [];
   if (missing) msgs.push(missing + " measurement" + (missing > 1 ? "s are" : " is") + " on a page with no scale — set it with <b>K</b>; they are left out of the totals.");
   if (unv) msgs.push(unv + " page scale" + (unv > 1 ? "s were" : " was") + " read from the drawing note and not yet checked — click the scale chip → <b>Verify</b> with a known dimension.");
+  if (inh) msgs.push(inh + " page scale" + (inh > 1 ? "s were" : " was") + " copied from another page (inherited) and not yet checked on that page — open it, click the scale chip → <b>Verify</b>.");
   wb.innerHTML = msgs.join("<br>"); wb.classList.toggle("on", msgs.length > 0);
   if (!P.proj.items.length) { el.innerHTML = '<div class="empty">Measurements appear here as you draw, in the house format: <b>Nos × L × W × H</b> in decimal feet, deductions as their own rows.</div>'; $("shInfo").textContent = ""; return; }
   let h = '<table class="sh"><thead><tr><th>#</th><th>Description</th><th class="n">Nos × L × W × H</th><th class="n">Qty</th></tr></thead><tbody>', n = 0;
   P.proj.conds.forEach(c => {
-    const its = P.proj.items.filter(i => i.cond === c.id); if (!its.length) return;
+    const its = P.proj.items.filter(i => i.cond === c.id && qaFilterOk(i)); if (!its.length) return;
     const t = condTotals(c);
-    h += `<tr class="ch"><td colspan="4"><span class="sw" style="background:${c.color}"></span>${esc(c.name)} <span style="font-weight:400;color:var(--muted)">(${esc(c.unit)})</span></td></tr>`;
+    h += `<tr class="ch"><td colspan="4"><span class="sw" style="background:${c.color}"></span>${c.boq ? `<span class="boq">${esc(c.boq)}</span> ` : ""}${esc(c.name)} <span style="font-weight:400;color:var(--muted)">(${esc(c.unit)})</span></td></tr>`;
     its.forEach(it => {
-      const k = itemScale(it), vp = viewportAt(it.file, it.page, it.pts[0]), pg = pageName(it) + (vp ? " · " + vp.name : "");
+      const k = itemScale(it), vp = viewportAt(it.file, it.page, it.pts[0]), lt = locText(locOf(it)), pg = pageName(it) + (vp ? " · " + vp.name : "") + (lt ? " · " + lt : "");
       if (!k) { h += `<tr class="it${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${++n}</td><td>${esc(it.label || kindName(it, c))}<div class="ds">${esc(pg)} · scale not set</div></td><td class="n">—</td><td class="n">—</td></tr>`; return; }
       rowsOf(it, k).forEach((r, i) => {
         const desc = (r.sign < 0 ? "Ded. " : "") + (it.label || kindName(it, c)) + (r.part ? " — part " + String.fromCharCode(96 + r.part) : "");
         const sub = [pg, r.runs && r.runs.length > 1 ? "runs " + r.runs.map(f3).join(" + ") : "", r.how === "poly" ? "plan area of the " + r.sides + "-sided outline" : "", r.how === "circle" ? "circle, dia " + f3(r.D) + " ft" + (c.type === "area" ? " — area = π/4 × D²" : " — length = π × D") : "",
                      c.type === "linear" && c.unit === "Sft" && (+c.faces || 1) > 1 && it.kind !== "ded" ? "Nos includes " + c.faces + " faces" : "",
                      r.below ? "≤ " + f2(+c.dedMin || 0) + " " + (c.unit === "cft" && c.type === "area" ? "cft" : "Sft") + " — not deducted (house rule)" : ""].filter(Boolean).join(" · ");
-        h += `<tr class="it${r.sign < 0 ? " ded" : ""}${r.below ? " below" : ""}${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${i === 0 ? ++n : ""}</td><td>${esc(desc)}${i === 0 ? `<button class="rn" title="Rename (e.g. Bedroom 1)" data-rename="${esc(it.id)}">&#9998;</button>` : ""}<div class="ds">${esc(sub)}</div></td>
+        h += `<tr class="it${r.sign < 0 ? " ded" : ""}${r.below ? " below" : ""}${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${i === 0 ? ++n : ""}</td><td>${esc(desc)}${i === 0 ? qaBadges(it) + `<button class="rn" title="Rename (e.g. Bedroom 1)" data-rename="${esc(it.id)}">&#9998;</button>` : ""}<div class="ds">${esc(sub)}</div></td>
           <td class="n">${dimText(r)}</td><td class="n">${r.below ? "0.00" : f2(r.qty)}</td></tr>`;
       });
     });
@@ -1416,6 +1504,14 @@ function renderSheet(){
   });
   el.innerHTML = h + "</tbody></table>";
   $("shInfo").textContent = P.proj.items.length + " measurements";
+}
+function qaBadges(it){
+  const b = [];
+  if (it.qa === "checked") b.push(`<span class="tag g" title="Checked by ${esc(it.qaBy)} on ${esc(dmy(it.qaAt))}">✓ checked</span>`);
+  if (it.qa === "recheck") b.push(`<span class="tag r" title="${esc(it.qaNote || "")}">recheck</span>`);
+  if (it.ai && it.qa !== "checked") b.push('<span class="tag a" title="Measured by the AI assistant — check it">AI</span>');
+  if (it.copied && it.qa !== "checked") b.push(`<span class="tag a" title="Copied from ${esc(keyName(it.copied.from))} (${esc(it.copied.how)}) — check it">copied</span>`);
+  return b.length ? " " + b.join("") : "";
 }
 function pageName(it){ const f = P.proj.files.find(x => x.id === it.file); return (f ? f.name.replace(/\.pdf$/i, "") : "?") + " p." + it.page; }
 function kindName(it, c){ return it.kind === "open" ? "Opening" : c.type === "count" ? c.name : c.type === "area" ? (it.kind === "ded" ? "void" : "area") : (it.kind === "ded" ? "length" : "run"); }
@@ -1437,7 +1533,14 @@ function renderProps(){
     ${c.type !== "count" && it.kind !== "open" ? `<div class="fg"><label>Measured as</label><select data-prop="kind"><option value="shape"${it.kind === "shape" ? " selected" : ""}>Add</option><option value="ded"${it.kind === "ded" ? " selected" : ""}>Deduct</option></select></div>` : ""}
     <div class="fg"><label>Condition</label><select data-prop="cond">${P.proj.conds.filter(x => x.type === c.type).map(x => `<option value="${esc(x.id)}"${x.id === it.cond ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>
     <button class="btn dng" data-act="delItem">Delete</button></div>
-    ${c.type === "count" && S.selPt >= 0 ? '<div style="margin-top:8px"><button class="btn sm dng" data-act="delPoint">Remove this point</button></div>' : ""}`;
+    ${c.type === "count" && S.selPt >= 0 ? '<div style="margin-top:8px"><button class="btn sm dng" data-act="delPoint">Remove this point</button></div>' : ""}
+    ${it.kind === "open" ? `<div class="row" style="margin-top:6px"><div class="fg"><label>Schedule mark</label><select data-prop="sch"><option value="">— none (own size) —</option>${(P.proj.openings || []).map(o => `<option value="${esc(o.id)}"${o.id === it.sch ? " selected" : ""}>${esc(o.mark)} — ${f3(o.w)} × ${f3(o.h)} ${esc(o.type)}</option>`).join("")}</select></div></div>` : ""}
+    ${c.type === "area" && it.kind === "shape" && k ? (() => { const dr = doorsOn(it), per = polyLen(poly, true) / k; return `<div class="row" style="margin-top:6px"><div class="fg"><label>Doors on outline (ft)</label><input type="text" data-prop="doorW" value="${dr.manual ? f3(dr.ft) : ""}" placeholder="auto ${f3(dr.ft)}"></div>
+      <div class="fg" style="flex:2"><span class="small">P ${f3(per)} − doors ${f3(Math.min(per, dr.ft))} = <b>PD ${f3(per - Math.min(per, dr.ft))} ft</b> ${dr.manual ? "(typed)" : "(auto: " + dr.n + " door opening" + (dr.n === 1 ? "" : "s") + " on this outline)"}</span></div></div>`; })() : ""}
+    <div class="row" style="margin-top:6px">${LOC_KEYS.map(lk => { const sh = (P.proj.sheets || {})[keyOf(it.file, it.page)] || {}; return `<div class="fg"><label>${LOC_NAMES[lk]}</label><input type="text" data-prop="${lk}" list="dlp_${lk}" value="${esc(it[lk] || "")}" placeholder="${esc(sh[lk] || (lk === "room" ? it.label || "" : ""))}"><datalist id="dlp_${lk}">${locValues(lk).map(x => `<option value="${esc(x)}">`).join("")}</datalist></div>`; }).join("")}</div>
+    <div class="row" style="margin-top:6px"><div class="fg"><label>QA status</label><select data-prop="qa">${Object.entries(QA_NAMES).map(([q, n]) => `<option value="${q}"${(it.qa || "") === q ? " selected" : ""}>${n}</option>`).join("")}</select></div>
+      <div class="fg" style="flex:2"><label>QA note</label><input type="text" data-prop="qaNote" value="${esc(it.qaNote || "")}" placeholder="e.g. confirm against section B-B"></div></div>
+    <div class="small" style="margin-top:4px">${it.qa === "checked" ? "Checked by " + esc(it.qaBy) + ", " + esc(dmy(it.qaAt)) : "Not checked"}${it.ai ? " · AI-generated" : ""}${it.copied ? " · copied from " + esc(keyName(it.copied.from)) + " (" + esc(it.copied.how) + ")" : ""}</div>`;
   el.classList.add("on");
 }
 
@@ -1475,29 +1578,6 @@ function pasteClip(){
   const it = Object.assign(JSON.parse(JSON.stringify(c)), {id: uid("I"), file: S.fileId, page: S.pageNo, pts: c.pts.map(p => [p[0] + dx, p[1] + dy])});
   mutate(() => { P.proj.items.push(it); }); S.sel = it.id; setTool("select"); S.sel = it.id; refresh();
 }
-/* typical floors: every measurement on this page copied to other pages at the same place (same drawing layout) */
-async function copyPageDialog(){
-  if (!S.page) return;
-  const mine = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo);
-  if (!mine.length) return toast("Nothing measured on this page yet");
-  const opts = []; P.proj.files.forEach(f => { for (let i = 1; i <= f.pages; i++) if (!(f.id === S.fileId && i === S.pageNo)) opts.push({f, i}); });
-  if (!opts.length) return toast("Add another page or PDF first");
-  const v = await ask("Copy this page's takeoff to…", `<p>${mine.length} measurement${mine.length > 1 ? "s" : ""} on <b>${esc(pageName({file: S.fileId, page: S.pageNo}))}</b> are copied to the same place on each page you tick — for typical floors drawn the same way.</p>
-    <div style="max-height:260px;overflow:auto;margin-top:8px;border:1px solid var(--line);border-radius:6px;padding:6px">${opts.map((o, n) => `<label style="display:flex;gap:6px;align-items:center;padding:2px 0;text-transform:none;letter-spacing:0;font-size:12px;font-weight:400;color:var(--txt)"><input type="checkbox" data-cp="${n}" style="width:auto"> ${esc(o.f.name.replace(/\.pdf$/i, ""))} — p.${o.i}${P.proj.scales[keyOf(o.f.id, o.i)] ? "" : " <span class='small'>(no scale)</span>"}</label>`).join("")}</div>
-    <div class="fg w2" style="margin-top:8px"><label><input type="checkbox" id="cpScale" style="width:auto" checked> Give pages without a scale this page's scale (and viewports)</label></div>`, "Copy",
-    () => { const pick = [...document.querySelectorAll("[data-cp]")].filter(x => x.checked).map(x => opts[+x.dataset.cp]); return pick.length ? {pick, sc: $("cpScale").checked} : "Tick at least one page"; });
-  if (!v) return;
-  mutate(() => {
-    v.pick.forEach(o => {
-      const key = keyOf(o.f.id, o.i);
-      if (v.sc && !P.proj.scales[key] && P.proj.scales[S.key]) P.proj.scales[key] = Object.assign({}, P.proj.scales[S.key]);
-      if (v.sc && P.proj.viewports && P.proj.viewports[S.key] && !(P.proj.viewports[key] || []).length) P.proj.viewports[key] = P.proj.viewports[S.key].map(x => Object.assign({}, x, {id: uid("V"), r: x.r.slice()}));
-      mine.forEach(it => P.proj.items.push(Object.assign(JSON.parse(JSON.stringify(it)), {id: uid("I"), file: o.f.id, page: o.i})));
-    });
-  });
-  toast(mine.length + " measurement" + (mine.length > 1 ? "s" : "") + " copied to " + v.pick.length + " page" + (v.pick.length > 1 ? "s" : ""), 4000);
-}
-
 /* ------------------------------------------------------------------ find similar symbols (auto count)
    The symbol boxed by the user is cut from the rendered page as an ink mask; every window of the page (and of the
    other pages, if asked) whose ink matches it — template ink found in the window, window ink explained by the
@@ -1726,6 +1806,9 @@ async function editCond(c){
      <div class="fg"><label>Thickness T (ft)</label><input type="text" id="cT" value="${d.t ? f3(+d.t) : ""}" placeholder="9&quot; = 0.75"></div>
      <div class="fg"><label>Faces</label><input type="number" id="cF" min="1" max="2" step="1" value="${+d.faces || 1}"></div>
      <div class="fg"><label>Deduct openings / voids over</label><input type="text" id="cD" value="${f2(+d.dedMin || 0)}"></div>
+     <div class="fg"><label>BOQ / WBS code</label><input type="text" id="cBoq" value="${esc(d.boq || "")}" placeholder="e.g. CW-01-009"></div>
+     <div class="fg"><label>Rate Analysis code</label><input type="text" id="cRa" value="${esc(d.ra || "")}" list="dlRa" placeholder="e.g. CIV-MAS-001" autocomplete="off"><datalist id="dlRa">${raLib().o ? [...raLib().items.values()].map(i => `<option value="${esc(i.code || i.id)}">${esc((i.qs || i.sub || "") + " — " + String(i.desc || "").slice(0, 60) + " (" + i.unit + ")")}</option>`).join("") : ""}</datalist></div>
+     <div class="fg w2 small" id="cRaInfo"></div>
      <div class="fg cntonly"><label>Count symbol</label><select id="cSym">${Object.entries(SYMS).map(([k2, v2]) => `<option value="${k2}"${(d.sym || "circle") === k2 ? " selected" : ""}>${v2}</option>`).join("")}</select></div>
      <div class="fg cntonly"><label>Caption</label><select id="cCap"><option value="seq"${(d.cap || "seq") === "seq" ? " selected" : ""}>Number 1, 2, 3…</option><option value="name"${d.cap === "name" ? " selected" : ""}>Condition name</option><option value="text"${d.cap === "text" ? " selected" : ""}>Custom label</option><option value="none"${d.cap === "none" ? " selected" : ""}>None</option></select></div>
      <div class="fg cntonly"><label>Custom label</label><input type="text" id="cCapT" value="${esc(d.capText || "")}" placeholder="e.g. LGT-EM"></div>
@@ -1740,8 +1823,12 @@ async function editCond(c){
     if (type === "linear" && unit !== "ft" && !(H > 0)) return "A wall measured in " + unit + " needs its height H";
     if (unit === "cft" && !(T > 0)) return "A quantity in cft needs the thickness T";
     return {name, type, unit, h: H || "", t: T || "", faces: Math.max(1, Math.min(2, +$("cF").value || 1)), dedMin: Math.max(0, parseFloat($("cD").value) || 0), color: $("cC").value,
-      sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value};
+      sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value, boq: $("cBoq").value.trim(), ra: $("cRa").value.trim().toUpperCase()};
   }, "cName");
+  const raInfo = () => { const code = $("cRa").value.trim(); if (!code) { $("cRaInfo").innerHTML = raLib().o ? "Link a Rate Analysis item to take its built-up rate (or type the rate in the bill’s Assembly)." : "Rate Analysis library not found in this browser — open SAJ QSCOST → Rate Analysis on this site once to link codes."; return; }
+    const r = rateOf({ra: code.toUpperCase()}, $("cUnit").value), p = raPrice(code);
+    $("cRaInfo").innerHTML = r.na ? `<span style="color:var(--red)">${esc(r.na)}</span>` : `<b>${esc(p.code)}</b> — ${esc(String(p.desc).slice(0, 110))} · <b>PKR ${f2(r.rate)} / ${esc(p.unit)}</b>${r.assumed ? ` · <span style="color:var(--amber)">${r.assumed} assumed row(s)</span>` : ""}`; };
+  $("cRa").addEventListener("input", raInfo); $("cUnit").addEventListener("change", raInfo); raInfo();
   const showCnt = () => document.querySelectorAll(".dlg .cntonly").forEach(el => { el.style.display = $("cType").value === "count" ? "" : "none"; });
   showCnt(); $("cType").addEventListener("change", showCnt);
   let del = false;
@@ -1777,14 +1864,14 @@ document.addEventListener("change", e => {   // dialog: preset and type change
 async function scaleDialog(){
   if (!S.page) return;
   const sc = P.proj.scales[S.key], cands = scaleCandidates(S.key);
-  const body = `<p>Current: <b>${sc ? (sc.how === "note" ? esc(scaleLabel(sc)) + " (from the drawing note)" : "calibrated — " + esc(sc.text)) : "not set"}</b>${sc ? (sc.verified ? " · <span style='color:var(--green)'>verified</span>" : " · <span style='color:var(--amber)'>not verified</span>") : ""}</p>
+  const body = `<p>Current: <b>${sc ? (sc.how === "note" ? esc(scaleLabel(sc)) + " (from the drawing note)" : sc.how === "inherited" ? "inherited — " + esc(sc.text) : "calibrated — " + esc(sc.text)) : "not set"}</b>${sc ? (sc.verified ? " · <span style='color:var(--green)'>verified</span>" : " · <span style='color:var(--amber)'>not verified</span>") : ""} · status <b>${esc(scaleState(sc).ic + " " + scaleState(sc).t)}</b></p>
     ${sc && sc.note ? `<p class="small">${esc(sc.note)}</p>` : ""}
     ${cands.length ? `<p style="margin-top:10px"><b>Scale notes found on this page</b></p>` + cands.map((c, i) => `<div class="cand" data-cand="${i}"><b>${esc(c.label)}</b><span class="small">“${esc(c.text.slice(0, 70))}”${c.note ? " · " + esc(c.note) : ""}</span></div>`).join("") : '<p class="small" style="margin-top:10px">No scale note was found in the text of this page (scanned drawings have no text).</p>'}
     <p class="small" style="margin-top:10px">A scale note is only right if the PDF is printed at the drawing's paper size. <b>Verify</b> by measuring a dimension you know; <b>Calibrate</b> sets the scale from it.</p>
     <p style="margin-top:12px"><b>Viewports</b> <span class="small">— parts of this sheet drawn at another scale (enlarged details, sections). Measurements inside one use its scale.</span></p>
     ${((P.proj.viewports || {})[S.key] || []).map(v => `<div class="cand"><b>${esc(v.name)}</b><span class="small">${v.ptPerFt ? esc(v.text || "1 ft = " + v.ptPerFt.toFixed(3) + " pt") : "scale not set"}</span><span style="flex:1"></span><button class="btn sm" data-vpcal="${esc(v.id)}">Calibrate</button><button class="btn sm dng" data-vpdel="${esc(v.id)}">Delete</button></div>`).join("") || '<p class="small">None on this page.</p>'}`;
   $("dlgT").textContent = "Page scale"; $("dlgB").innerHTML = body;
-  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="dlgVp">+ Viewport…</button>${sc ? '<button class="btn" id="dlgAll">Use on every page of this PDF</button><button class="btn" id="dlgVer">Verify…</button>' : ""}<button class="btn pri" id="dlgCal">Calibrate…</button>`;
+  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="dlgVp">+ Viewport…</button>${sc ? '<button class="btn" id="dlgAll">Copy scale to…</button><button class="btn" id="dlgVer">Verify…</button>' : ""}<button class="btn pri" id="dlgCal">Calibrate…</button>`;
   $("dlgBack").classList.add("on");
   const close = () => $("dlgBack").classList.remove("on");
   $("dlgCancel").onclick = close;
@@ -1794,7 +1881,7 @@ async function scaleDialog(){
   $("dlgB").querySelectorAll("[data-vpcal]").forEach(b => b.onclick = () => { close(); S.calVp = b.dataset.vpcal; setTool("cal"); toast("Click both ends of a known dimension inside the viewport"); });
   if (sc) {
     $("dlgVer").onclick = () => { close(); S.verify = true; setTool("measure"); toast("Measure a dimension you know, then press Enter"); };
-    $("dlgAll").onclick = () => { close(); mutate(() => { const f = P.proj.files.find(x => x.id === S.fileId); for (let i = 1; i <= f.pages; i++) P.proj.scales[keyOf(S.fileId, i)] = Object.assign({}, sc); }); toast("Scale copied to every page of this PDF"); };
+    $("dlgAll").onclick = () => { close(); copyScaleDialog(); };
   }
   $("dlgB").querySelectorAll("[data-cand]").forEach(el => el.onclick = () => { const c = cands[+el.dataset.cand]; close(); mutate(() => { P.proj.scales[S.key] = {ptPerFt: c.ptPerFt, how: "note", text: c.text, note: c.note || "", factor: c.factor || 1, verified: false, at: new Date().toISOString()}; }); });
 }
@@ -1836,16 +1923,16 @@ async function exportExcel(){
     const BLUE = {type: "pattern", pattern: "solid", fgColor: {argb: "FFDDEBFF"}}, GREEN = {type: "pattern", pattern: "solid", fgColor: {argb: "FFE2F4E8"}},
           GREY = {type: "pattern", pattern: "solid", fgColor: {argb: "FFE6E9EE"}}, YELLOW = {type: "pattern", pattern: "solid", fgColor: {argb: "FFFFF2C2"}}, HEAD = {type: "pattern", pattern: "solid", fgColor: {argb: "FF12263F"}};
     const ws = wb.addWorksheet("Measurement", {views: [{state: "frozen", ySplit: 4}], pageSetup: {paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0}});
-    ws.columns = [{width: 6}, {width: 48}, {width: 16}, {width: 8}, {width: 11}, {width: 11}, {width: 11}, {width: 13}, {width: 7}];
+    ws.columns = [{width: 6}, {width: 48}, {width: 16}, {width: 8}, {width: 11}, {width: 11}, {width: 11}, {width: 13}, {width: 7}, {width: 26}, {width: 22}];
     ws.mergeCells("A1:I1"); ws.getCell("A1").value = "MEASUREMENT SHEET — " + P.proj.name; ws.getCell("A1").font = {bold: true, size: 13};
     ws.mergeCells("A2:I2"); ws.getCell("A2").value = "PDF takeoff · " + dmy(today()) + " · decimal feet · Qty = Nos × L × W × H (blank = not used) · deductions as negative rows";
     ws.getCell("A2").font = {size: 9, color: {argb: "FF52514E"}};
     ws.mergeCells("A3:I3"); ws.getCell("A3").value = "Blue = measured / input · green = formula · grey = totals · yellow = check (see Assumptions)"; ws.getCell("A3").font = {size: 9, color: {argb: "FF52514E"}};
-    const hr = ws.getRow(4); hr.values = ["S.No", "Description", "Drawing / page", "Nos", "L (ft) / Area", "W (ft)", "H (ft)", "Qty", "Unit"];
+    const hr = ws.getRow(4); hr.values = ["S.No", "Description", "Drawing / page", "Nos", "L (ft) / Area", "W (ft)", "H (ft)", "Qty", "Unit", "Location", "QA"];
     hr.font = {bold: true, color: {argb: "FFFFFFFF"}}; hr.eachCell(c => { c.fill = HEAD; });
     let row = 5, sn = 0; const totals = [];
     for (const g of sheetRows()) {
-      const head = ws.getRow(row); head.values = ["", g.c.name + " (" + g.c.unit + ")" + (g.c.type === "linear" && g.c.unit !== "ft" ? " — H " + f3(+g.c.h) + " ft" + (g.c.t ? ", T " + f3(+g.c.t) + " ft" : "") + ((+g.c.faces || 1) > 1 ? ", " + g.c.faces + " faces" : "") : g.c.unit === "cft" ? " — T " + f3(+g.c.t) + " ft" : "")];
+      const head = ws.getRow(row); head.values = ["", (g.c.boq ? g.c.boq + " — " : "") + g.c.name + " (" + g.c.unit + ")" + (g.c.type === "linear" && g.c.unit !== "ft" ? " — H " + f3(+g.c.h) + " ft" + (g.c.t ? ", T " + f3(+g.c.t) + " ft" : "") + ((+g.c.faces || 1) > 1 ? ", " + g.c.faces + " faces" : "") : g.c.unit === "cft" ? " — T " + f3(+g.c.t) + " ft" : "")];
       head.font = {bold: true}; for (let n = 1; n <= 9; n++) head.getCell(n).fill = GREY;
       const first = ++row;
       g.rows.forEach(x => {
@@ -1863,6 +1950,8 @@ async function exportExcel(){
         q.value = r.below ? {formula: "0", result: 0} : {formula: (r.sign < 0 ? "-" : "") + `PRODUCT(D${row}:G${row})`, result: r.qty};
         q.fill = r.below ? YELLOW : GREEN; q.numFmt = "#,##0.00";
         rr.getCell(9).value = r.unit;
+        if (i === 0) { rr.getCell(10).value = locText(locOf(it)); rr.getCell(11).value = QA_NAMES[it.qa || ""] + (it.qa === "checked" ? " — " + it.qaBy + ", " + dmy(it.qaAt) : "") + (it.ai && it.qa !== "checked" ? " · AI-generated" : "") + (it.copied && it.qa !== "checked" ? " · copied, not checked" : "");
+          if (it.qa !== "checked") rr.getCell(11).fill = YELLOW; }
         if (r.sign < 0) rr.font = {color: {argb: "FFB32D2D"}};
         row++;
       });
@@ -1873,22 +1962,38 @@ async function exportExcel(){
     }
     await ws.protect("", {selectLockedCells: true, selectUnlockedCells: true, formatColumns: true});
     const bl = wb.addWorksheet("Bill");
-    bl.columns = [{header: "S.No", width: 6}, {header: "Item", width: 46}, {header: "Formula", width: 18}, {header: "Qty", width: 13}, {header: "Unit", width: 8}, {header: "Rate PKR", width: 13}, {header: "Amount PKR", width: 15}, {header: "Rate source / date", width: 42}];
+    bl.columns = [{header: "S.No", width: 6}, {header: "BOQ code", width: 13}, {header: "Item", width: 46}, {header: "Formula", width: 18}, {header: "Qty", width: 13}, {header: "Unit", width: 8}, {header: "Rate PKR", width: 13}, {header: "Amount PKR", width: 15}, {header: "RA code", width: 13}, {header: "Rate source / date", width: 60}];
     bl.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; bl.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
-    let bn = 0, br = 2;
-    billLines().forEach(l => { const r = bl.addRow([l.kind === "cond" ? ++bn : "", (l.kind === "asm" ? "   " : "") + l.name, l.kind === "asm" ? l.f : "measured", +l.qty.toFixed(3), l.unit, l.rate || 0, {formula: `D${br}*F${br}`, result: l.qty * (l.rate || 0)}, l.rate ? (rateOk(l) ? l.src + ", " + dmy(l.date) : "ASSUMPTION — no dated source") : "rate not set"]);
-      r.getCell(4).numFmt = "#,##0.000"; r.getCell(6).numFmt = "#,##0.00"; r.getCell(7).numFmt = "#,##0.00"; r.getCell(4).fill = GREEN; r.getCell(6).fill = BLUE; r.getCell(7).fill = GREEN;
-      if (l.kind === "cond") r.font = {bold: true}; if (!rateOk(l)) r.getCell(8).fill = YELLOW; br++; });
-    const bt = bl.addRow(["", "Total", "", "", "", "", {formula: `SUM(G2:G${br - 1})`, result: billLines().reduce((a, l) => a + l.qty * (l.rate || 0), 0)}]); bt.font = {bold: true}; bt.getCell(7).numFmt = "#,##0.00"; bt.eachCell(c2 => { c2.fill = GREY; });
+    let bn = 0, br = 2; const BL = billLines();
+    BL.forEach(l => { const r = bl.addRow([l.kind === "cond" ? ++bn : "", l.boq || "", (l.kind === "asm" ? "   " : "") + l.name, l.kind === "asm" ? l.f : "measured", +l.qty.toFixed(3), l.unit, l.rate || 0, {formula: `E${br}*G${br}`, result: l.qty * (l.rate || 0)}, l.ra || "",
+        l.na ? l.na : l.rate ? (rateOk(l) ? l.src + (l.ra ? "" : ", " + dmy(l.date)) : "ASSUMPTION — no dated source") : "rate not set"]);
+      r.getCell(5).numFmt = "#,##0.000"; r.getCell(7).numFmt = "#,##0.00"; r.getCell(8).numFmt = "#,##0.00"; r.getCell(5).fill = GREEN; r.getCell(7).fill = BLUE; r.getCell(8).fill = GREEN;
+      if (l.kind === "cond") r.font = {bold: true}; if (!rateOk(l) || !(l.rate > 0)) r.getCell(10).fill = YELLOW; br++; });
+    const bt = bl.addRow(["", "", "Total", "", "", "", "", {formula: `SUM(H2:H${br - 1})`, result: BL.reduce((a, l) => a + l.qty * (l.rate || 0), 0)}]); bt.font = {bold: true}; bt.getCell(8).numFmt = "#,##0.00"; bt.eachCell(c2 => { c2.fill = GREY; });
+    const lc = wb.addWorksheet("By location");
+    lc.columns = [{header: "Building / floor", width: 26}, {header: "BOQ code", width: 13}, {header: "Item", width: 46}, {header: "Qty", width: 13}, {header: "Unit", width: 8}, {header: "Rate PKR", width: 13}, {header: "Amount PKR", width: 15}];
+    lc.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; lc.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
+    floorGroups().forEach(g => billLines(g.only).forEach(l => { const r = lc.addRow([g.name, l.boq || "", (l.kind === "asm" ? "   " : "") + l.name, +l.qty.toFixed(3), l.unit, l.rate || 0, {formula: `D${lc.rowCount + 1}*F${lc.rowCount + 1}`, result: l.qty * (l.rate || 0)}]);
+      r.getCell(4).numFmt = "#,##0.000"; r.getCell(6).numFmt = "#,##0.00"; r.getCell(7).numFmt = "#,##0.00"; }));
+    if ((P.proj.openings || []).length) {
+      const os = wb.addWorksheet("Openings");
+      os.columns = [{header: "Mark", width: 10}, {header: "Type", width: 10}, {header: "Width ft", width: 11}, {header: "Height ft", width: 11}, {header: "Area Sft", width: 11}, {header: "Placed", width: 9}];
+      os.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; os.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
+      P.proj.openings.forEach(o => { const r = os.addRow([o.mark, o.type, +o.w, +o.h, {formula: `C${os.rowCount + 1}*D${os.rowCount + 1}`, result: o.w * o.h}, P.proj.items.filter(i => i.sch === o.id).length]); r.getCell(3).numFmt = "0.000"; r.getCell(4).numFmt = "0.000"; r.getCell(5).numFmt = "#,##0.00"; });
+    }
+    const V = validation(), vs = wb.addWorksheet("Validation");
+    vs.columns = [{header: "Status", width: 12}, {header: "Check — " + V.lvl, width: 110}];
+    vs.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; vs.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
+    (V.L.length ? V.L : [{lvl: "PASS", msg: "No errors or warnings"}]).forEach(x => { const r = vs.addRow([x.lvl, x.msg]); r.getCell(1).font = {bold: true, color: {argb: x.lvl === "ERROR" ? "FFB32D2D" : x.lvl === "WARNING" ? "FF8A5A00" : "FF16723F"}}; });
     const sm = wb.addWorksheet("Summary");
     sm.columns = [{header: "Condition", width: 48}, {header: "Qty", width: 14}, {header: "Unit", width: 8}, {header: "Measurements", width: 14}];
     sm.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; sm.getRow(1).eachCell(c => { c.fill = HEAD; });
     totals.forEach(t => { const r = sm.addRow([t.c.name, {formula: "Measurement!" + t.cell, result: t.t.net}, t.c.unit, P.proj.items.filter(i => i.cond === t.c.id).length]); r.getCell(2).numFmt = "#,##0.00"; r.getCell(2).fill = GREEN; });
     const au = wb.addWorksheet("Scale & audit");
-    au.columns = [{header: "Drawing", width: 34}, {header: "Page", width: 7}, {header: "Scale", width: 26}, {header: "1 ft on the sheet (pt)", width: 18}, {header: "How", width: 12}, {header: "Verified", width: 10}, {header: "Check", width: 40}];
+    au.columns = [{header: "Drawing", width: 34}, {header: "Page", width: 7}, {header: "Scale", width: 26}, {header: "1 ft on the sheet (pt)", width: 18}, {header: "How", width: 12}, {header: "Verified", width: 10}, {header: "Check", width: 40}, {header: "Status", width: 26}];
     au.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; au.getRow(1).eachCell(c => { c.fill = HEAD; });
     Object.entries(P.proj.scales).forEach(([kk, sc]) => { const [fid, pg] = kk.split(":"), f = P.proj.files.find(x => x.id === fid); if (!f) return;
-      const r = au.addRow([f.name, +pg, sc.how === "note" ? sc.text : "calibrated: " + sc.text, +sc.ptPerFt.toFixed(5), sc.how === "note" ? "scale note" : "calibrated", sc.verified ? "yes" : "NO", sc.check ? `measured ${f3(sc.check.measured)} ft vs printed ${f3(sc.check.printed)} ft` : sc.note || ""]);
+      const r = au.addRow([f.name, +pg, sc.how === "note" ? sc.text : sc.how === "inherited" ? sc.text : "calibrated: " + sc.text, +sc.ptPerFt.toFixed(5), sc.how === "note" ? "scale note" : sc.how === "inherited" ? "inherited" : "calibrated", sc.verified ? "yes" : "NO", sc.check ? `measured ${f3(sc.check.measured)} ft vs printed ${f3(sc.check.printed)} ft` : sc.note || "", scaleState(sc).t]);
       if (!sc.verified) r.eachCell(c => { c.fill = YELLOW; }); });
     const as = wb.addWorksheet("Assumptions");
     as.columns = [{header: "#", width: 5}, {header: "Item to confirm", width: 90}];
@@ -1904,10 +2009,10 @@ async function exportExcel(){
   busy("");
 }
 function exportCsv(){
-  const rows = [["S.No", "Condition", "Description", "Drawing / page", "Nos", "L (ft) / Area (Sft)", "W (ft)", "H (ft)", "Qty", "Unit"]];
+  const rows = [["S.No", "Condition", "Description", "Drawing / page", "Nos", "L (ft) / Area (Sft)", "W (ft)", "H (ft)", "Qty", "Unit", "BOQ code", "Location", "QA"]];
   let sn = 0;
-  sheetRows().forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.A != null ? f3(r.A) : r.L == null ? "" : f3(r.L), r.W == null ? "" : f3(r.W), r.H == null ? "" : f3(r.H), (r.qty).toFixed(2), r.unit]); });
-    rows.push(["", g.c.name, "Total " + g.c.name, "", "", "", "", "", g.t.net.toFixed(2), g.c.unit]); });
+  sheetRows().forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.A != null ? f3(r.A) : r.L == null ? "" : f3(r.L), r.W == null ? "" : f3(r.W), r.H == null ? "" : f3(r.H), (r.qty).toFixed(2), r.unit, g.c.boq || "", x.i === 0 ? locText(locOf(x.it)) : "", x.i === 0 ? QA_NAMES[x.it.qa || ""] + (x.it.ai && x.it.qa !== "checked" ? " · AI" : "") + (x.it.copied && x.it.qa !== "checked" ? " · copied" : "") : ""]); });
+    rows.push(["", g.c.name, "Total " + g.c.name, "", "", "", "", "", g.t.net.toFixed(2), g.c.unit, g.c.boq || "", "", ""]); });
   const t = rows.map(r => r.map(v => { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
   saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Measurement.csv");
 }
@@ -1991,13 +2096,426 @@ async function exportPdf(all){
 function exportJson(){ saveBlob(new Blob([JSON.stringify(Object.assign({format: "zd-takeoff", exported: new Date().toISOString()}, P.proj), null, 1)], {type: "application/json"}), fileBase() + ".takeoff.json"); }
 async function exportMenu(){
   if (!P.proj) return;
-  $("dlgT").textContent = "Export"; $("dlgB").innerHTML = `<p>Measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as rows).</p>`;
-  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="exJson">Project (.json)</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA">All marked-up pages (.pdf)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
+  const V = validation(), nE = V.L.filter(x => x.lvl === "ERROR").length, nW = V.L.length - nE;
+  $("dlgT").textContent = "Export";
+  $("dlgB").innerHTML = `<div class="wide"></div><p><b>Takeoff check: <span style="color:${lvlCol(V.lvl)}">${V.lvl}</span></b>${V.L.length ? ` — ${nE} error${nE === 1 ? "" : "s"}, ${nW} warning${nW === 1 ? "" : "s"}` : " — scales, heights, thicknesses, codes, rates, QA all in order"}</p>
+    ${V.L.length ? `<div style="max-height:240px;overflow:auto;margin:6px 0;border:1px solid var(--line);border-radius:6px">${V.L.map(x => `<div style="padding:4px 8px;border-bottom:1px solid #f0f4f8;font-size:12px"><b style="color:${lvlCol(x.lvl)};display:inline-block;width:70px">${x.lvl}</b>${esc(x.msg)}</div>`).join("")}</div>` : ""}
+    <p class="small">${V.lvl === "PASS" ? "" : "You can still export; the Excel file carries this list on its Validation sheet. "}Measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as rows).</p>`;
+  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="exBak">Backups…</button><button class="btn" id="exJson">Project (.json)</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA">All marked-up pages (.pdf)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
   $("dlgBack").classList.add("on");
   const close = () => $("dlgBack").classList.remove("on");
   $("dlgCancel").onclick = close;
   $("exXls").onclick = () => { close(); exportExcel(); }; $("exCsv").onclick = () => { close(); exportCsv(); };
-  $("exPng").onclick = () => { close(); exportPng(); }; $("exPdf1").onclick = () => { close(); exportPdf(false); }; $("exPdfA").onclick = () => { close(); exportPdf(true); }; $("exJson").onclick = () => { close(); exportJson(); };
+  $("exPng").onclick = () => { close(); exportPng(); }; $("exPdf1").onclick = () => { close(); exportPdf(false); }; $("exPdfA").onclick = () => { close(); exportPdf(true); }; $("exJson").onclick = () => { close(); exportJson(); }; $("exBak").onclick = () => backupsDialog();
+}
+
+/* ------------------------------------------------------------------ pages: list, paper sizes */
+function allPages(){ const o = []; P.proj.files.forEach(f => { for (let i = 1; i <= f.pages; i++) o.push({f, i, key: keyOf(f.id, i)}); }); return o; }
+async function pageSize(fid, i){
+  S.sizes = S.sizes || {}; const k = keyOf(fid, i);
+  if (S.sizes[k] === undefined) { try { const vp = (await (await doc(fid)).getPage(i)).getViewport({scale: 1}); S.sizes[k] = [vp.width, vp.height]; } catch (e) { S.sizes[k] = null; } }
+  return S.sizes[k];
+}
+const pageList = (rows, id) => `<div style="max-height:280px;overflow:auto;margin-top:8px;border:1px solid var(--line);border-radius:6px;padding:4px 6px">${rows.map((o, n) =>
+  `<label class="pk"><input type="checkbox" data-${id}="${n}"${o.on ? " checked" : ""}> <span style="flex:1">${o.html}</span></label>`).join("")}</div>`;
+
+/* ------------------------------------------------------------------ copy scale to… (never one scale blindly on every page) */
+async function copyScaleDialog(){
+  const sc = P.proj.scales[S.key]; if (!sc) return toast("Set this page's scale first");
+  const pages = allPages().filter(o => o.key !== S.key);
+  if (!pages.length) return toast("This project has only one page");
+  busy("Reading page sizes and scale notes…");
+  const mine = await pageSize(S.fileId, S.pageNo), myLbl = sc.how === "note" ? (scaleCandidates(S.key).find(c => Math.abs(c.ptPerFt - sc.ptPerFt) < 1e-6) || {}).label : "";
+  for (const o of pages) {
+    o.size = await pageSize(o.f.id, o.i); await pageTexts(o.f.id, o.i);
+    o.paper = !!(o.size && mine && Math.abs(o.size[0] - mine[0]) < 2 && Math.abs(o.size[1] - mine[1]) < 2);
+    o.note = scaleCandidates(o.key).some(c => myLbl ? c.label === myLbl : Math.abs(c.ptPerFt - sc.ptPerFt) / sc.ptPerFt < 0.005);
+    o.cur = P.proj.scales[o.key];
+    o.html = `${esc(o.f.name.replace(/\.pdf$/i, ""))} — p.${o.i} <span class="small">${o.size ? (o.size[0] / 72).toFixed(1) + " × " + (o.size[1] / 72).toFixed(1) + " in" : "PDF not attached"} · now: ${esc(scaleState(o.cur).ic + " " + scaleState(o.cur).t)}${o.note ? " · same scale note" : ""}</span>`;
+  }
+  busy("");
+  const pick = f => document.querySelectorAll("[data-cs]").forEach(x => { x.checked = f(pages[+x.dataset.cs]); });
+  const pr = ask("Copy scale to…", `<p>Copy <b>1 ft = ${sc.ptPerFt.toFixed(4)} pt</b> (${esc(scaleState(sc).t)}) from <b>${esc(pageName({file: S.fileId, page: S.pageNo}))}</b> to the pages you tick.
+    They are marked <b>⚠ Inherited</b> until you verify each one with a known dimension.</p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><button class="btn sm" type="button" id="csPdf">This PDF</button><button class="btn sm" type="button" id="csPaper">Same paper size</button><button class="btn sm" type="button" id="csNote">Same scale note</button><button class="btn sm" type="button" id="csNone">None</button></div>
+    ${pageList(pages, "cs")}<p class="small" style="margin-top:6px">A scale is right only for a sheet drawn at the same scale and printed at the same paper size.</p>`, "Copy",
+    () => { const t = [...document.querySelectorAll("[data-cs]")].filter(x => x.checked).map(x => pages[+x.dataset.cs]); return t.length ? {t} : "Tick at least one page"; });
+  $("csPdf").onclick = () => pick(o => o.f.id === S.fileId); $("csPaper").onclick = () => pick(o => o.paper); $("csNote").onclick = () => pick(o => o.note); $("csNone").onclick = () => pick(() => false);
+  const v = await pr; if (!v) return;
+  const over = v.t.filter(o => o.cur);
+  if (over.length && !(await ask("Replace existing scales?", `<p>${over.length} of the ticked pages already have a scale:</p><ul style="margin:6px 0 0 18px">${over.map(o => `<li>${esc(pageName({file: o.f.id, page: o.i}))} — ${esc(scaleState(o.cur).t)}</li>`).join("")}</ul><p style="margin-top:6px">Replace them with the inherited scale?</p>`, "Replace"))) return;
+  mutate(() => v.t.forEach(o => { P.proj.scales[o.key] = {ptPerFt: sc.ptPerFt, how: "inherited", from: S.key, text: "copied from " + pageName({file: S.fileId, page: S.pageNo}) + " (" + (sc.text || "") + ")", factor: sc.factor || 1, verified: false, at: new Date().toISOString()}; }));
+  toast("Scale copied to " + v.t.length + " page" + (v.t.length > 1 ? "s" : "") + " — marked inherited until verified", 4000);
+}
+
+/* ------------------------------------------------------------------ typical floors: preview, then copy — by the same place
+   (checked by matching the sheet's text positions) or aligned by two reference points picked on both sheets */
+async function layoutMatch(srcKey, fid, i){   // share of this sheet's words found at the same place on the other sheet
+  const [sf, sp] = srcKey.split(":"), A = await pageTexts(sf, +sp), B = await pageTexts(fid, i);
+  const a = A.filter(t => t.s.trim().length > 1), b = B.filter(t => t.s.trim().length > 1);
+  if (!a.length || !b.length) return null;
+  let hit = 0; a.forEach(t => { if (b.some(u => u.s.trim() === t.s.trim() && Math.abs(u.x - t.x) < 3 && Math.abs(u.y - t.y) < 3)) hit++; });
+  return hit / a.length;
+}
+const matchState = m => m == null ? {k: "warn", t: "no text to compare (scanned?) — check by eye"} : m >= 0.6 ? {k: "ok", t: Math.round(m * 100) + "% of the words in the same place"} : m >= 0.3 ? {k: "warn", t: "only " + Math.round(m * 100) + "% of the words in the same place — check"} : {k: "bad", t: "only " + Math.round(m * 100) + "% of the words in the same place — different layout"};
+async function copyPageDialog(){
+  if (!S.page) return;
+  const mine = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo);
+  if (!mine.length) return toast("Nothing measured on this page yet");
+  const opts = allPages().filter(o => o.key !== S.key);
+  if (!opts.length) return toast("Add another page or PDF first");
+  busy("Comparing the sheets…");
+  for (const o of opts) { o.m = await layoutMatch(S.key, o.f.id, o.i); o.st = matchState(o.m); o.on = false;
+    o.html = `${esc(o.f.name.replace(/\.pdf$/i, ""))} — p.${o.i}${P.proj.scales[o.key] ? "" : " <span class='small'>(no scale)</span>"} <span class="small" style="color:${o.st.k === "ok" ? "var(--green)" : o.st.k === "warn" ? "var(--amber)" : "var(--red)"}">· ${esc(o.st.t)}</span>`; }
+  busy("");
+  const v = await ask("Typical floors — copy this page's takeoff", `<p>${mine.length} measurement${mine.length > 1 ? "s" : ""} on <b>${esc(pageName({file: S.fileId, page: S.pageNo}))}</b>. Copies are marked <b>Copied — not checked</b> until a checker ticks them on the sheet.</p>
+    <div class="fg w2" style="margin-top:8px"><label>Position on the other sheets</label><select id="tyHow"><option value="same">Same place on the sheet (layout checked by the sheet's own text)</option><option value="align">Align by two reference points (sheet moved, turned or rescaled)</option></select></div>
+    ${pageList(opts, "cp")}
+    <div class="fg w2" style="margin-top:8px"><label><input type="checkbox" id="cpScale" style="width:auto" checked> Give pages without a scale this page's scale — marked inherited, to verify</label></div>`, "Next",
+    () => { const pick = [...document.querySelectorAll("[data-cp]")].filter(x => x.checked).map(x => opts[+x.dataset.cp]); return pick.length ? {pick, how: $("tyHow").value, sc: $("cpScale").checked} : "Tick at least one page"; });
+  if (!v) return;
+  if (v.how === "same") {
+    const bad = v.pick.filter(o => o.st.k !== "ok");
+    if (bad.length && !(await ask("Check the layout first", `<p>These sheets do not match this one well:</p><ul style="margin:6px 0 0 18px">${bad.map(o => `<li>${esc(pageName({file: o.f.id, page: o.i}))} — ${esc(o.st.t)}</li>`).join("")}</ul><p style="margin-top:6px">Measurements would land in the wrong place if the drawing is shifted or different. Use <b>Align by two reference points</b> instead, or copy anyway (each copy stays <b>not checked</b>).</p>`, "Copy anyway"))) return;
+    typCommit(mine, v.pick.map(o => ({o, T: null})), v.sc);
+    return;
+  }
+  S.typ = {src: S.key, srcFile: S.fileId, srcPage: S.pageNo, mine, queue: v.pick.slice(), sc: v.sc, a: [], b: [], done: []};
+  setTool("typref");
+  toast("Click reference point 1 on this sheet — a grid intersection or building corner you can find on every sheet", 5000);
+}
+/* similarity transform taking a1→b1, a2→b2 (move, turn, uniform scale) */
+function simT(a1, a2, b1, b2){
+  const ax = a2[0] - a1[0], ay = a2[1] - a1[1], bx = b2[0] - b1[0], by = b2[1] - b1[1], d = ax * ax + ay * ay;
+  if (d < 1e-9) return null;
+  const c = (ax * bx + ay * by) / d, s = (ax * by - ay * bx) / d;   // (c + i s) = (b2 - b1) / (a2 - a1)
+  return {c, s, k: Math.hypot(c, s), f: p => [b1[0] + c * (p[0] - a1[0]) - s * (p[1] - a1[1]), b1[1] + s * (p[0] - a1[0]) + c * (p[1] - a1[1])]};
+}
+async function typClick(p){
+  const T = S.typ; if (!T) return;
+  if (S.key === T.src) { T.a.push(p); if (T.a.length === 1) { toast("Click reference point 2 on this sheet — far from point 1", 4000); draw(); return; }
+    const o = T.queue[0]; await gotoPage(o.f.id, o.i); if (S.key !== o.key) { S.typ = null; setTool("select"); return; } setTool("typref"); toast("On this sheet click the same point 1", 4000); return; }
+  T.b.push(p); if (T.b.length === 1) { toast("Now the same point 2", 3000); draw(); return; }
+  const tr = simT(T.a[0], T.a[1], T.b[0], T.b[1]); if (!tr) { T.b = []; return toast("Points 1 and 2 are the same — pick them again"); }
+  T.T = tr; draw(); typBar();
+}
+function typBar(){
+  const T = S.typ, o = T.queue[0], kS = (P.proj.scales[T.src] || {}).ptPerFt, kT = (P.proj.scales[o.key] || {}).ptPerFt;
+  const exp = kS && kT ? kT / kS : null, off = exp ? Math.abs(T.T.k / exp - 1) : 0;
+  $("cmpLegend").innerHTML = `<b>Preview</b> — ${T.mine.length} measurements placed by your two points (dashed). Turned ${(Math.atan2(T.T.s, T.T.c) * 180 / Math.PI).toFixed(1)}°, scaled × ${T.T.k.toFixed(3)}${exp && off > 0.01 ? ` <b style="color:var(--red)">— the two sheets' scales give × ${exp.toFixed(3)}: check the points or the scales</b>` : ""}
+    <button class="btn sm pri" id="tyOk">Copy here</button><button class="btn sm" id="tyRedo">Pick again</button><button class="btn sm" id="tySkip">Skip sheet</button><button class="btn sm dng" id="tyStop">Stop</button>`;
+  $("cmpLegend").style.display = "flex";
+  $("tyOk").onclick = () => { T.done.push({o, T: T.T}); typNext(); };
+  $("tyRedo").onclick = () => { T.b = []; T.T = null; $("cmpLegend").style.display = "none"; draw(); toast("Click the same point 1 again"); };
+  $("tySkip").onclick = () => typNext();
+  $("tyStop").onclick = () => { S.typ = null; $("cmpLegend").style.display = "none"; setTool("select"); toast("Typical copy stopped — nothing copied"); };
+}
+async function typNext(){
+  const T = S.typ; $("cmpLegend").style.display = "none"; T.queue.shift(); T.b = []; T.T = null;
+  if (T.queue.length) { const o = T.queue[0]; await gotoPage(o.f.id, o.i); if (S.key !== o.key) { S.typ = null; setTool("select"); if (T.done.length) typCommit(T.mine, T.done, T.sc, T.src); return; } setTool("typref"); toast("Next sheet: click the same point 1", 4000); return; }
+  S.typ = null; setTool("select");
+  if (T.done.length) typCommit(T.mine, T.done, T.sc, T.src); else toast("Nothing copied");
+}
+function typCommit(mine, targets, giveScale, srcKey){
+  srcKey = srcKey || S.key;
+  const now = new Date().toISOString(), src = P.proj.scales[srcKey];
+  mutate(() => targets.forEach(({o, T}) => {
+    if (giveScale && !P.proj.scales[o.key] && src) P.proj.scales[o.key] = {ptPerFt: src.ptPerFt * (T ? T.k : 1), how: "inherited", from: srcKey, text: "copied from " + keyName(srcKey) + (T ? " via 2-point alignment" : ""), factor: src.factor || 1, verified: false, at: now};
+    if (!T && giveScale && P.proj.viewports[srcKey] && !(P.proj.viewports[o.key] || []).length) P.proj.viewports[o.key] = P.proj.viewports[srcKey].map(x => Object.assign({}, x, {id: uid("V"), r: x.r.slice()}));
+    mine.forEach(it => { const c = JSON.parse(JSON.stringify(it));
+      if (T) c.pts = c.pts.map(T.f);
+      Object.assign(c, {id: uid("I"), file: o.f.id, page: o.i, qa: "", qaBy: "", qaAt: "", copied: {from: srcKey, at: now, how: T ? "aligned" : "same place"}});
+      P.proj.items.push(c); });
+  }));
+  toast(mine.length + " measurement" + (mine.length > 1 ? "s" : "") + " copied to " + targets.length + " sheet" + (targets.length > 1 ? "s" : "") + " — marked Copied, not checked", 4500);
+}
+
+/* ------------------------------------------------------------------ doors on a room's outline (skirting: PD = P − doors) */
+const schOf = id => id ? (P.proj.openings || []).find(o => o.id === id) || null : null;
+function openW(o, k){ const s = schOf(o.sch); return s ? +s.w : o.ow ? +o.ow : dist(o.pts[0], o.pts[1]) / k; }
+function openH(o){ const s = schOf(o.sch); return s ? +s.h : +o.oh || 0; }
+function isDoor(o){ const s = schOf(o.sch); if (s) return s.type === "door"; const l = String(o.label || "").trim(); if (/^d/i.test(l)) return true; if (/^[wv]/i.test(l)) return false; return openH(o) >= 6; }
+/* openings marked as doors (schedule type, label D…, or 6 ft or taller) whose middle lies within 1.25 ft of the outline —
+   a door in the wall on either face of the room; the same door drawn in two wall conditions is taken once */
+function doorsOfPage(key){   // door openings of one page, indexed once per refresh
+  if (!S.doorIx) { S.doorIx = new Map(); P.proj.items.forEach(o => { if (o.kind === "open" && isDoor(o) && !hiddenItem(o)) { const kk = keyOf(o.file, o.page); if (!S.doorIx.has(kk)) S.doorIx.set(kk, []); S.doorIx.get(kk).push(o); } }); }
+  return S.doorIx.get(key) || [];
+}
+function doorsOn(it){
+  if (it.doorW !== undefined && it.doorW !== "" && it.doorW !== null) return {ft: +it.doorW || 0, n: null, manual: true};
+  const k = itemScale(it); if (!k || it.kind !== "shape") return {ft: 0, n: 0};
+  const poly = itemPoly(it), tol = 1.25 * k, seen = []; let ft = 0;
+  doorsOfPage(keyOf(it.file, it.page)).forEach(o => {
+    const m = [(o.pts[0][0] + o.pts[1][0]) / 2, (o.pts[0][1] + o.pts[1][1]) / 2];
+    if (seen.some(s => dist(s, m) < 0.75 * k)) return;
+    let d = Infinity; for (let i = 0; i < poly.length; i++) d = Math.min(d, distSeg(m, poly[i], poly[(i + 1) % poly.length]));
+    if (d <= tol) { seen.push(m); ft += openW(o, k); }
+  });
+  return {ft, n: seen.length};
+}
+
+/* ------------------------------------------------------------------ location: building / floor / zone-apartment / room.
+   A measurement takes its sheet's building and floor (Sheet info) unless it has its own. */
+const LOC_KEYS = ["bldg", "floor", "zone", "room"], LOC_NAMES = {bldg: "Building", floor: "Floor", zone: "Zone / Apt", room: "Room"};
+function locOf(it){ const sh = (P.proj.sheets || {})[keyOf(it.file, it.page)] || {}; return {bldg: it.bldg || sh.bldg || "", floor: it.floor || sh.floor || "", zone: it.zone || "", room: it.room || ""}; }
+const locText = L => [L.bldg, L.floor, L.zone, L.room].filter(Boolean).join(" · ");
+function locValues(k){ const s = new Set(); P.proj.items.forEach(it => { const v = locOf(it)[k]; if (v) s.add(v); }); Object.values(P.proj.sheets || {}).forEach(sh => { if (sh[k]) s.add(sh[k]); }); return [...s].sort(); }
+async function sheetInfoDialog(){
+  if (!S.page) return;
+  const sh = Object.assign({}, (P.proj.sheets || {})[S.key] || {}), F = [["no", "Sheet no.", "e.g. A-103"], ["title", "Drawing title", "e.g. Typical floor plan"], ["rev", "Revision", "e.g. Rev-03"], ["revDate", "Revision date", ""], ["disc", "Discipline", "e.g. Architectural"], ["bldg", "Building / block", "e.g. Tower A"], ["floor", "Floor", "e.g. Level 12"]];
+  const v = await ask("Sheet info — " + pageName({file: S.fileId, page: S.pageNo}), `<div class="grid">${F.map(([k, l, ph]) => `<div class="fg"><label>${l}</label><input type="${k === "revDate" ? "date" : "text"}" id="si_${k}" value="${esc(sh[k] || "")}" placeholder="${esc(ph)}"${k === "bldg" || k === "floor" ? ` list="dl_${k}"` : ""}></div>`).join("")}</div>
+    <datalist id="dl_bldg">${locValues("bldg").map(x => `<option value="${esc(x)}">`).join("")}</datalist><datalist id="dl_floor">${locValues("floor").map(x => `<option value="${esc(x)}">`).join("")}</datalist>
+    <p class="small" style="margin-top:8px">Measurements on this sheet take its building and floor unless they are given their own. The sheet no. and revision are used by the revision quantity compare. Nothing here is guessed — leave a field blank if the drawing does not say.</p>`, "Save",
+    () => { const o = {}; F.forEach(([k]) => { const x = $("si_" + k).value.trim(); if (x) o[k] = x; }); return o; }, "si_no");
+  if (!v) return;
+  mutate(() => { P.proj.sheets[S.key] = v; });
+}
+
+/* ------------------------------------------------------------------ QA: Measured → Checked, or Recheck required */
+const QA_NAMES = {"": "Measured", checked: "Checked", recheck: "Recheck required"};
+const needsReview = it => (it.ai || it.copied) && it.qa !== "checked";
+function qaUser(){ return pref("zdTakeoffUser") || ""; }
+async function askUser(){
+  let u = qaUser(); if (u) return u;
+  const v = await ask("Your name", '<div class="fg w2"><label>Name for the QA record (kept in this browser)</label><input type="text" id="dlgUser" placeholder="e.g. Sajjad"></div>', "Save", () => $("dlgUser").value.trim() || "Enter your name", "dlgUser");
+  if (!v) return ""; pref("zdTakeoffUser", v); return v;
+}
+async function setQa(items, qa){
+  if (!items.length) return;
+  const by = qa ? await askUser() : ""; if (qa && !by) return;
+  const at = new Date().toISOString();
+  mutate(() => items.forEach(it => { it.qa = qa; it.qaBy = qa ? by : ""; it.qaAt = qa ? at : ""; }));
+}
+function qaCounts(){
+  const its = P.proj.items, used = new Set(its.map(i => i.cond)), rate = P.proj.conds.reduce((a, c) => a + (used.has(c.id) || (c.asm || []).length ? [c].concat(c.asm || []).filter(o => { const r = rateOf(o, o === c ? c.unit : o.unit); return r.na || !(r.rate > 0); }).length : 0), 0);
+  return {n: its.length, checked: its.filter(i => i.qa === "checked").length, recheck: its.filter(i => i.qa === "recheck").length, review: its.filter(needsReview).length,
+          ai: its.filter(i => i.ai && i.qa !== "checked").length, copied: its.filter(i => i.copied && i.qa !== "checked").length, rate,
+          scale: Object.values(P.proj.scales).filter(s => !s.verified).length + new Set(its.filter(i => !itemScale(i)).map(i => keyOf(i.file, i.page))).size};
+}
+function qaFilterOk(it){ const f = S.qaFilter; return !f || (f === "checked" ? it.qa === "checked" : f === "pending" ? it.qa !== "checked" : f === "recheck" ? it.qa === "recheck" : f === "review" ? needsReview(it) : true); }
+function renderQaBar(){
+  const el = $("qaBar"); if (!P.proj || !P.proj.items.length) { el.innerHTML = ""; el.style.display = "none"; return; }
+  const q = qaCounts(), ch = (f, n, t, cls) => `<button class="qa${cls ? " " + cls : ""}${S.qaFilter === f ? " on" : ""}" data-qf="${f}" title="Show only these on the sheet">${n} ${t}</button>`;
+  el.style.display = "";
+  el.innerHTML = ch("", q.n, "measured") + ch("checked", q.checked, "checked", "g") + ch("pending", q.n - q.checked, "pending") + ch("recheck", q.recheck, "recheck", q.recheck ? "r" : "") +
+    ch("review", q.review, "AI / copied to check", q.review ? "a" : "") + `<span class="qa${q.rate ? " a" : ""}" title="Bill lines without a usable rate">${q.rate} missing rate</span><span class="qa${q.scale ? " a" : ""}" title="Page scales not verified, or measurements on a page with no scale">${q.scale} unverified scale</span>` +
+    (S.page ? `<button class="btn sm" data-qact="page" title="Mark every measurement on this page as checked by you">✓ Check this page</button>` : "");
+}
+
+/* ------------------------------------------------------------------ rates from the ZD Rate Analysis library.
+   The Rate Analysis app (SAJ QSCOST, same site) keeps its library in this browser under SAJ_QSCOST_v1; an item's built-up
+   rate is worked out exactly as it does (raCalc): materials + wastage + labour + plant + access + transport, then OH and
+   profit. Nothing is assumed: a code that is missing, priced in another unit, or with unrated rows gives RATE NOT AVAILABLE. */
+const RA_KEY = "SAJ_QSCOST_v1";
+let RAL = null;
+function raLib(){
+  if (RAL && Date.now() - RAL.t < 3000) return RAL;
+  let o = null; try { o = JSON.parse(localStorage.getItem(RA_KEY) || "null"); } catch (e) { o = null; }
+  RAL = o && Array.isArray(o.items) && Array.isArray(o.rates) ? {o, t: Date.now(), items: new Map(o.items.map(i => [String(i.code || i.id).toUpperCase(), i])), rates: new Map(o.rates.map(r => [r.code, r]))} : {o: null, t: Date.now()};
+  return RAL;
+}
+const raNum = x => { const t = parseFloat(String(x == null ? "" : x).replace(/,/g, "")); return isFinite(t) ? t : 0; };
+function raPrice(code){
+  const L = raLib(); if (!L.o) return {err: "lib"};
+  const it = L.items.get(String(code).trim().toUpperCase()); if (!it) return {err: "code"};
+  const rec = r => r.ref ? L.rates.get(r.ref) : null, rr = r => r.ref ? raNum((rec(r) || {}).rate) : raNum(r.rate), amt = r => r.mode === "lump" ? raNum(r.rate) : raNum(r.qty) * rr(r);
+  const sum = a => (a || []).reduce((s, r) => s + amt(r), 0), rows = [].concat(it.M || [], it.L || [], it.P || []);
+  const A = sum(it.M), C = sum(it.L), D = sum(it.P), B = A * raNum(it.wast) / 100, sub = A + B + C + D + raNum(it.acc) + raNum(it.trans), G = sub * raNum(it.oh) / 100;
+  const H = ((L.o.set || {}).profOnOh ? sub + G : sub) * raNum(it.prof) / 100;
+  const live = rows.filter(r => raNum(r.qty) !== 0 && !r.opt);
+  const dates = live.map(r => (rec(r) || {}).date).filter(Boolean).sort();
+  return {code: it.code || it.id, desc: it.desc || "", unit: it.unit || "", rate: sub + G + H, M: A, L: C, Pl: D, oh: G, prof: H,
+          gaps: live.filter(r => rr(r) === 0 && r.mode !== "lump").length, assumed: live.filter(r => (r.ref ? (rec(r) || {}).vs || "A" : r.rate ? "V" : "A") === "A").length, d0: dates[0] || "", d1: dates[dates.length - 1] || ""};
+}
+const normU = u => { u = String(u || "").trim().toLowerCase().replace(/\.$/, ""); return u === "rft" || u === "ft" || u === "rm" ? "ft" : u === "no" || u === "nos" || u === "each" || u === "nr" ? "nos" : u === "kgs" ? "kg" : u; };
+/* rate of a condition (rate, rateSrc, rateDate) or assembly line (rate, src, date), either typed or linked by RA code */
+function rateOf(o, unit){
+  const ra = String(o.ra || "").trim();
+  if (!ra) return {rate: +o.rate || 0, src: o.rateSrc != null ? o.rateSrc : o.src || "", date: o.rateDate != null ? o.rateDate : o.date || ""};
+  const r = raPrice(ra);
+  if (r.err === "lib") return o.raCache && o.raCache.code === ra && normU(o.raCache.unit) === normU(unit) ? Object.assign({}, o.raCache, {ra, cached: true}) : {rate: 0, ra, na: "RATE NOT AVAILABLE — the Rate Analysis library is not in this browser (open SAJ QSCOST → Rate Analysis on this site once)"};
+  if (r.err === "code") return {rate: 0, ra, na: "RATE NOT AVAILABLE — " + ra + " is not in the Rate Analysis library"};
+  if (normU(r.unit) !== normU(unit)) return {rate: 0, ra, na: `RATE NOT AVAILABLE — ${ra} is priced per ${r.unit}, this line is in ${unit}`};
+  if (r.gaps) return {rate: 0, ra, na: `RATE NOT AVAILABLE — ${ra} has ${r.gaps} unrated row${r.gaps > 1 ? "s" : ""} in Rate Analysis`};
+  const out = {rate: r.rate, ra, unit: r.unit, date: today(), src: `ZD Rate Analysis ${r.code}, ${dmy(today())} — built-up rate (material ${f2(r.M)} + labour ${f2(r.L)} + plant ${f2(r.Pl)} + OH ${f2(r.oh)} + profit ${f2(r.prof)})${r.d1 ? "; resource rates dated " + dmy(r.d0) + " to " + dmy(r.d1) : ""}${r.assumed ? "; " + r.assumed + " row" + (r.assumed > 1 ? "s" : "") + " ASSUMPTION — no dated source" : ""}`, assumed: r.assumed};
+  const cache = {code: ra, rate: out.rate, unit: r.unit, date: out.date, src: out.src};
+  if (!o.raCache || o.raCache.rate !== cache.rate || o.raCache.src !== cache.src) { o.raCache = cache; save(); }
+  return out;
+}
+
+/* ------------------------------------------------------------------ check before export */
+function validate(){
+  const out = [], E = (lvl, msg) => out.push({lvl, msg});
+  if (!P.proj.items.length) E("WARNING", "Nothing is measured yet");
+  const noSc = new Map(); P.proj.items.forEach(it => { if (!itemScale(it)) noSc.set(keyOf(it.file, it.page), (noSc.get(keyOf(it.file, it.page)) || 0) + 1); });
+  noSc.forEach((n, k) => E("ERROR", `${keyName(k)}: scale not set — ${n} measurement${n > 1 ? "s" : ""} left out of the totals`));
+  Object.entries(P.proj.scales).forEach(([k, sc]) => { if (!sc.verified && P.proj.items.some(it => keyOf(it.file, it.page) === k)) E("WARNING", `${keyName(k)}: scale ${scaleState(sc).t.toLowerCase()} — verify with a known dimension`); });
+  P.proj.items.forEach(it => { if (!cond(it.cond)) E("ERROR", `A measurement on ${pageName(it)} belongs to a deleted condition`); });
+  P.proj.conds.forEach(c => {
+    const its = P.proj.items.filter(i => i.cond === c.id); if (!its.length) return;
+    if (c.type === "linear" && c.unit !== "ft" && !(+c.h > 0)) E("ERROR", `${c.name}: height H missing (needed for ${c.unit})`);
+    if (c.unit === "cft" && !(+c.t > 0)) E("ERROR", `${c.name}: thickness T missing (needed for cft)`);
+    if (!String(c.boq || "").trim()) E("WARNING", `${c.name}: no BOQ code`);
+    const t = condTotals(c); if (t.net < 0) E("ERROR", `${c.name}: net quantity is negative (${f2(t.net)} ${c.unit}) — deductions exceed the gross`);
+    its.forEach(it => { const k = itemScale(it); if (!k) return; const q = rowsOf(it, k).reduce((a, r) => a + Math.abs(r.qty), 0);
+      if (!(q > 0) && !rowsOf(it, k).some(r => r.below)) E("ERROR", `${c.name} — ${it.label || kindName(it, c)} on ${pageName(it)}: zero quantity`);
+      if (it.kind === "open" && c.unit !== "ft" && !(openH(it) > 0)) E("ERROR", `${c.name} — opening ${it.label || ""} on ${pageName(it)}: height missing`);
+      if (!locOf(it).floor) noFloor.add(c.name); });
+  });
+  if (noFloor.size) E("WARNING", `No floor given (Sheet info or the measurement) for some measurements of: ${[...noFloor].join(", ")}`);
+  billLines().forEach(l => {
+    if (l.err) E("ERROR", `${l.name}: formula error — ${l.err}`);
+    else if (l.na) E("WARNING", `${l.name}: ${l.na}`);
+    else if (!(l.rate > 0)) E("WARNING", `${l.name}: rate not set`);
+    else if (!rateOk(l)) E("WARNING", `${l.name}: rate has no dated source — ASSUMPTION`);
+  });
+  const rc = P.proj.items.filter(i => i.qa === "recheck").length, ai = P.proj.items.filter(i => i.ai && i.qa !== "checked").length, cp = P.proj.items.filter(i => i.copied && i.qa !== "checked").length;
+  if (rc) E("ERROR", `${rc} measurement${rc > 1 ? "s" : ""} marked Recheck required`);
+  if (ai) E("WARNING", `${ai} AI-generated measurement${ai > 1 ? "s" : ""} not yet checked`);
+  if (cp) E("WARNING", `${cp} typical-floor cop${cp > 1 ? "ies" : "y"} not yet checked`);
+  return out;
+}
+const noFloor = new Set();
+function validation(){ noFloor.clear(); const L = validate(), lvl = L.some(x => x.lvl === "ERROR") ? "ERROR" : L.length ? "WARNING" : "PASS"; return {lvl, L}; }
+const lvlCol = l => l === "ERROR" ? "var(--red)" : l === "WARNING" ? "var(--amber)" : "var(--green)";
+
+/* ------------------------------------------------------------------ opening schedule: D1 = 3.000 × 7.000 once, reused */
+async function openingsDialog(){
+  const rows = JSON.parse(JSON.stringify(P.proj.openings || [])), used = id => P.proj.items.filter(i => i.sch === id).length;
+  const row = (o, n) => `<tr data-r="${n}"><td><input type="text" data-k="mark" value="${esc(o.mark)}" placeholder="D1"></td><td><select data-k="type">${["door", "window", "other"].map(t => `<option${o.type === t ? " selected" : ""}>${t}</option>`).join("")}</select></td>
+    <td><input type="text" data-k="w" value="${o.w ? f3(o.w) : ""}" placeholder="3'-0&quot;"></td><td><input type="text" data-k="h" value="${o.h ? f3(o.h) : ""}" placeholder="7'-0&quot;"></td><td class="small">${used(o.id)}</td>
+    <td>${used(o.id) ? "" : `<button class="btn sm dng" data-del="${n}" type="button">&times;</button>`}</td></tr>`;
+  const html = () => `<table class="asm"><thead><tr><th>Mark</th><th>Type</th><th>Width ft</th><th>Height ft</th><th>Used</th><th></th></tr></thead><tbody id="opB">${rows.map(row).join("")}</tbody></table>
+    <button class="btn sm" id="opAdd" type="button" style="margin-top:6px">+ Mark</button>
+    <p class="small" style="margin-top:8px">Sizes from the door / window schedule of the drawings — not assumed. Changing a size here changes every opening placed with that mark. Doors (type door) are taken off the skirting (PD); windows are not.</p>`;
+  const read = () => document.querySelectorAll("#opB tr").forEach(tr => { const o = rows[+tr.dataset.r]; tr.querySelectorAll("[data-k]").forEach(inp => { o[inp.dataset.k] = inp.value.trim(); }); });
+  const pr = ask("Opening schedule", html(), "Save", () => { read(); const seen = new Set();
+    for (const o of rows) { if (!o.mark) return "Every row needs a mark"; if (seen.has(o.mark.toUpperCase())) return "Mark " + o.mark + " is listed twice"; seen.add(o.mark.toUpperCase());
+      const w = parseFt(o.w), h = parseFt(o.h); if (!(w > 0) || !(h > 0)) return o.mark + ": enter width and height (ft or ft-in)"; o.w = w; o.h = h; }
+    return rows; });
+  const wire = () => { $("opAdd").onclick = () => { read(); rows.push({id: uid("O"), mark: "", type: "door", w: "", h: ""}); $("opB").innerHTML = rows.map(row).join(""); wire(); };
+    document.querySelectorAll("#opB [data-del]").forEach(b => b.onclick = () => { read(); rows.splice(+b.dataset.del, 1); $("opB").innerHTML = rows.map(row).join(""); wire(); }); };
+  wire();
+  const v = await pr; if (!v) return;
+  mutate(() => { P.proj.openings = v; P.proj.items.forEach(i => { const s = i.sch && v.find(o => o.id === i.sch); if (s) i.label = s.mark; }); });
+}
+
+/* ------------------------------------------------------------------ revision quantity compare → Change Management */
+function qtyOn(keys){   // bill lines measured on the given pages only
+  const ks = new Set(keys); return billLines(it => ks.has(keyOf(it.file, it.page)));
+}
+async function revCompareDialog(){
+  if (!P.proj.items.length) return toast("Measure both revisions first");
+  const pages = allPages(), sh = k => (P.proj.sheets || {})[k] || {}, cur = sh(S.key);
+  const isNew = o => o.key === S.key, isOld = o => o.key !== S.key && (S.cmp ? keyOf(S.cmp.file, S.cmp.page) === o.key : !!(cur.no && sh(o.key).no === cur.no && sh(o.key).rev !== cur.rev));
+  const lbl = o => `${esc(sh(o.key).no ? sh(o.key).no + (sh(o.key).rev ? " " + sh(o.key).rev : "") + " · " : "")}${esc(o.f.name.replace(/\.pdf$/i, ""))} — p.${o.i} <span class="small">${P.proj.items.filter(it => keyOf(it.file, it.page) === o.key).length} measurements</span>`;
+  const A = pages.map(o => Object.assign({}, o, {on: isOld(o), html: lbl(o)})), B = pages.map(o => Object.assign({}, o, {on: isNew(o), html: lbl(o)}));
+  const v = await ask("Revision quantity compare", `<p>Quantities measured on the <b>old</b> sheets against the <b>new</b> sheets, per condition and assembly item. Give each sheet its no. and revision in <b>Sheet info</b> to pick them faster.</p>
+    <div class="grid" style="margin-top:6px"><div class="fg"><label>Old revision — sheets</label>${pageList(A, "ro")}</div><div class="fg"><label>New revision — sheets</label>${pageList(B, "rn")}</div></div>`, "Compare",
+    () => { const o = [...document.querySelectorAll("[data-ro]")].filter(x => x.checked).map(x => A[+x.dataset.ro].key), n = [...document.querySelectorAll("[data-rn]")].filter(x => x.checked).map(x => B[+x.dataset.rn].key);
+      if (!o.length || !n.length) return "Tick at least one old and one new sheet"; if (o.some(k => n.includes(k))) return "A sheet cannot be both old and new"; return {o, n}; });
+  if (!v) return;
+  const rows = revRows(v.o, v.n), rl = ks => [...new Set(ks.map(k => { const s = sh(k); return s.no ? s.no + (s.rev ? " " + s.rev : "") : keyName(k); }))].join(", ");
+  const tot = rows.reduce((a, r) => a + (r.cost || 0), 0);
+  $("dlgT").textContent = "Revision quantity compare";
+  $("dlgB").innerHTML = `<p class="small">Old: <b>${esc(rl(v.o))}</b> → New: <b>${esc(rl(v.n))}</b></p>
+    <div style="overflow:auto;margin-top:6px"><table class="sh"><thead><tr><th>Item</th><th class="n">Old</th><th class="n">New</th><th class="n">Variance</th><th class="n">%</th><th class="n">Cost impact PKR</th></tr></thead><tbody>
+    ${rows.map(r => `<tr class="${r.kind === "asm" ? "" : "ch2"}"><td>${r.kind === "asm" ? "↳ " : ""}${esc(r.name)} <span class="small">${esc(r.unit)}</span>${r.boq ? `<div class="ds">${esc(r.boq)}</div>` : ""}</td><td class="n">${f2(r.old)}</td><td class="n">${f2(r.neu)}</td>
+      <td class="n" style="color:${r.var > 0 ? "var(--red)" : r.var < 0 ? "var(--green)" : "inherit"}">${r.var > 0 ? "+" : ""}${f2(r.var)}</td><td class="n">${r.pct == null ? "new" : (r.pct > 0 ? "+" : "") + r.pct.toFixed(2) + "%"}</td><td class="n">${r.cost == null ? `<span class="small" title="${esc(r.na || "rate not set")}">no rate</span>` : f2(r.cost)}</td></tr>`).join("")}
+    <tr class="tot"><td>Total cost impact (lines with a rate)</td><td></td><td></td><td></td><td></td><td class="n">${f2(tot)}</td></tr></tbody></table></div>
+    <p class="small" style="margin-top:8px">Variance = new − old. Cost impact = variance × the line's rate; lines without a usable rate show “no rate” — never assumed.</p>`;
+  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn pri" id="rcCsv">Change Management CSV</button>`;
+  $("dlgBack").classList.add("on");
+  $("dlgCancel").onclick = () => $("dlgBack").classList.remove("on");
+  $("rcCsv").onclick = () => revCsv(rows, v.o, v.n);
+}
+function revRows(oldKeys, newKeys){
+  const O = qtyOn(oldKeys), N = qtyOn(newKeys), id = l => l.c.id + "|" + (l.kind === "asm" ? l.a.id || l.name : ""), out = [];
+  const all = new Map(); O.forEach(l => all.set(id(l), {l, o: l.qty, n: 0})); N.forEach(l => { const x = all.get(id(l)); if (x) { x.n = l.qty; x.l = l; } else all.set(id(l), {l, o: 0, n: l.qty}); });
+  all.forEach(({l, o, n}) => { const v = n - o, rated = !l.na && l.rate > 0;
+    if (Math.abs(o) < 1e-9 && Math.abs(n) < 1e-9) return;
+    out.push({kind: l.kind, name: l.name, unit: l.unit, boq: l.boq || "", old: o, neu: n, var: v, pct: Math.abs(o) > 1e-9 ? v / o * 100 : null, rate: rated ? l.rate : null, cost: rated ? v * l.rate : null, na: l.na || (rated ? "" : "rate not set"), src: rated ? l.src + (l.date ? ", " + dmy(l.date) : "") : ""}); });
+  return out;
+}
+function revCsv(rows, oldKeys, newKeys){
+  const sh = k => (P.proj.sheets || {})[k] || {}, refs = ks => [...new Set(ks.map(k => { const s = sh(k); return s.no ? s.no + (s.rev ? " " + s.rev : "") : keyName(k); }))].join(" / ");
+  const locs = ks => [...new Set(ks.map(k => [sh(k).bldg, sh(k).floor].filter(Boolean).join(" ")).filter(Boolean))].join(" / ");
+  const H = ["Log ID", "Project", "Date Raised", "Discipline", "Raised By", "Type", "Location / Area", "Drawing / Spec Ref.", "Description of Issue / Change", "Reason for Change", "Cost Impact (Y/N)", "Est. Cost Impact", "Schedule Impact (Y/N)", "Status", "Remarks",
+             "Item", "BOQ Code", "Unit", "Old Qty", "New Qty", "Qty Variance", "Variance %", "Rate (PKR)"];
+  const disc = [...new Set(newKeys.map(k => sh(k).disc).filter(Boolean))].join(" / ");
+  const L = rows.filter(r => Math.abs(r.var) > 1e-9).map(r => ["", P.proj.name, today(), disc, qaUser(), "Drawing revision", locs(newKeys), refs(oldKeys) + " → " + refs(newKeys),
+    `${r.name}: ${f3(r.old)} → ${f3(r.neu)} ${r.unit} (${r.var > 0 ? "+" : ""}${f3(r.var)})`, "Drawing revision — USER INPUT REQUIRED", r.cost == null ? "" : r.cost !== 0 ? "Y" : "N", r.cost == null ? "" : r.cost.toFixed(2), "", "Pending",
+    r.cost == null ? r.na : "Rate: " + r.src, r.name, r.boq, r.unit, r.old.toFixed(3), r.neu.toFixed(3), r.var.toFixed(3), r.pct == null ? "" : r.pct.toFixed(2), r.rate == null ? "" : r.rate.toFixed(2)]);
+  if (!L.length) return toast("No quantity changed between the two revisions");
+  const t = [H].concat(L).map(r => r.map(v => { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
+  saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Revision_Change.csv");
+}
+
+/* ------------------------------------------------------------------ backups: last 10 copies of each project in this browser */
+const BAK_KEEP = 10;
+async function backupsOf(pid){ return (await tx("backups", "readonly", s => s.index("pid").getAll(pid))).sort((a, b) => b.at.localeCompare(a.at)); }
+async function backupNow(why, pr){
+  pr = pr || P.proj; if (!pr || !DB) return false;
+  const data = JSON.stringify(pr), list = await backupsOf(pr.id);
+  if (list[0] && list[0].data === data) return false;   // nothing changed since the last one
+  await dbPut("backups", {id: uid("B"), pid: pr.id, name: pr.name, at: new Date().toISOString(), why: why || "", n: (pr.items || []).length, data});
+  for (const b of list.slice(BAK_KEEP - 1)) await dbDel("backups", b.id);
+  return true;
+}
+async function backupsDialog(pid){
+  pid = pid || (P.proj && P.proj.id); if (!pid) return;
+  const pr = await dbGet("projects", pid), list = await backupsOf(pid);
+  const fmt = iso => dmy(iso) + " " + iso.slice(11, 16);
+  $("dlgT").textContent = "Backups — " + (pr ? pr.name : "");
+  $("dlgB").innerHTML = `<p class="small">The last ${BAK_KEEP} copies of this project kept in this browser: when it is opened, every 10 minutes while you work, and before a restore. PDFs are not copied (they do not change).</p>
+    ${list.length ? `<table class="sh" style="margin-top:8px"><thead><tr><th>Saved</th><th>Why</th><th class="n">Measurements</th><th></th></tr></thead><tbody>${list.map(b => `<tr><td>${esc(fmt(b.at))}</td><td>${esc(b.why)}</td><td class="n">${b.n}</td><td class="n"><button class="btn sm" data-rest="${esc(b.id)}">Restore</button></td></tr>`).join("")}</tbody></table>` : '<p style="margin-top:8px">No backup yet.</p>'}`;
+  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button>${P.proj && P.proj.id === pid ? '<button class="btn pri" id="bakNow">Back up now</button>' : ""}`;
+  $("dlgBack").classList.add("on");
+  $("dlgCancel").onclick = () => $("dlgBack").classList.remove("on");
+  if ($("bakNow")) $("bakNow").onclick = async () => { clearTimeout(saveT); await dbPut("projects", P.proj); toast((await backupNow("manual")) ? "Backed up" : "No change since the last backup"); backupsDialog(pid); };
+  $("dlgB").querySelectorAll("[data-rest]").forEach(b => b.onclick = async () => {
+    const bk = list.find(x => x.id === b.dataset.rest), old = JSON.parse(bk.data);
+    const ok = await ask("Restore this backup?", `<p>Replace <b>${esc(pr ? pr.name : "")}</b> (${pr ? pr.items.length : 0} measurements, changed ${esc(pr ? fmt(pr.updated) : "—")}) with the backup of <b>${esc(fmt(bk.at))}</b> (${bk.n} measurements)?</p><p class="small" style="margin-top:6px">The project as it is now is backed up first, so this can be undone from this list.</p>`, "Restore");
+    if (!ok) return backupsDialog(pid);
+    if (P.proj && P.proj.id === pid) { clearTimeout(saveT); await dbPut("projects", P.proj); }
+    const cur = await dbGet("projects", pid); if (cur) await backupNow("before restore", cur);
+    old.id = pid; migrate(old); old.updated = new Date().toISOString(); await dbPut("projects", old);
+    if (P.proj && P.proj.id === pid) await openProject(pid); else showStart();
+    toast("Restored the backup of " + fmt(bk.at), 4000);
+  });
+}
+setInterval(() => { if (P.proj && document.visibilityState !== "hidden") dbPut("projects", P.proj).then(() => backupNow("every 10 min")).catch(() => {}); }, 600000);
+
+/* ------------------------------------------------------------------ project import: lossless, then validated */
+async function importProject(text){
+  let o; try { o = JSON.parse(text); } catch (e) { throw new Error("the file is not valid JSON"); }
+  if (!o || o.format !== "zd-takeoff" || !Array.isArray(o.items)) throw new Error("not a takeoff project file");
+  const pr = JSON.parse(JSON.stringify(o)); delete pr.format; delete pr.exported;
+  pr.id = uid("P"); pr.name = pr.name || "Imported takeoff"; pr.created = pr.created || new Date().toISOString(); pr.updated = new Date().toISOString();
+  const fromV = migrate(pr);
+  await dbPut("projects", pr);
+  const back = await dbGet("projects", pr.id), miss = [];
+  for (const f of back.files) if (!(await dbGet("pdfs", f.id))) miss.push(f.name);
+  const cnt = v => Array.isArray(v) ? v.length : v && typeof v === "object" ? Object.values(v).reduce((a, x) => a + (Array.isArray(x) ? x.length : 1), 0) : v == null ? 0 : 1;
+  const ref = JSON.parse(JSON.stringify(o)); migrate(ref);   // the file as upgraded: defaults a v1 file lacks are not losses
+  const same = k => JSON.stringify(ref[k] === undefined ? null : ref[k]) === JSON.stringify(back[k] === undefined ? null : back[k]);
+  const rows = [], add = (what, a, b, st, note) => rows.push({what, a, b, st, note});
+  [["files", "PDFs"], ["conds", "Conditions"], ["items", "Measurements"], ["scales", "Page scales"], ["viewports", "Viewports"], ["marks", "Markups"], ["sheets", "Sheet info"], ["openings", "Opening schedule"]].forEach(([k, n]) =>
+    add(n, cnt(o[k]), cnt(back[k]), o[k] === undefined || same(k) ? "PASS" : "FAIL", o[k] === undefined ? "not in this file (older version) — empty" : ""));
+  ["auto", "layersOff", "last"].forEach(k => { if (o[k] !== undefined) add({auto: "Auto area settings", layersOff: "PDF layers off", last: "Last page"}[k], "kept", same(k) ? "kept" : "changed", same(k) ? "PASS" : "FAIL", ""); });
+  const known = new Set(["format", "exported", "id", "name", "created", "updated", "v", "files", "conds", "items", "scales", "viewports", "marks", "sheets", "openings", "auto", "layersOff", "last"]);
+  Object.keys(o).filter(k => !known.has(k)).forEach(k => add("Other: " + k, "kept", same(k) ? "kept" : "changed", same(k) ? "PASS" : "FAIL", "kept as it was"));
+  const orphanC = back.items.filter(i => !back.conds.some(c => c.id === i.cond)).length, orphanF = back.items.filter(i => !back.files.some(f => f.id === i.file)).length;
+  add("Measurements → condition", back.items.length, back.items.length - orphanC, orphanC ? "FAIL" : "PASS", orphanC ? orphanC + " point to a condition that is not in the file" : "");
+  add("Measurements → PDF", back.items.length, back.items.length - orphanF, orphanF ? "FAIL" : "PASS", orphanF ? orphanF + " point to a PDF that is not in the file" : "");
+  add("PDFs attached in this browser", back.files.length, back.files.length - miss.length, miss.length ? "WARNING" : "PASS", miss.length ? "add " + miss.join(", ") + " with + PDF (matched by name)" : "");
+  add("File version", "v" + fromV, "v" + back.v, "PASS", fromV < SCHEMA ? "upgraded" : "");
+  await openProject(pr.id);
+  const lvl = rows.some(r => r.st === "FAIL") ? "FAIL" : rows.some(r => r.st === "WARNING") ? "WARNING" : "PASS";
+  S.lastImport = {lvl, rows};
+  ask("Project Import Validation — " + lvl, `<table class="sh"><thead><tr><th>Check</th><th class="n">In file</th><th class="n">Imported</th><th>Status</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.what)}${r.note ? `<div class="ds">${esc(r.note)}</div>` : ""}</td><td class="n">${esc(r.a)}</td><td class="n">${esc(r.b)}</td><td style="font-weight:700;color:${r.st === "PASS" ? "var(--green)" : r.st === "WARNING" ? "var(--amber)" : "var(--red)"}">${r.st}</td></tr>`).join("")}</tbody></table>`, "");
+  $("dlgCancel").textContent = "Close";
+  return S.lastImport;
 }
 
 /* ------------------------------------------------------------------ events */
@@ -2034,7 +2552,14 @@ function wire(){
   $("bCompare").onclick = () => P.proj && compareDialog();
   const view = b => { S.billView = b; $("sheet").style.display = b ? "none" : ""; $("bill").style.display = b ? "" : "none"; $("vSheet").classList.toggle("on", !b); $("vBill").classList.toggle("on", b); if (b) renderBill(); };
   $("vSheet").onclick = () => view(false); $("vBill").onclick = () => view(true);
-  $("bill").addEventListener("click", e => { const a = e.target.closest("[data-asm]"); if (a) asmDialog(cond(a.dataset.asm)); });
+  $("bill").addEventListener("click", e => { const a = e.target.closest("[data-asm]"); if (a) return asmDialog(cond(a.dataset.asm));
+    const b = e.target.closest("[data-bact]"); if (b) return b.dataset.bact === "open" ? openingsDialog() : revCompareDialog(); });
+  $("bill").addEventListener("change", e => { if (e.target.id === "billGrp") { S.billGrp = e.target.value; renderBill(); } });
+  $("bSheet").onclick = () => P.proj && sheetInfoDialog();
+  $("qaBar").addEventListener("click", e => {
+    const f = e.target.closest("[data-qf]"); if (f) { S.qaFilter = S.qaFilter === f.dataset.qf ? "" : f.dataset.qf; renderSheet(); renderQaBar(); return; }
+    const a = e.target.closest("[data-qact]"); if (a) setQa(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.qa !== "checked"), "checked");
+  });
   let findT = null; $("findIn").addEventListener("input", e => { clearTimeout(findT); findT = setTimeout(() => findText(e.target.value), 350); });
   $("findIn").addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(findT); findText(e.target.value); } if (e.key === "Escape") { $("findRes").classList.remove("on"); e.target.blur(); } });
   document.addEventListener("pointerdown", e => { if (!e.target.closest("#findRes,#findIn")) $("findRes").classList.remove("on"); });
@@ -2060,14 +2585,11 @@ function wire(){
     if (!v) return; const pr = newProject(v.name); await dbPut("projects", pr); await openProject(pr.id); };
   $("bImport").onclick = () => $("impIn").click();
   $("impIn").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return;
-    try { const o = JSON.parse(await f.text()); if (o.format !== "zd-takeoff" || !o.items) throw new Error("not a takeoff project file");
-      const pr = Object.assign(newProject(o.name), {conds: o.conds, items: o.items, scales: o.scales, files: o.files, last: o.last || {}}); await dbPut("projects", pr);
-      const miss = []; for (const f of pr.files) if (!(await dbGet("pdfs", f.id))) miss.push(f.name);
-      await openProject(pr.id);
-      toast(miss.length ? "Imported — add " + miss.join(", ") + " with + PDF to re-attach the drawing" + (miss.length > 1 ? "s" : "") : "Imported", 6000); } catch (er) { toast("Could not import: " + er.message, 5000); } };
+    try { await importProject(await f.text()); } catch (er) { toast("Could not import: " + er.message, 5000); } };
   $("projList").addEventListener("click", async e => {
-    const o = e.target.closest("[data-open],[data-dup],[data-del]"); if (!o) return;
+    const o = e.target.closest("[data-open],[data-dup],[data-del],[data-bak]"); if (!o) return;
     if (o.dataset.open) return openProject(o.dataset.open);
+    if (o.dataset.bak) return backupsDialog(o.dataset.bak);
     if (o.dataset.dup) { const pr = await dbGet("projects", o.dataset.dup); const cp = Object.assign(JSON.parse(JSON.stringify(pr)), {id: uid("P"), name: pr.name + " (copy)", updated: new Date().toISOString()}); await dbPut("projects", cp); return showStart(); }
     if (o.dataset.del) { const pr = await dbGet("projects", o.dataset.del); const ok = await ask("Delete project", `<p>Delete <b>${esc(pr.name)}</b> with its ${pr.items.length} measurements and stored PDFs? This cannot be undone.</p>`, "Delete");
       if (!ok) return; const others = (await dbAll("projects")).filter(x => x.id !== pr.id), keep = new Set(others.flatMap(x => x.files.map(f => f.id)));
@@ -2101,9 +2623,13 @@ function wire(){
     const mk = e.target.dataset.mprop && (P.proj.marks || []).find(m => m.id === S.selMark);
     if (mk) { mutate(() => { mk[e.target.dataset.mprop] = e.target.value; }); return; }
     const it = P.proj.items.find(i => i.id === S.sel), f = e.target.dataset.prop; if (!it || !f) return;
+    if (f === "qa") return setQa([it], e.target.value);
     mutate(() => {
       if (f === "nos") it.nos = Math.max(1, Math.round(+e.target.value || 1));
       else if (f === "ow" || f === "oh") { const v = e.target.value.trim() ? parseFt(e.target.value) : 0; if (!isNaN(v)) it[f] = v; }
+      else if (f === "doorW") { const s = e.target.value.trim(); if (!s) delete it.doorW; else { const v = s.split("+").reduce((a, x) => a + parseFt(x), 0); if (!isNaN(v) && v >= 0) it.doorW = r3(v); } }
+      else if (f === "sch") { const s = schOf(e.target.value); if (s) { it.sch = s.id; it.label = s.mark; } else delete it.sch; }
+      else if (LOC_KEYS.includes(f)) { const v = e.target.value.trim(); if (v) it[f] = v; else delete it[f]; }
       else it[f] = e.target.value;
     });
   });
@@ -2254,7 +2780,7 @@ async function aiRunTool(b){
   const V = AI.view, k = curScale(), inp = b.input || {};
   if (!V || V.key !== S.key) return {err: "The page changed — ask the user to press ‘Read this view’ again."};
   if (!k) return {err: "The page scale is not set; ask the user to set it (K) first."};
-  const add = (name, pts) => { const c = aiAreaCond(), id = uid("I"); mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, label: String(name || "").slice(0, 60)}); }); return id; };
+  const add = (name, pts) => { const c = aiAreaCond(), id = uid("I"); mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(name || "").slice(0, 60)}); }); return id; };
   if (b.name === "trace_room") {
     const x = +inp.x, y = +inp.y; if (!(x >= 0 && y >= 0 && x <= V.W && y <= V.H)) return {err: "Point is outside the image."};
     const res = await autoRoom(aiToBase(V, x, y)); if (res.err) return {err: res.err};
@@ -2272,13 +2798,13 @@ async function aiRunTool(b){
     if (b.name === "draw_length") {
       if (pts.length < 2) return {err: "Need at least 2 points."};
       const c = condByName(inp.condition, "linear"), id = uid("I");
-      mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, label: String(inp.name || "").slice(0, 60)}); });
+      mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(inp.name || "").slice(0, 60)}); });
       return {ok: {id, name: inp.name, length_ft: +(polyLen(pts) / k).toFixed(3)}};
     }
     if (!pts.length) return {err: "No points."};
     const c = condByName(inp.condition, "count"); let it;
     mutate(() => { it = P.proj.items.find(i => i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && i.kind === "shape");
-      if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
+      if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); } it.ai = true; it.qa = "";
       pts.forEach(p => it.pts.push(p)); });
     return {ok: {id: it.id, name: c.name, count_on_page: it.pts.length}};
   }
@@ -2391,15 +2917,15 @@ async function freeImport(){
     if (!pts && corners.length >= 3) { pts = corners; how = "from Claude's corners"; }
     if (!pts) { aiLog("err", esc(r.name || "room") + ": no usable seed or corners"); continue; }
     const c = aiAreaCond(), id = uid("I"), a2 = ar(pts);
-    mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, label: String(r.name || "").slice(0, 60)}); });
+    mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(r.name || "").slice(0, 60)}); });
     aiLog("tool", `${esc(r.name || "")}: <b>${f2(a2)} Sft</b> <span class="small">${esc(how)}${want ? " · written " + f2(want) + " Sft" + (Math.abs(a2 - want) / want > 0.05 ? " — check" : " ✓") : ""}</span>`);
   }
   for (const l of (J.lengths || [])) { const pts = (l.points || []).filter(inImg).map(q => aiToBase(V, q[0], q[1])); if (pts.length < 2) continue;
-    const c = condByName(l.condition, "linear"); mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, label: String(l.name || "").slice(0, 60)}); });
+    const c = condByName(l.condition, "linear"); mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(l.name || "").slice(0, 60)}); });
     aiLog("tool", `${esc(c.name)} ${esc(l.name || "")}: <b>${f3(polyLen(pts) / k)} ft</b>`); }
   for (const g of (J.counts || [])) { const pts = (g.points || []).filter(inImg).map(q => aiToBase(V, q[0], q[1])); if (!pts.length) continue;
     const c = condByName(g.condition, "count"); let it;
-    mutate(() => { it = P.proj.items.find(i => i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && i.kind === "shape"); if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); } pts.forEach(p => it.pts.push(p)); });
+    mutate(() => { it = P.proj.items.find(i => i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && i.kind === "shape"); if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); } it.ai = true; it.qa = ""; pts.forEach(p => it.pts.push(p)); });
     aiLog("tool", `${esc(c.name)}: <b>${pts.length} Nos</b> added`); }
   busy(""); refresh();
 }
@@ -2517,7 +3043,7 @@ async function agentMeasure(filter){
     if (same) { same2++; aiLog("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${f2(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
     got.push({name: r.name, a: best.a, pts: best.pts});
     const dup = done.has(r.name.toLowerCase());
-    mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, label: r.name.slice(0, 60)}); });
+    mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, ai: true, label: r.name.slice(0, 60)}); });
     const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;
     aiLog("tool", `${esc(r.name)}: <b>${f2(best.a)} Sft</b> <span class="small">${r.sft ? "written " + esc(r.size) + " = " + f2(r.sft) + " Sft" + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > r.sft ? "+" : "") + f2(best.a - r.sft) + ")</b>" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
   }
@@ -2530,7 +3056,7 @@ async function agentCount(filter){
   if (!pick.length) {
     if (f && !/^(DOORS?|WINDOWS?|VENT\w*|ALL|TAGS)$/.test(f)) { const T = await pageTexts(S.fileId, S.pageNo), hits = T.filter(x => x.s.trim().toUpperCase() === f);   // any other exact word
       if (hits.length) { let it; const c = condByName(f, "count"); if (!c.sym) c.sym = "circle";
-        mutate(() => { it = P.proj.items.find(i => i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && i.kind === "shape"); if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
+        mutate(() => { it = P.proj.items.find(i => i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && i.kind === "shape"); if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); } it.ai = true; it.qa = "";
           hits.forEach(h => { const p = [h.x + (h.w || 0) / 2, h.y - (h.h || 6) / 2]; if (!it.pts.some(o => dist(o, p) < 2)) it.pts.push(p); }); });
         refresh(); return aiLog("tool", `${esc(f)}: <b>${hits.length} Nos</b> counted`); } }
     return aiLog("err", "No matching tags on this page" + (Object.keys(F.tags).length ? " — tags found: " + Object.keys(F.tags).map(esc).join(", ") : "") + ".");
@@ -2540,7 +3066,7 @@ async function agentCount(filter){
   mutate(() => pick.forEach(t2 => {
     const c = condByName(t2, "count"); if (!c.sym) { c.sym = tagKind(t2) === "Doors" ? "square" : tagKind(t2) === "Windows" ? "diamond" : "circle"; c.cap = "seq"; }
     let it = P.proj.items.find(i => i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && i.kind === "shape");
-    if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
+    if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); } it.ai = true; it.qa = "";
     let n = 0; F.tags[t2].forEach(p => { if (!it.pts.some(o => dist(o, p) < 2)) { it.pts.push(p); n++; } });
     lines.push(`${esc(t2)}: <b>${F.tags[t2].length} Nos</b>${n < F.tags[t2].length ? ` <span class="small">(${F.tags[t2].length - n} already marked)</span>` : ""}`);
   }));
@@ -2598,7 +3124,7 @@ function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw"
   wire(); wirePanels();
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView};   // for tests and the console
+  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
