@@ -158,6 +158,25 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 .dlg .cand:hover{border-color:var(--purple)}
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;display:none;z-index:20;max-width:90vw;text-align:center}
 
+/* Claude panel */
+#aiPanel{position:fixed;top:48px;right:0;bottom:0;width:min(400px,100vw);background:#fff;border-left:1px solid var(--line);box-shadow:-6px 0 24px rgba(15,41,66,.14);z-index:9;display:none;flex-direction:column}
+#aiPanel.on{display:flex}
+#aiPanel .aih{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+#aiPanel .aih b{color:var(--navy)}
+#aiPanel .sp{flex:1}
+#aiPanel .small{font-size:10.5px;color:var(--muted)}
+#aiKeyRow{display:none;flex-wrap:wrap;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line);background:#fbfcfe}
+#aiKeyRow input{flex:1;min-width:0}
+#aiLog{flex:1;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.aimsg{font-size:12.5px;line-height:1.5;padding:8px 10px;border-radius:8px;max-width:92%;word-wrap:break-word}
+.aimsg.user{align-self:flex-end;background:var(--purple);color:#fff}
+.aimsg.bot{align-self:flex-start;background:#f1f4f9;color:var(--txt)}
+.aimsg.tool{align-self:flex-start;background:#eaf6ef;color:#16582f;font-size:11.5px;padding:5px 9px}
+.aimsg.err{align-self:flex-start;background:#fdecec;color:#9b2222}
+.aimsg.wait{align-self:flex-start;color:var(--muted);font-style:italic;background:none;padding:2px 0}
+#aiPanel .aif{border-top:1px solid var(--line);padding:8px 12px;display:flex;flex-direction:column;gap:6px}
+#aiIn{width:100%;resize:vertical;border:1px solid #c9d6e4;border-radius:6px;padding:6px 8px;font:inherit;min-height:44px}
+#aiPanel .aib{display:flex;gap:6px;align-items:center}
 @media (max-width:1280px){.app{grid-template-columns:220px minmax(0,1fr) 360px}}
 @media (max-width:1100px){.app{grid-template-columns:200px minmax(0,1fr) 320px}}
 @media (max-width:860px){
@@ -197,6 +216,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <div class="sp"></div>
   <button class="btn sm" id="bUndo" title="Undo (Ctrl+Z)">&#8630;</button>
   <button class="btn sm" id="bRedo" title="Redo (Ctrl+Y)">&#8631;</button>
+  <button class="btn sm tg2" id="bClaude" title="Ask Claude to read the drawing and measure the rooms">&#10022; Claude</button>
   <button class="btn sm" id="bExport" title="Export">&#8681; Export</button>
   <a class="back" href="../zameen-developments/">SAJ QSCOST &rarr;</a>
 </header>
@@ -262,6 +282,15 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 
 <div id="dlgBack"><div class="dlg" role="dialog" aria-modal="true"><div class="dh" id="dlgT"></div><div class="db" id="dlgB"></div><div class="df" id="dlgF"></div></div></div>
 <div id="pop"></div>
+<aside id="aiPanel" aria-label="Claude assistant">
+  <div class="aih"><b>&#10022; Claude</b><span class="small">reads the drawing, measures rooms</span><span class="sp"></span>
+    <button class="btn sm" id="aiNew" title="Start a new conversation">New</button><button class="btn sm" id="aiKeyBtn" title="API key">Key</button><button class="btn sm" id="aiClose" title="Close">&times;</button></div>
+  <div id="aiKeyRow"><input type="password" id="aiKey" placeholder="Anthropic API key (sk-ant-…)" autocomplete="off"><button class="btn sm pri" id="aiKeySave">Save</button>
+    <div class="small">Your own key, from console.anthropic.com. Kept in this browser only and sent only to api.anthropic.com. Each request is billed to your Anthropic account.</div></div>
+  <div id="aiLog"></div>
+  <div class="aif"><textarea id="aiIn" rows="2" placeholder="e.g. measure every bedroom, or: the lounge outline is wrong, redo it"></textarea>
+    <div class="aib"><button class="btn sm" id="aiRead" title="Send a picture of the view on screen with your message">&#128065; Read this view</button><span class="sp"></span><button class="btn sm pri" id="aiSend">Send</button></div></div>
+</aside>
 <div id="toast"></div>
 
 <script type="module" src="takeoff.js"></script>
