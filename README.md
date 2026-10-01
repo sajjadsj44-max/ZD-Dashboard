@@ -8,6 +8,7 @@ Static, self-contained HTML dashboards published live on Netlify and GitHub Page
 |---|---|---|
 | Zameen Developments | https://zd-dashboard.netlify.app/ | https://sajjadsj44-max.github.io/zd-dashboards/zameen-developments/ |
 | Drawing Tracker | https://zd-dashboard.netlify.app/drawing-tracker/ | https://sajjadsj44-max.github.io/zd-dashboards/drawing-tracker/ |
+| PDF Takeoff | https://zd-dashboard.netlify.app/takeoff/ | https://sajjadsj44-max.github.io/zd-dashboards/takeoff/ |
 | Dashboard index | https://zd-dashboard.netlify.app/index.html | https://sajjadsj44-max.github.io/zd-dashboards/ |
 
 On Netlify the site root serves the dashboard itself (see the rewrite in
@@ -564,6 +565,55 @@ The code is the `<!--zd:pt-->` block of `zameen-developments/index.html`; charts
 node tools/test_price_trends.js       # 29 browser checks, worked against the page's own GRN block
 ```
 
+## PDF Takeoff (`takeoff/`)
+
+Added 01-Oct-2026 (Phase 1). Measure quantities straight off PDF drawings, in the browser — linked from the
+dashboard sidebar (QS Cost Control → PDF Takeoff) and the landing page.
+
+- **Private by design**: a PDF opens in the viewer's browser and is stored with the takeoff in that browser's
+  IndexedDB — nothing is uploaded and nothing is committed here. Projects move between computers as
+  **Export → Project (.json)**; the PDF is re-attached by adding it again (matched by file name and size).
+- **Scale**: read from the drawing's scale note — `1/8" = 1'-0"`, `3/16"=1'-0"`, `1" = 20'`, `1:100` — including
+  `@ A1`-style paper sizes when the PDF page is printed smaller or larger than the drawing (the A3 copy of an
+  A1 sheet is corrected by 1190.55 / 2383.94). A scale from a note shows as **not verified** until a known
+  dimension is measured against it (scale chip → Verify, ±1%); **Calibrate** (`K`) sets it from two points and a
+  length typed in feet or ft-in. Pages with no note must be calibrated; measurements on such pages stay out of
+  the totals until they are.
+- **Snapping** to the drawing's own vector lines — endpoints, intersections, midpoints, nearest point on a line
+  (curves flattened) — plus points already measured. Vector PDFs exported from CAD snap; scanned PDFs can be
+  measured but have no lines to snap to. `Shift` keeps a run at 0° / 90°.
+- **Conditions** (what is measured) with presets per the house standards: floor area (Sft), RCC slab (cft, T),
+  ceiling plaster, formwork soffit (5.00 Sft threshold), 9" and 13.5" brick walls (cft, H, T), 4.5" partition
+  (Sft, thickness stated), internal plaster both faces / external plaster (Sft, H), skirting (ft), doors and
+  windows (Nos). Heights and thicknesses are never assumed: a wall in Sft or cft cannot be created without H,
+  a cft quantity without T.
+- **Tools**: draw (`A` — polygon / run / count per the condition), rectangle (`R`), deduction (`D` — void in an
+  area, length in a run), opening (`O` — door / window width measured on the plan, height typed), measure
+  (`M`, not saved), select and drag points (`V`), undo / redo, Nos multiplier per measurement.
+- **Measurement sheet** in the house format: every row `Nos × L × W × H` in decimal feet (3 dp), Sft / cft
+  (2 dp), ft, Nos; a quantity is the product of the dimensions as printed, so the sheet re-measures from its
+  own figures. Rectangles are one row; other right-angled shapes split into rectangles (part a, b …); any other
+  shape into triangles `½ × base × height`; a run lists its legs (`12.000 + 14.000 + …`). Deductions are their
+  own negative rows; openings / voids at or under the condition's threshold (masonry and plaster 1.00 Sft,
+  formwork 5.00 Sft, concrete 0.50 cft) are listed but not deducted, saying why. Internal plaster carries both
+  faces in Nos.
+- **Exports**: Excel in the house colours (blue measured inputs, unlocked; green formulas `=PRODUCT(D:G)`,
+  `=-PRODUCT(…)` for deductions, a run's length as `=12.000+14.000+…`; grey `SUM` totals; sheet protected) with
+  Summary, Scale & audit (how each page's scale was set and checked) and Assumptions (unverified scales,
+  heights / thicknesses and opening heights to confirm); CSV; the marked-up page as PNG; the project as JSON.
+
+Phase 2 (planned): click-inside room areas with door gaps closed, walls found by thickness, symbol counting,
+a command bar, typical-floor multipliers and sending quantities to the Project BOQ. Phase 3: room tags and
+door / window marks read from the drawing, revision overlay, a scanned-PDF mode.
+
+`takeoff/index.html` (layout) and `takeoff/takeoff.js` (the app) load pdf.js 4.10.38 and ExcelJS from the jsDelivr
+CDN. Tests use a hand-written 3-page vector PDF with known dimensions (`tools/takeoff_fixture.js`):
+
+```sh
+python3 -m http.server 8765 &
+TK_LIBS=/path/with/pdfjs-dist+exceljs node tools/test_takeoff.js   # 52 browser checks
+```
+
 ## Calculator tab
 
 Sidebar → **Calculator** (after Admin) is a QS / civil / structural / MEP calculator
@@ -725,6 +775,7 @@ index.html                          landing page listing all dashboards
 netlify.toml                        Netlify publish settings and cache headers
 zameen-developments/index.html      Zameen Developments dashboard
 drawing-tracker/index.html          Drawing Tracker dashboard
+takeoff/index.html, takeoff.js      PDF Takeoff (pdf.js viewer, scale, snapping, measurement sheet)
 tools/grn_register.py               merge GRN receiving exports into the GRN Price Register
 tools/mrs_register.py               load a Punjab MRS PDF into the Punjab MRS Rates register
 tools/test_mrs_register.py          tests for the MRS loader
@@ -752,6 +803,8 @@ docs/master-rate-analysis-rev07.md  revision and validation report of the Master
 docs/RA_Master_Pakistan_FINAL_Rev07_2026-09-27.xlsx  the Rev07 workbook
 tools/test_rfq_tracker.js           browser tests for the RFQ Tracker (playwright)
 tools/test_price_trends.js          browser tests for Price Trends & Staleness (playwright)
+tools/takeoff_fixture.js            hand-written 3-page vector test PDF for the takeoff tests
+tools/test_takeoff.js               browser tests for the PDF Takeoff (playwright)
 tools/calc_data.py                  build the Calculator tab's section / pipe / material data block
 .github/workflows/rate-watch.yml    runs the rate watch daily and offers updates as a pull request
 .github/workflows/deploy-pages.yml  deploy to Pages + mirror main onto gh-pages

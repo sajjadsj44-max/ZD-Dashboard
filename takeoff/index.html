@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZD PDF Takeoff</title>
+<style>
+:root{
+  --navy:#0f2942; --navy2:#16375a; --blue:#2b7de9; --purple:#4b3b8f;
+  --bg:#eef2f7; --card:#fff; --line:#dde5ee; --txt:#1e2b3a; --muted:#6b7d92;
+  --green:#1e8e5a; --amber:#c9822a; --red:#d03b3b; --ink2:#52514e;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--txt);font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif;font-size:13px;-webkit-font-smoothing:antialiased;overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+.btn{background:#fff;border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;color:#3c4c60;white-space:nowrap}
+.btn:hover{border-color:var(--blue)}
+.btn.pri{background:var(--purple);border-color:var(--purple);color:#fff}
+.btn.dng{border-color:#f0b4b4;color:var(--red)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.sm{padding:3px 8px;font-size:11.5px}
+input[type=text],input[type=number],select{border:1px solid #c9d6e4;border-radius:6px;padding:5px 8px;background:#fff;min-width:0}
+input:focus,select:focus{outline:2px solid #b9adf0;outline-offset:-1px;border-color:var(--purple)}
+
+/* top bar */
+header{height:48px;background:linear-gradient(135deg,var(--navy),var(--navy2));color:#fff;display:flex;align-items:center;gap:8px;padding:0 10px;overflow-x:auto;overflow-y:hidden}
+header .mark{width:30px;height:30px;border:2px solid #fff;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex:none}
+header .ttl{font-weight:700;font-size:14px;white-space:nowrap}
+header .sep{width:1px;height:26px;background:rgba(255,255,255,.2);flex:none}
+header .btn{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.25);color:#fff}
+header .btn:hover{background:rgba(255,255,255,.16)}
+header select,header input{background:rgba(255,255,255,.95);color:var(--txt);height:30px}
+#projName{width:180px;font-weight:600}
+#pageSel{max-width:240px}
+#zoomPct{width:52px;text-align:center;font-variant-numeric:tabular-nums;font-size:12px;color:#cfe0f5}
+.chip{display:inline-flex;align-items:center;gap:6px;border-radius:14px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;border:1px solid transparent}
+.chip i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.chip.ok{background:#e5f5ec;color:#16723f}.chip.ok i{background:#0ca30c}
+.chip.warn{background:#fff5e2;color:#8a5a00}.chip.warn i{background:#fab219}
+.chip.bad{background:#fdecec;color:#9b2222}.chip.bad i{background:#d03b3b}
+header > *{flex:none}
+header .sp{flex:1}
+header a.back{color:#cfe0f5;font-size:12px;text-decoration:none;white-space:nowrap}
+
+/* layout */
+.app{display:grid;grid-template-columns:250px minmax(0,1fr) 420px;height:calc(100% - 48px)}
+.panel{background:var(--card);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;min-width:0}
+.panel.right{border-right:0;border-left:1px solid var(--line)}
+.ph{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ph h3{font-size:12.5px;font-weight:700;color:var(--navy);flex:1}
+.pb{overflow:auto;min-height:0;flex:1}
+.cond{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #f0f4f8;cursor:pointer}
+.cond:hover{background:#f8fbff}
+.cond.on{background:#f1eefc;box-shadow:inset 3px 0 0 var(--purple)}
+.cond .sw{width:12px;height:12px;border-radius:3px;flex:none}
+.cond .nm{flex:1;min-width:0}
+.cond .nm b{display:block;font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cond .nm span{font-size:10.5px;color:var(--muted)}
+.cond .q{font-variant-numeric:tabular-nums;font-weight:700;font-size:12px;text-align:right;white-space:nowrap}
+.cond .ed{border:0;background:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px}
+.empty{padding:22px 14px;color:var(--muted);text-align:center;line-height:1.6;font-size:12px}
+.keys{padding:10px 12px;border-top:1px solid var(--line);font-size:10.5px;color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:4px 8px}
+.keys span{white-space:nowrap}
+.keys kbd{display:inline-block;border:1px solid #c9d6e4;border-bottom-width:2px;border-radius:4px;padding:0 4px;font-size:10px;color:#3c4c60;background:#fbfcfe;font-family:inherit}
+
+/* stage */
+.stagewrap{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column}
+.tools{display:flex;gap:4px;padding:6px 8px;background:#fff;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center}
+.tool{border:1px solid var(--line);background:#fff;border-radius:6px;padding:4px 9px;cursor:pointer;font-size:12px;color:#3c4c60;display:inline-flex;gap:5px;align-items:center}
+.tool kbd{font-size:9.5px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 3px;font-family:inherit}
+.tool.on{background:var(--purple);border-color:var(--purple);color:#fff}
+.tool.on kbd{color:#d9d2ff;border-color:rgba(255,255,255,.4)}
+.tool:disabled{opacity:.4;cursor:default}
+.tools .sp{flex:1}
+.tg{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#3c4c60;cursor:pointer;padding:0 4px}
+#stage{position:relative;flex:1;overflow:hidden;background:#d9dee6;touch-action:none;min-height:0}
+#stage canvas{position:absolute;left:0;top:0;transform-origin:0 0}
+#low{image-rendering:auto}
+#ov{position:absolute;inset:0;width:100%;height:100%}
+#stage.pan{cursor:grab}#stage.panning{cursor:grabbing}#stage.draw{cursor:crosshair}
+.status{display:flex;gap:14px;align-items:center;padding:5px 10px;background:#fff;border-top:1px solid var(--line);font-size:11.5px;color:#3c4c60;min-height:28px;flex-wrap:wrap}
+.status b{font-variant-numeric:tabular-nums}
+.status .hint{color:var(--muted);margin-left:auto}
+#tip{position:absolute;pointer-events:none;background:#fff;border:1px solid rgba(11,11,11,.15);border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600;color:#0b0b0b;box-shadow:0 2px 8px rgba(15,41,66,.15);white-space:nowrap;display:none;z-index:3;font-variant-numeric:tabular-nums}
+#drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#3c4c60;text-align:center;padding:20px}
+#drop .box{border:2px dashed #9fb0c6;border-radius:12px;padding:28px 34px;background:rgba(255,255,255,.75);max-width:520px;line-height:1.6}
+#drop.over .box{border-color:var(--purple);background:#fff}
+#busy{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;border-radius:16px;padding:5px 14px;font-size:11.5px;display:none;z-index:4}
+
+/* sheet */
+table.sh{width:100%;border-collapse:collapse;font-size:11.5px}
+table.sh th{position:sticky;top:0;background:#f4f7fb;color:#4a5c72;font-size:9.5px;letter-spacing:.4px;font-weight:700;text-align:left;padding:6px 6px;border-bottom:1px solid var(--line);z-index:1}
+table.sh td{padding:5px 6px;border-bottom:1px solid #f0f4f8;vertical-align:top}
+table.sh td.n,table.sh th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.sh tr.ch td{background:#f7f9fc;font-weight:700;color:var(--navy);border-top:1px solid var(--line)}
+table.sh tr.ch .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+table.sh tr.it{cursor:pointer}
+table.sh tr.it:hover td{background:#f8fbff}
+table.sh tr.sel td{background:#eef3ff}
+table.sh tr.ded td{color:var(--red)}
+table.sh tr.below td{color:#9aa6b4}
+table.sh tr.tot td{font-weight:700;background:#fbfcfe;border-bottom:1px solid var(--line)}
+table.sh .ds{font-size:10.5px;color:var(--muted)}
+.props{border-top:1px solid var(--line);padding:10px 12px;background:#fbfcfe;display:none}
+.props.on{display:block}
+.props .row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.props .fg{display:flex;flex-direction:column;gap:3px;min-width:90px;flex:1}
+.props label,.dlg label{font-size:9.5px;letter-spacing:.5px;color:var(--muted);font-weight:700;text-transform:uppercase}
+.props h4{font-size:12px;color:var(--navy);margin-bottom:8px}
+.warnbar{background:#fff5e2;border-bottom:1px solid #f3d998;color:#7a5a08;font-size:11.5px;padding:7px 12px;line-height:1.5;display:none}
+.warnbar.on{display:block}
+
+/* start screen */
+#start{position:fixed;inset:48px 0 0 0;background:var(--bg);overflow:auto;z-index:5;display:none}
+#start.on{display:block}
+#start .wrap{max-width:900px;margin:0 auto;padding:26px 18px 60px}
+#start h2{font-size:18px;color:var(--navy);margin-bottom:4px}
+#start p.sub{color:var(--muted);margin-bottom:16px;line-height:1.6}
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden}
+.card .hd{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.card .hd h3{font-size:13.5px;color:var(--navy);flex:1}
+.plist{width:100%;border-collapse:collapse}
+.plist td,.plist th{padding:9px 12px;border-bottom:1px solid #f0f4f8;text-align:left;font-size:12.5px}
+.plist th{font-size:9.5px;letter-spacing:.5px;color:#4a5c72;background:#f4f7fb}
+.plist a{color:var(--purple);font-weight:700;cursor:pointer;text-decoration:none}
+.note{background:#fff;border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:8px;padding:12px 14px;font-size:12px;color:var(--muted);line-height:1.6}
+.note b{color:var(--txt)}
+
+/* dialog */
+#dlgBack{position:fixed;inset:0;background:rgba(15,41,66,.35);display:none;align-items:center;justify-content:center;z-index:10;padding:16px}
+#dlgBack.on{display:flex}
+.dlg{background:#fff;border-radius:10px;box-shadow:0 10px 40px rgba(15,41,66,.3);width:min(520px,100%);max-height:calc(100vh - 32px);display:flex;flex-direction:column}
+.dlg .dh{padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;color:var(--navy);font-size:14px}
+.dlg .db{padding:14px 16px;overflow:auto;line-height:1.55}
+.dlg .df{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.dlg .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.dlg .fg{display:flex;flex-direction:column;gap:3px;min-width:0}
+.dlg .fg.w2{grid-column:span 2}
+.dlg .err{color:var(--red);font-size:11.5px;margin-top:8px;min-height:1em}
+.dlg .small{font-size:11px;color:var(--muted)}
+.dlg .cand{display:flex;gap:8px;align-items:center;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin:4px 0;cursor:pointer}
+.dlg .cand:hover{border-color:var(--purple)}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;display:none;z-index:20;max-width:90vw;text-align:center}
+
+@media (max-width:1280px){.app{grid-template-columns:220px minmax(0,1fr) 360px}}
+@media (max-width:1100px){.app{grid-template-columns:200px minmax(0,1fr) 320px}}
+@media (max-width:860px){
+  body{overflow:auto}
+  .app{display:flex;flex-direction:column;height:auto}
+  .stagewrap{height:70vh;order:1}
+  .panel{border-right:0;border-bottom:1px solid var(--line);order:2}
+  .panel.right{order:3;border-left:0}
+  .pb{max-height:50vh}
+  #projName{width:120px}
+}
+@media print{body{overflow:visible}}
+</style>
+</head>
+<body>
+<header>
+  <div class="mark">ZD</div>
+  <div class="ttl">PDF Takeoff</div>
+  <div class="sep"></div>
+  <button class="btn sm" id="bProjects" title="All projects">&#9776; Projects</button>
+  <input type="text" id="projName" title="Project name" aria-label="Project name">
+  <button class="btn sm" id="bAdd" title="Add a PDF to this project">+ PDF</button>
+  <input type="file" id="fileIn" accept="application/pdf,.pdf" multiple hidden>
+  <div class="sep"></div>
+  <button class="btn sm" id="bPrev" title="Previous page (PgUp)">&lsaquo;</button>
+  <select id="pageSel" aria-label="Page"></select>
+  <button class="btn sm" id="bNext" title="Next page (PgDn)">&rsaquo;</button>
+  <div class="sep"></div>
+  <button class="btn sm" id="bZo" title="Zoom out (-)">&minus;</button>
+  <span id="zoomPct">—</span>
+  <button class="btn sm" id="bZi" title="Zoom in (+)">+</button>
+  <button class="btn sm" id="bFit" title="Fit page (F)">Fit</button>
+  <div class="sep"></div>
+  <span class="chip bad" id="scaleChip" title="Page scale — click to set or check"><i></i><span>Scale not set</span></span>
+  <div class="sp"></div>
+  <button class="btn sm" id="bUndo" title="Undo (Ctrl+Z)">&#8630;</button>
+  <button class="btn sm" id="bRedo" title="Redo (Ctrl+Y)">&#8631;</button>
+  <button class="btn sm" id="bExport" title="Export">&#8681; Export</button>
+  <a class="back" href="../zameen-developments/">SAJ QSCOST &rarr;</a>
+</header>
+
+<div class="app" id="app">
+  <aside class="panel">
+    <div class="ph"><h3>Conditions</h3><button class="btn sm pri" id="bNewCond">+ New</button></div>
+    <div class="pb" id="condList"></div>
+    <div class="keys">
+      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
+      <span><kbd>M</kbd> measure</span><span><kbd>K</kbd> set scale</span><span><kbd>V</kbd> select</span><span><kbd>Space</kbd> pan</span>
+      <span><kbd>Enter</kbd> finish</span><span><kbd>Esc</kbd> cancel</span><span><kbd>&#9003;</kbd> last point</span><span><kbd>S</kbd> snap</span>
+      <span><kbd>Shift</kbd> 0° / 90°</span><span><kbd>1</kbd>–<kbd>9</kbd> condition</span>
+    </div>
+  </aside>
+
+  <section class="stagewrap">
+    <div class="tools" id="tools">
+      <button class="tool" data-tool="select" title="Select / edit (V)">&#11016; Select <kbd>V</kbd></button>
+      <button class="tool" data-tool="pan" title="Pan (H or hold Space)">&#9995; Pan <kbd>H</kbd></button>
+      <button class="tool" data-tool="draw" title="Draw with the active condition (A)">&#9998; Draw <kbd>A</kbd></button>
+      <button class="tool" data-tool="rect" title="Rectangle area (R)">&#9645; Rect <kbd>R</kbd></button>
+      <button class="tool" data-tool="ded" title="Deduction for the active condition (D)">&minus; Deduct <kbd>D</kbd></button>
+      <button class="tool" data-tool="open" title="Door / window opening in a wall (O)">&#9707; Opening <kbd>O</kbd></button>
+      <button class="tool" data-tool="measure" title="Quick measure — not saved (M)">&#8596; Measure <kbd>M</kbd></button>
+      <button class="tool" data-tool="cal" title="Set scale from a known length (K)">&#128207; Scale <kbd>K</kbd></button>
+      <span class="sp"></span>
+      <label class="tg" title="Snap to drawing lines (S)"><input type="checkbox" id="snapOn" checked> Snap</label>
+    </div>
+    <div id="stage">
+      <canvas id="low"></canvas>
+      <canvas id="hi"></canvas>
+      <svg id="ov" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="tip"></div>
+      <div id="busy"></div>
+      <div id="drop"><div class="box"><b style="font-size:15px;color:var(--navy)">Drop a PDF drawing here</b><br>or use <b>+ PDF</b> above.<br>
+        <span style="font-size:11.5px">The PDF opens in this browser only — it is not uploaded anywhere.</span></div></div>
+    </div>
+    <div class="status" id="status"><span id="stPos">—</span><span id="stSnap"></span><span id="stMeas"></span><span class="hint" id="stHint"></span></div>
+  </section>
+
+  <aside class="panel right">
+    <div class="warnbar" id="warnbar"></div>
+    <div class="ph"><h3>Measurement sheet</h3><span class="ds" id="shInfo" style="font-size:10.5px;color:var(--muted)"></span></div>
+    <div class="pb" id="sheet"></div>
+    <div class="props" id="props"></div>
+  </aside>
+</div>
+
+<div id="start"><div class="wrap">
+  <h2>PDF Takeoff</h2>
+  <p class="sub">Measure areas, lengths and counts straight off PDF drawings, with the scale read from the drawing, snapping to the
+    drawing's own lines, and a measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as their own rows).</p>
+  <div class="card"><div class="hd"><h3>Projects</h3><button class="btn" id="bImport">Import project (.json)</button><input type="file" id="impIn" accept=".json,application/json" hidden>
+    <button class="btn pri" id="bNewProj">+ New project</button></div><div id="projList"></div></div>
+  <div class="note"><b>Your drawings stay on this computer.</b> PDFs and takeoffs are saved in this browser's storage (IndexedDB) on this device only —
+    nothing is uploaded, and another browser or computer will not see them. Use <b>Export → Project (.json)</b> to move a takeoff; the PDF is re-attached by
+    its file name. Vector PDFs exported from CAD snap to their lines; scanned PDFs can be measured but do not snap.</div>
+</div></div>
+
+<div id="dlgBack"><div class="dlg" role="dialog" aria-modal="true"><div class="dh" id="dlgT"></div><div class="db" id="dlgB"></div><div class="df" id="dlgF"></div></div></div>
+<div id="toast"></div>
+
+<script type="module" src="takeoff.js"></script>
+</body>
+</html>
