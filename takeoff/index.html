@@ -41,6 +41,8 @@ header select,header input{background:rgba(255,255,255,.95);color:var(--txt);hei
 .chip.bad{background:#fdecec;color:#9b2222}.chip.bad i{background:#d03b3b}
 header > *{flex:none}
 header .sp{flex:1}
+header .btn.tg2.on{background:#fff;color:var(--navy);border-color:#fff}
+#stage.dim canvas{filter:contrast(.35) brightness(1.48)}
 header a.back{color:#cfe0f5;font-size:12px;text-decoration:none;white-space:nowrap}
 
 /* layout */
@@ -188,6 +190,8 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <span id="zoomPct">—</span>
   <button class="btn sm" id="bZi" title="Zoom in (+)">+</button>
   <button class="btn sm" id="bFit" title="Fit page (F)">Fit</button>
+  <button class="btn sm tg2" id="bDim" title="Dimmer — fade the drawing so the takeoff stands out">&#9728; Dimmer</button>
+  <button class="btn sm tg2" id="bLw" title="Line weights are on — click to draw every line thin">&#9472; Line weights</button>
   <div class="sep"></div>
   <span class="chip bad" id="scaleChip" title="Page scale — click to set or check"><i></i><span>Scale not set</span></span>
   <div class="sp"></div>
@@ -202,7 +206,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
     <div class="ph"><h3>Conditions</h3><button class="btn sm pri" id="bNewCond">+ New</button></div>
     <div class="pb" id="condList"></div>
     <div class="keys">
-      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
+      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>C</kbd> count</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
       <span><kbd>M</kbd> measure</span><span><kbd>K</kbd> set scale</span><span><kbd>V</kbd> select</span><span><kbd>Space</kbd> pan</span>
       <span><kbd>Enter</kbd> / right-click finish</span><span><kbd>Esc</kbd> cancel</span><span><kbd>&#9003;</kbd> last point</span><span><kbd>S</kbd> snap</span>
       <span><kbd>Shift</kbd> 0° / 90°</span><span><kbd>1</kbd>–<kbd>9</kbd> condition</span>
@@ -217,6 +221,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
       <button class="tool" data-tool="rect" title="Rectangle area (R)">&#9645; Rect <kbd>R</kbd></button>
       <button class="tool" data-tool="auto" title="Auto area — click inside a room; its area is traced from the walls (W)">&#10024; Auto area <kbd>W</kbd></button>
       <button class="tool" id="bAutoSet" title="Auto area settings: door gap, furniture, wall lines">&#9881;</button>
+      <button class="tool" data-tool="count" title="Count — click each item; numbered markers (C)">&#9737; Count <kbd>C</kbd></button>
       <button class="tool" data-tool="ded" title="Deduction for the active condition (D)">&minus; Deduct <kbd>D</kbd></button>
       <button class="tool" data-tool="open" title="Door / window opening in a wall (O)">&#9707; Opening <kbd>O</kbd></button>
       <button class="tool" data-tool="measure" title="Quick measure — not saved (M)">&#8596; Measure <kbd>M</kbd></button>
