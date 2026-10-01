@@ -432,7 +432,7 @@ function snapAt(q){
    (the room's core). The core is grown back out over the thin lines to the wall faces, pockets narrower than the
    furniture setting are filled (furniture against a wall), and the outline is traced, squared up when the room is
    rectilinear (the bulge through a door opening is dropped there) and snapped onto the wall lines. */
-const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, skipDash: true, wall: null, show: false};
+const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false};
 const autoOpt = () => Object.assign({}, AUTO_DEF, (P.proj && P.proj.auto) || {});
 function segsIn(g, x0, y0, x1, y1){
   const c = g.cell, ids = new Set();
@@ -486,7 +486,7 @@ function barrierIds(g, ids, k, o){
   const door = o.skipDoors ? doorSymbols(g, ids, k) : new Set(), minL = o.minLen * k;
   const wall = o.wall ? {col: o.wall.split("|")[0], w: +o.wall.split("|")[1] || 0} : null;
   const out = ids.filter(i => { const s = g.segs[i];
-    if (door.has(i) || (s[4] & 8) || (o.skipDash && (s[4] & 2))) return false;
+    if (door.has(i) || (s[4] & 8) || (!o.dashBound && (s[4] & 2))) return false;
     if (Math.hypot(s[2] - s[0], s[3] - s[1]) < minL) return false;
     if (wall) { const st = (g.styles[s[6]] || "|0").split("|"); if (st[0] !== wall.col || +st[1] < 0.9 * wall.w) return false; }
     return true; });
@@ -641,7 +641,7 @@ function snapToWalls(Q, g, ids, tol, k, slack){   // rectilinear outline: each e
 }
 /* walls from the rendered drawing (what is seen on screen): every non-white pixel is ink; small separate marks (text,
    dashes of dashed lines, dots of stipple, dashed door swings) are dropped. Works for any PDF, scans included. */
-async function inkMask(x0, y0, W, H, px, minPx){
+async function inkMask(x0, y0, W, H, px, minPx, dashBound){
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
   await S.page.render({canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}).promise;
@@ -659,8 +659,32 @@ async function inkMask(x0, y0, W, H, px, minPx){
       fn(comp, x1c - x0c, y1c - y0c);
     }
   };
-  // small separate marks go first: letters, dashes of dashed lines, stipple dots, dashed door swings
-  comps(m, (c, w, h) => { if (Math.max(w, h) < minPx) c.forEach(i => { m[i] = 0; }); });
+  // small separate marks go first: letters, stipple dots, dashed door swings — and the dashes of dashed lines, unless they
+  // run on in a straight row (a dashed boundary of an open area): those rows are joined into one solid line and kept
+  const small = [];
+  comps(m, (c, w, h) => { if (Math.max(w, h) < minPx) small.push({c, x0: c.reduce((a, i) => Math.min(a, i % W), W), y0: c.reduce((a, i) => Math.min(a, (i - i % W) / W), H), w, h}); });
+  if (dashBound) {
+    const G = 0.8 * curScale() / px, L = 2 * curScale() / px, keep = new Set();
+    for (const dir of ["H", "V"]) {
+      const D = small.filter(d => dir === "H" ? d.w + 1 >= 3 * (d.h + 1) && d.w >= 2 : d.h + 1 >= 3 * (d.w + 1) && d.h >= 2)
+        .map(d => dir === "H" ? {d, a: d.x0, b: d.x0 + d.w, c: d.y0 + d.h / 2, t: d.h} : {d, a: d.y0, b: d.y0 + d.h, c: d.x0 + d.w / 2, t: d.w})
+        .sort((p, q) => p.c - q.c || p.a - q.a);
+      const used = new Set();
+      for (let i = 0; i < D.length; i++) {   // a row: dashes on one line, each gap under 0.8 ft, 2 ft or more in all
+        if (used.has(i)) continue;
+        const run = [D[i]]; used.add(i);
+        for (let j = i + 1; j < D.length && D[j].c - D[i].c <= 2.5; j++) { const last = run[run.length - 1];
+          if (!used.has(j) && Math.abs(D[j].c - last.c) <= 2 && D[j].a - last.b <= G && D[j].a >= last.a) { run.push(D[j]); used.add(j); } }
+        if (run.length < 2 || run[run.length - 1].b - run[0].a < L) continue;
+        run.forEach(r => keep.add(r.d));
+        const c = Math.round(run.reduce((s2, r) => s2 + r.c, 0) / run.length), t = Math.max(1, Math.round(run.reduce((s2, r) => s2 + r.t, 0) / run.length / 2));
+        for (let a = Math.floor(run[0].a); a <= Math.ceil(run[run.length - 1].b); a++) for (let o2 = -t; o2 <= t; o2++) {
+          const x = dir === "H" ? a : c + o2, y = dir === "H" ? c + o2 : a; if (x >= 0 && y >= 0 && x < W && y < H) m[y * W + x] = 1; }
+      }
+    }
+    small.forEach(d => { if (!keep.has(d)) d.c.forEach(i => { m[i] = 0; }); });
+    keep.forEach(d => d.c.forEach(i => { m[i] = 1; }));
+  } else small.forEach(d => d.c.forEach(i => { m[i] = 0; }));
   // then ink closer than ~0.4 ft fuses (hatching into a solid wall, so no fill runs between its strokes), 1 px thicker
   // so an 8-neighbour step cannot slip between diagonal pixels
   const rc = Math.max(1.5, 0.2 * curScale() / px), f = new Float32Array(N);
@@ -720,7 +744,7 @@ async function autoRoom(seed){   // -> {pts} or {err}
     };
     const rpx = Math.ceil(o.gap * k / px / 2) + 2;
     let thin, bar;
-    if (img) { const ink = await inkMask(x0, y0, W, H, px, Math.max(o.minLen, 1) * k / px); thin = ink.thin;   // a solid door swing stays in: its area is a pocket, added back
+    if (img) { const ink = await inkMask(x0, y0, W, H, px, Math.max(o.minLen, 1) * k / px, o.dashBound); thin = ink.thin;   // a solid door swing stays in: its area is a pocket, added back
       if (ids.doors.length) { const dl = raster(2 * px, true); for (let i = 0; i < N; i++) if (dl[i]) { thin[i] = 1; ink.big[i] = 1; } }
       bar = widen(ink.big, W, H, o.gap * k / px / 2); }
     else { thin = raster(2 * px); bar = raster(Math.max(o.gap * k, 2 * px)); }
@@ -797,13 +821,13 @@ async function autoSettings(){
     <div class="fg"><label>Wall lines</label><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="small" id="aoWall">${o.wall ? "colour " + esc(o.wall.split("|")[0]) + ", " + esc(o.wall.split("|")[1]) + " pt and heavier" : "any drawing line"}</span>
       <button class="btn sm" id="aoPick" type="button">Pick a wall…</button>${o.wall ? '<button class="btn sm" id="aoClr" type="button">Any line</button>' : ""}</div></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDoor" style="width:auto"${o.skipDoors ? " checked" : ""}> Ignore door swings and door leaves</label></div>
-    <div class="fg w2"><label><input type="checkbox" id="aoDash" style="width:auto"${o.skipDash ? " checked" : ""}> Ignore dashed lines (beams, slab edges overhead)</label></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoDash" style="width:auto"${o.dashBound ? " checked" : ""}> Straight dashed lines bound a room (e.g. an open dress / wardrobe area) — untick if dashed lines on your drawings are beams overhead</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoShow" style="width:auto"${o.show ? " checked" : ""}> Show the detected walls (pink) after each auto area — to see why a room leaks</label></div></div>
     <p class="small" style="margin-top:10px">If furniture or fixtures are drawn in the same pen as the walls, <b>Pick a wall</b> so only lines of that colour and weight bound the room.</p>`, "Save", () => {
       const gap = parseFt($("aoGap").value), pocket = parseFt($("aoPk").value || "0"), minLen = parseFt($("aoMin").value || "0");
       if (!(gap > 0.2 && gap < 30)) return "Close gaps: a width in ft, e.g. 4";
       if (isNaN(pocket) || isNaN(minLen)) return "Enter decimal feet";
-      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, skipDash: $("aoDash").checked, show: $("aoShow").checked}; }, "aoGap");
+      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked}; }, "aoGap");
   if (v) { P.proj.auto = Object.assign({}, P.proj.auto || {}, v); if (!v.show) S.autoShow = null; save(); draw(); toast("Auto area settings saved"); }
 }
 document.addEventListener("click", e => {   // auto-area dialog: pick / clear the wall pen
