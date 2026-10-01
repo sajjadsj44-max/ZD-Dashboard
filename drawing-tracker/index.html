@@ -59,6 +59,7 @@ tr:hover td{background:#fafcff}
 .badge.pending{background:#fbeedd;color:var(--amber)}
 .badge.progress{background:#e6eefc;color:var(--blue)}
 .badge.waiting{background:#f1e9fb;color:#7b4fbf}
+.badge.other{background:#eef1f5;color:#5d6b7c}
 a.openlink{color:var(--blue);text-decoration:none;font-weight:600;font-size:12px}
 a.openlink:hover{text-decoration:underline}
 .note{margin-top:8px;background:#fff;border:1px solid var(--line);border-left:3px solid var(--blue);
@@ -113,6 +114,7 @@ footer .wrap{max-width:1180px;margin:0 auto}
           <option value="In Progress">In Progress</option>
           <option value="Waiting">Waiting</option>
           <option value="Pending Entry">Pending Entry</option>
+          <option value="other">Other (not one of the above)</option>
         </select>
         <button id="clearProj" class="btnUpdate" style="background:var(--grey);display:none">Clear project filter</button>
       </div>
@@ -154,23 +156,42 @@ footer .wrap{max-width:1180px;margin:0 auto}
 
   function norm(s){ return String(s||"").toLowerCase().replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim(); }
 
+  // One of the four statuses the register uses, matched from the start of the cell so that
+  // "Not Received" is never counted as received; anything else is "other".
   function statusClass(st){
-    st = (st||"").toLowerCase();
-    if(st.indexOf("received")>=0) return "received";
-    if(st.indexOf("progress")>=0) return "progress";
-    if(st.indexOf("waiting")>=0) return "waiting";
-    return "pending";
+    var s = norm(st);
+    if(/\b(not|no)\b/.test(s)) return "other";
+    if(/^received\b/.test(s)) return "received";
+    if(/^in progress\b/.test(s)) return "progress";
+    if(/^waiting\b/.test(s)) return "waiting";
+    if(/^pending\b/.test(s)) return "pending";
+    return "other";
   }
 
+  // Only web links become clickable; a "javascript:" cell in the sheet must not run in the page.
+  function safeUrl(u){ return /^https?:\/\//i.test(String(u||"").trim()) ? String(u).trim() : ""; }
+
+  var SHARE_HINT = "It may not be shared as ‘Anyone with the link – Viewer’ yet.";
+
   function loadJsonp(url, cbName, onOk, onErr){
+    var done = false;
+    function finish(){ done = true; clearTimeout(timer); window[cbName] = function(){}; script.remove(); }
     window[cbName] = function(json){
-      delete window[cbName];
-      script.remove();
-      try{ onOk(json); }catch(e){ onErr(e); }
+      if(done) return;
+      finish();
+      try{
+        if(!json || json.status==="error" || !json.table){
+          var e = json && json.errors && json.errors[0];
+          throw new Error("Google could not return the sheet" + (e ? " (" + (e.detailed_message || e.message || e.reason) + ")" : "") + ". " + SHARE_HINT);
+        }
+        onOk(json);
+      }catch(e){ onErr(e); }
     };
     var script = document.createElement("script");
     script.src = url;
-    script.onerror = function(){ delete window[cbName]; onErr(new Error("Could not load the Google Sheet. It may not be shared as ‘Anyone with the link – Viewer’ yet.")); };
+    script.onerror = function(){ if(done) return; finish(); onErr(new Error("Could not load the Google Sheet. " + SHARE_HINT)); };
+    // A private sheet can answer with a sign-in page, which neither calls back nor fires onerror.
+    var timer = setTimeout(function(){ if(done) return; finish(); onErr(new Error("Google did not answer in 20 seconds. Check the connection; " + SHARE_HINT)); }, 20000);
     document.body.appendChild(script);
   }
 
@@ -193,7 +214,7 @@ footer .wrap{max-width:1180px;margin:0 auto}
     }
     var idx = {};
     cols.forEach(function(name, i){ if(name && idx[name]==null) idx[name] = i; });
-    return rows.map(function(r){
+    var out = rows.map(function(r){
       function cellAt(name){
         var i = idx[key(name)];
         return i==null ? null : (r.c||[])[i];
@@ -212,6 +233,14 @@ footer .wrap{max-width:1180px;margin:0 auto}
         link: cell("Drive Folder Link")
       };
     }).filter(function(r){ return r.project; });
+    // "NEO" and "Neo" are one project: group by a normalised key, show the first spelling met.
+    var shown = {};
+    out.forEach(function(r){
+      r.pkey = norm(r.project);
+      if(!shown[r.pkey]) shown[r.pkey] = r.project;
+      r.project = shown[r.pkey];
+    });
+    return out;
   }
 
   function renderKpis(){
@@ -219,9 +248,9 @@ footer .wrap{max-width:1180px;margin:0 auto}
     var received = 0, pending = 0;
     ROWS.forEach(function(r){
       projects[r.project] = true;
-      var s = (r.status||"").toLowerCase();
-      if(s.indexOf("received")>=0) received++;
-      else if(s.indexOf("pending")>=0) pending++;
+      var s = statusClass(r.status);
+      if(s==="received") received++;
+      else if(s==="pending") pending++;
     });
     document.getElementById("kProjects").textContent = Object.keys(projects).length;
     document.getElementById("kReceived").textContent = received;
@@ -239,9 +268,9 @@ footer .wrap{max-width:1180px;margin:0 auto}
       var p = r.project;
       byProj[p] = byProj[p] || {received:0, pending:0, other:0, total:0};
       byProj[p].total++;
-      var s = (r.status||"").toLowerCase();
-      if(s.indexOf("received")>=0) byProj[p].received++;
-      else if(s.indexOf("pending")>=0) byProj[p].pending++;
+      var s = statusClass(r.status);
+      if(s==="received") byProj[p].received++;
+      else if(s==="pending") byProj[p].pending++;
       else byProj[p].other++;
     });
     var names = Object.keys(byProj).sort();
@@ -275,9 +304,9 @@ footer .wrap{max-width:1180px;margin:0 auto}
 
     var rows = ROWS.filter(function(r){
       if(activeProject && r.project!==activeProject) return false;
-      if(statusQ && norm(r.status).indexOf(norm(statusQ))<0) return false;
+      if(statusQ && statusClass(r.status)!==statusClass(statusQ)) return false;
       if(q){
-        var hay = [r.project,r.discipline,r.drawing,r.status,r.category,r.remarks].join(" ").toLowerCase();
+        var hay = [r.project,r.discipline,r.drawing,r.status,r.dateReceived,r.category,r.remarks].join(" ").toLowerCase();
         if(hay.indexOf(q)<0) return false;
       }
       return true;
@@ -297,7 +326,7 @@ footer .wrap{max-width:1180px;margin:0 auto}
         + "<td>"+esc(r.dateReceived)+"</td>"
         + "<td>"+esc(r.category)+"</td>"
         + "<td>"+esc(r.remarks)+"</td>"
-        + "<td>"+(r.link ? '<a class="openlink" target="_blank" rel="noopener" href="'+esc(r.link)+'">Open in Drive &rarr;</a>' : "")+"</td>"
+        + "<td>"+(safeUrl(r.link) ? '<a class="openlink" target="_blank" rel="noopener" href="'+esc(safeUrl(r.link))+'">Open in Drive &rarr;</a>' : "")+"</td>"
         + "</tr>";
     }).join("");
   }
