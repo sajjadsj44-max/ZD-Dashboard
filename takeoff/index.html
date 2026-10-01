@@ -42,8 +42,16 @@ header select,header input{background:rgba(255,255,255,.95);color:var(--txt);hei
 header > *{flex:none}
 header .sp{flex:1}
 header .btn.tg2.on{background:#fff;color:var(--navy);border-color:#fff}
-#stage.dim canvas{filter:contrast(.35) brightness(1.48)}
+#stage canvas{filter:var(--dimf,none)}
+.dimw{display:inline-flex;align-items:center;gap:4px}.dimw input{width:70px;height:16px;padding:0}#dimLbl{font-size:11px;color:#cfe0f5;width:28px}
+.panel{position:relative}.rz{position:absolute;top:0;bottom:0;width:6px;cursor:col-resize;z-index:6}.rz:hover{background:rgba(75,59,143,.18)}
+.panel:not(.right) .rz{right:-3px}.panel.right .rz{left:-3px}
+.hidebtn{border:0;background:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px}
+.openp{position:absolute;top:50%;z-index:7;background:#fff;border:1px solid var(--line);padding:10px 3px;cursor:pointer;font-size:12px;color:var(--purple);box-shadow:0 2px 8px rgba(15,41,66,.15)}
+#openL{left:0;border-radius:0 6px 6px 0}#openR{right:0;border-radius:6px 0 0 6px}
 .findw{position:relative}
+.lyrbar{display:flex;gap:4px;padding:8px 10px;border-bottom:1px solid var(--line);flex-wrap:wrap}.lyrbar input{flex:1;min-width:80px}
+.lyr{display:flex;gap:6px;align-items:center;padding:4px 12px;font-size:12px;border-bottom:1px solid #f4f6fa;cursor:pointer;word-break:break-all}.lyr:hover{background:#f8fbff}
 #cmpLegend{position:absolute;top:8px;right:8px;z-index:4;display:none;gap:6px;align-items:center;background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:11.5px;box-shadow:0 2px 8px rgba(15,41,66,.15)}
 .seg{display:inline-flex}.seg .btn{border-radius:0}.seg .btn:first-child{border-radius:6px 0 0 6px}.seg .btn:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
 .seg .btn.on{background:var(--purple);border-color:var(--purple);color:#fff}
@@ -224,7 +232,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <span id="zoomPct">—</span>
   <button class="btn sm" id="bZi" title="Zoom in (+)">+</button>
   <button class="btn sm" id="bFit" title="Fit page (F)">Fit</button>
-  <button class="btn sm tg2" id="bDim" title="Dimmer — fade the drawing so the takeoff stands out">&#9728; Dimmer</button>
+  <span class="dimw"><button class="btn sm tg2" id="bDim" title="Dimmer — fade the drawing so the takeoff stands out">&#9728; Dimmer</button><input type="range" id="dimPct" min="0" max="90" step="5" value="50" title="Dimming %"><span id="dimLbl">0%</span></span>
   <button class="btn sm tg2" id="bLw" title="Line weights are on — click to draw every line thin">&#9472; Line weights</button>
   <div class="sep"></div>
   <div class="findw"><input type="search" id="findIn" placeholder="Find text (Ctrl+F)" aria-label="Find text on the drawings"><div id="findRes"></div></div>
@@ -241,8 +249,10 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 
 <div class="app" id="app">
   <aside class="panel">
-    <div class="ph"><h3>Conditions</h3><button class="btn sm pri" id="bNewCond">+ New</button></div>
+    <div class="rz" id="rzL" title="Drag to resize"></div>
+    <div class="ph"><span class="seg"><button class="btn sm on" id="tCond">Conditions</button><button class="btn sm" id="tLay">Layers</button></span><span style="flex:1"></span><button class="btn sm pri" id="bNewCond">+ New</button><button class="hidebtn" id="hideL" title="Hide this panel">&#10216;</button></div>
     <div class="pb" id="condList"></div>
+    <div class="pb" id="layerList" style="display:none"></div>
     <div class="keys">
       <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>C</kbd> count</span><span><kbd>E</kbd> circle</span><span><kbd>N</kbd> note</span><span><kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy</span><span><kbd>Ctrl</kbd>+<kbd>F</kbd> find</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
       <span><kbd>M</kbd> measure</span><span><kbd>K</kbd> set scale</span><span><kbd>V</kbd> select</span><span><kbd>Space</kbd> pan</span>
@@ -252,6 +262,8 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   </aside>
 
   <section class="stagewrap">
+    <button class="openp" id="openL" style="display:none" title="Show the conditions panel">&#10217;</button>
+    <button class="openp" id="openR" style="display:none" title="Show the measurement sheet">&#10216;</button>
     <div class="tools" id="tools">
       <button class="tool" data-tool="select" title="Select / edit (V)">&#11016; Select <kbd>V</kbd></button>
       <button class="tool" data-tool="pan" title="Pan (H or hold Space)">&#9995; Pan <kbd>H</kbd></button>
@@ -289,8 +301,9 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   </section>
 
   <aside class="panel right">
+    <div class="rz" id="rzR" title="Drag to resize"></div>
     <div class="warnbar" id="warnbar"></div>
-    <div class="ph"><h3>Measurement sheet</h3><span class="seg"><button class="btn sm on" id="vSheet">Sheet</button><button class="btn sm" id="vBill">Bill</button></span><span class="ds" id="shInfo" style="font-size:10.5px;color:var(--muted)"></span></div>
+    <div class="ph"><h3>Measurement sheet</h3><span class="seg"><button class="btn sm on" id="vSheet">Sheet</button><button class="btn sm" id="vBill">Bill</button></span><span class="ds" id="shInfo" style="font-size:10.5px;color:var(--muted)"></span><button class="hidebtn" id="hideR" title="Hide this panel">&#10217;</button></div>
     <div class="pb" id="sheet"></div>
     <div class="pb" id="bill" style="display:none"></div>
     <div class="props" id="props"></div>
@@ -318,7 +331,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <div id="aiLog"></div>
   <div class="aif"><textarea id="aiIn" rows="2" placeholder="e.g. measure every bedroom, or: the lounge outline is wrong, redo it"></textarea>
     <div class="aib"><button class="btn sm" id="aiRead" title="API key: send a picture of the view on screen with your message">&#128065; Read this view</button><span class="sp"></span><button class="btn sm pri" id="aiSend">Send</button></div>
-    <div class="aib"><span class="small">Free:</span><button class="btn sm" id="aiCopy" title="Copy the view and instructions for your own Claude.ai chat — no API key">&#128203; Copy for Claude</button><button class="btn sm" id="aiImport" title="Paste Claude.ai's reply to draw the measurements">&#8615; Import from Claude</button></div></div>
+    <div class="aib"><span class="small">Free:</span><button class="btn sm pri" id="aiDetails" title="No key: read this page's text — rooms, sizes, tags, levels — and give the agent tasks">&#128203; Drawing details</button><button class="btn sm" id="aiCopy" title="Copy the view and instructions for your own Claude.ai chat — no API key">Copy for Claude</button><button class="btn sm" id="aiImport" title="Paste Claude.ai's reply to draw the measurements">&#8615; Import from Claude</button></div></div>
 </aside>
 <div id="toast"></div>
 
