@@ -1463,6 +1463,14 @@ function wire(){
   $("bZo").onclick = () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2);
   $("bFit").onclick = () => { fit(); renderHi(); };
   $("bDim").onclick = () => setDim(!S.dim);
+  $("bClaude").onclick = () => aiToggle(!$("aiPanel").classList.contains("on"));
+  $("aiClose").onclick = () => aiToggle(false);
+  $("aiKeyBtn").onclick = () => aiShowKey($("aiKeyRow").style.display === "none");
+  $("aiKeySave").onclick = () => { const v = $("aiKey").value.trim(); pref("zdTakeoffApiKey", v); AI.client = null; aiShowKey(!v); aiLog("bot", v ? "Key saved in this browser." : "Key removed."); };
+  $("aiNew").onclick = () => { AI.history = []; AI.view = null; $("aiLog").innerHTML = ""; aiToggle(true); };
+  $("aiRead").onclick = () => aiSend($("aiIn").value.trim() || "Measure the floor area of every room in this view.", true).then(() => { $("aiIn").value = ""; });
+  $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
+  $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
   $("bLw").onclick = () => setThin(!S.thin);
   $("bUndo").onclick = undo; $("bRedo").onclick = redo;
   $("bExport").onclick = exportMenu;
@@ -1565,7 +1573,163 @@ function stepPage(d){
   if (n && n.indexOf("|") > 0) { const [f, p] = n.split("|"); gotoPage(f, +p); }
 }
 
-function pref(k, v){ try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+/* ------------------------------------------------------------------ Claude: reads the drawing and draws the areas
+   The view on screen goes to Claude as a picture, with the page's own text (room names, sizes) and positions. Claude
+   answers by calling the drawing tools below: trace_room runs the auto-area engine from a point it picks inside a room,
+   draw_area draws an outline from corners it reads off the picture, delete_area removes one it got wrong. Every tool
+   result carries the area in Sft, so Claude checks it against the size written in the room. Runs in this browser with
+   the user's own Anthropic API key (kept in this browser's storage, sent only to api.anthropic.com). */
+const ANTHROPIC_SDK = "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.131.0/+esm";
+const AI_MODEL = "claude-opus-5-5";
+const AI = {client: null, key: "", history: [], view: null, busy: false};
+const AI_SYSTEM = `You are a quantity surveyor's assistant inside a PDF takeoff tool. You see part of a construction drawing (usually a floor plan) as an image, with the text found on the PDF page and where it sits.
+
+Your job: measure what the user asks for — usually the floor area of rooms — by calling the drawing tools, then report briefly.
+
+Coordinates: image pixels, origin at the top-left of the image, x to the right, y down. Every point you give must be inside the image.
+
+How to measure a room:
+1. Find the room from its name text (e.g. BEDROOM, LOUNGE, BATH). The size written under the name (e.g. 14'-6"x12'-0" = 14.5 ft × 12.0 ft = 174.00 Sft) is the designer's nominal size — use it to check your result.
+2. Call trace_room with a point well inside the room: in open floor, away from walls, furniture and text. The tool traces the room from the drawing's walls and returns the area in Sft and the outline in image pixels.
+3. Check the result. If the area is far from the written size (more than about 5%), or the outline runs through a wall into another room, call delete_area on it and then draw_area with the room's corners read off the image, clockwise, at the inside faces of the walls. L-shaped and notched rooms need every corner.
+4. Name every area exactly as the room is named on the drawing (e.g. "BEDROOM 1", "LOUNGE"). If two rooms share a name, number them.
+
+Rules:
+- Never invent a dimension. If a room has no written size, say so and rely on the traced outline.
+- Do not re-measure rooms already listed as measured unless the user asks.
+- Units: decimal feet, Sft. Never metric.
+- Reply in short plain sentences: one line per room — name, area in Sft, and whether it matches the written size. Mention anything you could not measure and why.`;
+const AI_TOOLS = [
+  {name: "trace_room", description: "Measure a room's floor area by tracing it automatically from a point inside it (the tool follows the walls, closes door openings and ignores furniture and text). Returns the area in Sft and the traced outline in image pixels, or an error saying why it could not trace.",
+   strict: true, input_schema: {type: "object", additionalProperties: false, required: ["name", "x", "y"], properties: {
+     name: {type: "string", description: "Room name as written on the drawing"},
+     x: {type: "number", description: "Image x (px) of a point inside the room, in open floor"},
+     y: {type: "number", description: "Image y (px) of a point inside the room, in open floor"}}}},
+  {name: "draw_area", description: "Draw an area from its corner points (image pixels, in order around the outline). Use when trace_room fails or gives a wrong outline. Returns the area in Sft.",
+   strict: true, input_schema: {type: "object", additionalProperties: false, required: ["name", "points"], properties: {
+     name: {type: "string", description: "Room name as written on the drawing"},
+     points: {type: "array", description: "Corners in order, at least 3", items: {type: "object", additionalProperties: false, required: ["x", "y"], properties: {x: {type: "number"}, y: {type: "number"}}}}}}},
+  {name: "delete_area", description: "Delete a measured area by its id (from a tool result or the list of measured areas).",
+   strict: true, input_schema: {type: "object", additionalProperties: false, required: ["id"], properties: {id: {type: "string"}}}}
+];
+async function aiClient(){
+  const key = pref("zdTakeoffApiKey") || "";
+  if (!key) return null;
+  if (AI.client && AI.key === key) return AI.client;
+  let Anthropic;
+  try { Anthropic = (await import(ANTHROPIC_SDK)).default; } catch (e) { throw new Error("The Anthropic library could not be loaded — check the internet connection."); }
+  AI.client = new Anthropic({apiKey: key, dangerouslyAllowBrowser: true}); AI.key = key;
+  return AI.client;
+}
+async function aiSnapshot(){   // the part of the page on screen, long side 1600 px at most
+  const st = stage(), v = S.view;
+  const bx0 = Math.max(0, -v.tx / v.s), by0 = Math.max(0, -v.ty / v.s);
+  const bx1 = Math.min(S.base.width, (st.clientWidth - v.tx) / v.s), by1 = Math.min(S.base.height, (st.clientHeight - v.ty) / v.s);
+  const w = bx1 - bx0, h = by1 - by0, sc = Math.min(1600 / Math.max(w, h), 8), W = Math.max(1, Math.round(w * sc)), H = Math.max(1, Math.round(h * sc));
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  await S.page.render({canvasContext: ctx, viewport: S.page.getViewport({scale: sc}), transform: [1, 0, 0, 1, -bx0 * sc, -by0 * sc]}).promise;
+  return {data: cv.toDataURL("image/png").split(",")[1], x0: bx0, y0: by0, sc, W, H, key: S.key};
+}
+const aiToPx = (V, p) => [Math.round((p[0] - V.x0) * V.sc), Math.round((p[1] - V.y0) * V.sc)];
+const aiToBase = (V, x, y) => [V.x0 + x / V.sc, V.y0 + y / V.sc];
+function aiContext(V){   // page text and measured areas inside the view, in image pixels
+  const k = curScale(), inV = q => q[0] >= 0 && q[1] >= 0 && q[0] <= V.W && q[1] <= V.H;
+  const texts = (S.texts[S.key] || []).map(t => ({s: t.s.trim(), q: aiToPx(V, [t.x, t.y])})).filter(t => t.s && inV(t.q)).slice(0, 400);
+  const areas = P.proj.items.filter(it => it.file === S.fileId && it.page === S.pageNo && it.kind === "shape" && (cond(it.cond) || {}).type === "area")
+    .map(it => ({it, q: it.pts.map(p => aiToPx(V, p))})).filter(a => a.q.some(inV));
+  return `Image: ${V.W} × ${V.H} px. Scale: ${k ? "1 ft = " + (k * V.sc).toFixed(3) + " px in this image" : "not set — areas cannot be measured until the scale is set (K)"}.
+Text on the page in view (text @ x,y px):
+${texts.length ? texts.map(t => `"${t.s}" @ ${t.q[0]},${t.q[1]}`).join("\n") : "(none — the drawing may be a scan; read the image)"}
+Already measured here: ${areas.length ? areas.map(a => `${a.it.id} "${a.it.label || "area"}" ${f2(polyArea(a.it.pts) / k / k)} Sft`).join("; ") : "none"}`;
+}
+function aiAreaCond(){
+  let c = S.cond ? cond(S.cond) : null;
+  if (!c || c.type !== "area") c = P.proj.conds.find(x => x.type === "area");
+  if (!c) { c = {id: uid("C"), name: "Floor area", type: "area", unit: "Sft", color: COLORS[P.proj.conds.length % COLORS.length], h: "", t: "", faces: 1, dedMin: 0}; P.proj.conds.push(c); }
+  return c;
+}
+async function aiRunTool(b){
+  const V = AI.view, k = curScale(), inp = b.input || {};
+  if (!V || V.key !== S.key) return {err: "The page changed — ask the user to press ‘Read this view’ again."};
+  if (!k) return {err: "The page scale is not set; ask the user to set it (K) first."};
+  const add = (name, pts) => { const c = aiAreaCond(), id = uid("I"); mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, label: String(name || "").slice(0, 60)}); }); return id; };
+  if (b.name === "trace_room") {
+    const x = +inp.x, y = +inp.y; if (!(x >= 0 && y >= 0 && x <= V.W && y <= V.H)) return {err: "Point is outside the image."};
+    const res = await autoRoom(aiToBase(V, x, y)); if (res.err) return {err: res.err};
+    const id = add(inp.name, res.pts);
+    return {ok: {id, name: inp.name, area_sft: +(polyArea(res.pts) / k / k).toFixed(2), squared: res.rect, outline_px: res.pts.map(p => aiToPx(V, p))}};
+  }
+  if (b.name === "draw_area") {
+    const pts = (Array.isArray(inp.points) ? inp.points : []).filter(p => p && isFinite(+p.x) && isFinite(+p.y)).map(p => aiToBase(V, +p.x, +p.y));
+    if (pts.length < 3 || polyArea(pts) < 1e-6) return {err: "Need at least 3 corners enclosing an area."};
+    const id = add(inp.name, pts);
+    return {ok: {id, name: inp.name, area_sft: +(polyArea(pts) / k / k).toFixed(2)}};
+  }
+  if (b.name === "delete_area") {
+    const it = P.proj.items.find(i => i.id === inp.id && i.file === S.fileId && i.page === S.pageNo);
+    if (!it) return {err: "No area with that id on this page."};
+    mutate(() => { P.proj.items = P.proj.items.filter(i => i !== it); }); if (S.sel === it.id) S.sel = null;
+    return {ok: {deleted: it.id}};
+  }
+  return {err: "Unknown tool " + b.name};
+}
+function aiLog(kind, html){ const d = document.createElement("div"); d.className = "aimsg " + kind; d.innerHTML = html; $("aiLog").appendChild(d); $("aiLog").scrollTop = 1e9; return d; }
+const aiText = t => esc(t).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
+async function aiSend(text, fresh){
+  if (AI.busy || !P.proj) return;
+  if (!S.page) return aiLog("err", "Open a PDF page first.");
+  let client;
+  try { client = await aiClient(); } catch (e) { return aiLog("err", esc(e.message)); }
+  if (!client) { aiShowKey(true); return aiLog("err", "Add your Anthropic API key first (above)."); }
+  AI.busy = true; $("aiSend").disabled = true; $("aiRead").disabled = true;
+  aiLog("user", esc(text));
+  const wait = aiLog("wait", "Claude is reading the drawing…");
+  try {
+    const content = [];
+    if (fresh || !AI.view || AI.view.key !== S.key) {
+      AI.view = await aiSnapshot();
+      content.push({type: "image", source: {type: "base64", media_type: "image/png", data: AI.view.data}}, {type: "text", text: aiContext(AI.view)});
+    }
+    content.push({type: "text", text});
+    AI.history.push({role: "user", content});
+    for (let turn = 0; turn < 16; turn++) {
+      const res = await client.beta.messages.create({
+        model: AI_MODEL, max_tokens: 16000, output_config: {effort: "high"},
+        betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
+        system: [{type: "text", text: AI_SYSTEM, cache_control: {type: "ephemeral"}}],
+        tools: AI_TOOLS, messages: AI.history
+      });
+      if (res.stop_reason === "refusal") { AI.history = []; aiLog("err", "Claude declined this request" + (res.stop_details && res.stop_details.explanation ? ": " + esc(res.stop_details.explanation) : "") + ". The chat was reset."); break; }
+      AI.history.push({role: "assistant", content: res.content});
+      res.content.forEach(b => { if (b.type === "text" && b.text.trim()) aiLog("bot", aiText(b.text)); });
+      if (res.stop_reason === "max_tokens") { aiLog("err", "The answer was cut off (too long). Ask for fewer rooms at a time."); break; }
+      if (res.stop_reason !== "tool_use") break;
+      const results = [];
+      for (const b of res.content.filter(x => x.type === "tool_use")) {
+        let out; try { out = await aiRunTool(b); } catch (e) { out = {err: e.message || String(e)}; }
+        aiLog("tool", out.ok ? (out.ok.deleted ? "Deleted an area" : `${esc(b.input.name || "")}: <b>${f2(out.ok.area_sft)} Sft</b>`) + ` <span class="small">(${esc(b.name.replace("_", " "))})</span>` : `${esc(b.input && b.input.name || b.name)}: ${esc(out.err)}`);
+        results.push({type: "tool_result", tool_use_id: b.id, content: JSON.stringify(out.ok || {error: out.err}), is_error: !out.ok});
+      }
+      AI.history.push({role: "user", content: results});
+      refresh();
+    }
+  } catch (e) {
+    const st = e && e.status;
+    aiLog("err", st === 401 ? "The API key was not accepted — check it (above)." : st === 429 ? "Rate limited by the API — wait a minute and try again." : esc("Request failed: " + (e.message || e)));
+    if (st === 401) aiShowKey(true);
+    // keep the conversation valid: drop a trailing user turn the API never answered
+    while (AI.history.length && AI.history[AI.history.length - 1].role === "user" && !(AI.history[AI.history.length - 1].content || []).some(x => x.type === "tool_result")) AI.history.pop();
+  }
+  wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
+}
+function aiShowKey(on){ $("aiKeyRow").style.display = on ? "flex" : "none"; if (on) $("aiKey").value = pref("zdTakeoffApiKey") || ""; }
+function aiToggle(on){
+  $("aiPanel").classList.toggle("on", on); $("bClaude").classList.toggle("on", on);
+  if (on) { aiShowKey(!pref("zdTakeoffApiKey")); if (!$("aiLog").children.length) aiLog("bot", "I read the part of the drawing on screen and measure rooms for you. Zoom to the area you want, then press <b>Read this view</b> — or type, e.g. <i>measure every bedroom</i>."); setTimeout(() => $("aiIn").focus(), 0); }
+}
+
+function pref(k, v){ try { if (v === undefined) return localStorage.getItem(k); if (v === "") localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
 function setDim(on){ S.dim = on; stage().classList.toggle("dim", on); $("bDim").classList.toggle("on", on); pref("zdTakeoffDim", on ? "1" : "0"); }
 function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); if (S.page) { renderLow(); renderHi(true); } }
 
