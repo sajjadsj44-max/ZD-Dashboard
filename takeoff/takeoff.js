@@ -1342,6 +1342,13 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
     if (fences.length) { const fm = fenceMask(); for (let i = 0; i < N; i++) if (fm[i]) { thin[i] = 1; bar[i] = 1; } }   // the user's fences close what the drawing leaves open
     if (o.show) S.autoShow = {key: S.key, x0, y0, px, W, H, url: maskUrl(thin, W, H)};
     const named = labelMask(x0, y0, W, H, px, o.own);
+    // the click in a space narrower than the door gap (a passage, a corridor as wide as a door): its width and length here
+    const csx = Math.floor((seed[0] - x0) / px), csy = Math.floor((seed[1] - y0) / px); let passage = null;
+    if (csx > 0 && csy > 0 && csx < W - 1 && csy < H - 1 && !thin[csy * W + csx] && bar[csy * W + csx]) {
+      const run = (dx, dy) => { let n = 0, x = csx, y = csy; while (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !thin[y * W + x]) { x += dx; y += dy; n++; } return n; };
+      const hx = run(1, 0) + run(-1, 0), vy = run(0, 1) + run(0, -1), rm = Math.ceil(o.gap * k / px);
+      let d2 = Infinity; for (let dy = -rm; dy <= rm; dy++) for (let dx = -rm; dx <= rm; dx++) { const x = csx + dx, y = csy + dy, q = dx * dx + dy * dy; if (q < d2 && x >= 0 && y >= 0 && x < W && y < H && thin[y * W + x]) d2 = q; }
+      passage = {w: 2 * Math.sqrt(d2) * px / k, along: Math.max(hx, vy) * px / k, horiz: hx >= vy}; }   // width: twice the way to the nearest wall (a ray across could run out through a doorway)
     // B: every line widened to the door gap, so all openings close — the room's core — grown back out to the wall faces
     const sb = seedIn(bar, rpx), sa = seedIn(thin, 4);
     let m;
@@ -1371,11 +1378,14 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
       }
     } else {   // narrower than the gap all over (a passage): the thin-line fill alone, if it stays closed
       const A = sa >= 0 ? fill(thin, sa, true) : null;
-      if (!A) return {err: "This space is narrower than the door gap (" + f3(o.gap) + " ft) and is not closed — lower ‘Close gaps’ in the auto-area settings (⚙), or draw it."};
+      if (!A) return {err: "This space is narrower than the door gap (" + f3(o.gap) + " ft) and is not closed — lower ‘Close gaps’ in the auto-area settings (⚙), or draw it.", passage};
       m = A.m;
     }
     if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2, named); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
-    const loop = outerLoop(m, W, H); if (!loop || loop.length < 4) return {err: "No closed space found at that point."};
+    let partial = false;
+    if (passage) { let n = 0; if (passage.horiz) { for (let x = 0; x < W; x++) if (m[csy * W + x]) n++; } else for (let y = 0; y < H; y++) if (m[y * W + csx]) n++;
+      partial = n * px / k < 0.6 * passage.along; }   // the outline takes in less than 60 % of the passage's length: a piece by a doorway, not the passage
+    const loop = outerLoop(m, W, H); if (!loop || loop.length < 4) return {err: "No closed space found at that point.", passage};
     let Q = dpClosed(loop.map(p => [x0 + p[0] * px, y0 + p[1] * px]), 1.6 * px);
     const sq = squareUp(Q, 3 * px, o.gap * k, Math.max(o.gap, o.pocket) * k);
     Q = sq ? (ids.length ? snapToWalls(sq, g, ids, Math.max(4 * px, 0.35 * k), k, px, ids.doors) : offsetPoly(sq, (img ? 1.5 : 1) * px))
@@ -1383,8 +1393,8 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
     Q = cleanPoly(Q);
     if (sq) Q = cleanPoly(deTab(Q, k, (x, y) => { const xx = Math.round((x - x0) / px), yy = Math.round((y - y0) / px);
       for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const u = xx + dx, v = yy + dy; if (u >= 0 && v >= 0 && u < W && v < H && thin[v * W + u]) return true; } return false; }, px));
-    if (Q.length < 3 || polyArea(Q) < 1e-6) return {err: "No closed space found at that point."};
-    return {pts: Q, rect: !!sq};
+    if (Q.length < 3 || polyArea(Q) < 1e-6) return {err: "No closed space found at that point.", passage};
+    return {pts: Q, rect: !!sq, passage, partial};
   }
   return {err: "The space leaks — an opening wider than the door gap (" + f3(autoOpt().gap) + " ft) joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it."};
 }
@@ -1433,6 +1443,7 @@ async function autoAt(p){
   mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm}); });
   S.sel = id; draw(); renderSheet();
   const k = hereScale(p);
+  if (res.short && !res.leak) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — " + res.short + ".", 9000);
   if (res.leak) { if (!autoOpt().show) { P.proj.auto = Object.assign({}, P.proj.auto || {}, {show: true}); save(); }
     return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
   toast((nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
@@ -1440,7 +1451,15 @@ async function autoAt(p){
 /* Leak guard: a room's outline must not swallow another room's name, nor grow far past its own written size.
    When it does, trace again closing wider gaps and dashed lines, and keep the first clean outline. */
 async function autoRoomGuarded(p){
-  const first = await autoRoom(p); if (first.err) return first;
+  let first = await autoRoom(p);
+  // a passage about as narrow as the door gap (a 4 ft corridor, gap 4 ft): traced again closing openings just under its width
+  // (doorways on it close, it does not), when the first trace failed or took in only a piece of it
+  if (first.passage && (first.err || first.partial)) {
+    for (const f of [0.9, 0.8, 0.7, 0.6]) { const g2 = Math.max(1.2, f * autoOpt().gap); busy("A passage as narrow as the door gap — closing openings up to " + f3(g2) + " ft…");
+      const r2 = await autoRoom(p, {gap: g2}); if (!r2.err && !r2.partial) { r2.note = "passage narrower than the door gap: openings closed up to " + f3(g2) + " ft"; first = r2; break; } }
+    if (!first.err && first.partial) first.short = "only part of a passage narrower than the door gap was found — Ctrl+Z, set ‘Close gaps’ (⚙) below the passage's width and click again";
+  }
+  if (first.err) return first;
   let F = null; try { F = await drawingFacts(S.fileId, S.pageNo); } catch (e) {}
   if (!F || !F.rooms.length) return first;
   const k = hereScale(p), o = autoOpt();

@@ -145,9 +145,42 @@ function pdfFrom(P){
   out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF\n`;
   return Buffer.from(out, "latin1");
 }
+/* a scanned drawing: the house of p.1 as a 200 dpi grey image (no text, no lines to snap to), 24 × 18 in page; and a heavy
+   CAD page: n short hatch strokes over the same house */
+function makeScanPdf(){
+  const zlib = require("zlib"), dpi = 200, W = 24 * dpi, H = 18 * dpi, px = new Uint8Array(W * H).fill(255), sc = dpi / 72;   // page pt -> px
+  const fill = (x0, y0, x1, y1) => { for (let y = Math.max(0, Math.round(y0)); y < Math.min(H, Math.round(y1)); y++) px.fill(0, y * W + Math.max(0, Math.round(x0)), y * W + Math.min(W, Math.round(x1))); };
+  const P = v => (OX + v * S1) * sc, Q = v => (OY + v * S1) * sc;   // house ft -> px (same place as p.1, the page 1728 × 1296 pt)
+  // walls as solid bands between their faces: outer 9", partitions 4.5"
+  const band = (x0, y0, x1, y1) => fill(P(x0), Q(y0), P(x1), Q(y1));
+  band(X.e0, Y.e0, X.e1, Y.r1a); band(X.e0, Y.r4b, X.e1, Y.e1); band(X.e0, Y.e0, X.a0, ENTRY[0]); band(X.e0, ENTRY[1], X.a0, Y.e1); band(X.c1, Y.e0, X.e1, Y.e1);
+  const hp = (y0, y1, gaps) => { let x = X.a0; gaps.sort((a, b) => a[0] - b[0]).forEach(g => { band(x, y0, g[0], y1); x = g[1]; }); band(x, y0, X.c1, y1); };
+  hp(Y.r1b, Y.r2a, DOORS.filter(d => d[2] === Y.r1b).map(d => [d[0], d[1]])); hp(Y.r2b, Y.r3a, DOORS.filter(d => d[2] === Y.r2b).map(d => [d[0], d[1]])); hp(Y.r3b, Y.r4a, DOORS.filter(d => d[2] === Y.r3b).map(d => [d[0], d[1]]));
+  band(X.a1, Y.r1a, X.b0, Y.r1b); band(X.b1, Y.r1a, X.c0, Y.r1b); band(X.b1, Y.r3a, X.c0, Y.r3b); band(X.a1, Y.r4a, X.b0, Y.r4b); band(X.b1, Y.r4a, X.c0, Y.r4b);
+  // scan noise: a few specks and a 10'-0" scale bar under the plan (its ends ticked)
+  for (let i = 0; i < 4000; i++) { const x = (i * 7919) % W, y = (i * 104729) % H; px[y * W + x] = 90; }
+  band(0, 47, 10, 47.1); band(0, 46.6, 0.06, 47.5); band(9.94, 46.6, 10, 47.5);
+  const img = zlib.deflateSync(Buffer.from(px), {level: 6}), pw = W / sc, ph = H / sc;
+  const content = `q ${pw.toFixed(3)} 0 0 ${ph.toFixed(3)} 0 0 cm /Im1 Do Q`;
+  const objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw.toFixed(3)} ${ph.toFixed(3)}] /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >>`,
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`];
+  const head = `<< /Type /XObject /Subtype /Image /Width ${W} /Height ${H} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length ${img.length} >>\nstream\n`;
+  const parts = []; let len = 0; const add = b => { parts.push(b); len += b.length; }, offs = [];
+  add(Buffer.from("%PDF-1.4\n", "latin1"));
+  objs.forEach((o, i) => { offs.push(len); add(Buffer.from(`${i + 1} 0 obj\n${o}\nendobj\n`, "latin1")); });
+  offs.push(len); add(Buffer.from(`5 0 obj\n${head}`, "latin1")); add(img); add(Buffer.from("\nendstream\nendobj\n", "latin1"));
+  const x = len; add(Buffer.from(`xref\n0 6\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, "0") + " 00000 n \n").join("") + `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${x}\n%%EOF\n`, "latin1"));
+  return Buffer.concat(parts);
+}
+function makeHeavyPdf(n){   // the p.1 house with n short diagonal hatch strokes on its walls' outside (a dense CAD sheet)
+  const c = ["0.5 w"].concat(linesHouse(AD_H), text(textsHouse(AD_H)), ["0.2 w"]);
+  for (let i = 0; i < (n || 150000); i++) { const x = 1300 + (i % 600) * 2, y = 100 + Math.floor(i / 600) * 6; c.push(`${x} ${AD_H - y} m ${x + 4} ${AD_H - y - 4} l S`); }
+  return pdfFrom([{w: AD_W, h: AD_H, content: c.join("\n")}]);
+}
 const makeQaPdf = () => pdfFrom(pages());
 const makeBigPdf = n => pdfFrom(bigPages(n || 120));
 /* a room's clear rectangle in page points (app coordinates) */
 const roomRect = nm => { const r = HOUSE.find(x => x[0] === nm); return [OX + ft(r[1]), OY + ft(r[2]), OX + ft(r[3]), OY + ft(r[4])]; };
-module.exports = {makeQaPdf, makeBigPdf, pdfFrom, HOUSE, DOORS, WINDOWS, ENTRY, R7, S1, OX, OY, X, Y, roomRect, MM, AD_W, AD_H};
+module.exports = {makeScanPdf, makeHeavyPdf, makeQaPdf, makeBigPdf, pdfFrom, HOUSE, DOORS, WINDOWS, ENTRY, R7, S1, OX, OY, X, Y, roomRect, MM, AD_W, AD_H};
 if (require.main === module) { const n = +process.argv[3]; require("fs").writeFileSync(process.argv[2] || "takeoff_qa.pdf", n ? makeBigPdf(n) : makeQaPdf()); console.log("written", process.argv[2] || "takeoff_qa.pdf"); }
