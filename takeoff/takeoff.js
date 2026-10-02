@@ -2968,14 +2968,14 @@ async function findText(q){
 async function countTextHits(q, hits){   // text found on the drawings -> count markers (one count condition, per page)
   const ex = P.proj.conds.filter(x => x.type === "count");
   const v = await ask("Count “" + q + "”", `<p>${hits.length} marker${hits.length > 1 ? "s go" : " goes"} on the found text, page by page.</p>
-    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Count into</label><select id="ctC"><option value="">+ New count condition “${esc(q.toUpperCase())}”</option>${ex.map(c => `<option value="${esc(c.id)}"${c.id === S.cond ? " selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Count into</label><select id="ctC"><option value="">+ New count condition “${esc(q.toUpperCase())}”</option>${ex.map(c => `<option value="${esc(c.id)}"${c.name.trim().toUpperCase() === q.trim().toUpperCase() ? " selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
     <div class="fg"><label>Symbol (new condition)</label><select id="ctS">${Object.entries(SYMS).map(([k2, v2]) => `<option value="${k2}"${k2 === "check" ? " selected" : ""}>${v2}</option>`).join("")}</select></div>
     <div class="fg"><label>Caption (new condition)</label><select id="ctP"><option value="seq">Number</option><option value="name">Name</option><option value="none">None</option></select></div></div>`, "Count",
     () => ({c: $("ctC").value, sym: $("ctS").value, cap: $("ctP").value}));
   if (!v) return;
   let added = 0;
   mutate(() => {
-    let c = v.c ? cond(v.c) : null;
+    let c = v.c ? cond(v.c) : P.proj.conds.find(x => x.type === "count" && x.name.trim().toUpperCase() === q.trim().toUpperCase()) || null;   // (a new "D2" count, never the last one used; an existing "D2" is added to)
     if (!c) { c = {id: uid("C"), name: q.toUpperCase(), type: "count", unit: "Nos", color: COLORS[P.proj.conds.length % COLORS.length], h: "", t: "", faces: 1, dedMin: 0, sym: v.sym, cap: v.cap}; P.proj.conds.push(c); }
     hits.forEach(h => { let it = P.proj.items.find(i => i.cond === c.id && i.file === h.f.id && i.page === h.i && i.kind === "shape");
       if (!it) { it = {id: uid("I"), cond: c.id, file: h.f.id, page: h.i, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
@@ -3576,8 +3576,8 @@ const needsReview = it => (it.ai || it.copied) && it.qa !== "checked";
 function qaUser(){ return pref("zdTakeoffUser") || ""; }
 async function askUser(){
   let u = qaUser(); if (u) return u;
-  const v = await ask("Your name", '<div class="fg w2"><label>Name for the QA record (kept in this browser)</label><input type="text" id="dlgUser" placeholder="e.g. Sajjad"></div>', "Save", () => $("dlgUser").value.trim() || "Enter your name", "dlgUser");
-  if (!v) return ""; pref("zdTakeoffUser", v); return v;
+  const v = await ask("Your name", '<div class="fg w2"><label>Name for the QA record (kept in this browser)</label><input type="text" id="dlgUser" placeholder="e.g. Sajjad"></div>', "Save", () => { const n = $("dlgUser").value.trim(); return n ? {n} : "Enter your name"; }, "dlgUser");   // (a plain string from read() is an error message to ask(): the name goes in an object)
+  if (!v) return ""; pref("zdTakeoffUser", v.n); return v.n;
 }
 async function setQa(items, qa){
   if (!items.length) return;
@@ -4095,7 +4095,7 @@ function wire(){
     const it = P.proj.items.find(i => i.id === S.sel), f = e.target.dataset.prop; if (!it || !f) return;
     if (f === "qa") return setQa([it], e.target.value);
     mutate(() => {
-      if (f === "nos") it.nos = Math.max(1, Math.round(+e.target.value || 1));
+      if (f === "nos") { const v = Math.round(+e.target.value || 1); it.nos = Math.max(1, Math.min(100000, v)); if (v > 100000) toast("Nos is limited to 100,000 — check the number typed", 3500); }
       else if (f === "ow" || f === "oh") { const v = e.target.value.trim() ? parseFt(e.target.value) : 0; if (!isNaN(v)) it[f] = v; }
       else if (f === "doorW") { const s = e.target.value.trim(); if (!s) delete it.doorW; else { const v = s.split("+").reduce((a, x) => a + parseFt(x), 0); if (!isNaN(v) && v >= 0) it.doorW = r3(v); } }
       else if (f === "sch") { const s = schOf(e.target.value); if (s) { it.sch = s.id; it.label = s.mark; } else delete it.sch; }
@@ -5116,7 +5116,7 @@ function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw"
   loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on);
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, explodeRun, closeRun, offsetItem, offsetRun, typedPoint};   // for tests and the console
+  window.zdTakeoff = {save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, explodeRun, closeRun, offsetItem, offsetRun, typedPoint};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
