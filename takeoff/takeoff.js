@@ -278,6 +278,7 @@ async function boundCfg(fileId){   // an optional-content config with only the r
     Object.keys(L).forEach(id => cfg.setVisibility(id, BOUND.has(L[id].role) && !(((P.proj.layersOff || {})[fileId] || []).includes(L[id].name)))); } } catch (e) { cfg = null; }
   S.ocBound[fileId] = cfg; return cfg;
 }
+const ocOn = (cfg, id) => { const g = cfg && cfg.getGroup && cfg.getGroup(id); return !g || g.visible !== false; };   // (isVisible() wants a group object, not an id)
 const lay = fileId => S.ocgs && S.ocgs[fileId] ? {optionalContentConfigPromise: Promise.resolve(S.ocgs[fileId])} : {};
 async function loadLayers(fileId){
   S.ocgs = S.ocgs || {};
@@ -296,7 +297,7 @@ function renderLayers(){
   const RN = {wall: "wall", opening: "door / window", column: "column", railing: "railing", glass: "glass", hatch: "hatch", text: "text / dims", tag: "tags", unit: "unit area", fixture: "fixtures / MEP", other: ""};
   el.innerHTML = `<div class="lyrbar"><button class="btn sm" data-lall="1">All on</button><button class="btn sm" data-lall="0">All off</button><input type="search" id="lyrQ" placeholder="Filter layers"></div>
     <div class="lyrbar"><span class="small" style="width:100%">Clean the drawing:</span><button class="btn sm pri" data-lpre="clean" title="Only walls, doors / windows, columns and railings">Walls & openings only</button><button class="btn sm" data-lpre="text" title="Text, dimensions, grid, titles, clouds">Text off</button><button class="btn sm" data-lpre="fixture" title="Furniture, sanitary, kitchen, MEP, electrical">Fixtures off</button><button class="btn sm" data-lpre="hatch">Hatch off</button><button class="btn sm" data-lpre="tag">Tags off</button></div>` +
-    G.map(([id, g]) => { const r = layerRole(g.name); return `<label class="lyr" data-name="${esc(g.name.toLowerCase())}"><input type="checkbox" data-lid="${esc(id)}"${cfg.isVisible(id) ? " checked" : ""}> <span style="flex:1">${esc(g.name)}</span>${RN[r] ? `<span class="tag ${BOUND.has(r) ? "g" : "a"}" title="${BOUND.has(r) ? "Bounds rooms for auto area" : "Ignored by auto area"}">${RN[r]}</span>` : ""}</label>`; }).join("") +
+    G.map(([id, g]) => { const r = layerRole(g.name); return `<label class="lyr" data-name="${esc(g.name.toLowerCase())}"><input type="checkbox" data-lid="${esc(id)}"${ocOn(cfg, id) ? " checked" : ""}> <span style="flex:1">${esc(g.name)}</span>${RN[r] ? `<span class="tag ${BOUND.has(r) ? "g" : "a"}" title="${BOUND.has(r) ? "Bounds rooms for auto area" : "Ignored by auto area"}">${RN[r]}</span>` : ""}</label>`; }).join("") +
     '<div class="small" style="padding:8px 12px">Green roles bound rooms for <b>Auto area</b> and the agents (setting ⚙ “Use the PDF\'s layers”). Layers switched off here are left out of snapping, auto area and the agents too.</div>';
 }
 let layT = null;
@@ -304,7 +305,7 @@ function setLayer(ids, on){
   const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return;
   ids.forEach(id => cfg.setVisibility(id, on));
   P.proj.layersOff = P.proj.layersOff || {};
-  P.proj.layersOff[S.fileId] = Object.entries(cfg.getGroups()).filter(([id]) => !cfg.isVisible(id)).map(([, g]) => g.name);
+  P.proj.layersOff[S.fileId] = Object.entries(cfg.getGroups()).filter(([id]) => !ocOn(cfg, id)).map(([, g]) => g.name);
   if (S.ocBound) delete S.ocBound[S.fileId];
   save(); clearTimeout(layT); layT = setTimeout(() => { renderLow(); renderHi(true); }, 60);
 }
@@ -540,14 +541,9 @@ async function scaleFromRooms(key){
     est.push(Math.sqrt(pr[0] * pr[1]));
   });
   if (est.length < 3) return null;
-  // vote: each standard scale (and the note's) collects the rooms that measure within 10 % of it; the median stands in
-  // for a non-standard print size. The winner must hold 3+ rooms and a third of them, or it is no evidence.
-  est.sort((x, y) => x - y); const med = est[est.length >> 1];
-  const cand = STD_SCALES.map(c => c.ptPerFt).concat([med], P.proj && P.proj.scales[key] ? [P.proj.scales[key].ptPerFt] : []);
-  let best = null; cand.forEach(c => { const n = est.filter(v => Math.abs(v / c - 1) < 0.1).length; if (!best || n > best.n) best = {c, n}; });
-  if (best.n < 3 || best.n < est.length / 3) return null;
-  const inl = est.filter(v => Math.abs(v / best.c - 1) < 0.1);
-  return {ptPerFt: inl[inl.length >> 1], rooms: est.length, agree: best.n};
+  est.sort((x, y) => x - y); const med = est[est.length >> 1], agree = est.filter(v => Math.abs(v / med - 1) < 0.1).length;
+  if (agree < 3 || agree < est.length / 4) return null;   // written sizes too scattered to say anything
+  return {ptPerFt: med, rooms: est.length, agree, est};
 }
 const STD_SCALES = [[1 / 32, "1/32\""], [1 / 16, "1/16\""], [3 / 32, "3/32\""], [1 / 8, "1/8\""], [3 / 16, "3/16\""], [1 / 4, "1/4\""], [3 / 8, "3/8\""], [1 / 2, "1/2\""], [3 / 4, "3/4\""], [1, "1\""], [1.5, "1-1/2\""], [3, "3\""]]
   .map(([v, t]) => ({ptPerFt: 72 * v, label: t + " = 1'-0\""})).concat([20, 25, 50, 75, 100, 125, 150, 200, 250, 500].map(n => ({ptPerFt: 864 / n, label: "1:" + n})));
@@ -557,14 +553,35 @@ async function checkScale(key, ask2){
   if (!ev || ev.agree < 3) return null;
   const r = ev.ptPerFt / sc.ptPerFt; if (Math.abs(Math.log(r)) < Math.log(1.15)) { if (sc.doubt) { delete sc.doubt; save(); refresh(); } return {ok: true, ev}; }
   const std = STD_SCALES.slice().sort((a, b) => Math.abs(Math.log(a.ptPerFt / ev.ptPerFt)) - Math.abs(Math.log(b.ptPerFt / ev.ptPerFt)))[0];
-  const sug = Math.abs(Math.log(std.ptPerFt / ev.ptPerFt)) < Math.log(1.08) ? std : {ptPerFt: ev.ptPerFt, label: "1 ft = " + ev.ptPerFt.toFixed(3) + " pt"};
+  // the rooms' median, then: a standard scale within 6 %; else the walls (drawn exactly 4.5" / 9" / 13.5") within 10 %; else the median
+  const wl = Math.abs(Math.log(std.ptPerFt / ev.ptPerFt)) < Math.log(1.06) ? null : wallScale(key, ev.ptPerFt);
+  const sug = Math.abs(Math.log(std.ptPerFt / ev.ptPerFt)) < Math.log(1.06) ? std : wl ? wl : {ptPerFt: ev.ptPerFt, label: "1 ft = " + ev.ptPerFt.toFixed(3) + " pt"};
+  ev.agree = ev.est.filter(v => Math.abs(v / sug.ptPerFt - 1) < 0.1).length;
   sc.doubt = {label: sug.label, ptPerFt: sug.ptPerFt, ratio: +(sug.ptPerFt / sc.ptPerFt).toFixed(3), rooms: ev.rooms, agree: ev.agree}; save(); refresh();
   if (ask2 && key === S.key) {
-    const v = await ask("Scale note does not match the drawing", `<p>The note says <b>${esc(sc.text)}</b>, but <b>${ev.agree} of ${ev.rooms}</b> room sizes written on this drawing measure at <b>${esc(sug.label)}</b> — <b>× ${(sug.ptPerFt / sc.ptPerFt).toFixed(2)}</b> of the note. The PDF is printed at another size than the note was written for; at the note's scale every length would come out × ${(sug.ptPerFt / sc.ptPerFt).toFixed(2)} and every area × ${((sug.ptPerFt / sc.ptPerFt) ** 2).toFixed(2)} of the truth.</p>
-      <p class="small" style="margin-top:8px">Use the measured scale, then verify it with one dimension you know (scale chip → Verify). Nothing is measured until the scale is settled.</p>`, "Use " + sug.label);
-    if (v) mutate(() => { P.proj.scales[key] = {ptPerFt: sug.ptPerFt, how: "note", text: sug.label + " (measured from " + ev.agree + " written room sizes; the note says " + sc.text + ")", note: "PDF printed at × " + (sug.ptPerFt / sc.ptPerFt).toFixed(3) + " of the note's paper size", factor: sug.ptPerFt / sc.ptPerFt, verified: false, roomsCheck: ev, at: new Date().toISOString()}; });
+    const pv = ask("Scale note does not match the drawing", `<p>The note says <b>${esc(sc.text)}</b>, but <b>${ev.agree} of ${ev.rooms}</b> room sizes written on this drawing${sug.walls ? ` and its ${esc(sug.walls)} walls` : ""} measure at <b>${esc(sug.label)}</b> — <b>× ${(sug.ptPerFt / sc.ptPerFt).toFixed(2)}</b> of the note. The PDF is printed at another size than the note was written for; at the note's scale every length would come out × ${(sug.ptPerFt / sc.ptPerFt).toFixed(2)} and every area × ${((sug.ptPerFt / sc.ptPerFt) ** 2).toFixed(2)} of the truth.</p>
+      <p class="small" style="margin-top:8px"><b>Then verify it with one dimension printed on the drawing</b> (scale chip → Verify) — written room sizes are nominal, so this is an estimate, not a certainty. Nothing is measured until the scale is settled.</p>`, "Use " + sug.label);
+    const cb = document.createElement("button"); cb.className = "btn"; cb.textContent = "Calibrate from a dimension…"; cb.style.marginRight = "auto";
+    let cal = false; cb.onclick = () => { cal = true; $("dlgCancel").click(); }; $("dlgF").prepend(cb);
+    const v = await pv;
+    if (cal) { S.calVp = null; setTool("cal"); toast("Click both ends of a dimension printed on the drawing, then type its length", 5000); return {ok: false, ev, sug}; }
+    if (v) mutate(() => { P.proj.scales[key] = {ptPerFt: sug.ptPerFt, how: "note", text: sug.label + " (measured from " + ev.agree + " written room sizes" + (sug.walls ? " and the " + sug.walls + " walls" : "") + "; the note says " + sc.text + ")", note: "PDF printed at × " + (sug.ptPerFt / sc.ptPerFt).toFixed(3) + " of the note's paper size", factor: sug.ptPerFt / sc.ptPerFt, verified: false, roomsCheck: ev, at: new Date().toISOString()}; });
   }
   return {ok: false, ev, sug};
+}
+/* the scale from the walls: the most-drawn spacing of parallel wall faces (wall layers when the PDF has them) is a
+   4.5", 9" or 13.5" wall; the one of those that the room-size estimate est agrees with (within 10 %) gives the scale. */
+function wallScale(key, est){
+  const g = S.geo[key]; if (!g || !g.segs.length || !est) return null;
+  const wf = segRoleFilter(g, new Set(["wall"])), ids = g.segs.map((_, i) => i).filter(i => !wf || wf(i)), G = faceLines(null, est, ids); if (!G) return null;
+  const H = new Map(); G.forEach(gr => facePairs(gr, 0.25 * est, 1.6 * est, 1.5 * est, (d, o, t0, t1) => { const b = Math.round(d * 4); H.set(b, (H.get(b) || 0) + (t1 - t0)); }));
+  const peaks = [...H.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3); if (!peaks.length) return null;
+  let best = null;
+  peaks.forEach(([b, len]) => { const d = b / 4; [[0.375, "4.5\""], [0.75, "9\""], [1.125, "13.5\""]].forEach(([ft, nm]) => { const c = d / ft, e = Math.abs(Math.log(c / est));
+    if (e < Math.log(1.1) && (!best || len > best.len || (len === best.len && e < best.e))) best = {c, e, len, nm, d}; }); });
+  if (!best) return null;
+  const std = STD_SCALES.find(x => Math.abs(x.ptPerFt / best.c - 1) < 0.01);
+  return {ptPerFt: std ? std.ptPerFt : best.c, label: std ? std.label : "1 ft = " + best.c.toFixed(3) + " pt", walls: best.nm};
 }
 const scaleDoubt = () => { const sc = P.proj && P.proj.scales[S.key]; return sc && sc.doubt && !sc.verified ? sc.doubt : null; };
 
@@ -636,7 +653,7 @@ function segsIn(g, x0, y0, x1, y1){   // lines in a box — not those on PDF lay
 }
 function layerOffIx(g){   // layer indexes (of this page's lines) switched off by the user
   const cfg = g && g.file && S.ocgs && S.ocgs[g.file]; if (!cfg || !g.layerIds || !g.layerIds.length) return null;
-  const off = new Set(); g.layerIds.forEach((id, i) => { try { if (!cfg.isVisible(id)) off.add(i); } catch (e) {} }); return off.size ? off : null;
+  const off = new Set(); g.layerIds.forEach((id, i) => { try { if (!ocOn(cfg, id)) off.add(i); } catch (e) {} }); return off.size ? off : null;
 }
 function doorSymbols(g, ids, k){   // -> Set of segment ids that are door swings or door leaves
   const skip = new Set(), arcs = [], G = g.segs, len = i => Math.hypot(G[i][2] - G[i][0], G[i][3] - G[i][1]);
