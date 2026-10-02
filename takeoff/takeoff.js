@@ -596,7 +596,7 @@ function barrierIds(g, ids, k, o){
     if (Math.hypot(s[2] - s[0], s[3] - s[1]) < minL) return false;
     if (wall) { const st = (g.styles[s[6]] || "|0").split("|"); if (st[0] !== wall.col || +st[1] < 0.9 * wall.w) return false; }
     return true; });
-  out.doors = door.lines || [];
+  out.doors = door.lines || []; out.doorIds = [...door];
   return out;
 }
 function edt2(f, W, H){   // squared Euclidean distance transform in place (Felzenszwalb & Huttenlocher); f = 0 on features, 1e20 elsewhere
@@ -747,12 +747,18 @@ function snapToWalls(Q, g, ids, tol, k, slack){   // rectilinear outline: each e
 }
 /* walls from the rendered drawing (what is seen on screen): every non-white pixel is ink; small separate marks (text,
    dashes of dashed lines, dots of stipple, dashed door swings) are dropped. Works for any PDF, scans included. */
-async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft){
+async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase){
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
   await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}).promise;
   const d = ctx.getImageData(0, 0, W, H).data, N = W * H, m = new Uint8Array(N);
   for (let i = 0; i < N; i++) m[i] = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) < 190 ? 1 : 0;
+  if (erase && erase.length) {   // door swings and leaves: not walls, and a leaf open against a wall must not fuse into it
+    const ec = document.createElement("canvas"); ec.width = W; ec.height = H; const ex = ec.getContext("2d", {willReadFrequently: true});
+    ex.setTransform(1 / px, 0, 0, 1 / px, -x0 / px, -y0 / px); ex.lineWidth = 2.5 * px; ex.lineCap = "butt"; ex.strokeStyle = "#000"; ex.beginPath();
+    erase.forEach(s => { ex.moveTo(s[0], s[1]); ex.lineTo(s[2], s[3]); }); ex.stroke();
+    const ed = ex.getImageData(0, 0, W, H).data; for (let i = 0; i < N; i++) if (ed[i * 4 + 3] > 24) m[i] = 0;
+  }
   const seen = new Uint8Array(N), st = new Int32Array(N);
   const comps = (mask, fn) => {   // 8-connected marks of the mask -> fn(pixels, bbox width, bbox height)
     seen.fill(0);
@@ -854,11 +860,12 @@ async function autoRoom(seed){   // -> {pts} or {err}
       ctx.setTransform(1 / px, 0, 0, 1 / px, -x0 / px, -y0 / px); ctx.lineWidth = 2.5 * px; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = "#000"; ctx.beginPath();
       fences.forEach(f => f.pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke();
       const d = ctx.getImageData(0, 0, W, H).data, b = new Uint8Array(W * H); for (let i = 0; i < b.length; i++) b[i] = d[i * 4 + 3] > 24 ? 1 : 0; return b; };
-    let thin, bar;
-    if (img) { const ink = await inkMask(x0, y0, W, H, px, Math.max(o.minLen, 1) * k / px, o.dashBound, k); thin = ink.thin;   // a solid door swing stays in: its area is a pocket, added back
+    let thin, bar, ink = null;
+    if (img) { ink = await inkMask(x0, y0, W, H, px, Math.max(o.minLen, 1) * k / px, o.dashBound, k, (ids.doorIds || []).map(i => g.segs[i])); thin = ink.thin;   // a solid door swing stays in: its area is a pocket, added back
       if (ids.doors.length) { const dl = raster(2 * px, true); for (let i = 0; i < N; i++) if (dl[i]) { thin[i] = 1; ink.big[i] = 1; } }
       bar = widen(ink.big, W, H, o.gap * k / px / 2); }
     else { thin = raster(2 * px); bar = raster(Math.max(o.gap * k, 2 * px)); }
+    if (g.segs.length) { const cav = wallCavities(x0, y0, W, H, px, k, img ? ink.big : null, ids); for (let i = 0; i < N; i++) if (cav[i]) thin[i] = 1; }   // hollow walls are wall, not a recess of the room
     if (fences.length) { const fm = fenceMask(); for (let i = 0; i < N; i++) if (fm[i]) { thin[i] = 1; bar[i] = 1; } }   // the user's fences close what the drawing leaves open
     if (o.show) S.autoShow = {key: S.key, x0, y0, px, W, H, url: maskUrl(thin, W, H)};
     // B: every line widened to the door gap, so all openings close — the room's core — grown back out to the wall faces
@@ -904,6 +911,25 @@ async function autoRoom(seed){   // -> {pts} or {err}
   }
   return {err: "The space leaks — an opening wider than the door gap (" + f3(autoOpt().gap) + " ft) joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it."};
 }
+/* the inside of walls drawn as two lines with nothing between them: without this, the empty strip between a wall's faces
+   is an enclosed space next to the room and the pocket rule would add it (the room would run to the wall's far face).
+   Pairs of parallel lines 0.3-1.6 ft apart, running 1 ft or more together, that belong to the wall network (image mode:
+   both lines are part of the 8 ft+ ink network) are painted solid. */
+function wallCavities(x0, y0, W, H, px, k, big, ids){   // ids: the barrier lines (door swings and leaves already left out)
+  const out = new Uint8Array(W * H), G = faceLines(null, k, ids, 1.6 * k); if (!G) return out;
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.setTransform(1 / px, 0, 0, 1 / px, -x0 / px, -y0 / px); ctx.fillStyle = "#000";
+  const onBig = q => { const x = Math.round((q[0] - x0) / px), y = Math.round((q[1] - y0) / px); for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H && big[yy * W + xx]) return true; } return false; };
+  let n = 0;
+  G.forEach(g => facePairs(g, 0.3 * k, 1.6 * k, (big ? 1 : 2) * k, (d, o, t0, t1) => {
+    const P = (t, off) => [g.u[0] * t + g.n[0] * off, g.u[1] * t + g.n[1] * off];
+    if (big && ![0.2, 0.5, 0.8].every(f => { const t = t0 + (t1 - t0) * f; return onBig(P(t, o - d / 2)) && onBig(P(t, o + d / 2)); })) return;
+    const a = P(t0, o - d / 2), b = P(t1, o - d / 2), c = P(t1, o + d / 2), e = P(t0, o + d / 2);
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(e[0], e[1]); ctx.closePath(); ctx.fill(); n++; }));
+  if (!n) return out;
+  const im = ctx.getImageData(0, 0, W, H).data; for (let i = 0; i < out.length; i++) out[i] = im[i * 4 + 3] > 24 ? 1 : 0;
+  return out;
+}
 function maskUrl(m, W, H){   // what auto area treated as walls, for the "show detected walls" overlay
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d"), im = ctx.createImageData(W, H);
   for (let i = 0; i < m.length; i++) if (m[i]) { im.data[i * 4] = 255; im.data[i * 4 + 1] = 0; im.data[i * 4 + 2] = 140; im.data[i * 4 + 3] = 170; }
@@ -918,10 +944,10 @@ async function autoAt(p){
   let res; try { res = await autoRoom(p); } catch (e) { res = {err: "Auto area failed: " + (e.message || e)}; }
   busy("");
   if (res.err) return toast(res.err, 6000);
-  const id = uid("I");
-  mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: ""}); });
+  const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "";
+  mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm}); });
   S.sel = id; draw(); renderSheet();
-  const k = hereScale(p); toast("Room " + f2(polyArea(res.pts) / k / k) + " Sft" + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
+  const k = hereScale(p); toast((nm || "Room") + " " + f2(polyArea(res.pts) / k / k) + " Sft" + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
 }
 async function autoSettings(){
   const o = autoOpt();
@@ -1341,7 +1367,9 @@ async function finish(pts){
   const area = c.type === "area";
   if (area && (pts.length < 3 || polyArea(pts) < 1e-6)) { draw(); return; }
   if (!area && pts.length < 2) { draw(); return; }
-  mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: t === "ded" ? "ded" : "shape", pts, nos: 1, label: ""}); });
+  const nm = area && t !== "ded" && S.lbl.autoName ? roomNameAt(pts) : "";
+  mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: t === "ded" ? "ded" : "shape", pts, nos: 1, label: nm}); });
+  if (nm) toast("Named " + nm + " from the drawing", 1800);
 }
 
 /* ------------------------------------------------------------------ overlay */
@@ -1384,13 +1412,13 @@ function drawNow(){
     } else if (c.type === "area") {
       const ded = it.kind === "ded";
       h.push(`<polygon points="${ptsS(it.pts)}" fill="${ded ? "url(#hatch)" : col}" fill-opacity="${ded ? 1 : 0.22}" stroke="${ded ? "#d03b3b" : col}" stroke-width="${sel ? 3 : 1.6}" ${ded ? 'stroke-dasharray="5 3"' : ""}/>`);
-      if (k) { const scr = it.pts.map(toScr), ar = polyArea(scr); if (ar > 2500 || sel) { const cx = scr.reduce((a, p) => a + p[0], 0) / scr.length, cy = scr.reduce((a, p) => a + p[1], 0) / scr.length;
-        const q = rowsOf(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, k).reduce((a, r) => a + r.qty, 0); h.push(label([cx, cy], (it.label ? it.label + ": " : "") + f2(q) + " " + c.unit, ded ? "#9b2222" : "#0b0b0b")); } }
+      if (k && S.lbl.on) { const scr = it.pts.map(toScr), ar = polyArea(scr); if (ar > 2500 || sel || !S.lbl.small) { const L = capLines(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, k); if (L.length) h.push(labelBox(labelPt(scr), L, ded ? "#9b2222" : "#0b0b0b")); } }
     } else {
       const ded = it.kind === "ded";
       h.push(`<poly${it._pts ? "gon" : "line"} points="${ptsS(it.pts)}" fill="none" stroke="${ded ? "#d03b3b" : col}" stroke-width="${sel ? 5 : 3}" stroke-linejoin="round" stroke-linecap="round" opacity=".85" ${ded ? 'stroke-dasharray="7 4"' : ""}/>`);
-      if (k && sel) { const r = rowsOf(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, k)[0], q = toScr(it.pts[it.pts.length - 1]); h.push(label([q[0] + 8, q[1] - 10], f3(r.L) + " ft", "#0b0b0b")); }
+      if (k && S.lbl.on && (sel || polyLen(it.pts) * S.view.s > 60 || !S.lbl.small)) { const L = capLines(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, k); if (L.length) h.push(labelBox(lineLabelPt(it.pts.map(toScr)), L, ded ? "#9b2222" : "#0b0b0b")); }
     }
+    if (k && it.kind !== "open" && it.shape !== "circle" && (sel || (S.lbl.on && S.lbl.seg))) h.push(segLabels(it.pts.map(toScr), it.pts, k, c.type === "area", 1));
     if (sel) (it._pts || it.pts).forEach((p, i) => { const q = toScr(p); h.push(`<rect x="${(q[0] - 4).toFixed(1)}" y="${(q[1] - 4).toFixed(1)}" width="8" height="8" fill="#fff" stroke="${i === S.selPt ? "#0b0b0b" : col}" stroke-width="2"/>`); });
   });
   const c = S.cond ? cond(S.cond) : null, cur = S.cursor;
@@ -1435,6 +1463,94 @@ function drawNow(){
 function label(p, text, col){
   const t = esc(text), w = text.length * 6.4 + 10;
   return `<g><rect x="${(p[0] - w / 2).toFixed(1)}" y="${(p[1] - 9).toFixed(1)}" width="${w.toFixed(1)}" height="18" rx="4" fill="rgba(255,255,255,.88)"/><text x="${p[0].toFixed(1)}" y="${(p[1] + 4).toFixed(1)}" text-anchor="middle" font-size="11.5" font-weight="600" fill="${col}">${t}</text></g>`;
+}
+/* measurement captions, as Bluebeam's "show caption": which values a label shows is set once (🏷 ▾) and used on screen
+   and in the marked-up exports. Areas: name, quantity, area, perimeter, L × W; lengths: name, length, quantity, H / T. */
+const LBL_DEF = {on: true, name: true, qty: true, area: false, perim: false, len: true, dims: false, cond: false, seg: false, units: true, small: true, autoName: true};
+function loadLbl(){ let o = null; try { o = JSON.parse(pref("zdTakeoffLbl") || "null"); } catch (e) { o = null; } S.lbl = Object.assign({}, LBL_DEF, o || {}); }
+function capLines(it, c, k){
+  const o = S.lbl, out = [], u = t => o.units ? " " + t : "", rows = rowsOf(it, k), q = rows.reduce((a, r) => a + r.qty, 0), poly = itemPoly(it);
+  if (o.name && it.label) out.push(it.label);
+  if (o.cond) out.push(c.name);
+  if (c.type === "area") {
+    const A = polyArea(poly) / k / k * (it.kind === "ded" ? -1 : 1), P = polyLen(poly, true) / k, r = rows[0];
+    if (o.qty) out.push(f2(q) + u(c.unit));
+    if (o.area && !(o.qty && c.unit === "Sft")) out.push("A " + f2(A) + u("Sft"));
+    if (o.perim) out.push("P " + f3(P) + u("ft"));
+    if (o.dims && r) { if (r.how === "rect") out.push(f3(r.L) + " × " + f3(r.W) + u("ft")); else if (r.how === "circle") out.push("Ø " + f3(r.D) + u("ft")); }
+  } else if (c.type === "linear") {
+    const L = (it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k;
+    if (o.len) out.push("L " + f3(it.kind === "ded" ? -L : L) + u("ft"));
+    if (o.qty && (c.unit !== "ft" || !o.len)) out.push(f2(q) + u(c.unit));
+    if (o.dims && c.unit !== "ft") out.push((+c.h ? "H " + f3(+c.h) : "") + (+c.t ? (+c.h ? " · " : "") + "T " + f3(+c.t) : "") + ((+c.faces || 1) > 1 && c.unit === "Sft" ? " · " + c.faces + " faces" : ""));
+  }
+  if (!out.length && it.label) out.push(it.label);
+  return out.filter(Boolean);
+}
+function labelBox(p, lines, col, z){   // a caption of one or more lines centred on p (screen units × z)
+  z = z || 1; const lh = 14 * z, w = Math.max(...lines.map(t => t.length)) * 6.4 * z + 10 * z, hh = lines.length * lh + 4 * z, y0 = p[1] - hh / 2;
+  return `<g><rect x="${(p[0] - w / 2).toFixed(1)}" y="${y0.toFixed(1)}" width="${w.toFixed(1)}" height="${hh.toFixed(1)}" rx="${4 * z}" fill="rgba(255,255,255,.88)"/>` +
+    lines.map((t, i) => `<text x="${p[0].toFixed(1)}" y="${(y0 + 2 * z + lh * (i + 0.75)).toFixed(1)}" text-anchor="middle" font-family="Segoe UI,Arial" font-size="${11.5 * z}" font-weight="${i === 0 && lines.length > 1 ? 700 : 600}" fill="${col}">${esc(t)}</text>`).join("") + "</g>";
+}
+function labelPt(P){   // a point inside the outline for its caption: the centroid, or the middle of the widest span through it
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const f = P[j][0] * P[i][1] - P[i][0] * P[j][1]; a += f; cx += (P[j][0] + P[i][0]) * f; cy += (P[j][1] + P[i][1]) * f; }
+  const c = Math.abs(a) > 1e-9 ? [cx / (3 * a), cy / (3 * a)] : [P.reduce((s2, p) => s2 + p[0], 0) / P.length, P.reduce((s2, p) => s2 + p[1], 0) / P.length];
+  if (pointInPoly(c, P)) return c;
+  const xs = [];
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const A = P[j], B = P[i]; if ((A[1] > c[1]) !== (B[1] > c[1])) xs.push(A[0] + (c[1] - A[1]) * (B[0] - A[0]) / (B[1] - A[1])); }
+  xs.sort((x, y) => x - y); let best = null;
+  for (let i = 0; i + 1 < xs.length; i += 2) if (!best || xs[i + 1] - xs[i] > best[1] - best[0]) best = [xs[i], xs[i + 1]];
+  return best ? [(best[0] + best[1]) / 2, c[1]] : c;
+}
+function lineLabelPt(P, z){   // beside the middle of the longest run, clear of its segment length
+  z = z || 1; let bi = 1, bl = -1; for (let i = 1; i < P.length; i++) { const l = dist(P[i - 1], P[i]); if (l > bl) { bl = l; bi = i; } }
+  const a = P[bi - 1], b = P[bi] || a, L = dist(a, b) || 1, n = [(b[1] - a[1]) / L, -(b[0] - a[0]) / L], off = (S.lbl.seg ? 34 : 18) * z, m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  return Math.abs(n[0]) > Math.abs(n[1]) ? [m[0] + (n[0] < 0 ? -1 : 1) * (off + 30 * z), m[1]] : [m[0], m[1] - off];
+}
+function segLabels(scr, pts, k, closed, z){   // the length of every side, at its middle (Bluebeam "show segment values")
+  const out = [], n = closed ? pts.length : pts.length - 1;
+  for (let i = 0; i < n; i++) { const a = scr[i], b = scr[(i + 1) % scr.length]; if (dist(a, b) < 46 * z) continue;
+    const t = f3(dist(pts[i], pts[(i + 1) % pts.length]) / k), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    out.push(`<text x="${m[0].toFixed(1)}" y="${(m[1] - 4 * z).toFixed(1)}" text-anchor="middle" font-family="Segoe UI,Arial" font-size="${10 * z}" font-weight="600" fill="#33475b" stroke="#fff" stroke-width="${3 * z}" paint-order="stroke">${t}</text>`); }
+  return out.join("");
+}
+async function labelDialog(){
+  const o = S.lbl, cb = (k2, t) => `<label class="pk"><input type="checkbox" data-lb="${k2}"${o[k2] ? " checked" : ""}> ${t}</label>`;
+  const v = await ask("Labels on the drawing", `<div class="grid"><div class="fg"><label>Show on every label</label>${cb("name", "Name (room / label)")}${cb("cond", "Condition name")}${cb("qty", "Quantity in the condition's unit")}${cb("units", "Units (Sft, ft, cft, Nos)")}</div>
+    <div class="fg"><label>Areas</label>${cb("area", "Area Sft (when the unit is not Sft)")}${cb("perim", "Perimeter ft")}${cb("dims", "L × W of rectangles · Ø of circles · H / T of walls")}
+      <label style="margin-top:6px">Lengths</label>${cb("len", "Length ft")}</div>
+    <div class="fg w2"><label>Display</label>${cb("seg", "Length of every side / segment (always shown on the selected one)")}${cb("small", "Hide labels on shapes too small to read at this zoom")}${cb("autoName", "Name new areas from the room name written inside them (manual, rectangle, auto area, Claude)")}</div></div>
+    <p class="small" style="margin-top:8px">The same labels go on the marked-up PNG / PDF exports. <b>L</b> shows or hides all labels.</p>`, "Save", () => { const n = {on: o.on}; document.querySelectorAll("[data-lb]").forEach(x => { n[x.dataset.lb] = x.checked; }); return n; });
+  if (!v) return;
+  S.lbl = Object.assign({}, S.lbl, v); pref("zdTakeoffLbl", JSON.stringify(S.lbl)); draw();
+  if (P.proj && S.page) { const n = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !i.label && i.kind === "shape" && (cond(i.cond) || {}).type === "area").length;
+    if (n && S.lbl.autoName && await ask("Name the areas already drawn?", `<p>${n} area${n > 1 ? "s" : ""} on this page ${n > 1 ? "have" : "has"} no name. Name ${n > 1 ? "them" : "it"} from the room text inside?</p>`, "Name them")) nameAreas(); }
+}
+function setLblOn(on){ S.lbl.on = on; pref("zdTakeoffLbl", JSON.stringify(S.lbl)); $("bLbl").classList.toggle("on", on); $("bLbl").title = on ? "Labels shown — click (or L) to hide" : "Labels hidden — click (or L) to show"; draw(); }
+/* the room name written inside an outline (BEDROOM 2, LOUNGE…), from the PDF's own text; "" if none */
+function roomNameAt(poly, key){
+  const T = S.texts[key || S.key]; if (!T || !T.length || !poly || poly.length < 3) return "";
+  const lines = textLines(T).filter(l => !l.tag && pointInPoly([l.x + l.w / 2, l.y - l.h / 2], poly));
+  const ok = l => /[A-Za-z]{2,}/.test(l.s.replace(SIZE_RX, "")) && l.s.length <= 40 && !/\bSCALE\b|\bPLAN\b|SECTION|ELEVATION|DETAIL|\bNOTES?\b|\bLVL\b|F\.?F\.?L|\bUP\b|\bDN\b|^\s*[+\-±]?\s*\d+\s*'/i.test(l.s);
+  const c = labelPt(poly), by = (a, b) => b.h - a.h || dist([a.x + a.w / 2, a.y], c) - dist([b.x + b.w / 2, b.y], c);
+  const pick = lines.filter(l => ok(l) && ROOM_RX.test(l.s)).sort(by)[0] || lines.filter(ok).sort(by)[0];
+  return pick ? pick.s.replace(SIZE_RX, "").replace(/[\s,:;-]+$/, "").replace(/\s+/g, " ").trim().slice(0, 60) : "";
+}
+function nameAreas(){
+  let n = 0; mutate(() => P.proj.items.forEach(i => { if (i.file === S.fileId && i.page === S.pageNo && !i.label && i.kind === "shape" && (cond(i.cond) || {}).type === "area") { const t = roomNameAt(itemPoly(i)); if (t) { i.label = t; n++; } } }));
+  toast(n ? n + " area" + (n > 1 ? "s" : "") + " named from the drawing" : "No room names found inside the unnamed areas");
+}
+/* delete what is selected: a markup, one count point, or a measurement (toolbar 🗑, Delete key) */
+function delSelected(){
+  if (!P.proj) return;
+  if (S.selMark) { const id = S.selMark; mutate(() => { P.proj.marks = (P.proj.marks || []).filter(m => m.id !== id); }); S.selMark = null; refresh(); return; }
+  const it = S.sel && P.proj.items.find(i => i.id === S.sel);
+  if (!it) return toast("Select a measurement or markup first (Select V, then click it)");
+  const c = cond(it.cond);
+  if (c && c.type === "count" && S.selPt >= 0 && it.pts.length > 1) mutate(() => { it.pts.splice(S.selPt, 1); });
+  else mutate(() => { P.proj.items = P.proj.items.filter(i => i.id !== it.id); });
+  S.sel = null; S.selPt = -1; refresh();
 }
 
 /* ------------------------------------------------------------------ panels */
@@ -1516,6 +1632,7 @@ function qaBadges(it){
 function pageName(it){ const f = P.proj.files.find(x => x.id === it.file); return (f ? f.name.replace(/\.pdf$/i, "") : "?") + " p." + it.page; }
 function kindName(it, c){ return it.kind === "open" ? "Opening" : c.type === "count" ? c.name : c.type === "area" ? (it.kind === "ded" ? "void" : "area") : (it.kind === "ded" ? "length" : "run"); }
 function renderProps(){
+  $("bDel").disabled = !(S.sel || S.selMark);
   const el = $("props"), it = S.sel && P.proj ? P.proj.items.find(i => i.id === S.sel) : null;
   const mk = !it && S.selMark && P.proj ? (P.proj.marks || []).find(m => m.id === S.selMark) : null;
   if (mk) { el.innerHTML = `<h4>${esc(MARK_TOOLS[mk.type])} <span style="font-weight:400;color:var(--muted);font-size:11px">markup — not a quantity · drag to move</span></h4>
@@ -2019,7 +2136,6 @@ function exportCsv(){
 /* the takeoff of one page as an SVG over the page at scale sc (pt -> px): areas, lengths, counts, labels, markups, legend */
 function pageOverlaySvg(file, page, sc, W, H, legend){
   const T = p => [p[0] * sc, p[1] * sc], z = Math.max(1, sc / 1.6), h = [];
-  const lab = (p, text, col) => { const w = (text.length * 6.4 + 10) * z; return `<g><rect x="${(p[0] - w / 2).toFixed(1)}" y="${(p[1] - 9 * z).toFixed(1)}" width="${w.toFixed(1)}" height="${18 * z}" rx="${4 * z}" fill="rgba(255,255,255,.88)"/><text x="${p[0].toFixed(1)}" y="${(p[1] + 4 * z).toFixed(1)}" text-anchor="middle" font-family="Segoe UI,Arial" font-size="${11.5 * z}" font-weight="600" fill="${col}">${esc(text)}</text></g>`; };
   const ps = P => P.map(p => T(p).map(v => v.toFixed(1)).join(",")).join(" ");
   const tot = {};
   P.proj.items.filter(i => i.file === file && i.page === page && !hiddenItem(i)).forEach(it => {
@@ -2031,10 +2147,10 @@ function pageOverlaySvg(file, page, sc, W, H, legend){
     const poly = itemPoly(it);
     if (c.type === "area") {
       h.push(`<polygon points="${ps(poly)}" fill="${ded ? "#d03b3b" : col}" fill-opacity="${ded ? 0.14 : 0.22}" stroke="${ded ? "#d03b3b" : col}" stroke-width="${1.8 * z}" ${ded ? `stroke-dasharray="${5 * z} ${3 * z}"` : ""}/>`);
-      if (k) { const scr = poly.map(T); h.push(lab([scr.reduce((a, p) => a + p[0], 0) / scr.length, scr.reduce((a, p) => a + p[1], 0) / scr.length], (it.label ? it.label + ": " : "") + f2(q) + " " + c.unit, ded ? "#9b2222" : "#0b0b0b")); }
+      if (k && S.lbl.on) { const scr = poly.map(T), L = capLines(it, c, k); if (L.length) h.push(labelBox(labelPt(scr), L, ded ? "#9b2222" : "#0b0b0b", z)); if (S.lbl.seg && it.shape !== "circle") h.push(segLabels(scr, it.pts, k, true, z)); }
     } else {
       h.push(`<poly${it.shape === "circle" ? "gon" : "line"} points="${ps(poly)}" fill="none" stroke="${ded ? "#d03b3b" : col}" stroke-width="${3 * z}" stroke-linejoin="round" stroke-linecap="round" ${ded ? `stroke-dasharray="${7 * z} ${4 * z}"` : ""}/>`);
-      if (k && rows[0] && rows[0].L != null) { const e = T(poly[poly.length - 1]); h.push(lab([e[0] + 30 * z, e[1] - 10 * z], (it.label ? it.label + " " : "") + f3(rows[0].L) + " ft", "#0b0b0b")); }
+      if (k && S.lbl.on) { const scr = poly.map(T), L = capLines(it, c, k), m = lineLabelPt(scr, z); if (L.length) h.push(labelBox(m, L, ded ? "#9b2222" : "#0b0b0b", z)); if (S.lbl.seg && it.shape !== "circle") h.push(segLabels(scr, it.pts, k, false, z)); }
     }
   });
   (P.proj.marks || []).filter(m => m.file === file && m.page === page && m.type !== "fence").forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
@@ -2571,10 +2687,13 @@ function wire(){
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
   $("aiDetails").onclick = () => agentCmd("drawing details");
+  $("agRooms").onclick = () => agentCmd("measure all rooms"); $("agWalls").onclick = () => wallsDialog(); $("agTags").onclick = () => agentCmd("count all tags");
   $("aiRead").onclick = () => aiSend($("aiIn").value.trim() || "Measure the floor area of every room in this view.", true).then(() => { $("aiIn").value = ""; });
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
   $("bLw").onclick = () => setThin(!S.thin);
+  $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => labelDialog();
+  $("bDel").onclick = () => delSelected();
   $("bUndo").onclick = undo; $("bRedo").onclick = redo;
   $("bExport").onclick = exportMenu;
   $("scaleChip").onclick = scaleDialog;
@@ -2660,16 +2779,12 @@ function wire(){
     }
     if (e.key === "Backspace" || e.key === "Delete") {
       if (S.draft.length) { S.draft.pop(); if (S.tool === "measure") S.measure = S.draft.slice(); draw(); e.preventDefault(); return; }
-      if (S.selMark) { e.preventDefault(); const id = S.selMark; mutate(() => { P.proj.marks = (P.proj.marks || []).filter(m => m.id !== id); }); S.selMark = null; refresh(); return; }
-      const it = S.sel && P.proj.items.find(i => i.id === S.sel);
-      if (it) { e.preventDefault(); const c = cond(it.cond);
-        if (c && c.type === "count" && S.selPt >= 0 && it.pts.length > 1) mutate(() => { it.pts.splice(S.selPt, 1); });
-        else mutate(() => { P.proj.items = P.proj.items.filter(i => i.id !== it.id); });
-        S.sel = null; S.selPt = -1; refresh(); }
+      if (S.selMark || S.sel) { e.preventDefault(); delSelected(); }
       return;
     }
     const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", c: "count", e: "circle", n: "note", u: "cloud", d: "ded", o: "open", m: "measure", k: "cal"};
     if (T[k]) { setTool(T[k]); return; }
+    if (k === "l") return setLblOn(!S.lbl.on);
     if (k === "s") { $("snapOn").checked = !$("snapOn").checked; toast("Snap " + ($("snapOn").checked ? "on" : "off")); return; }
     if (k === "f") { fit(); renderHi(); return; }
     if (k === "+" || k === "=") return zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2);
@@ -2694,24 +2809,23 @@ function stepPage(d){
 const ANTHROPIC_SDK = "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.131.0/+esm";
 const AI_MODEL = "claude-opus-5-5";
 const AI = {client: null, key: "", history: [], view: null, busy: false};
-const AI_SYSTEM = `You are a quantity surveyor's assistant inside a PDF takeoff tool. You see part of a construction drawing (usually a floor plan) as an image, with the text found on the PDF page and where it sits.
+const AI_SYSTEM = `You are a quantity surveyor's takeoff assistant inside a PDF takeoff tool (Pakistan house standard: decimal feet, Sft, cft, ft, Nos; never metric). You see the part of a construction drawing on the user's screen as an image, with the text found on the PDF page and where it sits.
 
-Your job: measure what the user asks for — usually the floor area of rooms — by calling the drawing tools, then report briefly.
+FIRST, UNDERSTAND THE TASK. If the instruction is unclear or a needed fact is missing — which items, which part of the drawing, which condition, a wall height or slab thickness for Sft / cft, whether openings are deducted — ask ONE short, specific question and stop (call no tools). Offer the likely choices in the question. Never guess a height, thickness, rate or size; if the drawing shows it, say where you read it.
 
-Coordinates: image pixels, origin at the top-left of the image, x to the right, y down. Every point you give must be inside the image.
+THEN USE THE SPECIALISTS — they work from the PDF's own vector lines and text, so they are fast and exact:
+- measure_rooms: floor areas of rooms named on the drawing (auto-traced from inside the walls, checked against the written size). Use it first for any room / floor area task.
+- detect_walls: wall runs from their two parallel face lines (CAD PDFs). Give the thickness (9" = 0.75 ft, 13.5" = 1.125, 4.5" = 0.375); list_wall_thicknesses tells you what is drawn. Openings are bridged — they are deducted separately.
+- count_tags: door / window / any tag written on the drawing (D1, W2, V1…), counted from the text.
+- find_text: where a word or tag is, and how many times it appears.
+- set_condition: make or change a condition (unit, height H, thickness T, faces) — only with values the user gave or the drawing states.
+Only when a specialist cannot do it, draw by hand: trace_room (a point inside a room), draw_area (corners at the inside faces of the walls, clockwise; points snap to the nearest drawing corner within 0.5 ft), draw_length (wall centre or face as asked), add_counts (one point on each item), delete_area. list_measured shows what is already on the page.
 
-How to measure a room:
-1. Find the room from its name text (e.g. BEDROOM, LOUNGE, BATH). The size written under the name (e.g. 14'-6"x12'-0" = 14.5 ft × 12.0 ft = 174.00 Sft) is the designer's nominal size — use it to check your result.
-2. Call trace_room with a point well inside the room: in open floor, away from walls, furniture and text. The tool traces the room from the drawing's walls and returns the area in Sft and the outline in image pixels.
-3. Check the result. If the area is far from the written size (more than about 5%), or the outline runs through a wall into another room, call delete_area on it and then draw_area with the room's corners read off the image, clockwise, at the inside faces of the walls. L-shaped and notched rooms need every corner.
-4. Name every area exactly as the room is named on the drawing (e.g. "BEDROOM 1", "LOUNGE"). If two rooms share a name, number them.
+Coordinates: image pixels, origin top-left, x right, y down; every point must be inside the image.
 
-Rules:
-- Never invent a dimension. If a room has no written size, say so and rely on the traced outline.
-- Do not re-measure rooms already listed as measured unless the user asks.
-- When asked for walls or other lengths, use draw_length along the wall centre or face as asked; for doors, windows and fixtures, use add_counts with one point on each, using the tags on the drawing (D1, W2…) to name the condition.
-- Units: decimal feet, Sft. Never metric.
-- Reply in short plain sentences: one line per room — name, area in Sft, and whether it matches the written size. Mention anything you could not measure and why.`;
+CHECK YOUR WORK. Compare each area with the size written in the room (more than 5% off: delete it and draw it from corners, or tell the user why). Do not re-measure what is already measured unless asked. Name areas exactly as on the drawing.
+
+REPLY in short plain lines: what you measured (name — quantity unit — ✓ or "check"), what you could not do and why, and the next step you suggest. Keep it brief.`;
 const AI_TOOLS = [
   {name: "trace_room", description: "Measure a room's floor area by tracing it automatically from a point inside it (the tool follows the walls, closes door openings and ignores furniture and text). Returns the area in Sft and the traced outline in image pixels, or an error saying why it could not trace.",
    strict: true, input_schema: {type: "object", additionalProperties: false, required: ["name", "x", "y"], properties: {
@@ -2723,13 +2837,29 @@ const AI_TOOLS = [
      name: {type: "string", description: "Room name as written on the drawing"},
      points: {type: "array", description: "Corners in order, at least 3", items: {type: "object", additionalProperties: false, required: ["x", "y"], properties: {x: {type: "number"}, y: {type: "number"}}}}}}},
   {name: "draw_length", description: "Measure a length (walls, skirting, pipes) as a run through points in order (image pixels). Recorded under the named length condition, created if missing. Returns the length in ft.",
-   strict: true, input_schema: {type: "object", additionalProperties: false, required: ["condition", "name", "points"], properties: {
-     condition: {type: "string", description: "Length condition, e.g. \"Brick masonry 9\\\" wall\" or \"Skirting\""}, name: {type: "string", description: "Label, e.g. the room or wall name"},
+   input_schema: {type: "object", additionalProperties: false, required: ["condition", "name", "points"], properties: {
+     condition: {type: "string", description: "Length condition, e.g. \"Brick masonry 9\\\" wall\" or \"Skirting\""}, name: {type: "string", description: "Label, e.g. the room or wall name"}, snap: {type: "boolean", description: "Snap each point to the nearest drawing corner (faces); leave false for centre lines"},
      points: {type: "array", items: {type: "object", additionalProperties: false, required: ["x", "y"], properties: {x: {type: "number"}, y: {type: "number"}}}}}}},
   {name: "add_counts", description: "Count items (doors, windows, fixtures, lights) by placing one point on each (image pixels). Recorded under the named count condition, created if missing. Returns the new total on this page.",
    strict: true, input_schema: {type: "object", additionalProperties: false, required: ["condition", "points"], properties: {
      condition: {type: "string", description: "What is counted, e.g. \"Doors D2\" or \"Windows\""},
      points: {type: "array", items: {type: "object", additionalProperties: false, required: ["x", "y"], properties: {x: {type: "number"}, y: {type: "number"}}}}}}},
+  {name: "measure_rooms", description: "Specialist: measure the floor area of rooms named on this PDF page — each is auto-traced from inside its walls at its name and checked against the size written under it. Returns each room's area in Sft, the written size and whether it needs checking. Leave names empty for every room.",
+   input_schema: {type: "object", properties: {names: {type: "array", items: {type: "string"}, description: "Room names to measure (e.g. [\"BEDROOM\", \"LOUNGE\"]); empty = all rooms"}}}},
+  {name: "list_wall_thicknesses", description: "Specialist: the wall thicknesses drawn in the view (from pairs of parallel face lines), with about how many ft of wall each. Use before detect_walls when the thickness is not given.",
+   input_schema: {type: "object", properties: {}}},
+  {name: "detect_walls", description: "Specialist: find every wall of the given thickness in the view (or page) from its two parallel face lines and mark it on its centre line in a length condition; openings are bridged (deducted separately); L corners meet on the centre line, T-junctions stop at the face. Returns runs and total length ft. Running it again replaces its earlier runs.",
+   input_schema: {type: "object", required: ["thickness_ft"], properties: {thickness_ft: {type: "number", description: "Wall thickness in ft: 0.75 for 9 inch, 1.125 for 13.5 inch, 0.375 for 4.5 inch"},
+     condition: {type: "string", description: "Existing length condition name to add to (optional)"}, height_ft: {type: "number", description: "Wall height for a new condition, only if the user gave it or the drawing states it"},
+     whole_page: {type: "boolean", description: "Search the whole page, not only the view"}, bridge_ft: {type: "number", description: "Bridge gaps (openings) up to this length; default 6"}}}},
+  {name: "count_tags", description: "Specialist: count door / window / ventilator tags or any exact word written on the drawing (e.g. \"doors\", \"windows\", \"D1\", \"all\"), with one marker on each. Returns the count per tag.",
+   input_schema: {type: "object", required: ["what"], properties: {what: {type: "string"}}}},
+  {name: "find_text", description: "Find a word or tag in the page text: how many times it is on the page and where it is in the image (px).",
+   input_schema: {type: "object", required: ["text"], properties: {text: {type: "string"}}}},
+  {name: "set_condition", description: "Create or change a condition by name. type area | linear | count; unit: area Sft or cft, linear ft / Sft / cft, count Nos. Sft and cft walls need height_ft; cft needs thickness_ft. Only values the user gave or the drawing states.",
+   input_schema: {type: "object", required: ["name", "type", "unit"], properties: {name: {type: "string"}, type: {type: "string", enum: ["area", "linear", "count"]}, unit: {type: "string"}, height_ft: {type: "number"}, thickness_ft: {type: "number"}, faces: {type: "number"}}}},
+  {name: "list_measured", description: "List what is already measured on this page: id, name, condition, quantity and unit.",
+   input_schema: {type: "object", properties: {}}},
   {name: "delete_area", description: "Delete a measured area by its id (from a tool result or the list of measured areas).",
    strict: true, input_schema: {type: "object", additionalProperties: false, required: ["id"], properties: {id: {type: "string"}}}}
 ];
@@ -2754,6 +2884,14 @@ async function aiSnapshot(maxMp){   // the part of the page on screen, long side
 }
 const aiToPx = (V, p) => [Math.round((p[0] - V.x0) * V.sc), Math.round((p[1] - V.y0) * V.sc)];
 const aiToBase = (V, x, y) => [V.x0 + x / V.sc, V.y0 + y / V.sc];
+function snapCorner(p, r){   // the drawing corner (line end or crossing) nearest p within r, else null — for corners read off a picture
+  const g = S.geo[S.key]; if (!g || !g.segs.length) return null;
+  const near = segsIn(g, p[0] - r, p[1] - r, p[0] + r, p[1] + r).map(i => g.segs[i]).filter(s => !(s[4] & 9) && distSeg(p, [s[0], s[1]], [s[2], s[3]]) <= r).slice(0, 80);
+  let best = null; const take = q => { const d = dist(p, q); if (d <= r && (!best || d < best.d)) best = {q, d}; };
+  near.forEach(s => { take([s[0], s[1]]); take([s[2], s[3]]); });
+  for (let i = 0; i < near.length; i++) for (let j = i + 1; j < near.length; j++) { const x = segX([near[i][0], near[i][1]], [near[i][2], near[i][3]], [near[j][0], near[j][1]], [near[j][2], near[j][3]]); if (x) take(x); }
+  return best ? best.q : null;
+}
 function aiContext(V){   // page text and measured areas inside the view, in image pixels
   const k = curScale(), inV = q => q[0] >= 0 && q[1] >= 0 && q[0] <= V.W && q[1] <= V.H;
   const texts = (S.texts[S.key] || []).map(t => ({s: t.s.trim(), q: aiToPx(V, [t.x, t.y])})).filter(t => t.s && inV(t.q)).slice(0, 400);
@@ -2784,16 +2922,34 @@ async function aiRunTool(b){
   if (b.name === "trace_room") {
     const x = +inp.x, y = +inp.y; if (!(x >= 0 && y >= 0 && x <= V.W && y <= V.H)) return {err: "Point is outside the image."};
     const res = await autoRoom(aiToBase(V, x, y)); if (res.err) return {err: res.err};
-    const id = add(inp.name, res.pts);
-    return {ok: {id, name: inp.name, area_sft: +(polyArea(res.pts) / k / k).toFixed(2), squared: res.rect, outline_px: res.pts.map(p => aiToPx(V, p))}};
+    const nm = inp.name || roomNameAt(res.pts), id = add(nm, res.pts);
+    return {ok: {id, name: nm, area_sft: +(polyArea(res.pts) / k / k).toFixed(2), squared: res.rect, outline_px: res.pts.map(p => aiToPx(V, p))}};
   }
   if (b.name === "draw_area") {
-    const pts = (Array.isArray(inp.points) ? inp.points : []).filter(p => p && isFinite(+p.x) && isFinite(+p.y)).map(p => aiToBase(V, +p.x, +p.y));
+    let pts = (Array.isArray(inp.points) ? inp.points : []).filter(p => p && isFinite(+p.x) && isFinite(+p.y)).map(p => aiToBase(V, +p.x, +p.y));
     if (pts.length < 3 || polyArea(pts) < 1e-6) return {err: "Need at least 3 corners enclosing an area."};
-    const id = add(inp.name, pts);
-    return {ok: {id, name: inp.name, area_sft: +(polyArea(pts) / k / k).toFixed(2)}};
+    let snapped = 0; pts = pts.map(p => { const q = snapCorner(p, 0.5 * k); if (q) snapped++; return q || p; });
+    const nm = inp.name || roomNameAt(pts), id = add(nm, pts);
+    return {ok: {id, name: nm, area_sft: +(polyArea(pts) / k / k).toFixed(2), corners_snapped: snapped + " of " + pts.length}};
   }
+  if (b.name === "measure_rooms") { const r = await agentMeasure((Array.isArray(inp.names) ? inp.names : []).join(" ")); return r && r.error ? {err: r.error} : r ? {ok: r} : {err: "No rooms measured."}; }
+  if (b.name === "list_wall_thicknesses") return {ok: {in_view: wallThicknesses(viewRect()).map(w => ({thickness_ft: +w.t.toFixed(3), inches: Math.round(w.t * 24) / 2, wall_length_ft: Math.round(w.len)}))}};
+  if (b.name === "detect_walls") { const r = wallsAgent({t: +inp.thickness_ft, cond: inp.condition || null, h: +inp.height_ft || 0, page: !!inp.whole_page, bridge: inp.bridge_ft == null ? 6 : +inp.bridge_ft}); refresh(); return r.error ? {err: r.error} : {ok: r}; }
+  if (b.name === "count_tags") { const r = await agentCount(String(inp.what || "").toLowerCase().replace(/^all\s+/, "")); return r && r.error ? {err: r.error} : r && r.counts ? {ok: r} : {err: "Nothing counted."}; }
+  if (b.name === "find_text") { const q = String(inp.text || "").trim().toUpperCase(); if (!q) return {err: "No text given."};
+    const hits = textLines(S.texts[S.key] || []).filter(l => l.s.toUpperCase().includes(q)), inV = p => p[0] >= 0 && p[1] >= 0 && p[0] <= V.W && p[1] <= V.H;
+    return {ok: {on_page: hits.length, in_view: hits.map(l => ({text: l.s, at: aiToPx(V, [l.x + l.w / 2, l.y - l.h / 2])})).filter(h => inV(h.at)).slice(0, 60)}}; }
+  if (b.name === "set_condition") { const type = inp.type, unit = String(inp.unit || ""), H = +inp.height_ft || 0, T = +inp.thickness_ft || 0;
+    if (!UNITS[type] || !UNITS[type].includes(unit)) return {err: "Unit must be one of " + (UNITS[type] || []).join(", ") + " for " + type};
+    if (type === "linear" && unit !== "ft" && !(H > 0)) return {err: "A wall in " + unit + " needs height_ft — ask the user."};
+    if (unit === "cft" && !(T > 0)) return {err: "cft needs thickness_ft — ask the user."};
+    let c = P.proj.conds.find(x => x.name.toLowerCase() === String(inp.name).toLowerCase() && x.type === type);
+    mutate(() => { if (!c) { c = {id: uid("C"), name: String(inp.name).slice(0, 80), type, unit, color: COLORS[P.proj.conds.length % COLORS.length], h: "", t: "", faces: 1, dedMin: 0}; P.proj.conds.push(c); }
+      Object.assign(c, {unit, h: H || c.h, t: T || c.t, faces: Math.max(1, Math.min(2, +inp.faces || c.faces || 1))}); });
+    return {ok: {id: c.id, name: c.name, type, unit, height_ft: +c.h || null, thickness_ft: +c.t || null}}; }
+  if (b.name === "list_measured") return {ok: {items: P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo).slice(0, 120).map(i => { const c = cond(i.cond) || {}, kk = itemScale(i); return {id: i.id, name: i.label || "", condition: c.name, qty: kk ? +rowsOf(i, kk).reduce((a, r) => a + r.qty, 0).toFixed(3) : null, unit: c.unit}; })}};
   if (b.name === "draw_length" || b.name === "add_counts") {
+    if (b.name === "draw_length" && inp.snap) inp.points = (inp.points || []).map(p => { const q = p && snapCorner(aiToBase(V, +p.x, +p.y), 0.5 * k); return q ? {x: aiToPx(V, q)[0], y: aiToPx(V, q)[1]} : p; });
     const pts = (Array.isArray(inp.points) ? inp.points : []).filter(p => p && isFinite(+p.x) && isFinite(+p.y)).map(p => aiToBase(V, +p.x, +p.y));
     if (b.name === "draw_length") {
       if (pts.length < 2) return {err: "Need at least 2 points."};
@@ -2815,6 +2971,17 @@ async function aiRunTool(b){
     return {ok: {deleted: it.id}};
   }
   return {err: "Unknown tool " + b.name};
+}
+const SPECIALISTS = ["measure_rooms", "detect_walls", "count_tags"];
+function aiToolMsg(name, inp, out){   // one line in the panel for a tool step
+  const o = out.ok, nm = n => `<span class="small">(${esc(n.replace(/_/g, " "))})</span>`;
+  if (!o) return `${esc(inp.name || name.replace(/_/g, " "))}: ${esc(out.err)}`;
+  if (SPECIALISTS.includes(name)) return `Specialist ${nm(name)} done${o.total_length_ft != null ? ": <b>" + f3(o.total_length_ft) + " ft</b> in " + o.runs + " runs" : ""}`;
+  if (o.deleted) return "Deleted an area";
+  if (o.length_ft != null) return `${esc(inp.condition)} ${esc(inp.name || "")}: <b>${f3(o.length_ft)} ft</b> ${nm(name)}`;
+  if (o.count_on_page != null && name === "add_counts") return `${esc(o.name)}: <b>${o.count_on_page} Nos</b> on this page ${nm(name)}`;
+  if (o.area_sft != null) return `${esc(o.name || inp.name || "")}: <b>${f2(o.area_sft)} Sft</b> ${nm(name)}${o.corners_snapped ? ' <span class="small">corners snapped ' + esc(o.corners_snapped) + "</span>" : ""}`;
+  return `${esc(name.replace(/_/g, " "))} ✓`;
 }
 function aiLog(kind, html){ const d = document.createElement("div"); d.className = "aimsg " + kind; d.innerHTML = html; $("aiLog").appendChild(d); $("aiLog").scrollTop = 1e9; return d; }
 const aiText = t => esc(t).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
@@ -2850,7 +3017,7 @@ async function aiSend(text, fresh){
       const results = [];
       for (const b of res.content.filter(x => x.type === "tool_use")) {
         let out; try { out = await aiRunTool(b); } catch (e) { out = {err: e.message || String(e)}; }
-        aiLog("tool", out.ok ? (out.ok.deleted ? "Deleted an area" : out.ok.length_ft != null ? `${esc(b.input.condition)} ${esc(b.input.name || "")}: <b>${f3(out.ok.length_ft)} ft</b>` : out.ok.count_on_page != null ? `${esc(out.ok.name)}: <b>${out.ok.count_on_page} Nos</b> on this page` : `${esc(b.input.name || "")}: <b>${f2(out.ok.area_sft)} Sft</b>`) + ` <span class="small">(${esc(b.name.replace("_", " "))})</span>` : `${esc(b.input && b.input.name || b.name)}: ${esc(out.err)}`);
+        aiLog(out.ok ? "tool" : "err", aiToolMsg(b.name, b.input || {}, out));
         results.push({type: "tool_result", tool_use_id: b.id, content: JSON.stringify(out.ok || {error: out.err}), is_error: !out.ok});
       }
       AI.history.push({role: "user", content: results});
@@ -2875,6 +3042,7 @@ function aiSampler(){
     try {
       const smp = await window.claude.use("sample"); if (!smp) return null;
       const lim = await smp.limits().catch(() => null);
+      if (lim && lim.tools) AI.toolMax = lim.tools.maxCount || 99;
       return lim && lim.images && lim.tools ? smp : null;
     } catch (e) { return null; }
   })();
@@ -2890,12 +3058,13 @@ async function aiSendPlan(smp, text){
   try {
     AI.view = await aiSnapshot(1150000);
     const blob = await (await fetch("data:image/png;base64," + AI.view.data)).blob();
-    const tools = AI_TOOLS.map(t => ({name: t.name, description: t.description, inputSchema: t.input_schema,
+    const order = ["measure_rooms", "detect_walls", "count_tags", "list_wall_thicknesses", "trace_room", "draw_area", "draw_length", "add_counts", "delete_area", "find_text", "set_condition", "list_measured"];
+    const tools = AI_TOOLS.slice().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).slice(0, AI.toolMax || 99).map(t => ({name: t.name, description: t.description, inputSchema: t.input_schema,
       execute: async input => {
         if (ctl.signal.aborted) throw new Error("Stopped by the user.");
         const b = {name: t.name, input: input || {}};
         let out; try { out = await aiRunTool(b); } catch (e) { out = {err: e.message || String(e)}; }
-        aiLog("tool", out.ok ? (out.ok.deleted ? "Deleted an area" : out.ok.length_ft != null ? `${esc(b.input.condition)} ${esc(b.input.name || "")}: <b>${f3(out.ok.length_ft)} ft</b>` : out.ok.count_on_page != null ? `${esc(out.ok.name)}: <b>${out.ok.count_on_page} Nos</b> on this page` : `${esc(b.input.name || "")}: <b>${f2(out.ok.area_sft)} Sft</b>`) + ` <span class="small">(${esc(t.name.replace("_", " "))})</span>` : `${esc(b.input.name || t.name)}: ${esc(out.err)}`);
+        aiLog(out.ok ? "tool" : "err", aiToolMsg(b.name, b.input || {}, out));
         bubble = null; from = said.length; refresh();
         if (!out.ok) throw new Error(out.err);
         return out.ok;
@@ -2987,7 +3156,7 @@ async function freeImport(){
 function aiShowKey(on){ $("aiKeyRow").style.display = on ? "flex" : "none"; if (on) $("aiKey").value = pref("zdTakeoffApiKey") || ""; }
 function aiToggle(on){
   $("aiPanel").classList.toggle("on", on); $("bClaude").classList.toggle("on", on);
-  if (on) { aiShowKey(false); if (!$("aiLog").children.length) aiLog("bot", "I read the drawing and measure rooms, walls and counts.<br><b>Free, no key:</b> press <b>Drawing details</b> — I list the rooms, sizes, door/window tags, levels and stairs, and you give me tasks (or type <i>measure all rooms</i>, <i>count doors</i>, <i>help</i>).<br><b>With an API key:</b> zoom to an area and press <b>Read this view</b>.<br><b>Free, with your Claude.ai plan:</b> press <b>Copy for Claude</b>, paste in a claude.ai chat, then <b>Import from Claude</b>."); aiSampler().then(smp => { if (smp && !pref("zdTakeoffApiKey")) aiLog("bot", "<b>Connected to Claude through claude.ai — no API key needed.</b> Zoom to an area, type what to measure (e.g. <i>9\" walls on this floor, count doors D1</i>) and press <b>Read this view</b>. It runs on your Claude plan; the first time, press Allow."); }); setTimeout(() => $("aiIn").focus(), 0); }
+  if (on) { aiShowKey(false); if (!$("aiLog").children.length) aiLog("bot", "I read the drawing and do the takeoff with you.<br><b>Agents (free, instant):</b> 🏠 <b>Rooms</b> traces every named room and checks it against its written size · 🧱 <b>Walls</b> finds walls from their face lines · 🚪 <b>Doors / windows</b> counts the tags. Or type <i>measure bedroom</i>, <i>walls 9\"</i>, <i>count D1</i>, <i>help</i>.<br><b>Claude:</b> with an API key, or opened in claude.ai — type what you want and press <b>Read this view</b>; Claude uses the agents, draws what they cannot, and asks you when something is unclear."); aiSampler().then(smp => { if (smp && !pref("zdTakeoffApiKey")) aiLog("bot", "<b>Connected to Claude through claude.ai — no API key needed.</b> Zoom to an area, type what to measure (e.g. <i>9\" walls on this floor, count doors D1</i>) and press <b>Read this view</b>. It runs on your Claude plan; the first time, press Allow."); }); setTimeout(() => $("aiIn").focus(), 0); }
 }
 
 /* ------------------------------------------------------------------ free drawing agent (no API key)
@@ -3038,15 +3207,25 @@ async function agentCmd(text){
     if (/^(help|\?)$/.test(t)) return agentHelp();
     if (/measure|area|trace/.test(t)) { const w = t.replace(/\b(measure|auto|area|areas|trace|all|every|each|the|rooms?|of|floor|please|on|this|page)\b/g, " ").trim(); return agentMeasure(w); }
     if (/count|tag/.test(t)) { const w = t.replace(/\b(count|all|every|each|the|tags?|of|on|this|page|please|marks?)\b/g, " ").trim(); return agentCount(w); }
+    if (/wall|masonry|brick|block\s*work/.test(t)) return agentWallsCmd(t);
     if (/schedule|list|table|export|csv/.test(t)) return agentSchedule();
-    return agentDetails();
+    if (/detail|read|what|info|summary|overview/.test(t)) return agentDetails();
+    return agentAsk(text);
   } catch (e) { busy(""); aiLog("err", esc(e.message || String(e))); }
+}
+function agentAsk(text){   // not understood: ask back with the choices, never guess
+  const d = aiLog("bot", `I did not understand “${esc(text)}”. Did you mean one of these?<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
+    <button class="btn sm" data-ask="measure all rooms">Measure all rooms</button><button class="btn sm" data-ask="walls">Walls…</button><button class="btn sm" data-ask="count doors">Count doors</button>
+    <button class="btn sm" data-ask="count windows">Count windows</button><button class="btn sm" data-ask="drawing details">Drawing details</button><button class="btn sm" data-ask="help">Help</button></div>
+    <span class="small">Or write it differently, e.g. <i>measure bedroom</i>, <i>walls 9"</i>, <i>count D1</i>.</span>`);
+  d.addEventListener("click", e => { const b = e.target.closest("[data-ask]"); if (b) agentCmd(b.dataset.ask); });
 }
 function agentHelp(){
   aiLog("bot", `<b>Free drawing agent</b> — no API key. It reads the text inside the PDF (so not scanned drawings) and works on the page you have open. Try:<br>
     • <i>drawing details</i> — rooms, sizes, door/window tags, levels, scale, unit types, stairs<br>
     • <i>measure all rooms</i> or <i>measure bedroom</i> — auto area at each room name, checked against its written size<br>
     • <i>count doors</i>, <i>count windows</i>, <i>count D1</i>, <i>count all tags</i><br>
+    • <i>walls 9"</i>, <i>walls 4.5"</i>, or <i>walls</i> — wall runs found from their two parallel face lines (vector PDFs)<br>
     • <i>room schedule</i> — the room list as a table you can copy`);
 }
 const tagKind = k => /^(D|DW|SD|FD|MD|GD)\d/.test(k) ? "Doors" : /^(W|WD|CW|SW)\d/.test(k) ? "Windows" : /^V\d/.test(k) ? "Ventilators" : "Tags";
@@ -3073,13 +3252,13 @@ async function agentDetails(){
     if (id === "measure") agentMeasure(""); else if (id === "schedule") agentSchedule(); else if (id.startsWith("count:")) agentCount(id.slice(6).toLowerCase()); });
 }
 async function agentMeasure(filter){
-  const k = curScale(); if (!k) return aiLog("err", "Set the page scale first (K) — then I can measure.");
+  const k = curScale(); if (!k) { aiLog("err", "Set the page scale first (K) — then I can measure."); return {error: "page scale not set"}; }
   const F = await drawingFacts(S.fileId, S.pageNo);
-  const words = filter.split(/\s+/).filter(Boolean).map(w => w.replace(/s$/, ""));
+  const words = filter.toLowerCase().split(/\s+/).filter(Boolean).map(w => w.replace(/s$/, ""));
   const rooms = F.rooms.filter(r => !words.length || words.some(w => r.name.toLowerCase().replace(/\s+/g, "").includes(w.replace(/\s+/g, ""))));
-  if (!rooms.length) return aiLog("err", F.rooms.length ? "No room name on this page matches “" + esc(filter) + "”." : "I found no room names in this page's text.");
+  if (!rooms.length) { aiLog("err", F.rooms.length ? "No room name on this page matches “" + esc(filter) + "”." : "I found no room names in this page's text."); return {error: F.rooms.length ? "no room matches " + filter + "; rooms on the page: " + F.rooms.map(r => r.name).join(", ") : "no room names in the page text (scanned?) — use trace_room / draw_area"}; }
   const done = new Set(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo).map(i => (i.label || "").toLowerCase()));
-  const c = aiAreaCond(), got = []; let ok = 0, chk = 0, same2 = 0;
+  const c = aiAreaCond(), got = [], res = []; let ok = 0, chk = 0, same2 = 0;
   for (const [n, r] of rooms.entries()) {
     busy(`Measuring ${n + 1} of ${rooms.length}: ${r.name}…`); await new Promise(q => setTimeout(q, 10));
     const cx = r.x + r.w / 2, below = r.sizeY != null ? r.sizeY : r.y;
@@ -3092,18 +3271,20 @@ async function agentMeasure(filter){
       if (!best || err < best.err) best = {pts: res.pts, a, err};
       if (err <= 0.05) break;
     }
-    if (!best) { aiLog("err", `${esc(r.name)}: auto area could not close the room — use the Fence tool on the open side, or draw it`); continue; }
+    if (!best) { res.push({name: r.name, error: "could not close the room"}); aiLog("err", `${esc(r.name)}: auto area could not close the room — use the Fence tool on the open side, or draw it`); continue; }
     const cen = q => [q.reduce((a, v) => a + v[0], 0) / q.length, q.reduce((a, v) => a + v[1], 0) / q.length];
     const same = got.find(o => Math.abs(o.a - best.a) / best.a < 0.005 && dist(cen(o.pts), cen(best.pts)) < k);
-    if (same) { same2++; aiLog("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${f2(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
+    if (same) { same2++; res.push({name: r.name, error: "leaked into " + same.name}); aiLog("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${f2(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
     got.push({name: r.name, a: best.a, pts: best.pts});
     const dup = done.has(r.name.toLowerCase());
     mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, ai: true, label: r.name.slice(0, 60)}); });
     const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;
+    res.push({name: r.name, area_sft: +best.a.toFixed(2), written_sft: r.sft ? +r.sft.toFixed(2) : null, check: !!bad});
     aiLog("tool", `${esc(r.name)}: <b>${f2(best.a)} Sft</b> <span class="small">${r.sft ? "written " + esc(r.size) + " = " + f2(r.sft) + " Sft" + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > r.sft ? "+" : "") + f2(best.a - r.sft) + ")</b>" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
   }
   busy(""); refresh();
   aiLog("bot", `Measured ${ok + chk} of ${rooms.length} into <b>${esc(c.name)}</b>${chk ? ` — <b>${chk} to check</b> (more than 5% off the written size: fix with Fence, or the room is not a rectangle)` : ""}${same2 ? ` — <b>${same2}</b> leaked into a neighbour, not added` : ""}. Undo (Ctrl+Z) removes them one by one.`);
+  return {condition: c.name, rooms: res};
 }
 async function agentCount(filter){
   const F = await drawingFacts(S.fileId, S.pageNo), f = filter.replace(/\s+/g, "").toUpperCase();
@@ -3113,8 +3294,9 @@ async function agentCount(filter){
       if (hits.length) { let it; const c = condByName(f, "count"); if (!c.sym) c.sym = "circle";
         mutate(() => { it = P.proj.items.find(i => i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && i.kind === "shape"); if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); } it.ai = true; it.qa = "";
           hits.forEach(h => { const p = [h.x + (h.w || 0) / 2, h.y - (h.h || 6) / 2]; if (!it.pts.some(o => dist(o, p) < 2)) it.pts.push(p); }); });
-        refresh(); return aiLog("tool", `${esc(f)}: <b>${hits.length} Nos</b> counted`); } }
-    return aiLog("err", "No matching tags on this page" + (Object.keys(F.tags).length ? " — tags found: " + Object.keys(F.tags).map(esc).join(", ") : "") + ".");
+        refresh(); aiLog("tool", `${esc(f)}: <b>${hits.length} Nos</b> counted`); return {counts: {[f]: hits.length}}; } }
+    aiLog("err", "No matching tags on this page" + (Object.keys(F.tags).length ? " — tags found: " + Object.keys(F.tags).map(esc).join(", ") : "") + ".");
+    return {error: "no matching tags; tags on the page: " + (Object.keys(F.tags).join(", ") || "none")};
   }
   pick.sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
   const lines = [];
@@ -3127,6 +3309,7 @@ async function agentCount(filter){
   }));
   refresh();
   aiLog("tool", lines.join("<br>") + `<br><span class="small">One count condition per tag — markers sit on the tags. A tag written once for several doors needs its Nos edited.</span>`);
+  return {counts: Object.fromEntries(pick.map(t2 => [t2, F.tags[t2].length]))};
 }
 async function agentSchedule(){
   const F = await drawingFacts(S.fileId, S.pageNo), k = curScale();
@@ -3137,6 +3320,143 @@ async function agentSchedule(){
   const d = aiLog("bot", `<b>Room schedule</b> <button class="btn sm" data-cp="1">Copy for Excel</button><table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px"><tr><th align="left">Room</th><th align="left">Size</th><th align="right">Written</th><th align="right">Measured</th></tr>${rows.map(r => `<tr><td>${esc(r[1])}</td><td>${esc(r[2])}</td><td align="right">${r[3]}</td><td align="right">${r[4]}</td></tr>`).join("")}</table><span class="small">Sft, 3 dp.</span>`);
   d.querySelector("[data-cp]").onclick = async () => { try { await navigator.clipboard.writeText(tsv); toast("Copied — paste into Excel"); } catch (e) { toast("Could not copy"); } };
 }
+
+/* ------------------------------------------------------------------ walls agent: wall runs from the drawing's own vector lines.
+   A wall is drawn as two parallel face lines its thickness apart; every such pair of lines gives a run along its centre
+   line (the method of the floor-plan wall detectors: parallel pairs, spacing histogram). Gaps shorter than "bridge"
+   (door / window openings, and the gap a cross wall leaves in one face) are bridged so openings are deducted as their
+   own rows (Opening tool), and runs meeting at an L corner are joined at their centre lines — so the cft is exact:
+   corners by the centre line, T-junctions face to face, never counted twice. */
+function viewRect(){ const st = stage(), v = S.view; return [Math.max(0, -v.tx / v.s), Math.max(0, -v.ty / v.s), Math.min(S.base.width, (st.clientWidth - v.tx) / v.s), Math.min(S.base.height, (st.clientHeight - v.ty) / v.s)]; }
+function faceLines(rect, k, only, join){   // straight drawing lines in rect (or the given ids), grouped by direction -> [{u, n, L: [{o, t0, t1}]}]; join: bridge collinear gaps up to this (pt)
+  const g = S.geo[S.key]; if (!g || !g.segs.length) return null;
+  const ids = only || (rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i)), groups = new Map();
+  ids.forEach(i => { const s = g.segs[i]; if (s[4] & 11) return;   // curves, dashed lines and clip paths are not wall faces
+    const dx = s[2] - s[0], dy = s[3] - s[1], L = Math.hypot(dx, dy); if (L < 0.4 * k) return;
+    let a = Math.atan2(dy, dx); if (a < 0) a += Math.PI; if (a >= Math.PI - 0.0044) a -= Math.PI;
+    const key = Math.round(a / 0.0087);   // 0.5° bins
+    let G = groups.get(key) || groups.get(key - 1) || groups.get(key + 1);
+    if (!G) { G = {a: key * 0.0087, L: []}; G.u = [Math.cos(G.a), Math.sin(G.a)]; G.n = [-G.u[1], G.u[0]]; groups.set(key, G); }
+    const t0 = G.u[0] * s[0] + G.u[1] * s[1], t1 = G.u[0] * s[2] + G.u[1] * s[3];
+    G.L.push({o: (G.n[0] * (s[0] + s[2]) + G.n[1] * (s[1] + s[3])) / 2, t0: Math.min(t0, t1), t1: Math.max(t0, t1)}); });
+  const out = [...groups.values()];
+  if (join) out.forEach(G => {   // one face of a wall broken where a cross wall meets it: one line again
+    const L = G.L.sort((a, b) => a.o - b.o || a.t0 - b.t0), M = [];
+    L.forEach(l => { const q = M.find(m => Math.abs(m.o - l.o) <= 0.02 * k && l.t0 - m.t1 <= join && m.t0 - l.t1 <= join);
+      if (q) { q.t0 = Math.min(q.t0, l.t0); q.t1 = Math.max(q.t1, l.t1); } else M.push(Object.assign({}, l)); });
+    G.L = M; });
+  return out;
+}
+function facePairs(G, dMin, dMax, minOv, fn){   // every two lines of one direction dMin…dMax apart, overlapping minOv or more
+  const L = G.L.slice().sort((a, b) => a.o - b.o);
+  for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length && L[j].o - L[i].o <= dMax; j++) {
+    const d = L[j].o - L[i].o; if (d < dMin) continue;
+    const t0 = Math.max(L[i].t0, L[j].t0), t1 = Math.min(L[i].t1, L[j].t1); if (t1 - t0 >= minOv) fn(d, (L[i].o + L[j].o) / 2, t0, t1);
+  }
+}
+function wallLineIds(rect, k){   // the drawing's lines in rect less door swings and leaves (a leaf open against a wall is not a thin wall)
+  const g = S.geo[S.key]; if (!g || !g.segs.length) return null;
+  const ids = rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i), door = doorSymbols(g, ids, k);
+  return ids.filter(i => !door.has(i));
+}
+function wallThicknesses(rect){   // the wall thicknesses drawn here, most wall length first: [{t ft, len ft}]
+  const k = curScale(), ids = k && wallLineIds(rect, k), G = ids && faceLines(null, k, ids); if (!k || !G) return [];
+  const H = new Map();
+  G.forEach(g => facePairs(g, 0.3 * k, 2 * k, 1.5 * k, (d, o, t0, t1) => { const b = Math.round(d / k * 48); H.set(b, (H.get(b) || 0) + (t1 - t0) / k); }));
+  const tot = [...H.values()].reduce((a, v) => a + v, 0), out = [];
+  [...H.entries()].sort((a, b) => b[1] - a[1]).forEach(([b, len]) => { if (len < 0.04 * tot || len < 6 || out.some(o => Math.abs(o.b - b) <= 1)) return; out.push({b, t: b / 48, len}); });
+  return out.slice(0, 5).map(o => ({t: o.t, len: o.len}));
+}
+function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-line runs, page units
+  const k = curScale(), ids = k && wallLineIds(rect, k), G = ids && faceLines(null, k, ids); if (!k || !G) return null;
+  const tol = Math.max(0.04, 0.08 * T) * k, bridge = Math.max(1.6 * T, bridgeFt || 0) * k, runs = [];
+  G.forEach(g => {
+    const C = [];   // centre lines of this direction
+    facePairs(g, T * k - tol, T * k + tol, 0.3 * k, (d, o, t0, t1) => C.push({o, t0, t1}));
+    C.sort((a, b) => a.o - b.o);
+    const lines = []; C.forEach(c => { const l = lines[lines.length - 1]; if (l && c.o - l.o <= 0.12 * k) { l.iv.push([c.t0, c.t1]); l.o = (l.o * l.n + c.o) / (l.n + 1); l.n++; } else lines.push({o: c.o, n: 1, iv: [[c.t0, c.t1]]}); });
+    lines.forEach(l => {
+      l.iv.sort((a, b) => a[0] - b[0]); const m = [];
+      l.iv.forEach(v => { const q = m[m.length - 1]; if (q && v[0] - q[1] <= bridge) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
+      m.forEach(v => { if (v[1] - v[0] >= 0.6 * k) runs.push({u: g.u, n: g.n, a: [g.u[0] * v[0] + g.n[0] * l.o, g.u[1] * v[0] + g.n[1] * l.o], b: [g.u[0] * v[1] + g.n[0] * l.o, g.u[1] * v[1] + g.n[1] * l.o]}); });
+    });
+  });
+  // L corners: two runs ending within ~T/2 of where their centre lines cross are both taken to that point
+  const reach = 0.65 * T * k + 0.05 * k;
+  for (let i = 0; i < runs.length; i++) for (let j = i + 1; j < runs.length; j++) {
+    const A = runs[i], B = runs[j]; if (Math.abs(A.u[0] * B.u[0] + A.u[1] * B.u[1]) > 0.2) continue;
+    const X = segXInf(A.a, A.b, B.a, B.b); if (!X) continue;
+    const ea = dist(A.a, X) <= reach ? "a" : dist(A.b, X) <= reach ? "b" : null, eb = dist(B.a, X) <= reach ? "a" : dist(B.b, X) <= reach ? "b" : null;
+    if (ea && eb) { A[ea] = X.slice(); B[eb] = X.slice(); }
+  }
+  return runs.filter(r => dist(r.a, r.b) >= 0.6 * k);
+}
+function segXInf(a, b, c, d){ const r = [b[0] - a[0], b[1] - a[1]], s2 = [d[0] - c[0], d[1] - c[1]], den = r[0] * s2[1] - r[1] * s2[0]; if (Math.abs(den) < 1e-9) return null; const t = ((c[0] - a[0]) * s2[1] - (c[1] - a[1]) * s2[0]) / den; return [a[0] + t * r[0], a[1] + t * r[1]]; }
+function chainRuns(runs, eps){   // runs sharing an end (and only two at that point) joined into polylines
+  const key = p => Math.round(p[0] / eps) + "," + Math.round(p[1] / eps), deg = new Map();
+  runs.forEach(r => [r.a, r.b].forEach(p => deg.set(key(p), (deg.get(key(p)) || 0) + 1)));
+  const used = new Set(), out = [];
+  runs.forEach((r, i) => { if (used.has(i)) return; used.add(i); const P = [r.a, r.b];
+    for (let grow = true; grow;) { grow = false;
+      for (let j = 0; j < runs.length; j++) { if (used.has(j)) continue; const q = runs[j], e = P[P.length - 1], f = P[0];
+        if (deg.get(key(e)) === 2 && dist(q.a, e) < eps) { P.push(q.b); used.add(j); grow = true; } else if (deg.get(key(e)) === 2 && dist(q.b, e) < eps) { P.push(q.a); used.add(j); grow = true; }
+        else if (deg.get(key(f)) === 2 && dist(q.a, f) < eps) { P.unshift(q.b); used.add(j); grow = true; } else if (deg.get(key(f)) === 2 && dist(q.b, f) < eps) { P.unshift(q.a); used.add(j); grow = true; } } }
+    out.push(P); });
+  return out;
+}
+/* run the walls agent: T ft thick, into condition c (or a new one), on the view (or the page); replaces its earlier runs */
+function wallsAgent(o){
+  const k = curScale(); if (!k) return {error: "Set the page scale first (K)."};
+  if (!S.geo[S.key] || !S.geo[S.key].segs.length) return {error: "This page has no vector lines (scanned?) — walls cannot be found from face lines. Draw them, or use Claude to read them."};
+  const T = +o.t; if (!(T > 0.15 && T < 3)) return {error: "Give the wall thickness in ft, e.g. 0.75 for 9\"."};
+  const rect = o.page ? null : viewRect(), runs = findWalls(T, rect, o.bridge == null ? 6 : +o.bridge);
+  if (!runs || !runs.length) return {error: `No walls ${f3(T)} ft thick found ${o.page ? "on this page" : "in this view"}. Found thicknesses: ` + (wallThicknesses(rect).map(w => f3(w.t) + " ft (" + Math.round(w.len) + " ft)").join(", ") || "none")};
+  let c = o.cond ? (cond(o.cond) || P.proj.conds.find(x => x.type === "linear" && x.name.toLowerCase() === String(o.cond).toLowerCase())) : null;
+  const inch = Math.round(T * 12 * 2) / 2;
+  if (!c) { const H = +o.h > 0 ? +o.h : 0;
+    c = {id: uid("C"), name: o.name || (T >= 0.6 ? "Brick masonry " + inch + "\" wall" : "Partition wall " + inch + "\" (thickness " + f3(T) + " ft)"), type: "linear", unit: H ? (T >= 0.6 ? "cft" : "Sft") : "ft", color: COLORS[P.proj.conds.length % COLORS.length], h: H || "", t: T, faces: 1, dedMin: 1.0}; }
+  const polys = chainRuns(runs, 0.05 * k);
+  let total = 0;
+  mutate(() => {
+    if (!P.proj.conds.includes(c)) P.proj.conds.push(c);
+    P.proj.items = P.proj.items.filter(i => !(i.wallAuto && i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && (!rect || i.pts.every(q => q[0] >= rect[0] && q[0] <= rect[2] && q[1] >= rect[1] && q[1] <= rect[3]))));
+    polys.forEach((pts, n) => { total += polyLen(pts) / k; P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, wallAuto: true, label: "Wall " + (n + 1)}); });
+  });
+  S.cond = c.id; refresh();
+  return {condition: c.name, unit: c.unit, thickness_ft: T, runs: polys.length, total_length_ft: +total.toFixed(3), needs_height: c.unit === "ft" && T >= 0.3};
+}
+async function agentWallsCmd(t){
+  const m = /(\d+(?:\.\d+)?)\s*(?:"|in(?:ch)?|''|”)/.exec(t), f = /(\d*\.\d+|\d+)\s*ft/.exec(t);
+  const T = m ? +m[1] / 12 : f ? +f[1] : 0;
+  if (!T) return wallsDialog();
+  const r = wallsAgent({t: T});
+  if (r.error) return aiLog("err", esc(r.error));
+  aiLog("tool", `<b>${esc(r.condition)}</b>: ${r.runs} run${r.runs > 1 ? "s" : ""}, <b>${f3(r.total_length_ft)} ft</b> centre line`);
+  aiLog("bot", "Wall runs are marked (AI — check them). " + (r.needs_height ? "No wall height yet — edit the condition (✎) to give H and the unit cft, then deduct openings with the <b>Opening</b> tool (O)." : "Deduct door and window openings with the <b>Opening</b> tool (O) — they were bridged."));
+}
+async function wallsDialog(){
+  if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
+  if (!curScale()) return aiLog("err", "Set the page scale first (K).");
+  const found = wallThicknesses(viewRect()), lin = P.proj.conds.filter(c => c.type === "linear");
+  const v = await ask("Walls agent", `<p>Finds walls from their two parallel face lines (vector PDFs exported from CAD), marks each run on its centre line and adds it to a length condition.</p>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Wall thickness</label><select id="wlT">${found.map(w => `<option value="${w.t}">${f3(w.t)} ft (${Math.round(w.t * 12 * 2) / 2}") — about ${Math.round(w.len)} ft drawn in this view</option>`).join("")}<option value="">Other — type it</option></select>
+      <input type="text" id="wlT2" placeholder='e.g. 9" or 0.75' style="margin-top:4px${found.length ? ";display:none" : ""}"></div>
+      <div class="fg w2"><label>Into condition</label><select id="wlC"><option value="">+ New condition for this thickness</option>${lin.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select></div>
+      <div class="fg"><label>Wall height H (ft) — new condition</label><input type="text" id="wlH" placeholder="from the section; blank = length only"></div>
+      <div class="fg"><label>Bridge openings up to (ft)</label><input type="text" id="wlB" value="6.000"></div>
+      <div class="fg w2"><label><input type="checkbox" id="wlP" style="width:auto"> Whole page (not only the part on screen) — title blocks and details may add false walls</label></div></div>
+    <p class="small" style="margin-top:8px">${found.length ? "Thicknesses found in this view, most wall length first." : "No parallel wall faces found in this view — zoom to the plan, or the PDF has no vector lines."} Openings are bridged so they can be deducted as their own rows (Opening tool, O). Corners meet on the centre line; walls meeting a wall stop at its face, so nothing is counted twice. Running it again replaces its earlier runs.</p>`, "Find walls",
+    () => { const tv = $("wlT").value || $("wlT2").value.trim(); let T = 0; const mm = /^(\d+(?:\.\d+)?)\s*("|in)$/.exec(tv); T = mm ? +mm[1] / 12 : parseFt(tv);
+      if (!(T > 0.15 && T < 3)) return "Choose or type the wall thickness"; const H = $("wlH").value.trim() ? parseFt($("wlH").value) : 0, B = parseFt($("wlB").value || "0");
+      if (isNaN(H) || isNaN(B)) return "Height and bridge are decimal feet"; return {t: T, cond: $("wlC").value || null, h: H, bridge: B, page: $("wlP").checked}; });
+  if (!v) return;
+  busy("Finding walls…"); await new Promise(r => setTimeout(r, 20));
+  const r = wallsAgent(v); busy("");
+  if (r.error) return aiLog("err", esc(r.error));
+  aiLog("tool", `<b>${esc(r.condition)}</b>: ${r.runs} run${r.runs > 1 ? "s" : ""}, <b>${f3(r.total_length_ft)} ft</b> centre line${r.unit !== "ft" ? " → see the sheet for " + esc(r.unit) : ""}`);
+  aiLog("bot", "Check the runs on the drawing (they are marked AI). Deduct doors and windows with the <b>Opening</b> tool (O)." + (r.needs_height ? " Give the condition its height H (✎) to get cft." : ""));
+}
+document.addEventListener("change", e => { if (e.target.id === "wlT") $("wlT2").style.display = e.target.value ? "none" : ""; });
 
 /* side panels: drag the inner edge to resize, ⟨ ⟩ to hide; sizes kept per browser */
 function setPanels(){
@@ -3176,10 +3496,10 @@ function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw"
 
 /* ------------------------------------------------------------------ start */
 (async function init(){
-  wire(); wirePanels();
+  loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on);
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts};   // for tests and the console
+  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, wallThicknesses, findWalls, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
