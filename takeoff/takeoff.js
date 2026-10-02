@@ -895,6 +895,45 @@ function squareUp(Q, tol, gap, maxD){   // near-rectilinear outline -> rectiline
     } }
   return E.length >= 4 ? edgesToPoly(E) : null;
 }
+/* the outline's small bites into the walls, trimmed: at a door jamb or a wall end the fill can slip a few inches into
+   the wall's thickness, leaving a tab (out and back) or a step (the face jumps out and carries on). A tab up to 1 ft deep
+   and 3 ft wide, or a step up to 0.75 ft, is cut back to the room's face when that face is a drawn line (ink along at
+   least 30% of it) or the bite is under 1.5 Sft. Only bites outward (that add area) are cut. */
+function deTab(Q, k, inkAt, px){
+  const ink = (a, b) => { const L = dist(a, b), n = Math.max(2, Math.ceil(L / px)); let h = 0; for (let i = 0; i <= n; i++) if (inkAt(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n)) h++; return h / (n + 1); };
+  const ok = (cut, rem) => rem > 0 && rem <= 4 * k * k && (rem <= 1.5 * k * k || ink(cut[0], cut[1]) >= 0.3);
+  const dir = (a, b) => { const d = [b[0] - a[0], b[1] - a[1]], l = Math.hypot(d[0], d[1]) || 1; return [d[0] / l, d[1] / l]; };
+  const dot = (u, v) => u[0] * v[0] + u[1] * v[1];
+  for (let guard = 0; guard < 40; guard++) {
+    const n = Q.length, A0 = polyArea(Q); if (n < 5) break;
+    const at = i => Q[((i % n) + n) % n];
+    let done = false;
+    for (let i = 0; i < n && !done; i++) {
+      const b = at(i), c = at(i + 1), d = at(i + 2), e = at(i + 3);
+      // tab: b→c out, c→d across, d→e back
+      if (n >= 6) { const u1 = dir(b, c), u2 = dir(c, d), u3 = dir(d, e), l1 = dist(b, c), l2 = dist(c, d), l3 = dist(d, e);
+        if (Math.abs(dot(u1, u2)) < 0.05 && dot(u1, u3) < -0.95 && l1 <= k && l3 <= k && Math.abs(l1 - l3) <= 0.15 * k && l2 <= 3 * k) {
+          const Q2 = Q.filter((_, j) => j !== (i + 1) % n && j !== (i + 2) % n), rem = A0 - polyArea(Q2);
+          if (ok([b, e], rem)) { Q = Q2; done = true; continue; } } }
+      // step: a→b along, b→c short jog, c→d along the same way
+      const a = at(i - 1), z = at(i - 2), l = dist(b, c), ua = dir(a, b), uj = dir(b, c), ud = dir(c, d);
+      if (l <= 0.75 * k && Math.abs(dot(ua, uj)) < 0.05 && dot(ua, ud) > 0.95) {
+        const opts = [];
+        // move a→b onto c→d's line (a slides along z→a)
+        { const uz = dir(z, a), den = uz[0] * ud[1] - uz[1] * ud[0];
+          if (Math.abs(den) > 0.5) { const t = ((c[0] - a[0]) * ud[1] - (c[1] - a[1]) * ud[0]) / den, a2 = [a[0] + uz[0] * t, a[1] + uz[1] * t];
+            const Q2 = Q.map((q, j) => j === ((i - 1) % n + n) % n ? a2 : q).filter((_, j) => j !== i % n && j !== (i + 1) % n); opts.push({Q2, cut: [a2, c]}); } }
+        // or c→d back onto a→b's line (d slides along d→e)
+        { const ue = dir(d, e), den = ue[0] * ua[1] - ue[1] * ua[0];
+          if (Math.abs(den) > 0.5) { const t = ((b[0] - d[0]) * ua[1] - (b[1] - d[1]) * ua[0]) / den, d2 = [d[0] + ue[0] * t, d[1] + ue[1] * t];
+            const Q2 = Q.map((q, j) => j === (i + 2) % n ? d2 : q).filter((_, j) => j !== i % n && j !== (i + 1) % n); opts.push({Q2, cut: [b, d2]}); } }
+        for (const o of opts) { const rem = A0 - polyArea(o.Q2); if (o.Q2.length >= 4 && ok(o.cut, rem)) { Q = o.Q2; done = true; break; } }
+      }
+    }
+    if (!done) break;
+  }
+  return Q;
+}
 function offsetPoly(Q, d){   // every edge moved outward by d
   const n = Q.length, s = signedArea(Q) > 0 ? 1 : -1, L = [];
   for (let i = 0; i < n; i++) { const a = Q[i], b = Q[(i + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, nn = [s * dy / l, -s * dx / l];
@@ -1084,6 +1123,8 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
     const sq = squareUp(Q, 3 * px, o.gap * k, Math.max(o.gap, o.pocket) * k);
     Q = sq ? (ids.length ? snapToWalls(sq, g, ids, Math.max(4 * px, 0.35 * k), k, px) : offsetPoly(sq, (img ? 1.5 : 1) * px)) : offsetPoly(Q, (img ? 1.5 : 1) * px);
     Q = cleanPoly(Q);
+    if (sq) Q = cleanPoly(deTab(Q, k, (x, y) => { const xx = Math.round((x - x0) / px), yy = Math.round((y - y0) / px);
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const u = xx + dx, v = yy + dy; if (u >= 0 && v >= 0 && u < W && v < H && thin[v * W + u]) return true; } return false; }, px));
     if (Q.length < 3 || polyArea(Q) < 1e-6) return {err: "No closed space found at that point."};
     return {pts: Q, rect: !!sq};
   }
@@ -1106,7 +1147,7 @@ function wallCavities(x0, y0, W, H, px, k, big, ids){   // ids: the barrier line
     // between two things (a bed and a wall), not a wall
     // (a hollow wider than a 9" wall must be closed at both ends: 13.5" walls are capped, a gap beside furniture is not)
     if (big) { const shut = [[t0, -1], [t1, 1]].filter(([t, sg]) => [0.15, 0.3, 0.45].some(f => onBig(P(t + sg * f * k, o)))).length;
-      if (d > 1.3 * k || shut < (d > 0.85 * k ? 2 : 1)) return; }
+      if (d > 1.3 * k || (d > 0.85 * k && shut < 2)) return; }
     const a = P(t0, o - d / 2), b = P(t1, o - d / 2), c = P(t1, o + d / 2), e = P(t0, o + d / 2);
     ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(e[0], e[1]); ctx.closePath(); ctx.fill(); n++; }));
   if (!n) return out;
@@ -3858,7 +3899,7 @@ function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw"
   loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on);
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool};   // for tests and the console
+  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
