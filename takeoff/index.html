@@ -57,6 +57,17 @@ header .btn.tg2.on{background:#fff;color:var(--navy);border-color:#fff}
 #cmpLegend{position:absolute;top:8px;right:8px;z-index:4;display:none;gap:6px;align-items:center;background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:11.5px;box-shadow:0 2px 8px rgba(15,41,66,.15)}
 .seg{display:inline-flex}.seg .btn{border-radius:0}.seg .btn:first-child{border-radius:6px 0 0 6px}.seg .btn:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
 .seg .btn.on{background:var(--purple);border-color:var(--purple);color:#fff}
+.seg .btn+.btn{margin-left:-1px}
+/* Pages tab: thumbnails of every page */
+.pgf{display:flex;align-items:center;gap:6px;padding:8px 10px 2px;font-size:12px;border-top:1px solid var(--line)}
+.pgf:first-child{border-top:0}
+.pgf b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--navy)}
+.pgg{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;padding:6px 10px 10px}
+.pgt{border:1px solid var(--line);border-radius:6px;padding:4px;cursor:pointer;background:#fff;display:flex;flex-direction:column;gap:3px;align-items:stretch;min-width:0}
+.pgt:hover{border-color:var(--blue)}.pgt.on{border-color:var(--purple);box-shadow:0 0 0 2px #d9d2ff}
+.pgt img{width:100%;height:84px;background:#f4f7fb;border:1px solid #eef2f7;object-fit:contain;display:block}
+.pgt .pgl{font-size:10.5px;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pgt .pgl.ok{color:var(--green)}.pgt .pgl.warn{color:#8a5a00}.pgt .pgl.bad{color:var(--red)}
 table.sh.bill td:first-child{width:52%}
 table.sh tr.ch2 td{background:#f7f9fc;font-weight:600;border-top:1px solid var(--line)}
 table.asm{width:100%;border-collapse:collapse;font-size:11.5px}table.asm th{font-size:9.5px;text-align:left;color:var(--muted);padding:3px}table.asm td{padding:2px}table.asm input{width:100%;min-width:0;padding:4px 5px;font-size:11.5px}
@@ -140,7 +151,7 @@ table.sh .rn:hover{color:var(--purple)}
 #stage{position:relative;flex:1;overflow:hidden;background:#d9dee6;touch-action:none;min-height:0}
 #stage canvas{position:absolute;left:0;top:0;transform-origin:0 0}
 #low{image-rendering:auto}
-#ov{position:absolute;inset:0;width:100%;height:100%}
+#ov,#ov2{position:absolute;inset:0;width:100%;height:100%}#ov2{pointer-events:none}
 #stage.pan{cursor:grab}#stage.panning{cursor:grabbing}#stage.draw{cursor:crosshair}#stage.lasso{cursor:crosshair}#stage.zoomwin{cursor:zoom-in}
 /* right-click menu (Bluebeam / PlanSwift style) */
 #ctx{position:fixed;z-index:30;min-width:230px;max-width:340px;background:#fff;border:1px solid #c9d6e4;border-radius:8px;box-shadow:0 10px 32px rgba(15,41,66,.28);padding:4px 0;display:none;font-size:12.5px;user-select:none}
@@ -303,9 +314,10 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 <div class="app" id="app">
   <aside class="panel">
     <div class="rz" id="rzL" title="Drag to resize"></div>
-    <div class="ph"><span class="seg"><button class="btn sm on" id="tCond">Conditions</button><button class="btn sm" id="tLay">Layers</button></span><span style="flex:1"></span><button class="btn sm pri" id="bNewCond">+ New</button><button class="hidebtn" id="hideL" title="Hide this panel">&#10216;</button></div>
+    <div class="ph"><span class="seg"><button class="btn sm on" id="tCond">Conditions</button><button class="btn sm" id="tPages" title="Every page of the project: thumbnails, scale status, measurements — click to open">Pages</button><button class="btn sm" id="tLay">Layers</button></span><span style="flex:1"></span><button class="btn sm pri" id="bNewCond">+ New</button><button class="hidebtn" id="hideL" title="Hide this panel">&#10216;</button></div>
     <div class="pb" id="condList"></div>
     <div class="pb" id="layerList" style="display:none"></div>
+    <div class="pb" id="pageList" style="display:none"></div>
     <div class="keys">
       <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>C</kbd> count</span><span><kbd>E</kbd> circle</span><span><kbd>N</kbd> note</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
       <span><kbd>M</kbd> measure</span><span><kbd>K</kbd> set scale</span><span><kbd>V</kbd> select</span><span><kbd>B</kbd> break</span><span><kbd>Shift</kbd>+<kbd>O</kbd> lasso</span><span><kbd>Z</kbd> zoom box</span>
@@ -351,6 +363,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
       <canvas id="low"></canvas>
       <canvas id="hi"></canvas>
       <svg id="ov" xmlns="http://www.w3.org/2000/svg"></svg>
+      <svg id="ov2" xmlns="http://www.w3.org/2000/svg"></svg>
       <div id="tip"></div>
       <div id="busy"></div>
       <div id="cmpLegend"></div>

@@ -183,7 +183,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   await page.keyboard.press("m");
   await click(100, 400, {dx: 2, dy: 1}); await click(100 + 20 * G.K2, 400, {dx: -2, dy: 1});
   await page.keyboard.press("Enter"); await wait();
-  ok(/20\.000 ft/.test(await T(() => document.getElementById("ov").textContent)), "measured the 20'-0\" line: 20.000 ft");
+  ok(/20\.000 ft/.test(await T(() => document.getElementById("ov").textContent + document.getElementById("ov2").textContent)), "measured the 20'-0\" line: 20.000 ft");
   await page.keyboard.press("Escape");
   await page.click("#bNext");
   await page.waitForFunction(() => zdTakeoff.S.pageNo === 3, null, {timeout: 15000}); await wait(800);
