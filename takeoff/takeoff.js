@@ -524,9 +524,9 @@ async function indexPage(){
 function sizeDims(t){ const m = /^\s*([^xX×*]+?)\s*[xX×*]\s*([^xX×*]+?)\s*$/.exec(String(t || "")); if (!m) return null; const a = parseFt(m[1]), b = parseFt(m[2]); return a > 0 && b > 0 ? [a, b] : null; }
 async function scaleFromRooms(key){
   const [f, pg] = key.split(":"), g = S.geo[key]; if (!g || !g.segs.length) return null;
-  const F = await drawingFacts(f, +pg), est = [];
+  const F = await drawingFacts(f, +pg), est = [], bf = segRoleFilter(g, BOUND);   // walls / openings / columns only, when the PDF has layers: a bed or a table is not the room's edge
   const ray = (c, dx, dy, R) => {   // distance from c to the first drawing line along (dx, dy), up to R
-    let best = R; segsIn(g, c[0] - (dx < 0 ? R : 0), c[1] - (dy < 0 ? R : 0), c[0] + (dx > 0 ? R : 0), c[1] + (dy > 0 ? R : 0)).forEach(i => { const s = g.segs[i]; if (s[4] & 8) return;
+    let best = R; segsIn(g, c[0] - (dx < 0 ? R : 0), c[1] - (dy < 0 ? R : 0), c[0] + (dx > 0 ? R : 0), c[1] + (dy > 0 ? R : 0)).forEach(i => { const s = g.segs[i]; if (s[4] & 8 || (bf && !bf(i))) return;
       if (dy === 0) { const y0 = Math.min(s[1], s[3]), y1 = Math.max(s[1], s[3]); if (c[1] < y0 || c[1] > y1 || y1 === y0) return; const x = s[0] + (s[2] - s[0]) * (c[1] - s[1]) / (s[3] - s[1]), d = (x - c[0]) * dx; if (d > 0.5 && d < best) best = d; }
       else { const x0 = Math.min(s[0], s[2]), x1 = Math.max(s[0], s[2]); if (c[0] < x0 || c[0] > x1 || x1 === x0) return; const y = s[1] + (s[3] - s[1]) * (c[0] - s[0]) / (s[2] - s[0]), d = (y - c[1]) * dy; if (d > 0.5 && d < best) best = d; } });
     return best; };
@@ -553,9 +553,9 @@ async function checkScale(key, ask2){
   if (!ev || ev.agree < 3) return null;
   const r = ev.ptPerFt / sc.ptPerFt; if (Math.abs(Math.log(r)) < Math.log(1.15)) { if (sc.doubt) { delete sc.doubt; save(); refresh(); } return {ok: true, ev}; }
   const std = STD_SCALES.slice().sort((a, b) => Math.abs(Math.log(a.ptPerFt / ev.ptPerFt)) - Math.abs(Math.log(b.ptPerFt / ev.ptPerFt)))[0];
-  // the rooms' median, then: a standard scale within 6 %; else the walls (drawn exactly 4.5" / 9" / 13.5") within 10 %; else the median
-  const wl = Math.abs(Math.log(std.ptPerFt / ev.ptPerFt)) < Math.log(1.06) ? null : wallScale(key, ev.ptPerFt);
-  const sug = Math.abs(Math.log(std.ptPerFt / ev.ptPerFt)) < Math.log(1.06) ? std : wl ? wl : {ptPerFt: ev.ptPerFt, label: "1 ft = " + ev.ptPerFt.toFixed(3) + " pt"};
+  // the rooms' median, then: a standard scale within 2.5 %; else the walls (drawn exactly 4.5" / 9" / 13.5") within 4 %; else the median
+  const isStd = Math.abs(Math.log(std.ptPerFt / ev.ptPerFt)) < Math.log(1.025), wl = isStd ? null : wallScale(key, ev.ptPerFt);
+  const sug = isStd ? std : wl && Math.abs(Math.log(wl.ptPerFt / ev.ptPerFt)) < Math.log(1.04) ? wl : {ptPerFt: ev.ptPerFt, label: "1 ft = " + ev.ptPerFt.toFixed(3) + " pt"};
   ev.agree = ev.est.filter(v => Math.abs(v / sug.ptPerFt - 1) < 0.1).length;
   sc.doubt = {label: sug.label, ptPerFt: sug.ptPerFt, ratio: +(sug.ptPerFt / sc.ptPerFt).toFixed(3), rooms: ev.rooms, agree: ev.agree}; save(); refresh();
   if (ask2 && key === S.key) {
