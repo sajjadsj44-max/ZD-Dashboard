@@ -177,6 +177,10 @@ function mutate(fn){
   S.undo.push(snapshot()); if (S.undo.length > 100) S.undo.shift(); S.redo = [];
   fn(); save(); refresh();
 }
+/* Ctrl+Z / Ctrl+Y while a shape is being drawn step its points back and forward; otherwise the project history */
+function undoAny(){ if (S.draft.length) { (S.draftRedo = S.draftRedo || []).push(S.draft.pop()); if (S.tool === "measure") S.measure = S.draft.slice(); draftBtns(); draw(); return; } undo(); }
+function redoAny(){ if (S.draftRedo && S.draftRedo.length && (S.draft.length || S.tool !== "select")) { S.draft.push(S.draftRedo.pop()); if (S.tool === "measure") S.measure = S.draft.slice(); draftBtns(); draw(); return; } redo(); }
+function draftBtns(){ $("bUndo").disabled = !S.draft.length && !S.undo.length; $("bRedo").disabled = !(S.draftRedo && S.draftRedo.length) && !S.redo.length; }
 function undo(){ if (!S.undo.length) return; S.redo.push(snapshot()); restore(S.undo.pop()); }
 function redo(){ if (!S.redo.length) return; S.undo.push(snapshot()); restore(S.redo.pop()); }
 function restore(js){ const o = JSON.parse(js); UNDO_KEYS.forEach(k => { if (o[k] !== undefined) P.proj[k] = o[k]; }); migrate(P.proj); if (S.sel && !P.proj.items.some(i => i.id === S.sel)) S.sel = null; save(); refresh(); }
@@ -732,9 +736,14 @@ function jambLines(ids, k, gapFt){
       if (t > 0 && u >= -1e-6 && u <= 1 + 1e-6 && t < best) best = t; });
     return best; };
   G.forEach(gr => {
-    const L = gr.L.slice().sort((a, b) => a.o - b.o), wall = new Set();
+    // hatching is not a wall face: skew lines (walls run square) unless long, and runs of 5+ overlapping parallels
+    const axis = Math.min(Math.abs(gr.u[0]), Math.abs(gr.u[1])) < 0.035;
+    const L = gr.L.slice().filter(l => axis || l.t1 - l.t0 >= 2.5 * k).sort((a, b) => a.o - b.o), wall = new Set();
+    const ov = (a, b) => Math.min(a.t1, b.t1) - Math.max(a.t0, b.t0) >= 0.5 * k;
+    const hatch = new Set(L.filter((l, i) => { let n = 0; for (let j = 0; j < L.length && n < 4; j++) if (j !== i && Math.abs(L[j].o - l.o) <= 2.5 * k && Math.abs(L[j].o - l.o) > 0.03 * k && ov(l, L[j])) n++; return n >= 4; }));
     for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length && L[j].o - L[i].o <= 1.6 * k; j++) {
-      if (L[j].o - L[i].o < 0.25 * k) continue; if (Math.min(L[i].t1, L[j].t1) - Math.max(L[i].t0, L[j].t0) >= 0.5 * k) { wall.add(L[i]); wall.add(L[j]); } }
+      if (hatch.has(L[i]) || hatch.has(L[j])) continue;
+      if (L[j].o - L[i].o < 0.25 * k) continue; if (ov(L[i], L[j])) { wall.add(L[i]); wall.add(L[j]); } }
     wall.forEach(l => [[l.t0, -1], [l.t1, 1]].forEach(([t, sg]) => {
       const E = [gr.u[0] * t + gr.n[0] * l.o, gr.u[1] * t + gr.n[1] * l.o], d = [gr.u[0] * sg, gr.u[1] * sg];
       // the next piece of the same face (no end cap drawn): collinear, so the ray cannot meet it
@@ -1093,6 +1102,11 @@ function wallCavities(x0, y0, W, H, px, k, big, ids){   // ids: the barrier line
   G.forEach(g => facePairs(g, 0.3 * k, 1.6 * k, (big ? 1 : 2) * k, (d, o, t0, t1) => {
     const P = (t, off) => [g.u[0] * t + g.n[0] * off, g.u[1] * t + g.n[1] * off];
     if (big && ![0.2, 0.5, 0.8].every(f => { const t = t0 + (t1 - t0) * f; return onBig(P(t, o - d / 2)) && onBig(P(t, o + d / 2)); })) return;
+    // a wall's hollow is closed at an end (end cap, or the wall it runs into); a strip open at both ends is floor
+    // between two things (a bed and a wall), not a wall
+    // (a hollow wider than a 9" wall must be closed at both ends: 13.5" walls are capped, a gap beside furniture is not)
+    if (big) { const shut = [[t0, -1], [t1, 1]].filter(([t, sg]) => [0.15, 0.3, 0.45].some(f => onBig(P(t + sg * f * k, o)))).length;
+      if (d > 1.3 * k || shut < (d > 0.85 * k ? 2 : 1)) return; }
     const a = P(t0, o - d / 2), b = P(t1, o - d / 2), c = P(t1, o + d / 2), e = P(t0, o + d / 2);
     ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(e[0], e[1]); ctx.closePath(); ctx.fill(); n++; }));
   if (!n) return out;
@@ -1110,13 +1124,38 @@ async function autoAt(p){
     return toast("Already measured — this point is inside an area of " + c.name);
   busy("Finding the room…");
   await new Promise(r => setTimeout(r, 20));
-  let res; try { res = await autoRoom(p); } catch (e) { res = {err: "Auto area failed: " + (e.message || e)}; }
+  let res; try { res = await autoRoomGuarded(p); } catch (e) { res = {err: "Auto area failed: " + (e.message || e)}; }
   busy("");
   if (res.err) return toast(res.err, 6000);
   const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "";
   mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm}); });
   S.sel = id; draw(); renderSheet();
-  const k = hereScale(p); toast((nm || "Room") + " " + f2(polyArea(res.pts) / k / k) + " Sft" + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
+  const k = hereScale(p);
+  if (res.leak) { if (!autoOpt().show) { P.proj.auto = Object.assign({}, P.proj.auto || {}, {show: true}); save(); }
+    return toast("⚠ " + (nm || "Room") + " " + f2(polyArea(res.pts) / k / k) + " Sft — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
+  toast((nm || "Room") + " " + f2(polyArea(res.pts) / k / k) + " Sft" + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
+}
+/* Leak guard: a room's outline must not swallow another room's name, nor grow far past its own written size.
+   When it does, trace again closing wider gaps and dashed lines, and keep the first clean outline. */
+async function autoRoomGuarded(p){
+  const first = await autoRoom(p); if (first.err) return first;
+  let F = null; try { F = await drawingFacts(S.fileId, S.pageNo); } catch (e) {}
+  if (!F || !F.rooms.length) return first;
+  const k = hereScale(p), o = autoOpt();
+  const judge = r => { const inn = F.rooms.filter(m => pointInPoly([m.x + m.w / 2, m.y - m.h / 2], r.pts)), a = polyArea(r.pts) / k / k;
+    const own = inn.length === 1 ? inn[0] : null, big = own && own.sft && a > own.sft * 1.25;
+    return {n: inn.length, bad: inn.length > 1 || big, names: inn.map(m => m.name), a}; };
+  let j = judge(first); if (!j.bad) return first;
+  let best = {res: first, j};
+  for (const over of [{dashBound: true}, {dashBound: true, gap: o.gap * 1.5}, {dashBound: true, gap: o.gap * 2, pocket: Math.max(o.pocket || 0, 1.5)}, {dashBound: true, gap: o.gap * 3, pocket: Math.max(o.pocket || 0, 2)}]) {
+    busy("Room leaked into " + j.names.filter(Boolean).slice(0, 3).join(", ") + " — closing wider gaps…"); await new Promise(r => setTimeout(r, 10));
+    const r2 = await autoRoom(p, over); if (r2.err) continue;
+    const j2 = judge(r2);
+    if (!j2.bad && j2.n >= 1) { r2.note = "leak closed (gap " + f3(over.gap || o.gap) + " ft" + (over.dashBound ? ", dashed lines as walls" : "") + ")"; return r2; }
+    if (j2.n >= 1 && (j2.n < best.j.n || (j2.n === best.j.n && j2.a < best.j.a))) best = {res: r2, j: j2};
+  }
+  best.res.leak = best.j.n > 1 ? "takes in " + best.j.names.join(" + ") : "much bigger than its written size";
+  return best.res;
 }
 async function autoSettings(){
   const o = autoOpt();
@@ -1340,7 +1379,7 @@ function setTool(t){
   if (t !== "auto") S.pickWall = false;
   if (t !== "open") S.openMark = null;
   if (t !== "typref" && S.typ) { S.typ = null; $("cmpLegend").style.display = "none"; toast("Typical copy stopped — nothing copied"); }
-  S.tool = t; S.draft = []; S.measure = t === "measure" ? S.measure : null;
+  S.tool = t; S.draft = []; S.draftRedo = []; S.measure = t === "measure" ? S.measure : null;
   document.querySelectorAll("#tools .tool").forEach(b => b.classList.toggle("on", b.dataset.tool === t));
   stage().className = t === "pan" ? "pan" : t === "select" ? "" : "draw";
   hint(); draw(); renderProps();
@@ -1388,7 +1427,7 @@ function onDown(e){
     const closeArea = isAreaDraft() && S.draft.length >= 3 && dist(toScr(S.draft[0]), toScr(p)) <= SNAP_PX;
     if (closeArea) return finish(S.draft.slice());
     if (S.draft.length && dist(S.draft[S.draft.length - 1], p) < 1e-6) return;
-    S.draft.push(p); if (S.tool === "measure") S.measure = S.draft.slice(); draw(); return;
+    S.draft.push(p); S.draftRedo = []; if (S.tool === "measure") S.measure = S.draft.slice(); draftBtns(); draw(); return;
   }
   if (S.tool === "open" || S.tool === "cal" || S.tool === "circle" || S.tool === "vp") { S.draft.push(p); if (S.draft.length === 2) finish(S.draft.slice()); draw(); }
   if (S.tool === "note") return addMark("note", [p]);
@@ -1504,7 +1543,7 @@ function addCount(p){
 }
 async function finish(pts){
   const c = S.cond ? cond(S.cond) : null, t = S.tool;
-  S.draft = [];
+  S.draft = []; S.draftRedo = [];
   if (t === "measure") { S.measure = pts; S.measures.push(pts); draw(); return; }
   if (t === "fence") { if (pts.length >= 2) mutate(() => { (P.proj.marks = P.proj.marks || []).push({id: uid("M"), type: "fence", file: S.fileId, page: S.pageNo, pts, text: "", color: "#ff7a00", at: new Date().toISOString()}); }); draw(); return; }
   if (t === "vp") {
@@ -1768,7 +1807,7 @@ function delSelected(){
 }
 
 /* ------------------------------------------------------------------ panels */
-function refresh(){ S.doorIx = null; renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); draw(); $("bUndo").disabled = !S.undo.length; $("bRedo").disabled = !S.redo.length; }
+function refresh(){ S.doorIx = null; renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); draw(); draftBtns(); }
 let sheetT = null;
 function refreshSheetSoon(){ clearTimeout(sheetT); sheetT = setTimeout(() => { renderSheet(); renderConds(); }, 120); }
 function renderScaleChip(){
@@ -2927,7 +2966,7 @@ function wire(){
   $("bHideMk").onclick = () => { S.hideMk = !S.hideMk; $("bHideMk").classList.toggle("on", !S.hideMk); $("bHideMk").title = S.hideMk ? "Markups hidden — click to show all" : "Hide all markups (measurements and notes) to see the drawing"; draw(); toast(S.hideMk ? "All markups hidden" : "Markups shown", 1500); };
   $("bLayers").onclick = () => { S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };
   $("bDel").onclick = () => delSelected();
-  $("bUndo").onclick = undo; $("bRedo").onclick = redo;
+  $("bUndo").onclick = undoAny; $("bRedo").onclick = redoAny;
   $("bExport").onclick = exportMenu;
   $("scaleChip").onclick = scaleDialog;
   $("bNewCond").onclick = () => P.proj && editCond(null);
@@ -3014,8 +3053,8 @@ function wire(){
     if ($("dlgBack").classList.contains("on") || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
     if (!P.proj) return;
     const k = e.key.toLowerCase();
-    if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); return e.shiftKey ? redo() : undo(); }
-    if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); return redo(); }
+    if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); return e.shiftKey ? redoAny() : undoAny(); }
+    if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); return redoAny(); }
     if (e.altKey && S.cmp && /^Arrow/.test(e.key)) { e.preventDefault(); const st2 = (e.shiftKey ? 10 : 1) / S.view.s; S.cmp.dx += e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0; S.cmp.dy += e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0; clearTimeout(S.cmpT); S.cmpT = setTimeout(() => { renderLow(); renderHi(true); }, 120); return; }
     if ((e.ctrlKey || e.metaKey) && k === "a") { e.preventDefault(); return selectAll(); }
     if (!e.altKey && /^Arrow/.test(e.key) && selIds().size) { e.preventDefault(); const st2 = e.shiftKey ? 10 : 1; nudgeSel(e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0, e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0); return; }
@@ -3819,7 +3858,7 @@ function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw"
   loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on);
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool};   // for tests and the console
+  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
