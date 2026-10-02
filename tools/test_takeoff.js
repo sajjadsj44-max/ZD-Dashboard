@@ -210,7 +210,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   ok(blue && /DDEBFF/.test(blue.fgColor.argb) && prot && prot.locked === false && ms.sheetProtection, "dimension cells blue and unlocked, sheet protected");
   ok(wb.getWorksheet("Assumptions").getColumn(2).values.some(v => /height H 10\.500/.test(String(v))), "assumptions list the heights entered");
   const cf = await dl("#exCsv"), csv = fs.readFileSync(cf, "utf8");
-  ok(/S\.No,Condition,Description/.test(csv) && /Floor area,(area|BED ROOM),test-plans p\.1,1,12\.000,14\.000,,168\.00,Sft/.test(csv), "CSV rows in the house layout");
+  ok(/S\.No,Condition,Description/.test(csv) && /Floor area,(area|BED ROOM),test-plans p\.1,1,12\.000,14\.000,,168\.000,Sft/.test(csv), "CSV rows in the house layout");
   const pf = await dl("#exPng");
   ok(fs.statSync(pf).size > 20000, "marked-up page PNG");
   const jf = await dl("#exJson"), js = JSON.parse(fs.readFileSync(jf, "utf8"));

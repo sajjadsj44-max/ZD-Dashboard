@@ -17,7 +17,10 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const r3 = v => Math.round(v * 1000) / 1000;                       // lengths: decimal feet, 3 dp
 const f3 = v => r3(v).toFixed(3);
-const f2 = v => (Math.round(v * 100) / 100).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const f2 = v => (Math.round(v * 100) / 100).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});   // money (PKR), thresholds
+/* a quantity as shown: ft, Sft and cft to 3 dp (as the dimensions); Nos as a whole number (3 dp only if a formula gives a part) */
+const fq = (v, unit) => { v = +v || 0; const d = /^\s*nos?\.?\s*$/i.test(String(unit || "")) && Math.abs(v - Math.round(v)) < 1e-9 ? 0 : 3, x = Math.round(v * 10 ** d) / 10 ** d;
+  return (x === 0 ? 0 : x).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d}); };
 const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const today = () => { const d = new Date(); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); };
@@ -26,14 +29,20 @@ const dmy = iso => { const p = String(iso || "").slice(0, 10).split("-"); return
 function toast(msg, ms){ const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => { t.style.display = "none"; }, ms || 2600); }
 function busy(msg){ const b = $("busy"); b.textContent = msg || ""; b.style.display = msg ? "block" : "none"; }
 
-/* "12'-6\"", "12' 6", "12-6", "12.5", "150\"", "12'6 1/2\"" -> decimal feet (NaN if not a length) */
+/* vulgar fractions as written by some CAD fonts: "1½" -> "1 1/2", "¼" -> "1/4", 1⁄4 (fraction slash) -> 1/4 */
+const VF = {"¼": "1/4", "½": "1/2", "¾": "3/4", "⅛": "1/8", "⅜": "3/8", "⅝": "5/8", "⅞": "7/8", "⅓": "1/3", "⅔": "2/3", "⅙": "1/6", "⅚": "5/6", "⅕": "1/5", "⅖": "2/5", "⅗": "3/5", "⅘": "4/5", "⅒": "1/10"};
+const vulgar = s => String(s).replace(/(\d)?(\s*)([¼½¾⅛⅜⅝⅞⅓⅔⅙⅚⅕⅖⅗⅘⅒])/g, (_, d, sp, f) => d ? d + " " + VF[f] : sp + VF[f]).replace(/(\d)\s*⁄\s*(\d)/g, "$1/$2");
+/* "12'-6\"", "12' 6", "12-6", "12.5", "150\"", "12'6 1/2\"" -> decimal feet (NaN if not a length). A metric dimension
+   ("3000mm", "300 cm", "3.05m") is converted to decimal feet — the sheet stays in feet. */
 function parseFt(s){
-  s = String(s || "").trim().replace(/[’′]/g, "'").replace(/[”″]/g, '"').replace(/\s+/g, " ");
+  s = vulgar(String(s || "")).trim().replace(/[’′]/g, "'").replace(/[”″]/g, '"').replace(/\s+/g, " ");
   if (!s) return NaN;
-  const frac = t => { t = t.trim(); if (!t) return 0; const m = /^(\d+(?:\.\d+)?)?\s*(?:(\d+)\/(\d+))?$/.exec(t); if (!m) return NaN; return (m[1] ? +m[1] : 0) + (m[2] ? +m[2] / +m[3] : 0); };
-  let m = /^(\d+(?:\.\d+)?)\s*'\s*-?\s*([\d.\s/]*)"?$/.exec(s);          // 12'-6", 12' 6 1/2"
+  const frac = t => { t = t.trim(); if (!t) return 0; const m = /^(\d+(?:\.\d+)?)?\s*(?:(\d+)\/(\d+))?$/.exec(t); if (!m || (m[2] && !(+m[3] > 0))) return NaN; return (m[1] ? +m[1] : 0) + (m[2] ? +m[2] / +m[3] : 0); };
+  let m = /^(\d+(?:\.\d+)?|\.\d+)\s*(mm|cm|m)$/i.exec(s);                // 3000mm, 300 cm, 3.05 m
+  if (m) return +m[1] / {mm: 304.8, cm: 30.48, m: 0.3048}[m[2].toLowerCase()];
+  m = /^(\d+(?:\.\d+)?)\s*'\s*-?\s*([\d.\s/]*)"?$/.exec(s);              // 12'-6", 12' 6 1/2"
   if (m) { const i = frac(m[2]); return isNaN(i) ? NaN : +m[1] + i / 12; }
-  m = /^([\d.\s/]+)"$/.exec(s);                                          // 150"
+  m = /^([\d.\s/]+)\s*(?:"|in|inch|inches)$/i.exec(s);                     // 150", 150 in
   if (m) { const i = frac(m[1]); return isNaN(i) ? NaN : i / 12; }
   m = /^(\d+)\s*-\s*(\d+(?:\.\d+)?)$/.exec(s);                           // 12-6
   if (m) return +m[1] + +m[2] / 12;
@@ -161,16 +170,74 @@ function newProject(name){
   return {id: uid("P"), name: name || "Untitled takeoff", created: new Date().toISOString(), updated: new Date().toISOString(), v: SCHEMA,
           files: [], scales: {}, conds: [], items: [], last: {}, viewports: {}, marks: [], sheets: {}, openings: []};
 }
-function migrate(p){
-  const from = +p.v || 1, obj = v => v && typeof v === "object" && !Array.isArray(v), arr = Array.isArray;
+/* rep (optional): an array that gets one line per repair. A project file comes from anywhere (a colleague, an old
+   version, a damaged disk): values the app draws or multiplies are checked here — a colour that is not a colour (it is
+   written into the drawing's SVG), points that are not numbers, a unit that does not belong to its type. Measurements
+   or markups that cannot be drawn are left out and reported, never kept half-broken. */
+const HEXCOL = /^#[0-9a-f]{3}(?:[0-9a-f]{3})?(?:[0-9a-f]{2})?$/i;
+function migrate(p, rep){
+  const from = +p.v || 1, obj = v => v && typeof v === "object" && !Array.isArray(v), arr = Array.isArray, note = m => { if (rep) rep.push(m); };
+  const num = v => typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? +v : NaN;
+  const pt = q => arr(q) && q.length >= 2 && isFinite(num(q[0])) && isFinite(num(q[1])) ? [num(q[0]), num(q[1])] : null;
+  const pts = (P0, min) => { if (!arr(P0)) return null; const o = P0.map(pt); return o.every(Boolean) && o.length >= min ? o : null; };
   if (!arr(p.files)) p.files = []; if (!arr(p.conds)) p.conds = []; if (!arr(p.items)) p.items = []; if (!arr(p.marks)) p.marks = []; if (!arr(p.openings)) p.openings = [];
   if (!obj(p.scales)) p.scales = {}; if (!obj(p.viewports)) p.viewports = {}; if (!obj(p.last)) p.last = {}; if (!obj(p.sheets)) p.sheets = {};
-  p.items.forEach(it => { if (it.nos == null) it.nos = 1; if (it.label == null) it.label = ""; if (!it.kind) it.kind = "shape"; });
+  if (typeof p.name !== "string") p.name = String(p.name == null ? "Untitled takeoff" : p.name);
+  let n = p.files.length; p.files = p.files.filter(f => obj(f) && f.id != null); if (p.files.length < n) note((n - p.files.length) + " PDF entr" + (n - p.files.length > 1 ? "ies" : "y") + " without an id left out");
+  p.files.forEach(f => { f.id = String(f.id); f.name = String(f.name == null ? f.id : f.name); f.pages = Math.max(1, Math.round(num(f.pages)) || 1); });
+  n = p.conds.length; p.conds = p.conds.filter(c => obj(c) && c.id != null); if (p.conds.length < n) note((n - p.conds.length) + " condition" + (n - p.conds.length > 1 ? "s" : "") + " without an id left out");
+  p.conds.forEach((c, i) => {
+    c.id = String(c.id); c.name = String(c.name == null ? "Condition " + (i + 1) : c.name);
+    if (!UNITS[c.type]) { note(c.name + ": type “" + c.type + "” is not area / linear / count — set to area"); c.type = "area"; }
+    if (!UNITS[c.type].includes(c.unit)) { note(c.name + ": unit “" + c.unit + "” does not fit " + c.type + " — set to " + UNITS[c.type][0]); c.unit = UNITS[c.type][0]; }
+    if (!HEXCOL.test(String(c.color || ""))) { if (c.color != null && c.color !== "") note(c.name + ": colour “" + String(c.color).slice(0, 40) + "” is not a colour — replaced"); c.color = COLORS[i % COLORS.length]; }
+    ["h", "t"].forEach(k => { if (c[k] !== "" && c[k] != null && !(num(c[k]) > 0)) { note(c.name + ": " + (k === "h" ? "height" : "thickness") + " “" + c[k] + "” is not a length — cleared"); c[k] = ""; } else if (c[k] !== "" && c[k] != null) c[k] = num(c[k]); });
+    c.faces = Math.max(1, Math.min(2, Math.round(num(c.faces)) || 1)); c.dedMin = Math.max(0, num(c.dedMin) || 0);
+    ["rate"].forEach(k => { if (c[k] != null && !isFinite(num(c[k]))) c[k] = 0; });
+    if (c.asm != null && !arr(c.asm)) c.asm = [];
+  });
+  let bad = 0;
+  p.items = p.items.filter(it => {
+    if (!obj(it) || it.id == null) { bad++; return false; }
+    const c = p.conds.find(x => x.id === String(it.cond));
+    const min = it.kind === "open" || it.shape === "circle" ? 2 : !c || c.type === "count" ? 0 : c.type === "area" ? 3 : 2, q = pts(it.pts, min);   // (an empty count is kept: harmless, and flagged as zero by the export check)
+    if (!q) { bad++; return false; }
+    it.id = String(it.id); it.cond = String(it.cond); it.file = String(it.file); it.page = Math.max(1, Math.round(num(it.page)) || 1); it.pts = q;
+    return true; });
+  if (bad) note(bad + " measurement" + (bad > 1 ? "s" : "") + " with missing or broken points left out (they could not be drawn or measured)");
+  p.items.forEach(it => { const nn = Math.round(num(it.nos)); it.nos = nn >= 1 && isFinite(nn) ? nn : 1; if (it.label == null) it.label = ""; it.label = String(it.label);
+    if (!["shape", "ded", "open"].includes(it.kind)) it.kind = "shape";
+    if (it.arcs != null && !(arr(it.arcs) && it.arcs.every(a => arr(a) && a.length === 2 && Number.isInteger(a[0]) && Number.isInteger(a[1])))) delete it.arcs;
+    ["ow", "oh", "doorW"].forEach(k => { if (it[k] != null && it[k] !== "" && !isFinite(num(it[k]))) delete it[k]; }); });
+  bad = 0;
+  p.marks = p.marks.filter(m => { const q = obj(m) && m.id != null && MARK_TOOLS[m.type] && pts(m.pts, m.type === "note" ? 1 : 2); if (!q) { bad++; return false; } m.pts = q; m.id = String(m.id); m.text = String(m.text == null ? "" : m.text);
+    if (m.color != null && !HEXCOL.test(String(m.color))) { note("A markup's colour “" + String(m.color).slice(0, 40) + "” is not a colour — replaced"); m.color = "#d03b3b"; } return true; });
+  if (bad) note(bad + " markup" + (bad > 1 ? "s" : "") + " with missing or broken points left out");
+  Object.keys(p.scales).forEach(k => { const sc = p.scales[k]; if (!obj(sc) || !(num(sc.ptPerFt) > 0) || !isFinite(num(sc.ptPerFt))) { note("Page scale " + k + " is not a number — removed (set it again)"); delete p.scales[k]; } else sc.ptPerFt = num(sc.ptPerFt); });
+  Object.keys(p.viewports).forEach(k => { if (!arr(p.viewports[k])) { delete p.viewports[k]; return; }
+    p.viewports[k] = p.viewports[k].filter(v => { const ok = obj(v) && arr(v.r) && v.r.length === 4 && v.r.every(x => isFinite(num(x))) && isFinite(num(v.ptPerFt || 0)); if (!ok) note("A viewport on " + k + " is broken — removed"); else { v.r = v.r.map(num); v.ptPerFt = Math.max(0, num(v.ptPerFt || 0)); v.name = String(v.name == null ? "Viewport" : v.name); } return ok; }); });
+  p.openings = p.openings.filter(o => { const ok = obj(o) && o.id != null && num(o.w) > 0 && num(o.h) > 0; if (!ok) note("Opening schedule mark " + (obj(o) ? o.mark : "?") + " has no valid size — removed"); else { o.w = num(o.w); o.h = num(o.h); o.mark = String(o.mark == null ? "" : o.mark); } return ok; });
   p.v = SCHEMA;
   return from;
 }
-let saveT = null;
-function save(){ if (!P.proj) return; P.proj.updated = new Date().toISOString(); clearTimeout(saveT); saveT = setTimeout(() => dbPut("projects", P.proj).catch(e => toast("Could not save: " + e.message, 5000)), 300); }
+/* every change is written to IndexedDB 300 ms after it (one write for a burst of changes), and at once on Ctrl+S, before
+   the page is closed, reloaded or hidden, and before another project is opened — so a measurement made just before
+   closing the tab is not lost. The project is taken when the change is made, not when the timer fires. */
+let saveT = null, savePr = null;
+const TAB = uid("T");
+function save(){ if (!P.proj) return; P.proj.updated = new Date().toISOString(); savePr = P.proj; clearTimeout(saveT); saveT = setTimeout(flushSave, 300); }
+function flushSave(){
+  clearTimeout(saveT); saveT = null; const pr = savePr; savePr = null;
+  if (!pr || !DB) return Promise.resolve(false);
+  return dbPut("projects", pr).then(() => { tabSay({t: "saved", id: pr.id, at: pr.updated}); return true; }).catch(e => { toast("Could not save: " + e.message, 5000); return false; });
+}
+/* the same project open in two tabs: each would overwrite the other's work on its next save — say so in both */
+const TABCH = typeof BroadcastChannel === "function" ? new BroadcastChannel("zdTakeoff") : null;
+function tabSay(m){ try { if (TABCH) TABCH.postMessage(Object.assign({tab: TAB}, m)); } catch (e) {} }
+if (TABCH) TABCH.onmessage = e => { const m = e.data || {}; if (!P.proj || m.tab === TAB || m.id !== P.proj.id) return;
+  if (m.t === "open") tabSay({t: "here", id: P.proj.id});
+  S.otherTab = m.t === "saved" ? "changed in another tab or window at " + String(m.at || "").slice(11, 16) : "also open in another tab or window";
+  renderSheet(); };
 const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "openings"];
 function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 /* every change goes through mutate(): the project before it is kept for Ctrl+Z (200 steps), with a name for the
@@ -228,11 +295,15 @@ function restore(js){ const o = JSON.parse(js); UNDO_KEYS.forEach(k => { if (o[k
   save(); refresh(); }
 
 async function openProject(id){
+  await flushSave();   // the project being left keeps its last change
   const pr = await dbGet("projects", id);
   if (!pr) return toast("Project not found");
-  if ((+pr.v || 1) < SCHEMA) { const from = migrate(pr); await dbPut("projects", pr); toast("Project upgraded from file version " + from + " to " + SCHEMA, 3000); } else migrate(pr);
+  const rep = [];
+  if ((+pr.v || 1) < SCHEMA) { const from = migrate(pr, rep); await dbPut("projects", pr); toast("Project upgraded from file version " + from + " to " + SCHEMA, 3000); } else migrate(pr, rep);
+  if (rep.length) setTimeout(() => toast("The stored project had damaged entries, repaired: " + rep.slice(0, 2).join(" · ") + (rep.length > 2 ? " · …" : ""), 8000), 400);
   Object.values(S.docs).forEach(d => d.destroy && d.destroy());
-  P.proj = pr; S.docs = {}; S.geo = {}; S.texts = {}; S.undo = []; S.redo = []; S.sel = null; S.multi.clear(); S.selMark = null; draftClear(); S.page = null; S.fileId = null;
+  P.proj = pr; S.docs = {}; S.geo = {}; S.texts = {}; S.sizes = {}; S.ocgs = {}; S.ocBound = {}; S.undo = []; S.redo = []; S.sel = null; S.multi.clear(); S.selMark = null; draftClear(); S.page = null; S.fileId = null; S.otherTab = "";
+  tabSay({t: "open", id: pr.id});
   S.cond = (pr.conds[0] || {}).id || null;
   localStorage.setItem("zdTakeoffLast", pr.id);
   $("start").classList.remove("on");
@@ -245,6 +316,7 @@ async function openProject(id){
   backupNow("opened").catch(() => {});
 }
 async function showStart(){
+  await flushSave();
   const all = (await dbAll("projects")).sort((a, b) => b.updated.localeCompare(a.updated));
   $("projList").innerHTML = all.length ? '<table class="plist"><thead><tr><th>Project</th><th>PDFs</th><th>Measurements</th><th>Last changed</th><th></th></tr></thead><tbody>' +
     all.map(p => `<tr><td><a data-open="${esc(p.id)}">${esc(p.name)}</a></td><td>${p.files.length}</td><td>${p.items.length}</td><td>${dmy(p.updated)}</td>
@@ -265,8 +337,24 @@ async function doc(fileId){
   const rec = await dbGet("pdfs", fileId);
   if (!rec) throw new Error("PDF missing — add “" + ((P.proj.files.find(f => f.id === fileId) || {}).name || fileId) + "” again with + PDF to re-attach it.");
   const lib = await loadPdfjs();
-  S.docs[fileId] = await lib.getDocument({data: new Uint8Array(rec.data.slice(0)), isEvalSupported: false}).promise;
+  S.docs[fileId] = await lib.getDocument({data: new Uint8Array(rec.data.slice(0)), isEvalSupported: false, password: rec.pw || undefined}).promise;
   return S.docs[fileId];
+}
+/* a PDF locked with an open password: asked for (wrong → asked again), kept with the PDF in this browser only */
+async function openPdfData(lib, data, name){
+  let pw;
+  for (let tries = 0; ; tries++) {
+    try { return {d: await lib.getDocument({data: new Uint8Array(data.slice(0)), isEvalSupported: false, password: pw}).promise, pw}; }
+    catch (e) {
+      if (!e || e.name !== "PasswordException") throw e;
+      busy("");
+      const v = await ask("Password — " + name, `<p>${tries ? "<b style='color:var(--red)'>That password is not right.</b> " : ""}This PDF is locked with a password. Enter it to open the drawing.</p>
+        <div class="fg w2" style="margin-top:8px"><label>Password</label><input type="password" id="dlgPw" autocomplete="off"></div>
+        <p class="small" style="margin-top:6px">Kept with the PDF in this browser only, so the drawing opens again next time.</p>`, "Open", () => ({pw: $("dlgPw").value}), "dlgPw");
+      if (!v) throw new Error(name + " is locked with a password — not added");
+      pw = v.pw; busy("Opening " + name + "…");
+    }
+  }
 }
 async function addFiles(files){
   if (!P.proj) return;
@@ -277,15 +365,17 @@ async function addFiles(files){
       const data = await f.arrayBuffer();
       let meta = P.proj.files.find(x => x.name === f.name && x.size === f.size);
       const lib = await loadPdfjs();
-      const d = await lib.getDocument({data: new Uint8Array(data.slice(0)), isEvalSupported: false}).promise;
-      if (!meta) { meta = {id: uid("F"), name: f.name, size: f.size, pages: d.numPages, added: new Date().toISOString()}; P.proj.files.push(meta); }
-      await dbPut("pdfs", {name: f.name, size: f.size, data}, meta.id);
+      const {d, pw} = await openPdfData(lib, data, f.name);
+      const id = meta ? meta.id : uid("F");
+      await dbPut("pdfs", Object.assign({name: f.name, size: f.size, data}, pw ? {pw} : {}), id);   // stored first: a PDF listed in the project is always one that can be opened
+      if (!meta) { meta = {id, name: f.name, size: f.size, pages: d.numPages, added: new Date().toISOString()}; P.proj.files.push(meta); }
+      else if (meta.pages !== d.numPages) meta.pages = d.numPages;
       if (S.docs[meta.id]) S.docs[meta.id].destroy();
       S.docs[meta.id] = d;
       save(); buildPageSel();
       await gotoPage(meta.id, 1);
       toast(f.name + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""));
-    } catch (e) { toast(e.message || String(e), 5000); }
+    } catch (e) { const m = e && e.message || String(e); toast(/password/i.test(m) ? m : f.name + " could not be opened — " + m + (/Invalid PDF|empty/i.test(m) ? " (is it a PDF, and complete?)" : ""), 6000); }
     busy("");
   }
 }
@@ -356,21 +446,31 @@ function setLayer(ids, on){
   save(); clearTimeout(layT); layT = setTimeout(() => { renderLow(); renderHi(true); }, 60);
 }
 
+/* page changes can overlap (PgDn pressed twice, a sheet row clicked while a page is loading): only the latest one is
+   applied, and the page shown, its key, scale and indexed lines are always set together — never page 2's key with page
+   3's drawing */
 async function gotoPage(fileId, pageNo){
+  const seq = S.navSeq = (S.navSeq || 0) + 1, stale = () => seq !== S.navSeq;
   let d;
-  try { d = await doc(fileId); } catch (e) { toast(e.message, 6000); showDrop(true); return; }
-  pageNo = Math.max(1, Math.min(d.numPages, pageNo));
-  if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) {} S.renderTask = null; }
+  try { d = await doc(fileId); } catch (e) { if (!stale()) { toast(e.message, 6000); showDrop(true); } return; }
+  if (stale()) return;
+  pageNo = Math.max(1, Math.min(d.numPages, +pageNo || 1));
   await loadLayers(fileId);
+  if (stale()) return;
+  let pg; try { pg = await d.getPage(pageNo); } catch (e) { if (!stale()) toast("Page " + pageNo + " could not be read: " + (e.message || e), 6000); return; }
+  if (stale()) return;
+  if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) {} S.renderTask = null; }
   S.fileId = fileId; S.pageNo = pageNo; S.key = keyOf(fileId, pageNo);
-  S.page = await d.getPage(pageNo);
+  S.page = pg;
   S.base = S.page.getViewport({scale: 1});
+  S.rendered = null; $("hi").style.display = "none"; { const lc = $("low"); lc.width = lc.width; }   // the last page's picture goes at once
   draftClear(); S.resume = null; S.gap = null; S.multi.clear(); S.hover = null; S.measure = null; S.measures = []; S.snap = null; S.autoShow = null; S.cmp = null; $("cmpLegend").style.display = "none";
   P.proj.last = {file: fileId, page: pageNo}; save();
   $("pageSel").value = fileId + "|" + pageNo;
   showDrop(false);
   fit(); renderLayers();
   await renderLow();
+  if (stale()) return;
   renderHi(true);
   indexPage();   // vector lines + scale note, in the background
   refresh();
@@ -378,6 +478,11 @@ async function gotoPage(fileId, pageNo){
 
 /* ------------------------------------------------------------------ rendering */
 const stage = () => $("stage");
+function fitWidth(){   // the page's width across the window, from its top
+  if (!S.base) return;
+  const w = stage().clientWidth, s = Math.max(0.05, Math.min(60, (w - 24) / S.base.width));
+  S.view = {s, tx: (w - S.base.width * s) / 2, ty: 12}; applyView(); renderHi();
+}
 function fit(){
   if (!S.base) return;
   const st = stage(), w = st.clientWidth, h = st.clientHeight, s = Math.min((w - 24) / S.base.width, (h - 24) / S.base.height);
@@ -423,14 +528,17 @@ async function compareDialog(){
   $("cmpOff").onclick = () => { S.cmp = null; $("cmpLegend").style.display = "none"; renderLow(); renderHi(true); };
   renderLow(); renderHi(true);
 }
-async function renderLow(){
-  const longSide = Math.max(S.base.width, S.base.height), sc = Math.min(3, 3000 / longSide);
-  const vp = S.page.getViewport({scale: sc}), c = $("low");
-  c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
-  const ctx = thinLines(c.getContext("2d")); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+async function renderLow(){   // drawn off screen, then shown only if the page is still the one on screen
+  const page = S.page, fileId = S.fileId, longSide = Math.max(S.base.width, S.base.height), sc = Math.min(3, 3000 / longSide);
+  const vp = page.getViewport({scale: sc}), off = document.createElement("canvas");
+  off.width = Math.ceil(vp.width); off.height = Math.ceil(vp.height);
+  const ctx = thinLines(off.getContext("2d")); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, off.width, off.height);
+  try { await page.render({...lay(fileId), canvasContext: ctx, viewport: vp}).promise; } catch (e) {}
+  if (S.page !== page) return;
+  await overlayCmp(ctx, off.width, off.height, sc, 0, 0);
+  if (S.page !== page) return;
+  const c = $("low"); c.width = off.width; c.height = off.height; c.getContext("2d").drawImage(off, 0, 0);
   S.low = {s: sc};
-  try { await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp}).promise; } catch (e) {}
-  await overlayCmp(ctx, c.width, c.height, sc, 0, 0);
   applyView();
 }
 let hiT = null;
@@ -476,7 +584,7 @@ const toBase = (x, y) => [(x - S.view.tx) / S.view.s, (y - S.view.ty) / S.view.s
 const mul = (A, B) => [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1], A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3], A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
 const app = (M, x, y) => [M[0] * x + M[2] * y + M[4], M[1] * x + M[3] * y + M[5]];
 async function indexPage(){
-  const key = S.key, page = S.page, base = S.base;
+  const key = S.key, page = S.page, base = S.base, file = S.fileId;
   if (!S.geo[key]) {
     busy("Reading drawing lines…");
     try {
@@ -545,7 +653,7 @@ async function indexPage(){
         if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4000) return;   // page borders / hatch fills are not useful snap targets at this cost
         for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) { const k = x + "," + y; let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(i); }
       });
-      S.geo[key] = {segs, grid, cell, images, styles, layerIds, file: S.fileId};
+      S.geo[key] = {segs, grid, cell, images, styles, layerIds, file};
     } catch (e) { S.geo[key] = {segs: [], grid: new Map(), cell: 24, images: 0, styles: [], err: String(e)}; }
     busy("");
   }
@@ -604,7 +712,7 @@ async function checkScale(key, ask2){
   const sug = isStd ? std : wl && Math.abs(Math.log(wl.ptPerFt / ev.ptPerFt)) < Math.log(1.04) ? wl : {ptPerFt: ev.ptPerFt, label: "1 ft = " + ev.ptPerFt.toFixed(3) + " pt"};
   ev.agree = ev.est.filter(v => Math.abs(v / sug.ptPerFt - 1) < 0.1).length;
   sc.doubt = {label: sug.label, ptPerFt: sug.ptPerFt, ratio: +(sug.ptPerFt / sc.ptPerFt).toFixed(3), rooms: ev.rooms, agree: ev.agree}; save(); refresh();
-  if (ask2 && key === S.key) {
+  if (ask2 && key === S.key && !$("dlgBack").classList.contains("on")) {   // (a dialog already open is not cancelled for this: the chip shows the doubt)
     const pv = ask("Scale note does not match the drawing", `<p>The note says <b>${esc(sc.text)}</b>, but <b>${ev.agree} of ${ev.rooms}</b> room sizes written on this drawing${sug.walls ? ` and its ${esc(sug.walls)} walls` : ""} measure at <b>${esc(sug.label)}</b> — <b>× ${(sug.ptPerFt / sc.ptPerFt).toFixed(2)}</b> of the note. The PDF is printed at another size than the note was written for; at the note's scale every length would come out × ${(sug.ptPerFt / sc.ptPerFt).toFixed(2)} and every area × ${((sug.ptPerFt / sc.ptPerFt) ** 2).toFixed(2)} of the truth.</p>
       <p class="small" style="margin-top:8px"><b>Then verify it with one dimension printed on the drawing</b> (scale chip → Verify) — written room sizes are nominal, so this is an estimate, not a certainty. Nothing is measured until the scale is settled.</p>`, "Use " + sug.label);
     const cb = document.createElement("button"); cb.className = "btn"; cb.textContent = "Calibrate from a dimension…"; cb.style.marginRight = "auto";
@@ -635,11 +743,13 @@ const scaleDoubt = () => { const sc = P.proj && P.proj.scales[S.key]; return sc 
 const ISO = {A0: 3370.39, A1: 2383.94, A2: 1683.78, A3: 1190.55, A4: 841.89};   // ISO 216 long side in pt (A1 594 × 841 → 841 / 25.4 × 72)
 /* "1/8\" = 1'-0\"", "1\" = 20'", "1:100" -> inches on paper per foot (0 if none). loose: a bare 1:N counts */
 function inPerFtOf(raw, loose){
-  const s = String(raw || "").replace(/[’′]/g, "'").replace(/[”″“]/g, '"');
+  const s = vulgar(String(raw || "")).replace(/[’′]/g, "'").replace(/[”″“]/g, '"');
   let m;
-  if ((m = /(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?)\s*"\s*=\s*1\s*'\s*-?\s*0?\s*"?/.exec(s))) {
-    const t = m[1].trim(), q = /^(\d+)\s+(\d+)\/(\d+)$/.exec(t), f = /^(\d+)\/(\d+)$/.exec(t);
-    return {v: q ? +q[1] + +q[2] / +q[3] : f ? +f[1] / +f[2] : +t, label: m[0].replace(/\s+/g, " ").trim()};
+  // 1/8" = 1'-0" · 1 1/2" = 1'-0" · 1-1/2" = 1'-0" (a mixed number written with a hyphen is 1½", not ½")
+  if ((m = /(\d+\s*-\s*\d+\/\d+|\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?)\s*"\s*=\s*1\s*'\s*-?\s*0?\s*"?/.exec(s))) {
+    const t = m[1].trim(), q = /^(\d+)\s*[-\s]\s*(\d+)\/(\d+)$/.exec(t), f = /^(\d+)\/(\d+)$/.exec(t);
+    const v = q ? +q[1] + +q[2] / +q[3] : f ? +f[1] / +f[2] : +t;
+    if (v > 0 && isFinite(v)) return {v, label: m[0].replace(/\s+/g, " ").trim()};
   }
   if ((m = /\b1\s*"\s*=\s*(\d+(?:\.\d+)?)\s*'/.exec(s))) return {v: 1 / +m[1], label: m[0]};
   if ((m = /(?:^|[^\d.:\/])1\s*:\s*(\d{1,4})(?![\d:])/.exec(s)) && (loose || /scale|^\s*1\s*:/i.test(s))) return {v: 12 / +m[1], label: "1:" + m[1]};
@@ -647,7 +757,7 @@ function inPerFtOf(raw, loose){
 }
 function scaleCandidates(key){
   const T = S.texts[key] || [], out = [], seen = {};
-  const longPt = S.base ? Math.max(S.base.width, S.base.height) : 0;
+  const sz = key === S.key && S.base ? [S.base.width, S.base.height] : (S.sizes || {})[key], longPt = sz ? Math.max(sz[0], sz[1]) : 0;   // that page's own size (the "@ A1" correction)
   const lines = T.map(t => t.s).concat(T.map((t, i) => T[i + 1] && Math.abs(T[i + 1].y - t.y) < 3 ? t.s + " " + T[i + 1].s : "")).filter(Boolean);
   for (const raw of lines) {
     const s = raw.replace(/[’′]/g, "'").replace(/[”″“]/g, '"');
@@ -1206,18 +1316,21 @@ async function autoAt(p){
   const c = S.cond ? cond(S.cond) : null; if (!c) return;
   if (P.proj.items.some(it => it.cond === c.id && it.file === S.fileId && it.page === S.pageNo && it.kind === "shape" && c.type === "area" && pointInPoly(p, it.pts)))
     return toast("Already measured — this point is inside an area of " + c.name);
-  busy("Finding the room…");
+  if (S.autoBusy) return toast("Still tracing the last room…", 1500);
+  busy("Finding the room…"); S.autoBusy = true;
+  const key = S.key;
   await new Promise(r => setTimeout(r, 20));
   let res; try { res = await autoRoomGuarded(p); } catch (e) { res = {err: "Auto area failed: " + (e.message || e)}; }
-  busy("");
+  busy(""); S.autoBusy = false;
+  if (S.key !== key || !cond(c.id)) return toast("The page changed while the room was traced — nothing added; click again", 4000);   // never a room of one page put on another
   if (res.err) return toast(res.err, 6000);
   const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "";
   mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm}); });
   S.sel = id; draw(); renderSheet();
   const k = hereScale(p);
   if (res.leak) { if (!autoOpt().show) { P.proj.auto = Object.assign({}, P.proj.auto || {}, {show: true}); save(); }
-    return toast("⚠ " + (nm || "Room") + " " + f2(polyArea(res.pts) / k / k) + " Sft — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
-  toast((nm || "Room") + " " + f2(polyArea(res.pts) / k / k) + " Sft" + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
+    return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
+  toast((nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
 }
 /* Leak guard: a room's outline must not swallow another room's name, nor grow far past its own written size.
    When it does, trace again closing wider gaps and dashed lines, and keep the first clean outline. */
@@ -1401,7 +1514,7 @@ function renderBill(){
       const amt = l.qty * l.rate; tot += amt;
       h += `<tr class="${l.kind === "cond" ? "ch2" : "it"}"><td>${l.kind === "asm" ? "↳ " : `${++n}. <span class="sw" style="background:${l.c.color}"></span>`}${l.boq ? `<span class="boq">${esc(l.boq)}</span> ` : ""}${esc(l.name)}${l.kind === "cond" ? ` <button class="rn" data-asm="${esc(l.c.id)}" title="Items this condition drives, and rates">&#9881; Assembly</button>` : ""}
         <div class="ds">${l.kind === "asm" ? (l.err ? '<span style="color:var(--red)">' + esc(l.err) + "</span>" : "= " + esc(l.f)) : "measured"} · ${rateNote(l)}</div></td>
-        <td class="n">${f2(l.qty)}<div class="ds">${esc(l.unit)}</div></td><td class="n">${l.rate ? f2(l.rate) : "—"}</td><td class="n">${l.rate ? f2(amt) : "—"}</td></tr>`;
+        <td class="n">${fq(l.qty, l.unit)}<div class="ds">${esc(l.unit)}</div></td><td class="n">${l.rate ? f2(l.rate) : "—"}</td><td class="n">${l.rate ? f2(amt) : "—"}</td></tr>`;
     });
     all += tot;
     h += `<tr class="tot"><td>Total${g.name ? " " + esc(g.name) : ""}</td><td></td><td></td><td class="n">${f2(tot)}</td></tr>`;
@@ -1420,7 +1533,7 @@ async function asmDialog(c){
     <td><input type="text" data-k="f" value="${esc(a.f || "")}" placeholder="A*1.05"></td><td><input type="text" data-k="boq" value="${esc(a.boq || "")}" style="width:78px" placeholder="BOQ code"></td><td><input type="text" data-k="ra" value="${esc(a.ra || "")}" style="width:92px" placeholder="RA code" list="dlRa2"></td><td><input type="number" data-k="rate" value="${a.rate || ""}" style="width:80px" placeholder="0"></td>
     <td><input type="text" data-k="src" value="${esc(a.src || "")}" placeholder="source"></td><td><input type="date" data-k="date" value="${esc(a.date || "")}"></td><td><button class="btn sm dng" data-del="${n}" type="button">&times;</button></td></tr>`;
   const cr = rateOf(c, c.unit);
-  const body = () => `<p class="small">Now: Q = ${f2(vars.Q)} ${esc(c.unit)}${c.type === "area" ? ` · A = ${f2(vars.A)} Sft · P = ${f3(vars.P)} ft · PD = ${f3(vars.PD)} ft (P less ${f3(vars.D)} ft of doors)` : ""}${c.type === "linear" ? ` · L = ${f3(vars.L)} ft` : ""} · N = ${vars.N}${vars.H ? " · H = " + f3(vars.H) : ""}${vars.T ? " · T = " + f3(vars.T) : ""}.
+  const body = () => `<p class="small">Now: Q = ${fq(vars.Q, c.unit)} ${esc(c.unit)}${c.type === "area" ? ` · A = ${fq(vars.A)} Sft · P = ${f3(vars.P)} ft · PD = ${f3(vars.PD)} ft (P less ${f3(vars.D)} ft of doors)` : ""}${c.type === "linear" ? ` · L = ${f3(vars.L)} ft` : ""} · N = ${vars.N}${vars.H ? " · H = " + f3(vars.H) : ""}${vars.T ? " · T = " + f3(vars.T) : ""}.
     Formulas use Q A P PD D L N H T and ceil floor round min max abs sqrt, e.g. <code>A*1.05</code>, <code>PD</code> (skirting), <code>ceil(A/4)</code>.</p>
     ${c.ra ? `<p class="small" style="margin-top:6px">${esc(c.name)} is linked to Rate Analysis <b>${esc(c.ra)}</b> (condition editor): ${cr.na ? `<span style="color:var(--red)">${esc(cr.na)}</span>` : "PKR " + f2(cr.rate) + " / " + esc(c.unit) + " — the typed rate below is not used"}.</p>` : ""}
     <div class="grid" style="margin:8px 0"><div class="fg"><label>Rate for ${esc(c.name)} (PKR / ${esc(c.unit)})</label><input type="number" id="crRate" value="${c.rate || ""}" placeholder="0"></div>
@@ -2015,13 +2128,13 @@ function drawNow(){
   if (S.draft.length && cur && S.tool === "circle") {
     const a = S.draft[0], r = dist(a, cur), q = toScr(a), col = c ? c.color : "#0b0b0b";
     h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(r * S.view.s).toFixed(1)}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>`);
-    if (k) live = "dia " + f3(2 * r / k) + " ft · " + f2(Math.PI * r * r / k / k) + " Sft · round " + f3(2 * Math.PI * r / k) + " ft";
+    if (k) live = "dia " + f3(2 * r / k) + " ft · " + fq(Math.PI * r * r / k / k) + " Sft · round " + f3(2 * Math.PI * r / k) + " ft";
   } else if (S.draft.length && cur) {
     const D = S.arcMid && S.draft.length ? S.draft.concat(arcPts(S.draft[S.draft.length - 1], S.arcMid, cur)) : S.draft.concat([S.tool === "rect" ? null : cur]).filter(Boolean);
     if (S.arcMode && !S.arcMid && S.draft.length) { const q = toScr(cur); h.push(`<text x="${(q[0] + 12).toFixed(1)}" y="${(q[1] - 12).toFixed(1)}" font-size="11" font-weight="700" fill="#4b3b8f" stroke="#fff" stroke-width="3" paint-order="stroke">arc: point on it</text>`); }
     if (S.arcMid) { const q = toScr(S.arcMid); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="3.5" fill="#4b3b8f"/>`); }
     if (S.tool === "rect") { const a = S.draft[0]; const R = [a, [cur[0], a[1]], cur, [a[0], cur[1]]]; h.push(`<polygon points="${ptsS(R)}" fill="${c.color}" fill-opacity=".15" stroke="${c.color}" stroke-width="2"/>`);
-      if (k) live = f3(Math.abs(cur[0] - a[0]) / k) + " × " + f3(Math.abs(cur[1] - a[1]) / k) + " ft = " + f2(Math.abs(cur[0] - a[0]) * Math.abs(cur[1] - a[1]) / k / k) + " Sft"; }
+      if (k) live = f3(Math.abs(cur[0] - a[0]) / k) + " × " + f3(Math.abs(cur[1] - a[1]) / k) + " ft = " + fq(Math.abs(cur[0] - a[0]) * Math.abs(cur[1] - a[1]) / k / k) + " Sft"; }
     else {
       const col = S.tool === "fence" ? "#ff7a00" : S.tool === "ded" || S.tool === "open" ? "#d03b3b" : S.tool === "measure" || S.tool === "cal" ? "#0b0b0b" : c ? c.color : "#0b0b0b";
       if (isAreaDraft() && D.length >= 3) h.push(`<polygon points="${ptsS(D)}" fill="${col}" fill-opacity=".12" stroke="none"/>`);
@@ -2029,7 +2142,7 @@ function drawNow(){
       S.draft.forEach(p => { const q = toScr(p); h.push(`<circle cx="${q[0]}" cy="${q[1]}" r="3.5" fill="#fff" stroke="${col}" stroke-width="2"/>`); });
       if (k) { const L = polyLen(D) / k, seg = dist(D[D.length - 2], D[D.length - 1]) / k;
         const a1 = D[D.length - 2], a2 = D[D.length - 1], ang = (Math.atan2(a1[1] - a2[1], a2[0] - a1[0]) * 180 / Math.PI + 360) % 360;
-        live = (isAreaDraft() && D.length >= 3 ? f2(polyArea(D) / k / k) + " Sft · perimeter " + f3(polyLen(D, true) / k) + " ft" : (D.length > 2 ? "run " + f3(seg) + " · total " : "") + f3(L) + " ft") + " · ∠ " + ang.toFixed(1) + "°"; }
+        live = (isAreaDraft() && D.length >= 3 ? fq(polyArea(D) / k / k) + " Sft · perimeter " + f3(polyLen(D, true) / k) + " ft" : (D.length > 2 ? "run " + f3(seg) + " · total " : "") + f3(L) + " ft") + " · ∠ " + ang.toFixed(1) + "°"; }
       else if (S.tool === "cal") live = (dist(D[0], D[D.length - 1])).toFixed(2) + " pt";
     }
   }
@@ -2058,7 +2171,7 @@ function hoverText(id){
   if (!o.cond) return MARK_TOOLS[o.type] + (o.text ? " — " + o.text : "") + (o.locked ? " · locked" : "");
   const c = cond(o.cond), k = itemScale(o); if (!c) return "";
   const q = k ? rowsOf(o, k).reduce((a, r) => a + r.qty, 0) : null;
-  return (o.label ? o.label + " · " : "") + c.name + (q == null ? " · scale not set" : " · " + f2(q) + " " + c.unit) + (o.locked ? " · locked" : "");
+  return (o.label ? o.label + " · " : "") + c.name + (q == null ? " · scale not set" : " · " + fq(q, c.unit) + " " + c.unit) + (o.locked ? " · locked" : "");
 }
 function label(p, text, col){
   const t = esc(text), w = text.length * 6.4 + 10;
@@ -2074,14 +2187,14 @@ function capLines(it, c, k){
   if (o.cond) out.push(c.name);
   if (c.type === "area") {
     const A = polyArea(poly) / k / k * (it.kind === "ded" ? -1 : 1), P = polyLen(poly, true) / k, r = rows[0];
-    if (o.qty) out.push(f2(q) + u(c.unit));
-    if (o.area && !(o.qty && c.unit === "Sft")) out.push("A " + f2(A) + u("Sft"));
+    if (o.qty) out.push(fq(q, c.unit) + u(c.unit));
+    if (o.area && !(o.qty && c.unit === "Sft")) out.push("A " + fq(A) + u("Sft"));
     if (o.perim) out.push("P " + f3(P) + u("ft"));
     if (o.dims && r) { if (r.how === "rect") out.push(f3(r.L) + " × " + f3(r.W) + u("ft")); else if (r.how === "circle") out.push("Ø " + f3(r.D) + u("ft")); }
   } else if (c.type === "linear") {
     const L = (it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k;
     if (o.len) out.push("L " + f3(it.kind === "ded" ? -L : L) + u("ft"));
-    if (o.qty && (c.unit !== "ft" || !o.len)) out.push(f2(q) + u(c.unit));
+    if (o.qty && (c.unit !== "ft" || !o.len)) out.push(fq(q, c.unit) + u(c.unit));
     if (o.dims && c.unit !== "ft") out.push((+c.h ? "H " + f3(+c.h) : "") + (+c.t ? (+c.h ? " · " : "") + "T " + f3(+c.t) : "") + ((+c.faces || 1) > 1 && c.unit === "Sft" ? " · " + c.faces + " faces" : ""));
   }
   if (!out.length && it.label) out.push(it.label);
@@ -2127,7 +2240,9 @@ async function labelDialog(){
   if (P.proj && S.page) { const n = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !i.label && i.kind === "shape" && (cond(i.cond) || {}).type === "area").length;
     if (n && S.lbl.autoName && await ask("Name the areas already drawn?", `<p>${n} area${n > 1 ? "s" : ""} on this page ${n > 1 ? "have" : "has"} no name. Name ${n > 1 ? "them" : "it"} from the room text inside?</p>`, "Name them")) nameAreas(); }
 }
-function setLblOn(on){ S.lbl.on = on; pref("zdTakeoffLbl", JSON.stringify(S.lbl)); $("bLbl").classList.toggle("on", on); $("bLbl").title = on ? "Labels shown — click (or L) to hide" : "Labels hidden — click (or L) to show"; draw(); }
+function setLblOn(on){ S.lbl.on = on; pref("zdTakeoffLbl", JSON.stringify(S.lbl)); $("bLbl").classList.toggle("on", on); $("bLbl").title = on ? "Labels shown — click (or L) to hide" : "Labels hidden — click (or L) to show"; viewMark(); draw(); }
+/* the View button shows a dot while something is dimmed, thinned or hidden — so a hidden markup is never a surprise */
+function viewMark(){ const b = $("bView"); if (b) b.classList.toggle("mod", !!(S.dim || S.thin || S.hideMk || (S.lbl && !S.lbl.on))); }
 /* the room name written inside an outline (BEDROOM 2, LOUNGE…), from the PDF's own text; "" if none */
 function roomNameAt(poly, key){
   const T = S.texts[key || S.key]; if (!T || !T.length || !poly || poly.length < 3) return "";
@@ -2179,7 +2294,7 @@ function renderConds(){
       : `<button class="btn sm" data-cact="allon" title="Show every condition">All on</button><button class="btn sm" data-cact="alloff" title="Hide every condition">All off</button><span class="small">tick conditions to show / hide several</span>`}</div>`;
   L.innerHTML = bar + P.proj.conds.map((c, i) => { const t = condTotals(c);
     return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}</span></div>
-      <div class="q">${f2(t.net)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; }).join("");
+      <div class="q">${fq(t.net, c.unit)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; }).join("");
 }
 function renderSheet(){
   const el = $("sheet");
@@ -2190,6 +2305,7 @@ function renderSheet(){
   if (missing) msgs.push(missing + " measurement" + (missing > 1 ? "s are" : " is") + " on a page with no scale — set it with <b>K</b>; they are left out of the totals.");
   if (unv) msgs.push(unv + " page scale" + (unv > 1 ? "s were" : " was") + " read from the drawing note and not yet checked — click the scale chip → <b>Verify</b> with a known dimension.");
   if (inh) msgs.push(inh + " page scale" + (inh > 1 ? "s were" : " was") + " copied from another page (inherited) and not yet checked on that page — open it, click the scale chip → <b>Verify</b>.");
+  if (S.otherTab) msgs.unshift(`<b>⚠ This project is ${esc(S.otherTab)}.</b> Two open copies overwrite each other's work when they save — keep one open. <button class="btn sm" data-reload="1">Reload this one</button>`);
   wb.innerHTML = msgs.join("<br>"); wb.classList.toggle("on", msgs.length > 0);
   if (!P.proj.items.length) { el.innerHTML = '<div class="empty">Measurements appear here as you draw, in the house format: <b>Nos × L × W × H</b> in decimal feet, deductions as their own rows.</div>'; $("shInfo").textContent = ""; return; }
   let h = '<table class="sh"><thead><tr><th>#</th><th>Description</th><th class="n">Nos × L × W × H</th><th class="n">Qty</th></tr></thead><tbody>', n = 0;
@@ -2206,10 +2322,10 @@ function renderSheet(){
                      c.type === "linear" && c.unit === "Sft" && (+c.faces || 1) > 1 && it.kind !== "ded" ? "Nos includes " + c.faces + " faces" : "",
                      r.below ? "≤ " + f2(+c.dedMin || 0) + " " + (c.unit === "cft" && c.type === "area" ? "cft" : "Sft") + " — not deducted (house rule)" : ""].filter(Boolean).join(" · ");
         h += `<tr class="it${r.sign < 0 ? " ded" : ""}${r.below ? " below" : ""}${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${i === 0 ? ++n : ""}</td><td>${esc(desc)}${i === 0 ? qaBadges(it) + `<button class="rn" title="Rename (e.g. Bedroom 1)" data-rename="${esc(it.id)}">&#9998;</button>` : ""}<div class="ds">${esc(sub)}</div></td>
-          <td class="n">${dimText(r)}</td><td class="n">${r.below ? "0.00" : f2(r.qty)}</td></tr>`;
+          <td class="n">${dimText(r)}</td><td class="n">${fq(r.below ? 0 : r.qty, c.unit)}</td></tr>`;
       });
     });
-    h += `<tr class="tot"><td></td><td>Total ${esc(c.name)}${t.ded ? `<div class="ds">gross ${f2(t.gross)} − deductions ${f2(t.ded)}</div>` : ""}</td><td></td><td class="n">${f2(t.net)} ${esc(c.unit)}</td></tr>`;
+    h += `<tr class="tot"><td></td><td>Total ${esc(c.name)}${t.ded ? `<div class="ds">gross ${fq(t.gross, c.unit)} − deductions ${fq(t.ded, c.unit)}</div>` : ""}</td><td></td><td class="n">${fq(t.net, c.unit)} ${esc(c.unit)}</td></tr>`;
   });
   el.innerHTML = h + "</tbody></table>";
   $("shInfo").textContent = P.proj.items.length + " measurements";
@@ -2241,8 +2357,8 @@ function renderProps(){
       <button class="btn sm" data-act="lock">${mk.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn dng" data-act="delMark"${mk.locked ? " disabled" : ""}>Delete</button></div>`; el.classList.add("on"); return; }
   if (!it) { el.classList.remove("on"); el.innerHTML = ""; return; }
   const c = cond(it.cond), k = itemScale(it), poly = itemPoly(it);
-  const meas = !k ? "scale not set" : it.shape === "circle" ? "dia " + f3(2 * dist(it.pts[0], it.pts[1]) / k) + " ft · " + (c.type === "area" ? f2(polyArea(poly) / k / k) + " Sft" : f3(polyLen(poly, true) / k) + " ft round")
-    : c.type === "area" ? f2(polyArea(it.pts) / k / k) + " Sft measured · perimeter " + f3(polyLen(it.pts, true) / k) + " ft" : c.type === "linear" ? f3(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k) + " ft measured" : it.pts.length + " points";
+  const meas = !k ? "scale not set" : it.shape === "circle" ? "dia " + f3(2 * dist(it.pts[0], it.pts[1]) / k) + " ft · " + (c.type === "area" ? fq(polyArea(poly) / k / k) + " Sft" : f3(polyLen(poly, true) / k) + " ft round")
+    : c.type === "area" ? fq(polyArea(it.pts) / k / k) + " Sft measured · perimeter " + f3(polyLen(it.pts, true) / k) + " ft" : c.type === "linear" ? f3(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k) + " ft measured" : it.pts.length + " points";
   el.innerHTML = `<h4>${esc(c.name)} — ${esc(kindName(it, c))} <span style="font-weight:400;color:var(--muted);font-size:11px">${esc(meas)}</span></h4>
     <div class="row"><div class="fg" style="flex:2"><label>Label</label><input type="text" data-prop="label" value="${esc(it.label)}" placeholder="e.g. Bed room 1"></div>
     <div class="fg"><label>Nos (×)</label><input type="number" min="1" step="1" data-prop="nos" value="${+it.nos || 1}"></div>
@@ -2405,7 +2521,7 @@ function toArea(it, condId){
   LOC_KEYS.forEach(lk => { if (it[lk]) nb[lk] = it[lk]; });
   mutate(() => { P.proj.items.push(nb); }, "Area in " + c.name);
   S.cond = condId; setSel([nb.id]); refresh();
-  const k = itemScale(nb); toast("Area added to " + c.name + (k ? ": " + f2(polyArea(pts) / k / k) + " Sft" : ""), 2600);
+  const k = itemScale(nb); toast("Area added to " + c.name + (k ? ": " + fq(polyArea(pts) / k / k) + " Sft" : ""), 2600);
 }
 function explodeRun(it){   // PlanSwift "segment" takeoff: every leg its own run (an arc stays one piece)
   if (it.locked) return lockedMsg();
@@ -2778,11 +2894,13 @@ function colorPop(anchor, c){
 
 /* ------------------------------------------------------------------ dialogs */
 function ask(title, body, okLabel, read, focusId){
+  if (ask.cur) ask.cur(null);   // a dialog opened over another: the one underneath is cancelled, never left listening for Enter
   return new Promise(res => {
     $("dlgT").textContent = title; $("dlgB").innerHTML = body + '<div class="err" id="dlgErr"></div>';
     $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Cancel</button>${okLabel ? `<button class="btn pri" id="dlgOk">${esc(okLabel)}</button>` : ""}`;
     $("dlgBack").classList.add("on");
-    const done = v => { $("dlgBack").classList.remove("on"); document.removeEventListener("keydown", key, true); res(v); };
+    const done = v => { if (ask.cur === done) ask.cur = null; $("dlgBack").classList.remove("on"); document.removeEventListener("keydown", key, true); res(v); };
+    ask.cur = done;
     const ok = () => { const v = read ? read() : true; if (typeof v === "string") { $("dlgErr").textContent = v; return; } done(v); };
     const key = e => { if (e.key === "Escape") { e.stopPropagation(); done(null); } else if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); e.stopPropagation(); ok(); } };
     document.addEventListener("keydown", key, true);
@@ -2962,7 +3080,7 @@ async function exportExcel(){
         });
         const q = rr.getCell(8);
         q.value = r.below ? {formula: "0", result: 0} : {formula: (r.sign < 0 ? "-" : "") + `PRODUCT(D${row}:G${row})`, result: r.qty};
-        q.fill = r.below ? YELLOW : GREEN; q.numFmt = "#,##0.00";
+        q.fill = r.below ? YELLOW : GREEN; q.numFmt = qFmt(r.unit);
         rr.getCell(9).value = r.unit;
         if (i === 0) { rr.getCell(10).value = locText(locOf(it)); rr.getCell(11).value = QA_NAMES[it.qa || ""] + (it.qa === "checked" ? " — " + it.qaBy + ", " + dmy(it.qaAt) : "") + (it.ai && it.qa !== "checked" ? " · AI-generated" : "") + (it.copied && it.qa !== "checked" ? " · copied, not checked" : "");
           if (it.qa !== "checked") rr.getCell(11).fill = YELLOW; }
@@ -2970,7 +3088,7 @@ async function exportExcel(){
         row++;
       });
       const tr = ws.getRow(row); tr.getCell(2).value = "Total " + g.c.name; tr.getCell(9).value = g.c.unit;
-      tr.getCell(8).value = {formula: `SUM(H${first}:H${row - 1})`, result: g.t.net}; tr.getCell(8).numFmt = "#,##0.00";
+      tr.getCell(8).value = {formula: `SUM(H${first}:H${row - 1})`, result: g.t.net}; tr.getCell(8).numFmt = qFmt(g.c.unit);
       tr.font = {bold: true}; for (let n = 1; n <= 9; n++) tr.getCell(n).fill = GREY;
       totals.push({c: g.c, cell: "H" + row, t: g.t}); row++;
     }
@@ -2981,7 +3099,7 @@ async function exportExcel(){
     let bn = 0, br = 2; const BL = billLines();
     BL.forEach(l => { const r = bl.addRow([l.kind === "cond" ? ++bn : "", l.boq || "", (l.kind === "asm" ? "   " : "") + l.name, l.kind === "asm" ? l.f : "measured", +l.qty.toFixed(3), l.unit, l.rate || 0, {formula: `E${br}*G${br}`, result: l.qty * (l.rate || 0)}, l.ra || "",
         l.na ? l.na : l.rate ? (rateOk(l) ? l.src + (l.ra ? "" : ", " + dmy(l.date)) : "ASSUMPTION — no dated source") : "rate not set"]);
-      r.getCell(5).numFmt = "#,##0.000"; r.getCell(7).numFmt = "#,##0.00"; r.getCell(8).numFmt = "#,##0.00"; r.getCell(5).fill = GREEN; r.getCell(7).fill = BLUE; r.getCell(8).fill = GREEN;
+      r.getCell(5).numFmt = qFmt(l.unit); r.getCell(7).numFmt = "#,##0.00"; r.getCell(8).numFmt = "#,##0.00"; r.getCell(5).fill = GREEN; r.getCell(7).fill = BLUE; r.getCell(8).fill = GREEN;
       if (l.kind === "cond") r.font = {bold: true}; if (!rateOk(l) || !(l.rate > 0)) r.getCell(10).fill = YELLOW; br++; });
     const bt = bl.addRow(["", "", "Total", "", "", "", "", {formula: `SUM(H2:H${br - 1})`, result: BL.reduce((a, l) => a + l.qty * (l.rate || 0), 0)}]); bt.font = {bold: true}; bt.getCell(8).numFmt = "#,##0.00"; bt.eachCell(c2 => { c2.fill = GREY; });
     const lc = wb.addWorksheet("By location");
@@ -2993,7 +3111,7 @@ async function exportExcel(){
       const os = wb.addWorksheet("Openings");
       os.columns = [{header: "Mark", width: 10}, {header: "Type", width: 10}, {header: "Width ft", width: 11}, {header: "Height ft", width: 11}, {header: "Area Sft", width: 11}, {header: "Placed", width: 9}];
       os.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; os.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
-      P.proj.openings.forEach(o => { const r = os.addRow([o.mark, o.type, +o.w, +o.h, {formula: `C${os.rowCount + 1}*D${os.rowCount + 1}`, result: o.w * o.h}, P.proj.items.filter(i => i.sch === o.id).length]); r.getCell(3).numFmt = "0.000"; r.getCell(4).numFmt = "0.000"; r.getCell(5).numFmt = "#,##0.00"; });
+      P.proj.openings.forEach(o => { const r = os.addRow([o.mark, o.type, +o.w, +o.h, {formula: `C${os.rowCount + 1}*D${os.rowCount + 1}`, result: o.w * o.h}, P.proj.items.filter(i => i.sch === o.id).length]); r.getCell(3).numFmt = "0.000"; r.getCell(4).numFmt = "0.000"; r.getCell(5).numFmt = "#,##0.000"; });
     }
     const V = validation(), vs = wb.addWorksheet("Validation");
     vs.columns = [{header: "Status", width: 12}, {header: "Check — " + V.lvl, width: 110}];
@@ -3002,7 +3120,7 @@ async function exportExcel(){
     const sm = wb.addWorksheet("Summary");
     sm.columns = [{header: "Condition", width: 48}, {header: "Qty", width: 14}, {header: "Unit", width: 8}, {header: "Measurements", width: 14}];
     sm.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; sm.getRow(1).eachCell(c => { c.fill = HEAD; });
-    totals.forEach(t => { const r = sm.addRow([t.c.name, {formula: "Measurement!" + t.cell, result: t.t.net}, t.c.unit, P.proj.items.filter(i => i.cond === t.c.id).length]); r.getCell(2).numFmt = "#,##0.00"; r.getCell(2).fill = GREEN; });
+    totals.forEach(t => { const r = sm.addRow([t.c.name, {formula: "Measurement!" + t.cell, result: t.t.net}, t.c.unit, P.proj.items.filter(i => i.cond === t.c.id).length]); r.getCell(2).numFmt = qFmt(t.c.unit); r.getCell(2).fill = GREEN; });
     const au = wb.addWorksheet("Scale & audit");
     au.columns = [{header: "Drawing", width: 34}, {header: "Page", width: 7}, {header: "Scale", width: 26}, {header: "1 ft on the sheet (pt)", width: 18}, {header: "How", width: 12}, {header: "Verified", width: 10}, {header: "Check", width: 40}, {header: "Status", width: 26}];
     au.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; au.getRow(1).eachCell(c => { c.fill = HEAD; });
@@ -3022,11 +3140,14 @@ async function exportExcel(){
   } catch (e) { toast(e.message || String(e), 5000); }
   busy("");
 }
+const isNos = u => /^\s*nos?\.?\s*$/i.test(String(u || ""));
+const qFmt = u => isNos(u) ? "#,##0" : "#,##0.000";   // Excel: quantities 3 dp, Nos whole
+const qCsv = (v, u) => { v = +v || 0; const x = isNos(u) && Math.abs(v - Math.round(v)) < 1e-9 ? Math.round(v) : Math.round(v * 1000) / 1000; return (x === 0 ? 0 : x).toFixed(isNos(u) && Number.isInteger(x) ? 0 : 3); };
 function exportCsv(){
   const rows = [["S.No", "Condition", "Description", "Drawing / page", "Nos", "L (ft) / Area (Sft)", "W (ft)", "H (ft)", "Qty", "Unit", "BOQ code", "Location", "QA"]];
   let sn = 0;
-  sheetRows().forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.A != null ? f3(r.A) : r.L == null ? "" : f3(r.L), r.W == null ? "" : f3(r.W), r.H == null ? "" : f3(r.H), (r.qty).toFixed(2), r.unit, g.c.boq || "", x.i === 0 ? locText(locOf(x.it)) : "", x.i === 0 ? QA_NAMES[x.it.qa || ""] + (x.it.ai && x.it.qa !== "checked" ? " · AI" : "") + (x.it.copied && x.it.qa !== "checked" ? " · copied" : "") : ""]); });
-    rows.push(["", g.c.name, "Total " + g.c.name, "", "", "", "", "", g.t.net.toFixed(2), g.c.unit, g.c.boq || "", "", ""]); });
+  sheetRows().forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.A != null ? f3(r.A) : r.L == null ? "" : f3(r.L), r.W == null ? "" : f3(r.W), r.H == null ? "" : f3(r.H), qCsv(r.qty, r.unit), r.unit, g.c.boq || "", x.i === 0 ? locText(locOf(x.it)) : "", x.i === 0 ? QA_NAMES[x.it.qa || ""] + (x.it.ai && x.it.qa !== "checked" ? " · AI" : "") + (x.it.copied && x.it.qa !== "checked" ? " · copied" : "") : ""]); });
+    rows.push(["", g.c.name, "Total " + g.c.name, "", "", "", "", "", qCsv(g.t.net, g.c.unit), g.c.unit, g.c.boq || "", "", ""]); });
   const t = rows.map(r => r.map(v => { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
   saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Measurement.csv");
 }
@@ -3052,7 +3173,7 @@ function pageOverlaySvg(file, page, sc, W, H, legend){
   });
   (P.proj.marks || []).filter(m => m.file === file && m.page === page && m.type !== "fence").forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
   if (legend) {
-    const lines = [[P.proj.name + " — " + pageName({file, page}), "#0b0b0b", ""]].concat(P.proj.conds.filter(c => tot[c.id] !== undefined).map(c => [c.name + ": " + f2(tot[c.id]) + " " + c.unit, "#0b0b0b", c.color]));
+    const lines = [[P.proj.name + " — " + pageName({file, page}), "#0b0b0b", ""]].concat(P.proj.conds.filter(c => tot[c.id] !== undefined).map(c => [c.name + ": " + fq(tot[c.id], c.unit) + " " + c.unit, "#0b0b0b", c.color]));
     const lw = Math.max(...lines.map(l => l[0].length)) * 6.6 * z + 30 * z;
     h.push(`<rect x="${8 * z}" y="${8 * z}" width="${lw}" height="${(lines.length * 17 + 10) * z}" fill="rgba(255,255,255,.93)" stroke="#c9d6e4"/>`);
     lines.forEach((l, i) => { const y = (24 + i * 17) * z; if (l[2]) h.push(`<rect x="${16 * z}" y="${y - 9 * z}" width="${9 * z}" height="${9 * z}" fill="${l[2]}"/>`);
@@ -3092,12 +3213,12 @@ async function exportPdf(all){
       const pg = await (await doc(f)).getPage(p), base = pg.getViewport({scale: 1}), sc = Math.min(3, 4000 / Math.max(base.width, base.height));
       const W = Math.ceil(base.width * sc), H = Math.ceil(base.height * sc), cv = document.createElement("canvas"); cv.width = W; cv.height = H;
       const ctx = cv.getContext("2d");
-      const flat = pg.rotate % 360 !== 0;
+      if (!srcCache[f]) { const rec = await dbGet("pdfs", f); srcCache[f] = await L.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); }
+      const flat = pg.rotate % 360 !== 0 || srcCache[f].isEncrypted;   // an encrypted PDF cannot be copied page for page (its content would stay encrypted): flattened like a turned page
       if (flat) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); await loadLayers(f); await pg.render({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})}).promise; }
       await svgOnto(ctx, pageOverlaySvg(f, p, sc, W, H, true));
       const png = await out.embedPng(await (await new Promise(r => cv.toBlob(r, "image/png"))).arrayBuffer());
       if (flat) { const np = out.addPage([base.width, base.height]); np.drawImage(png, {x: 0, y: 0, width: base.width, height: base.height}); continue; }
-      if (!srcCache[f]) { const rec = await dbGet("pdfs", f); srcCache[f] = await L.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); }
       const [cp] = await out.copyPages(srcCache[f], [p - 1]); out.addPage(cp);
       const vb = pg.view;   // [x0, y0, x1, y1] of the shown box, in PDF space
       cp.drawImage(png, {x: vb[0], y: vb[1], width: vb[2] - vb[0], height: vb[3] - vb[1]});
@@ -3369,7 +3490,7 @@ function validate(){
     if (c.type === "linear" && c.unit !== "ft" && !(+c.h > 0)) E("ERROR", `${c.name}: height H missing (needed for ${c.unit})`);
     if (c.unit === "cft" && !(+c.t > 0)) E("ERROR", `${c.name}: thickness T missing (needed for cft)`);
     if (!String(c.boq || "").trim()) E("WARNING", `${c.name}: no BOQ code`);
-    const t = condTotals(c); if (t.net < 0) E("ERROR", `${c.name}: net quantity is negative (${f2(t.net)} ${c.unit}) — deductions exceed the gross`);
+    const t = condTotals(c); if (t.net < 0) E("ERROR", `${c.name}: net quantity is negative (${fq(t.net, c.unit)} ${c.unit}) — deductions exceed the gross`);
     its.forEach(it => { const k = itemScale(it); if (!k) return; const q = rowsOf(it, k).reduce((a, r) => a + Math.abs(r.qty), 0);
       if (!(q > 0) && !rowsOf(it, k).some(r => r.below)) E("ERROR", `${c.name} — ${it.label || kindName(it, c)} on ${pageName(it)}: zero quantity`);
       if (it.kind === "open" && c.unit !== "ft" && !(openH(it) > 0)) E("ERROR", `${c.name} — opening ${it.label || ""} on ${pageName(it)}: height missing`);
@@ -3433,8 +3554,8 @@ async function revCompareDialog(){
   $("dlgT").textContent = "Revision quantity compare";
   $("dlgB").innerHTML = `<p class="small">Old: <b>${esc(rl(v.o))}</b> → New: <b>${esc(rl(v.n))}</b></p>
     <div style="overflow:auto;margin-top:6px"><table class="sh"><thead><tr><th>Item</th><th class="n">Old</th><th class="n">New</th><th class="n">Variance</th><th class="n">%</th><th class="n">Cost impact PKR</th></tr></thead><tbody>
-    ${rows.map(r => `<tr class="${r.kind === "asm" ? "" : "ch2"}"><td>${r.kind === "asm" ? "↳ " : ""}${esc(r.name)} <span class="small">${esc(r.unit)}</span>${r.boq ? `<div class="ds">${esc(r.boq)}</div>` : ""}</td><td class="n">${f2(r.old)}</td><td class="n">${f2(r.neu)}</td>
-      <td class="n" style="color:${r.var > 0 ? "var(--red)" : r.var < 0 ? "var(--green)" : "inherit"}">${r.var > 0 ? "+" : ""}${f2(r.var)}</td><td class="n">${r.pct == null ? "new" : (r.pct > 0 ? "+" : "") + r.pct.toFixed(2) + "%"}</td><td class="n">${r.cost == null ? `<span class="small" title="${esc(r.na || "rate not set")}">no rate</span>` : f2(r.cost)}</td></tr>`).join("")}
+    ${rows.map(r => `<tr class="${r.kind === "asm" ? "" : "ch2"}"><td>${r.kind === "asm" ? "↳ " : ""}${esc(r.name)} <span class="small">${esc(r.unit)}</span>${r.boq ? `<div class="ds">${esc(r.boq)}</div>` : ""}</td><td class="n">${fq(r.old, r.unit)}</td><td class="n">${fq(r.neu, r.unit)}</td>
+      <td class="n" style="color:${r.var > 0 ? "var(--red)" : r.var < 0 ? "var(--green)" : "inherit"}">${r.var > 0 ? "+" : ""}${fq(r.var, r.unit)}</td><td class="n">${r.pct == null ? "new" : (r.pct > 0 ? "+" : "") + r.pct.toFixed(2) + "%"}</td><td class="n">${r.cost == null ? `<span class="small" title="${esc(r.na || "rate not set")}">no rate</span>` : f2(r.cost)}</td></tr>`).join("")}
     <tr class="tot"><td>Total cost impact (lines with a rate)</td><td></td><td></td><td></td><td></td><td class="n">${f2(tot)}</td></tr></tbody></table></div>
     <p class="small" style="margin-top:8px">Variance = new − old. Cost impact = variance × the line's rate; lines without a usable rate show “no rate” — never assumed.</p>`;
   $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn pri" id="rcCsv">Change Management CSV</button>`;
@@ -3485,19 +3606,23 @@ async function backupsDialog(pid){
   $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button>${P.proj && P.proj.id === pid ? '<button class="btn pri" id="bakNow">Back up now</button>' : ""}`;
   $("dlgBack").classList.add("on");
   $("dlgCancel").onclick = () => $("dlgBack").classList.remove("on");
-  if ($("bakNow")) $("bakNow").onclick = async () => { clearTimeout(saveT); await dbPut("projects", P.proj); toast((await backupNow("manual")) ? "Backed up" : "No change since the last backup"); backupsDialog(pid); };
+  if ($("bakNow")) $("bakNow").onclick = async () => { savePr = P.proj; await flushSave(); toast((await backupNow("manual")) ? "Backed up" : "No change since the last backup"); backupsDialog(pid); };
   $("dlgB").querySelectorAll("[data-rest]").forEach(b => b.onclick = async () => {
     const bk = list.find(x => x.id === b.dataset.rest), old = JSON.parse(bk.data);
     const ok = await ask("Restore this backup?", `<p>Replace <b>${esc(pr ? pr.name : "")}</b> (${pr ? pr.items.length : 0} measurements, changed ${esc(pr ? fmt(pr.updated) : "—")}) with the backup of <b>${esc(fmt(bk.at))}</b> (${bk.n} measurements)?</p><p class="small" style="margin-top:6px">The project as it is now is backed up first, so this can be undone from this list.</p>`, "Restore");
     if (!ok) return backupsDialog(pid);
-    if (P.proj && P.proj.id === pid) { clearTimeout(saveT); await dbPut("projects", P.proj); }
+    if (P.proj && P.proj.id === pid) { savePr = P.proj; await flushSave(); }
     const cur = await dbGet("projects", pid); if (cur) await backupNow("before restore", cur);
     old.id = pid; migrate(old); old.updated = new Date().toISOString(); await dbPut("projects", old);
     if (P.proj && P.proj.id === pid) await openProject(pid); else showStart();
     toast("Restored the backup of " + fmt(bk.at), 4000);
   });
 }
-setInterval(() => { if (P.proj && document.visibilityState !== "hidden") dbPut("projects", P.proj).then(() => backupNow("every 10 min")).catch(() => {}); }, 600000);
+setInterval(() => { if (P.proj && document.visibilityState !== "hidden") { savePr = P.proj; flushSave().then(ok => ok && backupNow("every 10 min")).catch(() => {}); } }, 600000);
+/* leaving or hiding the page writes the pending change at once (the 300 ms timer would not run) */
+window.addEventListener("pagehide", () => { flushSave(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave(); });
+window.addEventListener("beforeunload", () => { flushSave(); });
 
 /* ------------------------------------------------------------------ project import: lossless, then validated */
 async function importProject(text){
@@ -3505,7 +3630,7 @@ async function importProject(text){
   if (!o || o.format !== "zd-takeoff" || !Array.isArray(o.items)) throw new Error("not a takeoff project file");
   const pr = JSON.parse(JSON.stringify(o)); delete pr.format; delete pr.exported;
   pr.id = uid("P"); pr.name = pr.name || "Imported takeoff"; pr.created = pr.created || new Date().toISOString(); pr.updated = new Date().toISOString();
-  const fromV = migrate(pr);
+  const repairs = [], fromV = migrate(pr, repairs);
   await dbPut("projects", pr);
   const back = await dbGet("projects", pr.id), miss = [];
   for (const f of back.files) if (!(await dbGet("pdfs", f.id))) miss.push(f.name);
@@ -3514,7 +3639,8 @@ async function importProject(text){
   const same = k => JSON.stringify(ref[k] === undefined ? null : ref[k]) === JSON.stringify(back[k] === undefined ? null : back[k]);
   const rows = [], add = (what, a, b, st, note) => rows.push({what, a, b, st, note});
   [["files", "PDFs"], ["conds", "Conditions"], ["items", "Measurements"], ["scales", "Page scales"], ["viewports", "Viewports"], ["marks", "Markups"], ["sheets", "Sheet info"], ["openings", "Opening schedule"]].forEach(([k, n]) =>
-    add(n, cnt(o[k]), cnt(back[k]), o[k] === undefined || same(k) ? "PASS" : "FAIL", o[k] === undefined ? "not in this file (older version) — empty" : ""));
+    add(n, cnt(o[k]), cnt(back[k]), o[k] === undefined || (same(k) && cnt(o[k]) === cnt(back[k])) ? "PASS" : "FAIL", o[k] === undefined ? "not in this file (older version) — empty" : cnt(o[k]) !== cnt(back[k]) ? "the file holds entries that could not be read — see Repaired below" : ""));
+  repairs.forEach(r => add("Repaired", "", "", /left out|removed/.test(r) ? "FAIL" : "WARNING", r));
   ["auto", "layersOff", "last"].forEach(k => { if (o[k] !== undefined) add({auto: "Auto area settings", layersOff: "PDF layers off", last: "Last page"}[k], "kept", same(k) ? "kept" : "changed", same(k) ? "PASS" : "FAIL", ""); });
   const known = new Set(["format", "exported", "id", "name", "created", "updated", "v", "files", "conds", "items", "scales", "viewports", "marks", "sheets", "openings", "auto", "layersOff", "last"]);
   Object.keys(o).filter(k => !known.has(k)).forEach(k => add("Other: " + k, "kept", same(k) ? "kept" : "changed", same(k) ? "PASS" : "FAIL", "kept as it was"));
@@ -3573,13 +3699,13 @@ const ctxArrange = () => ({t: "Arrange / rotate", sub: [{t: "Bring to front", fn
 function selTotals(ids){   // "Floor area 312.00 Sft · Doors 4 Nos" for the selection
   const T = new Map();
   [...ids].map(id => P.proj.items.find(i => i.id === id)).filter(Boolean).forEach(it => { const c = cond(it.cond), k = itemScale(it); if (!c || !k) return; const q = rowsOf(it, k).reduce((a, r) => a + r.qty, 0); const t = T.get(c.id) || {c, q: 0, n: 0}; t.q += q; t.n++; T.set(c.id, t); });
-  return [...T.values()].map(t => t.c.name + " " + f2(t.q) + " " + t.c.unit).join(" · ");
+  return [...T.values()].map(t => t.c.name + " " + fq(t.q, t.c.unit) + " " + t.c.unit).join(" · ");
 }
 function ctxItem(hi, sp, q, e){
   const it = hi.it, c = cond(it.cond), ids = selIds(), many = ids.size > 1, k = itemScale(it), sel = [...ids].map(id => P.proj.items.find(i => i.id === id)).filter(Boolean);
   const runs = sel.filter(isRun), vi = !many && editPts(it) ? vertexAt(it, sp) : -1, sg = !many && (editPts(it) || it.shape === "circle") ? segAt(it, sp) : null;
   const cut = sg || (vi > 0 && vi < it.pts.length - 1 ? {i: vi - 1, p: it.pts[vi]} : null), lk = sel.some(o => o.locked), allLk = sel.length && sel.every(o => o.locked);
-  const qty = k ? f2(rowsOf(it, k).reduce((a, r) => a + r.qty, 0)) + " " + c.unit : "scale not set";
+  const qty = k ? fq(rowsOf(it, k).reduce((a, r) => a + r.qty, 0), c.unit) + " " + c.unit : "scale not set";
   const L = [{h: many ? ids.size + " selected" : (it.label || kindName(it, c)), s: many ? selTotals(ids) : c.name + " · " + qty + (it.locked ? " · locked" : "")}];
   if (!many) L.push({t: "Properties…", k: "Dbl-click", fn: focusProps}, {t: "Rename…", k: "F2", fn: () => renameItem(it)});
   L.push({sep: 1});
@@ -3627,7 +3753,7 @@ function ctxCanvas(q){
     {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {sep: 1},
     {t: "Undo" + (u ? ": " + u : ""), k: "Ctrl+Z", fn: undoAny, dis: !S.undo.length}, {t: "Redo" + (r ? ": " + r : ""), k: "Ctrl+Y", fn: redoAny, dis: !S.redo.length}, {sep: 1},
     {t: "Tools", sub: [T("select", "Select", "V"), T("lasso", "Lasso select", "Shift+O"), T("pan", "Pan", "H"), {sep: 1}, T("draw", "Draw", "A"), T("rect", "Rectangle", "R"), T("auto", "Auto area", "W"), T("circle", "Circle", "E"), T("count", "Count", "C"), T("ded", "Deduct", "D"), T("open", "Opening", "O"), {sep: 1}, T("break", "Break a run", "B"), T("measure", "Measure", "M"), T("cal", "Set scale", "K")]},
-    {t: "View", sub: [{t: "Fit page", k: "F", fn: () => { fit(); renderHi(); }}, {t: "Zoom window", k: "Z", fn: () => setTool("zoomwin")}, {t: "Zoom in", k: "+", fn: () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2)}, {t: "Zoom out", k: "−", fn: () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2)}, {sep: 1},
+    {t: "View", sub: [{t: "Fit page", k: "F", fn: () => { fit(); renderHi(); }}, {t: "Fit width", k: "Shift+F", fn: fitWidth}, {t: "Zoom window", k: "Z", fn: () => setTool("zoomwin")}, {t: "Zoom in", k: "+", fn: () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2)}, {t: "Zoom out", k: "−", fn: () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2)}, {sep: 1},
       {t: "Labels", k: "L", fn: () => setLblOn(!S.lbl.on), on: S.lbl.on}, {t: "Snap to drawing lines", k: "S", fn: () => { $("snapOn").checked = !$("snapOn").checked; }, on: $("snapOn").checked}, {t: "Markups", fn: () => $("bHideMk").click(), on: !S.hideMk}]},
     {sep: 1}, {t: "Keyboard & mouse shortcuts…", k: "?", fn: keysDialog}];
 }
@@ -3639,12 +3765,19 @@ function keysDialog(){
     ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
     ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"]])}
-    ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Ctrl+F", "find text"], ["1–9", "pick a condition"]])}
+    ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"]])}
   </table>`, "Close");
 }
 /* ------------------------------------------------------------------ events */
 function wire(){
   const st = stage();
+  document.addEventListener("keydown", e => {   // Ctrl+S: save now (not the browser's "Save page as")
+    if (!((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s")) return;
+    e.preventDefault(); if (!P.proj) return;
+    const a = document.activeElement; if (a && a.closest && a.closest("#props,header") && /^(INPUT|SELECT)$/.test(a.tagName)) a.blur();   // a field being typed in is taken first
+    savePr = P.proj; flushSave().then(ok => toast(ok ? "Saved in this browser — " + P.proj.items.length + " measurement" + (P.proj.items.length === 1 ? "" : "s") + " · Export → Project (.json) to keep a copy elsewhere" : "Not saved — see the message above", 2600));
+  }, true);
+  $("warnbar").addEventListener("click", e => { if (e.target.closest("[data-reload]")) { clearTimeout(saveT); savePr = null; location.reload(); } });   // this tab's pending change is dropped, not written over the other's
   st.addEventListener("pointerdown", onDown);
   st.addEventListener("pointermove", onMove);
   st.addEventListener("pointerup", onUp); st.addEventListener("pointercancel", onUp);
@@ -3721,9 +3854,15 @@ function wire(){
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
   $("bLw").onclick = () => setThin(!S.thin);
-  $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => labelDialog();
-  $("bHideMk").onclick = () => { S.hideMk = !S.hideMk; $("bHideMk").classList.toggle("on", !S.hideMk); $("bHideMk").title = S.hideMk ? "Markups hidden — click to show all" : "Hide all markups (measurements and notes) to see the drawing"; draw(); toast(S.hideMk ? "All markups hidden" : "Markups shown", 1500); };
-  $("bLayers").onclick = () => { S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };
+  const vpop = $("viewPop"), vOpen = on => { vpop.classList.toggle("on", on); $("bView").setAttribute("aria-expanded", on ? "true" : "false"); };
+  $("bView").onclick = e => { e.stopPropagation(); vOpen(!vpop.classList.contains("on")); };
+  document.addEventListener("pointerdown", e => { if (vpop.classList.contains("on") && !e.target.closest("#viewPop,#bView")) vOpen(false); }, true);
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && vpop.classList.contains("on")) { vOpen(false); e.stopPropagation(); } }, true);
+  $("bFitW").onclick = () => { fitWidth(); vOpen(false); };
+  { const hd = document.querySelector("header"); new ResizeObserver(() => document.documentElement.style.setProperty("--hh", hd.offsetHeight + "px")).observe(hd); }   // the bar's height (one row, or two on a narrower screen)
+  $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => { vOpen(false); labelDialog(); };
+  $("bHideMk").onclick = () => { S.hideMk = !S.hideMk; $("bHideMk").classList.toggle("on", !S.hideMk); $("bHideMk").title = S.hideMk ? "Markups hidden — click to show all" : "Hide all markups (measurements and notes) to see the drawing"; viewMark(); draw(); toast(S.hideMk ? "All markups hidden" : "Markups shown", 1500); };
+  $("bLayers").onclick = () => { vOpen(false); S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };
   $("bDel").onclick = () => delSelected();
   $("bKeys").onclick = keysDialog;
   $("bZw").onclick = () => P.proj && S.page && setTool("zoomwin");
@@ -3871,9 +4010,10 @@ function wire(){
     if (T[k]) { setTool(T[k]); return; }
     if (k === "l") return setLblOn(!S.lbl.on);
     if (k === "s") { $("snapOn").checked = !$("snapOn").checked; toast("Snap " + ($("snapOn").checked ? "on" : "off")); return; }
-    if (k === "f") { fit(); renderHi(); return; }
+    if (k === "f") { if (e.shiftKey) fitWidth(); else { fit(); renderHi(); } return; }
     if (k === "+" || k === "=") return zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2);
     if (k === "-") return zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2);
+    if (e.key === "Home" || e.key === "End") { const o = [...$("pageSel").options].map(x => x.value).filter(v => v.indexOf("|") > 0), n = e.key === "Home" ? o[0] : o[o.length - 1]; if (n) { e.preventDefault(); const [f, p] = n.split("|"); gotoPage(f, +p); } return; }
     if (e.key === "PageDown") return stepPage(1);
     if (e.key === "PageUp") return stepPage(-1);
     if (/^[1-9]$/.test(k) && P.proj.conds[+k - 1]) { S.cond = P.proj.conds[+k - 1].id; setTool(S.tool === "select" || S.tool === "pan" ? "draw" : S.tool); refresh(); }
@@ -3988,7 +4128,7 @@ function aiContext(V){   // page text and measured areas inside the view, in ima
   return `Image: ${V.W} × ${V.H} px. Scale: ${k ? "1 ft = " + (k * V.sc).toFixed(3) + " px in this image" : "not set — areas cannot be measured until the scale is set (K)"}.
 Text on the page in view (text @ x,y px):
 ${texts.length ? texts.map(t => `"${t.s}" @ ${t.q[0]},${t.q[1]}`).join("\n") : "(none — the drawing may be a scan; read the image)"}
-Already measured here: ${areas.length ? areas.map(a => `${a.it.id} "${a.it.label || "area"}" ${f2(polyArea(a.it.pts) / k / k)} Sft`).join("; ") : "none"}`;
+Already measured here: ${areas.length ? areas.map(a => `${a.it.id} "${a.it.label || "area"}" ${fq(polyArea(a.it.pts) / k / k)} Sft`).join("; ") : "none"}`;
 }
 function condByName(name, type){   // an existing condition of this type with this name, else a new one
   const n = String(name || "").trim() || (type === "count" ? "Count" : type === "linear" ? "Length" : "Floor area");
@@ -4070,7 +4210,7 @@ function aiToolMsg(name, inp, out){   // one line in the panel for a tool step
   if (o.deleted) return "Deleted an area";
   if (o.length_ft != null) return `${esc(inp.condition)} ${esc(inp.name || "")}: <b>${f3(o.length_ft)} ft</b> ${nm(name)}`;
   if (o.count_on_page != null && name === "add_counts") return `${esc(o.name)}: <b>${o.count_on_page} Nos</b> on this page ${nm(name)}`;
-  if (o.area_sft != null) return `${esc(o.name || inp.name || "")}: <b>${f2(o.area_sft)} Sft</b> ${nm(name)}${o.corners_snapped ? ' <span class="small">corners snapped ' + esc(o.corners_snapped) + "</span>" : ""}`;
+  if (o.area_sft != null) return `${esc(o.name || inp.name || "")}: <b>${fq(o.area_sft)} Sft</b> ${nm(name)}${o.corners_snapped ? ' <span class="small">corners snapped ' + esc(o.corners_snapped) + "</span>" : ""}`;
   return `${esc(name.replace(/_/g, " "))} ✓`;
 }
 function aiLog(kind, html){ const d = document.createElement("div"); d.className = "aimsg " + kind; d.innerHTML = html; $("aiLog").appendChild(d); $("aiLog").scrollTop = 1e9; return d; }
@@ -4227,12 +4367,12 @@ async function freeImport(){
     let pts = null, how = "";
     if (inImg(r.seed)) { const res = await autoRoom(aiToBase(V, r.seed[0], r.seed[1])); if (res.pts) { pts = res.pts; how = "traced"; } }
     const ar = q => polyArea(q) / k / k;
-    if (pts && want && Math.abs(ar(pts) - want) / want > 0.05 && corners.length >= 3) { how = "from Claude's corners (trace gave " + f2(ar(pts)) + ")"; pts = corners; }
+    if (pts && want && Math.abs(ar(pts) - want) / want > 0.05 && corners.length >= 3) { how = "from Claude's corners (trace gave " + fq(ar(pts)) + ")"; pts = corners; }
     if (!pts && corners.length >= 3) { pts = corners; how = "from Claude's corners"; }
     if (!pts) { aiLog("err", esc(r.name || "room") + ": no usable seed or corners"); continue; }
     const c = aiAreaCond(), id = uid("I"), a2 = ar(pts);
     mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(r.name || "").slice(0, 60)}); });
-    aiLog("tool", `${esc(r.name || "")}: <b>${f2(a2)} Sft</b> <span class="small">${esc(how)}${want ? " · written " + f2(want) + " Sft" + (Math.abs(a2 - want) / want > 0.05 ? " — check" : " ✓") : ""}</span>`);
+    aiLog("tool", `${esc(r.name || "")}: <b>${fq(a2)} Sft</b> <span class="small">${esc(how)}${want ? " · written " + fq(want) + " Sft" + (Math.abs(a2 - want) / want > 0.05 ? " — check" : " ✓") : ""}</span>`);
   }
   for (const l of (J.lengths || [])) { const pts = (l.points || []).filter(inImg).map(q => aiToBase(V, q[0], q[1])); if (pts.length < 2) continue;
     const c = condByName(l.condition, "linear"); mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(l.name || "").slice(0, 60)}); });
@@ -4503,7 +4643,7 @@ async function agentDetails(){
   const d = aiLog("bot", `<b>Drawing details — ${esc(pageName({file: S.fileId, page: S.pageNo}))}</b>
     ${sec("Scale", (F.scales.length ? "Written: " + F.scales.map(esc).join(", ") : "No scale text found") + " · set: " + (k ? "yes" : "<span style='color:#b3261e'>not set — press K</span>"))}
     ${sec("Unit / type", F.types.map(esc).join("<br>"))}
-    ${sec("Rooms (" + F.rooms.length + ")", F.rooms.map(r => `${esc(r.name)}${r.size ? ` — ${esc(r.size)} = <b>${f2(r.sft)} Sft</b>` : ""}`).join("<br>") + (tot ? `<br><span class="small">Written sizes total ${f2(tot)} Sft (inside dimensions, not the covered area)</span>` : ""))}
+    ${sec("Rooms (" + F.rooms.length + ")", F.rooms.map(r => `${esc(r.name)}${r.size ? ` — ${esc(r.size)} = <b>${fq(r.sft)} Sft</b>` : ""}`).join("<br>") + (tot ? `<br><span class="small">Written sizes total ${fq(tot)} Sft (inside dimensions, not the covered area)</span>` : ""))}
     ${Object.entries(groups).map(([g, l]) => sec(g + " (" + l.reduce((a, x) => a + x[1], 0) + " Nos)", l.sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})).map(x => `${esc(x[0])} × ${x[1]}${F.sched[x[0]] ? ` <span class="small">(${f3(F.sched[x[0]].w)} × ${f3(F.sched[x[0]].h)} ft${F.sched[x[0]].qty ? ", sch. qty " + F.sched[x[0]].qty : ""})</span>` : ""}`).join(" · "))).join("")}
     ${Object.keys(F.sched).length ? sec("Door / window schedule (" + Object.keys(F.sched).length + " marks)", Object.entries(F.sched).sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})).map(([k2, v2]) => `${esc(k2)} ${f3(v2.w)} × ${f3(v2.h)} ft${v2.qty ? " · qty " + v2.qty : ""}`).join("<br>")) : ""}
     ${sec("Levels", F.levels.map(esc).join(" · "))}
@@ -4547,7 +4687,7 @@ async function agentMeasure(filter, only){   // only: these rooms (an apartment)
     if (!best) { res.push({name: r.name, error: "could not close the room"}); aiLog("err", `${esc(r.name)}: auto area could not close the room — use the Fence tool on the open side, or draw it`); continue; }
     const cen = q => [q.reduce((a, v) => a + v[0], 0) / q.length, q.reduce((a, v) => a + v[1], 0) / q.length];
     const same = got.find(o => Math.abs(o.a - best.a) / best.a < 0.005 && dist(cen(o.pts), cen(best.pts)) < k);
-    if (same) { same2++; res.push({name: r.name, error: "leaked into " + same.name}); aiLog("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${f2(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
+    if (same) { same2++; res.push({name: r.name, error: "leaked into " + same.name}); aiLog("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${fq(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
     const inside = F.rooms.filter(q => q !== r && pointInPoly([q.x + q.w / 2, q.y - q.h / 2], best.pts));
     const hit = inside.find(q => q.name !== r.name && got.some(o => sameRoom(o.room, q)));   // runs into a room already measured on its own: a leak, not open plan
     if (hit) { same2++; res.push({name: r.name, error: "leaked into " + hit.name}); aiLog("err", `${esc(r.name)}: runs on into <b>${esc(hit.name)}</b> (already measured) — an opening is not closed. Draw a <b>Fence</b> across it and run again, or draw this room.`); continue; }
@@ -4560,7 +4700,7 @@ async function agentMeasure(filter, only){   // only: these rooms (an apartment)
     mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, ai: true, label: nm}); });
     const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;   // best.err is against the written sizes of every room in the space
     res.push({name: nm, area_sft: +best.a.toFixed(2), written_sft: r.sft ? +wrt.toFixed(2) : null, check: !!bad, open_plan_with: others.map(q => q.name)});
-    aiLog("tool", `${esc(nm)}: <b>${f2(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? f2(wrt) + " Sft together" : esc(r.size) + " = " + f2(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + f2(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
+    aiLog("tool", `${esc(nm)}: <b>${fq(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? fq(wrt) + " Sft together" : esc(r.size) + " = " + fq(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + fq(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
   }
   busy(""); refresh();
   aiLog("bot", `Measured ${ok + chk} of ${rooms.length} into <b>${esc(c.name)}</b>${chk ? ` — <b>${chk} to check</b> (more than 5% off the written size: fix with Fence, or the room is not a rectangle)` : ""}${same2 ? ` — <b>${same2}</b> leaked into a neighbour, not added` : ""}. Undo (Ctrl+Z) removes them one by one.`);
@@ -4590,7 +4730,7 @@ async function agentUnit(no){
   aiLog("bot", `<b>Apartment ${esc(u.no)}</b>${u.type ? " — " + esc(u.type) : ""}: ${mine.length} rooms (${mine.map(r => esc(r.name)).join(", ")}).`);
   const r = await agentMeasure("", mine); if (!r || r.error) return r;
   const tot = r.rooms.reduce((a, x) => a + (x.area_sft || 0), 0);
-  aiLog("bot", `Apartment ${esc(u.no)}: rooms measured <b>${f2(tot)} Sft</b>${u.sft ? ` · written on the drawing <b>${f2(u.sft)} Sft</b> (that figure usually includes the walls and is not a floor-finish area)` : ""}.`);
+  aiLog("bot", `Apartment ${esc(u.no)}: rooms measured <b>${fq(tot)} Sft</b>${u.sft ? ` · written on the drawing <b>${fq(u.sft)} Sft</b> (that figure usually includes the walls and is not a floor-finish area)` : ""}.`);
   return Object.assign(r, {unit: u.no, type: u.type, unit_written_sft: u.sft || null, rooms_total_sft: +tot.toFixed(2)});
 }
 async function unitDialog(){
@@ -4794,9 +4934,9 @@ function setDim(on){   // on = true/false, or a dimming level 0-90 %
   const d = S.dim ? S.dimPct / 100 : 0, c = 1 - d, b = 1 / (0.5 + 0.5 * c);
   stage().style.setProperty("--dimf", d ? `contrast(${c.toFixed(3)}) brightness(${b.toFixed(3)})` : "none");
   $("bDim").classList.toggle("on", S.dim); $("dimPct").value = S.dimPct || 50; $("dimLbl").textContent = (S.dim ? S.dimPct : 0) + "%";
-  pref("zdTakeoffDim", S.dim ? String(S.dimPct) : "0");
+  pref("zdTakeoffDim", S.dim ? String(S.dimPct) : "0"); viewMark();
 }
-function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); if (S.page) { renderLow(); renderHi(true); } }
+function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); viewMark(); if (S.page) { renderLow(); renderHi(true); } }
 
 /* ------------------------------------------------------------------ start */
 (async function init(){

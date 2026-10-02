@@ -24,7 +24,9 @@ input[type=text],input[type=number],select{border:1px solid #c9d6e4;border-radiu
 input:focus,select:focus{outline:2px solid #b9adf0;outline-offset:-1px;border-color:var(--purple)}
 
 /* top bar */
-header{height:48px;background:linear-gradient(135deg,var(--navy),var(--navy2));color:#fff;display:flex;align-items:center;gap:8px;padding:0 10px;overflow-x:auto;overflow-y:hidden}
+/* the bar wraps onto a second row on narrower screens: every control stays on screen (none hidden off the right edge) */
+:root{--hh:48px}
+header{min-height:48px;background:linear-gradient(135deg,var(--navy),var(--navy2));color:#fff;display:flex;align-items:center;flex-wrap:wrap;gap:8px;row-gap:6px;padding:6px 10px;position:relative;z-index:8}
 header .mark{width:30px;height:30px;border:2px solid #fff;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex:none}
 header .ttl{font-weight:700;font-size:14px;white-space:nowrap}
 header .sep{width:1px;height:26px;background:rgba(255,255,255,.2);flex:none}
@@ -71,16 +73,28 @@ span.qa{cursor:default}.qa.g{color:var(--green)}.qa.a{color:#8a5a00;border-color
 .billbar{display:flex;gap:6px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--line);flex-wrap:wrap}.billbar select{padding:2px 4px;font-size:11.5px}
 table.sh tr.grp td{background:#12263f;color:#fff;font-weight:700;font-size:11.5px}
 #findIn{width:170px}
-#findRes{position:fixed;top:46px;width:340px;max-height:60vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(15,41,66,.22);z-index:12;display:none;color:var(--txt)}
+#findRes{position:fixed;top:calc(var(--hh) - 2px);width:340px;max-height:60vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(15,41,66,.22);z-index:12;display:none;color:var(--txt)}
 #findRes.on{display:block}
 #findRes .fr{padding:6px 10px;border-bottom:1px solid #f0f4f8;display:flex;flex-direction:column;cursor:pointer;font-size:12px}
 #findRes .fr:hover{background:#f6f8fc}
 #findRes .small{font-size:10.5px;color:var(--muted)}
 .tools .tsep{width:1px;height:20px;background:var(--line);margin:0 2px}
 header a.back{color:#cfe0f5;font-size:12px;text-decoration:none;white-space:nowrap}
+/* View menu: dimmer, line weights, markups, PDF layers, labels, fit width */
+.vieww{position:relative}
+#viewPop{position:absolute;top:calc(100% + 8px);left:0;z-index:16;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 32px rgba(15,41,66,.28);padding:8px;display:none;flex-direction:column;gap:6px;min-width:230px;color:var(--txt)}
+#viewPop.on{display:flex}
+#viewPop .btn{background:#fff;color:#3c4c60;border-color:var(--line);text-align:left}
+#viewPop .btn:hover{border-color:var(--blue)}
+#viewPop .btn.tg2.on{background:var(--purple);border-color:var(--purple);color:#fff}
+#viewPop #dimLbl{color:var(--muted)}
+#viewPop .seg{display:flex}#viewPop .seg .btn:first-child{flex:1}
+#bView .vdot{display:none;width:7px;height:7px;border-radius:50%;background:#fab219;margin-left:3px;vertical-align:1px}#bView.mod .vdot{display:inline-block}
+#viewPop .vh{font-size:9.5px;letter-spacing:.5px;color:var(--muted);font-weight:700;text-transform:uppercase}
+@media (max-width:1700px){header .ttl{display:none}}
 
 /* layout */
-.app{display:grid;grid-template-columns:250px minmax(0,1fr) 420px;height:calc(100% - 48px)}
+.app{display:grid;grid-template-columns:250px minmax(0,1fr) 420px;height:calc(100% - var(--hh))}
 .panel{background:var(--card);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;min-width:0}
 .panel.right{border-right:0;border-left:1px solid var(--line)}
 .ph{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -177,7 +191,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 .warnbar.on{display:block}
 
 /* start screen */
-#start{position:fixed;inset:48px 0 0 0;background:var(--bg);overflow:auto;z-index:5;display:none}
+#start{position:fixed;inset:var(--hh) 0 0 0;background:var(--bg);overflow:auto;z-index:5;display:none}
 #start.on{display:block}
 #start .wrap{max-width:900px;margin:0 auto;padding:26px 18px 60px}
 #start h2{font-size:18px;color:var(--navy);margin-bottom:4px}
@@ -209,7 +223,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;display:none;z-index:20;max-width:90vw;text-align:center}
 
 /* Claude panel */
-#aiPanel{position:fixed;top:48px;right:0;bottom:0;width:min(400px,100vw);background:#fff;border-left:1px solid var(--line);box-shadow:-6px 0 24px rgba(15,41,66,.14);z-index:9;display:none;flex-direction:column}
+#aiPanel{position:fixed;top:var(--hh);right:0;bottom:0;width:min(400px,100vw);background:#fff;border-left:1px solid var(--line);box-shadow:-6px 0 24px rgba(15,41,66,.14);z-index:9;display:none;flex-direction:column}
 #aiPanel.on{display:flex}
 #aiPanel .aih{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 #aiPanel .aih b{color:var(--navy)}
@@ -262,11 +276,17 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <button class="btn sm" id="bZi" title="Zoom in (+)">+</button>
   <button class="btn sm" id="bFit" title="Fit page (F)">Fit</button>
   <button class="btn sm" id="bZw" title="Zoom window (Z) — drag a box round the part to see">&#11034;</button>
-  <span class="dimw"><button class="btn sm tg2" id="bDim" title="Dimmer — fade the drawing so the takeoff stands out">&#9728; Dimmer</button><input type="range" id="dimPct" min="0" max="90" step="5" value="50" title="Dimming %"><span id="dimLbl">0%</span></span>
-  <button class="btn sm tg2" id="bLw" title="Line weights are on — click to draw every line thin">&#9472; Line weights</button>
-  <button class="btn sm tg2 on" id="bHideMk" title="Hide all markups (measurements and notes) to see the drawing">&#128065; Markups</button>
-  <button class="btn sm" id="bLayers" title="The PDF's own CAD layers: switch them on / off to clean the drawing">&#128450; Layers</button>
-  <span class="seg"><button class="btn sm tg2" id="bLbl" title="Show / hide measurement labels (L)">&#127991; Labels</button><button class="btn sm" id="bLblSet" title="What the labels show: name, quantity, area, perimeter, length, L × W, segment lengths…">&#9662;</button></span>
+  <div class="vieww"><button class="btn sm" id="bView" title="View: fit width, dimmer, line weights, markups on / off, the PDF's layers, labels" aria-haspopup="true" aria-expanded="false">&#128065; View<span class="vdot" title="Something is switched off or dimmed"></span> &#9662;</button>
+    <div id="viewPop" aria-label="View">
+      <button class="btn sm" id="bFitW" title="Fit the page width to the window (Shift+F)">&#8596; Fit width <kbd>Shift</kbd>+<kbd>F</kbd></button>
+      <span class="vh">Drawing</span>
+      <span class="dimw"><button class="btn sm tg2" id="bDim" title="Dimmer — fade the drawing so the takeoff stands out">&#9728; Dimmer</button><input type="range" id="dimPct" min="0" max="90" step="5" value="50" title="Dimming %"><span id="dimLbl">0%</span></span>
+      <button class="btn sm tg2" id="bLw" title="Line weights are on — click to draw every line thin">&#9472; Line weights</button>
+      <button class="btn sm" id="bLayers" title="The PDF's own CAD layers: switch them on / off to clean the drawing">&#128450; PDF layers…</button>
+      <span class="vh">Takeoff</span>
+      <button class="btn sm tg2 on" id="bHideMk" title="Hide all markups (measurements and notes) to see the drawing">&#128065; Markups</button>
+      <span class="seg"><button class="btn sm tg2" id="bLbl" title="Show / hide measurement labels (L)">&#127991; Labels <kbd>L</kbd></button><button class="btn sm" id="bLblSet" title="What the labels show: name, quantity, area, perimeter, length, L × W, segment lengths…">&#9662;</button></span>
+    </div></div>
   <div class="sep"></div>
   <div class="findw"><input type="search" id="findIn" placeholder="Find text (Ctrl+F)" aria-label="Find text on the drawings"><div id="findRes"></div></div>
   <button class="btn sm" id="bCompare" title="Overlay another revision in colour to see what changed">&#9681; Compare</button>
