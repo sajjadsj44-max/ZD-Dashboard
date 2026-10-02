@@ -128,7 +128,8 @@ const S = {                           // session state (not saved)
   tool: "select", cond: null, draft: [], cursor: null, snap: null, sel: null, selPt: -1,
   geo: {},                            // "fileId:page" -> {segs, grid, cell, n}
   texts: {},                          // "fileId:page" -> [{s, x, y}]
-  undo: [], redo: [], drag: null, space: false, measure: null, measures: [], pinch: null
+  undo: [], redo: [], drag: null, space: false, measure: null, measures: [], pinch: null,
+  multi: new Set(), box: null, condSel: new Set()   // multi-selection (shift-click, box, Ctrl+A); conditions ticked in the list
 };
 const keyOf = (f, p) => f + ":" + p;
 const curScale = () => P.proj && P.proj.scales[S.key] ? P.proj.scales[S.key].ptPerFt : 0;
@@ -253,6 +254,31 @@ function showDrop(on){ $("drop").style.display = on ? "flex" : "none"; }
 /* ------------------------------------------------------------------ PDF layers (optional content, e.g. AutoCAD layers)
    One visibility config per PDF, passed to every render — screen, auto area, find similar, exports, Claude — so a
    layer switched off (furniture, text, hatch) is gone everywhere. Switched-off layers are saved by name. */
+/* layer roles, from the layer names: what bounds a room (walls, doors and windows, columns, railings) and what does
+   not (furniture, fixtures, glass screens, hatch, text, clouds). Used by auto area, the agents and the presets. */
+const ROLES = [["column", /column|^col\b/i], ["hatch", /hatch|patt/i], ["glass", /glass|glaz/i], ["wall", /\bwalls?\b|r\.?c\.?c|partition|block ?work|masonry|parapet/i],
+  ["tag", /^\s*d\s*-\s*w\s*$|tag/i], ["opening", /door|window|gate|vent/i], ["railing", /railing|balcon|metal.*frame/i], ["unit", /apartment|appartment|\bunit\b/i],
+  ["text", /text|title|area|size|dim|grid|note|section|seal|cloud|label|tag|lable/i], ["fixture", /fixt|fict|furn|bath|kit|sanit|plant|tree|equip|mep|elect|light|lcd|marble|stair|step|\bwh\b|d\.b|j\.b|access|trap|cupboard|ac |wood|landscape|ramp|parking|ceiling|beam|lintel/i]];
+const BOUND = new Set(["wall", "opening", "column", "railing"]);
+function layerRole(name){ for (const [r, rx] of ROLES) if (rx.test(name)) return r; return "other"; }
+function layerInfo(fileId){   // {id: {name, role}} of the PDF's layers, or null
+  const cfg = S.ocgs && S.ocgs[fileId]; if (!cfg) return null;
+  const out = {}; Object.entries(cfg.getGroups()).forEach(([id, gr]) => { out[id] = {name: gr.name, role: layerRole(gr.name)}; }); return out;
+}
+function segRoleFilter(g, roles){   // a test for segment ids: on a layer of one of these roles (null: the PDF has no such layers)
+  const L = g && g.layerIds && g.file && layerInfo(g.file); if (!L || !g.layerIds.length) return null;
+  const ok = g.layerIds.map(id => !!(L[id] && roles.has(L[id].role)));
+  if (!ok.some(Boolean)) return null;
+  return i => { const li = g.segs[i][7]; return li >= 0 && ok[li]; };
+}
+async function boundCfg(fileId){   // an optional-content config with only the room-boundary layers shown (for auto area's picture)
+  S.ocBound = S.ocBound || {};
+  if (S.ocBound[fileId] !== undefined) return S.ocBound[fileId];
+  let cfg = null; try { const L = layerInfo(fileId); if (L && Object.values(L).some(l => l.role === "wall")) { cfg = await (await doc(fileId)).getOptionalContentConfig();
+    Object.keys(L).forEach(id => cfg.setVisibility(id, BOUND.has(L[id].role) && !(((P.proj.layersOff || {})[fileId] || []).includes(L[id].name)))); } } catch (e) { cfg = null; }
+  S.ocBound[fileId] = cfg; return cfg;
+}
+const ocOn = (cfg, id) => { const g = cfg && cfg.getGroup && cfg.getGroup(id); return !g || g.visible !== false; };   // (isVisible() wants a group object, not an id)
 const lay = fileId => S.ocgs && S.ocgs[fileId] ? {optionalContentConfigPromise: Promise.resolve(S.ocgs[fileId])} : {};
 async function loadLayers(fileId){
   S.ocgs = S.ocgs || {};
@@ -268,15 +294,19 @@ function renderLayers(){
   if (!S.page) { el.innerHTML = ""; return; }
   if (!cfg) { el.innerHTML = '<div class="empty">This PDF has no layers. AutoCAD keeps them when you plot with <b>DWG To PDF.pc3</b> and “Include layer information” ticked (Page Setup → PDF Options).</div>'; return; }
   const G = Object.entries(cfg.getGroups()).sort((a, b) => a[1].name.localeCompare(b[1].name));
-  el.innerHTML = `<div class="lyrbar"><button class="btn sm" data-lall="1">All on</button><button class="btn sm" data-lall="0">All off</button><input type="search" id="lyrQ" placeholder="Filter layers"></div>` +
-    G.map(([id, g]) => `<label class="lyr" data-name="${esc(g.name.toLowerCase())}"><input type="checkbox" data-lid="${esc(id)}"${cfg.isVisible(id) ? " checked" : ""}> ${esc(g.name)}</label>`).join("");
+  const RN = {wall: "wall", opening: "door / window", column: "column", railing: "railing", glass: "glass", hatch: "hatch", text: "text / dims", tag: "tags", unit: "unit area", fixture: "fixtures / MEP", other: ""};
+  el.innerHTML = `<div class="lyrbar"><button class="btn sm" data-lall="1">All on</button><button class="btn sm" data-lall="0">All off</button><input type="search" id="lyrQ" placeholder="Filter layers"></div>
+    <div class="lyrbar"><span class="small" style="width:100%">Clean the drawing:</span><button class="btn sm pri" data-lpre="clean" title="Only walls, doors / windows, columns and railings">Walls & openings only</button><button class="btn sm" data-lpre="text" title="Text, dimensions, grid, titles, clouds">Text off</button><button class="btn sm" data-lpre="fixture" title="Furniture, sanitary, kitchen, MEP, electrical">Fixtures off</button><button class="btn sm" data-lpre="hatch">Hatch off</button><button class="btn sm" data-lpre="tag">Tags off</button></div>` +
+    G.map(([id, g]) => { const r = layerRole(g.name); return `<label class="lyr" data-name="${esc(g.name.toLowerCase())}"><input type="checkbox" data-lid="${esc(id)}"${ocOn(cfg, id) ? " checked" : ""}> <span style="flex:1">${esc(g.name)}</span>${RN[r] ? `<span class="tag ${BOUND.has(r) ? "g" : "a"}" title="${BOUND.has(r) ? "Bounds rooms for auto area" : "Ignored by auto area"}">${RN[r]}</span>` : ""}</label>`; }).join("") +
+    '<div class="small" style="padding:8px 12px">Green roles bound rooms for <b>Auto area</b> and the agents (setting ⚙ “Use the PDF\'s layers”). Layers switched off here are left out of snapping, auto area and the agents too.</div>';
 }
 let layT = null;
 function setLayer(ids, on){
   const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return;
   ids.forEach(id => cfg.setVisibility(id, on));
   P.proj.layersOff = P.proj.layersOff || {};
-  P.proj.layersOff[S.fileId] = Object.entries(cfg.getGroups()).filter(([id]) => !cfg.isVisible(id)).map(([, g]) => g.name);
+  P.proj.layersOff[S.fileId] = Object.entries(cfg.getGroups()).filter(([id]) => !ocOn(cfg, id)).map(([, g]) => g.name);
+  if (S.ocBound) delete S.ocBound[S.fileId];
   save(); clearTimeout(layT); layT = setTimeout(() => { renderLow(); renderHi(true); }, 60);
 }
 
@@ -406,7 +436,9 @@ async function indexPage(){
     try {
       const ops = await page.getOperatorList(), O = pdfjs.OPS, segs = [], stack = [], styles = [], styleIx = new Map();
       let ctm = base.transform.slice(), images = 0, lw = 1, dash = false, sCol = "0,0,0", fCol = "0,0,0", sp = 0, pend = -1, pendCtm = ctm, cur = null, start = null;
-      const push = (a, b, fl) => { if (Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) > 0.05 && segs.length < 600000) segs.push([a[0], a[1], b[0], b[1], fl || 0, sp, -1]); };
+      const mc = [], layerIds = [], layerIx = new Map(); let lay0 = -1;   // PDF layers (optional content): the layer each line is drawn on
+      const curLayer = () => { for (let j = mc.length - 1; j >= 0; j--) if (mc[j] >= 0) return mc[j]; return -1; };
+      const push = (a, b, fl) => { if (Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) > 0.05 && segs.length < 600000) segs.push([a[0], a[1], b[0], b[1], fl || 0, sp, -1, lay0]); };
       const colKey = a => typeof a[0] === "string" ? a[0] : Array.from(a || []).slice(0, 3).map(v => Math.round(v)).join(",");
       const style = (col, w) => { const key = col + "|" + (Math.round(w * 10) / 10); let i = styleIx.get(key); if (i == null) { i = styles.length; styles.push(key); styleIx.set(key, i); } return i; };
       const paint = (stroke, fill) => {   // the paint operator after a path says how its lines were drawn (stroked, filled, or only a clip)
@@ -421,7 +453,11 @@ async function indexPage(){
       const setGs = g => { if (g) ({ctm, lw, dash, sCol, fCol} = g); };
       for (let i = 0; i < ops.fnArray.length; i++) {
         const fn = ops.fnArray[i], ar = ops.argsArray[i];
-        if (fn === O.save) stack.push(gs());
+        if (fn === O.beginMarkedContentProps) { let li = -1; const pr = ar && ar[1]; const id = ar && ar[0] === "OC" && pr ? (typeof pr === "string" ? pr : pr.id || (pr.ids && pr.ids[0])) : null;
+          if (id) { li = layerIx.get(id); if (li == null) { li = layerIds.length; layerIds.push(id); layerIx.set(id, li); } } mc.push(li); lay0 = curLayer(); }
+        else if (fn === O.beginMarkedContent) mc.push(-1);
+        else if (fn === O.endMarkedContent) { mc.pop(); lay0 = curLayer(); }
+        else if (fn === O.save) stack.push(gs());
         else if (fn === O.restore) setGs(stack.pop());
         else if (fn === O.transform) ctm = mul(ctm, ar);
         else if (fn === O.paintFormXObjectBegin) { stack.push(gs()); if (ar[0]) ctm = mul(ctm, ar[0]); }
@@ -463,7 +499,7 @@ async function indexPage(){
         if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4000) return;   // page borders / hatch fills are not useful snap targets at this cost
         for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) { const k = x + "," + y; let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(i); }
       });
-      S.geo[key] = {segs, grid, cell, images, styles};
+      S.geo[key] = {segs, grid, cell, images, styles, layerIds, file: S.fileId};
     } catch (e) { S.geo[key] = {segs: [], grid: new Map(), cell: 24, images: 0, styles: [], err: String(e)}; }
     busy("");
   }
@@ -475,10 +511,80 @@ async function indexPage(){
   }
   if (key === S.key && P.proj && !P.proj.scales[key]) {
     const c = scaleCandidates(key);
-    if (c.length) { P.proj.scales[key] = {ptPerFt: c[0].ptPerFt, how: "note", text: c[0].text, note: c[0].note || "", factor: c[0].factor || 1, verified: false, at: new Date().toISOString()}; save(); toast("Scale read from the drawing: " + c[0].label + " — check it against a known dimension (scale chip → Verify)", 5200); }
+    if (c.length) { P.proj.scales[key] = {ptPerFt: c[0].ptPerFt, how: "note", text: c[0].text, note: c[0].note || "", factor: c[0].factor || 1, verified: false, at: new Date().toISOString()}; save(); toast("Scale read from the drawing: " + c[0].label + " — check it against a known dimension (scale chip → Verify)", 5200);
+      checkScale(key, true); }
   }
   if (key === S.key) refresh();
 }
+/* ------------------------------------------------------------------ scale check: the room sizes written on the drawing
+   (BEDROOM 12'-9"x11'-0") against the room as drawn. From each room's name the clear span to the walls is found left,
+   right, up and down (rays against the PDF's own lines, from three points, the middle span kept, so a door opening or a
+   bed in the way of one does not count); span ÷ written size gives pt per ft for that room, the median of all rooms the drawing's scale. A note that
+   disagrees by more than 15 % is flagged: the PDF is then printed at another size than the note was written for. */
+function sizeDims(t){ const m = /^\s*([^xX×*]+?)\s*[xX×*]\s*([^xX×*]+?)\s*$/.exec(String(t || "")); if (!m) return null; const a = parseFt(m[1]), b = parseFt(m[2]); return a > 0 && b > 0 ? [a, b] : null; }
+async function scaleFromRooms(key){
+  const [f, pg] = key.split(":"), g = S.geo[key]; if (!g || !g.segs.length) return null;
+  const F = await drawingFacts(f, +pg), est = [], bf = segRoleFilter(g, BOUND);   // walls / openings / columns only, when the PDF has layers: a bed or a table is not the room's edge
+  const ray = (c, dx, dy, R) => {   // distance from c to the first drawing line along (dx, dy), up to R
+    let best = R; segsIn(g, c[0] - (dx < 0 ? R : 0), c[1] - (dy < 0 ? R : 0), c[0] + (dx > 0 ? R : 0), c[1] + (dy > 0 ? R : 0)).forEach(i => { const s = g.segs[i]; if (s[4] & 8 || (bf && !bf(i))) return;
+      if (dy === 0) { const y0 = Math.min(s[1], s[3]), y1 = Math.max(s[1], s[3]); if (c[1] < y0 || c[1] > y1 || y1 === y0) return; const x = s[0] + (s[2] - s[0]) * (c[1] - s[1]) / (s[3] - s[1]), d = (x - c[0]) * dx; if (d > 0.5 && d < best) best = d; }
+      else { const x0 = Math.min(s[0], s[2]), x1 = Math.max(s[0], s[2]); if (c[0] < x0 || c[0] > x1 || x1 === x0) return; const y = s[1] + (s[3] - s[1]) * (c[0] - s[0]) / (s[2] - s[0]), d = (y - c[1]) * dy; if (d > 0.5 && d < best) best = d; } });
+    return best; };
+  F.rooms.forEach(r => {
+    const d = sizeDims(r.size); if (!d || d[0] < 4 || d[1] < 4) return;
+    const R = 40 * r.h * Math.max(d[0], d[1]) / 10, c = [r.x + r.w / 2, r.y - r.h / 2], below = r.sizeY != null ? r.sizeY + r.h * 0.6 : r.y + r.h * 1.5;
+    const P0 = [c, [c[0], r.y - r.h * 2], [c[0], below]];
+    const span = (dx, dy) => P0.map(q => ray(q, dx, dy, R) + ray(q, -dx, -dy, R)).sort((x, y) => x - y)[1];   // the middle one: one ray through a door, or one blocked by a bed, does not count
+    const w = span(1, 0), h = span(0, 1); if (!(w < 2 * R && h < 2 * R)) return;
+    const a = [w / d[0], h / d[1]], b = [w / d[1], h / d[0]], A = Math.abs(Math.log(a[0] / a[1])), B = Math.abs(Math.log(b[0] / b[1]));
+    const pr = A <= B ? a : b; if (Math.min(A, B) > 0.22) return;
+    est.push(Math.sqrt(pr[0] * pr[1]));
+  });
+  if (est.length < 3) return null;
+  est.sort((x, y) => x - y); const med = est[est.length >> 1], agree = est.filter(v => Math.abs(v / med - 1) < 0.1).length;
+  if (agree < 3 || agree < est.length / 4) return null;   // written sizes too scattered to say anything
+  return {ptPerFt: med, rooms: est.length, agree, est};
+}
+const STD_SCALES = [[1 / 32, "1/32\""], [1 / 16, "1/16\""], [3 / 32, "3/32\""], [1 / 8, "1/8\""], [3 / 16, "3/16\""], [1 / 4, "1/4\""], [3 / 8, "3/8\""], [1 / 2, "1/2\""], [3 / 4, "3/4\""], [1, "1\""], [1.5, "1-1/2\""], [3, "3\""]]
+  .map(([v, t]) => ({ptPerFt: 72 * v, label: t + " = 1'-0\""})).concat([20, 25, 50, 75, 100, 125, 150, 200, 250, 500].map(n => ({ptPerFt: 864 / n, label: "1:" + n})));
+async function checkScale(key, ask2){
+  const sc = P.proj && P.proj.scales[key]; if (!sc || sc.verified || sc.how === "calibrated") return null;
+  let ev; try { ev = await scaleFromRooms(key); } catch (e) { ev = null; }
+  if (!ev || ev.agree < 3) return null;
+  const r = ev.ptPerFt / sc.ptPerFt; if (Math.abs(Math.log(r)) < Math.log(1.15)) { if (sc.doubt) { delete sc.doubt; save(); refresh(); } return {ok: true, ev}; }
+  const std = STD_SCALES.slice().sort((a, b) => Math.abs(Math.log(a.ptPerFt / ev.ptPerFt)) - Math.abs(Math.log(b.ptPerFt / ev.ptPerFt)))[0];
+  // the rooms' median, then: a standard scale within 2.5 %; else the walls (drawn exactly 4.5" / 9" / 13.5") within 4 %; else the median
+  const isStd = Math.abs(Math.log(std.ptPerFt / ev.ptPerFt)) < Math.log(1.025), wl = isStd ? null : wallScale(key, ev.ptPerFt);
+  const sug = isStd ? std : wl && Math.abs(Math.log(wl.ptPerFt / ev.ptPerFt)) < Math.log(1.04) ? wl : {ptPerFt: ev.ptPerFt, label: "1 ft = " + ev.ptPerFt.toFixed(3) + " pt"};
+  ev.agree = ev.est.filter(v => Math.abs(v / sug.ptPerFt - 1) < 0.1).length;
+  sc.doubt = {label: sug.label, ptPerFt: sug.ptPerFt, ratio: +(sug.ptPerFt / sc.ptPerFt).toFixed(3), rooms: ev.rooms, agree: ev.agree}; save(); refresh();
+  if (ask2 && key === S.key) {
+    const pv = ask("Scale note does not match the drawing", `<p>The note says <b>${esc(sc.text)}</b>, but <b>${ev.agree} of ${ev.rooms}</b> room sizes written on this drawing${sug.walls ? ` and its ${esc(sug.walls)} walls` : ""} measure at <b>${esc(sug.label)}</b> — <b>× ${(sug.ptPerFt / sc.ptPerFt).toFixed(2)}</b> of the note. The PDF is printed at another size than the note was written for; at the note's scale every length would come out × ${(sug.ptPerFt / sc.ptPerFt).toFixed(2)} and every area × ${((sug.ptPerFt / sc.ptPerFt) ** 2).toFixed(2)} of the truth.</p>
+      <p class="small" style="margin-top:8px"><b>Then verify it with one dimension printed on the drawing</b> (scale chip → Verify) — written room sizes are nominal, so this is an estimate, not a certainty. Nothing is measured until the scale is settled.</p>`, "Use " + sug.label);
+    const cb = document.createElement("button"); cb.className = "btn"; cb.textContent = "Calibrate from a dimension…"; cb.style.marginRight = "auto";
+    let cal = false; cb.onclick = () => { cal = true; $("dlgCancel").click(); }; $("dlgF").prepend(cb);
+    const v = await pv;
+    if (cal) { S.calVp = null; setTool("cal"); toast("Click both ends of a dimension printed on the drawing, then type its length", 5000); return {ok: false, ev, sug}; }
+    if (v) mutate(() => { P.proj.scales[key] = {ptPerFt: sug.ptPerFt, how: "note", text: sug.label + " (measured from " + ev.agree + " written room sizes" + (sug.walls ? " and the " + sug.walls + " walls" : "") + "; the note says " + sc.text + ")", note: "PDF printed at × " + (sug.ptPerFt / sc.ptPerFt).toFixed(3) + " of the note's paper size", factor: sug.ptPerFt / sc.ptPerFt, verified: false, roomsCheck: ev, at: new Date().toISOString()}; });
+  }
+  return {ok: false, ev, sug};
+}
+/* the scale from the walls: the most-drawn spacing of parallel wall faces (wall layers when the PDF has them) is a
+   4.5", 9" or 13.5" wall; the one of those that the room-size estimate est agrees with (within 10 %) gives the scale. */
+function wallScale(key, est){
+  const g = S.geo[key]; if (!g || !g.segs.length || !est) return null;
+  const wf = segRoleFilter(g, new Set(["wall"])), ids = g.segs.map((_, i) => i).filter(i => !wf || wf(i)), G = faceLines(null, est, ids); if (!G) return null;
+  const H = new Map(); G.forEach(gr => facePairs(gr, 0.25 * est, 1.6 * est, 1.5 * est, (d, o, t0, t1) => { const b = Math.round(d * 4); H.set(b, (H.get(b) || 0) + (t1 - t0)); }));
+  const peaks = [...H.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3); if (!peaks.length) return null;
+  let best = null;
+  peaks.forEach(([b, len]) => { const d = b / 4; [[0.375, "4.5\""], [0.75, "9\""], [1.125, "13.5\""]].forEach(([ft, nm]) => { const c = d / ft, e = Math.abs(Math.log(c / est));
+    if (e < Math.log(1.1) && (!best || len > best.len || (len === best.len && e < best.e))) best = {c, e, len, nm, d}; }); });
+  if (!best) return null;
+  const std = STD_SCALES.find(x => Math.abs(x.ptPerFt / best.c - 1) < 0.01);
+  return {ptPerFt: std ? std.ptPerFt : best.c, label: std ? std.label : "1 ft = " + best.c.toFixed(3) + " pt", walls: best.nm};
+}
+const scaleDoubt = () => { const sc = P.proj && P.proj.scales[S.key]; return sc && sc.doubt && !sc.verified ? sc.doubt : null; };
+
 /* scale notes on the page: 1/8" = 1'-0", 3/16"=1'-0", 1" = 20', 1:100 (with "@ A1" paper size if given) */
 const ISO = {A0: 3370.39, A1: 2383.94, A2: 1683.78, A3: 1190.55, A4: 841.89};   // ISO 216 long side in pt (A1 594 × 841 → 841 / 25.4 × 72)
 /* "1/8\" = 1'-0\"", "1\" = 20'", "1:100" -> inches on paper per foot (0 if none). loose: a bare 1:N counts */
@@ -538,12 +644,16 @@ function snapAt(q){
    (the room's core). The core is grown back out over the thin lines to the wall faces, pockets narrower than the
    furniture setting are filled (furniture against a wall), and the outline is traced, squared up when the room is
    rectilinear (the bulge through a door opening is dropped there) and snapped onto the wall lines. */
-const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false};
+const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false, layers: true};
 const autoOpt = () => Object.assign({}, AUTO_DEF, (P.proj && P.proj.auto) || {});
-function segsIn(g, x0, y0, x1, y1){
-  const c = g.cell, ids = new Set();
-  for (let x = Math.floor(x0 / c); x <= Math.floor(x1 / c); x++) for (let y = Math.floor(y0 / c); y <= Math.floor(y1 / c); y++) (g.grid.get(x + "," + y) || []).forEach(i => ids.add(i));
+function segsIn(g, x0, y0, x1, y1){   // lines in a box — not those on PDF layers switched off
+  const c = g.cell, ids = new Set(), off = layerOffIx(g);
+  for (let x = Math.floor(x0 / c); x <= Math.floor(x1 / c); x++) for (let y = Math.floor(y0 / c); y <= Math.floor(y1 / c); y++) (g.grid.get(x + "," + y) || []).forEach(i => { if (!off || !off.has(g.segs[i][7])) ids.add(i); });
   return [...ids].sort((a, b) => a - b);
+}
+function layerOffIx(g){   // layer indexes (of this page's lines) switched off by the user
+  const cfg = g && g.file && S.ocgs && S.ocgs[g.file]; if (!cfg || !g.layerIds || !g.layerIds.length) return null;
+  const off = new Set(); g.layerIds.forEach((id, i) => { try { if (!ocOn(cfg, id)) off.add(i); } catch (e) {} }); return off.size ? off : null;
 }
 function doorSymbols(g, ids, k){   // -> Set of segment ids that are door swings or door leaves
   const skip = new Set(), arcs = [], G = g.segs, len = i => Math.hypot(G[i][2] - G[i][0], G[i][3] - G[i][1]);
@@ -588,15 +698,72 @@ function circumcentre(a, b, c){
   const A = a[0] * a[0] + a[1] * a[1], B = b[0] * b[0] + b[1] * b[1], C = c[0] * c[0] + c[1] * c[1];
   return [(A * (b[1] - c[1]) + B * (c[1] - a[1]) + C * (a[1] - b[1])) / d, (A * (c[0] - b[0]) + B * (a[0] - c[0]) + C * (b[0] - a[0])) / d];
 }
+/* revision clouds: chains of six or more small arcs (each under 1.5 ft) joined end to end. Not walls — a cloud drawn
+   across a room would otherwise split it, or close a bath onto the next room. Found once per page. */
+function cloudIds(g, k){
+  if (g.clouds && g.clouds.k === k) return g.clouds.set;
+  const G = g.segs, sp = new Map();
+  G.forEach((s, i) => { let e = sp.get(s[5]); if (!e) { e = {ids: [], curve: true, x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9}; sp.set(s[5], e); }
+    e.ids.push(i); if (!(s[4] & 1)) e.curve = false; e.x0 = Math.min(e.x0, s[0], s[2]); e.y0 = Math.min(e.y0, s[1], s[3]); e.x1 = Math.max(e.x1, s[0], s[2]); e.y1 = Math.max(e.y1, s[1], s[3]); });
+  const arcs = [...sp.values()].filter(e => e.curve && Math.max(e.x1 - e.x0, e.y1 - e.y0) <= 1.5 * k), par = arcs.map((_, n) => n), at = new Map();
+  const find = x => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+  arcs.forEach((e, n) => { const a = G[e.ids[0]], z = G[e.ids[e.ids.length - 1]];
+    [[a[0], a[1]], [z[2], z[3]]].forEach(([x, y]) => { const key = Math.round(x * 2) + "," + Math.round(y * 2); if (at.has(key)) par[find(n)] = find(at.get(key)); else at.set(key, n); }); });
+  const cnt = new Map(); arcs.forEach((_, n) => cnt.set(find(n), (cnt.get(find(n)) || 0) + 1));
+  const set = new Set(); arcs.forEach((e, n) => { if (cnt.get(find(n)) >= 6) e.ids.forEach(i => set.add(i)); });
+  g.clouds = {k, set}; return set;
+}
+/* door openings closed at their jambs: from each end of a wall face (a line paired with another 0.25-1.6 ft away — a
+   wall's two faces, hatched or thin-line partitions) the line is followed on; if it meets another wall or the next
+   piece of the same face 1.2 ft to "close gaps" + 1 ft further, a line is drawn across there. That closes doors between
+   two wall ends and doors beside a cross wall (a door in a corner), so a room never runs on through a doorway into the
+   next room — on drawings whose door swings are dashed, or not drawn, nothing else closes the opening. */
+function jambLines(ids, k, gapFt){
+  const g = S.geo[S.key], G = faceLines(null, k, ids), out = []; if (!G || !g) return out;
+  const gMin = 1.2 * k, gMax = (Math.max(gapFt, 3) + 1) * k, near = 0.15 * k;
+  const segs = ids.map(i => g.segs[i]);
+  const ray = (E, d) => {   // nearest line hit from E along d, beyond the lines E itself touches
+    let best = Infinity;
+    segsIn(g, Math.min(E[0], E[0] + d[0] * gMax) - 1, Math.min(E[1], E[1] + d[1] * gMax) - 1, Math.max(E[0], E[0] + d[0] * gMax) + 1, Math.max(E[1], E[1] + d[1] * gMax) + 1).forEach(i => {
+      const s = g.segs[i]; if (s[4] & 9) return; const a = [s[0], s[1]], b = [s[2], s[3]];
+      if (distSeg(E, a, b) < near) return;
+      const r = [b[0] - a[0], b[1] - a[1]], den = d[0] * r[1] - d[1] * r[0]; if (Math.abs(den) < 1e-9) return;
+      const t = ((a[0] - E[0]) * r[1] - (a[1] - E[1]) * r[0]) / den, u = ((a[0] - E[0]) * d[1] - (a[1] - E[1]) * d[0]) / den;
+      if (t > 0 && u >= -1e-6 && u <= 1 + 1e-6 && t < best) best = t; });
+    return best; };
+  G.forEach(gr => {
+    const L = gr.L.slice().sort((a, b) => a.o - b.o), wall = new Set();
+    for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length && L[j].o - L[i].o <= 1.6 * k; j++) {
+      if (L[j].o - L[i].o < 0.25 * k) continue; if (Math.min(L[i].t1, L[j].t1) - Math.max(L[i].t0, L[j].t0) >= 0.5 * k) { wall.add(L[i]); wall.add(L[j]); } }
+    wall.forEach(l => [[l.t0, -1], [l.t1, 1]].forEach(([t, sg]) => {
+      const E = [gr.u[0] * t + gr.n[0] * l.o, gr.u[1] * t + gr.n[1] * l.o], d = [gr.u[0] * sg, gr.u[1] * sg];
+      // the next piece of the same face (no end cap drawn): collinear, so the ray cannot meet it
+      let hit = ray(E, d);
+      L.forEach(q => { if (q === l || Math.abs(q.o - l.o) > 0.03 * k) return; const gap = sg > 0 ? q.t0 - t : t - q.t1; if (gap > 0 && gap < hit) hit = gap; });
+      if (hit >= gMin && hit <= gMax) out.push([E[0], E[1], E[0] + d[0] * hit, E[1] + d[1] * hit]);
+    }));
+  });
+  return out;
+}
+/* room names (BEDROOM, BATH…) written in the window, as pixel masks: a space that has its own name is never taken
+   into another room as a recess or pocket */
+function labelMask(x0, y0, W, H, px, own){   // own: the name of the room being measured (not a reason to stop)
+  const m = new Uint8Array(W * H), T = S.texts[S.key] || [];
+  textLines(T).forEach(l => { if (l.tag || !ROOM_RX.test(l.s) || l.s.length > 32) return;
+    if (own && dist(own, [l.x + l.w / 2, l.y - l.h / 2]) < Math.max(2, l.h)) return;
+    const x = Math.round((l.x + l.w / 2 - x0) / px), y = Math.round((l.y - l.h / 2 - y0) / px), r = Math.max(2, Math.round(l.h / px / 2));
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) m[yy * W + xx] = 1; } });
+  return m;
+}
 function barrierIds(g, ids, k, o){
-  const door = o.skipDoors ? doorSymbols(g, ids, k) : new Set(), minL = o.minLen * k;
+  const door = o.skipDoors ? doorSymbols(g, ids, k) : new Set(), minL = o.minLen * k, cloud = cloudIds(g, k);
   const wall = o.wall ? {col: o.wall.split("|")[0], w: +o.wall.split("|")[1] || 0} : null;
   const out = ids.filter(i => { const s = g.segs[i];
-    if (door.has(i) || (s[4] & 8) || (!o.dashBound && (s[4] & 2))) return false;
+    if (door.has(i) || cloud.has(i) || (s[4] & 8) || (!o.dashBound && (s[4] & 2))) return false;
     if (Math.hypot(s[2] - s[0], s[3] - s[1]) < minL) return false;
     if (wall) { const st = (g.styles[s[6]] || "|0").split("|"); if (st[0] !== wall.col || +st[1] < 0.9 * wall.w) return false; }
     return true; });
-  out.doors = door.lines || []; out.doorIds = [...door];
+  out.doors = (door.lines || []).concat(jambLines(out, k, o.gap)); out.doorIds = [...door].concat(ids.filter(i => cloud.has(i)));
   return out;
 }
 function edt2(f, W, H){   // squared Euclidean distance transform in place (Felzenszwalb & Huttenlocher); f = 0 on features, 1e20 elsewhere
@@ -624,7 +791,7 @@ function closeMask(m, W, H, R){   // morphological closing with a disc of radius
 /* pockets: with the walls right round the room counted as room, whatever is then fully enclosed — furniture or a
    wardrobe against a wall, a door swing — is a pocket of this room and is added (up to maxPx pixels). The next room is
    never enclosed: its own walls, further off, join it to the outside. */
-function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx){
+function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx, named){
   const N = W * H, f = new Float32Array(N);
   for (let i = 0; i < N; i++) f[i] = m[i] ? 0 : 1e20;
   edt2(f, W, H);
@@ -641,7 +808,7 @@ function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx){
       if (x < W - 1 && !solid[i + 1] && !seen[i + 1]) { seen[i + 1] = 1; st[top++] = i + 1; }
       if (y > 0 && !solid[i - W] && !seen[i - W]) { seen[i - W] = 1; st[top++] = i - W; }
       if (y < H - 1 && !solid[i + W] && !seen[i + W]) { seen[i + W] = 1; st[top++] = i + W; } }
-    if (!open && touch >= minTouch && comp.length >= minPx && comp.length <= maxPx) comp.forEach(i => { m[i] = 1; });   // gaps in a wall's hatching are smaller
+    if (!open && touch >= minTouch && comp.length >= minPx && comp.length <= maxPx && !(named && comp.some(i => named[i]))) comp.forEach(i => { m[i] = 1; });   // gaps in a wall's hatching are smaller
   }
   // the room's own ink inside it (furniture outlines, text) is part of the floor too
   for (let i = 0; i < N; i++) if (!m[i] && ink[i]) { const x = i % W; let n = 0;
@@ -747,10 +914,10 @@ function snapToWalls(Q, g, ids, tol, k, slack){   // rectilinear outline: each e
 }
 /* walls from the rendered drawing (what is seen on screen): every non-white pixel is ink; small separate marks (text,
    dashes of dashed lines, dots of stipple, dashed door swings) are dropped. Works for any PDF, scans included. */
-async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase){
+async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}).promise;
+  await S.page.render({...(ocb ? {optionalContentConfigPromise: Promise.resolve(ocb)} : lay(S.fileId)), canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}).promise;
   const d = ctx.getImageData(0, 0, W, H).data, N = W * H, m = new Uint8Array(N);
   for (let i = 0; i < N; i++) m[i] = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) < 190 ? 1 : 0;
   if (erase && erase.length) {   // door swings and leaves: not walls, and a leaf open against a wall must not fuse into it
@@ -820,14 +987,15 @@ function widen(m, W, H, r){   // every ink pixel widened to a disc of radius r p
   for (let i = 0; i < N; i++) out[i] = f[i] <= r2 ? 1 : 0;
   return out;
 }
-async function autoRoom(seed){   // -> {pts} or {err}
+async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for this one trace (a smaller door gap for a small room)
   const k = hereScale(seed), g = S.geo[S.key] || {segs: [], grid: new Map(), cell: 24, styles: []};
   if (!k) return {err: "Set the page scale first (K) — the door gap and wall offsets are in feet."};
-  const o = autoOpt(), img = o.src !== "vector";
+  const o = Object.assign(autoOpt(), over || {}), img = o.src !== "vector";
   if (!img && !g.segs.length) return {err: "This page has no vector lines — switch Auto area settings (⚙) to ‘walls from the drawing image’."};
   for (const [half, pxFt] of [[45, 0.06], [110, 0.14]]) {
     const px = pxFt * k, W = Math.ceil(2 * half * k / px), H = W, x0 = seed[0] - half * k, y0 = seed[1] - half * k;
-    const ids = barrierIds(g, segsIn(g, x0, y0, x0 + W * px, y0 + H * px), k, o);
+    const bf = o.layers ? segRoleFilter(g, BOUND) : null, ocb = o.layers && bf ? await boundCfg(S.fileId) : null;   // the PDF's wall / door / window / column / railing layers only
+    const ids = barrierIds(g, segsIn(g, x0, y0, x0 + W * px, y0 + H * px).filter(i => !bf || bf(i)), k, o);
     const raster = (lw, doorsOnly) => {   // barrier lines (and door openings) stroked lw (pt) wide -> 1 = blocked
       const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
       const ctx = cv.getContext("2d", {willReadFrequently: true});
@@ -861,13 +1029,14 @@ async function autoRoom(seed){   // -> {pts} or {err}
       fences.forEach(f => f.pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke();
       const d = ctx.getImageData(0, 0, W, H).data, b = new Uint8Array(W * H); for (let i = 0; i < b.length; i++) b[i] = d[i * 4 + 3] > 24 ? 1 : 0; return b; };
     let thin, bar, ink = null;
-    if (img) { ink = await inkMask(x0, y0, W, H, px, Math.max(o.minLen, 1) * k / px, o.dashBound, k, (ids.doorIds || []).map(i => g.segs[i])); thin = ink.thin;   // a solid door swing stays in: its area is a pocket, added back
+    if (img) { ink = await inkMask(x0, y0, W, H, px, Math.max(o.minLen, 1) * k / px, o.dashBound, k, (ids.doorIds || []).map(i => g.segs[i]), ocb); thin = ink.thin;   // a solid door swing stays in: its area is a pocket, added back
       if (ids.doors.length) { const dl = raster(2 * px, true); for (let i = 0; i < N; i++) if (dl[i]) { thin[i] = 1; ink.big[i] = 1; } }
       bar = widen(ink.big, W, H, o.gap * k / px / 2); }
     else { thin = raster(2 * px); bar = raster(Math.max(o.gap * k, 2 * px)); }
     if (g.segs.length) { const cav = wallCavities(x0, y0, W, H, px, k, img ? ink.big : null, ids); for (let i = 0; i < N; i++) if (cav[i]) thin[i] = 1; }   // hollow walls are wall, not a recess of the room
     if (fences.length) { const fm = fenceMask(); for (let i = 0; i < N; i++) if (fm[i]) { thin[i] = 1; bar[i] = 1; } }   // the user's fences close what the drawing leaves open
     if (o.show) S.autoShow = {key: S.key, x0, y0, px, W, H, url: maskUrl(thin, W, H)};
+    const named = labelMask(x0, y0, W, H, px, o.own);
     // B: every line widened to the door gap, so all openings close — the room's core — grown back out to the wall faces
     const sb = seedIn(bar, rpx), sa = seedIn(thin, 4);
     let m;
@@ -892,7 +1061,7 @@ async function autoRoom(seed){   // -> {pts} or {err}
           while (top) { const i = st[--top], x = i % W, y = (i - x) / W; comp.push(i);
             if (!bar[i] || x === 0 || y === 0 || x === W - 1 || y === H - 1) room = true;
             for (const j of [i - 1, i + 1, i - W, i + W]) if (j >= 0 && j < N && A.m[j] && !m[j] && !seen[j] && Math.abs(j % W - x) <= 1) { seen[j] = 1; st[top++] = j; } }
-          if (!room) comp.forEach(i => { m[i] = 1; });
+          if (!room && !comp.some(i => named[i])) comp.forEach(i => { m[i] = 1; });
         }
       }
     } else {   // narrower than the gap all over (a passage): the thin-line fill alone, if it stays closed
@@ -900,7 +1069,7 @@ async function autoRoom(seed){   // -> {pts} or {err}
       if (!A) return {err: "This space is narrower than the door gap (" + f3(o.gap) + " ft) and is not closed — lower ‘Close gaps’ in the auto-area settings (⚙), or draw it."};
       m = A.m;
     }
-    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
+    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2, named); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
     const loop = outerLoop(m, W, H); if (!loop || loop.length < 4) return {err: "No closed space found at that point."};
     let Q = dpClosed(loop.map(p => [x0 + p[0] * px, y0 + p[1] * px]), 1.6 * px);
     const sq = squareUp(Q, 3 * px, o.gap * k, Math.max(o.gap, o.pocket) * k);
@@ -958,6 +1127,7 @@ async function autoSettings(){
     <div class="fg"><label>Ignore marks smaller than (ft)</label><input type="text" id="aoMin" value="${f3(o.minLen)}"><span class="small">text, dashes, hatching (image: at least 1 ft)</span></div>
     <div class="fg"><label>Wall lines</label><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="small" id="aoWall">${o.wall ? "colour " + esc(o.wall.split("|")[0]) + ", " + esc(o.wall.split("|")[1]) + " pt and heavier" : "any drawing line"}</span>
       <button class="btn sm" id="aoPick" type="button">Pick a wall…</button>${o.wall ? '<button class="btn sm" id="aoClr" type="button">Any line</button>' : ""}</div></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoLay" style="width:auto"${o.layers ? " checked" : ""}> Use the PDF's layers: only walls, doors / windows, columns and railings bound a room (furniture, fixtures, glass screens, hatch, text and clouds ignored) — when the PDF has them</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDoor" style="width:auto"${o.skipDoors ? " checked" : ""}> Ignore door swings and door leaves</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDash" style="width:auto"${o.dashBound ? " checked" : ""}> Straight dashed lines bound a room (e.g. an open dress / wardrobe area) — untick if dashed lines on your drawings are beams overhead</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoShow" style="width:auto"${o.show ? " checked" : ""}> Show the detected walls (pink) after each auto area — to see why a room leaks</label></div></div>
@@ -965,7 +1135,7 @@ async function autoSettings(){
       const gap = parseFt($("aoGap").value), pocket = parseFt($("aoPk").value || "0"), minLen = parseFt($("aoMin").value || "0");
       if (!(gap > 0.2 && gap < 30)) return "Close gaps: a width in ft, e.g. 4";
       if (isNaN(pocket) || isNaN(minLen)) return "Enter decimal feet";
-      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked}; }, "aoGap");
+      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, layers: $("aoLay").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked}; }, "aoGap");
   if (v) { P.proj.auto = Object.assign({}, P.proj.auto || {}, v); if (!v.show) S.autoShow = null; save(); draw(); toast("Auto area settings saved"); }
 }
 document.addEventListener("click", e => {   // auto-area dialog: pick / clear the wall pen
@@ -1242,6 +1412,7 @@ function onMove(e){
     S.view = {s: ns, tx: c[0] - (S.pinch.c[0] - v.tx) * k, ty: c[1] - (S.pinch.c[1] - v.ty) * k}; applyView(); renderHi(); return;
   }
   if (S.drag && S.drag.pan) { S.view = {s: S.drag.v.s, tx: S.drag.v.tx + sp[0] - S.drag.sp[0], ty: S.drag.v.ty + sp[1] - S.drag.sp[1]}; applyView(); renderHi(); return; }
+  if (S.box) { S.box.b = sp; if (S.box.pending && dist(S.box.a, sp) > 6) { S.box.pending = false; S.sel = null; } if (!S.box.pending) { draw(); return; } }
   const {p, s} = cursorPoint(e, sp);
   S.cursor = p; S.snap = s; S.cursorScr = sp;
   if (S.drag && S.drag.vertex != null) { const it = P.proj.items.find(i => i.id === S.drag.item); if (it) { it.pts[S.drag.vertex] = p; S.drag.moved = true; refreshSheetSoon(); } }
@@ -1252,13 +1423,21 @@ function onMove(e){
   draw();
 }
 function onUp(e){
+  if (S.box) boxSelect();
   if (S.touches) { delete S.touches[e.pointerId]; if (Object.keys(S.touches).length < 2) S.pinch = null; }
   if (S.drag && S.drag.mark && S.drag.moved) { const m = (P.proj.marks || []).find(x => x.id === S.drag.mark), pts = m.pts; m.pts = S.drag.orig; mutate(() => { m.pts = pts; }); }
   if (S.drag && S.drag.vertex != null && S.drag.moved) { const it = P.proj.items.find(i => i.id === S.drag.item), pts = it.pts.slice(); it.pts = S.drag.orig; mutate(() => { it.pts = pts; if (it.qa === "checked") { it.qa = ""; it.qaNote = "outline changed after it was checked"; } }); }
   S.drag = null; stage().classList.remove("panning");
 }
 function selectAt(sp, e){
-  const mk = markAt(sp);
+  const shift = !!(e && e.shiftKey), mk = markAt(sp);
+  if (shift) {   // add to / take out of the selection
+    if (S.sel) S.multi.add(S.sel); if (S.selMark) S.multi.add(S.selMark); S.sel = null; S.selMark = null;
+    const id = mk ? mk.id : (hitItem(sp) || {}).id;
+    if (id) { if (S.multi.has(id)) S.multi.delete(id); else S.multi.add(id); } S.box = {a: sp, b: sp, add: true, pending: true};
+    refresh(); return;
+  }
+  S.multi.clear();
   if (mk) { S.selMark = mk.id; S.sel = null; S.drag = {mark: mk.id, sp, orig: mk.pts.map(p => p.slice())}; refresh(); return; }
   S.selMark = null;
   const items = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i));
@@ -1280,7 +1459,40 @@ function selectAt(sp, e){
   }
   S.sel = hit ? hit.id : null; S.selPt = hitPt;
   if (hit && hit.cond !== S.cond) { S.cond = hit.cond; }
+  S.box = {a: sp, b: sp, pending: true};   // a drag (not a click) from here selects with a box
   refresh();
+}
+function hitItem(sp){   // the measurement under a screen point (edge first, then the smallest area containing it)
+  const q = toBase(sp[0], sp[1]), items = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i));
+  let hit = null, hitA = Infinity;
+  for (let n = items.length - 1; n >= 0; n--) { const it = items[n], c = cond(it.cond); if (!c) continue;
+    if (c.type === "count") { if (it.pts.some(p => dist(toScr(p), sp) <= HIT_PX)) return it; continue; }
+    const closed = c.type === "area" || it.shape === "circle", poly = itemPoly(it);
+    for (let i = 1; i < poly.length + (closed ? 1 : 0); i++) if (distSeg(sp, toScr(poly[i - 1]), toScr(poly[i % poly.length])) <= HIT_PX) return it;
+    if (c.type === "area" && pointInPoly(q, poly)) { const a = polyArea(poly); if (a < hitA) { hit = it; hitA = a; } } }
+  return hit;
+}
+function boxSelect(){   // everything with a point inside the dragged box
+  const b = S.box; S.box = null; if (!b || b.pending) { draw(); return; }
+  const x0 = Math.min(b.a[0], b.b[0]), x1 = Math.max(b.a[0], b.b[0]), y0 = Math.min(b.a[1], b.b[1]), y1 = Math.max(b.a[1], b.b[1]);
+  if (x1 - x0 < 4 && y1 - y0 < 4) { draw(); return; }
+  const inB = p => { const q = toScr(p); return q[0] >= x0 && q[0] <= x1 && q[1] >= y0 && q[1] <= y1; };
+  if (!b.add) S.multi.clear();
+  P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i) && i.pts.some(inB)).forEach(i => S.multi.add(i.id));
+  (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo && m.pts.some(inB)).forEach(m => S.multi.add(m.id));
+  S.sel = null; S.selMark = null; refresh();
+  if (S.multi.size) toast(S.multi.size + " selected — Delete removes them · arrow keys move them · Ctrl+A selects all on the page", 3200);
+}
+function selectAll(){
+  S.multi = new Set(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).map(i => i.id).concat((P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo).map(m => m.id)));
+  S.sel = null; S.selMark = null; setTool("select"); refresh(); toast(S.multi.size + " selected on this page", 2000);
+}
+function selIds(){ const ids = new Set(S.multi); if (S.sel) ids.add(S.sel); if (S.selMark) ids.add(S.selMark); return ids; }
+function nudgeSel(dx, dy){   // arrow keys: move the selection (screen pixels)
+  const ids = selIds(); if (!ids.size) return false; const d = [dx / S.view.s, dy / S.view.s];
+  mutate(() => { P.proj.items.forEach(i => { if (ids.has(i.id)) i.pts = i.pts.map(p => [p[0] + d[0], p[1] + d[1]]); });
+    (P.proj.marks || []).forEach(m => { if (ids.has(m.id)) m.pts = m.pts.map(p => [p[0] + d[0], p[1] + d[1]]); }); });
+  return true;
 }
 function addCount(p){
   const c = cond(S.cond); if (!c) return;
@@ -1385,7 +1597,7 @@ function drawNow(){
   ((P.proj.viewports || {})[S.key] || []).forEach(v => { const a = toScr([v.r[0], v.r[1]]), b = toScr([v.r[2], v.r[3]]);
     h.push(`<rect x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="none" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`);
     h.push(label([a[0] + 6 + (v.name.length + 14) * 3.2, a[1] + 12], v.name + " · " + (v.ptPerFt ? v.text || "own scale" : "scale not set"), "#4b3b8f")); });
-  (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo).forEach(m => h.push(markSvg(m, toScr, 1)));
+  if (!S.hideMk) (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo).forEach(m => h.push(markSvg(m, toScr, 1)));
   if (S.typ) {   // typical copy: reference points, and the copies placed by them (dashed) before they are confirmed
     const T = S.typ;
     if (T.T && S.key !== T.src) T.mine.forEach(it => { const c = cond(it.cond), Q = (it.shape === "circle" ? itemPoly(it) : it.pts).map(T.T.f);
@@ -1397,9 +1609,10 @@ function drawNow(){
   if (["cloud", "hilite", "arrow"].indexOf(S.tool) >= 0 && S.draft.length && S.cursor) h.push(markSvg({type: S.tool, pts: [S.draft[0], S.cursor], color: "#d03b3b"}, toScr, 1));
   if (S.flash && S.flash.key === S.key && Date.now() < S.flash.until) { const q = toScr(S.flash.p); h.push(`<circle cx="${q[0]}" cy="${q[1] - 5}" r="26" fill="none" stroke="#ff2d55" stroke-width="3"><animate attributeName="r" values="18;30;18" dur="1s" repeatCount="indefinite"/></circle>`); }
   if (S.tool === "vp" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); h.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(123,92,224,.06)" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`); }
-  P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).forEach(it => {
+  if (S.box && !S.box.pending) { const a = S.box.a, b = S.box.b; h.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(75,59,143,.08)" stroke="#4b3b8f" stroke-width="1.5" stroke-dasharray="5 3"/>`); }
+  if (!S.hideMk) P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).forEach(it => {
     const c = cond(it.cond); if (!c) return;
-    const col = c.color, sel = it.id === S.sel, k = itemScale(it), pts0 = it.pts;
+    const col = c.color, sel = it.id === S.sel || S.multi.has(it.id), k = itemScale(it), pts0 = it.pts;
     if (it.shape === "circle") it = Object.assign({}, it, {pts: itemPoly(it), _pts: pts0});
     if (c.type === "count") {
       h.push(countSvg(c, it.pts, toScr, 1, sel ? S.selPt : -1));
@@ -1544,6 +1757,7 @@ function nameAreas(){
 /* delete what is selected: a markup, one count point, or a measurement (toolbar 🗑, Delete key) */
 function delSelected(){
   if (!P.proj) return;
+  if (S.multi.size) { const ids = new Set(S.multi), n = ids.size; mutate(() => { P.proj.items = P.proj.items.filter(i => !ids.has(i.id)); P.proj.marks = (P.proj.marks || []).filter(m => !ids.has(m.id)); }); S.multi.clear(); S.sel = null; S.selMark = null; refresh(); toast(n + " deleted — Ctrl+Z brings them back"); return; }
   if (S.selMark) { const id = S.selMark; mutate(() => { P.proj.marks = (P.proj.marks || []).filter(m => m.id !== id); }); S.selMark = null; refresh(); return; }
   const it = S.sel && P.proj.items.find(i => i.id === S.sel);
   if (!it) return toast("Select a measurement or markup first (Select V, then click it)");
@@ -1568,6 +1782,7 @@ function renderScaleChip(){
    not yet checked), From note (read from the drawing's note, not yet checked), Unknown */
 function scaleState(sc){
   if (!sc) return {k: "bad", ic: "✕", t: "Unknown"};
+  if (sc.doubt && !sc.verified) return {k: "bad", ic: "✕", t: "Doubtful — the drawing measures " + sc.doubt.label};
   if (sc.how === "inherited") return sc.verified ? {k: "ok", ic: "✓", t: "Inherited · verified"} : {k: "warn", ic: "⚠", t: "Inherited from " + keyName(sc.from)};
   if (sc.how === "calibrated") return {k: "ok", ic: "✓", t: "Calibrated"};
   return sc.verified ? {k: "ok", ic: "✓", t: "Verified"} : {k: "warn", ic: "⚠", t: "From note — not verified"};
@@ -1584,8 +1799,12 @@ function renderConds(){
   const L = $("condList");
   if (!P.proj) { L.innerHTML = ""; return; }
   if (!P.proj.conds.length) { L.innerHTML = '<div class="empty">A <b>condition</b> is what you are measuring — e.g. <i>9" brick wall</i>, <i>floor tiles</i>, <i>doors</i>. Create one, then draw on the drawing.<br><br><button class="btn pri" id="bFirstCond">+ New condition</button></div>'; return; }
-  L.innerHTML = P.proj.conds.map((c, i) => { const t = condTotals(c);
-    return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}</span></div>
+  S.condSel.forEach(id => { if (!cond(id)) S.condSel.delete(id); });
+  const ns = S.condSel.size, bar = `<div class="lyrbar"><label class="pk" style="flex:none" title="Tick all / none"><input type="checkbox" data-cka="1"${ns && ns === P.proj.conds.length ? " checked" : ""}></label>
+    ${ns ? `<b style="font-size:11.5px">${ns} ticked:</b><button class="btn sm" data-cact="show">Show</button><button class="btn sm" data-cact="hide">Hide</button><button class="btn sm" data-cact="only">Only these</button><button class="btn sm dng" data-cact="del">Delete</button>`
+      : `<button class="btn sm" data-cact="allon" title="Show every condition">All on</button><button class="btn sm" data-cact="alloff" title="Hide every condition">All off</button><span class="small">tick conditions to show / hide several</span>`}</div>`;
+  L.innerHTML = bar + P.proj.conds.map((c, i) => { const t = condTotals(c);
+    return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}</span></div>
       <div class="q">${f2(t.net)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; }).join("");
 }
 function renderSheet(){
@@ -1632,7 +1851,12 @@ function qaBadges(it){
 function pageName(it){ const f = P.proj.files.find(x => x.id === it.file); return (f ? f.name.replace(/\.pdf$/i, "") : "?") + " p." + it.page; }
 function kindName(it, c){ return it.kind === "open" ? "Opening" : c.type === "count" ? c.name : c.type === "area" ? (it.kind === "ded" ? "void" : "area") : (it.kind === "ded" ? "length" : "run"); }
 function renderProps(){
-  $("bDel").disabled = !(S.sel || S.selMark);
+  $("bDel").disabled = !(S.sel || S.selMark || S.multi.size);
+  if (S.multi.size && P.proj) { const its = P.proj.items.filter(i => S.multi.has(i.id)), nm = S.multi.size - its.length;
+    $("props").innerHTML = `<h4>${S.multi.size} selected <span style="font-weight:400;color:var(--muted);font-size:11px">${its.length} measurement${its.length === 1 ? "" : "s"}${nm ? " · " + nm + " markup" + (nm > 1 ? "s" : "") : ""} · Shift-click adds or removes · arrow keys move · Esc clears</span></h4>
+      <div class="row"><div class="fg" style="flex:2"><label>Move to condition</label><select data-mact="cond"><option value="">—</option>${P.proj.conds.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select></div>
+      <button class="btn" data-mact="check">✓ Mark checked</button><button class="btn" data-mact="hide">Hide their conditions</button><button class="btn dng" data-mact="del">Delete ${S.multi.size}</button></div>`;
+    $("props").classList.add("on"); return; }
   const el = $("props"), it = S.sel && P.proj ? P.proj.items.find(i => i.id === S.sel) : null;
   const mk = !it && S.selMark && P.proj ? (P.proj.marks || []).find(m => m.id === S.selMark) : null;
   if (mk) { el.innerHTML = `<h4>${esc(MARK_TOOLS[mk.type])} <span style="font-weight:400;color:var(--muted);font-size:11px">markup — not a quantity · drag to move</span></h4>
@@ -1837,7 +2061,7 @@ function cloudPath(a, b, r){   // scalloped rectangle between screen points a an
   return `M ${x0} ${y0} ` + side([x0, y0], [x1, y0]) + " " + side([x1, y0], [x1, y1]) + " " + side([x1, y1], [x0, y1]) + " " + side([x0, y1], [x0, y0]) + " Z";
 }
 function markSvg(m, T, z){   // T: base -> screen; z: px per screen unit (1 on screen)
-  const col = m.color || "#d03b3b", sel = m.id === S.selMark;
+  const col = m.color || "#d03b3b", sel = m.id === S.selMark || S.multi.has(m.id);
   if (m.type === "fence") { const d = m.pts.map(p => T(p).map(v => v.toFixed(1)).join(",")).join(" ");
     return `<polyline points="${d}" fill="none" stroke="#ff7a00" stroke-width="${(sel ? 4 : 3) * z}" stroke-dasharray="${6 * z} ${3 * z}" stroke-linecap="round"/>`; }
   if (m.type === "hilite") { const a = T(m.pts[0]), b = T(m.pts[1]); return `<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="#ffe14d" fill-opacity=".38" stroke="${sel ? "#0b0b0b" : "none"}"/>`; }
@@ -1988,11 +2212,13 @@ async function scaleDialog(){
     <p style="margin-top:12px"><b>Viewports</b> <span class="small">— parts of this sheet drawn at another scale (enlarged details, sections). Measurements inside one use its scale.</span></p>
     ${((P.proj.viewports || {})[S.key] || []).map(v => `<div class="cand"><b>${esc(v.name)}</b><span class="small">${v.ptPerFt ? esc(v.text || "1 ft = " + v.ptPerFt.toFixed(3) + " pt") : "scale not set"}</span><span style="flex:1"></span><button class="btn sm" data-vpcal="${esc(v.id)}">Calibrate</button><button class="btn sm dng" data-vpdel="${esc(v.id)}">Delete</button></div>`).join("") || '<p class="small">None on this page.</p>'}`;
   $("dlgT").textContent = "Page scale"; $("dlgB").innerHTML = body;
-  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="dlgVp">+ Viewport…</button>${sc ? '<button class="btn" id="dlgAll">Copy scale to…</button><button class="btn" id="dlgVer">Verify…</button>' : ""}<button class="btn pri" id="dlgCal">Calibrate…</button>`;
+  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="dlgVp">+ Viewport…</button>${sc ? '<button class="btn" id="dlgAll">Copy scale to…</button><button class="btn" id="dlgVer">Verify…</button>' : ""}${sc ? '<button class="btn" id="dlgChk" title="Compare the scale with the room sizes written on the drawing">Check vs room sizes</button>' : ""}<button class="btn pri" id="dlgCal">Calibrate…</button>`;
   $("dlgBack").classList.add("on");
   const close = () => $("dlgBack").classList.remove("on");
   $("dlgCancel").onclick = close;
   $("dlgCal").onclick = () => { close(); S.calVp = null; setTool("cal"); };
+  if ($("dlgChk")) $("dlgChk").onclick = async () => { close(); const sc2 = P.proj.scales[S.key]; if (sc2) { delete sc2.doubt; sc2.verified = false; } busy("Checking the scale against the room sizes…"); const r = await checkScale(S.key, true); busy("");
+    if (!r) toast("Not enough written room sizes on this page to check the scale — verify with a known dimension", 5000); else if (r.ok) toast("Scale agrees with " + r.ev.agree + " written room sizes (1 ft = " + r.ev.ptPerFt.toFixed(2) + " pt measured)", 5000); };
   $("dlgVp").onclick = () => { close(); setTool("vp"); toast("Click two opposite corners of the part drawn at another scale"); };
   $("dlgB").querySelectorAll("[data-vpdel]").forEach(b => b.onclick = () => { mutate(() => { P.proj.viewports[S.key] = P.proj.viewports[S.key].filter(v => v.id !== b.dataset.vpdel); }); close(); scaleDialog(); });
   $("dlgB").querySelectorAll("[data-vpcal]").forEach(b => b.onclick = () => { close(); S.calVp = b.dataset.vpcal; setTool("cal"); toast("Click both ends of a known dimension inside the viewport"); });
@@ -2663,7 +2889,12 @@ function wire(){
   const leftTab = t => { $("condList").style.display = t ? "none" : ""; $("layerList").style.display = t ? "" : "none"; $("tCond").classList.toggle("on", !t); $("tLay").classList.toggle("on", t); $("bNewCond").style.display = t ? "none" : ""; if (t) renderLayers(); };
   $("tCond").onclick = () => leftTab(false); $("tLay").onclick = () => leftTab(true);
   $("layerList").addEventListener("change", e => { if (e.target.dataset.lid) setLayer([e.target.dataset.lid], e.target.checked); });
-  $("layerList").addEventListener("click", e => { const b = e.target.closest("[data-lall]"); if (!b) return; const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; setLayer(Object.keys(cfg.getGroups()), b.dataset.lall === "1"); renderLayers(); });
+  $("layerList").addEventListener("click", e => { const pr = e.target.closest("[data-lpre]");
+    if (pr) { const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; const G = Object.entries(cfg.getGroups()), t = pr.dataset.lpre;
+      if (t === "clean") { setLayer(G.map(([id]) => id), true); setLayer(G.filter(([, g]) => !BOUND.has(layerRole(g.name))).map(([id]) => id), false); }
+      else setLayer(G.filter(([, g]) => { const r = layerRole(g.name); return t === "text" ? r === "text" || r === "unit" : t === "fixture" ? r === "fixture" || r === "glass" : r === t; }).map(([id]) => id), false);
+      renderLayers(); return; }
+    const b = e.target.closest("[data-lall]"); if (!b) return; const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; setLayer(Object.keys(cfg.getGroups()), b.dataset.lall === "1"); renderLayers(); });
   $("layerList").addEventListener("input", e => { if (e.target.id !== "lyrQ") return; const q = e.target.value.toLowerCase(); document.querySelectorAll("#layerList .lyr").forEach(l => { l.style.display = l.dataset.name.includes(q) ? "" : "none"; }); });
   $("bCompare").onclick = () => P.proj && compareDialog();
   const view = b => { S.billView = b; $("sheet").style.display = b ? "none" : ""; $("bill").style.display = b ? "" : "none"; $("vSheet").classList.toggle("on", !b); $("vBill").classList.toggle("on", b); if (b) renderBill(); };
@@ -2687,12 +2918,14 @@ function wire(){
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
   $("aiDetails").onclick = () => agentCmd("drawing details");
-  $("agRooms").onclick = () => agentCmd("measure all rooms"); $("agWalls").onclick = () => wallsDialog(); $("agTags").onclick = () => agentCmd("count all tags");
+  $("agRooms").onclick = () => agentCmd("measure all rooms"); $("agUnit").onclick = () => unitDialog(); $("agWalls").onclick = () => wallsDialog(); $("agTags").onclick = () => agentCmd("count all tags");
   $("aiRead").onclick = () => aiSend($("aiIn").value.trim() || "Measure the floor area of every room in this view.", true).then(() => { $("aiIn").value = ""; });
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
   $("bLw").onclick = () => setThin(!S.thin);
   $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => labelDialog();
+  $("bHideMk").onclick = () => { S.hideMk = !S.hideMk; $("bHideMk").classList.toggle("on", !S.hideMk); $("bHideMk").title = S.hideMk ? "Markups hidden — click to show all" : "Hide all markups (measurements and notes) to see the drawing"; draw(); toast(S.hideMk ? "All markups hidden" : "Markups shown", 1500); };
+  $("bLayers").onclick = () => { S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };
   $("bDel").onclick = () => delSelected();
   $("bUndo").onclick = undo; $("bRedo").onclick = redo;
   $("bExport").onclick = exportMenu;
@@ -2717,6 +2950,15 @@ function wire(){
   $("condList").addEventListener("click", e => {
     if (e.target.id === "bFirstCond") return editCond(null);
     const ed = e.target.closest("[data-edit]"); if (ed) return editCond(cond(ed.dataset.edit));
+    const ck = e.target.closest("[data-ck]"); if (ck) { if (ck.checked) S.condSel.add(ck.dataset.ck); else S.condSel.delete(ck.dataset.ck); renderConds(); return; }
+    const cka = e.target.closest("[data-cka]"); if (cka) { S.condSel = cka.checked ? new Set(P.proj.conds.map(c => c.id)) : new Set(); renderConds(); return; }
+    const ca = e.target.closest("[data-cact]"); if (ca) { const a = ca.dataset.cact, sel = S.condSel;
+      if (a === "del") { const n = P.proj.items.filter(i => sel.has(i.cond)).length;
+        ask("Delete " + sel.size + " condition" + (sel.size > 1 ? "s" : ""), `<p>Delete ${[...sel].map(id => "<b>" + esc(cond(id).name) + "</b>").join(", ")}${n ? ` and their <b>${n}</b> measurement${n > 1 ? "s" : ""}` : ""}? Undo (Ctrl+Z) brings them back.</p>`, "Delete").then(ok => { if (!ok) return;
+          mutate(() => { P.proj.items = P.proj.items.filter(i => !sel.has(i.cond)); P.proj.conds = P.proj.conds.filter(c => !sel.has(c.id)); }); if (sel.has(S.cond)) S.cond = (P.proj.conds[0] || {}).id || null; S.condSel = new Set(); refresh(); });
+        return; }
+      P.proj.conds.forEach(c => { c.hidden = a === "allon" ? false : a === "alloff" ? true : a === "show" ? (sel.has(c.id) ? false : c.hidden) : a === "hide" ? (sel.has(c.id) ? true : c.hidden) : !sel.has(c.id); });
+      if (S.sel && hiddenItem(P.proj.items.find(i => i.id === S.sel) || {})) S.sel = null; save(); refresh(); return; }
     const ey = e.target.closest("[data-eye]"); if (ey) { const c = cond(ey.dataset.eye); c.hidden = !c.hidden; if (c.hidden && S.sel && P.proj.items.some(i => i.id === S.sel && i.cond === c.id)) S.sel = null; save(); refresh(); return; }
     const co = e.target.closest("[data-color]"); if (co) return colorPop(co, cond(co.dataset.color));
     const c = e.target.closest("[data-cond]"); if (!c) return;
@@ -2752,7 +2994,16 @@ function wire(){
       else it[f] = e.target.value;
     });
   });
+  $("props").addEventListener("change", e => {   // a multiple selection: move to another condition
+    if (e.target.dataset.mact !== "cond" || !e.target.value) return; const c = cond(e.target.value), ids = selIds();
+    const bad = P.proj.items.filter(i => ids.has(i.id) && (cond(i.cond) || {}).type !== c.type).length;
+    mutate(() => P.proj.items.forEach(i => { if (ids.has(i.id) && (cond(i.cond) || {}).type === c.type) i.cond = c.id; }));
+    toast("Moved to " + c.name + (bad ? " — " + bad + " of another kind (area / length / count) left as they were" : ""), 3500); });
   $("props").addEventListener("click", e => {
+    const ma = e.target.closest("[data-mact]");
+    if (ma && ma.dataset.mact === "del") return delSelected();
+    if (ma && ma.dataset.mact === "check") return setQa(P.proj.items.filter(i => S.multi.has(i.id)), "checked");
+    if (ma && ma.dataset.mact === "hide") { const cs = new Set(P.proj.items.filter(i => S.multi.has(i.id)).map(i => i.cond)); P.proj.conds.forEach(c => { if (cs.has(c.id)) c.hidden = true; }); S.multi.clear(); save(); refresh(); return; }
     const a = e.target.closest("[data-act]"); if (!a) return;
     if (a.dataset.act === "delMark") { const id = S.selMark; mutate(() => { P.proj.marks = (P.proj.marks || []).filter(m => m.id !== id); }); S.selMark = null; refresh(); return; }
     const it = P.proj.items.find(i => i.id === S.sel); if (!it) return;
@@ -2766,11 +3017,14 @@ function wire(){
     if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); return e.shiftKey ? redo() : undo(); }
     if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); return redo(); }
     if (e.altKey && S.cmp && /^Arrow/.test(e.key)) { e.preventDefault(); const st2 = (e.shiftKey ? 10 : 1) / S.view.s; S.cmp.dx += e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0; S.cmp.dy += e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0; clearTimeout(S.cmpT); S.cmpT = setTimeout(() => { renderLow(); renderHi(true); }, 120); return; }
+    if ((e.ctrlKey || e.metaKey) && k === "a") { e.preventDefault(); return selectAll(); }
+    if (!e.altKey && /^Arrow/.test(e.key) && selIds().size) { e.preventDefault(); const st2 = e.shiftKey ? 10 : 1; nudgeSel(e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0, e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0); return; }
     if ((e.ctrlKey || e.metaKey) && k === "c") { e.preventDefault(); return copySel(); }
     if ((e.ctrlKey || e.metaKey) && k === "v") { e.preventDefault(); return pasteClip(); }
     if ((e.ctrlKey || e.metaKey) && k === "f") { e.preventDefault(); $("findIn").focus(); $("findIn").select(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === " ") { S.space = true; stage().classList.add("pan"); e.preventDefault(); return; }
+    if (e.key === "Escape" && (S.multi.size || S.box)) { S.multi.clear(); S.box = null; refresh(); return; }
     if (e.key === "Escape") { if (S.autoShow) { S.autoShow = null; } if (S.pickWall) { S.pickWall = false; hint(); } else if (S.draft.length) { S.draft = []; } else if (S.measures.length || S.measure) { S.measures = []; S.measure = null; } else if (S.sel) { S.sel = null; } else setTool("select"); refresh(); return; }
     if (e.key === "Enter") {
       if (S.tool === "measure" && S.verify && S.measure && S.measure.length > 1) return verifyMeasure();
@@ -2779,7 +3033,7 @@ function wire(){
     }
     if (e.key === "Backspace" || e.key === "Delete") {
       if (S.draft.length) { S.draft.pop(); if (S.tool === "measure") S.measure = S.draft.slice(); draw(); e.preventDefault(); return; }
-      if (S.selMark || S.sel) { e.preventDefault(); delSelected(); }
+      if (S.selMark || S.sel || S.multi.size) { e.preventDefault(); delSelected(); }
       return;
     }
     const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", c: "count", e: "circle", n: "note", u: "cloud", d: "ded", o: "open", m: "measure", k: "cal"};
@@ -2814,6 +3068,7 @@ const AI_SYSTEM = `You are a quantity surveyor's takeoff assistant inside a PDF 
 FIRST, UNDERSTAND THE TASK. If the instruction is unclear or a needed fact is missing — which items, which part of the drawing, which condition, a wall height or slab thickness for Sft / cft, whether openings are deducted — ask ONE short, specific question and stop (call no tools). Offer the likely choices in the question. Never guess a height, thickness, rate or size; if the drawing shows it, say where you read it.
 
 THEN USE THE SPECIALISTS — they work from the PDF's own vector lines and text, so they are fast and exact:
+- measure_unit: every room of one apartment by its number on the plan (e.g. 107), with the apartment total.
 - measure_rooms: floor areas of rooms named on the drawing (auto-traced from inside the walls, checked against the written size). Use it first for any room / floor area task.
 - detect_walls: wall runs from their two parallel face lines (CAD PDFs). Give the thickness (9" = 0.75 ft, 13.5" = 1.125, 4.5" = 0.375); list_wall_thicknesses tells you what is drawn. Openings are bridged — they are deducted separately.
 - count_tags: door / window / any tag written on the drawing (D1, W2, V1…), counted from the text.
@@ -2846,6 +3101,8 @@ const AI_TOOLS = [
      points: {type: "array", items: {type: "object", additionalProperties: false, required: ["x", "y"], properties: {x: {type: "number"}, y: {type: "number"}}}}}}},
   {name: "measure_rooms", description: "Specialist: measure the floor area of rooms named on this PDF page — each is auto-traced from inside its walls at its name and checked against the size written under it. Returns each room's area in Sft, the written size and whether it needs checking. Leave names empty for every room.",
    input_schema: {type: "object", properties: {names: {type: "array", items: {type: "string"}, description: "Room names to measure (e.g. [\"BEDROOM\", \"LOUNGE\"]); empty = all rooms"}}}},
+  {name: "measure_unit", description: "Specialist: measure every room of one apartment by its number written on the plan (e.g. \"107\"): rooms belong to the nearest apartment number; each room is traced and checked, and the apartment total is compared with its written area.",
+   input_schema: {type: "object", required: ["number"], properties: {number: {type: "string"}}}},
   {name: "list_wall_thicknesses", description: "Specialist: the wall thicknesses drawn in the view (from pairs of parallel face lines), with about how many ft of wall each. Use before detect_walls when the thickness is not given.",
    input_schema: {type: "object", properties: {}}},
   {name: "detect_walls", description: "Specialist: find every wall of the given thickness in the view (or page) from its two parallel face lines and mark it on its centre line in a length condition; openings are bridged (deducted separately); L corners meet on the centre line, T-junctions stop at the face. Returns runs and total length ft. Running it again replaces its earlier runs.",
@@ -2918,6 +3175,7 @@ async function aiRunTool(b){
   const V = AI.view, k = curScale(), inp = b.input || {};
   if (!V || V.key !== S.key) return {err: "The page changed — ask the user to press ‘Read this view’ again."};
   if (!k) return {err: "The page scale is not set; ask the user to set it (K) first."};
+  if (scaleDoubt()) return {err: "The page scale is doubtful (the drawing measures " + scaleDoubt().label + ", not the note) — ask the user to settle it before measuring."};
   const add = (name, pts) => { const c = aiAreaCond(), id = uid("I"); mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(name || "").slice(0, 60)}); }); return id; };
   if (b.name === "trace_room") {
     const x = +inp.x, y = +inp.y; if (!(x >= 0 && y >= 0 && x <= V.W && y <= V.H)) return {err: "Point is outside the image."};
@@ -2933,6 +3191,7 @@ async function aiRunTool(b){
     return {ok: {id, name: nm, area_sft: +(polyArea(pts) / k / k).toFixed(2), corners_snapped: snapped + " of " + pts.length}};
   }
   if (b.name === "measure_rooms") { const r = await agentMeasure((Array.isArray(inp.names) ? inp.names : []).join(" ")); return r && r.error ? {err: r.error} : r ? {ok: r} : {err: "No rooms measured."}; }
+  if (b.name === "measure_unit") { const r = await agentUnit(String(inp.number || "")); return r && r.error ? {err: r.error} : r ? {ok: r} : {err: "Nothing measured."}; }
   if (b.name === "list_wall_thicknesses") return {ok: {in_view: wallThicknesses(viewRect()).map(w => ({thickness_ft: +w.t.toFixed(3), inches: Math.round(w.t * 24) / 2, wall_length_ft: Math.round(w.len)}))}};
   if (b.name === "detect_walls") { const r = wallsAgent({t: +inp.thickness_ft, cond: inp.condition || null, h: +inp.height_ft || 0, page: !!inp.whole_page, bridge: inp.bridge_ft == null ? 6 : +inp.bridge_ft}); refresh(); return r.error ? {err: r.error} : {ok: r}; }
   if (b.name === "count_tags") { const r = await agentCount(String(inp.what || "").toLowerCase().replace(/^all\s+/, "")); return r && r.error ? {err: r.error} : r && r.counts ? {ok: r} : {err: "Nothing counted."}; }
@@ -2972,7 +3231,7 @@ async function aiRunTool(b){
   }
   return {err: "Unknown tool " + b.name};
 }
-const SPECIALISTS = ["measure_rooms", "detect_walls", "count_tags"];
+const SPECIALISTS = ["measure_rooms", "detect_walls", "count_tags", "measure_unit"];
 function aiToolMsg(name, inp, out){   // one line in the panel for a tool step
   const o = out.ok, nm = n => `<span class="small">(${esc(n.replace(/_/g, " "))})</span>`;
   if (!o) return `${esc(inp.name || name.replace(/_/g, " "))}: ${esc(out.err)}`;
@@ -3058,7 +3317,7 @@ async function aiSendPlan(smp, text){
   try {
     AI.view = await aiSnapshot(1150000);
     const blob = await (await fetch("data:image/png;base64," + AI.view.data)).blob();
-    const order = ["measure_rooms", "detect_walls", "count_tags", "list_wall_thicknesses", "trace_room", "draw_area", "draw_length", "add_counts", "delete_area", "find_text", "set_condition", "list_measured"];
+    const order = ["measure_rooms", "measure_unit", "detect_walls", "count_tags", "list_wall_thicknesses", "trace_room", "draw_area", "draw_length", "add_counts", "delete_area", "find_text", "set_condition", "list_measured"];
     const tools = AI_TOOLS.slice().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).slice(0, AI.toolMax || 99).map(t => ({name: t.name, description: t.description, inputSchema: t.input_schema,
       execute: async input => {
         if (ctl.signal.aborted) throw new Error("Stopped by the user.");
@@ -3164,7 +3423,7 @@ function aiToggle(on){
    Tasks: measure every room (auto area seeded at its name, checked against the written size), count tags, schedule. */
 const ROOM_RX = /\b(MASTER\s+)?(BED\s*ROOM|BED|LOUNGE|LIVING|DRAWING|DINING|FAMILY|TV|KITCHEN|KIT|PANTRY|BATH|TOILET|W\.?C|POWDER|WASH|DRESS(ING)?|WARDROBE|W\.?I\.?C|STORE|LAUNDRY|UTILITY|SERVANT|MAID|DRIVER|GUARD|LOBBY|FOYER|ENTRANCE|PASSAGE|CORRIDOR|GALLERY|BALCONY|TERRACE|VERANDAH?|PORCH|LAWN|GARAGE|PARKING|STUDY|OFFICE|PRAYER|GYM|HALL|RECEPTION|STAIR(CASE|S)?|LIFT|LOBBY|DUCT|SHAFT|ELECTRIC(AL)?\s+ROOM|PLANT|SHOP|ROOM)\b/i;
 const SIZE_RX = /(\d+(?:\.\d+)?\s*'\s*-?\s*(?:\d+(?:\.\d+)?)?(?:\s*\d\/\d)?\s*(?:"|'')?)\s*[xX×*]\s*(\d+(?:\.\d+)?\s*'\s*-?\s*(?:\d+(?:\.\d+)?)?(?:\s*\d\/\d)?\s*(?:"|'')?)/;
-const TAG_RX = /^(D|W|V|DW|SD|FD|WD|MD|GD|CW|SW|V)\s*-?\s*(\d{1,3}[A-Z]?)$/i;
+const TAG_RX = /^(D|W|V|DW|SD|FD|WD|MD|GD|CW|SW|V)\s*-?\s*(\d{1,3}[A-Z]?)\s*(['’′]{0,2})$/i;   // W37 and W37' (primed: another size of the type) are different tags
 function textLines(T){   // pdf text pieces -> lines {s, x, y, w, h, parts}
   const t = T.slice().sort((a, b) => a.y - b.y || a.x - b.x), out = [];
   t.forEach(p => {
@@ -3172,7 +3431,7 @@ function textLines(T){   // pdf text pieces -> lines {s, x, y, w, h, parts}
     if (L) { L.s += (p.x - (L.x + L.w) > 0.25 * L.h && !/\s$/.test(L.s) ? " " : "") + p.s; L.w = Math.max(L.w, p.x + p.w - L.x); L.parts.push(p); }
     else out.push({s: p.s, x: p.x, y: p.y, w: p.w || p.s.length * p.h * 0.55, h: p.h, parts: [p], tag: TAG_RX.test(p.s.trim().replace(/\s+/g, ""))});   // a door / window tag stays on its own
   });
-  out.forEach(l => { l.s = l.s.replace(/\s+/g, " ").trim(); });
+  out.forEach(l => { l.s = l.s.replace(/½/g, " 1/2").replace(/¼/g, " 1/4").replace(/¾/g, " 3/4").replace(/⅛/g, " 1/8").replace(/\s+/g, " ").trim(); });   // 13'-5½" is 13'-5 1/2"
   return out;
 }
 async function drawingFacts(fileId, pageNo){
@@ -3182,7 +3441,7 @@ async function drawingFacts(fileId, pageNo){
   lines.forEach(l => {
     const u = l.s.toUpperCase();
     let m;
-    if ((m = TAG_RX.exec(u.replace(/\s+/g, "")))) { const k = m[1].toUpperCase() + m[2].toUpperCase(); (tags[k] = tags[k] || []).push([l.x + l.w / 2, l.y - l.h / 2]); return; }
+    if ((m = TAG_RX.exec(u.replace(/\s+/g, "")))) { const k = m[1].toUpperCase() + m[2].toUpperCase() + (m[3] ? "'".repeat(m[3].length) : ""); (tags[k] = tags[k] || []).push([l.x + l.w / 2, l.y - l.h / 2]); return; }
     if ((m = /SCALE\s*[:=-]?\s*(\d+\/\d+"\s*=\s*1'\s*-?\s*0"?|1"\s*=\s*\d+'\s*-?\s*0"?|1\s*:\s*\d+)/i.exec(l.s))) scales.add(m[1].replace(/\s+/g, ""));
     if ((m = /(?:^|\s)([+\-±]\s*\d+'\s*-\s*\d+(?:\s*\d\/\d)?"?)/.exec(l.s)) || /\b(F\.?F\.?L|LVL|LEVEL)\b/i.test(l.s)) levels.add((m ? m[1] : l.s).replace(/\s+/g, " ").trim().slice(0, 40));
     if ((m = /\b(TYPE\s*[-–]?\s*[A-Z0-9]{1,3}|\d\s*BED(ROOM)?S?\b(?!\s*ROOM\s*\d)|STUDIO|PENTHOUSE|\d{3,5}\s*S\.?\s*FT|\d{3,5}\s*SQ\.?\s*FT)/i.exec(l.s)) && !SIZE_RX.test(l.s)) types.add(l.s.slice(0, 50));
@@ -3197,6 +3456,8 @@ async function drawingFacts(fileId, pageNo){
       rooms.push({name: l.s.replace(SIZE_RX, "").trim(), x: l.x, y: l.y, w: l.w, h: l.h, size: z.txt, sft: z.a, sizeY: null});
     }
   });
+  const uniq = []; rooms.forEach(r => { if (!uniq.some(q => q.name === r.name && Math.abs(q.x - r.x) < 1.5 * r.h && Math.abs(q.y - r.y) < 1.5 * r.h)) uniq.push(r); });   // the same name drawn twice (bold) is one room
+  rooms.length = 0; uniq.forEach(r => rooms.push(r));
   return {rooms, tags, levels: [...levels], types: [...types], scales: [...scales], notes: [...notes], textCount: lines.length};
 }
 async function agentCmd(text){
@@ -3207,6 +3468,9 @@ async function agentCmd(text){
     if (/^(help|\?)$/.test(t)) return agentHelp();
     if (/measure|area|trace/.test(t)) { const w = t.replace(/\b(measure|auto|area|areas|trace|all|every|each|the|rooms?|of|floor|please|on|this|page)\b/g, " ").trim(); return agentMeasure(w); }
     if (/count|tag/.test(t)) { const w = t.replace(/\b(count|all|every|each|the|tags?|of|on|this|page|please|marks?)\b/g, " ").trim(); return agentCount(w); }
+    let um = /(?:apartment|appartment|apt|unit|flat)\s*(?:no\.?|#)?\s*([0-9]{1,4}[a-z]?)/.exec(t) || /^\s*(?:measure\s+)?([0-9]{2,4}[a-z]?)\s*$/.exec(t);
+    if (um) return agentUnit(um[1]);
+    if (/apartment|unit|flat/.test(t)) return unitDialog();
     if (/wall|masonry|brick|block\s*work/.test(t)) return agentWallsCmd(t);
     if (/schedule|list|table|export|csv/.test(t)) return agentSchedule();
     if (/detail|read|what|info|summary|overview/.test(t)) return agentDetails();
@@ -3225,6 +3489,7 @@ function agentHelp(){
     • <i>drawing details</i> — rooms, sizes, door/window tags, levels, scale, unit types, stairs<br>
     • <i>measure all rooms</i> or <i>measure bedroom</i> — auto area at each room name, checked against its written size<br>
     • <i>count doors</i>, <i>count windows</i>, <i>count D1</i>, <i>count all tags</i><br>
+    • <i>apartment 107</i> (or just <i>107</i>) — every room of one apartment, with its total<br>
     • <i>walls 9"</i>, <i>walls 4.5"</i>, or <i>walls</i> — wall runs found from their two parallel face lines (vector PDFs)<br>
     • <i>room schedule</i> — the room list as a table you can copy`);
 }
@@ -3251,40 +3516,93 @@ async function agentDetails(){
     b.parentElement.firstElementChild.textContent = b.parentElement.firstElementChild.textContent.replace("☐", "☑");
     if (id === "measure") agentMeasure(""); else if (id === "schedule") agentSchedule(); else if (id.startsWith("count:")) agentCount(id.slice(6).toLowerCase()); });
 }
-async function agentMeasure(filter){
+const sameRoom = (a, b) => !!a && !!b && a.name === b.name && Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;   // one label, whichever list it came from
+async function agentMeasure(filter, only){   // only: these rooms (an apartment), whatever the view
   const k = curScale(); if (!k) { aiLog("err", "Set the page scale first (K) — then I can measure."); return {error: "page scale not set"}; }
+  if (scaleDoubt()) { aiLog("err", "The page scale is doubtful: the drawing measures " + esc(scaleDoubt().label) + ", not the note. Settle it first (scale chip)."); return {error: "page scale doubtful — the drawing measures " + scaleDoubt().label + "; ask the user to settle the scale first"}; }
   const F = await drawingFacts(S.fileId, S.pageNo);
   const words = filter.toLowerCase().split(/\s+/).filter(Boolean).map(w => w.replace(/s$/, ""));
-  const rooms = F.rooms.filter(r => !words.length || words.some(w => r.name.toLowerCase().replace(/\s+/g, "").includes(w.replace(/\s+/g, ""))));
+  let rooms = F.rooms.filter(r => !words.length || words.some(w => r.name.toLowerCase().replace(/\s+/g, "").includes(w.replace(/\s+/g, ""))));
+  const vr = viewRect(), zoomed = (vr[2] - vr[0]) * (vr[3] - vr[1]) < 0.6 * S.base.width * S.base.height, all = rooms.length;
+  if (only) rooms = only; else if (zoomed) rooms = rooms.filter(r => { const x = r.x + r.w / 2, y = r.y - r.h / 2; return x >= vr[0] && x <= vr[2] && y >= vr[1] && y <= vr[3]; });
+  if (!only && zoomed && all && !rooms.length) { aiLog("err", "No room names in the part on screen — pan to the rooms, or zoom out (Fit) for the whole page."); return {error: "no rooms in the view"}; }
+  if (!only && zoomed && rooms.length < all) aiLog("bot", `Measuring the <b>${rooms.length}</b> rooms on screen (of ${all} on the page) — press <b>Fit</b> first for all of them.`);
   if (!rooms.length) { aiLog("err", F.rooms.length ? "No room name on this page matches “" + esc(filter) + "”." : "I found no room names in this page's text."); return {error: F.rooms.length ? "no room matches " + filter + "; rooms on the page: " + F.rooms.map(r => r.name).join(", ") : "no room names in the page text (scanned?) — use trace_room / draw_area"}; }
   const done = new Set(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo).map(i => (i.label || "").toLowerCase()));
   const c = aiAreaCond(), got = [], res = []; let ok = 0, chk = 0, same2 = 0;
   for (const [n, r] of rooms.entries()) {
     busy(`Measuring ${n + 1} of ${rooms.length}: ${r.name}…`); await new Promise(q => setTimeout(q, 10));
-    const cx = r.x + r.w / 2, below = r.sizeY != null ? r.sizeY : r.y;
-    const seeds = [[cx, r.y - r.h * 1.7], [cx, below + r.h * 0.9], [r.x - r.h, r.y - r.h / 2], [r.x + r.w + r.h, r.y - r.h / 2], [cx, below + r.h * 2.5], [cx, r.y - r.h * 3.5]];
-    let best = null;
+    const cx = r.x + r.w / 2, below = r.sizeY != null ? r.sizeY : r.y, lc = [cx, r.y - r.h / 2];   // lc: the name itself — the room it is written in is the one wanted
+    const seeds = [lc, [cx, r.y - r.h * 1.7], [cx, below + r.h * 0.9], [r.x - r.h, r.y - r.h / 2], [r.x + r.w + r.h, r.y - r.h / 2], [cx, below + r.h * 2.5], [cx, r.y - r.h * 3.5]];
+    if (got.some(o => o.with.some(q => sameRoom(q, r)))) { const o = got.find(g2 => g2.with.some(q => sameRoom(q, r))); res.push({name: r.name, shared_with: o.name}); aiLog("tool", `${esc(r.name)}: <span class="small">in the same open space as <b>${esc(o.name)}</b> — measured with it</span>`); continue; }
+    let best = null; const dd = sizeDims(r.size), tried = [];
+    const over = Object.assign({own: lc}, dd ? {gap: Math.max(2.5, Math.min(autoOpt().gap, 0.6 * Math.min(dd[0], dd[1])))} : {});   // a 5 ft bath: close gaps up to 3 ft, not 4
     for (const sd of seeds) {
-      const res = await autoRoom(sd); if (!res.pts) continue;
+      const res = await autoRoom(sd, over); if (!res.pts) { if (/leaks/.test(res.err || "") && tried.length === 0 && seeds.indexOf(sd) >= 1) break; continue; }
       const a = polyArea(res.pts) / k / k; if (!(a > 4)) continue;
-      const err = r.sft ? Math.abs(a - r.sft) / r.sft : 0;
+      const own = pointInPoly(lc, res.pts);   // an outline that misses the room's own name is a neighbouring compartment (the shower of a bath, a wardrobe)
+      const err = (r.sft ? Math.abs(a - r.sft) / r.sft : 0) + (own ? 0 : 10);
       if (!best || err < best.err) best = {pts: res.pts, a, err};
-      if (err <= 0.05) break;
+      if (err <= 0.05 || tried.some(t => Math.abs(t - a) / a < 0.005)) break;   // within 5 %, or the same outline twice: the room as drawn
+      tried.push(a);
     }
+    if (best && best.err >= 10) best.err -= 10;
     if (!best) { res.push({name: r.name, error: "could not close the room"}); aiLog("err", `${esc(r.name)}: auto area could not close the room — use the Fence tool on the open side, or draw it`); continue; }
     const cen = q => [q.reduce((a, v) => a + v[0], 0) / q.length, q.reduce((a, v) => a + v[1], 0) / q.length];
     const same = got.find(o => Math.abs(o.a - best.a) / best.a < 0.005 && dist(cen(o.pts), cen(best.pts)) < k);
     if (same) { same2++; res.push({name: r.name, error: "leaked into " + same.name}); aiLog("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${f2(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
-    got.push({name: r.name, a: best.a, pts: best.pts});
-    const dup = done.has(r.name.toLowerCase());
-    mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, ai: true, label: r.name.slice(0, 60)}); });
-    const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;
-    res.push({name: r.name, area_sft: +best.a.toFixed(2), written_sft: r.sft ? +r.sft.toFixed(2) : null, check: !!bad});
-    aiLog("tool", `${esc(r.name)}: <b>${f2(best.a)} Sft</b> <span class="small">${r.sft ? "written " + esc(r.size) + " = " + f2(r.sft) + " Sft" + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > r.sft ? "+" : "") + f2(best.a - r.sft) + ")</b>" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
+    const inside = F.rooms.filter(q => q !== r && pointInPoly([q.x + q.w / 2, q.y - q.h / 2], best.pts));
+    const hit = inside.find(q => q.name !== r.name && got.some(o => sameRoom(o.room, q)));   // runs into a room already measured on its own: a leak, not open plan
+    if (hit) { same2++; res.push({name: r.name, error: "leaked into " + hit.name}); aiLog("err", `${esc(r.name)}: runs on into <b>${esc(hit.name)}</b> (already measured) — an opening is not closed. Draw a <b>Fence</b> across it and run again, or draw this room.`); continue; }
+    const dupes = inside.filter(q => q.name === r.name);   // the same name twice in one room (text on two layers): one room
+    const others = inside.filter(q => q.name !== r.name && !got.some(o => o.with.some(w => sameRoom(w, q))));   // other names in the same space: open plan
+    const nm = [r.name].concat(others.map(q => q.name)).join(" + ").slice(0, 60), wrt = r.sft + others.reduce((a, q) => a + (q.sft || 0), 0);
+    if (others.length && r.sft) best.err = Math.abs(best.a - wrt) / wrt;
+    got.push({name: nm, a: best.a, pts: best.pts, with: inside.filter(q => !got.some(o => sameRoom(o.room, q))), room: r});
+    const dup = done.has(nm.toLowerCase());
+    mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, ai: true, label: nm}); });
+    const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;   // best.err is against the written sizes of every room in the space
+    res.push({name: nm, area_sft: +best.a.toFixed(2), written_sft: r.sft ? +wrt.toFixed(2) : null, check: !!bad, open_plan_with: others.map(q => q.name)});
+    aiLog("tool", `${esc(nm)}: <b>${f2(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? f2(wrt) + " Sft together" : esc(r.size) + " = " + f2(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + f2(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
   }
   busy(""); refresh();
   aiLog("bot", `Measured ${ok + chk} of ${rooms.length} into <b>${esc(c.name)}</b>${chk ? ` — <b>${chk} to check</b> (more than 5% off the written size: fix with Fence, or the room is not a rectangle)` : ""}${same2 ? ` — <b>${same2}</b> leaked into a neighbour, not added` : ""}. Undo (Ctrl+Z) removes them one by one.`);
   return {condition: c.name, rooms: res};
+}
+/* apartments: the unit numbers written on the plan — a 2-4 digit number with TYPE-… / n BED / … SFT under it. Each room
+   belongs to the nearest unit number. */
+async function unitsOf(f, pg){
+  const T = await pageTexts(f, pg), L = textLines(T);
+  const nums = T.filter(t => /^\s*\d{2,4}[A-Z]?\s*$/i.test(t.s)).map(t => ({s: t.s, x: t.x, y: t.y, w: t.w || t.s.length * t.h * 0.55, h: t.h}));   // the raw pieces: a number beside another word is still a unit number
+  return nums.map(n => {
+    const near = L.filter(l => Math.abs(l.y - n.y) > 0.5 * n.h && Math.abs(l.x + l.w / 2 - (n.x + n.w / 2)) < 4 * n.h && l.y > n.y && l.y - n.y < 7 * n.h).sort((a, b) => a.y - b.y);
+    const type = near.filter(l => /TYPE|BED|STUDIO|PENT|SHOP|OFFICE/i.test(l.s)).map(l => l.s).join(" · "), sm = near.map(l => /(\d{3,6})\s*S\.?\s*F\.?T/i.exec(l.s)).find(Boolean);
+    return type || sm ? {no: n.s.trim().toUpperCase(), x: n.x + n.w / 2, y: n.y - n.h / 2, type, sft: sm ? +sm[1] : 0} : null; }).filter(Boolean);
+}
+async function agentUnit(no){
+  if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
+  const U = await unitsOf(S.fileId, S.pageNo); if (!U.length) { aiLog("err", "No apartment numbers found on this page (a number with TYPE- / BED / SFT written under it). Zoom to the apartment and use 🏠 Rooms instead."); return {error: "no unit numbers on this page"}; }
+  const u = U.find(x => x.no === String(no).trim().toUpperCase()); if (!u) { aiLog("err", `No apartment ${esc(no)} on this page. Apartments here: ${U.map(x => esc(x.no)).join(", ")}.`); return {error: "unit not found; units on the page: " + U.map(x => x.no).join(", ")}; }
+  const F = await drawingFacts(S.fileId, S.pageNo), cen = r => [r.x + r.w / 2, r.y - r.h / 2];
+  const COMMON = /STAIR|LIFT|LOBBY|CORRIDOR|PASSAGE|ELECTRIC|DUCT|SHAFT|CARGO|SERVICE|GENERATOR|PUMP|MUMTY|RAMP|PARKING|GUARD|SECURITY/i;   // common areas belong to no apartment
+  const mine = F.rooms.filter(r => !COMMON.test(r.name)).filter(r => { const c = cen(r); let best = null; U.forEach(x => { const d = dist(c, [x.x, x.y]); if (!best || d < best.d) best = {x, d}; }); return best.x === u; });
+  if (!mine.length) { aiLog("err", "No rooms found for apartment " + esc(u.no) + "."); return {error: "no rooms"}; }
+  const xs = mine.map(r => cen(r)[0]).concat(u.x), ys = mine.map(r => cen(r)[1]).concat(u.y), st = stage(), m = 20 * (curScale() || 10);
+  const x0 = Math.min(...xs) - m, x1 = Math.max(...xs) + m, y0 = Math.min(...ys) - m, y1 = Math.max(...ys) + m, sc = Math.min(st.clientWidth / (x1 - x0), st.clientHeight / (y1 - y0));
+  S.view = {s: sc, tx: (st.clientWidth - (x0 + x1) * sc) / 2, ty: (st.clientHeight - (y0 + y1) * sc) / 2}; applyView(); renderHi();
+  aiLog("bot", `<b>Apartment ${esc(u.no)}</b>${u.type ? " — " + esc(u.type) : ""}: ${mine.length} rooms (${mine.map(r => esc(r.name)).join(", ")}).`);
+  const r = await agentMeasure("", mine); if (!r || r.error) return r;
+  const tot = r.rooms.reduce((a, x) => a + (x.area_sft || 0), 0);
+  aiLog("bot", `Apartment ${esc(u.no)}: rooms measured <b>${f2(tot)} Sft</b>${u.sft ? ` · written on the drawing <b>${f2(u.sft)} Sft</b> (that figure usually includes the walls and is not a floor-finish area)` : ""}.`);
+  return Object.assign(r, {unit: u.no, type: u.type, unit_written_sft: u.sft || null, rooms_total_sft: +tot.toFixed(2)});
+}
+async function unitDialog(){
+  if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
+  const U = (await unitsOf(S.fileId, S.pageNo)).sort((a, b) => a.no.localeCompare(b.no, undefined, {numeric: true}));
+  const v = await ask("Apartment agent", `<p>Measures every room of one apartment (rooms belong to the nearest apartment number), checks each against its written size and totals them.</p>
+    <div class="fg w2" style="margin-top:8px"><label>Apartment</label>${U.length ? `<select id="unSel">${U.map(x => `<option value="${esc(x.no)}">${esc(x.no)}${x.type ? " — " + esc(x.type) : ""}${x.sft ? " · " + x.sft + " Sft" : ""}</option>`).join("")}</select>` : '<input type="text" id="unSel" placeholder="e.g. 101">'}</div>
+    <p class="small" style="margin-top:8px">${U.length ? U.length + " apartments found on this page." : "No apartment numbers found automatically — type one, or zoom to the apartment and use 🏠 Rooms."} A room name works too: type <i>measure bedroom</i> in the chat.</p>`, "Measure", () => $("unSel").value.trim() ? {no: $("unSel").value.trim()} : "Choose an apartment");
+  if (v) agentUnit(v.no);
 }
 async function agentCount(filter){
   const F = await drawingFacts(S.fileId, S.pageNo), f = filter.replace(/\s+/g, "").toUpperCase();
@@ -3356,7 +3674,8 @@ function facePairs(G, dMin, dMax, minOv, fn){   // every two lines of one direct
 }
 function wallLineIds(rect, k){   // the drawing's lines in rect less door swings and leaves (a leaf open against a wall is not a thin wall)
   const g = S.geo[S.key]; if (!g || !g.segs.length) return null;
-  const ids = rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i), door = doorSymbols(g, ids, k);
+  const wf = segRoleFilter(g, new Set(["wall"]));   // the PDF's wall layers, when it has them: no furniture, fixtures or hatch
+  const ids = (rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i)).filter(i => !wf || wf(i)), door = doorSymbols(g, ids, k);
   return ids.filter(i => !door.has(i));
 }
 function wallThicknesses(rect){   // the wall thicknesses drawn here, most wall length first: [{t ft, len ft}]
@@ -3407,6 +3726,7 @@ function chainRuns(runs, eps){   // runs sharing an end (and only two at that po
 /* run the walls agent: T ft thick, into condition c (or a new one), on the view (or the page); replaces its earlier runs */
 function wallsAgent(o){
   const k = curScale(); if (!k) return {error: "Set the page scale first (K)."};
+  if (scaleDoubt()) return {error: "The page scale is doubtful — the drawing measures " + scaleDoubt().label + ", not the note. Settle it first (scale chip)."};
   if (!S.geo[S.key] || !S.geo[S.key].segs.length) return {error: "This page has no vector lines (scanned?) — walls cannot be found from face lines. Draw them, or use Claude to read them."};
   const T = +o.t; if (!(T > 0.15 && T < 3)) return {error: "Give the wall thickness in ft, e.g. 0.75 for 9\"."};
   const rect = o.page ? null : viewRect(), runs = findWalls(T, rect, o.bridge == null ? 6 : +o.bridge);
@@ -3499,7 +3819,7 @@ function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw"
   loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on);
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, wallThicknesses, findWalls, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool};   // for tests and the console
+  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
