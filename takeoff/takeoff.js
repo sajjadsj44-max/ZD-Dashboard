@@ -1035,6 +1035,12 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
     else { thin = raster(2 * px); bar = raster(Math.max(o.gap * k, 2 * px)); }
     if (g.segs.length) { const cav = wallCavities(x0, y0, W, H, px, k, img ? ink.big : null, ids); for (let i = 0; i < N; i++) if (cav[i]) thin[i] = 1; }   // hollow walls are wall, not a recess of the room
     if (fences.length) { const fm = fenceMask(); for (let i = 0; i < N; i++) if (fm[i]) { thin[i] = 1; bar[i] = 1; } }   // the user's fences close what the drawing leaves open
+    { const done = P.proj.items.filter(it => it.file === S.fileId && it.page === S.pageNo && it.kind === "shape" && !hiddenItem(it) && (cond(it.cond) || {}).type === "area" && it.shape !== "circle" && !pointInPoly(seed, it.pts));
+      if (done.length) {   // rooms already measured are solid: a new outline stops where they begin — no area counted twice
+        const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d", {willReadFrequently: true});
+        ctx.setTransform(1 / px, 0, 0, 1 / px, -x0 / px, -y0 / px); ctx.fillStyle = "#000";
+        done.forEach(it => { ctx.beginPath(); it.pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath(); ctx.fill(); });
+        const d = ctx.getImageData(0, 0, W, H).data; for (let i = 0; i < N; i++) if (d[i * 4 + 3] > 128) { thin[i] = 1; bar[i] = 1; } } }
     if (o.show) S.autoShow = {key: S.key, x0, y0, px, W, H, url: maskUrl(thin, W, H)};
     const named = labelMask(x0, y0, W, H, px, o.own);
     // B: every line widened to the door gap, so all openings close — the room's core — grown back out to the wall faces
@@ -3587,14 +3593,58 @@ async function agentUnit(no){
   const COMMON = /STAIR|LIFT|LOBBY|CORRIDOR|PASSAGE|ELECTRIC|DUCT|SHAFT|CARGO|SERVICE|GENERATOR|PUMP|MUMTY|RAMP|PARKING|GUARD|SECURITY/i;   // common areas belong to no apartment
   const mine = F.rooms.filter(r => !COMMON.test(r.name)).filter(r => { const c = cen(r); let best = null; U.forEach(x => { const d = dist(c, [x.x, x.y]); if (!best || d < best.d) best = {x, d}; }); return best.x === u; });
   if (!mine.length) { aiLog("err", "No rooms found for apartment " + esc(u.no) + "."); return {error: "no rooms"}; }
+  { const ds = mine.map(r => dist(cen(r), [u.x, u.y])).sort((a, b) => a - b), md = ds[ds.length >> 1], far = mine.filter(r => dist(cen(r), [u.x, u.y]) > 2.2 * md);   // a room far outside the cluster belongs to an apartment whose number is further off
+    if (far.length && mine.length - far.length >= 2) { far.forEach(r => mine.splice(mine.indexOf(r), 1)); aiLog("bot", `Left out ${far.map(r => esc(r.name)).join(", ")} — far from the rest of apartment ${esc(u.no)}; measure ${far.length > 1 ? "them" : "it"} on ${far.length > 1 ? "their" : "its"} own if ${far.length > 1 ? "they belong" : "it belongs"} here.`); } }
   const xs = mine.map(r => cen(r)[0]).concat(u.x), ys = mine.map(r => cen(r)[1]).concat(u.y), st = stage(), m = 20 * (curScale() || 10);
   const x0 = Math.min(...xs) - m, x1 = Math.max(...xs) + m, y0 = Math.min(...ys) - m, y1 = Math.max(...ys) + m, sc = Math.min(st.clientWidth / (x1 - x0), st.clientHeight / (y1 - y0));
   S.view = {s: sc, tx: (st.clientWidth - (x0 + x1) * sc) / 2, ty: (st.clientHeight - (y0 + y1) * sc) / 2}; applyView(); renderHi();
   aiLog("bot", `<b>Apartment ${esc(u.no)}</b>${u.type ? " — " + esc(u.type) : ""}: ${mine.length} rooms (${mine.map(r => esc(r.name)).join(", ")}).`);
+  const before = new Set(P.proj.items.map(i => i.id));
   const r = await agentMeasure("", mine); if (!r || r.error) return r;
+  P.proj.items.forEach(i => { if (!before.has(i.id)) i.unit = u.no; }); save();
+  { // a room that touches no other room of the apartment (more than a wall away from all of them) belongs to another apartment
+    const k = curScale(), its = P.proj.items.filter(i => i.unit === u.no && !before.has(i.id));
+    const gap = (A, B) => { let m = Infinity; A.forEach(p => { for (let i = 0; i < B.length; i++) m = Math.min(m, distSeg(p, B[i], B[(i + 1) % B.length])); }); return m; };
+    const lone = its.length > 2 ? its.filter(a => its.every(b => b === a || Math.min(gap(a.pts, b.pts), gap(b.pts, a.pts)) > 1.5 * k)) : [];
+    if (lone.length) { const ids = new Set(lone.map(i => i.id)); mutate(() => { P.proj.items = P.proj.items.filter(i => !ids.has(i.id)); });
+      r.rooms = r.rooms.filter(x => !lone.some(i => i.label === x.name && Math.abs(polyArea(i.pts) / k / k - (x.area_sft || 0)) < 0.05));
+      aiLog("bot", `Removed ${lone.map(i => "<b>" + esc(i.label) + "</b>").join(", ")} — not next to any other room of apartment ${esc(u.no)}, so it belongs to a neighbour. Measure it on its own if it is part of ${esc(u.no)}.`); } }
+  const gaps = await fillGaps(u, U);
+  r.rooms = r.rooms.concat(gaps);
   const tot = r.rooms.reduce((a, x) => a + (x.area_sft || 0), 0);
   aiLog("bot", `Apartment ${esc(u.no)}: rooms measured <b>${f2(tot)} Sft</b>${u.sft ? ` · written on the drawing <b>${f2(u.sft)} Sft</b> (that figure usually includes the walls and is not a floor-finish area)` : ""}.`);
   return Object.assign(r, {unit: u.no, type: u.type, unit_written_sft: u.sft || null, rooms_total_sft: +tot.toFixed(2)});
+}
+/* the floor of an apartment that no named room covered — passages, wardrobes, shower stalls, the strip at a door: open
+   points on a 1.5 ft grid over the apartment that are nearer this apartment's number than any other, not inside a
+   measured area and not on a drawing line, are traced (measured rooms are walls to them) and added on their own */
+async function fillGaps(u, U){
+  const k = curScale(), g = S.geo[S.key]; if (!k || !g) return [];
+  const mine = () => P.proj.items.filter(it => it.file === S.fileId && it.page === S.pageNo && it.kind === "shape" && (cond(it.cond) || {}).type === "area" && it.unit === u.no);
+  const own = mine(); if (!own.length) return [];
+  const xs = own.flatMap(it => it.pts.map(q => q[0])), ys = own.flatMap(it => it.pts.map(q => q[1])), pad = 3 * k;
+  const X0 = Math.min(...xs) - pad, X1 = Math.max(...xs) + pad, Y0 = Math.min(...ys) - pad, Y1 = Math.max(...ys) + pad;
+  const nearest = q => { let b = null; U.forEach(x => { const d = dist(q, [x.x, x.y]); if (!b || d < b.d) b = {x, d}; }); return b && b.x; };
+  const all = () => P.proj.items.filter(it => it.file === S.fileId && it.page === S.pageNo && it.kind === "shape" && (cond(it.cond) || {}).type === "area");
+  const bf = segRoleFilter(g, BOUND), onLine = q => segsIn(g, q[0] - 0.4 * k, q[1] - 0.4 * k, q[0] + 0.4 * k, q[1] + 0.4 * k).some(i => (!bf || bf(i)) && distSeg(q, [g.segs[i][0], g.segs[i][1]], [g.segs[i][2], g.segs[i][3]]) < 0.4 * k);
+  const c = aiAreaCond(), out = []; let tries = 0;
+  for (let y = Y0 + 0.75 * k; y < Y1; y += 1.5 * k) for (let x = X0 + 0.75 * k; x < X1; x += 1.5 * k) {
+    const q = [x, y]; if (nearest(q) !== u || all().some(it => pointInPoly(q, it.pts)) || onLine(q)) continue;
+    if (++tries > 60) break;
+    busy("Apartment " + u.no + ": looking for floor not yet measured…"); await new Promise(r => setTimeout(r, 0));
+    const res = await autoRoom(q, {gap: 3}); if (!res.pts) continue;
+    const a = polyArea(res.pts) / k / k, cen = labelPt(res.pts);
+    if (a < 3 || a > 150 || nearest(cen) !== u || res.pts.some(p => p[0] < X0 - 6 * k || p[0] > X1 + 6 * k || p[1] < Y0 - 6 * k || p[1] > Y1 + 6 * k)) continue;   // tiny, or a neighbour's / the outside
+    const t0 = roomNameAt(res.pts) || "";
+    if (/ACCESS|DUCT|SHAFT|^\s*A\.?P\.?\s*\d|SHAFT|VOID|OPEN\s*TO/i.test(t0)) continue;   // services, not floor
+    const nm = /^\s*SH\.?\s*$/i.test(t0) ? "SHOWER" : /^\s*W\.?C\.?\s*$/i.test(t0) ? "WC" : /BALCONY|WIDE/i.test(t0) ? "BALCONY" : /WARD/i.test(t0) ? "WARDROBE" : t0 || "PASSAGE / UNNAMED";
+    mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, ai: true, unit: u.no, label: (nm + " (" + u.no + ")").slice(0, 60)}); });
+    out.push({name: nm, area_sft: +a.toFixed(2), gap: true});
+    aiLog("tool", `${esc(nm)}: <b>${f2(a)} Sft</b> <span class="small">floor with no room name — check it belongs to apartment ${esc(u.no)}</span>`);
+  }
+  busy("");
+  if (!out.length) aiLog("bot", `No unmeasured floor left in apartment ${esc(u.no)}.`);
+  return out;
 }
 async function unitDialog(){
   if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
