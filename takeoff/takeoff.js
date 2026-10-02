@@ -475,10 +475,58 @@ async function indexPage(){
   }
   if (key === S.key && P.proj && !P.proj.scales[key]) {
     const c = scaleCandidates(key);
-    if (c.length) { P.proj.scales[key] = {ptPerFt: c[0].ptPerFt, how: "note", text: c[0].text, note: c[0].note || "", factor: c[0].factor || 1, verified: false, at: new Date().toISOString()}; save(); toast("Scale read from the drawing: " + c[0].label + " — check it against a known dimension (scale chip → Verify)", 5200); }
+    if (c.length) { P.proj.scales[key] = {ptPerFt: c[0].ptPerFt, how: "note", text: c[0].text, note: c[0].note || "", factor: c[0].factor || 1, verified: false, at: new Date().toISOString()}; save(); toast("Scale read from the drawing: " + c[0].label + " — check it against a known dimension (scale chip → Verify)", 5200);
+      checkScale(key, true); }
   }
   if (key === S.key) refresh();
 }
+/* ------------------------------------------------------------------ scale check: the room sizes written on the drawing
+   (BEDROOM 12'-9"x11'-0") against the room as drawn. From each room's name the clear span to the walls is found left,
+   right, up and down (rays against the PDF's own lines, from three points, the middle span kept, so a door opening or a
+   bed in the way of one does not count); span ÷ written size gives pt per ft for that room, the median of all rooms the drawing's scale. A note that
+   disagrees by more than 15 % is flagged: the PDF is then printed at another size than the note was written for. */
+function sizeDims(t){ const m = /^\s*([^xX×*]+?)\s*[xX×*]\s*([^xX×*]+?)\s*$/.exec(String(t || "")); if (!m) return null; const a = parseFt(m[1]), b = parseFt(m[2]); return a > 0 && b > 0 ? [a, b] : null; }
+async function scaleFromRooms(key){
+  const [f, pg] = key.split(":"), g = S.geo[key]; if (!g || !g.segs.length) return null;
+  const F = await drawingFacts(f, +pg), est = [];
+  const ray = (c, dx, dy, R) => {   // distance from c to the first drawing line along (dx, dy), up to R
+    let best = R; segsIn(g, c[0] - (dx < 0 ? R : 0), c[1] - (dy < 0 ? R : 0), c[0] + (dx > 0 ? R : 0), c[1] + (dy > 0 ? R : 0)).forEach(i => { const s = g.segs[i]; if (s[4] & 8) return;
+      if (dy === 0) { const y0 = Math.min(s[1], s[3]), y1 = Math.max(s[1], s[3]); if (c[1] < y0 || c[1] > y1 || y1 === y0) return; const x = s[0] + (s[2] - s[0]) * (c[1] - s[1]) / (s[3] - s[1]), d = (x - c[0]) * dx; if (d > 0.5 && d < best) best = d; }
+      else { const x0 = Math.min(s[0], s[2]), x1 = Math.max(s[0], s[2]); if (c[0] < x0 || c[0] > x1 || x1 === x0) return; const y = s[1] + (s[3] - s[1]) * (c[0] - s[0]) / (s[2] - s[0]), d = (y - c[1]) * dy; if (d > 0.5 && d < best) best = d; } });
+    return best; };
+  F.rooms.forEach(r => {
+    const d = sizeDims(r.size); if (!d || d[0] < 4 || d[1] < 4) return;
+    const R = 40 * r.h * Math.max(d[0], d[1]) / 10, c = [r.x + r.w / 2, r.y - r.h / 2], below = r.sizeY != null ? r.sizeY + r.h * 0.6 : r.y + r.h * 1.5;
+    const P0 = [c, [c[0], r.y - r.h * 2], [c[0], below]];
+    const span = (dx, dy) => P0.map(q => ray(q, dx, dy, R) + ray(q, -dx, -dy, R)).sort((x, y) => x - y)[1];   // the middle one: one ray through a door, or one blocked by a bed, does not count
+    const w = span(1, 0), h = span(0, 1); if (!(w < 2 * R && h < 2 * R)) return;
+    const a = [w / d[0], h / d[1]], b = [w / d[1], h / d[0]], A = Math.abs(Math.log(a[0] / a[1])), B = Math.abs(Math.log(b[0] / b[1]));
+    const pr = A <= B ? a : b; if (Math.min(A, B) > 0.22) return;
+    est.push(Math.sqrt(pr[0] * pr[1]));
+  });
+  if (est.length < 3) return null;
+  est.sort((x, y) => x - y); const med = est[est.length >> 1], near = est.filter(v => Math.abs(v / med - 1) < 0.12).length;
+  return {ptPerFt: med, rooms: est.length, agree: near};
+}
+const STD_SCALES = [[1 / 32, "1/32\""], [1 / 16, "1/16\""], [3 / 32, "3/32\""], [1 / 8, "1/8\""], [3 / 16, "3/16\""], [1 / 4, "1/4\""], [3 / 8, "3/8\""], [1 / 2, "1/2\""], [3 / 4, "3/4\""], [1, "1\""], [1.5, "1-1/2\""], [3, "3\""]]
+  .map(([v, t]) => ({ptPerFt: 72 * v, label: t + " = 1'-0\""})).concat([20, 25, 50, 75, 100, 125, 150, 200, 250, 500].map(n => ({ptPerFt: 864 / n, label: "1:" + n})));
+async function checkScale(key, ask2){
+  const sc = P.proj && P.proj.scales[key]; if (!sc || sc.verified || sc.how === "calibrated") return null;
+  let ev; try { ev = await scaleFromRooms(key); } catch (e) { ev = null; }
+  if (!ev || ev.agree < 3) return null;
+  const r = ev.ptPerFt / sc.ptPerFt; if (Math.abs(Math.log(r)) < Math.log(1.15)) { if (sc.doubt) { delete sc.doubt; save(); refresh(); } return {ok: true, ev}; }
+  const std = STD_SCALES.slice().sort((a, b) => Math.abs(Math.log(a.ptPerFt / ev.ptPerFt)) - Math.abs(Math.log(b.ptPerFt / ev.ptPerFt)))[0];
+  const sug = Math.abs(Math.log(std.ptPerFt / ev.ptPerFt)) < Math.log(1.08) ? std : {ptPerFt: ev.ptPerFt, label: "1 ft = " + ev.ptPerFt.toFixed(3) + " pt"};
+  sc.doubt = {label: sug.label, ptPerFt: sug.ptPerFt, ratio: +(sug.ptPerFt / sc.ptPerFt).toFixed(3), rooms: ev.rooms, agree: ev.agree}; save(); refresh();
+  if (ask2 && key === S.key) {
+    const v = await ask("Scale note does not match the drawing", `<p>The note says <b>${esc(sc.text)}</b>, but <b>${ev.agree} of ${ev.rooms}</b> room sizes written on this drawing measure at <b>${esc(sug.label)}</b> — <b>× ${(sug.ptPerFt / sc.ptPerFt).toFixed(2)}</b> of the note. The PDF is printed at another size than the note was written for; at the note's scale every length would come out × ${(sug.ptPerFt / sc.ptPerFt).toFixed(2)} and every area × ${((sug.ptPerFt / sc.ptPerFt) ** 2).toFixed(2)} of the truth.</p>
+      <p class="small" style="margin-top:8px">Use the measured scale, then verify it with one dimension you know (scale chip → Verify). Nothing is measured until the scale is settled.</p>`, "Use " + sug.label);
+    if (v) mutate(() => { P.proj.scales[key] = {ptPerFt: sug.ptPerFt, how: "note", text: sug.label + " (measured from " + ev.agree + " written room sizes; the note says " + sc.text + ")", note: "PDF printed at × " + (sug.ptPerFt / sc.ptPerFt).toFixed(3) + " of the note's paper size", factor: sug.ptPerFt / sc.ptPerFt, verified: false, roomsCheck: ev, at: new Date().toISOString()}; });
+  }
+  return {ok: false, ev, sug};
+}
+const scaleDoubt = () => { const sc = P.proj && P.proj.scales[S.key]; return sc && sc.doubt && !sc.verified ? sc.doubt : null; };
+
 /* scale notes on the page: 1/8" = 1'-0", 3/16"=1'-0", 1" = 20', 1:100 (with "@ A1" paper size if given) */
 const ISO = {A0: 3370.39, A1: 2383.94, A2: 1683.78, A3: 1190.55, A4: 841.89};   // ISO 216 long side in pt (A1 594 × 841 → 841 / 25.4 × 72)
 /* "1/8\" = 1'-0\"", "1\" = 20'", "1:100" -> inches on paper per foot (0 if none). loose: a bare 1:N counts */
@@ -588,15 +636,55 @@ function circumcentre(a, b, c){
   const A = a[0] * a[0] + a[1] * a[1], B = b[0] * b[0] + b[1] * b[1], C = c[0] * c[0] + c[1] * c[1];
   return [(A * (b[1] - c[1]) + B * (c[1] - a[1]) + C * (a[1] - b[1])) / d, (A * (c[0] - b[0]) + B * (a[0] - c[0]) + C * (b[0] - a[0])) / d];
 }
+/* revision clouds: chains of six or more small arcs (each under 1.5 ft) joined end to end. Not walls — a cloud drawn
+   across a room would otherwise split it, or close a bath onto the next room. Found once per page. */
+function cloudIds(g, k){
+  if (g.clouds && g.clouds.k === k) return g.clouds.set;
+  const G = g.segs, sp = new Map();
+  G.forEach((s, i) => { let e = sp.get(s[5]); if (!e) { e = {ids: [], curve: true, x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9}; sp.set(s[5], e); }
+    e.ids.push(i); if (!(s[4] & 1)) e.curve = false; e.x0 = Math.min(e.x0, s[0], s[2]); e.y0 = Math.min(e.y0, s[1], s[3]); e.x1 = Math.max(e.x1, s[0], s[2]); e.y1 = Math.max(e.y1, s[1], s[3]); });
+  const arcs = [...sp.values()].filter(e => e.curve && Math.max(e.x1 - e.x0, e.y1 - e.y0) <= 1.5 * k), par = arcs.map((_, n) => n), at = new Map();
+  const find = x => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+  arcs.forEach((e, n) => { const a = G[e.ids[0]], z = G[e.ids[e.ids.length - 1]];
+    [[a[0], a[1]], [z[2], z[3]]].forEach(([x, y]) => { const key = Math.round(x * 2) + "," + Math.round(y * 2); if (at.has(key)) par[find(n)] = find(at.get(key)); else at.set(key, n); }); });
+  const cnt = new Map(); arcs.forEach((_, n) => cnt.set(find(n), (cnt.get(find(n)) || 0) + 1));
+  const set = new Set(); arcs.forEach((e, n) => { if (cnt.get(find(n)) >= 6) e.ids.forEach(i => set.add(i)); });
+  g.clouds = {k, set}; return set;
+}
+/* door openings closed at their jambs: where a wall face stops and the same face line carries on 1.2 ft to "close gaps"
+   + 1 ft further, a line is drawn across on each face — so a room never runs on through a doorway into the next room
+   (on drawings whose door swings are dashed, or not drawn, nothing else closes the opening) */
+function jambLines(ids, k, gapFt){
+  const G = faceLines(null, k, ids), out = []; if (!G) return out;
+  const gMin = 1.2 * k, gMax = (Math.max(gapFt, 3) + 1) * k;
+  G.forEach(g => {
+    const L = g.L.slice().sort((a, b) => a.o - b.o || a.t0 - b.t0), lines = [];
+    L.forEach(l => { const q = lines[lines.length - 1]; if (q && l.o - q.o <= 0.03 * k) q.iv.push([l.t0, l.t1]); else lines.push({o: l.o, iv: [[l.t0, l.t1]]}); });
+    lines.forEach(l => { l.iv.sort((a, b) => a[0] - b[0]); let end = l.iv[0][1];
+      for (let i = 1; i < l.iv.length; i++) { const gap = l.iv[i][0] - end;
+        if (gap >= gMin && gap <= gMax) out.push([g.u[0] * end + g.n[0] * l.o, g.u[1] * end + g.n[1] * l.o, g.u[0] * l.iv[i][0] + g.n[0] * l.o, g.u[1] * l.iv[i][0] + g.n[1] * l.o]);
+        end = Math.max(end, l.iv[i][1]); } });
+  });
+  return out;
+}
+/* room names (BEDROOM, BATH…) written in the window, as pixel masks: a space that has its own name is never taken
+   into another room as a recess or pocket */
+function labelMask(x0, y0, W, H, px){
+  const m = new Uint8Array(W * H), T = S.texts[S.key] || [];
+  textLines(T).forEach(l => { if (l.tag || !ROOM_RX.test(l.s) || l.s.length > 32) return;
+    const x = Math.round((l.x + l.w / 2 - x0) / px), y = Math.round((l.y - l.h / 2 - y0) / px), r = Math.max(2, Math.round(l.h / px / 2));
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) m[yy * W + xx] = 1; } });
+  return m;
+}
 function barrierIds(g, ids, k, o){
-  const door = o.skipDoors ? doorSymbols(g, ids, k) : new Set(), minL = o.minLen * k;
+  const door = o.skipDoors ? doorSymbols(g, ids, k) : new Set(), minL = o.minLen * k, cloud = cloudIds(g, k);
   const wall = o.wall ? {col: o.wall.split("|")[0], w: +o.wall.split("|")[1] || 0} : null;
   const out = ids.filter(i => { const s = g.segs[i];
-    if (door.has(i) || (s[4] & 8) || (!o.dashBound && (s[4] & 2))) return false;
+    if (door.has(i) || cloud.has(i) || (s[4] & 8) || (!o.dashBound && (s[4] & 2))) return false;
     if (Math.hypot(s[2] - s[0], s[3] - s[1]) < minL) return false;
     if (wall) { const st = (g.styles[s[6]] || "|0").split("|"); if (st[0] !== wall.col || +st[1] < 0.9 * wall.w) return false; }
     return true; });
-  out.doors = door.lines || []; out.doorIds = [...door];
+  out.doors = (door.lines || []).concat(jambLines(out, k, o.gap)); out.doorIds = [...door].concat(ids.filter(i => cloud.has(i)));
   return out;
 }
 function edt2(f, W, H){   // squared Euclidean distance transform in place (Felzenszwalb & Huttenlocher); f = 0 on features, 1e20 elsewhere
@@ -624,7 +712,7 @@ function closeMask(m, W, H, R){   // morphological closing with a disc of radius
 /* pockets: with the walls right round the room counted as room, whatever is then fully enclosed — furniture or a
    wardrobe against a wall, a door swing — is a pocket of this room and is added (up to maxPx pixels). The next room is
    never enclosed: its own walls, further off, join it to the outside. */
-function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx){
+function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx, named){
   const N = W * H, f = new Float32Array(N);
   for (let i = 0; i < N; i++) f[i] = m[i] ? 0 : 1e20;
   edt2(f, W, H);
@@ -641,7 +729,7 @@ function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx){
       if (x < W - 1 && !solid[i + 1] && !seen[i + 1]) { seen[i + 1] = 1; st[top++] = i + 1; }
       if (y > 0 && !solid[i - W] && !seen[i - W]) { seen[i - W] = 1; st[top++] = i - W; }
       if (y < H - 1 && !solid[i + W] && !seen[i + W]) { seen[i + W] = 1; st[top++] = i + W; } }
-    if (!open && touch >= minTouch && comp.length >= minPx && comp.length <= maxPx) comp.forEach(i => { m[i] = 1; });   // gaps in a wall's hatching are smaller
+    if (!open && touch >= minTouch && comp.length >= minPx && comp.length <= maxPx && !(named && comp.some(i => named[i]))) comp.forEach(i => { m[i] = 1; });   // gaps in a wall's hatching are smaller
   }
   // the room's own ink inside it (furniture outlines, text) is part of the floor too
   for (let i = 0; i < N; i++) if (!m[i] && ink[i]) { const x = i % W; let n = 0;
@@ -820,10 +908,10 @@ function widen(m, W, H, r){   // every ink pixel widened to a disc of radius r p
   for (let i = 0; i < N; i++) out[i] = f[i] <= r2 ? 1 : 0;
   return out;
 }
-async function autoRoom(seed){   // -> {pts} or {err}
+async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for this one trace (a smaller door gap for a small room)
   const k = hereScale(seed), g = S.geo[S.key] || {segs: [], grid: new Map(), cell: 24, styles: []};
   if (!k) return {err: "Set the page scale first (K) — the door gap and wall offsets are in feet."};
-  const o = autoOpt(), img = o.src !== "vector";
+  const o = Object.assign(autoOpt(), over || {}), img = o.src !== "vector";
   if (!img && !g.segs.length) return {err: "This page has no vector lines — switch Auto area settings (⚙) to ‘walls from the drawing image’."};
   for (const [half, pxFt] of [[45, 0.06], [110, 0.14]]) {
     const px = pxFt * k, W = Math.ceil(2 * half * k / px), H = W, x0 = seed[0] - half * k, y0 = seed[1] - half * k;
@@ -868,6 +956,7 @@ async function autoRoom(seed){   // -> {pts} or {err}
     if (g.segs.length) { const cav = wallCavities(x0, y0, W, H, px, k, img ? ink.big : null, ids); for (let i = 0; i < N; i++) if (cav[i]) thin[i] = 1; }   // hollow walls are wall, not a recess of the room
     if (fences.length) { const fm = fenceMask(); for (let i = 0; i < N; i++) if (fm[i]) { thin[i] = 1; bar[i] = 1; } }   // the user's fences close what the drawing leaves open
     if (o.show) S.autoShow = {key: S.key, x0, y0, px, W, H, url: maskUrl(thin, W, H)};
+    const named = labelMask(x0, y0, W, H, px);
     // B: every line widened to the door gap, so all openings close — the room's core — grown back out to the wall faces
     const sb = seedIn(bar, rpx), sa = seedIn(thin, 4);
     let m;
@@ -892,7 +981,7 @@ async function autoRoom(seed){   // -> {pts} or {err}
           while (top) { const i = st[--top], x = i % W, y = (i - x) / W; comp.push(i);
             if (!bar[i] || x === 0 || y === 0 || x === W - 1 || y === H - 1) room = true;
             for (const j of [i - 1, i + 1, i - W, i + W]) if (j >= 0 && j < N && A.m[j] && !m[j] && !seen[j] && Math.abs(j % W - x) <= 1) { seen[j] = 1; st[top++] = j; } }
-          if (!room) comp.forEach(i => { m[i] = 1; });
+          if (!room && !comp.some(i => named[i])) comp.forEach(i => { m[i] = 1; });
         }
       }
     } else {   // narrower than the gap all over (a passage): the thin-line fill alone, if it stays closed
@@ -900,7 +989,7 @@ async function autoRoom(seed){   // -> {pts} or {err}
       if (!A) return {err: "This space is narrower than the door gap (" + f3(o.gap) + " ft) and is not closed — lower ‘Close gaps’ in the auto-area settings (⚙), or draw it."};
       m = A.m;
     }
-    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
+    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2, named); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
     const loop = outerLoop(m, W, H); if (!loop || loop.length < 4) return {err: "No closed space found at that point."};
     let Q = dpClosed(loop.map(p => [x0 + p[0] * px, y0 + p[1] * px]), 1.6 * px);
     const sq = squareUp(Q, 3 * px, o.gap * k, Math.max(o.gap, o.pocket) * k);
@@ -1568,6 +1657,7 @@ function renderScaleChip(){
    not yet checked), From note (read from the drawing's note, not yet checked), Unknown */
 function scaleState(sc){
   if (!sc) return {k: "bad", ic: "✕", t: "Unknown"};
+  if (sc.doubt && !sc.verified) return {k: "bad", ic: "✕", t: "Doubtful — the drawing measures " + sc.doubt.label};
   if (sc.how === "inherited") return sc.verified ? {k: "ok", ic: "✓", t: "Inherited · verified"} : {k: "warn", ic: "⚠", t: "Inherited from " + keyName(sc.from)};
   if (sc.how === "calibrated") return {k: "ok", ic: "✓", t: "Calibrated"};
   return sc.verified ? {k: "ok", ic: "✓", t: "Verified"} : {k: "warn", ic: "⚠", t: "From note — not verified"};
@@ -1988,11 +2078,13 @@ async function scaleDialog(){
     <p style="margin-top:12px"><b>Viewports</b> <span class="small">— parts of this sheet drawn at another scale (enlarged details, sections). Measurements inside one use its scale.</span></p>
     ${((P.proj.viewports || {})[S.key] || []).map(v => `<div class="cand"><b>${esc(v.name)}</b><span class="small">${v.ptPerFt ? esc(v.text || "1 ft = " + v.ptPerFt.toFixed(3) + " pt") : "scale not set"}</span><span style="flex:1"></span><button class="btn sm" data-vpcal="${esc(v.id)}">Calibrate</button><button class="btn sm dng" data-vpdel="${esc(v.id)}">Delete</button></div>`).join("") || '<p class="small">None on this page.</p>'}`;
   $("dlgT").textContent = "Page scale"; $("dlgB").innerHTML = body;
-  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="dlgVp">+ Viewport…</button>${sc ? '<button class="btn" id="dlgAll">Copy scale to…</button><button class="btn" id="dlgVer">Verify…</button>' : ""}<button class="btn pri" id="dlgCal">Calibrate…</button>`;
+  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="dlgVp">+ Viewport…</button>${sc ? '<button class="btn" id="dlgAll">Copy scale to…</button><button class="btn" id="dlgVer">Verify…</button>' : ""}${sc ? '<button class="btn" id="dlgChk" title="Compare the scale with the room sizes written on the drawing">Check vs room sizes</button>' : ""}<button class="btn pri" id="dlgCal">Calibrate…</button>`;
   $("dlgBack").classList.add("on");
   const close = () => $("dlgBack").classList.remove("on");
   $("dlgCancel").onclick = close;
   $("dlgCal").onclick = () => { close(); S.calVp = null; setTool("cal"); };
+  if ($("dlgChk")) $("dlgChk").onclick = async () => { close(); const sc2 = P.proj.scales[S.key]; if (sc2) { delete sc2.doubt; sc2.verified = false; } busy("Checking the scale against the room sizes…"); const r = await checkScale(S.key, true); busy("");
+    if (!r) toast("Not enough written room sizes on this page to check the scale — verify with a known dimension", 5000); else if (r.ok) toast("Scale agrees with " + r.ev.agree + " written room sizes (1 ft = " + r.ev.ptPerFt.toFixed(2) + " pt measured)", 5000); };
   $("dlgVp").onclick = () => { close(); setTool("vp"); toast("Click two opposite corners of the part drawn at another scale"); };
   $("dlgB").querySelectorAll("[data-vpdel]").forEach(b => b.onclick = () => { mutate(() => { P.proj.viewports[S.key] = P.proj.viewports[S.key].filter(v => v.id !== b.dataset.vpdel); }); close(); scaleDialog(); });
   $("dlgB").querySelectorAll("[data-vpcal]").forEach(b => b.onclick = () => { close(); S.calVp = b.dataset.vpcal; setTool("cal"); toast("Click both ends of a known dimension inside the viewport"); });
@@ -2918,6 +3010,7 @@ async function aiRunTool(b){
   const V = AI.view, k = curScale(), inp = b.input || {};
   if (!V || V.key !== S.key) return {err: "The page changed — ask the user to press ‘Read this view’ again."};
   if (!k) return {err: "The page scale is not set; ask the user to set it (K) first."};
+  if (scaleDoubt()) return {err: "The page scale is doubtful (the drawing measures " + scaleDoubt().label + ", not the note) — ask the user to settle it before measuring."};
   const add = (name, pts) => { const c = aiAreaCond(), id = uid("I"); mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(name || "").slice(0, 60)}); }); return id; };
   if (b.name === "trace_room") {
     const x = +inp.x, y = +inp.y; if (!(x >= 0 && y >= 0 && x <= V.W && y <= V.H)) return {err: "Point is outside the image."};
@@ -3253,9 +3346,14 @@ async function agentDetails(){
 }
 async function agentMeasure(filter){
   const k = curScale(); if (!k) { aiLog("err", "Set the page scale first (K) — then I can measure."); return {error: "page scale not set"}; }
+  if (scaleDoubt()) { aiLog("err", "The page scale is doubtful: the drawing measures " + esc(scaleDoubt().label) + ", not the note. Settle it first (scale chip)."); return {error: "page scale doubtful — the drawing measures " + scaleDoubt().label + "; ask the user to settle the scale first"}; }
   const F = await drawingFacts(S.fileId, S.pageNo);
   const words = filter.toLowerCase().split(/\s+/).filter(Boolean).map(w => w.replace(/s$/, ""));
-  const rooms = F.rooms.filter(r => !words.length || words.some(w => r.name.toLowerCase().replace(/\s+/g, "").includes(w.replace(/\s+/g, ""))));
+  let rooms = F.rooms.filter(r => !words.length || words.some(w => r.name.toLowerCase().replace(/\s+/g, "").includes(w.replace(/\s+/g, ""))));
+  const vr = viewRect(), zoomed = (vr[2] - vr[0]) * (vr[3] - vr[1]) < 0.6 * S.base.width * S.base.height, all = rooms.length;
+  if (zoomed) rooms = rooms.filter(r => { const x = r.x + r.w / 2, y = r.y - r.h / 2; return x >= vr[0] && x <= vr[2] && y >= vr[1] && y <= vr[3]; });
+  if (zoomed && all && !rooms.length) { aiLog("err", "No room names in the part on screen — pan to the rooms, or zoom out (Fit) for the whole page."); return {error: "no rooms in the view"}; }
+  if (zoomed && rooms.length < all) aiLog("bot", `Measuring the <b>${rooms.length}</b> rooms on screen (of ${all} on the page) — press <b>Fit</b> first for all of them.`);
   if (!rooms.length) { aiLog("err", F.rooms.length ? "No room name on this page matches “" + esc(filter) + "”." : "I found no room names in this page's text."); return {error: F.rooms.length ? "no room matches " + filter + "; rooms on the page: " + F.rooms.map(r => r.name).join(", ") : "no room names in the page text (scanned?) — use trace_room / draw_area"}; }
   const done = new Set(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo).map(i => (i.label || "").toLowerCase()));
   const c = aiAreaCond(), got = [], res = []; let ok = 0, chk = 0, same2 = 0;
@@ -3263,24 +3361,30 @@ async function agentMeasure(filter){
     busy(`Measuring ${n + 1} of ${rooms.length}: ${r.name}…`); await new Promise(q => setTimeout(q, 10));
     const cx = r.x + r.w / 2, below = r.sizeY != null ? r.sizeY : r.y;
     const seeds = [[cx, r.y - r.h * 1.7], [cx, below + r.h * 0.9], [r.x - r.h, r.y - r.h / 2], [r.x + r.w + r.h, r.y - r.h / 2], [cx, below + r.h * 2.5], [cx, r.y - r.h * 3.5]];
-    let best = null;
+    if (got.some(o => o.with.includes(r) )) { const o = got.find(q => q.with.includes(r)); res.push({name: r.name, shared_with: o.name}); aiLog("tool", `${esc(r.name)}: <span class="small">in the same open space as <b>${esc(o.name)}</b> — measured with it</span>`); continue; }
+    let best = null; const dd = sizeDims(r.size), tried = [];
+    const over = dd ? {gap: Math.max(2.5, Math.min(autoOpt().gap, 0.6 * Math.min(dd[0], dd[1])))} : null;   // a 5 ft bath: close gaps up to 3 ft, not 4
     for (const sd of seeds) {
-      const res = await autoRoom(sd); if (!res.pts) continue;
+      const res = await autoRoom(sd, over); if (!res.pts) { if (/leaks/.test(res.err || "") && tried.length === 0 && seeds.indexOf(sd) >= 1) break; continue; }
       const a = polyArea(res.pts) / k / k; if (!(a > 4)) continue;
       const err = r.sft ? Math.abs(a - r.sft) / r.sft : 0;
       if (!best || err < best.err) best = {pts: res.pts, a, err};
-      if (err <= 0.05) break;
+      if (err <= 0.05 || tried.some(t => Math.abs(t - a) / a < 0.005)) break;   // within 5 %, or the same outline twice: the room as drawn
+      tried.push(a);
     }
     if (!best) { res.push({name: r.name, error: "could not close the room"}); aiLog("err", `${esc(r.name)}: auto area could not close the room — use the Fence tool on the open side, or draw it`); continue; }
     const cen = q => [q.reduce((a, v) => a + v[0], 0) / q.length, q.reduce((a, v) => a + v[1], 0) / q.length];
     const same = got.find(o => Math.abs(o.a - best.a) / best.a < 0.005 && dist(cen(o.pts), cen(best.pts)) < k);
     if (same) { same2++; res.push({name: r.name, error: "leaked into " + same.name}); aiLog("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${f2(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
-    got.push({name: r.name, a: best.a, pts: best.pts});
-    const dup = done.has(r.name.toLowerCase());
-    mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, ai: true, label: r.name.slice(0, 60)}); });
-    const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;
-    res.push({name: r.name, area_sft: +best.a.toFixed(2), written_sft: r.sft ? +r.sft.toFixed(2) : null, check: !!bad});
-    aiLog("tool", `${esc(r.name)}: <b>${f2(best.a)} Sft</b> <span class="small">${r.sft ? "written " + esc(r.size) + " = " + f2(r.sft) + " Sft" + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > r.sft ? "+" : "") + f2(best.a - r.sft) + ")</b>" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
+    const others = F.rooms.filter(q => q !== r && !got.some(o => o.with.includes(q)) && pointInPoly([q.x + q.w / 2, q.y - q.h / 2], best.pts));   // other names in the same space: open plan
+    const nm = [r.name].concat(others.map(q => q.name)).join(" + ").slice(0, 60), wrt = r.sft + others.reduce((a, q) => a + (q.sft || 0), 0);
+    if (others.length && r.sft) best.err = Math.abs(best.a - wrt) / wrt;
+    got.push({name: nm, a: best.a, pts: best.pts, with: others});
+    const dup = done.has(nm.toLowerCase());
+    mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, ai: true, label: nm}); });
+    const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;   // best.err is against the written sizes of every room in the space
+    res.push({name: nm, area_sft: +best.a.toFixed(2), written_sft: r.sft ? +wrt.toFixed(2) : null, check: !!bad, open_plan_with: others.map(q => q.name)});
+    aiLog("tool", `${esc(nm)}: <b>${f2(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? f2(wrt) + " Sft together" : esc(r.size) + " = " + f2(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + f2(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
   }
   busy(""); refresh();
   aiLog("bot", `Measured ${ok + chk} of ${rooms.length} into <b>${esc(c.name)}</b>${chk ? ` — <b>${chk} to check</b> (more than 5% off the written size: fix with Fence, or the room is not a rectangle)` : ""}${same2 ? ` — <b>${same2}</b> leaked into a neighbour, not added` : ""}. Undo (Ctrl+Z) removes them one by one.`);
@@ -3407,6 +3511,7 @@ function chainRuns(runs, eps){   // runs sharing an end (and only two at that po
 /* run the walls agent: T ft thick, into condition c (or a new one), on the view (or the page); replaces its earlier runs */
 function wallsAgent(o){
   const k = curScale(); if (!k) return {error: "Set the page scale first (K)."};
+  if (scaleDoubt()) return {error: "The page scale is doubtful — the drawing measures " + scaleDoubt().label + ", not the note. Settle it first (scale chip)."};
   if (!S.geo[S.key] || !S.geo[S.key].segs.length) return {error: "This page has no vector lines (scanned?) — walls cannot be found from face lines. Draw them, or use Claude to read them."};
   const T = +o.t; if (!(T > 0.15 && T < 3)) return {error: "Give the wall thickness in ft, e.g. 0.75 for 9\"."};
   const rect = o.page ? null : viewRect(), runs = findWalls(T, rect, o.bridge == null ? 6 : +o.bridge);
@@ -3499,7 +3604,7 @@ function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw"
   loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on);
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, wallThicknesses, findWalls, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool};   // for tests and the console
+  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, wallThicknesses, findWalls, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
