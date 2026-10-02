@@ -644,6 +644,46 @@ dashboard sidebar (QS Cost Control → PDF Takeoff) and the landing page.
 - **Backups**: the last 10 copies of each project in this browser — on opening, every 10 minutes while working,
   on demand, and before a restore. Restore (Projects → Backups, or Export → Backups…) always asks first.
 
+**Bluebeam / PlanSwift editing** (added 02-Oct-2026 — compared against Bluebeam Revu 21 / Bluebeam Max and PlanSwift 11
+v11.0.0.191 with Takeoff Boost; the full table is `docs/takeoff-bluebeam-planswift-parity.md`):
+
+- **Selecting**: click; a box dragged **left → right selects what is wholly inside** (blue), **right → left what it
+  touches** (green); **Lasso** (`Shift+O`); Shift / Ctrl+click add or take out; **Tab** steps through objects lying on
+  top of each other; hover highlights the object and shows its quantity; a multiple selection shows its totals.
+- **Moving and copying**: drag a selected object to move it (the grabbed point snaps to the drawing; `Shift` straight;
+  `Alt`+drag moves without selecting first); **Ctrl+drag copies**; arrow keys nudge. `Ctrl+C` / `Ctrl+X` / `Ctrl+V`
+  work on a whole selection (measurements and markups), on any page, pasted at the **same real size** if the page's
+  scale differs; **`Ctrl+Shift+V` pastes in place** (typical floors); `Ctrl+D` duplicates; **`Ctrl` + arrow copies at a
+  distance or as an array** (ft across / down, PlanSwift style); *Place copies by clicking*; *Copy to other pages*;
+  rotate 90° / flip; bring to front / send to back; **lock** (`Ctrl+Shift+L`: not moved, edited or deleted).
+- **Undo while drawing**: `Ctrl+Z` / `Backspace` take back the last click (an arc as one step) and **`Ctrl+Y` puts it
+  back**; `Ctrl+Z` or `Esc` during a drag cancels it; the undo / redo buttons name the change ("Undo: Move 3 objects"),
+  200 steps.
+- **Drawing**: `A` while drawing makes the next segment an **arc** (a point on it, then its end — one leg on the sheet);
+  **type a length and Enter** to place the next point at that distance (`12'-6"`, `12.5`; a rectangle takes `12 x 14`);
+  `Ctrl`+click places a point with no snap.
+- **Editing points**: **double-click a side to add a point, double-click a point to remove it** (or `Shift`+click, as in
+  Bluebeam); drag the **+** at the middle of a side to pull out a new point; a selected point goes with `Delete`.
+- **Lines**: **Break** (`B`) cuts a run in two where clicked, `Shift`+click with Break deletes one segment; *Cut a gap*
+  removes the part between two clicks (a door across a skirting); **Join** makes selected runs one; *Continue drawing*
+  carries a run on from its nearer end; *Explode* gives one run per segment; *Close* the run; **Offset** a run sideways
+  or an outline in / out (defaults to half the condition's thickness); an area's outline becomes a **perimeter run**
+  in a length condition, a run of 3+ points an area.
+- **Right-click menu** on a measurement, a selection, a markup or the empty drawing, with all of the above plus
+  properties, rename (`F2`), cut-out / opening, move to condition, select all of the condition, condition (edit,
+  colour, hide, show only), QA (checked / recheck), zoom to and delete. A right-drag still pans; on a tablet, press and
+  hold. `?` lists every shortcut; `Z` is a zoom window.
+- **Doors / windows agent** (🚪 in the Claude panel, or *count doors on all pages* in its chat): every door, window and
+  ventilator tag however it is written — `D1`, `D-1`, `D.01`, `DR-02`, `DOOR 3`, `SD` / `FD` / `FRD` / `MD` / `GD` / `AD` /
+  `DD` / `RS`, `W1`, `WN-2`, `WIN 3`, `WINDOW 4`, `KW` / `TW` / `BW` / `CW` / `SW` / `FW` / `AW` / `SKY`, `V1`, `VT`, `VENT 1`,
+  `LV`, `DW`, primed `W1'`, suffixed `W1A` (`D-01` and `D1` are one mark) — including tags written in two pieces (a letter
+  over a number in a circle). Marks inside the door / window schedule table are not counted; the table's sizes (ft-in,
+  inches, decimal ft, or mm converted to ft) and quantities are read, a schedule quantity that differs from the count
+  is flagged, and the sizes can go straight into the opening schedule. On this page, every page of the PDF or the whole
+  project; you tick what to count (one condition per mark, or per type); markers are flagged AI until checked.
+  *count door swings* counts doors from their swing symbols (arcs of 1.2–6 ft; double doors once) on drawings with no
+  tags.
+
 Phase 2 (planned): click-inside room areas with door gaps closed, walls found by thickness, symbol counting,
 a command bar, typical-floor multipliers and sending quantities to the Project BOQ. Phase 3: room tags and
 door / window marks read from the drawing, revision overlay, a scanned-PDF mode.
@@ -653,7 +693,7 @@ CDN. Tests use a hand-written 3-page vector PDF with known dimensions (`tools/ta
 
 ```sh
 python3 -m http.server 8765 &
-TK_LIBS=/path/with/pdfjs-dist+exceljs node tools/test_takeoff.js   # 93 browser checks
+TK_LIBS=/path/with/pdfjs-dist+exceljs node tools/test_takeoff.js   # 150 browser checks
 ```
 
 ## Calculator tab
@@ -845,6 +885,7 @@ docs/master-rate-analysis-rev07.md  revision and validation report of the Master
 docs/RA_Master_Pakistan_FINAL_Rev07_2026-09-27.xlsx  the Rev07 workbook
 tools/test_rfq_tracker.js           browser tests for the RFQ Tracker (playwright)
 tools/test_price_trends.js          browser tests for Price Trends & Staleness (playwright)
+docs/takeoff-bluebeam-planswift-parity.md  PDF Takeoff vs Bluebeam Revu 21 / Max and PlanSwift 11 (Takeoff Boost), feature by feature
 tools/takeoff_fixture.js            hand-written 3-page vector test PDF for the takeoff tests
 tools/test_takeoff.js               browser tests for the PDF Takeoff (playwright)
 tools/calc_data.py                  build the Calculator tab's section / pipe / material data block

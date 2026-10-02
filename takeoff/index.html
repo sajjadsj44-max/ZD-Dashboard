@@ -109,7 +109,7 @@ table.sh .rn:hover{color:var(--purple)}
 .cond .q{font-variant-numeric:tabular-nums;font-weight:700;font-size:12px;text-align:right;white-space:nowrap}
 .cond .ed{border:0;background:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px}
 .empty{padding:22px 14px;color:var(--muted);text-align:center;line-height:1.6;font-size:12px}
-.keys{padding:10px 12px;border-top:1px solid var(--line);font-size:10.5px;color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:4px 8px}
+.keys{padding:10px 12px;border-top:1px solid var(--line);font-size:10.5px;color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;max-height:170px;overflow:auto}
 .keys span{white-space:nowrap}
 .keys kbd{display:inline-block;border:1px solid #c9d6e4;border-bottom-width:2px;border-radius:4px;padding:0 4px;font-size:10px;color:#3c4c60;background:#fbfcfe;font-family:inherit}
 
@@ -127,7 +127,22 @@ table.sh .rn:hover{color:var(--purple)}
 #stage canvas{position:absolute;left:0;top:0;transform-origin:0 0}
 #low{image-rendering:auto}
 #ov{position:absolute;inset:0;width:100%;height:100%}
-#stage.pan{cursor:grab}#stage.panning{cursor:grabbing}#stage.draw{cursor:crosshair}
+#stage.pan{cursor:grab}#stage.panning{cursor:grabbing}#stage.draw{cursor:crosshair}#stage.lasso{cursor:crosshair}#stage.zoomwin{cursor:zoom-in}
+/* right-click menu (Bluebeam / PlanSwift style) */
+#ctx{position:fixed;z-index:30;min-width:230px;max-width:340px;background:#fff;border:1px solid #c9d6e4;border-radius:8px;box-shadow:0 10px 32px rgba(15,41,66,.28);padding:4px 0;display:none;font-size:12.5px;user-select:none}
+#ctx.on{display:block}
+#ctx .chd{padding:6px 12px 7px;border-bottom:1px solid var(--line);margin-bottom:3px;display:flex;flex-direction:column;gap:1px;max-width:340px}
+#ctx .chd b{color:var(--navy);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#ctx .chd span{font-size:10.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ctx .ci{position:relative;display:flex;align-items:center;gap:14px;padding:5px 12px;cursor:pointer;color:var(--txt);white-space:nowrap}
+#ctx .ci:hover{background:#f1eefc;color:var(--purple)}
+#ctx .ci .ct{flex:1;overflow:hidden;text-overflow:ellipsis}#ctx .ci .ck{font-size:10.5px;color:var(--muted)}
+#ctx .ci.dis{opacity:.42;pointer-events:none}#ctx .ci.dng{color:var(--red)}#ctx .ci.dng:hover{background:#fdecec}
+#ctx .csep{height:1px;background:var(--line);margin:3px 0}
+#ctx .cm{display:none;position:absolute;left:100%;top:-4px;min-width:210px;max-height:70vh;overflow:auto;background:#fff;border:1px solid #c9d6e4;border-radius:8px;box-shadow:0 10px 32px rgba(15,41,66,.28);padding:4px 0}
+#ctx.flip .cm{left:auto;right:100%}
+#ctx .ci.sub:hover>.cm{display:block}
+kbd{display:inline-block;border:1px solid #c9d6e4;border-bottom-width:2px;border-radius:4px;padding:0 4px;font-size:10.5px;color:#3c4c60;background:#fbfcfe;font-family:inherit}
+table.keyt td{vertical-align:top;border-bottom:1px solid #f2f5f9}
 .status{display:flex;gap:14px;align-items:center;padding:5px 10px;background:#fff;border-top:1px solid var(--line);font-size:11.5px;color:#3c4c60;min-height:28px;flex-wrap:wrap}
 .status b{font-variant-numeric:tabular-nums}
 .status .hint{color:var(--muted);margin-left:auto}
@@ -157,6 +172,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 .props .fg{display:flex;flex-direction:column;gap:3px;min-width:90px;flex:1}
 .props label,.dlg label{font-size:9.5px;letter-spacing:.5px;color:var(--muted);font-weight:700;text-transform:uppercase}
 .props h4{font-size:12px;color:var(--navy);margin-bottom:8px}
+.props .small{font-size:10.5px;color:var(--muted);line-height:1.4}
 .warnbar{background:#fff5e2;border-bottom:1px solid #f3d998;color:#7a5a08;font-size:11.5px;padding:7px 12px;line-height:1.5;display:none}
 .warnbar.on{display:block}
 
@@ -245,6 +261,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <span id="zoomPct">—</span>
   <button class="btn sm" id="bZi" title="Zoom in (+)">+</button>
   <button class="btn sm" id="bFit" title="Fit page (F)">Fit</button>
+  <button class="btn sm" id="bZw" title="Zoom window (Z) — drag a box round the part to see">&#11034;</button>
   <span class="dimw"><button class="btn sm tg2" id="bDim" title="Dimmer — fade the drawing so the takeoff stands out">&#9728; Dimmer</button><input type="range" id="dimPct" min="0" max="90" step="5" value="50" title="Dimming %"><span id="dimLbl">0%</span></span>
   <button class="btn sm tg2" id="bLw" title="Line weights are on — click to draw every line thin">&#9472; Line weights</button>
   <button class="btn sm tg2 on" id="bHideMk" title="Hide all markups (measurements and notes) to see the drawing">&#128065; Markups</button>
@@ -270,10 +287,12 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
     <div class="pb" id="condList"></div>
     <div class="pb" id="layerList" style="display:none"></div>
     <div class="keys">
-      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>C</kbd> count</span><span><kbd>E</kbd> circle</span><span><kbd>N</kbd> note</span><span><kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy</span><span><kbd>Ctrl</kbd>+<kbd>F</kbd> find</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
-      <span><kbd>M</kbd> measure</span><span><kbd>K</kbd> set scale</span><span><kbd>V</kbd> select</span><span><kbd>Space</kbd> pan</span>
-      <span><kbd>Enter</kbd> / right-click finish</span><span><kbd>Esc</kbd> cancel</span><span><kbd>&#9003;</kbd> last point</span><span><kbd>S</kbd> snap</span>
-      <span><kbd>Shift</kbd> 0° / 90°</span><span><kbd>1</kbd>–<kbd>9</kbd> condition</span>
+      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>C</kbd> count</span><span><kbd>E</kbd> circle</span><span><kbd>N</kbd> note</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
+      <span><kbd>M</kbd> measure</span><span><kbd>K</kbd> set scale</span><span><kbd>V</kbd> select</span><span><kbd>B</kbd> break</span><span><kbd>Shift</kbd>+<kbd>O</kbd> lasso</span><span><kbd>Z</kbd> zoom box</span>
+      <span><kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo point</span><span><kbd>A</kbd> arc (drawing)</span><span><kbd>Ctrl</kbd>+click no snap</span><span><kbd>Shift</kbd> 0° / 90°</span>
+      <span><kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>X</kbd>/<kbd>V</kbd></span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> in place</span><span><kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate</span><span><kbd>Ctrl</kbd>+drag copy</span>
+      <span>dbl-click side +point</span><span>dbl-click point −point</span><span>right-click menu</span><span><kbd>Tab</kbd> next under cursor</span>
+      <span><kbd>Enter</kbd> finish</span><span><kbd>Esc</kbd> cancel</span><span><kbd>Space</kbd> pan</span><span><kbd>?</kbd> all keys</span>
     </div>
   </aside>
 
@@ -281,7 +300,8 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
     <button class="openp" id="openL" style="display:none" title="Show the conditions panel">&#10217;</button>
     <button class="openp" id="openR" style="display:none" title="Show the measurement sheet">&#10216;</button>
     <div class="tools" id="tools">
-      <button class="tool" data-tool="select" title="Select / edit (V)">&#11016; Select <kbd>V</kbd></button>
+      <button class="tool" data-tool="select" title="Select / edit (V): click, or drag a box — left→right selects what is wholly inside, right→left what it touches. Drag a selected object to move it, Ctrl+drag to copy. Right-click for more.">&#11016; Select <kbd>V</kbd></button>
+      <button class="tool" data-tool="lasso" title="Lasso select (Shift+O): drag a free shape round the objects">&#10160; Lasso</button>
       <button class="tool" data-tool="pan" title="Pan (H or hold Space)">&#9995; Pan <kbd>H</kbd></button>
       <button class="tool" data-tool="draw" title="Draw with the active condition (A)">&#9998; Draw <kbd>A</kbd></button>
       <button class="tool" data-tool="rect" title="Rectangle area (R)">&#9645; Rect <kbd>R</kbd></button>
@@ -293,6 +313,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
       <button class="tool" data-tool="vsearch" title="Find similar — box one symbol; every matching symbol on the page or PDF is counted">&#128269; Find similar</button>
       <button class="tool" data-tool="ded" title="Deduction for the active condition (D)">&minus; Deduct <kbd>D</kbd></button>
       <button class="tool" data-tool="open" title="Door / window opening in a wall (O)">&#9707; Opening <kbd>O</kbd></button>
+      <button class="tool" data-tool="break" title="Break (B): click a length run to cut it in two there · Shift+click deletes one segment">&#9986; Break <kbd>B</kbd></button>
       <button class="tool" data-tool="measure" title="Quick measure — not saved (M)">&#8596; Measure <kbd>M</kbd></button>
       <button class="tool" data-tool="cal" title="Set scale from a known length (K)">&#128207; Scale <kbd>K</kbd></button>
       <span class="tsep"></span>
@@ -302,6 +323,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
       <button class="tool" data-tool="hilite" title="Highlight an area">&#9641; Highlight</button>
       <span class="tsep"></span>
       <button class="tool" id="bDel" title="Delete the selected measurement, count point or markup (Delete)" disabled>&#128465; Delete</button>
+      <button class="tool" id="bKeys" title="Keyboard &amp; mouse shortcuts (?)">&#9000; Keys</button>
       <span class="sp"></span>
       <label class="tg" title="Snap to drawing lines (S)"><input type="checkbox" id="snapOn" checked> Snap</label>
     </div>
@@ -342,6 +364,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 
 <div id="dlgBack"><div class="dlg" role="dialog" aria-modal="true"><div class="dh" id="dlgT"></div><div class="db" id="dlgB"></div><div class="df" id="dlgF"></div></div></div>
 <div id="pop"></div>
+<div id="ctx" role="menu" aria-label="Actions"></div>
 <aside id="aiPanel" aria-label="Claude assistant">
   <div class="aih"><b>&#10022; Claude</b><span class="small">reads the drawing, measures rooms</span><span class="sp"></span>
     <button class="btn sm" id="aiNew" title="Start a new conversation">New</button><button class="btn sm" id="aiKeyBtn" title="API key">Key</button><button class="btn sm" id="aiClose" title="Close">&times;</button></div>
@@ -350,7 +373,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <div id="aiLog"></div>
   <div class="aif"><textarea id="aiIn" rows="2" placeholder="e.g. measure every bedroom, or: the lounge outline is wrong, redo it"></textarea>
     <div class="aib"><button class="btn sm" id="aiRead" title="API key: send a picture of the view on screen with your message">&#128065; Read this view</button><span class="sp"></span><button class="btn sm pri" id="aiSend">Send</button></div>
-    <div class="aib"><span class="small">Agents:</span><button class="btn sm pri" id="agRooms" title="Rooms agent (free, instant): auto-trace every room named on this page and check it against its written size">&#127968; Rooms</button><button class="btn sm pri" id="agUnit" title="Apartment agent (free): every room of one apartment by its number, e.g. 107, with the apartment total">&#127970; Apartment</button><button class="btn sm pri" id="agWalls" title="Walls agent (free, instant): find walls from their two parallel face lines and mark them on the centre line">&#129521; Walls</button><button class="btn sm pri" id="agTags" title="Tags agent (free, instant): count door / window / ventilator tags written on the drawing">&#128682; Doors / windows</button><button class="btn sm" id="aiDetails" title="Read this page's text — rooms, sizes, tags, levels — and list tasks">&#128203; Details</button></div>
+    <div class="aib"><span class="small">Agents:</span><button class="btn sm pri" id="agRooms" title="Rooms agent (free, instant): auto-trace every room named on this page and check it against its written size">&#127968; Rooms</button><button class="btn sm pri" id="agUnit" title="Apartment agent (free): every room of one apartment by its number, e.g. 107, with the apartment total">&#127970; Apartment</button><button class="btn sm pri" id="agWalls" title="Walls agent (free, instant): find walls from their two parallel face lines and mark them on the centre line">&#129521; Walls</button><button class="btn sm pri" id="agTags" title="Doors / windows agent (free): every door, window and ventilator tag (D1, D-1, DR-01, DOOR 1, SD2, W1, WN-2, KW1, V1 …) on this page, this PDF or the whole project — schedule tables read for sizes and checked against the count; optional door-swing count">&#128682; Doors / windows</button><button class="btn sm" id="aiDetails" title="Read this page's text — rooms, sizes, tags, levels — and list tasks">&#128203; Details</button></div>
     <div class="aib"><span class="small">Claude.ai chat:</span><button class="btn sm" id="aiCopy" title="Copy the view and instructions for your own Claude.ai chat — no API key">Copy for Claude</button><button class="btn sm" id="aiImport" title="Paste Claude.ai's reply to draw the measurements">&#8615; Import from Claude</button></div></div>
 </aside>
 <div id="toast"></div>

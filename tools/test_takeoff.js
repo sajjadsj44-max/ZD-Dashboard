@@ -15,7 +15,12 @@
    endpoints; rectangle and polygon areas, an L-shape split into rectangles and a triangle as ½ × base × height;
    a deduction and its negative row; wall plaster both faces with an opening deducted and one below the 1.00 Sft
    threshold; count; a 9" wall in cft; Nos multiplier; undo / redo; select and delete; ft-in parsing; Excel (formulas,
-   colours), CSV, PNG and project JSON export / import; reload restores project and PDF; phone width; no page errors. */
+   colours), CSV, PNG and project JSON export / import; reload restores project and PDF; phone width; no page errors.
+   Bluebeam / PlanSwift editing: Ctrl+Z / Ctrl+Y / Backspace on points while drawing, arcs (A) as one step and one leg;
+   double-click / Shift+click add and remove points, the + handle; Break, delete segment, join; window vs crossing box,
+   lasso; right-click menus; drag to move, Ctrl+drag copy, Ctrl+V at the cursor, Ctrl+Shift+V in place, Ctrl+D, lock,
+   rotate; typed lengths; explode, offset; zoom window; door / window tags in every spelling, schedule rows left out with
+   their sizes read, the agent dialog, door swings. */
 const path = require("path"), fs = require("fs"), os = require("os");
 let pw;
 try { pw = require("playwright"); } catch (e) { pw = require("/opt/node22/lib/node_modules/playwright"); }
@@ -205,7 +210,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   ok(blue && /DDEBFF/.test(blue.fgColor.argb) && prot && prot.locked === false && ms.sheetProtection, "dimension cells blue and unlocked, sheet protected");
   ok(wb.getWorksheet("Assumptions").getColumn(2).values.some(v => /height H 10\.500/.test(String(v))), "assumptions list the heights entered");
   const cf = await dl("#exCsv"), csv = fs.readFileSync(cf, "utf8");
-  ok(/S\.No,Condition,Description/.test(csv) && /Floor area,area,test-plans p\.1,1,12\.000,14\.000,,168\.00,Sft/.test(csv), "CSV rows in the house layout");
+  ok(/S\.No,Condition,Description/.test(csv) && /Floor area,(area|BED ROOM),test-plans p\.1,1,12\.000,14\.000,,168\.00,Sft/.test(csv), "CSV rows in the house layout");
   const pf = await dl("#exPng");
   ok(fs.statSync(pf).size > 20000, "marked-up page PNG");
   const jf = await dl("#exJson"), js = JSON.parse(fs.readFileSync(jf, "utf8"));
@@ -352,6 +357,201 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   ok((await T(() => zdTakeoff.P.proj.items.length)) === nAll && (await T(id => zdTakeoff.backupsOf(id), pid)).some(b => b.why === "before restore" && b.n === nAll - 1), "restored; the state before the restore was backed up first");
   ok((await T(id => zdTakeoff.backupsOf(id), pid)).length <= 10, "at most 10 backups per project");
 
+
+  console.log("drawing: Ctrl+Z / Ctrl+Y on points, arcs");
+  await T(k => zdTakeoff.gotoPage(k.split(":")[0], 3), P3); await wait(700);
+  await newCond("Custom length", {name: "Edit run"});
+  const runsOf = () => T(() => { const Z = zdTakeoff, P = Z.P.proj, c = P.conds.find(x => x.name === "Edit run"); return P.items.filter(i => i.cond === c.id).map(i => ({id: i.id, n: i.pts.length, L: Z.rowsOf(i, 9)[0].L, runs: Z.rowsOf(i, 9)[0].runs, pts: i.pts, locked: !!i.locked})); });
+  const dlen = () => T(() => zdTakeoff.S.draft.length);
+  await click(560, 200); await click(650, 200); await click(700, 260);
+  ok((await dlen()) === 3, "three points clicked");
+  await page.keyboard.press("Control+z"); await wait();
+  ok((await dlen()) === 2, "Ctrl+Z while drawing takes back the wrong point");
+  await page.keyboard.press("Control+y"); await wait();
+  ok((await dlen()) === 3, "Ctrl+Y puts it back");
+  await page.keyboard.press("Backspace"); await wait();
+  ok((await dlen()) === 2, "Backspace takes it back too");
+  await click(650, 290); await page.keyboard.press("Enter"); await wait();
+  let R = await runsOf();
+  ok(R.length === 1 && R[0].n === 3 && near(R[0].L, 20), `run finished with the right points: 10.000 + 10.000 = ${R[0] && R[0].L} ft`);
+  ok(/Run in Edit run/.test(await page.getAttribute("#bUndo", "title")), "undo button names the last change: " + (await page.getAttribute("#bUndo", "title")));
+  await click(560, 400); await page.keyboard.press("a"); await click(605, 445); await click(650, 400); await wait();
+  const dArc = await dlen();
+  ok(dArc > 30, `A while drawing: an arc through three clicks (${dArc} points, one every 2.5°)`);
+  await page.keyboard.press("Control+z"); await wait();
+  ok((await dlen()) === 1, "Ctrl+Z takes back the whole arc in one step");
+  await page.keyboard.press("Control+y"); await wait();
+  ok((await dlen()) === dArc, "Ctrl+Y puts the arc back");
+  await page.keyboard.press("Enter"); await wait();
+  R = await runsOf();
+  const arcRun = R.find(r => r.n > 30);
+  ok(arcRun && arcRun.runs.length === 1 && near(arcRun.L, Math.PI * 5, 0.003), `the arc is one leg on the sheet: π × 45 pt = ${arcRun && arcRun.L} ft (15.708)`);
+
+  console.log("select & edit points (Bluebeam / PlanSwift)");
+  await page.keyboard.press("v");
+  const run1 = R.find(r => r.n === 3).id;
+  await click(590, 200); await wait();
+  ok(await T(id => zdTakeoff.S.sel === id, run1), "click on the line selects the run");
+  const dbl = async (x, y) => { const p = await scr(x, y); await page.mouse.move(p[0], p[1]); await wait(40); await page.mouse.dblclick(p[0], p[1]); await wait(150); };
+  await dbl(590, 200);
+  R = await runsOf(); let r1 = R.find(r => r.id === run1);
+  ok(r1.n === 4 && near(r1.L, 20), `double-click on a side adds a point (4 points, still ${r1.L} ft)`);
+  await dbl(590, 200);
+  r1 = (await runsOf()).find(r => r.id === run1);
+  ok(r1.n === 3, "double-click on the point removes it");
+  await page.keyboard.down("Shift"); await click(620, 200); await page.keyboard.up("Shift");
+  r1 = (await runsOf()).find(r => r.id === run1);
+  ok(r1.n === 4, "Shift+click on a side adds a point (Bluebeam)");
+  await page.keyboard.down("Shift"); await click(620, 200); await page.keyboard.up("Shift");
+  r1 = (await runsOf()).find(r => r.id === run1);
+  ok(r1.n === 3, "Shift+click on the point removes it");
+  { const a = await scr(650, 245), b = await scr(680, 245); await page.mouse.move(a[0], a[1]); await wait(40); await page.mouse.down(); await page.mouse.move(a[0] + 10, a[1], {steps: 3}); await page.mouse.move(b[0], b[1], {steps: 6}); await page.mouse.up(); await wait(200); }
+  r1 = (await runsOf()).find(r => r.id === run1);
+  ok(r1.n === 4 && near(r1.L, (90 + 2 * Math.hypot(30, 45)) / 9, 0.01), `dragging the + at a side's middle adds a point there (${r1.L} ft)`);
+  await page.keyboard.press("Control+z"); await wait();
+  r1 = (await runsOf()).find(r => r.id === run1);
+  ok(r1.n === 3 && near(r1.L, 20), "Ctrl+Z takes the new point away");
+
+  console.log("break, delete segment, join");
+  await page.keyboard.press("b"); await click(605, 200); await wait();
+  R = await runsOf();
+  const parts = R.filter(r => r.n < 30).map(r => r.L).sort((a, b) => a - b);
+  ok(parts.length === 2 && near(parts[0], 5) && near(parts[1], 15), `Break (B) cut the run in two: ${parts.join(" + ")} ft`);
+  await page.keyboard.down("Shift"); await click(650, 250); await page.keyboard.up("Shift"); await wait();
+  R = await runsOf();
+  ok(R.filter(r => r.n < 30).reduce((a, r) => a + r.L, 0) === 10, "Shift+click with Break deleted one segment (total 5 + 5 = 10 ft)");
+  await page.keyboard.press("v");
+  const drag = async (x0, y0, x1, y1, mods) => { const a = await scr(x0, y0), b = await scr(x1, y1); for (const m of mods || []) await page.keyboard.down(m); await page.mouse.move(a[0], a[1]); await wait(40); await page.mouse.down(); await page.mouse.move((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, {steps: 4}); await page.mouse.move(b[0], b[1], {steps: 4}); await page.mouse.up(); for (const m of mods || []) await page.keyboard.up(m); await wait(200); };
+  await drag(570, 190, 640, 212);
+  ok((await T(() => zdTakeoff.selIds().size)) === 0, "box left → right (window) selects nothing that is only partly inside");
+  await drag(640, 212, 615, 190);
+  ok((await T(() => zdTakeoff.selIds().size)) === 1, "box right → left (crossing) selects what it touches");
+  await drag(548, 212, 664, 188);
+  ok((await T(() => zdTakeoff.selIds().size)) === 2, "window round both halves selects both");
+  { const p = await scr(580, 200); await page.mouse.click(p[0], p[1], {button: "right"}); await wait(200); }
+  ok(await page.isVisible("#ctx"), "right-click opens the menu");
+  const menu = await page.innerText("#ctx");
+  ok(/Join 2 runs into one/.test(menu) && /Copy/.test(menu) && /Paste in place/.test(menu) && /Lock/.test(menu) && /Move to condition/.test(menu), "menu for a selection: join, clipboard, lock, move to condition…");
+  await page.locator("#ctx .ci", {hasText: "Join 2 runs"}).click(); await wait(200);
+  R = await runsOf(); const joined = R.filter(r => r.n < 30);
+  ok(joined.length === 1 && near(joined[0].L, 10), `Join made one run of ${joined[0] && joined[0].L} ft`);
+  { const p = await scr(605, 200); await page.mouse.click(p[0] + 3, p[1], {button: "right"}); await wait(200); }
+  const m2 = await page.innerText("#ctx");
+  ok(/Break here/.test(m2) && /Delete this segment/.test(m2) && /Cut a gap from here/.test(m2) && /Continue drawing this run/.test(m2) && /Make an area in/.test(m2), "menu on a run: break here, delete segment, cut a gap, continue drawing, make an area");
+  await page.keyboard.press("Escape"); await wait();
+  ok(!(await page.isVisible("#ctx")), "Esc closes the menu");
+  { const p = await scr(760, 520); await page.mouse.click(p[0], p[1], {button: "right"}); await wait(200); }
+  ok(/Paste here/.test(await page.innerText("#ctx")) && /Keyboard & mouse shortcuts/.test(await page.innerText("#ctx")), "menu on the empty drawing: paste here, tools, view, shortcuts");
+  await page.keyboard.press("Escape");
+
+  console.log("move, copy, paste, lock, rotate");
+  const jr = joined[0].id;
+  await click(595, 200); await wait();
+  await drag(595, 200, 595, 160);
+  let J = (await runsOf()).find(r => r.id === jr);
+  ok(near(J.pts[0][1] - joined[0].pts[0][1], 40, 0.01) && near(J.pts[0][0], joined[0].pts[0][0], 0.01), "drag a selected run: moved 40 pt (4.444 ft) down");
+  ok(/Move 1 object/.test(await page.getAttribute("#bUndo", "title")), "undo names it: Move 1 object");
+  await page.keyboard.press("Control+z"); await wait();
+  J = (await runsOf()).find(r => r.id === jr);
+  ok(near(J.pts[0][1], joined[0].pts[0][1], 0.01), "Ctrl+Z puts it back");
+  const n0r = (await runsOf()).length;
+  await drag(580, 200, 580, 150, ["Control"]);
+  R = await runsOf();
+  ok(R.length === n0r + 1 && R.some(r => r.id !== jr && r.n === 3 && near(r.pts[0][1] - joined[0].pts[0][1], 50, 0.01)), "Ctrl+drag copies the run (the original stays)");
+  await click(580, 200); await wait();
+  await page.keyboard.press("Control+c");
+  { const p = await scr(720, 520); await page.mouse.move(p[0], p[1]); await wait(60); }
+  await page.keyboard.press("Control+v"); await wait();
+  R = await runsOf();
+  const pasted = R.find(r => r.n === 3 && Math.abs((Math.min(...r.pts.map(q => q[0])) + Math.max(...r.pts.map(q => q[0]))) / 2 - 720) < 1);
+  ok(R.length === n0r + 2 && !!pasted, "Ctrl+V pastes at the cursor");
+  await page.keyboard.press("Control+d"); await wait();
+  ok((await runsOf()).length === n0r + 3, "Ctrl+D duplicates");
+  await T(k => zdTakeoff.gotoPage(k.split(":")[0], 1), P1); await wait(700);
+  await page.keyboard.press("Control+Shift+v"); await wait();
+  const ip = await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.name === "Edit run"); return Z.P.proj.items.filter(i => i.cond === c.id && i.page === 1).map(i => i.pts); });
+  ok(ip.length === 1 && near(ip[0][0][0], joined[0].pts[0][0], 0.01) && near(ip[0][0][1], joined[0].pts[0][1], 0.01), "Ctrl+Shift+V on another page pastes in the same place (typical floors)");
+  await T(k => zdTakeoff.gotoPage(k.split(":")[0], 3), P3); await wait(700);
+  await click(580, 200); await wait();
+  await page.keyboard.press("Control+Shift+l"); await wait();
+  ok((await runsOf()).find(r => r.id === jr).locked, "Ctrl+Shift+L locks it");
+  await drag(580, 200, 580, 120);
+  J = (await runsOf()).find(r => r.id === jr);
+  ok(near(J.pts[0][1], joined[0].pts[0][1], 0.01), "a locked run does not move");
+  await page.keyboard.press("Delete"); await wait();
+  ok((await runsOf()).some(r => r.id === jr), "nor is it deleted");
+  await page.keyboard.press("Control+Shift+l"); await wait();
+  await T(() => zdTakeoff.transformSel("cw")); await wait();
+  J = (await runsOf()).find(r => r.id === jr);
+  ok(!J.locked && near(J.pts[0][0], J.pts[2][0], 0.01) && near(J.L, 10), "unlocked, then rotated 90°: now vertical, still 10.000 ft");
+
+  console.log("doors / windows agent");
+  const tg = await T(() => zdTakeoff.tagsOf([
+    {s: "D1", x: 100, y: 100, w: 8, h: 6}, {s: "D-1", x: 300, y: 150, w: 12, h: 6}, {s: "DR-02", x: 100, y: 220, w: 20, h: 6}, {s: "DOOR 3", x: 200, y: 300, w: 26, h: 6},
+    {s: "W", x: 400, y: 100, w: 4, h: 6}, {s: "1", x: 400.5, y: 107, w: 3, h: 6}, {s: "W1'", x: 450, y: 180, w: 10, h: 6}, {s: "V-1", x: 500, y: 250, w: 10, h: 6},
+    {s: "KW2", x: 520, y: 320, w: 12, h: 6}, {s: "SD1", x: 140, y: 330, w: 12, h: 6}, {s: "WN-3", x: 160, y: 380, w: 16, h: 6}, {s: "D", x: 250, y: 400, w: 4, h: 6}, {s: "4", x: 254.5, y: 400, w: 4, h: 6},
+    {s: "D1", x: 600, y: 400, w: 8, h: 6}, {s: "3'-0\" x 7'-0\"", x: 620, y: 400, w: 50, h: 6}, {s: "12", x: 690, y: 400, w: 8, h: 6},
+    {s: "W1", x: 600, y: 412, w: 8, h: 6}, {s: "4'-0\"", x: 620, y: 412, w: 20, h: 6}, {s: "5'-0\"", x: 650, y: 412, w: 20, h: 6}, {s: "6", x: 690, y: 412, w: 6, h: 6},
+    {s: "V1", x: 600, y: 424, w: 8, h: 6}, {s: "900 x 600", x: 620, y: 424, w: 40, h: 6}]));
+  const pc = Object.fromEntries(Object.entries(tg.plan).map(([k, v]) => [k, v.length]));
+  ok(pc.D1 === 2 && pc.D2 === 1 && pc.D3 === 1 && pc.D4 === 1 && pc.W1 === 1 && pc["W1'"] === 1 && pc.V1 === 1 && pc.KW2 === 1 && pc.SD1 === 1 && pc.W3 === 1, "tags in every spelling: D1, D-1, DR-02, DOOR 3, D + 4 split, W over 1 stacked, W1', V-1, KW2, SD1, WN-3 → " + JSON.stringify(pc));
+  ok(tg.inSched === 3 && tg.sched.D1 && tg.sched.D1.w === 3 && tg.sched.D1.h === 7 && tg.sched.D1.qty === 12 && tg.sched.W1.w === 4 && tg.sched.W1.h === 5 && tg.sched.W1.qty === 6 && near(tg.sched.V1.w, 2.953, 0.001), "schedule rows left out of the count, sizes read (3.000 × 7.000 qty 12; 4.000 × 5.000 qty 6; 900 × 600 mm → 2.953 × 1.969 ft)");
+  ok(await T(() => ["D1", "D-01", "Dr 1", "DOOR-1", "d.01"].every(s => (zdTakeoff.tagParse(s) || {}).k === "D1") && zdTakeoff.tagParse("BED ROOM") === null && zdTakeoff.tagParse("W1A").k === "W1A"), "D1, D-01, Dr 1, DOOR-1, d.01 are one mark; BED ROOM is not a tag");
+  const saved = await T(() => { const S = zdTakeoff.S, k = S.key, old = S.texts[k]; S.texts[k] = [{s: "D1", x: 600, y: 300, w: 8, h: 6}, {s: "D-1", x: 700, y: 330, w: 12, h: 6}, {s: "W2", x: 650, y: 360, w: 8, h: 6}, {s: "D1", x: 600, y: 500, w: 8, h: 6}, {s: "3'-0\"x7'-0\"", x: 615, y: 500, w: 40, h: 6}]; window.__oldTexts = old; return true; });
+  const cr = await T(() => zdTakeoff.agentCount("doors"));
+  ok(saved && cr && cr.counts && cr.counts.D1 === 2 && !cr.counts.W2, "agent: count doors → D1 2 Nos (the schedule row left out, windows not counted)");
+  const cw = await T(() => zdTakeoff.agentCount("windows"));
+  ok(cw && cw.counts && cw.counts.W2 === 1, "agent: count windows → W2 1 Nos");
+  await T(() => { zdTakeoff.S.texts[zdTakeoff.S.key] = window.__oldTexts; });
+  await T(() => { const S = zdTakeoff.S; window.__old2 = S.texts[S.key]; S.texts[S.key] = [{s: "D-2", x: 600, y: 300, w: 12, h: 6}, {s: "D-2", x: 700, y: 330, w: 12, h: 6}, {s: "W 5", x: 650, y: 360, w: 10, h: 6}, {s: "V1", x: 650, y: 380, w: 8, h: 6},
+    {s: "DOOR & WINDOW SCHEDULE", x: 560, y: 470, w: 90, h: 6}, {s: "D2", x: 560, y: 480, w: 8, h: 6}, {s: "FLUSH DOOR", x: 575, y: 480, w: 40, h: 6}, {s: "3'-6\"", x: 625, y: 480, w: 18, h: 6}, {s: "7'-0\"", x: 650, y: 480, w: 18, h: 6}, {s: "3", x: 680, y: 480, w: 5, h: 6}]; });
+  await page.click("#bClaude"); await wait(200); await page.click("#agTags"); await wait(200);
+  await page.click("#dlgOk"); await wait(500);
+  const dwt = await page.innerText("#dlgB");
+  ok(/D2/.test(dwt) && /W5/.test(dwt) && /V1/.test(dwt) && /3\.500 × 7\.000/.test(dwt) && /≠/.test(dwt), "Doors / windows agent: scan lists D2 (3.500 × 7.000 from the schedule, qty 3 ≠ 2 counted), W5, V1");
+  await page.locator("#dlgB tr", {hasText: "V1"}).locator("input").uncheck(); await page.click("#dlgOk"); await wait(300);
+  const dwc = await T(() => { const Z = zdTakeoff, P = Z.P.proj, n = nm => { const c = P.conds.find(x => x.name === nm); return c ? P.items.filter(i => i.cond === c.id && i.file + ":" + i.page === Z.S.key).reduce((a, i) => a + i.pts.length, 0) : 0; }; return {d2: n("D2"), w5: n("W5"), v1: n("V1"), sch: P.openings.find(o => o.mark === "D2")}; });
+  ok(dwc.d2 === 2 && dwc.w5 === 1 && dwc.v1 === 0 && dwc.sch && dwc.sch.w === 3.5 && dwc.sch.h === 7 && dwc.sch.type === "door", "ticked marks counted (V1 unticked, not counted); D2's size from the schedule added to the opening schedule");
+  await T(() => { zdTakeoff.S.texts[zdTakeoff.S.key] = window.__old2; });
+  await page.click("#aiClose");
+  await T(k => zdTakeoff.gotoPage(k.split(":")[0], 1), P1); await wait(600);
+  const sw = await T(async () => { await zdTakeoff.indexPage(); return zdTakeoff.doorSwings(); });
+  ok(sw && sw.length === 1 && near(sw[0].w, 3, 0.25) && sw[0].leaves === 1, `door swing symbols: ${sw && sw.length} door, leaf ${sw && sw[0] && sw[0].w.toFixed(2)} ft (3'-0" door in the fixture)`);
+
+
+  console.log("sketch to scale, explode, offset, lasso, keys");
+  await T(k => zdTakeoff.gotoPage(k.split(":")[0], 3), P3); await wait(700);
+  await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.name === "Edit run"); Z.S.cond = c.id; Z.setTool("draw"); });
+  await click(560, 520); { const p = await scr(700, 520); await page.mouse.move(p[0], p[1]); await wait(60); }
+  await page.keyboard.type("12'-6\""); await page.keyboard.press("Enter"); await wait();
+  { const p = await scr(560, 520); await page.mouse.move(p[0] + 120, p[1] - 200 + 200, {steps: 2}); }
+  const ty = await T(() => { const S = zdTakeoff.S; return S.draft.length === 2 ? Math.hypot(S.draft[1][0] - S.draft[0][0], S.draft[1][1] - S.draft[0][1]) / 9 : -1; });
+  ok(near(ty, 12.5, 1e-6), `typed 12'-6" + Enter while drawing: next point ${ty.toFixed(3)} ft along the cursor (Bluebeam sketch to scale)`);
+  await page.keyboard.press("Escape"); await wait();
+  await T(() => { const Z = zdTakeoff, P = Z.P.proj, c = P.conds.find(x => x.name === "Edit run"); P.items.push({id: "Iexp", cond: c.id, file: Z.S.fileId, page: Z.S.pageNo, kind: "shape", pts: [[600, 50], [690, 50], [690, 140], [600, 140]], nos: 1, label: "exp"}); Z.setSel(["Iexp"]); });
+  await T(() => zdTakeoff.explodeRun(zdTakeoff.P.proj.items.find(i => i.id === "Iexp"))); await wait();
+  const ex = await T(() => zdTakeoff.selIds().size);
+  ok(ex === 3, "Explode into segments: a 3-leg run became 3 runs (PlanSwift segment takeoff)");
+  await T(() => { const Z = zdTakeoff, P = Z.P.proj, it = P.items.find(i => i.id === "Iexp"); Z.offsetItem(it, 1, true); });
+  const of = await T(() => { const Z = zdTakeoff, s = Z.S.sel, it = Z.P.proj.items.find(i => i.id === s); return it && it.pts; });
+  ok(of && near(of[0][1], 41, 0.01) && near(of[1][1], 41, 0.01), "Offset copy of a run: 1.000 ft to its left (9 pt)");
+  await T(() => { const Z = zdTakeoff, P = Z.P.proj, a = P.conds.find(x => x.type === "area"); P.items.push({id: "Isq", cond: a.id, file: Z.S.fileId, page: Z.S.pageNo, kind: "shape", pts: [[700, 50], [790, 50], [790, 140], [700, 140]], nos: 1, label: ""}); Z.offsetItem(P.items.find(i => i.id === "Isq"), 1, false); });
+  const sq = await T(() => { const Z = zdTakeoff, it = Z.P.proj.items.find(i => i.id === "Isq"); return Z.rowsOf(it, 9)[0]; });
+  ok(sq.L === 12 && sq.W === 12 && sq.qty === 144, `Offset outline outward 1.000 ft: 10 × 10 room → ${sq.L} × ${sq.W} = ${sq.qty} Sft`);
+  await page.keyboard.press("Shift+O"); await wait();
+  ok(await T(() => zdTakeoff.S.tool === "lasso"), "Shift+O: lasso tool (Bluebeam)");
+  { const pts = [[590, 445], [800, 445], [800, 565], [590, 565]]; const a = await scr(...pts[0]); await page.mouse.move(a[0], a[1]); await page.mouse.down(); for (const q of pts.slice(1).concat([pts[0]])) { const b = await scr(...q); await page.mouse.move(b[0], b[1], {steps: 5}); } await page.mouse.up(); await wait(200); }
+  ok((await T(() => zdTakeoff.selIds().size)) >= 5, `lasso selected what it went round (${await T(() => zdTakeoff.selIds().size)})`);
+  ok(/Selected:/.test(await page.innerText("#props")), "a multiple selection shows its totals (" + (await page.innerText("#props")).split("Selected:")[1].split("\n")[0].trim().slice(0, 80) + ")");
+  await page.keyboard.press("?"); await wait();
+  ok(/Keyboard & mouse/.test(await page.innerText("#dlgT")) && /crossing/.test(await page.innerText("#dlgB")), "? shows every keyboard & mouse shortcut");
+  await shot("keys"); await closeDlg();
+  await page.keyboard.press("z"); await wait();
+  ok(await T(() => zdTakeoff.S.tool === "zoomwin"), "Z: zoom window");
+  const s0 = await T(() => zdTakeoff.S.view.s);
+  { const a = await scr(560, 400), b = await scr(660, 330); await page.mouse.move(a[0], a[1]); await page.mouse.down(); await page.mouse.move(b[0], b[1], {steps: 5}); await page.mouse.up(); await wait(300); }
+  ok((await T(() => zdTakeoff.S.view.s)) > 2.5 * s0 && (await T(() => zdTakeoff.S.tool)) !== "zoomwin", "zoom window zoomed to the box, then went back to the tool");
+  await page.click("#bFit"); await wait(200);
 
   console.log("layout");
   await page.setViewportSize({width: 390, height: 844}); await wait(400);
