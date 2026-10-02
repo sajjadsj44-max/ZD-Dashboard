@@ -272,6 +272,51 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     await T(() => zdTakeoff.setTool("select"));
   });
 
+  /* ---------------------------------------------------------------- 4b. agents, scale check, viewports, turned page export */
+  await run("4b. Free agents, scale check against room sizes, viewport, turned page", async () => {
+    await go(1); await setScale(await key(), 18);
+    const keep = await T(() => { const Z = zdTakeoff, mine = Z.P.proj.items.filter(i => i.page === 1 && i.file === Z.S.fileId); Z.P.proj.items = Z.P.proj.items.filter(i => !mine.includes(i)); return JSON.stringify(mine); });
+    const ca = await T(() => { const Z = zdTakeoff, c = {id: "CAG", name: "Agent rooms", type: "area", unit: "Sft", color: "#4a3aa7", h: "", t: "", faces: 1, dedMin: 0}; Z.P.proj.conds.push(c); Z.S.cond = c.id; return c.id; });
+    let t0 = Date.now(); const r = await T(() => zdTakeoff.agentMeasure("")); perf("Rooms agent: 9 rooms traced and checked", Date.now() - t0, 30000);
+    const want = {"BED ROOM 1": 144, "BATH 1": 72, "BED ROOM 2": 144, "CORRIDOR": 123, "LIVING": 257.25, "KITCHEN": 168, "BED ROOM 3": 144, "BATH 2": 72, "STORE": 144};
+    const got = Object.fromEntries((r.rooms || []).map(x => [x.name, x]));
+    Object.entries(want).forEach(([n, v]) => calc("Rooms agent " + n, v, got[n] ? got[n].area_sft : NaN, 0.01, "Sft"));
+    ok((r.rooms || []).filter(x => x.written_sft != null).length === 8 && (r.rooms || []).every(x => !x.check), "written sizes read for the 8 rooms that have one (12’-0\"x12’-0\" as the PDF gives it) — none flagged");
+    await T(() => { const Z = zdTakeoff; Z.P.proj.items = Z.P.proj.items.filter(i => i.cond !== "CAG"); Z.P.proj.conds = Z.P.proj.conds.filter(c => c.id !== "CAG"); });
+    for (const [t, len, n] of [[0.75, 150.75, 1], [0.375, 154.25, 8]]) {
+      const w = await T(t => zdTakeoff.wallsAgent({t, page: true, bridge: 6}), t);
+      calc(`Walls agent ${t === 0.75 ? '9"' : '4.5"'} centre / face-to-face length`, len, w.total_length_ft, 0.01, "ft");
+      ok(w.runs === n, `…in ${w.runs} run${w.runs > 1 ? "s" : ""} (expected ${n}: ${t === 0.75 ? "the outer wall as one closed loop" : "partitions; the corridor is not bridged, the + junction counted once"})`);
+      await T(name => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.name === name); Z.P.proj.items = Z.P.proj.items.filter(i => i.cond !== c.id); Z.P.proj.conds = Z.P.proj.conds.filter(x => x !== c); }, w.condition);
+    }
+    await T(k => { zdTakeoff.P.proj.items = zdTakeoff.P.proj.items.concat(JSON.parse(k)); zdTakeoff.setSel([]); }, keep);
+    // a note that disagrees with the drawing is caught by the room sizes written on it
+    const k1 = await key();
+    await T(k => { zdTakeoff.P.proj.scales[k] = {ptPerFt: 9, how: "note", text: "SCALE 1/8\" = 1'-0\"", verified: false}; }, k1);
+    const ck = await T(k => zdTakeoff.checkScale(k, false).then(r => r && {ok: r.ok, sug: r.sug && r.sug.ptPerFt, lbl: r.sug && r.sug.label, agree: r.ev && r.ev.agree}), k1);
+    ok(ck && ck.ok === false && near(ck.sug, 18, 1e-9), "a wrong note (1/8\") is caught: " + (ck ? ck.agree + " written room sizes measure at " + ck.lbl : "no check"));
+    ok(/Doubtful/.test(await T(k => zdTakeoff.scaleState(zdTakeoff.P.proj.scales[k]).t, k1)), "…the page is marked Doubtful until settled");
+    await T(k => { zdTakeoff.P.proj.scales[k] = {ptPerFt: 18, how: "note", text: "SCALE 1/4\" = 1'-0\"", verified: false}; }, k1);
+    const ck2 = await T(k => zdTakeoff.checkScale(k, false).then(r => r && r.ok), k1); ok(ck2 === true, "the right note (1/4\") agrees with the written room sizes");
+    await setScale(k1, 18);
+    // a viewport drawn at 1-1/2" = 1'-0" on the 3/16" sheet
+    await go(6); await page.click("#scaleChip"); await page.click("#dlgVp"); await click(445, 140); await click(805, 450);
+    await page.waitForSelector("#vpSc"); ok((await page.inputValue("#vpSc")) === "1-1/2\" = 1'-0\"", "viewport scale read from the detail's own note: " + await page.inputValue("#vpSc"));
+    await page.click("#dlgOk"); await wait(200);
+    ok(near(await T(() => zdTakeoff.P.proj.viewports[zdTakeoff.S.key][0].ptPerFt), 108, 1e-9), "viewport scale 108 pt per ft");
+    const ds = await T(() => { const S = zdTakeoff.S, s = S.geo[S.key].segs.find(q => Math.abs(q[1] - 395) < 0.5 && Math.abs(q[3] - 395) < 0.5 && q[0] > 470); return s.slice(0, 4); });
+    calc("2'-0\" line inside the 1-1/2\" detail", 2, await T(s => { const Z = zdTakeoff, c = {id: "CV", name: "V", type: "linear", unit: "ft", color: "#2a78d6", h: "", t: "", faces: 1}; Z.P.proj.conds.push(c); const it = {id: "IV", cond: "CV", file: Z.S.fileId, page: Z.S.pageNo, kind: "shape", pts: [[s[0], s[1]], [s[2], s[3]]], nos: 1}; Z.P.proj.items.push(it); const k = Z.P.proj.viewports[Z.S.key][0].ptPerFt; return Z.rowsOf(it, k)[0].L; }, ds), 1e-9, "ft");
+    calc("16'-0\" line outside the detail (sheet 3/16\")", 16, await T(() => { const Z = zdTakeoff, s = Z.S.geo[Z.S.key].segs.find(q => Math.hypot(q[2] - q[0], q[3] - q[1]) > 200), it = {id: "IV2", cond: "CV", file: Z.S.fileId, page: Z.S.pageNo, kind: "shape", pts: [[s[0], s[1]], [s[2], s[3]]], nos: 1}; Z.P.proj.items.push(it); const k = Z.P.proj.scales[Z.S.key].ptPerFt; return Z.rowsOf(it, k)[0].L; }), 1e-9, "ft");
+    ok(near(await T(() => { const Z = zdTakeoff, it = Z.P.proj.items.find(i => i.id === "IV"); return Z.condTotals(Z.P.proj.conds.find(c => c.id === "CV")).net; }), 18, 1e-9), "the totals use each measurement's own scale (detail 2 + sheet 16 = 18 ft)");
+    await T(() => { const Z = zdTakeoff; Z.P.proj.items = Z.P.proj.items.filter(i => i.cond !== "CV"); Z.P.proj.conds = Z.P.proj.conds.filter(c => c.id !== "CV"); });
+    // marked-up PDF of the turned page
+    await go(2); const cf = await T(() => zdTakeoff.P.proj.conds.find(c => c.name === "Floor area").id); await T(id => { zdTakeoff.S.cond = id; }, cf);
+    await page.keyboard.press("r"); await click(100, 100); await click(300, 400); await wait(150); const tp = (await lastItem()).id;
+    const pf = await dl("#exPdf1"), PL = require(path.join(LIBS, "pdf-lib")), pd = await PL.PDFDocument.load(fs.readFileSync(pf));
+    ok(pd.getPageCount() === 1 && Math.round(pd.getPage(0).getWidth()) === 595 && Math.round(pd.getPage(0).getHeight()) === 842, "marked-up PDF of the turned page: upright 595 × 842, as on screen");
+    await T(id => { zdTakeoff.P.proj.items = zdTakeoff.P.proj.items.filter(i => i.id !== id); zdTakeoff.setSel([]); }, tp); await go(1);
+  });
+
   /* ---------------------------------------------------------------- 5. data kept, conditions (layers) */
   await run("5. Data integrity and conditions (layers)", async () => {
     await go(1);

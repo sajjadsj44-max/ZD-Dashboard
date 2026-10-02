@@ -29,6 +29,8 @@ const dmy = iso => { const p = String(iso || "").slice(0, 10).split("-"); return
 function toast(msg, ms){ const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => { t.style.display = "none"; }, ms || 2600); }
 function busy(msg){ const b = $("busy"); b.textContent = msg || ""; b.style.display = msg ? "block" : "none"; }
 
+/* the page's text with foot and inch marks as typed: PDF fonts give ' and " back as ’ ‘ ′ and ” “ ″ (12’-0"x12’-0") */
+const normQ = s => String(s).replace(/[’‘′`´]/g, "'").replace(/[”“″]/g, '"');
 /* vulgar fractions as written by some CAD fonts: "1½" -> "1 1/2", "¼" -> "1/4", 1⁄4 (fraction slash) -> 1/4 */
 const VF = {"¼": "1/4", "½": "1/2", "¾": "3/4", "⅛": "1/8", "⅜": "3/8", "⅝": "5/8", "⅞": "7/8", "⅓": "1/3", "⅔": "2/3", "⅙": "1/6", "⅚": "5/6", "⅕": "1/5", "⅖": "2/5", "⅗": "3/5", "⅘": "4/5", "⅒": "1/10"};
 const vulgar = s => String(s).replace(/(\d)?(\s*)([¼½¾⅛⅜⅝⅞⅓⅔⅙⅚⅕⅖⅗⅘⅒])/g, (_, d, sp, f) => d ? d + " " + VF[f] : sp + VF[f]).replace(/(\d)\s*⁄\s*(\d)/g, "$1/$2");
@@ -675,7 +677,7 @@ async function indexPage(){
   if (!S.texts[key]) {
     try {
       const tc = await page.getTextContent();
-      S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: t.str, x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
+      S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
     } catch (e) { S.texts[key] = []; }
   }
   if (key === S.key && P.proj && !P.proj.scales[key]) {
@@ -695,15 +697,20 @@ async function scaleFromRooms(key){
   const [f, pg] = key.split(":"), g = S.geo[key]; if (!g || !g.segs.length) return null;
   const F = await drawingFacts(f, +pg), est = [], bf = segRoleFilter(g, BOUND);   // walls / openings / columns only, when the PDF has layers: a bed or a table is not the room's edge
   const ray = (c, dx, dy, R) => {   // distance from c to the first drawing line along (dx, dy), up to R
-    let best = R; segsIn(g, c[0] - (dx < 0 ? R : 0), c[1] - (dy < 0 ? R : 0), c[0] + (dx > 0 ? R : 0), c[1] + (dy > 0 ? R : 0)).forEach(i => { const s = g.segs[i]; if (s[4] & 8 || (bf && !bf(i))) return;
+    let best = R; segsIn(g, c[0] - (dx < 0 ? R : 0), c[1] - (dy < 0 ? R : 0), c[0] + (dx > 0 ? R : 0), c[1] + (dy > 0 ? R : 0)).forEach(i => { const s = g.segs[i]; if (s[4] & 9 || (bf && !bf(i))) return;   // (curves — door swings — are not the room's edge)
       if (dy === 0) { const y0 = Math.min(s[1], s[3]), y1 = Math.max(s[1], s[3]); if (c[1] < y0 || c[1] > y1 || y1 === y0) return; const x = s[0] + (s[2] - s[0]) * (c[1] - s[1]) / (s[3] - s[1]), d = (x - c[0]) * dx; if (d > 0.5 && d < best) best = d; }
       else { const x0 = Math.min(s[0], s[2]), x1 = Math.max(s[0], s[2]); if (c[0] < x0 || c[0] > x1 || x1 === x0) return; const y = s[1] + (s[3] - s[1]) * (c[0] - s[0]) / (s[2] - s[0]), d = (y - c[1]) * dy; if (d > 0.5 && d < best) best = d; } });
     return best; };
   F.rooms.forEach(r => {
     const d = sizeDims(r.size); if (!d || d[0] < 4 || d[1] < 4) return;
     const R = 40 * r.h * Math.max(d[0], d[1]) / 10, c = [r.x + r.w / 2, r.y - r.h / 2], below = r.sizeY != null ? r.sizeY + r.h * 0.6 : r.y + r.h * 1.5;
-    const P0 = [c, [c[0], r.y - r.h * 2], [c[0], below]];
-    const span = (dx, dy) => P0.map(q => ray(q, dx, dy, R) + ray(q, -dx, -dy, R)).sort((x, y) => x - y)[1];   // the middle one: one ray through a door, or one blocked by a bed, does not count
+    // seven parallel rays each way (across: at seven heights round the name; up and down: at seven places side by side); the
+    // span most of them agree on (within 1 %) is the room's: a ray through a door or one blocked by a bed disagrees with the rest
+    const mid = [c[0], (c[1] + below) / 2];
+    const span = (dx, dy) => { const st = dy ? Math.max(r.w * 0.35, 1.5 * r.h) : 1.2 * r.h, v = [];
+      for (let j = -3; j <= 3; j++) { const q = dy ? [mid[0] + j * st, mid[1]] : [mid[0], mid[1] + j * st]; v.push(ray(q, dx, dy, R) + ray(q, -dx, -dy, R)); }
+      let best = null; v.forEach(a => { const n = v.filter(b => Math.abs(b / a - 1) < 0.01).length; if (!best || n > best.n || (n === best.n && a < best.a)) best = {a, n}; });
+      return best.n >= 2 ? v.filter(b => Math.abs(b / best.a - 1) < 0.01).reduce((t, b) => t + b, 0) / best.n : 2 * R; };
     const w = span(1, 0), h = span(0, 1); if (!(w < 2 * R && h < 2 * R)) return;
     const a = [w / d[0], h / d[1]], b = [w / d[1], h / d[0]], A = Math.abs(Math.log(a[0] / a[1])), B = Math.abs(Math.log(b[0] / b[1]));
     const pr = A <= B ? a : b; if (Math.min(A, B) > 0.22) return;
@@ -721,9 +728,12 @@ async function checkScale(key, ask2){
   let ev; try { ev = await scaleFromRooms(key); } catch (e) { ev = null; }
   if (!ev || ev.agree < 3) return null;
   const r = ev.ptPerFt / sc.ptPerFt; if (Math.abs(Math.log(r)) < Math.log(1.15)) { if (sc.doubt) { delete sc.doubt; save(); refresh(); } return {ok: true, ev}; }
-  const std = STD_SCALES.slice().sort((a, b) => Math.abs(Math.log(a.ptPerFt / ev.ptPerFt)) - Math.abs(Math.log(b.ptPerFt / ev.ptPerFt)))[0];
+  // the standard scale most rooms agree with (within 3 %), then the one nearest the median — not just the nearest: a median
+  // pulled a little by furniture can sit closer to 1:50 than to the 1/4" the rooms are drawn at
+  const votes = x => ev.est.filter(v => Math.abs(v / x.ptPerFt - 1) < 0.03).length;
+  const std = STD_SCALES.slice().sort((a, b) => votes(b) - votes(a) || Math.abs(Math.log(a.ptPerFt / ev.ptPerFt)) - Math.abs(Math.log(b.ptPerFt / ev.ptPerFt)))[0];
   // the rooms' median, then: a standard scale within 2.5 %; else the walls (drawn exactly 4.5" / 9" / 13.5") within 4 %; else the median
-  const isStd = Math.abs(Math.log(std.ptPerFt / ev.ptPerFt)) < Math.log(1.025), wl = isStd ? null : wallScale(key, ev.ptPerFt);
+  const isStd = Math.abs(Math.log(std.ptPerFt / ev.ptPerFt)) < Math.log(1.025) || votes(std) >= Math.max(3, ev.est.length / 2), wl = isStd ? null : wallScale(key, ev.ptPerFt);
   const sug = isStd ? std : wl && Math.abs(Math.log(wl.ptPerFt / ev.ptPerFt)) < Math.log(1.04) ? wl : {ptPerFt: ev.ptPerFt, label: "1 ft = " + ev.ptPerFt.toFixed(3) + " pt"};
   ev.agree = ev.est.filter(v => Math.abs(v / sug.ptPerFt - 1) < 0.1).length;
   sc.doubt = {label: sug.label, ptPerFt: sug.ptPerFt, ratio: +(sug.ptPerFt / sc.ptPerFt).toFixed(3), rooms: ev.rooms, agree: ev.agree}; save(); refresh();
@@ -2941,7 +2951,7 @@ async function pageTexts(fileId, pageNo){
   if (S.texts[key]) return S.texts[key];
   try {
     const pg = await (await doc(fileId)).getPage(pageNo), base = pg.getViewport({scale: 1}), tc = await pg.getTextContent();
-    S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: t.str, x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
+    S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
   } catch (e) { S.texts[key] = []; }
   return S.texts[key];
 }
@@ -4985,15 +4995,29 @@ function wallThicknesses(rect){   // the wall thicknesses drawn here, most wall 
 }
 function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-line runs, page units
   const k = curScale(), ids = k && wallLineIds(rect, k), G = ids && faceLines(null, k, ids); if (!k || !G) return null;
-  const tol = Math.max(0.04, 0.08 * T) * k, bridge = Math.max(1.6 * T, bridgeFt || 0) * k, runs = [];
+  const tol = Math.max(0.04, 0.08 * T) * k, bridge = Math.max(1.6 * T, bridgeFt || 0) * k, runs = [], gg = S.geo[S.key];
+  /* a gap is bridged (a door or window opening) only if no other line crosses the wall's band inside it: a cross wall,
+     a corridor's partition — then the two pieces are separate walls with a room or passage between them */
+  const crossed = (g, o, ta, tb) => { const u = g.u, n = g.n, hw = 0.4 * T * k, P = (t, oo) => [u[0] * t + n[0] * oo, u[1] * t + n[1] * oo], a = P(ta, o - hw), b = P(tb, o + hw), c2 = P(ta, o + hw), d2 = P(tb, o - hw);
+    const xs = [a[0], b[0], c2[0], d2[0]], ys = [a[1], b[1], c2[1], d2[1]];
+    return segsIn(gg, Math.min(...xs) - 1, Math.min(...ys) - 1, Math.max(...xs) + 1, Math.max(...ys) + 1).some(i => { const s2 = gg.segs[i]; if (s2[4] & 9) return false;
+      const t1 = u[0] * s2[0] + u[1] * s2[1], o1 = n[0] * s2[0] + n[1] * s2[1], t2 = u[0] * s2[2] + u[1] * s2[3], o2 = n[0] * s2[2] + n[1] * s2[3];
+      if (Math.min(o1, o2) > o - hw || Math.max(o1, o2) < o + hw) return false;   // must cross the whole band
+      const tc = t1 + (t2 - t1) * (o - o1) / ((o2 - o1) || 1e-9); return tc > ta + 0.1 * k && tc < tb - 0.1 * k; }); };
   G.forEach(g => {
     const C = [];   // centre lines of this direction
-    facePairs(g, T * k - tol, T * k + tol, 0.3 * k, (d, o, t0, t1) => C.push({o, t0, t1}));
+    facePairs(g, T * k - tol, T * k + tol, 0.3 * k, (d, o, t0, t1) => {
+      // a third line of this direction between the two faces over half their length: not a wall's two faces (a window's
+      // glass beside a bed, a cupboard against a wall) — a wall's hollow is empty but for its windows
+      // (counted: lines that run on past the pair — a window's glass lines stop within its wall and do not count)
+      const iv = []; g.L.forEach(l => { if (l.o > o - d / 2 + 0.04 * k && l.o < o + d / 2 - 0.04 * k && (l.t0 < t0 - 0.5 * k || l.t1 > t1 + 0.5 * k)) { const a = Math.max(t0, l.t0), b = Math.min(t1, l.t1); if (b > a) iv.push([a, b]); } });
+      iv.sort((a, b) => a[0] - b[0]); let inside = 0, e = -Infinity; iv.forEach(([a, b]) => { if (b > e) { inside += b - Math.max(a, e); e = b; } });
+      if (inside <= 0.5 * (t1 - t0)) C.push({o, t0, t1}); });
     C.sort((a, b) => a.o - b.o);
     const lines = []; C.forEach(c => { const l = lines[lines.length - 1]; if (l && c.o - l.o <= 0.12 * k) { l.iv.push([c.t0, c.t1]); l.o = (l.o * l.n + c.o) / (l.n + 1); l.n++; } else lines.push({o: c.o, n: 1, iv: [[c.t0, c.t1]]}); });
     lines.forEach(l => {
       l.iv.sort((a, b) => a[0] - b[0]); const m = [];
-      l.iv.forEach(v => { const q = m[m.length - 1]; if (q && v[0] - q[1] <= bridge) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
+      l.iv.forEach(v => { const q = m[m.length - 1]; if (q && (v[0] - q[1] <= 0.1 * k || (v[0] - q[1] <= bridge && !crossed(g, l.o, q[1], v[0])))) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
       m.forEach(v => { if (v[1] - v[0] >= 0.6 * k) runs.push({u: g.u, n: g.n, a: [g.u[0] * v[0] + g.n[0] * l.o, g.u[1] * v[0] + g.n[1] * l.o], b: [g.u[0] * v[1] + g.n[0] * l.o, g.u[1] * v[1] + g.n[1] * l.o]}); });
     });
   });
@@ -5005,6 +5029,17 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
     const ea = dist(A.a, X) <= reach ? "a" : dist(A.b, X) <= reach ? "b" : null, eb = dist(B.a, X) <= reach ? "a" : dist(B.b, X) <= reach ? "b" : null;
     if (ea && eb) { A[ea] = X.slice(); B[eb] = X.slice(); }
   }
+  /* + junctions: two runs crossing in their middles — the longer goes through, the shorter is cut at its faces, so the
+     square where they cross is counted once */
+  for (let changed = true, guard = 0; changed && guard < 500; guard++) { changed = false;
+    for (let i = 0; i < runs.length && !changed; i++) for (let j = 0; j < runs.length && !changed; j++) {
+      const A = runs[i], B = runs[j]; if (i === j || Math.abs(A.u[0] * B.u[0] + A.u[1] * B.u[1]) > 0.2) continue;
+      const LA = dist(A.a, A.b), LB = dist(B.a, B.b); if (LA > LB || (LA === LB && i > j)) continue;   // A, the shorter, is cut
+      const X = segXInf(A.a, A.b, B.a, B.b), h = T * k / 2; if (!X) continue;
+      const inA = dist(A.a, X) + dist(X, A.b) - LA < 0.01 * k, inB = dist(B.a, X) + dist(X, B.b) - LB < 0.01 * k;
+      if (!inA || !inB || dist(A.a, X) <= h + 0.05 * k || dist(X, A.b) <= h + 0.05 * k || dist(B.a, X) <= h || dist(X, B.b) <= h) continue;
+      const v = [(A.b[0] - A.a[0]) / LA, (A.b[1] - A.a[1]) / LA];
+      runs.splice(i, 1, Object.assign({}, A, {b: [X[0] - v[0] * h, X[1] - v[1] * h]}), Object.assign({}, A, {a: [X[0] + v[0] * h, X[1] + v[1] * h]})); changed = true; } }
   return runs.filter(r => dist(r.a, r.b) >= 0.6 * k);
 }
 function segXInf(a, b, c, d){ const r = [b[0] - a[0], b[1] - a[1]], s2 = [d[0] - c[0], d[1] - c[1]], den = r[0] * s2[1] - r[1] * s2[0]; if (Math.abs(den) < 1e-9) return null; const t = ((c[0] - a[0]) * s2[1] - (c[1] - a[1]) * s2[0]) / den; return [a[0] + t * r[0], a[1] + t * r[1]]; }
