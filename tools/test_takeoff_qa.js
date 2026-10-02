@@ -159,7 +159,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     await go(5);
     const g5 = await T(() => { const S = zdTakeoff.S, s = S.geo[S.key].segs.find(q => Math.hypot(q[2] - q[0], q[3] - q[1]) > 100); return {L: Math.hypot(s[2] - s[0], s[3] - s[1]), k: zdTakeoff.P.proj.scales[S.key].ptPerFt}; });
     calc("1:50 metric page: scale 1 ft (pt)", 864 / 50, g5.k, 1e-9, "pt");
-    calc("1:50 metric page: 5000 mm line in ft", 5000 / 304.8, g5.L / g5.k, 0.001, "ft");
+    calc("1:50 metric page: line dimensioned 5000 on the metric drawing, in ft", 5000 / 304.8, g5.L / g5.k, 0.001, "ft");
     // a PDF locked with an open password
     if (lockedPdf().length) await page.setInputFiles("#fileIn", {name: "locked.pdf", mimeType: "application/pdf", buffer: lockedPdf()});
     const gotPw = lockedPdf().length ? await page.waitForSelector("#dlgPw", {timeout: 6000}).then(() => true, () => false) : false;
@@ -168,6 +168,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
       ok(/not right/.test(await page.innerText("#dlgB")), "wrong password: asked again");
       await page.fill("#dlgPw", "open123"); await page.click("#dlgOk");
       ok(await page.waitForFunction(() => zdTakeoff.P.proj.files.some(f => f.name === "locked.pdf") && zdTakeoff.S.geo[zdTakeoff.S.key], null, {timeout: 10000}).then(() => true, () => false), "right password: the locked PDF opens and is indexed");
+      const lp = await dl("#exPdf1"), PL = require(path.join(LIBS, "pdf-lib")); let lpd = null; try { lpd = await PL.PDFDocument.load(fs.readFileSync(lp)); } catch (e) {}
+      ok(lpd && lpd.getPageCount() === 1 && !lpd.isEncrypted, "marked-up PDF of the locked drawing: opens with no password, one page (flattened)");
     } else R.notTested.push({what: "Password-protected PDF in the QA run", why: "no encrypted fixture (python3 + pypdf not available to build one)"});
     await closeDlg();
   });
@@ -269,6 +271,17 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
       if (n1 > n0) calc("Auto area p.7 " + nm + " room", want, await qtyOf((await lastItem()).id), Math.max(0.5, 0.01 * want), "Sft");
       else calc("Auto area p.7 " + nm + " room — " + (await page.innerText("#toast")).slice(0, 90), want, NaN, 0.5, "Sft");
     }
+    // the page changed while a room is traced: the room goes on neither page (traced again on its own page afterwards)
+    const [lx, ly] = FX.R7.ell, lit = await lastItem(), nA = await T(() => zdTakeoff.P.proj.items.length);
+    if (lit && lit.page === 7) {
+      await T(id => { zdTakeoff.P.proj.items = zdTakeoff.P.proj.items.filter(i => i.id !== id); zdTakeoff.setSel([]); }, lit.id);
+      const lp = await scr(lx, ly), f1 = await fid(); await page.mouse.move(lp[0], lp[1]); await page.mouse.down(); await page.mouse.up();
+      await T(f => zdTakeoff.gotoPage(f, 6), f1); await page.waitForFunction(() => !zdTakeoff.S.autoBusy, null, {timeout: 20000}); await wait(150);
+      const tmsg = await page.innerText("#toast");
+      ok((await T(() => zdTakeoff.P.proj.items.length)) === nA - 1 && /page changed/.test(tmsg), "page changed while a room was traced: nothing added to either page (“" + tmsg.slice(0, 70) + "”)");
+      await go(7); await T(id => { zdTakeoff.S.cond = id; zdTakeoff.setTool("auto"); }, cf); await click(lx, ly); await page.waitForFunction(() => !zdTakeoff.S.autoBusy, null, {timeout: 20000}); await wait(150);
+      const li2 = await lastItem(); ok((await T(() => zdTakeoff.P.proj.items.length)) === nA && li2.page === 7, "…traced again on its own page");
+    } else ok(false, "page change during a trace: the p.7 L room was not traced, nothing to test with");
     await T(() => zdTakeoff.setTool("select"));
   });
 
@@ -572,11 +585,12 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
   await run("13. Export → import round trip (Excel, CSV, PDF, PNG, JSON)", async () => {
     await go(1);
     const tots = await T(() => Object.fromEntries(zdTakeoff.P.proj.conds.filter(c => zdTakeoff.P.proj.items.some(i => i.cond === c.id)).map(c => [c.name, zdTakeoff.condTotals(c).net])));
+    const tun = await T(() => Object.fromEntries(zdTakeoff.P.proj.conds.map(c => [c.name, c.unit])));
     let t0 = Date.now(); const xf = await dl("#exXls"); perf("Excel export (" + Object.keys(tots).length + " conditions)", Date.now() - t0, 8000);
     const ExcelJS = require(path.join(LIBS, "exceljs")), wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(xf);
     const ms = wb.getWorksheet("Measurement"), xt = {};
     ms.eachRow(r => { const d = String(r.getCell(2).value || ""), q = r.getCell(8).value; if (/^Total /.test(d) && q && q.formula) xt[d.replace(/^Total /, "")] = {v: q.result, fmt: r.getCell(8).numFmt}; });
-    Object.entries(tots).forEach(([n, v]) => calc("Excel total = takeoff: " + n, v, xt[n] ? xt[n].v : NaN, 1e-9, ""));
+    Object.entries(tots).forEach(([n, v]) => calc("Excel total = takeoff: " + n, v, xt[n] ? xt[n].v : NaN, 1e-9, tun[n] || ""));
     ok(xt["Floor area"] && xt["Floor area"].fmt === "#,##0.000" && xt["D1"] && xt["D1"].fmt === "#,##0", "Excel number formats: Sft 0.000, Nos whole");
     const sm = wb.getWorksheet("Summary"), sv = {}; sm.eachRow((r, i) => { if (i > 1) sv[r.getCell(1).value] = r.getCell(2).value; });
     ok(Object.entries(tots).every(([n, v]) => sv[n] && /^Measurement!H\d+$/.test(sv[n].formula) && near(sv[n].result, v, 1e-9)), "Summary links each total to its Measurement cell");
@@ -584,7 +598,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     ok(bv.some(([n, q]) => n === "Skirting" && near(q, 450.25, 0.001)) && bv.some(([n, q]) => n === "Ceiling plaster" && near(q, 1268.25, 0.001)), "Bill sheet: ceiling 1,268.250 Sft, skirting 450.250 ft");
     const cf = await dl("#exCsv"), csv = fs.readFileSync(cf, "utf8").replace(/^\uFEFF/, ""), lines = csv.split(/\r\n/).map(l => l.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(v => /^".*"$/.test(v) ? v.slice(1, -1).replace(/""/g, '"') : v));
     const ctot = Object.fromEntries(lines.filter(l => /^Total /.test(l[2] || "")).map(l => [l[1], +l[8]]));
-    Object.entries(tots).forEach(([n, v]) => calc("CSV total = takeoff: " + n, Math.round(v * 1000) / 1000, ctot[n], 1e-9, ""));
+    Object.entries(tots).forEach(([n, v]) => calc("CSV total = takeoff: " + n, Math.round(v * 1000) / 1000, ctot[n], 1e-9, tun[n] || ""));
     ok(lines.some(l => l[1] === "D1" && l[8] === "7"), "CSV: counts as whole numbers (7)");
     t0 = Date.now(); const pf = await dl("#exPdfA"); perf("marked-up PDF, all measured pages", Date.now() - t0, 15000);
     const PL = require(path.join(LIBS, "pdf-lib")), pd = await PL.PDFDocument.load(fs.readFileSync(pf));
@@ -741,6 +755,18 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     ok(/on a page with no scale/.test(await page.innerText("#warnbar")) && /scale not set/.test(await page.innerText(`#sheet tr[data-item="${ns.id}"]`)), "…flagged on the sheet and in the warning bar, left out of the totals");
     ok((await T(() => zdTakeoff.validation().L.some(x => x.lvl === "ERROR" && /scale not set/.test(x.msg)))), "…and an ERROR in the export check");
     await T(id => { zdTakeoff.P.proj.items = zdTakeoff.P.proj.items.filter(i => i.id !== id); }, ns.id); await go(1);
+    // an outline that crosses itself (a figure of eight): warned as it is finished, flagged on the sheet, an ERROR in the export check
+    await T(id => { zdTakeoff.S.cond = id; zdTakeoff.setTool("draw"); }, cf);
+    const nb0 = await T(() => zdTakeoff.P.proj.items.length);
+    for (const [x, y] of [[44, 2], [50, 8], [50, 2], [44, 8]]) await click(hx(x), hy(y), {mod: "Control"});   // equal halves: they cancel to 0 Sft
+    await page.keyboard.press("Enter"); await wait(200); const bmsg0 = await page.innerText("#toast");
+    ok((await T(() => zdTakeoff.P.proj.items.length)) === nb0 && /crosses itself.*cancel out/.test(bmsg0), "a figure of eight with equal halves (0 Sft): not added, and says why (“" + bmsg0.slice(0, 70) + "”)");
+    for (const [x, y] of [[44, 2], [52, 8], [52, 2], [44, 6]]) await click(hx(x), hy(y), {mod: "Control"});   // unequal halves
+    await page.keyboard.press("Enter"); await wait(200);
+    const bw = await lastItem(), bmsg = await page.innerText("#toast");
+    ok(bw && bw.pts.length === 4 && /crosses itself/.test(bmsg), "a figure of eight with unequal halves: warned as it is finished (“" + bmsg.slice(0, 60) + "”)");
+    ok(/CROSSES ITSELF/.test(await page.innerText(`#sheet tr[data-item="${bw.id}"]`)) && (await T(() => zdTakeoff.validation().L.some(x => x.lvl === "ERROR" && /crosses itself/.test(x.msg)))), "…flagged on the sheet and an ERROR in the export check");
+    await T(id => { zdTakeoff.P.proj.items = zdTakeoff.P.proj.items.filter(i => i.id !== id); zdTakeoff.setSel([]); zdTakeoff.setTool("select"); }, bw.id);
     // odd characters in names
     const odd = '<b>Q&A "x"</b> 😀 ٹائلیں';
     const co = await newCond("Custom count", {name: odd});
@@ -800,6 +826,22 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     await page.mouse.click(p[0], p[1], {button: "right"}); await wait(150);
     ok(await page.isVisible("#ctx") && /Properties/.test(await page.innerText("#ctx")), "right-click on a measurement: its menu");
     await page.keyboard.press("Escape"); await wait(80); ok(!(await page.isVisible("#ctx")), "Esc closes the menu");
+    // Space held, then the window loses focus (Alt+Tab): pan mode does not stick; middle button: no browser autoscroll
+    await page.keyboard.down(" "); await wait(50); const sp1 = await T(() => zdTakeoff.S.space);
+    await T(() => window.dispatchEvent(new Event("blur"))); const sp2 = await T(() => zdTakeoff.S.space); await page.keyboard.up(" ");
+    ok(sp1 === true && sp2 === false, "Space held, then Alt+Tab (window loses focus): pan mode released");
+    ok(await T(() => { const e = new MouseEvent("mousedown", {button: 1, bubbles: true, cancelable: true}); document.getElementById("stage").dispatchEvent(e);
+      window.dispatchEvent(new MouseEvent("mouseup", {button: 1, bubbles: true})); return e.defaultPrevented; }), "middle button on the drawing: the browser's autoscroll is blocked");
+    // undo keeps 200 steps
+    await T(id => zdTakeoff.setSel([id]), run2.id); const keep = await T(id => JSON.stringify(zdTakeoff.P.proj.items.find(i => i.id === id).pts), run2.id);
+    for (let i = 0; i < 210; i++) await page.keyboard.press("ArrowRight");
+    const ul = await T(() => zdTakeoff.S.undo.length); ok(ul === 200, "undo keeps the last 200 steps (210 nudges → " + ul + ")");
+    await T(([id, pts]) => { zdTakeoff.P.proj.items.find(i => i.id === id).pts = JSON.parse(pts); zdTakeoff.setSel([]); }, [run2.id, keep]);
+    // a dialog opened over another: the one underneath is cancelled, not left listening for Enter
+    const nc0 = await T(() => zdTakeoff.P.proj.conds.length);
+    await page.click("#bNewCond"); await wait(150); await T(() => document.getElementById("bLblSet").click()); await wait(200);
+    await page.keyboard.press("Escape"); await wait(150); await page.keyboard.press("Enter"); await wait(250);
+    ok((await T(() => zdTakeoff.P.proj.conds.length)) === nc0 && !(await dlgOn()), "a dialog opened over another: Esc closes it, Enter afterwards creates nothing underneath");
     await T(id => { const Z = zdTakeoff; Z.P.proj.items = Z.P.proj.items.filter(i => i.cond !== id); Z.P.proj.conds = Z.P.proj.conds.filter(c => c.id !== id); Z.setSel([]); }, cs);
   });
 
@@ -851,7 +893,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     calc("Count 7 points × Nos 3", 21, await q("KN", [[1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6], [7, 7]], {nos: 3}), 0, "Nos");
     calc("ft-in 12'-6\" → decimal ft", 12.5, await T(() => zdTakeoff.parseFt("12'-6\"")), 1e-12, "ft");
     calc("ft-in 3'-4 1/2\" → decimal ft", 3.375, await T(() => zdTakeoff.parseFt("3'-4 1/2\"")), 1e-12, "ft");
-    calc("3000 mm → decimal ft", 3000 / 304.8, await T(() => zdTakeoff.parseFt("3000mm")), 1e-12, "ft");
+    calc("metric length typed as “3000mm” → decimal ft", 3000 / 304.8, await T(() => zdTakeoff.parseFt("3000mm")), 1e-12, "ft");
     calc("rounding: dimensions to 3 dp, quantity their product (12.3456 × 7.8912)", 12.346 * 7.891, await q("KA", R0(1, 1, 12.3456, 7.8912)), 1e-9, "Sft");
     await T(() => { const Z = zdTakeoff; Z.P.proj.conds = Z.P.proj.conds.filter(c => !/^K[ASW9LN]$/.test(c.id)); });
   });
@@ -874,6 +916,43 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     const ids = await T(() => zdTakeoff.P.proj.items.map(i => i.id)); ok(new Set(ids).size === ids.length, "no duplicate measurement ids");
     const pids = await page.evaluate(async () => new Promise(r => { const q = indexedDB.open("zdTakeoff"); q.onsuccess = () => { const t = q.result.transaction("projects").objectStore("projects").getAll(); t.onsuccess = () => r(t.result.map(p => p.id)); }; }));
     ok(new Set(pids).size === pids.length && pids.length >= 3, "every stored project has its own id (" + pids.length + " projects, imported copies get new ids)");
+  });
+
+  /* ---------------------------------------------------------------- 23. scanned drawing, heavy CAD sheet */
+  await run("23. Scanned drawing (raster, no lines, no text) and a 150,000-line CAD sheet", async () => {
+    await page.click("#bProjects"); await wait(200); await page.click("#bNewProj"); await page.fill("#dlgName", "QA scan"); await page.click("#dlgOk"); await wait(400);
+    let t0 = Date.now(); await page.setInputFiles("#fileIn", {name: "scan.pdf", mimeType: "application/pdf", buffer: FX.makeScanPdf()});
+    await page.waitForFunction(() => zdTakeoff.S.page && zdTakeoff.S.geo[zdTakeoff.S.key], null, {timeout: 30000}); perf("open a 200 dpi scanned sheet", Date.now() - t0, 6000);
+    ok(await T(() => { const g = zdTakeoff.S.geo[zdTakeoff.S.key]; return g.segs.length === 0 && g.images === 1 && !zdTakeoff.P.proj.scales[zdTakeoff.S.key]; }), "scan: no lines to snap to, no text, no scale — measured by calibration");
+    // calibrate on the 10'-0" scale bar (no snap on a scan: zoomed in on each end)
+    const bar = [[FX.OX, FX.OY + 47.05 * 18], [FX.OX + 180, FX.OY + 47.05 * 18]];
+    await page.keyboard.press("k");
+    for (const p of bar) { await T(([x, y]) => { const S = zdTakeoff.S, st = document.getElementById("stage"), s = 8; S.view = {s, tx: st.clientWidth / 2 - x * s, ty: st.clientHeight / 2 - y * s}; zdTakeoff.applyView(); }, p); await wait(120); await click(p[0], p[1]); }
+    await page.waitForSelector("#dlgLen"); await page.fill("#dlgLen", "10'-0\""); await page.click("#dlgOk"); await wait(200); await page.keyboard.press("f");
+    calc("scan calibrated on its 10'-0\" bar (1/4\" = 18 pt per ft)", 18, await T(() => zdTakeoff.P.proj.scales[zdTakeoff.S.key].ptPerFt), 0.1, "pt / ft");
+    const cf = await newCond("Floor area"); await T(id => { zdTakeoff.S.cond = id; zdTakeoff.setTool("auto"); }, cf);
+    const want = {"BED ROOM 1": 144, "BATH 1": 72, "BED ROOM 2": 144, "CORRIDOR": 123, "LIVING": 257.25, "KITCHEN": 168, "BED ROOM 3": 144, "BATH 2": 72, "STORE": 144};
+    for (const [nm, x0, y0, x1, y1] of FX.HOUSE) {
+      const n0 = await T(() => zdTakeoff.P.proj.items.length); await click(FX.OX + (x0 + x1) / 2 * 18, FX.OY + ((y0 + y1) / 2 + 0.3) * 18);
+      await page.waitForFunction(() => !zdTakeoff.S.autoBusy, null, {timeout: 20000}); await wait(100);
+      const ok1 = (await T(() => zdTakeoff.P.proj.items.length)) > n0, q = ok1 ? await qtyOf((await lastItem()).id) : NaN;
+      calc("scan: auto area " + nm + (nm === "CORRIDOR" ? " (passage as wide as the door gap, on a scan: entrance recess taken in — see notes)" : ""), want[nm], q, nm === "CORRIDOR" ? 0.06 * want[nm] : 0.01 * want[nm], "Sft");
+    }
+    await T(() => zdTakeoff.setTool("select"));
+    // a heavy CAD sheet
+    await page.evaluate(() => { window.__lt = []; try { new PerformanceObserver(l => l.getEntries().forEach(e => window.__lt.push(Math.round(e.duration)))).observe({entryTypes: ["longtask"]}); } catch (e) {} });
+    t0 = Date.now(); await page.setInputFiles("#fileIn", {name: "heavy.pdf", mimeType: "application/pdf", buffer: FX.makeHeavyPdf(150000)});
+    // wait on the heavy file by name: the scan is still the last file until the new one is stored
+    await page.waitForFunction(() => { const Z = zdTakeoff, f = Z.P.proj.files.find(x => x.name === "heavy.pdf"); return f && Z.S.page && Z.S.page.pageNumber === 1 && Z.S.fileId === f.id && Z.S.geo[Z.S.key]; }, null, {timeout: 60000});
+    perf("open a sheet of 150,000 lines (shown and indexed)", Date.now() - t0, 8000, (await T(() => zdTakeoff.S.geo[zdTakeoff.S.key].segs.length)) + " lines");
+    const lt = await T(() => window.__lt.slice()); perf("…longest freeze while it loads", Math.max(0, ...lt), 2000);
+    await setScale(await key(), 18); await T(id => { zdTakeoff.S.cond = id; zdTakeoff.setTool("auto"); }, cf);
+    t0 = Date.now(); await click(FX.OX + 10.5 * 18, FX.OY + 9.5 * 18); await page.waitForFunction(() => !zdTakeoff.S.autoBusy, null, {timeout: 30000}); await wait(100);
+    perf("auto area on the 150,000-line sheet", Date.now() - t0, 6000);
+    calc("…BED ROOM 1 on the heavy sheet", 144, await qtyOf((await lastItem()).id), 0.72, "Sft");
+    await T(() => zdTakeoff.setTool("draw")); const b = await page.locator("#stage").boundingBox(); await T(() => { window.__lt = []; });
+    t0 = Date.now(); for (let i = 0; i < 30; i++) await page.mouse.move(b.x + 400 + i * 5, b.y + 300); perf("30 mouse moves with snapping on the heavy sheet", Date.now() - t0, 3000);
+    await page.keyboard.press("Escape"); await T(() => zdTakeoff.setTool("select"));
   });
 
   await finish();

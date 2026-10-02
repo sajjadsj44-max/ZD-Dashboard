@@ -2165,7 +2165,7 @@ async function finish(pts){
   }
   if (t === "circle") { if (dist(pts[0], pts[1]) < 0.5) { draw(); return; } mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", shape: "circle", pts, nos: 1, label: ""}); }); return; }
   const area = c.type === "area";
-  if (area && (pts.length < 3 || polyArea(pts) < 1e-6)) { draw(); return; }
+  if (area && (pts.length < 3 || polyArea(pts) < 1e-6)) { if (selfCross(pts)) toast("⚠ This outline crosses itself and its two halves cancel out (0 Sft) — nothing added. Draw it again without crossing the sides.", 7000); draw(); return; }   // a figure of eight with equal halves: said why, never dropped silently
   if (!area && pts.length < 2) { draw(); return; }
   const ri = resume && P.proj.items.find(i => i.id === resume.id);
   if (ri) {   // a run continued (right-click → Continue drawing): the same measurement, longer
