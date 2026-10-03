@@ -4475,11 +4475,12 @@ async function aiSend(text, fresh){
   if (AI.busy || !P.proj) return;
   if (!S.page) return aiLog("err", "Open a PDF page first.");
   let client;
-  try { client = await aiClient(); } catch (e) { return aiLog("err", esc(e.message)); }
+  try { client = await aiClient(); } catch (e) { aiLog("err", esc(e.message) + " Answering with the free agent instead."); return agentCmd(text); }
   if (!client) { const smp = await aiSampler(); return smp ? aiSendPlan(smp, text) : agentCmd(text); }   // no API key: Claude through claude.ai, else the free rule-based agent
   AI.busy = true; $("aiSend").disabled = true; $("aiRead").disabled = true;
   aiLog("user", esc(text));
   const wait = aiLog("wait", "Claude is reading the drawing…");
+  let replied = false, free = false;   // free: the paid route failed before Claude did anything — the free agent answers instead
   try {
     const content = [];
     if (fresh || !AI.view || AI.view.key !== S.key) {
@@ -4494,7 +4495,7 @@ async function aiSend(text, fresh){
         betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
         system: [{type: "text", text: AI_SYSTEM, cache_control: {type: "ephemeral"}}],
         tools: AI_TOOLS, messages: AI.history
-      });
+      }); replied = true;
       if (res.stop_reason === "refusal") { AI.history = []; aiLog("err", "Claude declined this request" + (res.stop_details && res.stop_details.explanation ? ": " + esc(res.stop_details.explanation) : "") + ". The chat was reset."); break; }
       AI.history.push({role: "assistant", content: res.content});
       res.content.forEach(b => { if (b.type === "text" && b.text.trim()) aiLog("bot", aiText(b.text)); });
@@ -4510,13 +4511,15 @@ async function aiSend(text, fresh){
       refresh();
     }
   } catch (e) {
-    const st = e && e.status;
-    aiLog("err", st === 401 ? "The API key was not accepted — check it (above)." : st === 429 ? "Rate limited by the API — wait a minute and try again." : esc("Request failed: " + (e.message || e)));
+    const st = e && e.status; free = !replied && (st === 401 || st === 403 || !st);
+    aiLog("err", (st === 401 ? "The API key was not accepted — check it (above)." : st === 429 ? "Rate limited by the API — wait a minute and try again." : esc("Request failed: " + (e.message || e)))
+      + (free ? " Answering with the <b>free agent</b> instead — to use it always, remove the key: <b>Key</b> → clear the box → <b>Save</b>." : ""));
     if (st === 401) aiShowKey(true);
     // keep the conversation valid: drop a trailing user turn the API never answered
     while (AI.history.length && AI.history[AI.history.length - 1].role === "user" && !(AI.history[AI.history.length - 1].content || []).some(x => x.type === "tool_result")) AI.history.pop();
   }
   wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
+  if (free) await agentCmd(text, true);
 }
 /* the claude.ai route: when this page is opened as a Claude artifact, Claude runs on the viewer's own Claude plan through
    the artifact's `sample` capability — no API key. Same tools as above; each message sends a fresh picture of the view
@@ -4848,9 +4851,9 @@ async function drawingFacts(fileId, pageNo){
   rooms.length = 0; uniq.forEach(r => rooms.push(r));
   return {rooms, tags, sched: TG.sched, inSched: TG.inSched, levels: [...levels], types: [...types], scales: [...scales], notes: [...notes], textCount: lines.length};
 }
-async function agentCmd(text){
+async function agentCmd(text, echoed){   // echoed: the message is already in the panel (the paid route failed and handed it on)
   if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
-  aiLog("user", esc(text));
+  if (!echoed) aiLog("user", esc(text));
   const steps = cmdSteps(text); let out;
   if (steps.length > 1) aiLog("bot", `${steps.length} steps, one after another: ${steps.map((s, i) => (i + 1) + ". <i>" + esc(s) + "</i>").join(" · ")}`);
   for (const s of steps) out = await agentStep(s);
