@@ -683,7 +683,7 @@ async function indexPage(){
   if (key === S.key && P.proj && !P.proj.scales[key]) {
     const c = scaleCandidates(key);
     if (c.length) { P.proj.scales[key] = {ptPerFt: c[0].ptPerFt, how: "note", text: c[0].text, note: c[0].note || "", factor: c[0].factor || 1, verified: false, at: new Date().toISOString()}; save(); toast(keyName(key) + ": scale read from the drawing, " + c[0].label + " — check it against a known dimension (scale chip → Verify)", 5200);
-      checkScale(key, true); }
+      checkScale(key, !S.agentRun); }   // (an agent working through the pages checks it itself, with no dialog in its way)
   }
   if (key === S.key) refresh();
 }
@@ -4105,6 +4105,7 @@ function wire(){
   $("aiImport").onclick = () => freeImport();
   $("aiDetails").onclick = () => agentCmd("drawing details");
   $("agRooms").onclick = () => agentCmd("measure all rooms"); $("agUnit").onclick = () => unitDialog(); $("agWalls").onclick = () => wallsDialog(); $("agTags").onclick = () => doorWinDialog();
+  $("agFull").onclick = () => fullTakeoffDialog(); $("agFin").onclick = () => finishesDialog(); $("agCheck").onclick = () => P.proj && agentCheck("all");
   $("aiRead").onclick = () => aiSend($("aiIn").value.trim() || "Measure the floor area of every room in this view.", true).then(() => { $("aiIn").value = ""; });
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
@@ -4641,7 +4642,7 @@ async function freeImport(){
 function aiShowKey(on){ $("aiKeyRow").style.display = on ? "flex" : "none"; if (on) $("aiKey").value = pref("zdTakeoffApiKey") || ""; }
 function aiToggle(on){
   $("aiPanel").classList.toggle("on", on); $("bClaude").classList.toggle("on", on);
-  if (on) { aiShowKey(false); if (!$("aiLog").children.length) aiLog("bot", "I read the drawing and do the takeoff with you.<br><b>Agents (free, instant):</b> 🏠 <b>Rooms</b> traces every named room and checks it against its written size · 🧱 <b>Walls</b> finds walls from their face lines · 🚪 <b>Doors / windows</b> counts the tags. Or type <i>measure bedroom</i>, <i>walls 9\"</i>, <i>count D1</i>, <i>help</i>.<br><b>Claude:</b> with an API key, or opened in claude.ai — type what you want and press <b>Read this view</b>; Claude uses the agents, draws what they cannot, and asks you when something is unclear."); aiSampler().then(smp => { if (smp && !pref("zdTakeoffApiKey")) aiLog("bot", "<b>Connected to Claude through claude.ai — no API key needed.</b> Zoom to an area, type what to measure (e.g. <i>9\" walls on this floor, count doors D1</i>) and press <b>Read this view</b>. It runs on your Claude plan; the first time, press Allow."); }); setTimeout(() => $("aiIn").focus(), 0); }
+  if (on) { aiShowKey(false); if (!$("aiLog").children.length) aiLog("bot", "I read the drawing and do the takeoff with you.<br><b>Free agents (no API key, no cost):</b> ⚡ <b>Full takeoff</b> does rooms, walls, doors / windows and finishes in one run — this page, the PDF or the project · 🏠 <b>Rooms</b> traces every named room and checks it against its written size · 🧱 <b>Walls</b> finds walls from their face lines · 🚪 <b>Doors / windows</b> counts the tags · 🎨 <b>Finishes</b> gives each room's plaster / paint, skirting and ceiling, openings deducted · ✅ <b>Check</b> audits the takeoff. Or type <i>measure bedroom</i>, <i>walls 9\"</i>, <i>count D1</i>, <i>how many doors</i>, <i>help</i>.<br><b>Claude:</b> with an API key, or opened in claude.ai — type what you want and press <b>Read this view</b>; Claude uses the agents, draws what they cannot, and asks you when something is unclear."); aiSampler().then(smp => { if (smp && !pref("zdTakeoffApiKey")) aiLog("bot", "<b>Connected to Claude through claude.ai — no API key needed.</b> Zoom to an area, type what to measure (e.g. <i>9\" walls on this floor, count doors D1</i>) and press <b>Read this view</b>. It runs on your Claude plan; the first time, press Allow."); }); setTimeout(() => $("aiIn").focus(), 0); }
 }
 
 /* ------------------------------------------------------------------ free drawing agent (no API key)
@@ -4850,14 +4851,32 @@ async function drawingFacts(fileId, pageNo){
 async function agentCmd(text){
   if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
   aiLog("user", esc(text));
-  const t = text.toLowerCase().trim();
+  const steps = cmdSteps(text); let out;
+  if (steps.length > 1) aiLog("bot", `${steps.length} steps, one after another: ${steps.map((s, i) => (i + 1) + ". <i>" + esc(s) + "</i>").join(" · ")}`);
+  for (const s of steps) out = await agentStep(s);
+  return out;
+}
+const CMD_VERB = /(?:measure|count|find|walls?|check|audit|make|do|run|finish(?:es)?|plaster|skirting|paint|take\s*-?\s*off|details?|apartment|unit|flat|list|schedule|how|total|trace)\b/.source;
+const CMD_SPLIT = new RegExp(/\s*(?:;|,?\s*\band\s+then\b|,?\s*\bthen\b|,?\s*\balso\b|,\s*(?=VERB)|\s+and\s+(?=VERB))\s*/.source.replace(/VERB/g, CMD_VERB), "i");
+function cmdSteps(text){   // "measure all rooms, then count doors and walls 9"": one step each
+  return String(text).split(CMD_SPLIT).map(s => s.trim()).filter(Boolean);
+}
+async function agentStep(text){
+  const t = text.toLowerCase().trim(), scope = /\b(project|all\s+pdfs?|every\s+pdf|all\s+drawings)\b/.test(t) ? "all" : /\b(all|every|each)\s+(pages?|sheets?)\b|\bwhole\s+(pdf|set)\b|\bpdf\b/.test(t) ? "pdf" : "page";
   try {
     if (/^(help|\?)$/.test(t)) return agentHelp();
+    if (/^(how\s+(many|much)|total\b|sum\b|what(?:'s|\s+is)\s+the\s+(?:total|number))/.test(t)) return agentAnswer(t);
+    if (/\b(full|complete|whole|entire|auto(?:matic)?)\s*take\s*-?\s*off\b|^take\s*-?\s*off\b|\beverything\b|\bdo\s+(?:it\s+)?all\b|\ball\s+(?:the\s+)?agents\b/.test(t)) return fullTakeoffDialog(scope);
+    if (/\b(check|audit|qa|verify|review|mistakes?|errors?|missing)\b/.test(t)) return agentCheck(/\bpage\b/.test(t) && scope === "page" ? "page" : "all");
+    if (/\b(finish(?:es|ing)?|plaster(?:ing)?|paint(?:ing)?|skirting|ceiling)\b/.test(t)) return finishesDialog();
+    if (/measure|area|trace/.test(t) && scope !== "page" && !/apartment|appartment|\bapt\b|unit|flat/.test(t)) {   // rooms on every page: the full takeoff with only its rooms
+      const w = t.replace(/\b(measure|auto|area|areas|trace|all|every|each|the|rooms?|of|floor|please|on|in|this|pages?|sheets?|pdfs?|project|drawings?|whole|set)\b/g, " ").replace(/\s+/g, " ").trim();
+      return fullTakeoff({scope, rooms: true, filter: w}); }
     if (/measure|area|trace/.test(t)) { const w = t.replace(/\b(measure|auto|area|areas|trace|all|every|each|the|rooms?|of|floor|please|on|this|page)\b/g, " ").trim(); return agentMeasure(w); }
     if (/count|tag/.test(t)) {
       if (/swing/.test(t)) return agentSwings();
-      const scope = /\b(project|all\s+pdfs?|every\s+pdf|all\s+drawings)\b/.test(t) ? "all" : /\b(all|every|each)\s+(pages?|sheets?)\b|\bwhole\s+(pdf|set)\b|\bpdf\b/.test(t) ? "pdf" : "page";
-      const w = t.replace(/\b(on|in|of|the|this|whole|every|each|all|pages?|sheets?|pdfs?|project|drawings?|set)\b/g, " ").replace(/\b(count|tags?|please|marks?)\b/g, " ").trim();
+      let w = t.replace(/\b(on|in|of|the|this|whole|every|each|all|pages?|sheets?|pdfs?|project|drawings?|set)\b/g, " ").replace(/\b(count|tags?|please|marks?)\b/g, " ").trim();
+      if (/\b(doors?|windows?|vent\w*)\b.*\b(and|&|\+)\b/.test(w)) w = "all";   // "count doors and windows": every tag
       return agentCount(w, scope); }
     let um = /(?:apartment|appartment|apt|unit|flat)\s*(?:no\.?|#)?\s*([0-9]{1,4}[a-z]?)/.exec(t) || /^\s*(?:measure\s+)?([0-9]{2,4}[a-z]?)\s*$/.exec(t);
     if (um) return agentUnit(um[1]);
@@ -4870,20 +4889,25 @@ async function agentCmd(text){
 }
 function agentAsk(text){   // not understood: ask back with the choices, never guess
   const d = aiLog("bot", `I did not understand “${esc(text)}”. Did you mean one of these?<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
-    <button class="btn sm" data-ask="measure all rooms">Measure all rooms</button><button class="btn sm" data-ask="walls">Walls…</button><button class="btn sm" data-ask="count doors">Count doors</button>
-    <button class="btn sm" data-ask="count windows">Count windows</button><button class="btn sm" data-ask="drawing details">Drawing details</button><button class="btn sm" data-ask="help">Help</button></div>
-    <span class="small">Or write it differently, e.g. <i>measure bedroom</i>, <i>walls 9"</i>, <i>count D1</i>.</span>`);
+    <button class="btn sm pri" data-ask="full takeoff">⚡ Full takeoff</button><button class="btn sm" data-ask="measure all rooms">Measure all rooms</button><button class="btn sm" data-ask="walls">Walls…</button><button class="btn sm" data-ask="count doors">Count doors</button>
+    <button class="btn sm" data-ask="count windows">Count windows</button><button class="btn sm" data-ask="finishes">🎨 Finishes</button><button class="btn sm" data-ask="check">✅ Check</button><button class="btn sm" data-ask="drawing details">Drawing details</button><button class="btn sm" data-ask="help">Help</button></div>
+    <span class="small">Or write it differently, e.g. <i>measure bedroom</i>, <i>walls 9"</i>, <i>count D1</i>, <i>how many doors</i>.</span>`);
   d.addEventListener("click", e => { const b = e.target.closest("[data-ask]"); if (b) agentCmd(b.dataset.ask); });
 }
 function agentHelp(){
-  aiLog("bot", `<b>Free drawing agent</b> — no API key. It reads the text inside the PDF (so not scanned drawings) and works on the page you have open. Try:<br>
+  aiLog("bot", `<b>Free drawing agents</b> — no API key, no cost, nothing leaves this browser. They read the lines and text inside the PDF (so not scanned drawings) and work on the page you have open unless you say otherwise. Try:<br>
+    • <i>full takeoff</i> (or ⚡) — rooms, walls, doors / windows and finishes in one run, on this page, <i>every page</i> or the <i>whole project</i>; one Ctrl+Z takes it back<br>
     • <i>drawing details</i> — rooms, sizes, door/window tags, levels, scale, unit types, stairs<br>
-    • <i>measure all rooms</i> or <i>measure bedroom</i> — auto area at each room name, checked against its written size<br>
+    • <i>measure all rooms</i> or <i>measure bedroom</i> — auto area at each room name, checked against its written size; add <i>on every page</i> for the whole PDF; a typing slip (<i>bedrom</i>) still finds it<br>
     • <i>count doors</i>, <i>count windows</i>, <i>count D1</i>, <i>count all tags</i> — add <i>on all pages</i> or <i>in the project</i>; 🚪 <b>Doors / windows</b> scans, shows what it found (with the schedule's sizes and quantities) and counts what you tick<br>
     • <i>count door swings</i> — doors from their swing symbols, for drawings with no door tags<br>
     • <i>apartment 107</i> (or just <i>107</i>) — every room of one apartment, with its total<br>
     • <i>walls 9"</i>, <i>walls 4.5"</i>, or <i>walls</i> — wall runs found from their two parallel face lines (vector PDFs)<br>
-    • <i>room schedule</i> — the room list as a table you can copy`);
+    • <i>finishes</i> (or 🎨) — each room's wall plaster / paint (Nos × L × H, every door and window its own deduction row), skirting less doors, ceiling<br>
+    • <i>check</i> (or ✅) — audits the takeoff: rooms not measured, areas measured twice, double counts, tags not counted, schedule quantities and sizes<br>
+    • <i>how many D1</i>, <i>how many doors</i>, <i>total floor area</i>, <i>total bedroom area</i> — answered from what is measured<br>
+    • <i>room schedule</i> — the room list as a table you can copy<br>
+    Chain them: <i>measure all rooms, then count doors and walls 9"</i>.`);
 }
 async function agentDetails(){
   const F = await drawingFacts(S.fileId, S.pageNo), k = curScale();
@@ -4892,6 +4916,7 @@ async function agentDetails(){
   const tot = F.rooms.reduce((a, r) => a + r.sft, 0);
   const sec = (title, body) => body ? `<div style="margin-top:6px"><b>${title}</b><br>${body}</div>` : "";
   const tasks = [];
+  if (F.rooms.length || Object.keys(groups).length) tasks.push(["full", "Full takeoff of this page — rooms, walls, doors / windows (and finishes, given the room height)"]);
   if (F.rooms.length) tasks.push(["measure", `Measure all ${F.rooms.length} rooms with auto area and check them against the written sizes`]);
   Object.keys(groups).forEach(g => tasks.push(["count:" + g, `Count ${g.toLowerCase()} (${groups[g].reduce((a, x) => a + x[1], 0)} tags: ${groups[g].map(x => x[0]).join(", ")})`]));
   if (F.rooms.length) tasks.push(["schedule", "Make the room schedule (copy to Excel)"]);
@@ -4906,27 +4931,36 @@ async function agentDetails(){
     ${tasks.length ? `<div style="margin-top:8px"><b>Tasks</b> — give one to the agent:</div>` + tasks.map(([id, l2]) => `<div style="display:flex;gap:6px;align-items:center;margin-top:4px"><span style="flex:1">☐ ${esc(l2)}</span><button class="btn sm pri" data-task="${esc(id)}">Do it</button></div>`).join("") : ""}`);
   d.addEventListener("click", e => { const b = e.target.closest("[data-task]"); if (!b) return; const id = b.dataset.task; b.disabled = true; b.textContent = "Done ✓";
     b.parentElement.firstElementChild.textContent = b.parentElement.firstElementChild.textContent.replace("☐", "☑");
-    if (id === "measure") agentMeasure(""); else if (id === "schedule") agentSchedule(); else if (id.startsWith("count:")) agentCount(id.slice(6).toLowerCase()); });
+    if (id === "full") fullTakeoffDialog("page"); else if (id === "measure") agentMeasure(""); else if (id === "schedule") agentSchedule(); else if (id.startsWith("count:")) agentCount(id.slice(6).toLowerCase()); });
 }
 const sameRoom = (a, b) => !!a && !!b && a.name === b.name && Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;   // one label, whichever list it came from
-async function agentMeasure(filter, only){   // only: these rooms (an apartment), whatever the view
-  const k = curScale(); if (!k) { aiLog("err", "Set the page scale first (K) — then I can measure."); return {error: "page scale not set"}; }
-  if (scaleDoubt()) { aiLog("err", "The page scale is doubtful: the drawing measures " + esc(scaleDoubt().label) + ", not the note. Settle it first (scale chip)."); return {error: "page scale doubtful — the drawing measures " + scaleDoubt().label + "; ask the user to settle the scale first"}; }
+async function agentMeasure(filter, only, opt){   // only: these rooms (an apartment), whatever the view; opt.quiet: no lines in the panel (the full takeoff reports)
+  const say = opt && opt.quiet ? () => document.createElement("div") : aiLog;
+  const k = curScale(); if (!k) { say("err", "Set the page scale first (K) — then I can measure."); return {error: "page scale not set"}; }
+  if (scaleDoubt()) { say("err", "The page scale is doubtful: the drawing measures " + esc(scaleDoubt().label) + ", not the note. Settle it first (scale chip)."); return {error: "page scale doubtful — the drawing measures " + scaleDoubt().label + "; ask the user to settle the scale first"}; }
   const F = await drawingFacts(S.fileId, S.pageNo);
   const words = filter.toLowerCase().split(/\s+/).filter(Boolean).map(w => w.replace(/s$/, ""));
   let rooms = F.rooms.filter(r => !words.length || words.some(w => r.name.toLowerCase().replace(/\s+/g, "").includes(w.replace(/\s+/g, ""))));
+  if (!rooms.length && words.length) rooms = F.rooms.filter(r => words.some(w => nameLike(r.name, w)));   // "bedrom", "kitchn": a slip of the keyboard is still the room
   const vr = viewRect(), zoomed = (vr[2] - vr[0]) * (vr[3] - vr[1]) < 0.6 * S.base.width * S.base.height, all = rooms.length;
   if (only) rooms = only; else if (zoomed) rooms = rooms.filter(r => { const x = r.x + r.w / 2, y = r.y - r.h / 2; return x >= vr[0] && x <= vr[2] && y >= vr[1] && y <= vr[3]; });
-  if (!only && zoomed && all && !rooms.length) { aiLog("err", "No room names in the part on screen — pan to the rooms, or zoom out (Fit) for the whole page."); return {error: "no rooms in the view"}; }
-  if (!only && zoomed && rooms.length < all) aiLog("bot", `Measuring the <b>${rooms.length}</b> rooms on screen (of ${all} on the page) — press <b>Fit</b> first for all of them.`);
-  if (!rooms.length) { aiLog("err", F.rooms.length ? "No room name on this page matches “" + esc(filter) + "”." : "I found no room names in this page's text."); return {error: F.rooms.length ? "no room matches " + filter + "; rooms on the page: " + F.rooms.map(r => r.name).join(", ") : "no room names in the page text (scanned?) — use trace_room / draw_area"}; }
+  if (!only && zoomed && all && !rooms.length) { say("err", "No room names in the part on screen — pan to the rooms, or zoom out (Fit) for the whole page."); return {error: "no rooms in the view"}; }
+  if (!only && zoomed && rooms.length < all) say("bot", `Measuring the <b>${rooms.length}</b> rooms on screen (of ${all} on the page) — press <b>Fit</b> first for all of them.`);
+  if (!rooms.length) { say("err", F.rooms.length ? "No room name on this page matches “" + esc(filter) + "”." : "I found no room names in this page's text."); return {error: F.rooms.length ? "no room matches " + filter + "; rooms on the page: " + F.rooms.map(r => r.name).join(", ") : "no room names in the page text (scanned?) — use trace_room / draw_area"}; }
   const done = new Set(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo).map(i => (i.label || "").toLowerCase()));
   const c = aiAreaCond(), got = [], res = []; let ok = 0, chk = 0, same2 = 0;
+  const mine = P.proj.items.filter(i => onPage(i) && i.cond === c.id && i.kind === "shape"), had = rooms.filter(r => mine.some(i => pointInPoly([r.x + r.w / 2, r.y - r.h / 2], itemPoly(i))));
+  if (had.length) {   // a room already measured in this condition is left as it is — running the agent again never measures it twice
+    rooms = rooms.filter(r => !had.includes(r));
+    had.forEach(r => { const it = mine.find(i => pointInPoly([r.x + r.w / 2, r.y - r.h / 2], itemPoly(i))); res.push({name: r.name, already: true, area_sft: +(polyArea(itemPoly(it)) / k / k).toFixed(2)}); });
+    say("bot", `${had.length === 1 ? "1 room is" : had.length + " rooms are"} already measured in <b>${esc(c.name)}</b> and left as ${had.length === 1 ? "it is" : "they are"} (delete one to measure it again): ${had.map(r => esc(r.name)).join(", ")}.`);
+    if (!rooms.length) return {condition: c.name, rooms: res};
+  }
   for (const [n, r] of rooms.entries()) {
     busy(`Measuring ${n + 1} of ${rooms.length}: ${r.name}…`); await new Promise(q => setTimeout(q, 10));
     const cx = r.x + r.w / 2, below = r.sizeY != null ? r.sizeY : r.y, lc = [cx, r.y - r.h / 2];   // lc: the name itself — the room it is written in is the one wanted
     const seeds = [lc, [cx, r.y - r.h * 1.7], [cx, below + r.h * 0.9], [r.x - r.h, r.y - r.h / 2], [r.x + r.w + r.h, r.y - r.h / 2], [cx, below + r.h * 2.5], [cx, r.y - r.h * 3.5]];
-    if (got.some(o => o.with.some(q => sameRoom(q, r)))) { const o = got.find(g2 => g2.with.some(q => sameRoom(q, r))); res.push({name: r.name, shared_with: o.name}); aiLog("tool", `${esc(r.name)}: <span class="small">in the same open space as <b>${esc(o.name)}</b> — measured with it</span>`); continue; }
+    if (got.some(o => o.with.some(q => sameRoom(q, r)))) { const o = got.find(g2 => g2.with.some(q => sameRoom(q, r))); res.push({name: r.name, shared_with: o.name}); say("tool", `${esc(r.name)}: <span class="small">in the same open space as <b>${esc(o.name)}</b> — measured with it</span>`); continue; }
     let best = null; const dd = sizeDims(r.size), tried = [];
     const over = Object.assign({own: lc}, dd ? {gap: Math.max(2.5, Math.min(autoOpt().gap, 0.6 * Math.min(dd[0], dd[1])))} : {});   // a 5 ft bath: close gaps up to 3 ft, not 4
     for (const sd of seeds) {
@@ -4939,13 +4973,13 @@ async function agentMeasure(filter, only){   // only: these rooms (an apartment)
       tried.push(a);
     }
     if (best && best.err >= 10) best.err -= 10;
-    if (!best) { res.push({name: r.name, error: "could not close the room"}); aiLog("err", `${esc(r.name)}: auto area could not close the room — use the Fence tool on the open side, or draw it`); continue; }
+    if (!best) { res.push({name: r.name, error: "could not close the room"}); say("err", `${esc(r.name)}: auto area could not close the room — use the Fence tool on the open side, or draw it`); continue; }
     const cen = q => [q.reduce((a, v) => a + v[0], 0) / q.length, q.reduce((a, v) => a + v[1], 0) / q.length];
     const same = got.find(o => Math.abs(o.a - best.a) / best.a < 0.005 && dist(cen(o.pts), cen(best.pts)) < k);
-    if (same) { same2++; res.push({name: r.name, error: "leaked into " + same.name}); aiLog("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${fq(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
+    if (same) { same2++; res.push({name: r.name, error: "leaked into " + same.name}); say("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${fq(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
     const inside = F.rooms.filter(q => q !== r && pointInPoly([q.x + q.w / 2, q.y - q.h / 2], best.pts));
     const hit = inside.find(q => q.name !== r.name && got.some(o => sameRoom(o.room, q)));   // runs into a room already measured on its own: a leak, not open plan
-    if (hit) { same2++; res.push({name: r.name, error: "leaked into " + hit.name}); aiLog("err", `${esc(r.name)}: runs on into <b>${esc(hit.name)}</b> (already measured) — an opening is not closed. Draw a <b>Fence</b> across it and run again, or draw this room.`); continue; }
+    if (hit) { same2++; res.push({name: r.name, error: "leaked into " + hit.name}); say("err", `${esc(r.name)}: runs on into <b>${esc(hit.name)}</b> (already measured) — an opening is not closed. Draw a <b>Fence</b> across it and run again, or draw this room.`); continue; }
     const dupes = inside.filter(q => q.name === r.name);   // the same name twice in one room (text on two layers): one room
     const others = inside.filter(q => q.name !== r.name && !got.some(o => o.with.some(w => sameRoom(w, q))));   // other names in the same space: open plan
     const nm = [r.name].concat(others.map(q => q.name)).join(" + ").slice(0, 60), wrt = r.sft + others.reduce((a, q) => a + (q.sft || 0), 0);
@@ -4955,10 +4989,10 @@ async function agentMeasure(filter, only){   // only: these rooms (an apartment)
     mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, ai: true, label: nm}); });
     const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;   // best.err is against the written sizes of every room in the space
     res.push({name: nm, area_sft: +best.a.toFixed(2), written_sft: r.sft ? +wrt.toFixed(2) : null, check: !!bad, open_plan_with: others.map(q => q.name)});
-    aiLog("tool", `${esc(nm)}: <b>${fq(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? fq(wrt) + " Sft together" : esc(r.size) + " = " + fq(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + fq(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
+    say("tool", `${esc(nm)}: <b>${fq(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? fq(wrt) + " Sft together" : esc(r.size) + " = " + fq(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + fq(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
   }
   busy(""); refresh();
-  aiLog("bot", `Measured ${ok + chk} of ${rooms.length} into <b>${esc(c.name)}</b>${chk ? ` — <b>${chk} to check</b> (more than 5% off the written size: fix with Fence, or the room is not a rectangle)` : ""}${same2 ? ` — <b>${same2}</b> leaked into a neighbour, not added` : ""}. Undo (Ctrl+Z) removes them one by one.`);
+  say("bot", `Measured ${ok + chk} of ${rooms.length} into <b>${esc(c.name)}</b>${chk ? ` — <b>${chk} to check</b> (more than 5% off the written size: fix with Fence, or the room is not a rectangle)` : ""}${same2 ? ` — <b>${same2}</b> leaked into a neighbour, not added` : ""}. Undo (Ctrl+Z) removes them one by one.`);
   return {condition: c.name, rooms: res};
 }
 /* apartments: the unit numbers written on the plan — a 2-4 digit number with TYPE-… / n BED / … SFT under it. Each room
@@ -5181,6 +5215,381 @@ async function wallsDialog(){
   aiLog("bot", "Check the runs on the drawing (they are marked AI). Deduct doors and windows with the <b>Opening</b> tool (O)." + (r.needs_height ? " Give the condition its height H (✎) to get cft." : ""));
 }
 document.addEventListener("change", e => { if (e.target.id === "wlT") $("wlT2").style.display = e.target.value ? "none" : ""; });
+/* ------------------------------------------------------------------ free agents II: ⚡ full takeoff · 🎨 finishes · ✅ check.
+   Still no API key, no cost, nothing sent anywhere. The full takeoff chains the agents above over this page, a PDF or
+   the whole project and reports once; the finishes agent puts each room's wall finish and skirting on the sheet in the
+   house format, every door and window its own deduction row; the checker audits a takeoff for what a checking QS asks
+   about, each finding with a button to show or fix it. A whole run is one undo step. */
+const STD_WALLS = [4, 4.5, 5, 6, 8, 9, 10, 12, 13.5, 18];   // inches: thicknesses taken on their own — any other spacing of parallel lines (window glass, a counter) is listed, not measured
+const stdWall = t => STD_WALLS.find(s => Math.abs(t * 12 - s) <= 0.26);
+const inchOf = t => Math.round(t * 24) / 2 + "\"";
+const natSort = (a, b) => String(a).localeCompare(String(b), undefined, {numeric: true});
+const isRoomArea = i => i.kind === "shape" && !i.finAuto && (cond(i.cond) || {}).type === "area" && !!String(i.label || "").trim() && i.pts.length >= 2;
+const wallCondFor = T => P.proj.conds.find(c => c.type === "linear" && Math.abs(+c.t - T) < 0.005 && !c.finAgent && (c.agentWall || /wall|masonry|partition|block/i.test(c.name)) && !/plaster|paint|finish|skirting/i.test(c.name));
+function lev(a, b){ if (Math.abs(a.length - b.length) > 2) return 9; let p = Array.from({length: b.length + 1}, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) { const c = [i]; for (let j = 1; j <= b.length; j++) c[j] = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); p = c; } return p[b.length]; }
+function nameLike(name, w){   // a room / condition name and a typed word: the same word, give or take a slip of the keyboard
+  w = String(w || "").toLowerCase().replace(/[^a-z0-9]/g, ""); if (!w || (w.length < 2 && !/^\d$/.test(w))) return false;
+  const toks = String(name || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean), joined = toks.join(""), alpha = toks.filter(x => !/^\d+$/.test(x)).join("");
+  if (joined.includes(w)) return true;
+  const tol = w.length >= 7 ? 2 : w.length >= 4 ? 1 : 0; if (!tol) return false;
+  return [alpha, joined].concat(toks).some(x => lev(x, w) <= tol || (x.length > w.length && lev(x.slice(0, w.length), w) <= tol));
+}
+const roomWords = s => String(s || "").toLowerCase().split(/\s+/).filter(Boolean).map(w => w.replace(/s$/, ""));
+const roomWanted = (r, words) => !words.length || words.some(w => r.name.toLowerCase().replace(/\s+/g, "").includes(w) || nameLike(r.name, w));
+async function asOneStep(label, fn){   // everything fn changes is undone by one Ctrl+Z
+  const before = snapshot(), top = S.undo[S.undo.length - 1];
+  try { return await fn(); }
+  finally { if (snapshot() !== before) { S.undo.splice(top ? S.undo.lastIndexOf(top) + 1 : 0); S.undo.push({js: before, label}); S.redo = []; refresh(); } }
+}
+async function agentGoto(f, i){   // open a page and wait for its lines and text -> true when it is the page shown
+  const key = keyOf(f, i);
+  if (S.key !== key || !S.page) await gotoPage(f, i);
+  for (let n = 0; n < 1200 && S.key === key && !(S.geo[key] && S.texts[key]); n++) await new Promise(r => setTimeout(r, 25));
+  return S.key === key && !!S.geo[key] && !!S.texts[key];
+}
+
+/* ⚡ full takeoff: rooms (auto area at every room name not yet measured), walls (every standard thickness drawn, on the
+   centre line), door / window tags (with the schedule table's sizes into the opening schedule) and the finishes, page
+   after page. A page with no scale, or one its written room sizes disagree with, is skipped and listed. */
+async function fullTakeoffDialog(scope){
+  if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
+  if (S.agentRun) return toast("An agent is already running — wait for it to finish");
+  const fc = P.proj.conds.find(c => c.finAgent === "wall"), nP = (P.proj.files.find(x => x.id === S.fileId) || {}).pages || 1, nA = allPages().length;
+  const v = await ask("⚡ Full takeoff agent", `<p>Runs the free agents one after another and reports once — no API key, nothing leaves this browser.</p>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Where</label><select id="ftScope"><option value="page">This page</option><option value="pdf"${scope === "pdf" ? " selected" : ""}>Every page of this PDF (${nP})</option><option value="all"${scope === "all" ? " selected" : ""}>Every PDF in the project (${nA} pages)</option></select></div>
+    <div class="fg w2"><label>Do</label><label class="pk"><input type="checkbox" id="ftR" checked> 🏠 Rooms — auto area at every room name not yet measured, checked against its written size</label>
+      <label class="pk"><input type="checkbox" id="ftW" checked> 🧱 Walls — every standard thickness drawn (4.5", 9", 13.5" …), on the centre line</label>
+      <label class="pk"><input type="checkbox" id="ftD" checked> 🚪 Doors / windows — every tag counted; sizes in a schedule table go to the opening schedule</label>
+      <label class="pk"><input type="checkbox" id="ftF"${fc ? " checked" : ""}> 🎨 Finishes — wall finish and skirting of each room, doors and windows deducted as their own rows</label></div>
+    <div class="fg"><label>Room height H (ft) — finishes</label><input type="text" id="ftH" value="${fc && +fc.h ? f3(+fc.h) : ""}" placeholder="floor to ceiling, from the section"></div>
+    <div class="fg"><label>Door height (ft) — doors not in the schedule</label><input type="text" id="ftDH" value="${P.proj.finDH ? f3(P.proj.finDH) : ""}" placeholder="from the door schedule"></div></div>
+    <p class="small" style="margin-top:8px">A page with no scale, or a scale its written room sizes disagree with, is skipped and listed — nothing is measured at a doubtful scale. Rooms already measured are left as they are; walls and finishes found again replace the agent's own earlier runs. Everything added is marked <b>AI</b> until checked, and one <b>Ctrl+Z</b> takes the whole run back.</p>`, "Run",
+    () => { const o = {scope: $("ftScope").value, rooms: $("ftR").checked, walls: $("ftW").checked, doors: $("ftD").checked, fin: $("ftF").checked};
+      if (!o.rooms && !o.walls && !o.doors && !o.fin) return "Tick something to do";
+      const H = $("ftH").value.trim() ? parseFt($("ftH").value) : 0, DH = $("ftDH").value.trim() ? parseFt($("ftDH").value) : 0;
+      if (isNaN(H) || isNaN(DH)) return "Heights are in feet, e.g. 10.5 or 10'-6\"";
+      if (o.fin && !(H > 0)) return "Give the room height H for the finishes (or untick Finishes)";
+      return Object.assign(o, {H, DH}); });
+  if (v) return fullTakeoff(v);
+}
+async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, filter} -> {pages: [one report per page], ms}
+  if (!P.proj || !S.page) return {error: "no page open"};
+  if (S.agentRun) return {error: "an agent is already running"};
+  const pages = o.scope === "page" || !o.scope ? [{f: P.proj.files.find(x => x.id === S.fileId), i: S.pageNo}] : allPages().filter(p => o.scope === "all" || p.f.id === S.fileId);
+  const home = [S.fileId, S.pageNo], cond0 = S.cond, rep = [], t0 = Date.now(), words = roomWords(o.filter);
+  let roomC = null; S.agentRun = true;
+  try { await asOneStep("Full takeoff", async () => {
+    for (const [n, p] of pages.entries()) {
+      const R = {page: pageName({file: p.f.id, page: p.i}), file: p.f.id, no: p.i}; rep.push(R);
+      busy(`⚡ Full takeoff — ${R.page}${pages.length > 1 ? ` (${n + 1} of ${pages.length})` : ""}…`);
+      if (!await agentGoto(p.f.id, p.i)) { R.skip = "could not be opened (or another page was opened meanwhile)"; continue; }
+      if (!S.geo[S.key].segs.length && !S.texts[S.key].length) { R.skip = "blank — no lines or text"; continue; }
+      if (!curScale()) { R.skip = "no scale — set it (K), then run again"; continue; }
+      try { await checkScale(S.key, false); } catch (e) {}
+      if (scaleDoubt()) { R.skip = "scale doubtful — the written room sizes measure " + scaleDoubt().label + "; settle it on the scale chip"; continue; }
+      if (o.rooms) {
+        const F = await drawingFacts(S.fileId, S.pageNo), have = P.proj.items.filter(i => onPage(i) && i.kind === "shape" && (cond(i.cond) || {}).type === "area");
+        const want = F.rooms.filter(r => roomWanted(r, words)), todo = want.filter(r => !have.some(i => pointInPoly([r.x + r.w / 2, r.y - r.h / 2], itemPoly(i))));
+        R.rooms = {named: want.length, had: want.length - todo.length, ok: 0, chk: [], bad: [], sft: 0};
+        if (todo.length) {
+          if (roomC && cond(roomC)) S.cond = roomC;
+          const r = await agentMeasure("", todo, {quiet: true});
+          if (r.error) R.rooms.err = r.error;
+          else { roomC = (P.proj.conds.find(c => c.type === "area" && c.name === r.condition) || {}).id || roomC; R.rooms.cond = r.condition;
+            r.rooms.forEach(x => { if (x.error) R.rooms.bad.push(x.name + " — " + x.error); else if (x.already) R.rooms.had++; else if (x.area_sft != null) { R.rooms.sft += x.area_sft; if (x.check) R.rooms.chk.push(x.name); else R.rooms.ok++; } }); }
+        }
+      }
+      if (o.walls) {
+        busy(`⚡ Full takeoff — ${R.page}: walls…`); await new Promise(r => setTimeout(r, 10));
+        const found = wallThicknesses(null), seen = new Set(); R.walls = []; R.wallOther = found.filter(w => !stdWall(w.t)).map(w => ({t: w.t, len: w.len}));
+        for (const w of found) { const s = stdWall(w.t); if (!s || seen.has(s)) continue; seen.add(s);
+          const T = s / 12, ex = wallCondFor(T), r = wallsAgent({t: T, page: true, bridge: 6, cond: ex ? ex.id : null});
+          if (!r.error && !ex) { const c = P.proj.conds.find(x => x.type === "linear" && x.name === r.condition); if (c) c.agentWall = true; }
+          R.walls.push(r.error ? {t: T, err: r.error} : {t: T, name: r.condition, ft: r.total_length_ft, runs: r.runs, unit: r.unit}); }
+      }
+      if (o.doors) {
+        const res = await scanTags("page"), T = res[0].T, keys = Object.keys(T.plan).filter(k2 => tagKind(k2) !== "Tags").sort(natSort);
+        const newSch = Object.keys(T.sched).filter(k2 => !(P.proj.openings || []).some(x => String(x.mark).toUpperCase() === k2));
+        R.tags = {}; R.newSch = newSch; R.sch = {}; keys.forEach(k2 => { R.tags[k2] = T.plan[k2].length; }); Object.entries(T.sched).forEach(([k2, sc]) => { if (sc.qty) R.sch[k2] = sc.qty; });
+        if (keys.length || newSch.length) mutate(() => { if (keys.length) putCounts(res, keys, "mark");
+          newSch.forEach(k2 => { const sc = T.sched[k2]; P.proj.openings.push({id: uid("O"), mark: k2, type: tagKind(k2) === "Doors" ? "door" : tagKind(k2) === "Windows" ? "window" : "other", w: sc.w, h: sc.h, src: "read from the drawing's schedule (" + sc.how + ")"}); }); }, "Count doors / windows");
+      }
+      if (o.fin) R.fin = !P.proj.items.some(i => onPage(i) && isRoomArea(i)) ? {none: true} : finishesRun({H: o.H, DH: o.DH, cond: roomC && P.proj.items.some(i => onPage(i) && i.cond === roomC && isRoomArea(i)) ? roomC : roomCondOf(), ceiling: true});
+    }
+  }); } finally { S.agentRun = false; busy(""); if (cond0 && cond(cond0)) S.cond = cond0; }   // the condition the user had picked stays picked
+  if (pages.length > 1 && (S.fileId !== home[0] || S.pageNo !== home[1])) await agentGoto(home[0], home[1]);
+  const ms = Date.now() - t0; fullReport(o, rep, ms);
+  return {pages: rep, ms};
+}
+function fullReport(o, rep, ms){
+  const done = rep.filter(R => !R.skip), skip = rep.filter(R => R.skip), sum = (L, f) => L.reduce((a, x) => a + (+f(x) || 0), 0);
+  const roomsL = R => R.rooms.err ? `<span style="color:var(--red)">${esc(R.rooms.err)}</span>` : !R.rooms.named ? "no room names in the page's text" + (o.filter ? " matching “" + esc(o.filter) + "”" : "")
+    : R.rooms.had >= R.rooms.named ? `all ${R.rooms.named} rooms were already measured — left as they are`
+    : `<b>${R.rooms.ok + R.rooms.chk.length}</b> of ${R.rooms.named} rooms measured${R.rooms.had ? ` (${R.rooms.had} were already)` : ""}${R.rooms.sft ? ` · <b>${fq(R.rooms.sft)} Sft</b>` : ""}${R.rooms.chk.length ? ` · <b style="color:var(--amber)">check</b> ${R.rooms.chk.map(esc).join(", ")}` : ""}${R.rooms.bad.length ? `<br><span class="small" style="color:var(--red)">not closed: ${R.rooms.bad.map(esc).join("; ")} — a Fence across the opening, then run again</span>` : ""}`;
+  const wallsL = R => (R.walls.length ? R.walls.map(w => w.err ? `${inchOf(w.t)}: <span style="color:var(--red)">${esc(w.err)}</span>` : `${inchOf(w.t)} <b>${f3(w.ft)} ft</b> <span class="small">(${w.runs} run${w.runs > 1 ? "s" : ""})</span>`).join(" · ") : "no wall faces found (scanned page?)")
+    + (R.wallOther.length ? `<br><span class="small">Not taken: ${R.wallOther.map(w => inchOf(w.t) + " (" + Math.round(w.len) + " ft)").join(", ")} — window glass, counters and the like; 🧱 Walls takes one if it is a wall.</span>` : "");
+  const tagsL = R => (Object.keys(R.tags).length ? Object.entries(R.tags).map(([m, n]) => esc(m) + " <b>×" + n + "</b>").join(" · ") : "no door / window tags") + (R.newSch.length ? `<br><span class="small">Sizes of ${R.newSch.map(esc).join(", ")} read from the schedule into the opening schedule.</span>` : "");
+  const finL = R => R.fin.none ? "no rooms measured on this page" : R.fin.error ? `<span style="color:var(--red)">${esc(R.fin.error)}</span>` : `${R.fin.rooms.length} rooms · wall finish <b>${fq(sum(R.fin.rooms, x => x.wallNet))} Sft</b> net · skirting <b>${fq(sum(R.fin.rooms, x => x.skirt))} ft</b>${sum(R.fin.rooms, x => x.notes.length) ? ` · <b style="color:var(--amber)">${sum(R.fin.rooms, x => x.notes.length)} opening${sum(R.fin.rooms, x => x.notes.length) > 1 ? "s" : ""} not deducted</b> <span class="small">(no size — see 🎨 Finishes)</span>` : ""}`;
+  const blk = R => `<div style="margin-top:7px"><b>${esc(R.page)}</b>${R.rooms ? "<br>🏠 " + roomsL(R) : ""}${R.walls ? "<br>🧱 " + wallsL(R) : ""}${R.tags ? "<br>🚪 " + tagsL(R) : ""}${R.fin ? "<br>🎨 " + finL(R) : ""}</div>`;
+  let tot = "";
+  if (done.length > 1) {   // the run's totals, and the counts against the schedule's quantities
+    const W = {}, G = {}; done.forEach(R => { (R.walls || []).forEach(w => { if (!w.err) W[w.t] = (W[w.t] || 0) + w.ft; }); Object.entries(R.tags || {}).forEach(([m, n]) => { G[m] = (G[m] || 0) + n; }); });
+    tot = `<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px"><b>All ${done.length} pages</b>${o.rooms ? `<br>🏠 <b>${fq(sum(done, R => R.rooms && R.rooms.sft))} Sft</b> of rooms measured` : ""}${Object.keys(W).length ? "<br>🧱 " + Object.keys(W).sort((a, b) => a - b).map(t => inchOf(+t) + " <b>" + f3(W[t]) + " ft</b>").join(" · ") : ""}${Object.keys(G).length ? "<br>🚪 " + Object.keys(G).sort(natSort).map(m => esc(m) + " <b>×" + G[m] + "</b>").join(" · ") : ""}</div>`;
+  }
+  const sch = {}; rep.forEach(R => Object.assign(sch, R.sch || {}));
+  const off = Object.entries(sch).map(([m, q]) => { const c = P.proj.conds.find(x => x.type === "count" && x.name.toUpperCase() === m), n = c ? condTotals(c).net : 0; return n && n !== q ? `${esc(m)}: schedule ${q}, counted ${n}` : ""; }).filter(Boolean);
+  const d = aiLog("bot", `<b>⚡ Full takeoff</b> — ${done.length} page${done.length === 1 ? "" : "s"} done${skip.length ? `, ${skip.length} skipped` : ""} in ${(ms / 1000).toFixed(1)} s${done.length > 8 ? `<details><summary class="small">Page by page</summary>${done.map(blk).join("")}</details>` : done.map(blk).join("")}${tot}
+    ${off.length ? `<div style="margin-top:6px;color:var(--red)"><b>Counted ≠ schedule quantity:</b> ${off.join(" · ")}</div>` : ""}
+    ${skip.length ? `<div style="margin-top:6px" class="small"><b>Skipped:</b> ${skip.map(R => esc(R.page) + " — " + esc(R.skip)).join("<br>")}</div>` : ""}
+    <div style="margin-top:6px" class="small">Everything added is marked <b>AI</b> until checked. One <b>Ctrl+Z</b> takes the whole run back.</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn sm pri" data-fa="check">✅ Check the takeoff</button>${!o.fin && done.length ? '<button class="btn sm" data-fa="fin">🎨 Finishes…</button>' : ""}<button class="btn sm" data-fa="sched">📋 Room schedule</button></div>`);
+  d.addEventListener("click", e => { const b = e.target.closest("[data-fa]"); if (!b) return; const a = b.dataset.fa; if (a === "check") agentCheck(o.scope === "page" ? "page" : "all"); else if (a === "fin") finishesDialog(); else agentSchedule(); });
+}
+
+/* 🎨 finishes of the rooms measured on this page (named area measurements): each room's wall finish as one closed run
+   (Nos × L × H, faces 1) with every door and window on it deducted as its own opening row, its skirting less its doors,
+   and its ceiling as an assembly line of the room condition (= A). Doors are the swings drawn (hinge to jamb), sized from
+   the opening schedule when a door tag is beside one, else its drawn width × the door height given; windows are the
+   window tags in or beside the room, sized from the opening schedule only — a window's height is never on a plan, so one
+   with no size is listed, not deducted. Running it again replaces its own earlier runs on the page. */
+function roomCondOf(){   // the area condition holding the most named rooms on this page
+  const n = {}; P.proj.items.forEach(i => { if (onPage(i) && isRoomArea(i)) n[i.cond] = (n[i.cond] || 0) + 1; });
+  return Object.keys(n).sort((a, b) => n[b] - n[a])[0] || null;
+}
+function doorLines(){   // the doors drawn on this page: [{a, b}] hinge to jamb, page units; a double door's two leaves are one
+  const g = S.geo[S.key], k = curScale(); if (!g || !k || !g.segs.length) return [];
+  const out = [];
+  doorSymbols(g, segsIn(g, 0, 0, S.base.width, S.base.height), k).lines.forEach(l => {
+    const d = {a: [l[0], l[1]], b: [l[2], l[3]]}, L = dist(d.a, d.b); if (!(L > 0)) return;
+    const u = [(d.b[0] - d.a[0]) / L, (d.b[1] - d.a[1]) / L];
+    const q = out.find(o => { const M = dist(o.a, o.b), v = [(o.b[0] - o.a[0]) / M, (o.b[1] - o.a[1]) / M];
+      if (Math.abs(u[0] * v[1] - u[1] * v[0]) > 0.05 || Math.abs((d.a[0] - o.a[0]) * v[1] - (d.a[1] - o.a[1]) * v[0]) > 0.1 * k) return false;   // one line
+      const t = [d.a, d.b].map(p => (p[0] - o.a[0]) * v[0] + (p[1] - o.a[1]) * v[1]); return Math.min(...t) < M + 0.3 * k && Math.max(...t) > -0.3 * k; });   // touching or overlapping
+    if (!q) { out.push(d); return; }
+    const M = dist(q.a, q.b), v = [(q.b[0] - q.a[0]) / M, (q.b[1] - q.a[1]) / M], ts = [q.a, q.b, d.a, d.b].map(p => (p[0] - q.a[0]) * v[0] + (p[1] - q.a[1]) * v[1]), lo = Math.min(...ts), hi = Math.max(...ts), o0 = q.a.slice();
+    q.a = [o0[0] + v[0] * lo, o0[1] + v[1] * lo]; q.b = [o0[0] + v[0] * hi, o0[1] + v[1] * hi]; q.leaves = 2;
+  });
+  return out;
+}
+function finCond(kind, H){   // the finishes agent's own conditions, made once and reused
+  let c = P.proj.conds.find(x => x.finAgent === kind);
+  if (!c) { c = kind === "wall" ? {id: uid("C"), name: "Internal wall finish — rooms (plaster / paint)", type: "linear", unit: "Sft", h: H, t: "", faces: 1, dedMin: 1.0, finAgent: "wall"}
+                                : {id: uid("C"), name: "Skirting — rooms", type: "linear", unit: "ft", h: "", t: "", faces: 1, dedMin: 0, finAgent: "skirt"};
+    c.color = COLORS[P.proj.conds.length % COLORS.length]; P.proj.conds.push(c); }
+  if (kind === "wall") c.h = H;
+  return c;
+}
+function finishesRun(o){   // o: {H, DH, cond, ceiling} on this page -> {rooms: [{name, floor, per, skirt, wallGross, wallDed, wallNet, doors, wins, notes}], wall, skirt} or {error}
+  const k = curScale(); if (!k) return {error: "Set the page scale first (K)."};
+  if (scaleDoubt()) return {error: "The page scale is doubtful — the drawing measures " + scaleDoubt().label + ", not the note. Settle it first (scale chip)."};
+  const H = +o.H; if (!(H > 0)) return {error: "Give the room height H (ft) — floor to ceiling, from the section."};
+  const DH = +o.DH > 0 ? +o.DH : 0, rooms = P.proj.items.filter(i => onPage(i) && isRoomArea(i) && (!o.cond || i.cond === o.cond));
+  if (!rooms.length) return {error: "No named room areas on this page — run 🏠 Rooms first (the finishes go round each measured room)."};
+  const T = tagsOf(S.texts[S.key] || []), doors = doorLines(), tol = 1.25 * k, polys = rooms.map(itemPoly), wins = rooms.map(() => []), loose = [];
+  const tagPts = fams => Object.entries(T.plan).filter(([m]) => fams.includes(tagKind(m))).flatMap(([m, pts]) => pts.map(p => ({m, p})));
+  const dTags = tagPts(["Doors"]);
+  dTags.forEach(t2 => {   // each door tag to the door drawn nearest it (within 3 ft): that door's mark
+    let best = null; doors.forEach(d => { const e = distSeg(t2.p, d.a, d.b); if (e < 3 * k && (!best || e < best.e)) best = {d, e}; });
+    if (best) { t2.d = best.d; if (!best.d.mk || best.e < best.d.mkE) { best.d.mk = t2.m; best.d.mkE = best.e; } } });
+  // window tags — and door tags with no swing drawn beside them (an entrance, a sliding door, an opening): each to the room
+  // it is in, else the nearest (within 4 ft of its outline), on that room's nearest side
+  tagPts(["Windows", "Ventilators"]).concat(dTags.filter(t2 => !t2.d).map(t2 => Object.assign(t2, {door: true}))).forEach(t2 => {
+    let best = null;
+    polys.forEach((pl, n) => { let e = Infinity, ei = 0; for (let i = 0; i < pl.length; i++) { const x = distSeg(t2.p, pl[i], pl[(i + 1) % pl.length]); if (x < e) { e = x; ei = i; } }
+      const sc = pointInPoly(t2.p, pl) ? -1 : e; if (sc < 4 * k && (!best || sc < best.sc)) best = {n, sc, ei}; });
+    if (best) wins[best.n].push({m: t2.m, p: t2.p, ei: best.ei, door: !!t2.door}); else loose.push(t2.m); });
+  const onRoom = (pl, d) => { const L = dist(d.a, d.b), u = [(d.b[0] - d.a[0]) / L, (d.b[1] - d.a[1]) / L];   // a door along one side of the room, both its ends within 1.25 ft of it
+    for (let i = 0; i < pl.length; i++) { const p = pl[i], q = pl[(i + 1) % pl.length], M = dist(p, q); if (!(M > 0)) continue;
+      if (Math.abs(u[0] * (q[1] - p[1]) - u[1] * (q[0] - p[0])) / M > 0.1) continue;
+      if (distSeg(d.a, p, q) <= tol && distSeg(d.b, p, q) <= tol) return true; }
+    return false; };
+  const schM = m => (P.proj.openings || []).find(x => String(x.mark).toUpperCase() === m) || null;
+  const addSch = Object.entries(T.sched).filter(([m]) => !schM(m)).map(([m, sc]) => ({id: uid("O"), mark: m, type: tagKind(m) === "Doors" ? "door" : tagKind(m) === "Windows" ? "window" : "other", w: sc.w, h: sc.h, src: "read from the drawing's schedule (" + sc.how + ")"}));
+  const out = []; let wc, skc;
+  mutate(() => {
+    addSch.forEach(x => P.proj.openings.push(x)); if (DH) P.proj.finDH = DH;
+    wc = finCond("wall", H); skc = finCond("skirt");
+    P.proj.items = P.proj.items.filter(i => !(i.finAuto && onPage(i) && (i.cond === wc.id || i.cond === skc.id)));
+    if (o.ceiling) [...new Set(rooms.map(i => i.cond))].map(cond).forEach(c => { if (c && !(c.asm || []).some(a => /ceiling/i.test(a.name || ""))) c.asm = (c.asm || []).concat({id: uid("A"), name: "Ceiling finish (plaster / paint)", unit: "Sft", f: "A"}); });
+    rooms.forEach((it, n) => {
+      const pl = polys[n], name = it.label.trim(), circ = it.shape === "circle", R = {name, nos: +it.nos || 1, it: it.id, doors: [], wins: [], notes: [], w: [], s: []};
+      const base = {file: S.fileId, page: S.pageNo, nos: R.nos, ai: true, finAuto: true, room: name};
+      const run = c2 => { const pts = pl.map(p => p.slice()).concat([pl[0].slice()]), x = Object.assign({id: uid("I"), cond: c2, kind: "shape", pts, label: name}, base); if (circ) x.arcs = [[0, pts.length - 1]]; P.proj.items.push(x); return x.id; };
+      R.w.push(run(wc.id)); R.s.push(run(skc.id));
+      const mine = doors.filter(d => onRoom(pl, d));
+      mine.forEach(d => {
+        const s = d.mk ? schM(d.mk) : null, w = s ? +s.w : dist(d.a, d.b) / k, h = s ? +s.h : DH;
+        const op = Object.assign({kind: "open", pts: [d.a.slice(), d.b.slice()], label: d.mk || "Door", ow: r3(w), oh: h ? r3(h) : 0}, s ? {sch: s.id} : {}, base);
+        const sk = Object.assign({id: uid("I"), cond: skc.id}, op); P.proj.items.push(sk); R.s.push(sk.id);   // the door's width off the skirting
+        if (h > 0) { const wo = Object.assign({id: uid("I"), cond: wc.id}, op); P.proj.items.push(wo); R.w.push(wo.id); }
+        else R.notes.push(`${d.mk || "a door"} ${f3(w)} ft wide: no height (not in the opening schedule, no door height given) — not deducted from the wall finish`);
+        R.doors.push(d.mk || "door"); });
+      wins[n].forEach(wn => {
+        if (wn.door && mine.some(d => !d.mk && distSeg(wn.p, d.a, d.b) < 5 * k)) return;   // a tag a little far from a swing with no tag of its own: that door, already taken
+        const s = schM(wn.m), lst = wn.door ? R.doors : R.wins;
+        if (!s) { R.notes.push(`${wn.m}${wn.door ? " (a door tag with no swing drawn)" : ""}: no size in the opening schedule — not deducted`); lst.push(wn.m + "?"); return; }
+        const p = pl[wn.ei], q = pl[(wn.ei + 1) % pl.length], L = dist(p, q), u = [(q[0] - p[0]) / L, (q[1] - p[1]) / L], hw = Math.min(L, +s.w * k) / 2;
+        const t = Math.max(hw, Math.min(L - hw, (wn.p[0] - p[0]) * u[0] + (wn.p[1] - p[1]) * u[1]));
+        const wo = Object.assign({id: uid("I"), cond: wc.id, kind: "open", pts: [[p[0] + u[0] * (t - hw), p[1] + u[1] * (t - hw)], [p[0] + u[0] * (t + hw), p[1] + u[1] * (t + hw)]], label: wn.m, sch: s.id, ow: +s.w, oh: +s.h}, base);
+        P.proj.items.push(wo); R.w.push(wo.id); lst.push(wn.m);
+        if (wn.door) { const sk = Object.assign({}, wo, {id: uid("I"), cond: skc.id, pts: wo.pts.map(p => p.slice())}); P.proj.items.push(sk); R.s.push(sk.id); } });
+      out.push(R);
+    });
+  }, "Finishes");
+  const q = id => { const it = P.proj.items.find(i => i.id === id), kk = it && itemScale(it); return kk ? rowsOf(it, kk).reduce((a, r) => a + r.qty, 0) : 0; };
+  out.forEach(R => { R.floor = q(R.it); R.ceil = R.floor; R.per = q(R.s[0]); R.skirt = R.s.reduce((a, id) => a + q(id), 0); R.wallGross = q(R.w[0]); R.wallNet = R.w.reduce((a, id) => a + q(id), 0); R.wallDed = R.wallGross - R.wallNet; });
+  return {rooms: out, wall: wc.name, skirt: skc.name, H, loose, schAdded: addSch.map(x => x.mark), ceiling: !!o.ceiling};
+}
+async function finishesDialog(){
+  if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
+  if (!curScale()) return aiLog("err", "Set the page scale first (K).");
+  const rooms = P.proj.items.filter(i => onPage(i) && isRoomArea(i)), byC = {}; rooms.forEach(i => { byC[i.cond] = (byC[i.cond] || 0) + 1; });
+  if (!rooms.length) { const d = aiLog("err", `No named room areas on this page yet — the finishes go round each measured room. <button class="btn sm pri" data-go="1">🏠 Measure the rooms first</button>`);
+    d.querySelector("[data-go]").onclick = async () => { const r = await agentMeasure(""); if (r && !r.error) finishesDialog(); }; return; }
+  const best = roomCondOf(), cs = Object.keys(byC).map(cond).filter(Boolean), wc = P.proj.conds.find(c => c.finAgent === "wall");
+  const v = await ask("🎨 Finishes agent", `<p>For each room measured on this page: the wall finish (plaster / paint) round the room as Nos × L × H with every door and window on it deducted as its own row, the skirting less its doors, and the ceiling (= the floor area).</p>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Rooms from</label><select id="fnC">${cs.map(c => `<option value="${esc(c.id)}"${c.id === best ? " selected" : ""}>${esc(c.name)} (${byC[c.id]} rooms)</option>`).join("")}${cs.length > 1 ? `<option value="">Every area condition (${rooms.length} rooms)</option>` : ""}</select></div>
+    <div class="fg"><label>Room height H (ft)</label><input type="text" id="fnH" value="${wc && +wc.h ? f3(+wc.h) : ""}" placeholder="floor to ceiling, from the section"></div>
+    <div class="fg"><label>Door height (ft) — doors not in the schedule</label><input type="text" id="fnDH" value="${P.proj.finDH ? f3(P.proj.finDH) : ""}" placeholder="from the door schedule"></div>
+    <div class="fg w2"><label class="pk"><input type="checkbox" id="fnCl" checked> Ceiling finish as an assembly line of the room condition (= its floor area A) — for the Bill</label></div></div>
+    <p class="small" style="margin-top:8px">Doors are found from their swings; a door tag beside one gives its size from the opening schedule (Bill → Opening schedule), else its drawn width × the door height above. Windows are found from their tags and need a size in the opening schedule — a window's height is never on a plan, so one with no size is listed, not deducted. Openings of 1.00 Sft or less are not deducted (house rule). Running it again replaces its own earlier runs on this page.</p>`, "Do finishes",
+    () => { const H = parseFt($("fnH").value), DH = $("fnDH").value.trim() ? parseFt($("fnDH").value) : 0;
+      if (!(H > 0)) return "Give the room height H (ft) — floor to ceiling"; if (isNaN(DH)) return "The door height is in feet, e.g. 7 or 7'-0\"";
+      return {H, DH, cond: $("fnC").value || null, ceiling: $("fnCl").checked}; }, "fnH");
+  if (!v) return;
+  const r = await asOneStep("Finishes", () => finishesRun(v));
+  if (r.error) return aiLog("err", esc(r.error));
+  finReport(r); return r;
+}
+function finReport(r){
+  const tot = f => r.rooms.reduce((a, x) => a + x[f], 0), notes = r.rooms.flatMap(x => x.notes.map(n => `<b>${esc(x.name)}</b>: ${esc(n)}`)).concat(r.loose.map(m => `${esc(m)}: no measured room beside the tag — not deducted`));
+  const tsv = [["Room", "Nos", "Floor Sft", "Ceiling Sft", "Perimeter ft", "Doors", "Windows", "Skirting ft", "Wall finish gross Sft", "Openings deducted Sft", "Wall finish net Sft"]]
+    .concat(r.rooms.map(x => [x.name, x.nos, x.floor.toFixed(3), x.ceil.toFixed(3), x.per.toFixed(3), x.doors.join(" "), x.wins.join(" "), x.skirt.toFixed(3), x.wallGross.toFixed(3), x.wallDed.toFixed(3), x.wallNet.toFixed(3)])).map(a => a.join("\t")).join("\n");
+  const d = aiLog("bot", `<b>🎨 Finishes</b> — ${r.rooms.length} rooms, H = ${f3(r.H)} ft <button class="btn sm" data-cp="1">Copy for Excel</button>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px"><tr><th align="left">Room</th><th align="right">Floor / ceiling Sft</th><th align="right">Wall finish Sft</th><th align="right">Skirting ft</th><th align="left">Openings</th></tr>
+    ${r.rooms.map(x => `<tr><td>${esc(x.name)}${x.nos > 1 ? " ×" + x.nos : ""}</td><td align="right">${fq(x.floor)}</td><td align="right">${fq(x.wallNet)}</td><td align="right">${fq(x.skirt)}</td><td class="small">${esc(x.doors.concat(x.wins).join(" ")) || "—"}</td></tr>`).join("")}
+    <tr><td><b>Total</b></td><td align="right"><b>${fq(tot("floor"))}</b></td><td align="right"><b>${fq(tot("wallNet"))}</b></td><td align="right"><b>${fq(tot("skirt"))}</b></td><td></td></tr></table>
+    <span class="small">On the sheet: <b>${esc(r.wall)}</b> (each room's run, its doors and windows as deduction rows) and <b>${esc(r.skirt)}</b> (less the doors)${r.ceiling ? "; the ceiling is an assembly line of the room condition, in the Bill" : ""}.${r.schAdded.length ? " Sizes of " + r.schAdded.map(esc).join(", ") + " read from the drawing's schedule into the opening schedule." : ""}</span>
+    ${notes.length ? `<div style="margin-top:6px;color:#8a5a00"><b>Not deducted (${notes.length})</b> — give the size in Bill → Opening schedule, then run again:<br>${notes.join("<br>")}</div>` : ""}`);
+  d.querySelector("[data-cp]").onclick = async () => { try { await navigator.clipboard.writeText(tsv); toast("Copied — paste into Excel"); } catch (e) { toast("Could not copy"); } };
+}
+
+/* ✅ the checker: what a checking QS asks about a takeoff — rooms written on the drawing but not measured, the same room
+   measured twice, a count marker on top of another, door / window tags not counted (or counted differently), measured
+   against written sizes, counts against the schedule's quantities, the schedule's sizes against the opening schedule,
+   walls with no height, unchecked agent work, and the export check — each with a button to show or fix it. */
+function overlapSft(A, B, k){   // about how much two outlines overlap (Sft), by sampling their common box
+  const bb = Q => Q.reduce((o, p) => [Math.min(o[0], p[0]), Math.min(o[1], p[1]), Math.max(o[2], p[0]), Math.max(o[3], p[1])], [1e12, 1e12, -1e12, -1e12]);
+  const a = bb(A), b = bb(B), x0 = Math.max(a[0], b[0]), y0 = Math.max(a[1], b[1]), x1 = Math.min(a[2], b[2]), y1 = Math.min(a[3], b[3]);
+  if (!(x1 > x0 && y1 > y0)) return 0;
+  const N = 24, dx = (x1 - x0) / N, dy = (y1 - y0) / N; let n = 0;
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) { const p = [x0 + (i + 0.5) * dx, y0 + (j + 0.5) * dy]; if (pointInPoly(p, A) && pointInPoly(p, B)) n++; }
+  return n * dx * dy / k / k;
+}
+async function agentCheck(scope){
+  if (!P.proj) return {error: "no project"};
+  scope = scope === "page" && S.page ? "page" : "all";
+  const out = [], acts = [], passed = [], exp = [];
+  const F = (lvl, msg, fn, lbl) => { out.push({lvl, msg, a: fn ? acts.push({fn, lbl: lbl || "Show"}) - 1 : -1}); };
+  const split = key => { const j = key.lastIndexOf(":"); return [key.slice(0, j), +key.slice(j + 1)]; };
+  const show = (key, ids) => async () => { const [f, p] = split(key); if (!await agentGoto(f, p)) return; setSel(ids); setTool("select"); zoomTo(ids); refresh(); };
+  const isCnt = i => (cond(i.cond) || {}).type === "count", lp = r => [r.x + r.w / 2, r.y - r.h / 2];
+  const keys = (scope === "page" ? [S.key] : [...new Set(P.proj.items.map(i => keyOf(i.file, i.page)).concat(S.page ? [S.key] : []))]).filter(k2 => P.proj.files.some(x => x.id === split(k2)[0]));
+  try {
+    for (const [n, key] of keys.entries()) {
+      busy(`✅ Checking ${keyName(key)}${keys.length > 1 ? ` (${n + 1} of ${keys.length})` : ""}…`);
+      const [f, p] = split(key), pn = esc(keyName(key)), its = P.proj.items.filter(i => i.file === f && i.page === p), Fa = await drawingFacts(f, p);
+      const areas = its.filter(i => i.kind === "shape" && (cond(i.cond) || {}).type === "area");
+      if (Fa.rooms.length && (areas.length || key === S.key)) {   // rooms written on the drawing, not measured
+        const miss = Fa.rooms.filter(r => !areas.some(i => pointInPoly(lp(r), itemPoly(i))));
+        if (miss.length) F("warn", `${pn}: <b>${miss.length}</b> of ${Fa.rooms.length} rooms written on the drawing not measured — ${miss.slice(0, 12).map(r => esc(r.name)).join(", ")}${miss.length > 12 ? " …" : ""}`, async () => { if (await agentGoto(f, p)) { const rc = roomCondOf(); if (rc) S.cond = rc; await agentMeasure("", miss); } }, "🏠 Measure them");   // into the condition holding the page's other rooms
+        else passed.push(`${pn}: all ${Fa.rooms.length} rooms written on the drawing are measured`);
+      }
+      let sz = 0, szBad = 0;   // measured against the size written in the room
+      areas.forEach(i => { const k = itemScale(i); if (!k || !String(i.label || "").trim()) return; const pl = itemPoly(i), inn = Fa.rooms.filter(r => pointInPoly(lp(r), pl)); if (inn.length !== 1 || !inn[0].sft) return;
+        sz++; const a = polyArea(pl) / k / k, w = inn[0].sft, e = (a - w) / w;
+        if (Math.abs(e) > 0.05) { szBad++; F("warn", `${pn} — <b>${esc(i.label)}</b>: measured ${fq(a)} Sft, written ${esc(inn[0].size)} = ${fq(w)} Sft (${e > 0 ? "+" : ""}${(100 * e).toFixed(1)} %) — look at the outline; a written size is often the main rectangle only`, show(key, [i.id])); } });
+      if (sz && !szBad) passed.push(`${pn}: ${sz} room${sz > 1 ? "s" : ""} within 5 % of the size written in ${sz > 1 ? "them" : "it"}`);
+      const byC = new Map(); areas.forEach(i => { if (!byC.has(i.cond)) byC.set(i.cond, []); byC.get(i.cond).push(i); });
+      let ov = 0;   // the same floor measured twice: two outlines of one condition overlapping
+      byC.forEach((L, cid) => { for (let a = 0; a < L.length; a++) for (let b = a + 1; b < L.length; b++) { const k = itemScale(L[a]); if (!k) continue;
+        const A = itemPoly(L[a]), B = itemPoly(L[b]), x = overlapSft(A, B, k); if (!(x > 1 && x > 0.02 * Math.min(polyArea(A), polyArea(B)) / k / k)) continue;
+        ov++; F("err", `${pn} — ${esc(cond(cid).name)}: <b>${esc(L[a].label || "an area")}</b> and <b>${esc(L[b].label || "an area")}</b> overlap by about ${fq(x)} Sft — measured twice?`, show(key, [L[a].id, L[b].id])); } });
+      if (areas.length > 1 && !ov) passed.push(`${pn}: no two areas of one condition overlap`);
+      const cm = new Map(); its.filter(isCnt).forEach(i => i.pts.forEach(pt => { if (!cm.has(i.cond)) cm.set(i.cond, []); cm.get(i.cond).push({pt, id: i.id}); }));
+      cm.forEach((L, cid) => {   // a count marker on top of another: counted twice
+        const k = scaleAt(f, p, L[0].pt), tl = k ? 0.5 * k : 4, ids = new Set(); let dup = 0; L.sort((a, b) => a.pt[0] - b.pt[0]);
+        for (let a = 0; a < L.length; a++) for (let b = a + 1; b < L.length && L[b].pt[0] - L[a].pt[0] <= tl; b++) if (dist(L[a].pt, L[b].pt) <= tl) { dup++; ids.add(L[a].id); ids.add(L[b].id); }
+        if (dup) F("err", `${pn} — <b>${esc(cond(cid).name)}</b>: ${dup} marker${dup > 1 ? "s" : ""} on top of another (within 6") — counted twice?`, show(key, [...ids])); });
+      const tags = Object.entries(Fa.tags);
+      if (tags.length && (its.length || key === S.key)) {   // door / window tags on the drawing against what is counted
+        const cntOf = nm => its.filter(i => isCnt(i) && cond(i.cond).name.toUpperCase() === nm.toUpperCase()).reduce((a, i) => a + i.pts.length, 0), fam = {}, notC = [], diff = [];
+        tags.forEach(([m, pts]) => { fam[tagKind(m)] = (fam[tagKind(m)] || 0) + pts.length; const c1 = cntOf(m); if (c1) { if (c1 !== pts.length) diff.push(`${esc(m)}: ${c1} counted, ${pts.length} on the drawing`); } else if (!cntOf(tagKind(m))) notC.push(`${esc(m)} ×${pts.length}`); });
+        Object.entries(fam).forEach(([kd, n2]) => { const c2 = cntOf(kd); if (c2 && c2 !== n2) diff.push(`${esc(kd)}: ${c2} counted, ${n2} tags on the drawing`); });
+        if (notC.length) F("warn", `${pn}: door / window tags not counted — ${notC.join(" · ")}`, async () => { if (await agentGoto(f, p)) await agentCount("", "page"); }, "🚪 Count them");
+        if (diff.length) F("warn", `${pn}: counts differ from the tags on the drawing — ${diff.join(" · ")}`, show(key, its.filter(isCnt).map(i => i.id)));
+        if (!notC.length && !diff.length) passed.push(`${pn}: every door / window tag on the drawing is counted (${tags.reduce((a, t2) => a + t2[1].length, 0)})`);
+      }
+      const un = areas.filter(i => !String(i.label || "").trim());
+      if (un.length && Fa.rooms.length) F("info", `${pn}: ${un.length} area${un.length > 1 ? "s" : ""} with no name — name ${un.length > 1 ? "them" : "it"} (✎) so the room schedule and the finishes match`, show(key, un.map(i => i.id)));
+    }
+    const sp = scope === "page" ? [split(S.key)] : allPages().map(o => [o.f.id, o.i]), sched = {};   // the drawings' door / window schedules
+    for (const [n, [f, p]] of sp.entries()) { if (sp.length > 3) busy(`✅ Reading schedules — page ${n + 1} of ${sp.length}…`); Object.entries(tagsOf(await pageTexts(f, p)).sched).forEach(([m, s]) => { sched[m] = Object.assign({at: keyOf(f, p)}, s); }); }
+    let schOk = 0;
+    Object.keys(sched).sort(natSort).forEach(m => { const s = sched[m], c = P.proj.conds.find(x => x.type === "count" && x.name.toUpperCase() === m), n2 = c ? condTotals(c).net : 0;
+      if (s.qty && c) { if (n2 !== s.qty) F("warn", `<b>${esc(m)}</b>: the schedule (${esc(keyName(s.at))}) says <b>${s.qty}</b> Nos, <b>${fq(n2, "Nos")}</b> counted in the project`, null); else schOk++; }
+      const o = (P.proj.openings || []).find(x => String(x.mark).toUpperCase() === m);
+      if (o && (Math.abs(o.w - s.w) > 0.01 || Math.abs(o.h - s.h) > 0.01)) F("warn", `<b>${esc(m)}</b>: the opening schedule has ${f3(o.w)} × ${f3(o.h)} ft, the drawing's schedule (${esc(keyName(s.at))}) ${f3(s.w)} × ${f3(s.h)} ft — a revised size?`, () => openingsDialog(), "Opening schedule"); });
+    if (schOk) passed.push(`${schOk} mark${schOk > 1 ? "s" : ""} counted exactly as the schedule's quantity`);
+    P.proj.conds.forEach(c => { if (c.type === "linear" && c.unit === "ft" && +c.t >= 0.3 && P.proj.items.some(i => i.cond === c.id))
+      F("info", `<b>${esc(c.name)}</b>: ${f3(condTotals(c).net)} ft of length only — give it the wall height H and the unit cft (✎) for the volume`, () => editCond(c), "✎ Edit"); });
+    const rv = P.proj.items.filter(needsReview);
+    if (rv.length) F("info", `${rv.length} measurement${rv.length > 1 ? "s" : ""} made by the agents or copied, not yet checked — look ${rv.length > 1 ? "them" : "it"} over, then ✓ Check this page`, () => { S.qaFilter = "review"; S.rHide = false; setPanels(); refresh(); }, "Show on the sheet");
+    else if (P.proj.items.length) passed.push("every agent / copied measurement has been checked");
+    validation().L.filter(x => !/AI-generated|typical-floor cop/.test(x.msg)).forEach(x => { if (x.lvl === "ERROR") F("err", esc(x.msg), null); else exp.push(esc(x.msg)); });   // the export check: its errors here, its notes (BOQ codes, rates, floors) folded below
+  } finally { busy(""); }
+  const cnt = l => out.filter(x => x.lvl === l).length, ic = {err: "❌", warn: "⚠️", info: "ℹ️"};
+  const d = aiLog("bot", `<b>✅ Takeoff check</b> — ${scope === "page" ? esc(keyName(S.key)) : `the project (${keys.length} page${keys.length === 1 ? "" : "s"} with measurements)`}: <b style="color:var(--red)">${cnt("err")}</b> to fix · <b style="color:#8a5a00">${cnt("warn")}</b> to look at · ${cnt("info")} note${cnt("info") === 1 ? "" : "s"} · <span style="color:var(--green)">${passed.length} passed</span>
+    ${["err", "warn", "info"].map(l => out.filter(x => x.lvl === l).map(x => `<div style="margin-top:5px">${ic[l]} ${x.msg}${x.a >= 0 ? ` <button class="btn sm" data-ca="${x.a}">${esc(acts[x.a].lbl)}</button>` : ""}</div>`).join("")).join("")}
+    ${!out.length ? '<div style="margin-top:6px;color:var(--green)"><b>Nothing to fix.</b></div>' : ""}
+    ${exp.length ? `<details style="margin-top:6px"><summary class="small">Before export — ${exp.length} note${exp.length === 1 ? "" : "s"} (BOQ codes, rates, floors)</summary>${exp.map(x => `<div class="small">• ${x}</div>`).join("")}</details>` : ""}
+    ${passed.length ? `<details style="margin-top:6px"><summary class="small">✓ ${passed.length} passed</summary>${passed.map(x => `<div class="small">✓ ${x}</div>`).join("")}</details>` : ""}`);
+  d.addEventListener("click", e => { const b = e.target.closest("[data-ca]"); if (b) acts[+b.dataset.ca].fn(); });
+  return {errors: cnt("err"), warnings: cnt("warn"), notes: cnt("info"), exportNotes: exp.length, passed: passed.length, findings: out.map(x => ({lvl: x.lvl, text: x.msg.replace(/<[^>]+>/g, "")}))};
+}
+
+/* instant answers from the takeoff itself — "how many D1", "how many doors", "total floor area", "total bedroom area":
+   nothing is measured or changed */
+function agentAnswer(t){
+  if (!P.proj) return {answer: []};
+  const q0 = String(t).replace(/^\s*(how\s+(many|much)|total|sum(\s+of)?|what(?:'s|\s+is)\s+the\s+(?:total|number)(\s+of)?)\s*/i, "").replace(/\?/g, " "), area = /\b(area|sft|sq)/i.test(q0);
+  const q = q0.replace(/\b(are|is|there|do|we|have|in|on|the|this|page|project|of|total|areas?|qty|quantity|measured|counted|please|sft|sq\.?\s*ft|all|every|nos)\b/gi, " ").replace(/\s+/g, " ").trim();
+  const used = P.proj.conds.filter(c => P.proj.items.some(i => i.cond === c.id));
+  const pageQ = c => P.proj.items.filter(i => i.cond === c.id && onPage(i)).reduce((a, it) => { const k = itemScale(it); return k ? a + rowsOf(it, k).reduce((s2, r) => s2 + r.qty, 0) : a; }, 0);
+  const line = c => `<b>${esc(c.name)}</b>: <b>${fq(condTotals(c).net, c.unit)} ${esc(c.unit)}</b>${S.page ? ` <span class="small">(this page ${fq(pageQ(c), c.unit)})</span>` : ""}`;
+  const ans = L => L.map(c => ({name: c.name, qty: +condTotals(c).net.toFixed(3), unit: c.unit}));
+  if (!q) { const L = used.filter(c => !area || c.type === "area"); aiLog("bot", L.length ? L.map(line).join("<br>") : "Nothing is measured yet."); return {answer: ans(L)}; }
+  const tg = tagParse(q.replace(/\s+/g, "")), fam = /^doors?$/i.test(q) ? "Doors" : /^windows?$/i.test(q) ? "Windows" : /^vent/i.test(q) ? "Ventilators" : null, ws = q.split(" ");
+  let L = tg ? used.filter(c => c.type === "count" && c.name.toUpperCase() === tg.k)
+    : fam ? used.filter(c => c.type === "count" && ((tagParse(c.name) && tagKind(tagParse(c.name).k) === fam) || new RegExp("^" + fam.replace(/s$/, ""), "i").test(c.name)))
+    : used.filter(c => (!area || c.type === "area") && ws.every(w => nameLike(c.name, w)));
+  const rooms = !tg && !fam && !L.length ? P.proj.items.filter(i => isRoomArea(i) && ws.every(w => nameLike(i.label, w))) : [];
+  if (L.length) {
+    const marks = fam ? L.filter(c => tagParse(c.name)) : [];
+    aiLog("bot", L.map(line).join("<br>") + (marks.length > 1 ? `<br>${esc(fam.replace(/s$/, ""))} marks together: <b>${fq(marks.reduce((a, c) => a + condTotals(c).net, 0), "Nos")} Nos</b>` : ""));
+    return {answer: ans(L)};
+  }
+  if (rooms.length) {
+    const qa = it => { const k = itemScale(it); return k ? rowsOf(it, k).reduce((a, r) => a + r.qty, 0) : 0; }, tot = rooms.reduce((a, i) => a + qa(i), 0);
+    aiLog("bot", `Rooms named like “${esc(q)}”: <b>${rooms.length}</b> — <b>${fq(tot)} Sft</b><br><span class="small">${rooms.map(i => esc(i.label) + " " + fq(qa(i))).join(" · ")}</span>`);
+    return {answer: [{name: q, qty: +tot.toFixed(3), unit: "Sft", rooms: rooms.length}]};
+  }
+  const onDwg = tg && S.page ? ((tagsOf(S.texts[S.key] || []).plan[tg.k]) || []).length : 0;
+  const d = aiLog("bot", `Nothing measured matches “${esc(q)}” yet${onDwg ? ` — this page's drawing has <b>${onDwg}</b> ${esc(tg.k)} tag${onDwg > 1 ? "s" : ""}` : ""}. <button class="btn sm" data-aa="count ${esc(tg ? tg.k : q)}">Count ${esc(tg ? tg.k : q)}</button>${tg ? "" : ` <button class="btn sm" data-aa="measure ${esc(q)}">Measure ${esc(q)}</button>`}`);
+  d.addEventListener("click", e => { const b = e.target.closest("[data-aa]"); if (b) agentCmd(b.dataset.aa); });
+  return {answer: [], on_drawing: onDwg};
+}
 
 /* side panels: drag the inner edge to resize, ⟨ ⟩ to hide; sizes kept per browser */
 function setPanels(){
@@ -5223,7 +5632,7 @@ function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw"
   loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on);
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, explodeRun, closeRun, offsetItem, offsetRun, typedPoint};   // for tests and the console
+  window.zdTakeoff = {fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, explodeRun, closeRun, offsetItem, offsetRun, typedPoint};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();

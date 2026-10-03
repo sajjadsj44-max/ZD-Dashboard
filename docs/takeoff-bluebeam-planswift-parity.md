@@ -99,7 +99,10 @@ A right-drag still pans; only a right-click without dragging opens the menu, and
 | This page / every page of the PDF / whole project | ◐ | ✓ | ★ |
 | Review before counting | ✓ | ✓ ("verify the matches") | ★ tick what to count; markers flagged AI until checked |
 | Count doors from swing symbols (no tags) | — | ◐ (Auto Takeoff counts) | ★ swing arcs 1.2–6 ft; double doors as one |
-| Natural-language agent ("count all doors") | ✓ Bluebeam Max (Claude) | — | ✓ Claude panel + free agent: *count doors on all pages*, *count door swings* |
+| Natural-language agent ("count all doors") | ✓ Bluebeam Max (Claude) | — | ✓ Claude panel + free agent: *count doors on all pages*, *count door swings*; chained commands, *how many D1*, *total floor area* answered from the takeoff |
+| One-click full takeoff (rooms, walls, doors / windows, finishes) over a page, PDF or project | ◐ Max (prompted) | ◐ Auto Takeoff (per item) | ★ ⚡ free, no API key; one report; one Ctrl+Z; doubtful-scale pages skipped |
+| Room finishes from the room outlines (plaster / paint, skirting, ceiling) | — | ◐ assemblies | ★ 🎨 per room, every door and window its own deduction row; sizes from the opening schedule, never assumed |
+| Takeoff audit (missed rooms, double measures, uncounted tags, schedule qty) | — | — | ★ ✅ each finding with Show / fix |
 
 ## 6b. Pages, view and scale (added in the QA pass, 02-Oct-2026)
 
