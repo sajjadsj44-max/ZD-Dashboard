@@ -6013,7 +6013,7 @@ var SH=(function(){
     return svg('<polygon points="'+P.map(function(q){return q.join(',');}).join(' ')+'" class="zc-solid"/><line x1="10" y1="'+top+'" x2="250" y2="'+top+'" class="zc-ground"/>'+
       dimH(cx-bw/2,cx+bw/2,top+dep+20,'W'+lab(p.W,p.u),[top+dep,top+dep])+dimV(top,top+dep,cx+bw/2+off+14,'D'+lab(p.D,p.u),'r')+(s?note(cx-bw/2-off/2-4,top+dep/2,s+'H:1V','end'):'')+note(cx,top-8,'L'+lab(p.L,p.u)+' (into page)','middle')); };
   S.wall=function(p){ var x0=26,y0=26,w=208,h=140; var g='<rect x="'+x0+'" y="'+y0+'" width="'+w+'" height="'+h+'" class="zc-brick"/>';
-    var ops=(p.ops||[]).slice(0,4), L=+p.L||1, Hh=+p.H||1;
+    var ops=(p.ops||[]).filter(function(o){ return o && +o.w>0 && +o.h>0; }).slice(0,4), L=+p.L||1, Hh=+p.H||1;   // an openings row not filled in yet is not drawn
     ops.forEach(function(o,i){ var ow=Math.min(w*0.35,Math.max(10,(o.w/L)*w)), oh=Math.min(h*0.8,Math.max(10,(o.h/Hh)*h)); var ox=x0+14+i*(w/Math.max(ops.length,1)); var oy=o.h/Hh>0.7? y0+h-oh : y0+22;
       g+='<rect x="'+ox+'" y="'+oy+'" width="'+ow+'" height="'+oh+'" class="zc-open"/><text class="zc-note" x="'+(ox+ow/2)+'" y="'+(oy+oh/2+4)+'" text-anchor="middle">−'+(o.n||1)+'</text>'; });
     return svg(g+dimH(x0,x0+w,y0+h+22,'L'+lab(p.L,p.u),[y0+h,y0+h])+dimV(y0,y0+h,x0+w+12,'H'+lab(p.H,p.u),'r')+(p.t?note(x0,y0-8,'thickness'+lab(p.t,p.tu)):'')); };
