@@ -1123,7 +1123,7 @@ function squareUp(Q, tol, gap, maxD){   // near-rectilinear outline -> rectiline
    the wall's thickness, leaving a tab (out and back) or a step (the face jumps out and carries on). A tab up to 1 ft deep
    and 3 ft wide, or a step up to 0.75 ft, is cut back to the room's face when that face is a drawn line (ink along at
    least 30% of it) or the bite is under 1.5 Sft. Only bites outward (that add area) are cut. */
-function deTab(Q, k, inkAt, px){
+function deTab(Q, k, inkAt, px, gap){
   const ink = (a, b) => { const L = dist(a, b), n = Math.max(2, Math.ceil(L / px)); let h = 0; for (let i = 0; i <= n; i++) if (inkAt(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n)) h++; return h / (n + 1); };
   const ok = (cut, rem) => rem > 0 && rem <= 4 * k * k && (rem <= 1.5 * k * k || ink(cut[0], cut[1]) >= 0.3);
   const dir = (a, b) => { const d = [b[0] - a[0], b[1] - a[1]], l = Math.hypot(d[0], d[1]) || 1; return [d[0] / l, d[1] / l]; };
@@ -1136,9 +1136,14 @@ function deTab(Q, k, inkAt, px){
       const b = at(i), c = at(i + 1), d = at(i + 2), e = at(i + 3);
       // tab: b→c out, c→d across, d→e back
       if (n >= 6) { const u1 = dir(b, c), u2 = dir(c, d), u3 = dir(d, e), l1 = dist(b, c), l2 = dist(c, d), l3 = dist(d, e);
-        if (Math.abs(dot(u1, u2)) < 0.05 && dot(u1, u3) < -0.95 && l1 <= k && l3 <= k && Math.abs(l1 - l3) <= 0.15 * k && l2 <= 3 * k) {
+        if (Math.abs(dot(u1, u2)) < 0.05 && dot(u1, u3) < -0.95 && Math.abs(l1 - l3) <= 0.15 * k) {
           const Q2 = Q.filter((_, j) => j !== (i + 1) % n && j !== (i + 2) % n), rem = A0 - polyArea(Q2);
-          if (ok([b, e], rem)) { Q = Q2; done = true; continue; } } }
+          if (l1 <= k && l3 <= k && l2 <= 3 * k && ok([b, e], rem)) { Q = Q2; done = true; continue; }
+          // a doorway: the tab's far side crosses open space (where the gap was closed) and its two sides run along the
+          // jambs — the opening is closed on the room's face of the wall, whatever its width up to the door gap
+          if (gap && l1 <= 1.25 * k && l3 <= 1.25 * k && l2 <= (gap + 0.5) * k && rem > 0 && rem <= (gap + 0.5) * 1.25 * k * k
+            && ink([c[0] + (d[0] - c[0]) * 0.15, c[1] + (d[1] - c[1]) * 0.15], [c[0] + (d[0] - c[0]) * 0.85, c[1] + (d[1] - c[1]) * 0.85]) < 0.15   // (its ends pass the jambs' corners)
+            && ink(b, c) >= 0.5 && ink(d, e) >= 0.5) { Q = Q2; done = true; continue; } } }
       // step: a→b along, b→c short jog, c→d along the same way
       const a = at(i - 1), z = at(i - 2), l = dist(b, c), ua = dir(a, b), uj = dir(b, c), ud = dir(c, d);
       if (l <= 0.75 * k && Math.abs(dot(ua, uj)) < 0.05 && dot(ua, ud) > 0.95) {
@@ -1157,6 +1162,27 @@ function deTab(Q, k, inkAt, px){
     if (!done) break;
   }
   return Q;
+}
+/* a scanned drawing has no lines to snap to: a side of a square outline that lies inside a wall — where it runs along the
+   wall it is several pixels into the wall's ink (the room grown back through an opening as wide as the door gap) — goes
+   back to the wall's face. Sides only move inward, and only when most of the ink they run along is deep. */
+function pushSides(Q, inkPx, px, k){
+  const n = Q.length; if (n < 4) return Q;
+  const A0 = polyArea(Q); let R = Q.map(p => p.slice());
+  for (let i = 0; i < n; i++) {
+    const a = R[i], b = R[(i + 1) % n], L = dist(a, b); if (L < 3 * px) continue;
+    const ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L; if (Math.abs(ux) > 1e-6 && Math.abs(uy) > 1e-6) continue;   // square sides only
+    let nx = -uy, ny = ux; if (!pointInPoly([(a[0] + b[0]) / 2 + nx * px, (a[1] + b[1]) / 2 + ny * px], R)) { nx = -nx; ny = -ny; }   // inward
+    const ds = []; let cnt = 0;
+    for (let t = 2 * px; t <= L - 2 * px; t += px) { cnt++; const x = a[0] + ux * t, y = a[1] + uy * t; if (!inkPx(x, y)) continue;   // (not at the corners)
+      let d = 0; while (d < 0.6 * k && inkPx(x + nx * d, y + ny * d)) d += px / 2; if (d < 0.6 * k) ds.push(d); }   // (ink on and on: another wall met end-on)
+    if (!ds.length || ds.length < 0.15 * cnt) continue;
+    // the ink of a scan reaches about 1.5 px past the wall's face, and a side on the face sits that far into it
+    ds.sort((p, q) => p - q); const med = ds[ds.length >> 1]; if (med < 3.5 * px) continue;
+    const sh = med - 1.5 * px, R2 = R.map(p => p.slice()); R2[i] = [a[0] + nx * sh, a[1] + ny * sh]; R2[(i + 1) % n] = [b[0] + nx * sh, b[1] + ny * sh];
+    if (!selfCross(R2) && polyArea(R2) < polyArea(R) && polyArea(R2) > 0.9 * A0) R = R2;
+  }
+  return R;
 }
 /* an outline that is not square to the sheet (a room turned 45°, a bay, a round room): a round one is fitted as a circle on
    the wall it follows; otherwise each side long enough is moved onto the drawing line parallel to it within tol (the
@@ -1391,8 +1417,11 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
     Q = sq ? (ids.length ? snapToWalls(sq, g, ids, Math.max(4 * px, 0.35 * k), k, px, ids.doors) : offsetPoly(sq, (img ? 1.5 : 1) * px))
       : ids.length ? snapPoly(Q, ids.map(i => g.segs[i]).concat(ids.doors), Math.max(4 * px, 0.35 * k), k, (img ? 1.5 : 1) * px, px) : offsetPoly(Q, (img ? 1.5 : 1) * px);
     Q = cleanPoly(Q);
+    const inkPx = (x, y) => { const u = Math.round((x - x0) / px), v = Math.round((y - y0) / px); return u >= 0 && v >= 0 && u < W && v < H && !!thin[v * W + u]; };
+    if (sq && !ids.length) Q = cleanPoly(pushSides(Q, inkPx, px, k));   // (before the tabs: a doorway's two jambs then line up)
     if (sq) Q = cleanPoly(deTab(Q, k, (x, y) => { const xx = Math.round((x - x0) / px), yy = Math.round((y - y0) / px);
-      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const u = xx + dx, v = yy + dy; if (u >= 0 && v >= 0 && u < W && v < H && thin[v * W + u]) return true; } return false; }, px));
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const u = xx + dx, v = yy + dy; if (u >= 0 && v >= 0 && u < W && v < H && thin[v * W + u]) return true; } return false; }, px, o.gap));
+    if (sq && !ids.length) Q = cleanPoly(pushSides(Q, inkPx, px, k));
     if (Q.length < 3 || polyArea(Q) < 1e-6) return {err: "No closed space found at that point.", passage};
     return {pts: Q, rect: !!sq, passage, partial};
   }

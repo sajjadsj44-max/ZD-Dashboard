@@ -111,14 +111,14 @@ Severity: P0 Critical (silently wrong quantities, lost work or a security hole),
 | B32 | Input | Middle-drag started the browser's autoscroll as well as panning. | P3 Low | Default not prevented. | `preventDefault` on middle mousedown. | Yes — §19 (default prevented), §1 (middle-drag pans) |
 | B33 | Validation | Nos accepted 99,999,999,999. | P3 Low | No upper limit. | Capped at 100,000 with a message. | Yes — §17 (abc, -5, 0, 2.6, 1e3, 99999999999) |
 | B34 | Drawing | An area drawn as a figure of eight with equal halves (net 0 Sft) vanished on Enter with no message. | P3 Low | Zero-area outlines were dropped silently. | Refused with a message saying the outline crosses itself and its halves cancel out; an uneven figure of eight is kept and flagged (B14). | Yes — §17 (both cases) |
+| B35 | Auto area (scan) | Scanned sheet, CORRIDOR (a 4 ft passage as wide as the door gap): 128.751 Sft against 123.000 (+4.7 %) — the room grown back through the 3 ft entrance came out past the building's outer face, and the faces beside the entrance sat 0.26 ft inside the wall. | P2 Medium | Gap closing on a raster widens the walls and grows the room back; with the passage barely wider than the gap the regrowth pushed through the opening. The tab trim only took tabs up to 3 ft wide with ink along the cut, and a doorway has none. | A tab whose far side crosses open space and whose two sides run along the jambs is a doorway: closed on the room's face of the wall (up to the door-gap width). On scans, a side lying deep in a wall's ink goes back to its face. Now 123.547–124.721 Sft (+0.4 to +1.4 %, ±1 px a side). | Yes — §23 (tolerance tightened from 6 % to 1.5 %); vector drawings unchanged (§4, original suite) |
 
 **Known issues left open** (not hidden — listed here and in the live checklist):
 
 | ID | Feature | Issue | Severity | Status / workaround |
 |---|---|---|---|---|
-| K1 | Auto area on scans | Scanned sheet, CORRIDOR: 128.751 Sft against 123.000 (+4.7 %) — the corridor's entrance recess is taken in: on a scan the recess and the corridor are one ink-free space of about the same width. | P2 Medium | Open — on vector drawings the corridor is exact (123.000). On scans: check the outline, or draw the corridor (`R`). |
-| K2 | Performance | Auto area runs on the page's main thread: the page does not respond for ~1,442 ms per room on a normal sheet, 3,641 ms on a 150,000-line sheet. | P3 Low | Open — within limit (6,000 ms); moving the trace to a worker would remove it. |
-| K3 | Performance | Opening a 150,000-line sheet: longest single freeze 620 ms. | P3 Low | Open — within limit (2,000 ms). |
+| K2 | Performance | Auto area runs on the page's main thread: the page does not respond for ~2,303 ms per room on a normal sheet, 4,711 ms on a 150,000-line sheet. | P3 Low | Open — within limit (6,000 ms); moving the trace to a worker would remove it. |
+| K3 | Performance | Opening a 150,000-line sheet: longest single freeze 987 ms. | P3 Low | Open — within limit (2,000 ms). |
 
 By design (not a bug): a hidden condition stays in the totals — hiding is a view filter, as in Bluebeam / PlanSwift; the sheet still lists it.
 
@@ -130,15 +130,15 @@ Single-click auto area on the house (p.1, 1/4" = 1'-0"):
 
 | Room | Expected Sft | Got Sft | Time ms |
 |---|---:|---:|---:|
-| BED ROOM 1 | 144.000 | 144.000 | 1,442 |
-| BATH 1 | 72.000 | 72.000 | 1,385 |
-| BED ROOM 2 | 144.000 | 144.000 | 1,302 |
-| CORRIDOR | 123.000 | 123.000 | 1,228 |
-| LIVING | 257.250 | 257.250 | 1,311 |
-| KITCHEN | 168.000 | 168.000 | 1,265 |
-| BED ROOM 3 | 144.000 | 144.000 | 1,290 |
-| BATH 2 | 72.000 | 72.000 | 1,257 |
-| STORE | 144.000 | 144.000 | 1,216 |
+| BED ROOM 1 | 144.000 | 144.000 | 2,303 |
+| BATH 1 | 72.000 | 72.000 | 2,248 |
+| BED ROOM 2 | 144.000 | 144.000 | 1,967 |
+| CORRIDOR | 123.000 | 123.000 | 2,041 |
+| LIVING | 257.250 | 257.250 | 2,155 |
+| KITCHEN | 168.000 | 168.000 | 2,089 |
+| BED ROOM 3 | 144.000 | 144.000 | 1,987 |
+| BATH 2 | 72.000 | 72.000 | 2,049 |
+| STORE | 144.000 | 144.000 | 1,926 |
 | **Total** | **1,268.250** | **1,268.250** | |
 
 | # | Test | Expected | Actual | Difference | Tolerance | Unit | Result |
@@ -291,13 +291,13 @@ Single-click auto area on the house (p.1, 1/4" = 1'-0"):
 | 146 | rounding: dimensions to 3 dp, quantity their product (12.3456 × 7.8912) | 97.422 | 97.422 | 0.000 | exact | Sft | PASS |
 | 147 | scan calibrated on its 10'-0" bar (1/4" = 18 pt per ft) | 18.000 | 18.000 | 0.000 | ±0.100 | pt / ft | PASS |
 | 148 | scan: auto area BED ROOM 1 | 144.000 | 143.638 | -0.362 | ±1.440 | Sft | PASS |
-| 149 | scan: auto area BATH 1 | 72.000 | 72.360 | 0.360 | ±0.720 | Sft | PASS |
+| 149 | scan: auto area BATH 1 | 72.000 | 72.144 | 0.144 | ±0.720 | Sft | PASS |
 | 150 | scan: auto area BED ROOM 2 | 144.000 | 143.638 | -0.362 | ±1.440 | Sft | PASS |
-| 151 | scan: auto area CORRIDOR (passage as wide as the door gap, on a scan: entrance recess taken in — see notes) | 123.000 | 128.751 | 5.751 | ±7.380 | Sft | PASS |
+| 151 | scan: auto area CORRIDOR (passage as wide as the door gap, entrance closed on the wall's inner face) | 123.000 | 124.721 | 1.721 | ±1.845 | Sft | PASS |
 | 152 | scan: auto area LIVING | 257.250 | 257.353 | 0.103 | ±2.573 | Sft | PASS |
 | 153 | scan: auto area KITCHEN | 168.000 | 167.996 | -0.004 | ±1.680 | Sft | PASS |
 | 154 | scan: auto area BED ROOM 3 | 144.000 | 143.638 | -0.362 | ±1.440 | Sft | PASS |
-| 155 | scan: auto area BATH 2 | 72.000 | 72.541 | 0.541 | ±0.720 | Sft | PASS |
+| 155 | scan: auto area BATH 2 | 72.000 | 72.615 | 0.615 | ±0.720 | Sft | PASS |
 | 156 | scan: auto area STORE | 144.000 | 143.638 | -0.362 | ±1.440 | Sft | PASS |
 | 157 | …BED ROOM 1 on the heavy sheet | 144.000 | 144.000 | 0.000 | ±0.720 | Sft | PASS |
 
@@ -307,42 +307,42 @@ Headless Chromium on the build machine (no GPU); times include the test's own ov
 
 | Test | Time ms | Limit ms | Result | Note |
 |---|---:|---:|---|---|
-| open the 8-page QA set (to page 1 indexed, scale read) | 262 | 5,000 | PASS |  |
-| auto area BED ROOM 1 | 1,442 | 6,000 | PASS |  |
-| auto area BATH 1 | 1,385 | 6,000 | PASS |  |
-| auto area BED ROOM 2 | 1,302 | 6,000 | PASS |  |
-| auto area CORRIDOR | 1,228 | 6,000 | PASS |  |
-| auto area LIVING | 1,311 | 6,000 | PASS |  |
-| auto area KITCHEN | 1,265 | 6,000 | PASS |  |
-| auto area BED ROOM 3 | 1,290 | 6,000 | PASS |  |
-| auto area BATH 2 | 1,257 | 6,000 | PASS |  |
-| auto area STORE | 1,216 | 6,000 | PASS |  |
-| Rooms agent: 9 rooms traced and checked | 9,448 | 30,000 | PASS |  |
-| Excel export (6 conditions) | 388 | 8,000 | PASS |  |
-| marked-up PDF, all measured pages | 1,168 | 15,000 | PASS |  |
-| 100 measurements: one edit (undo snapshot + sheet + drawing) | 12 | 150 | PASS |  |
-| 100 measurements: 20 mouse moves | 339 | 1,200 | PASS | ≈17 ms each incl. test overhead |
-| 500 measurements: one edit (undo snapshot + sheet + drawing) | 29 | 150 | PASS |  |
-| 500 measurements: 20 mouse moves | 332 | 1,200 | PASS | ≈17 ms each incl. test overhead |
-| 1000 measurements: one edit (undo snapshot + sheet + drawing) | 53 | 300 | PASS |  |
-| 1000 measurements: 20 mouse moves | 391 | 2,500 | PASS | ≈20 ms each incl. test overhead |
-| Excel export with 1000+ measurements | 568 | 15,000 | PASS |  |
-| project JSON export with 1000+ measurements | 289 | 3,000 | PASS |  |
-| open a 120-page PDF (first page shown and indexed) | 241 | 6,000 | PASS |  |
-| 10 page changes on the 120-page PDF (each shown and indexed) | 741 | 6,000 | PASS | 74 ms each |
-| Pages tab: first thumbnails of 120 drawn | 86 | 8,000 | PASS |  |
-| Find text across 120 pages | 115 | 15,000 | PASS |  |
+| open the 8-page QA set (to page 1 indexed, scale read) | 366 | 5,000 | PASS |  |
+| auto area BED ROOM 1 | 2,303 | 6,000 | PASS |  |
+| auto area BATH 1 | 2,248 | 6,000 | PASS |  |
+| auto area BED ROOM 2 | 1,967 | 6,000 | PASS |  |
+| auto area CORRIDOR | 2,041 | 6,000 | PASS |  |
+| auto area LIVING | 2,155 | 6,000 | PASS |  |
+| auto area KITCHEN | 2,089 | 6,000 | PASS |  |
+| auto area BED ROOM 3 | 1,987 | 6,000 | PASS |  |
+| auto area BATH 2 | 2,049 | 6,000 | PASS |  |
+| auto area STORE | 1,926 | 6,000 | PASS |  |
+| Rooms agent: 9 rooms traced and checked | 15,409 | 30,000 | PASS |  |
+| Excel export (6 conditions) | 610 | 8,000 | PASS |  |
+| marked-up PDF, all measured pages | 1,947 | 15,000 | PASS |  |
+| 100 measurements: one edit (undo snapshot + sheet + drawing) | 21 | 150 | PASS |  |
+| 100 measurements: 20 mouse moves | 337 | 1,200 | PASS | ≈17 ms each incl. test overhead |
+| 500 measurements: one edit (undo snapshot + sheet + drawing) | 68 | 150 | PASS |  |
+| 500 measurements: 20 mouse moves | 331 | 1,200 | PASS | ≈17 ms each incl. test overhead |
+| 1000 measurements: one edit (undo snapshot + sheet + drawing) | 85 | 300 | PASS |  |
+| 1000 measurements: 20 mouse moves | 492 | 2,500 | PASS | ≈25 ms each incl. test overhead |
+| Excel export with 1000+ measurements | 745 | 15,000 | PASS |  |
+| project JSON export with 1000+ measurements | 302 | 3,000 | PASS |  |
+| open a 120-page PDF (first page shown and indexed) | 344 | 6,000 | PASS |  |
+| 10 page changes on the 120-page PDF (each shown and indexed) | 1,159 | 6,000 | PASS | 116 ms each |
+| Pages tab: first thumbnails of 120 drawn | 96 | 8,000 | PASS |  |
+| Find text across 120 pages | 146 | 15,000 | PASS |  |
 | JS heap after the 120-page run | 13 MB | 1,500 MB | PASS |  |
-| open a 200 dpi scanned sheet | 595 | 6,000 | PASS |  |
-| open a sheet of 150,000 lines (shown and indexed) | 2,086 | 8,000 | PASS | 150180 lines |
-| …longest freeze while it loads | 620 | 2,000 | PASS |  |
-| auto area on the 150,000-line sheet | 3,641 | 6,000 | PASS |  |
-| 30 mouse moves with snapping on the heavy sheet | 699 | 3,000 | PASS |  |
+| open a 200 dpi scanned sheet | 1,492 | 6,000 | PASS |  |
+| open a sheet of 150,000 lines (shown and indexed) | 3,494 | 8,000 | PASS | 150180 lines |
+| …longest freeze while it loads | 987 | 2,000 | PASS |  |
+| auto area on the 150,000-line sheet | 4,711 | 6,000 | PASS |  |
+| 30 mouse moves with snapping on the heavy sheet | 819 | 3,000 | PASS |  |
 
 ## E. Remaining risks
 
 - **Real drawings differ from fixtures.** CAD exports with blocks, dashed / hidden lines, text drawn as outlines, very thin walls or walls drawn as single lines may trace differently. Auto area and the free agents are the most exposed; manual drawing, scale and the sheet are not.
-- **Scanned sheets** have no text (no OCR): no scale note, room names or tags are read; scale must be calibrated; auto area works on ink but a corridor's entrance recess can be taken in (K1).
+- **Scanned sheets** have no text (no OCR): no scale note, room names or tags are read; scale must be calibrated; auto area works on the ink, to about ±1 px a side (0.06 ft on the 200 dpi test scan — ±1.5 % of a 4 ft corridor's width).
 - **One browser only.** Projects live in the browser's IndexedDB; clearing site data or a different browser / host loses them unless exported (*Export → Project .json*). Backups (last 10) are in the same browser.
 - **Browser crash** (not a normal close) inside the 300 ms save window could lose the last change; normal close / reload / tab hide now save at once (tested).
 - **Only Chromium tested** — Firefox / Safari untested; the app uses standard APIs (IndexedDB, BroadcastChannel, IntersectionObserver, ResizeObserver) that both support.
@@ -365,7 +365,7 @@ On a real project PDF, in Chrome. Before merging, the PR's deploy preview is htt
 1. **Password PDF** (if you have one): asks for the password, opens; export marked-up PDF.
 1. **Header at your screen width** (1366 / 1920): scale chip, Undo / Redo, Export visible; View menu opens.
 1. **Pages tab:** thumbnails appear, scale status icons right; *Remove PDF* asks first.
-1. **Scanned sheet** (if any): calibrate on a known dimension, measure by hand; auto area on rooms — check corridors (K1).
+1. **Scanned sheet** (if any): calibrate on a known dimension, measure by hand; auto area on rooms and a corridor — outlines on the wall faces, doorways closed on the room's side.
 
 ## QA status
 
@@ -373,9 +373,9 @@ On a real project PDF, in Chrome. Before merging, the PR's deploy preview is htt
 QA STATUS: PASS WITH KNOWN ISSUES
 Critical Bugs: 0 open (4 found and fixed: B01, B02, B03, B04)
 High Bugs: 0 open (17 found and fixed: B05, B06, B07, B08, B09, B10, B11, B12, B13, B14, B15, B16, B17, B18, B19, B20, B21)
-Medium Bugs: 1 open (K1 scan corridor +4.7 %); 9 found and fixed
+Medium Bugs: 0 open; 10 found and fixed
 Low Bugs: 2 open (K2, K3 main-thread freezes); 4 found and fixed
-Fixed Today: 34 (B01–B34)
+Fixed Today: 35 (B01–B35)
 Not Tested: OCR of scanned drawings; Reorder / duplicate / rotate / delete single pages of a PDF; Sort / search / pagination of the measurement sheet; Claude API agent (the 🤖 Claude panel's model calls); Firefox, Safari; Touch / pinch zoom / press-and-hold on a tablet; Real project drawings (Revit / AutoCAD exports); Browser storage quota (very large PDFs filling IndexedDB)
 Tomorrow's Retest Priority: 1 scale on a real sheet (note, verify, zoom), 2 rapid paging keeps each page's scale, 3 auto area + walls on a real floor plan, 4 save on close / two tabs, 5 Excel totals and 3 dp
 ```

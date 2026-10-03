@@ -936,7 +936,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
       const n0 = await T(() => zdTakeoff.P.proj.items.length); await click(FX.OX + (x0 + x1) / 2 * 18, FX.OY + ((y0 + y1) / 2 + 0.3) * 18);
       await page.waitForFunction(() => !zdTakeoff.S.autoBusy, null, {timeout: 20000}); await wait(100);
       const ok1 = (await T(() => zdTakeoff.P.proj.items.length)) > n0, q = ok1 ? await qtyOf((await lastItem()).id) : NaN;
-      calc("scan: auto area " + nm + (nm === "CORRIDOR" ? " (passage as wide as the door gap, on a scan: entrance recess taken in — see notes)" : ""), want[nm], q, nm === "CORRIDOR" ? 0.06 * want[nm] : 0.01 * want[nm], "Sft");
+      // a 4 ft corridor as wide as the door gap, clicked off its centre: ±1 px a side on this scan (0.06 ft) is ±1.5 % of its width
+      calc("scan: auto area " + nm + (nm === "CORRIDOR" ? " (passage as wide as the door gap, entrance closed on the wall's inner face)" : ""), want[nm], q, nm === "CORRIDOR" ? 0.015 * want[nm] : 0.01 * want[nm], "Sft");
     }
     await T(() => zdTakeoff.setTool("select"));
     // a heavy CAD sheet
