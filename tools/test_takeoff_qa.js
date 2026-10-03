@@ -421,6 +421,13 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     ok(rp.pages.length === 8 && (await T(() => zdTakeoff.S.pageNo)) === 1, `every page of the PDF: ${rp.pages.length} pages, back on p.1 after (${(rp.ms / 1000).toFixed(1)} s)`);
     const p4 = rp.pages.find(x => x.no === 4); ok(p4 && /blank/.test(p4.skip || ""), "the blank p.4 is skipped and says why: " + (p4 && p4.skip));
     ok(rp.pages.find(x => x.no === 1).rooms.had === 9, "p.1's rooms left as they are");
+    // an API key that cannot be used (here the Claude library cannot load): the chat answers with the free agent instead
+    await T(() => { localStorage.setItem("zdTakeoffApiKey", "sk-ant-not-valid"); document.getElementById("aiLog").innerHTML = ""; });
+    await page.fill("#aiIn", "how many doors"); await page.click("#aiSend");
+    const fb = () => T(() => { const t = document.getElementById("aiLog").innerText; return /free agent instead/.test(t) && /D1: \d+ Nos/.test(t); });
+    for (let i = 0; i < 60 && !(await fb()); i++) await wait(250);
+    ok(await fb(), "with an API key that cannot be used, the chat still answers — by the free agent, and says so");
+    await T(() => localStorage.removeItem("zdTakeoffApiKey"));
     // the panel
     ok(await T(() => ["agFull", "agFin", "agCheck"].every(id => document.getElementById(id))), "⚡ Full takeoff, 🎨 Finishes and ✅ Check buttons in the Claude panel");
     await page.click("#agFull"); await wait(250); ok(await page.isVisible("#ftScope"), "⚡ Full takeoff opens its dialog (where, what, room and door heights)"); await closeDlg();

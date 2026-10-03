@@ -19,3 +19,9 @@
   Never invent a rate.
 - Prefer a current (last ~30 days) dated Lahore market rate; if none can be
   found, use the latest Phoenix GRN rate and say so in the remarks.
+
+# PDF Takeoff (`takeoff/`)
+
+- Whenever `takeoff/takeoff.js` changes, bump the `?v=` on its `<script>` tag in
+  `takeoff/index.html` (e.g. `?v=2026-10-03b`). GitHub Pages lets browsers cache
+  files for 10 minutes, so without it a new page can run under the old script.
