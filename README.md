@@ -105,6 +105,28 @@ tools/grn_register.py NEW_RECEIVING.xlsx  # one or more exports
 Receipts already in the register are skipped, so a cumulative export can be
 re-run safely. The raw exports are not committed.
 
+**Purchase orders** (added 03-Oct-2026): the register also lists the item lines of
+the Sage 300 PO books, printed from Sage as **POPOR01 – PO Purchase Orders**:
+**Mall 35** (179 POs, Dec-2019 to Sep-2026) and **Zameen Omega → Phoenix**
+(99 POs, Jan-2023 to Oct-2026) — 704 lines, 543 items. **Type** picks GRN
+receipts, purchase orders or both; a PO item is marked **PO** and has no item
+code. Its rate is the rate ordered, before any PO-level discount and tax, and
+**+ Rate DB** writes `<Site> PO-n, DD-Mon-YYYY — <vendor>` into the remarks (plus
+the discount when the PO had one). PO lines are only shown in the register: the
+Price Trends, the Rate Database check and the RFQ vendor suggestions still use
+GRN receipts. The data is the `raPoData` block of the same page; to add newer PO
+books (the PDFs from Sage's Universal Printer), run:
+
+```sh
+TK_LIBS=/path/with/node_modules node tools/po_register.js POPOR01.pdf [MORE.pdf ...]   # needs pdfjs-dist
+```
+
+Every PO is checked before anything is written (its lines less any discount must
+equal its subtotal, and subtotal + tax its total); PO lines already held are
+skipped. The site comes from the company on the PO (Mall 35 → Mall 35, Zameen
+Omega → Phoenix) or `--site`. A PO item takes the category of a GRN item with the
+same description, else none. The PDFs are not committed.
+
 ## KPK MRS Rates (Rate Analysis)
 
 QS Cost Control → **KPK MRS Rates** lists all 4,584 items of the Khyber
@@ -925,6 +947,7 @@ zameen-developments/index.html      Zameen Developments dashboard
 drawing-tracker/index.html          Drawing Tracker dashboard
 takeoff/index.html, takeoff.js      PDF Takeoff (pdf.js viewer, scale, snapping, measurement sheet)
 tools/grn_register.py               merge GRN receiving exports into the GRN Price Register
+tools/po_register.js                merge Sage POPOR01 purchase order PDFs into the GRN Price Register (raPoData)
 tools/mrs_register.py               load a Punjab MRS PDF into the Punjab MRS Rates register
 tools/test_mrs_register.py          tests for the MRS loader
 tools/mep_rates.py                  build the MEP rate analyses from the MAK final bill + GRN register
