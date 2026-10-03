@@ -101,6 +101,18 @@ A right-drag still pans; only a right-click without dragging opens the menu, and
 | Count doors from swing symbols (no tags) | — | ◐ (Auto Takeoff counts) | ★ swing arcs 1.2–6 ft; double doors as one |
 | Natural-language agent ("count all doors") | ✓ Bluebeam Max (Claude) | — | ✓ Claude panel + free agent: *count doors on all pages*, *count door swings* |
 
+## 6b. Pages, view and scale (added in the QA pass, 02-Oct-2026)
+
+| Feature | Bluebeam | PlanSwift | ZD Takeoff |
+|---|---|---|---|
+| Page thumbnails / page navigator | ✓ Thumbnails panel | ✓ Pages tab | ★ Pages tab: every PDF, thumbnails drawn as they scroll into view, scale status and measurement count per page |
+| Fit page / fit width | ✓ | ✓ | ✓ fit page (`F`) + ★ fit width (`Shift+F`), View menu |
+| First / last page | ✓ | ✓ | ★ Home / End |
+| Pick a standard scale from a list | ✓ | ✓ | ★ architectural, engineering, metric ratio, typed; with the paper size it was drawn for (ISO / ARCH / ANSI) |
+| Scale checked against dimensions on the sheet | — | ◐ Auto Scale (Takeoff Boost) | ★ room sizes written on the sheet measured across each room; a wrong note is flagged with the scale most rooms agree with |
+| Password-protected PDFs | ✓ | ✓ | ★ asks for the open password; marked-up export flattened |
+| Remove a PDF from the project | ✓ | ✓ | ★ (backup first) |
+
 ## 7. Not in ZD Takeoff yet (and why)
 
 | Feature | Where | Note |
@@ -112,6 +124,7 @@ A right-drag still pans; only a right-click without dragging opens the menu, and
 | OCR of scanned drawings | both | Scanned PDFs measure but have no text or lines to read. |
 | Slope / pitch factor on areas | both | Use the assembly formula on the condition. |
 | Group / ungroup | Bluebeam | Multi-select and conditions instead. |
+| Reorder / rotate / delete pages inside a PDF | both | The PDF is kept as issued; a turned page is shown as the PDF turns it. |
 
 ## Sources (searched 02-Oct-2026)
 

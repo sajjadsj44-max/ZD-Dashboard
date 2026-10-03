@@ -17,7 +17,10 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const r3 = v => Math.round(v * 1000) / 1000;                       // lengths: decimal feet, 3 dp
 const f3 = v => r3(v).toFixed(3);
-const f2 = v => (Math.round(v * 100) / 100).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const f2 = v => (Math.round(v * 100) / 100).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});   // money (PKR), thresholds
+/* a quantity as shown: ft, Sft and cft to 3 dp (as the dimensions); Nos as a whole number (3 dp only if a formula gives a part) */
+const fq = (v, unit) => { v = +v || 0; const d = /^\s*nos?\.?\s*$/i.test(String(unit || "")) && Math.abs(v - Math.round(v)) < 1e-9 ? 0 : 3, x = Math.round(v * 10 ** d) / 10 ** d;
+  return (x === 0 ? 0 : x).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d}); };
 const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const today = () => { const d = new Date(); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); };
@@ -26,14 +29,22 @@ const dmy = iso => { const p = String(iso || "").slice(0, 10).split("-"); return
 function toast(msg, ms){ const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => { t.style.display = "none"; }, ms || 2600); }
 function busy(msg){ const b = $("busy"); b.textContent = msg || ""; b.style.display = msg ? "block" : "none"; }
 
-/* "12'-6\"", "12' 6", "12-6", "12.5", "150\"", "12'6 1/2\"" -> decimal feet (NaN if not a length) */
+/* the page's text with foot and inch marks as typed: PDF fonts give ' and " back as ’ ‘ ′ and ” “ ″ (12’-0"x12’-0") */
+const normQ = s => String(s).replace(/[’‘′`´]/g, "'").replace(/[”“″]/g, '"');
+/* vulgar fractions as written by some CAD fonts: "1½" -> "1 1/2", "¼" -> "1/4", 1⁄4 (fraction slash) -> 1/4 */
+const VF = {"¼": "1/4", "½": "1/2", "¾": "3/4", "⅛": "1/8", "⅜": "3/8", "⅝": "5/8", "⅞": "7/8", "⅓": "1/3", "⅔": "2/3", "⅙": "1/6", "⅚": "5/6", "⅕": "1/5", "⅖": "2/5", "⅗": "3/5", "⅘": "4/5", "⅒": "1/10"};
+const vulgar = s => String(s).replace(/(\d)?(\s*)([¼½¾⅛⅜⅝⅞⅓⅔⅙⅚⅕⅖⅗⅘⅒])/g, (_, d, sp, f) => d ? d + " " + VF[f] : sp + VF[f]).replace(/(\d)\s*⁄\s*(\d)/g, "$1/$2");
+/* "12'-6\"", "12' 6", "12-6", "12.5", "150\"", "12'6 1/2\"" -> decimal feet (NaN if not a length). A metric dimension
+   ("3000mm", "300 cm", "3.05m") is converted to decimal feet — the sheet stays in feet. */
 function parseFt(s){
-  s = String(s || "").trim().replace(/[’′]/g, "'").replace(/[”″]/g, '"').replace(/\s+/g, " ");
+  s = vulgar(String(s || "")).trim().replace(/[’′]/g, "'").replace(/[”″]/g, '"').replace(/\s+/g, " ");
   if (!s) return NaN;
-  const frac = t => { t = t.trim(); if (!t) return 0; const m = /^(\d+(?:\.\d+)?)?\s*(?:(\d+)\/(\d+))?$/.exec(t); if (!m) return NaN; return (m[1] ? +m[1] : 0) + (m[2] ? +m[2] / +m[3] : 0); };
-  let m = /^(\d+(?:\.\d+)?)\s*'\s*-?\s*([\d.\s/]*)"?$/.exec(s);          // 12'-6", 12' 6 1/2"
+  const frac = t => { t = t.trim(); if (!t) return 0; const m = /^(\d+(?:\.\d+)?)?\s*(?:(\d+)\/(\d+))?$/.exec(t); if (!m || (m[2] && !(+m[3] > 0))) return NaN; return (m[1] ? +m[1] : 0) + (m[2] ? +m[2] / +m[3] : 0); };
+  let m = /^(\d+(?:\.\d+)?|\.\d+)\s*(mm|cm|m)$/i.exec(s);                // 3000mm, 300 cm, 3.05 m
+  if (m) return +m[1] / {mm: 304.8, cm: 30.48, m: 0.3048}[m[2].toLowerCase()];
+  m = /^(\d+(?:\.\d+)?)\s*'\s*-?\s*([\d.\s/]*)"?$/.exec(s);              // 12'-6", 12' 6 1/2"
   if (m) { const i = frac(m[2]); return isNaN(i) ? NaN : +m[1] + i / 12; }
-  m = /^([\d.\s/]+)"$/.exec(s);                                          // 150"
+  m = /^([\d.\s/]+)\s*(?:"|in|inch|inches)$/i.exec(s);                     // 150", 150 in
   if (m) { const i = frac(m[1]); return isNaN(i) ? NaN : i / 12; }
   m = /^(\d+)\s*-\s*(\d+(?:\.\d+)?)$/.exec(s);                           // 12-6
   if (m) return +m[1] + +m[2] / 12;
@@ -44,6 +55,18 @@ function parseFt(s){
 /* ------------------------------------------------------------------ geometry */
 const polyLen = (P, closed) => { let s = 0; for (let i = 1; i < P.length; i++) s += dist(P[i - 1], P[i]); if (closed && P.length > 2) s += dist(P[P.length - 1], P[0]); return s; };
 const polyArea = P => { let s = 0; for (let i = 0, j = P.length - 1; i < P.length; j = i++) s += (P[j][0] + P[i][0]) * (P[j][1] - P[i][1]); return Math.abs(s) / 2; };
+/* a closed outline whose sides cross (corners clicked out of order, a point dragged across a side): its area by
+   coordinates is then not the area enclosed, so it is flagged on the sheet, in the export check and when drawn */
+function selfCross(P){
+  const n = P.length; if (n < 4) return false;
+  const o = (a, b, c) => { const v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); return Math.abs(v) < 1e-9 ? 0 : Math.sign(v); };
+  for (let i = 0; i < n; i++) { const a = P[i], b = P[(i + 1) % n];
+    for (let j = i + 2; j < n; j++) { if (i === 0 && j === n - 1) continue; const c = P[j], d = P[(j + 1) % n];
+      if (o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0) return true; } }
+  return false;
+}
+const crossed = it => { const c = cond(it.cond); return !!c && c.type === "area" && it.shape !== "circle" && it.kind !== "open" && selfCross(it.pts); };
+const crossMsg = "⚠ This outline crosses itself — its area is not the area drawn. Drag the points so the sides do not cross (or Ctrl+Z).";
 function pointInPoly(p, P){ let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if (((a[1] > p[1]) !== (b[1] > p[1])) && (p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0])) c = !c; } return c; }
 function distSeg(p, a, b){ const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy; let t = L ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L : 0; t = Math.max(0, Math.min(1, t)); return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); }
 function projSeg(p, a, b){ const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy; let t = L ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L : 0; t = Math.max(0, Math.min(1, t)); return [a[0] + t * dx, a[1] + t * dy]; }
@@ -161,22 +184,83 @@ function newProject(name){
   return {id: uid("P"), name: name || "Untitled takeoff", created: new Date().toISOString(), updated: new Date().toISOString(), v: SCHEMA,
           files: [], scales: {}, conds: [], items: [], last: {}, viewports: {}, marks: [], sheets: {}, openings: []};
 }
-function migrate(p){
-  const from = +p.v || 1, obj = v => v && typeof v === "object" && !Array.isArray(v), arr = Array.isArray;
+/* rep (optional): an array that gets one line per repair. A project file comes from anywhere (a colleague, an old
+   version, a damaged disk): values the app draws or multiplies are checked here — a colour that is not a colour (it is
+   written into the drawing's SVG), points that are not numbers, a unit that does not belong to its type. Measurements
+   or markups that cannot be drawn are left out and reported, never kept half-broken. */
+const HEXCOL = /^#[0-9a-f]{3}(?:[0-9a-f]{3})?(?:[0-9a-f]{2})?$/i;
+function migrate(p, rep){
+  const from = +p.v || 1, obj = v => v && typeof v === "object" && !Array.isArray(v), arr = Array.isArray, note = m => { if (rep) rep.push(m); };
+  const num = v => typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? +v : NaN;
+  const pt = q => arr(q) && q.length >= 2 && isFinite(num(q[0])) && isFinite(num(q[1])) ? [num(q[0]), num(q[1])] : null;
+  const pts = (P0, min) => { if (!arr(P0)) return null; const o = P0.map(pt); return o.every(Boolean) && o.length >= min ? o : null; };
   if (!arr(p.files)) p.files = []; if (!arr(p.conds)) p.conds = []; if (!arr(p.items)) p.items = []; if (!arr(p.marks)) p.marks = []; if (!arr(p.openings)) p.openings = [];
   if (!obj(p.scales)) p.scales = {}; if (!obj(p.viewports)) p.viewports = {}; if (!obj(p.last)) p.last = {}; if (!obj(p.sheets)) p.sheets = {};
-  p.items.forEach(it => { if (it.nos == null) it.nos = 1; if (it.label == null) it.label = ""; if (!it.kind) it.kind = "shape"; });
+  if (typeof p.name !== "string") p.name = String(p.name == null ? "Untitled takeoff" : p.name);
+  let n = p.files.length; p.files = p.files.filter(f => obj(f) && f.id != null); if (p.files.length < n) note((n - p.files.length) + " PDF entr" + (n - p.files.length > 1 ? "ies" : "y") + " without an id left out");
+  p.files.forEach(f => { f.id = String(f.id); f.name = String(f.name == null ? f.id : f.name); f.pages = Math.max(1, Math.round(num(f.pages)) || 1); });
+  n = p.conds.length; p.conds = p.conds.filter(c => obj(c) && c.id != null); if (p.conds.length < n) note((n - p.conds.length) + " condition" + (n - p.conds.length > 1 ? "s" : "") + " without an id left out");
+  p.conds.forEach((c, i) => {
+    c.id = String(c.id); c.name = String(c.name == null ? "Condition " + (i + 1) : c.name);
+    if (!UNITS[c.type]) { note(c.name + ": type “" + c.type + "” is not area / linear / count — set to area"); c.type = "area"; }
+    if (!UNITS[c.type].includes(c.unit)) { note(c.name + ": unit “" + c.unit + "” does not fit " + c.type + " — set to " + UNITS[c.type][0]); c.unit = UNITS[c.type][0]; }
+    if (!HEXCOL.test(String(c.color || ""))) { if (c.color != null && c.color !== "") note(c.name + ": colour “" + String(c.color).slice(0, 40) + "” is not a colour — replaced"); c.color = COLORS[i % COLORS.length]; }
+    ["h", "t"].forEach(k => { if (c[k] !== "" && c[k] != null && !(num(c[k]) > 0)) { note(c.name + ": " + (k === "h" ? "height" : "thickness") + " “" + c[k] + "” is not a length — cleared"); c[k] = ""; } else if (c[k] !== "" && c[k] != null) c[k] = num(c[k]); });
+    c.faces = Math.max(1, Math.min(2, Math.round(num(c.faces)) || 1)); c.dedMin = Math.max(0, num(c.dedMin) || 0);
+    ["rate"].forEach(k => { if (c[k] != null && !isFinite(num(c[k]))) c[k] = 0; });
+    if (c.asm != null && !arr(c.asm)) c.asm = [];
+  });
+  let bad = 0;
+  p.items = p.items.filter(it => {
+    if (!obj(it) || it.id == null) { bad++; return false; }
+    const c = p.conds.find(x => x.id === String(it.cond));
+    const min = it.kind === "open" || it.shape === "circle" ? 2 : !c || c.type === "count" ? 0 : c.type === "area" ? 3 : 2, q = pts(it.pts, min);   // (an empty count is kept: harmless, and flagged as zero by the export check)
+    if (!q) { bad++; return false; }
+    it.id = String(it.id); it.cond = String(it.cond); it.file = String(it.file); it.page = Math.max(1, Math.round(num(it.page)) || 1); it.pts = q;
+    return true; });
+  if (bad) note(bad + " measurement" + (bad > 1 ? "s" : "") + " with missing or broken points left out (they could not be drawn or measured)");
+  p.items.forEach(it => { const nn = Math.round(num(it.nos)); it.nos = nn >= 1 && isFinite(nn) ? nn : 1; if (it.label == null) it.label = ""; it.label = String(it.label);
+    if (!["shape", "ded", "open"].includes(it.kind)) it.kind = "shape";
+    if (it.arcs != null && !(arr(it.arcs) && it.arcs.every(a => arr(a) && a.length === 2 && Number.isInteger(a[0]) && Number.isInteger(a[1])))) delete it.arcs;
+    ["ow", "oh", "doorW"].forEach(k => { if (it[k] != null && it[k] !== "" && !isFinite(num(it[k]))) delete it[k]; }); });
+  bad = 0;
+  p.marks = p.marks.filter(m => { const q = obj(m) && m.id != null && MARK_TOOLS[m.type] && pts(m.pts, m.type === "note" ? 1 : 2); if (!q) { bad++; return false; } m.pts = q; m.id = String(m.id); m.text = String(m.text == null ? "" : m.text);
+    if (m.color != null && !HEXCOL.test(String(m.color))) { note("A markup's colour “" + String(m.color).slice(0, 40) + "” is not a colour — replaced"); m.color = "#d03b3b"; } return true; });
+  if (bad) note(bad + " markup" + (bad > 1 ? "s" : "") + " with missing or broken points left out");
+  Object.keys(p.scales).forEach(k => { const sc = p.scales[k]; if (!obj(sc) || !(num(sc.ptPerFt) > 0) || !isFinite(num(sc.ptPerFt))) { note("Page scale " + k + " is not a number — removed (set it again)"); delete p.scales[k]; } else sc.ptPerFt = num(sc.ptPerFt); });
+  Object.keys(p.viewports).forEach(k => { if (!arr(p.viewports[k])) { delete p.viewports[k]; return; }
+    p.viewports[k] = p.viewports[k].filter(v => { const ok = obj(v) && arr(v.r) && v.r.length === 4 && v.r.every(x => isFinite(num(x))) && isFinite(num(v.ptPerFt || 0)); if (!ok) note("A viewport on " + k + " is broken — removed"); else { v.r = v.r.map(num); v.ptPerFt = Math.max(0, num(v.ptPerFt || 0)); v.name = String(v.name == null ? "Viewport" : v.name); } return ok; }); });
+  p.openings = p.openings.filter(o => { const ok = obj(o) && o.id != null && num(o.w) > 0 && num(o.h) > 0; if (!ok) note("Opening schedule mark " + (obj(o) ? o.mark : "?") + " has no valid size — removed"); else { o.w = num(o.w); o.h = num(o.h); o.mark = String(o.mark == null ? "" : o.mark); } return ok; });
   p.v = SCHEMA;
   return from;
 }
-let saveT = null;
-function save(){ if (!P.proj) return; P.proj.updated = new Date().toISOString(); clearTimeout(saveT); saveT = setTimeout(() => dbPut("projects", P.proj).catch(e => toast("Could not save: " + e.message, 5000)), 300); }
+/* every change is written to IndexedDB 300 ms after it (one write for a burst of changes), and at once on Ctrl+S, before
+   the page is closed, reloaded or hidden, and before another project is opened — so a measurement made just before
+   closing the tab is not lost. The project is taken when the change is made, not when the timer fires. */
+let saveT = null, savePr = null;
+const TAB = uid("T");
+function save(){ if (!P.proj) return; S.ver = (S.ver || 0) + 1; P.proj.updated = new Date().toISOString(); savePr = P.proj; clearTimeout(saveT); saveT = setTimeout(flushSave, 300); }
+function flushSave(){
+  clearTimeout(saveT); saveT = null; const pr = savePr; savePr = null;
+  if (!pr || !DB) return Promise.resolve(false);
+  return dbPut("projects", pr).then(() => { tabSay({t: "saved", id: pr.id, at: pr.updated}); return true; }).catch(e => { toast("Could not save: " + e.message, 5000); return false; });
+}
+/* the same project open in two tabs: each would overwrite the other's work on its next save — say so in both */
+const TABCH = typeof BroadcastChannel === "function" ? new BroadcastChannel("zdTakeoff") : null;
+function tabSay(m){ try { if (TABCH) TABCH.postMessage(Object.assign({tab: TAB}, m)); } catch (e) {} }
+if (TABCH) TABCH.onmessage = e => { const m = e.data || {}; if (!P.proj || m.tab === TAB || m.id !== P.proj.id) return;
+  if (m.t === "open") tabSay({t: "here", id: P.proj.id});
+  S.otherTab = m.t === "saved" ? "changed in another tab or window at " + String(m.at || "").slice(11, 16) : "also open in another tab or window";
+  renderSheet(); };
 const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "openings"];
 function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 /* every change goes through mutate(): the project before it is kept for Ctrl+Z (200 steps), with a name for the
    undo / redo buttons ("Undo: Move 3 measurements") */
 function mutate(fn, label){
-  S.undo.push({js: snapshot(), label: label || ""}); if (S.undo.length > 200) S.undo.shift(); S.redo = []; S.draftRedo = [];
+  S.undo.push({js: snapshot(), label: label || ""});
+  let tot = 0; S.undo.forEach(e => { tot += undoEntry(e).js.length; });   // 200 steps, fewer (20 at least) for a big project: about 80 MB of history at most
+  while (S.undo.length > 200 || (S.undo.length > 20 && tot > 40e6)) tot -= undoEntry(S.undo.shift()).js.length;
+  S.redo = []; S.draftRedo = [];
   fn(); save(); refresh();
 }
 /* the shape being drawn keeps its own history in steps: a click is one step, an arc (many points) is one step, so
@@ -228,11 +312,15 @@ function restore(js){ const o = JSON.parse(js); UNDO_KEYS.forEach(k => { if (o[k
   save(); refresh(); }
 
 async function openProject(id){
+  await flushSave();   // the project being left keeps its last change
   const pr = await dbGet("projects", id);
   if (!pr) return toast("Project not found");
-  if ((+pr.v || 1) < SCHEMA) { const from = migrate(pr); await dbPut("projects", pr); toast("Project upgraded from file version " + from + " to " + SCHEMA, 3000); } else migrate(pr);
+  const rep = [];
+  if ((+pr.v || 1) < SCHEMA) { const from = migrate(pr, rep); await dbPut("projects", pr); toast("Project upgraded from file version " + from + " to " + SCHEMA, 3000); } else migrate(pr, rep);
+  if (rep.length) setTimeout(() => toast("The stored project had damaged entries, repaired: " + rep.slice(0, 2).join(" · ") + (rep.length > 2 ? " · …" : ""), 8000), 400);
   Object.values(S.docs).forEach(d => d.destroy && d.destroy());
-  P.proj = pr; S.docs = {}; S.geo = {}; S.texts = {}; S.undo = []; S.redo = []; S.sel = null; S.multi.clear(); S.selMark = null; draftClear(); S.page = null; S.fileId = null;
+  P.proj = pr; S.docs = {}; S.geo = {}; S.texts = {}; S.sizes = {}; S.thumbs = {}; S.thumbQ = []; S.ocgs = {}; S.ocBound = {}; S.undo = []; S.redo = []; S.sel = null; S.multi.clear(); S.selMark = null; draftClear(); S.page = null; S.fileId = null; S.otherTab = "";
+  tabSay({t: "open", id: pr.id});
   S.cond = (pr.conds[0] || {}).id || null;
   localStorage.setItem("zdTakeoffLast", pr.id);
   $("start").classList.remove("on");
@@ -245,6 +333,7 @@ async function openProject(id){
   backupNow("opened").catch(() => {});
 }
 async function showStart(){
+  await flushSave();
   const all = (await dbAll("projects")).sort((a, b) => b.updated.localeCompare(a.updated));
   $("projList").innerHTML = all.length ? '<table class="plist"><thead><tr><th>Project</th><th>PDFs</th><th>Measurements</th><th>Last changed</th><th></th></tr></thead><tbody>' +
     all.map(p => `<tr><td><a data-open="${esc(p.id)}">${esc(p.name)}</a></td><td>${p.files.length}</td><td>${p.items.length}</td><td>${dmy(p.updated)}</td>
@@ -265,8 +354,24 @@ async function doc(fileId){
   const rec = await dbGet("pdfs", fileId);
   if (!rec) throw new Error("PDF missing — add “" + ((P.proj.files.find(f => f.id === fileId) || {}).name || fileId) + "” again with + PDF to re-attach it.");
   const lib = await loadPdfjs();
-  S.docs[fileId] = await lib.getDocument({data: new Uint8Array(rec.data.slice(0)), isEvalSupported: false}).promise;
+  S.docs[fileId] = await lib.getDocument({data: new Uint8Array(rec.data.slice(0)), isEvalSupported: false, password: rec.pw || undefined}).promise;
   return S.docs[fileId];
+}
+/* a PDF locked with an open password: asked for (wrong → asked again), kept with the PDF in this browser only */
+async function openPdfData(lib, data, name){
+  let pw;
+  for (let tries = 0; ; tries++) {
+    try { return {d: await lib.getDocument({data: new Uint8Array(data.slice(0)), isEvalSupported: false, password: pw}).promise, pw}; }
+    catch (e) {
+      if (!e || e.name !== "PasswordException") throw e;
+      busy("");
+      const v = await ask("Password — " + name, `<p>${tries ? "<b style='color:var(--red)'>That password is not right.</b> " : ""}This PDF is locked with a password. Enter it to open the drawing.</p>
+        <div class="fg w2" style="margin-top:8px"><label>Password</label><input type="password" id="dlgPw" autocomplete="off"></div>
+        <p class="small" style="margin-top:6px">Kept with the PDF in this browser only, so the drawing opens again next time.</p>`, "Open", () => ({pw: $("dlgPw").value}), "dlgPw");
+      if (!v) throw new Error(name + " is locked with a password — not added");
+      pw = v.pw; busy("Opening " + name + "…");
+    }
+  }
 }
 async function addFiles(files){
   if (!P.proj) return;
@@ -277,15 +382,17 @@ async function addFiles(files){
       const data = await f.arrayBuffer();
       let meta = P.proj.files.find(x => x.name === f.name && x.size === f.size);
       const lib = await loadPdfjs();
-      const d = await lib.getDocument({data: new Uint8Array(data.slice(0)), isEvalSupported: false}).promise;
-      if (!meta) { meta = {id: uid("F"), name: f.name, size: f.size, pages: d.numPages, added: new Date().toISOString()}; P.proj.files.push(meta); }
-      await dbPut("pdfs", {name: f.name, size: f.size, data}, meta.id);
+      const {d, pw} = await openPdfData(lib, data, f.name);
+      const id = meta ? meta.id : uid("F");
+      await dbPut("pdfs", Object.assign({name: f.name, size: f.size, data}, pw ? {pw} : {}), id);   // stored first: a PDF listed in the project is always one that can be opened
+      if (!meta) { meta = {id, name: f.name, size: f.size, pages: d.numPages, added: new Date().toISOString()}; P.proj.files.push(meta); }
+      else if (meta.pages !== d.numPages) meta.pages = d.numPages;
       if (S.docs[meta.id]) S.docs[meta.id].destroy();
       S.docs[meta.id] = d;
       save(); buildPageSel();
       await gotoPage(meta.id, 1);
       toast(f.name + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""));
-    } catch (e) { toast(e.message || String(e), 5000); }
+    } catch (e) { const m = e && e.message || String(e); toast(/password/i.test(m) ? m : f.name + " could not be opened — " + m + (/Invalid PDF|empty/i.test(m) ? " (is it a PDF, and complete?)" : ""), 6000); }
     busy("");
   }
 }
@@ -356,21 +463,31 @@ function setLayer(ids, on){
   save(); clearTimeout(layT); layT = setTimeout(() => { renderLow(); renderHi(true); }, 60);
 }
 
+/* page changes can overlap (PgDn pressed twice, a sheet row clicked while a page is loading): only the latest one is
+   applied, and the page shown, its key, scale and indexed lines are always set together — never page 2's key with page
+   3's drawing */
 async function gotoPage(fileId, pageNo){
+  const seq = S.navSeq = (S.navSeq || 0) + 1, stale = () => seq !== S.navSeq;
   let d;
-  try { d = await doc(fileId); } catch (e) { toast(e.message, 6000); showDrop(true); return; }
-  pageNo = Math.max(1, Math.min(d.numPages, pageNo));
-  if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) {} S.renderTask = null; }
+  try { d = await doc(fileId); } catch (e) { if (!stale()) { toast(e.message, 6000); showDrop(true); } return; }
+  if (stale()) return;
+  pageNo = Math.max(1, Math.min(d.numPages, +pageNo || 1));
   await loadLayers(fileId);
+  if (stale()) return;
+  let pg; try { pg = await d.getPage(pageNo); } catch (e) { if (!stale()) toast("Page " + pageNo + " could not be read: " + (e.message || e), 6000); return; }
+  if (stale()) return;
+  if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) {} S.renderTask = null; }
   S.fileId = fileId; S.pageNo = pageNo; S.key = keyOf(fileId, pageNo);
-  S.page = await d.getPage(pageNo);
+  S.page = pg;
   S.base = S.page.getViewport({scale: 1});
+  S.rendered = null; $("hi").style.display = "none"; { const lc = $("low"); lc.width = lc.width; }   // the last page's picture goes at once
   draftClear(); S.resume = null; S.gap = null; S.multi.clear(); S.hover = null; S.measure = null; S.measures = []; S.snap = null; S.autoShow = null; S.cmp = null; $("cmpLegend").style.display = "none";
   P.proj.last = {file: fileId, page: pageNo}; save();
   $("pageSel").value = fileId + "|" + pageNo;
   showDrop(false);
   fit(); renderLayers();
   await renderLow();
+  if (stale()) return;
   renderHi(true);
   indexPage();   // vector lines + scale note, in the background
   refresh();
@@ -378,6 +495,11 @@ async function gotoPage(fileId, pageNo){
 
 /* ------------------------------------------------------------------ rendering */
 const stage = () => $("stage");
+function fitWidth(){   // the page's width across the window, from its top
+  if (!S.base) return;
+  const w = stage().clientWidth, s = Math.max(0.05, Math.min(60, (w - 24) / S.base.width));
+  S.view = {s, tx: (w - S.base.width * s) / 2, ty: 12}; applyView(); renderHi();
+}
 function fit(){
   if (!S.base) return;
   const st = stage(), w = st.clientWidth, h = st.clientHeight, s = Math.min((w - 24) / S.base.width, (h - 24) / S.base.height);
@@ -404,7 +526,7 @@ async function overlayCmp(ctx, w, h, scale, tx, ty){
   tint(ctx, w, h, true);
   const o = document.createElement("canvas"); o.width = w; o.height = h;
   const c2 = o.getContext("2d", {willReadFrequently: true}); c2.fillStyle = "#fff"; c2.fillRect(0, 0, w, h);
-  try { await S.cmp.pg.render({...lay(S.cmp.file), canvasContext: thinLines(c2), viewport: S.cmp.pg.getViewport({scale}), transform: [1, 0, 0, 1, tx + S.cmp.dx * scale, ty + S.cmp.dy * scale]}).promise; } catch (e) { return; }
+  try { await sliced(S.cmp.pg.render({...lay(S.cmp.file), canvasContext: thinLines(c2), viewport: S.cmp.pg.getViewport({scale}), transform: [1, 0, 0, 1, tx + S.cmp.dx * scale, ty + S.cmp.dy * scale]})).promise; } catch (e) { return; }
   tint(c2, w, h, false);
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "multiply"; ctx.drawImage(o, 0, 0); ctx.restore();
 }
@@ -423,14 +545,17 @@ async function compareDialog(){
   $("cmpOff").onclick = () => { S.cmp = null; $("cmpLegend").style.display = "none"; renderLow(); renderHi(true); };
   renderLow(); renderHi(true);
 }
-async function renderLow(){
-  const longSide = Math.max(S.base.width, S.base.height), sc = Math.min(3, 3000 / longSide);
-  const vp = S.page.getViewport({scale: sc}), c = $("low");
-  c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
-  const ctx = thinLines(c.getContext("2d")); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+async function renderLow(){   // drawn off screen, then shown only if the page is still the one on screen
+  const page = S.page, fileId = S.fileId, longSide = Math.max(S.base.width, S.base.height), sc = Math.min(3, 3000 / longSide);
+  const vp = page.getViewport({scale: sc}), off = document.createElement("canvas");
+  off.width = Math.ceil(vp.width); off.height = Math.ceil(vp.height);
+  const ctx = thinLines(off.getContext("2d")); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, off.width, off.height);
+  try { await sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vp})).promise; } catch (e) {}
+  if (S.page !== page) return;
+  await overlayCmp(ctx, off.width, off.height, sc, 0, 0);
+  if (S.page !== page) return;
+  const c = $("low"); c.width = off.width; c.height = off.height; c.getContext("2d").drawImage(off, 0, 0);
   S.low = {s: sc};
-  try { await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp}).promise; } catch (e) {}
-  await overlayCmp(ctx, c.width, c.height, sc, 0, 0);
   applyView();
 }
 let hiT = null;
@@ -443,7 +568,7 @@ function renderHi(now){
     const w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
     const off = document.createElement("canvas"); off.width = w; off.height = h;
     const ctx = thinLines(off.getContext("2d"));
-    const task = S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]});
+    const task = sliced(S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}));
     S.renderTask = task;
     try { await task.promise; } catch (e) { return; }
     if (S.renderTask !== task) return;
@@ -476,7 +601,7 @@ const toBase = (x, y) => [(x - S.view.tx) / S.view.s, (y - S.view.ty) / S.view.s
 const mul = (A, B) => [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1], A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3], A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
 const app = (M, x, y) => [M[0] * x + M[2] * y + M[4], M[1] * x + M[3] * y + M[5]];
 async function indexPage(){
-  const key = S.key, page = S.page, base = S.base;
+  const key = S.key, page = S.page, base = S.base, file = S.fileId;
   if (!S.geo[key]) {
     busy("Reading drawing lines…");
     try {
@@ -545,19 +670,19 @@ async function indexPage(){
         if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4000) return;   // page borders / hatch fills are not useful snap targets at this cost
         for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) { const k = x + "," + y; let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(i); }
       });
-      S.geo[key] = {segs, grid, cell, images, styles, layerIds, file: S.fileId};
+      S.geo[key] = {segs, grid, cell, images, styles, layerIds, file};
     } catch (e) { S.geo[key] = {segs: [], grid: new Map(), cell: 24, images: 0, styles: [], err: String(e)}; }
     busy("");
   }
   if (!S.texts[key]) {
     try {
       const tc = await page.getTextContent();
-      S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: t.str, x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
+      S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
     } catch (e) { S.texts[key] = []; }
   }
   if (key === S.key && P.proj && !P.proj.scales[key]) {
     const c = scaleCandidates(key);
-    if (c.length) { P.proj.scales[key] = {ptPerFt: c[0].ptPerFt, how: "note", text: c[0].text, note: c[0].note || "", factor: c[0].factor || 1, verified: false, at: new Date().toISOString()}; save(); toast("Scale read from the drawing: " + c[0].label + " — check it against a known dimension (scale chip → Verify)", 5200);
+    if (c.length) { P.proj.scales[key] = {ptPerFt: c[0].ptPerFt, how: "note", text: c[0].text, note: c[0].note || "", factor: c[0].factor || 1, verified: false, at: new Date().toISOString()}; save(); toast(keyName(key) + ": scale read from the drawing, " + c[0].label + " — check it against a known dimension (scale chip → Verify)", 5200);
       checkScale(key, true); }
   }
   if (key === S.key) refresh();
@@ -572,15 +697,20 @@ async function scaleFromRooms(key){
   const [f, pg] = key.split(":"), g = S.geo[key]; if (!g || !g.segs.length) return null;
   const F = await drawingFacts(f, +pg), est = [], bf = segRoleFilter(g, BOUND);   // walls / openings / columns only, when the PDF has layers: a bed or a table is not the room's edge
   const ray = (c, dx, dy, R) => {   // distance from c to the first drawing line along (dx, dy), up to R
-    let best = R; segsIn(g, c[0] - (dx < 0 ? R : 0), c[1] - (dy < 0 ? R : 0), c[0] + (dx > 0 ? R : 0), c[1] + (dy > 0 ? R : 0)).forEach(i => { const s = g.segs[i]; if (s[4] & 8 || (bf && !bf(i))) return;
+    let best = R; segsIn(g, c[0] - (dx < 0 ? R : 0), c[1] - (dy < 0 ? R : 0), c[0] + (dx > 0 ? R : 0), c[1] + (dy > 0 ? R : 0)).forEach(i => { const s = g.segs[i]; if (s[4] & 9 || (bf && !bf(i))) return;   // (curves — door swings — are not the room's edge)
       if (dy === 0) { const y0 = Math.min(s[1], s[3]), y1 = Math.max(s[1], s[3]); if (c[1] < y0 || c[1] > y1 || y1 === y0) return; const x = s[0] + (s[2] - s[0]) * (c[1] - s[1]) / (s[3] - s[1]), d = (x - c[0]) * dx; if (d > 0.5 && d < best) best = d; }
       else { const x0 = Math.min(s[0], s[2]), x1 = Math.max(s[0], s[2]); if (c[0] < x0 || c[0] > x1 || x1 === x0) return; const y = s[1] + (s[3] - s[1]) * (c[0] - s[0]) / (s[2] - s[0]), d = (y - c[1]) * dy; if (d > 0.5 && d < best) best = d; } });
     return best; };
   F.rooms.forEach(r => {
     const d = sizeDims(r.size); if (!d || d[0] < 4 || d[1] < 4) return;
     const R = 40 * r.h * Math.max(d[0], d[1]) / 10, c = [r.x + r.w / 2, r.y - r.h / 2], below = r.sizeY != null ? r.sizeY + r.h * 0.6 : r.y + r.h * 1.5;
-    const P0 = [c, [c[0], r.y - r.h * 2], [c[0], below]];
-    const span = (dx, dy) => P0.map(q => ray(q, dx, dy, R) + ray(q, -dx, -dy, R)).sort((x, y) => x - y)[1];   // the middle one: one ray through a door, or one blocked by a bed, does not count
+    // seven parallel rays each way (across: at seven heights round the name; up and down: at seven places side by side); the
+    // span most of them agree on (within 1 %) is the room's: a ray through a door or one blocked by a bed disagrees with the rest
+    const mid = [c[0], (c[1] + below) / 2];
+    const span = (dx, dy) => { const st = dy ? Math.max(r.w * 0.35, 1.5 * r.h) : 1.2 * r.h, v = [];
+      for (let j = -3; j <= 3; j++) { const q = dy ? [mid[0] + j * st, mid[1]] : [mid[0], mid[1] + j * st]; v.push(ray(q, dx, dy, R) + ray(q, -dx, -dy, R)); }
+      let best = null; v.forEach(a => { const n = v.filter(b => Math.abs(b / a - 1) < 0.01).length; if (!best || n > best.n || (n === best.n && a < best.a)) best = {a, n}; });
+      return best.n >= 2 ? v.filter(b => Math.abs(b / best.a - 1) < 0.01).reduce((t, b) => t + b, 0) / best.n : 2 * R; };
     const w = span(1, 0), h = span(0, 1); if (!(w < 2 * R && h < 2 * R)) return;
     const a = [w / d[0], h / d[1]], b = [w / d[1], h / d[0]], A = Math.abs(Math.log(a[0] / a[1])), B = Math.abs(Math.log(b[0] / b[1]));
     const pr = A <= B ? a : b; if (Math.min(A, B) > 0.22) return;
@@ -598,13 +728,16 @@ async function checkScale(key, ask2){
   let ev; try { ev = await scaleFromRooms(key); } catch (e) { ev = null; }
   if (!ev || ev.agree < 3) return null;
   const r = ev.ptPerFt / sc.ptPerFt; if (Math.abs(Math.log(r)) < Math.log(1.15)) { if (sc.doubt) { delete sc.doubt; save(); refresh(); } return {ok: true, ev}; }
-  const std = STD_SCALES.slice().sort((a, b) => Math.abs(Math.log(a.ptPerFt / ev.ptPerFt)) - Math.abs(Math.log(b.ptPerFt / ev.ptPerFt)))[0];
+  // the standard scale most rooms agree with (within 3 %), then the one nearest the median — not just the nearest: a median
+  // pulled a little by furniture can sit closer to 1:50 than to the 1/4" the rooms are drawn at
+  const votes = x => ev.est.filter(v => Math.abs(v / x.ptPerFt - 1) < 0.03).length;
+  const std = STD_SCALES.slice().sort((a, b) => votes(b) - votes(a) || Math.abs(Math.log(a.ptPerFt / ev.ptPerFt)) - Math.abs(Math.log(b.ptPerFt / ev.ptPerFt)))[0];
   // the rooms' median, then: a standard scale within 2.5 %; else the walls (drawn exactly 4.5" / 9" / 13.5") within 4 %; else the median
-  const isStd = Math.abs(Math.log(std.ptPerFt / ev.ptPerFt)) < Math.log(1.025), wl = isStd ? null : wallScale(key, ev.ptPerFt);
+  const isStd = Math.abs(Math.log(std.ptPerFt / ev.ptPerFt)) < Math.log(1.025) || votes(std) >= Math.max(3, ev.est.length / 2), wl = isStd ? null : wallScale(key, ev.ptPerFt);
   const sug = isStd ? std : wl && Math.abs(Math.log(wl.ptPerFt / ev.ptPerFt)) < Math.log(1.04) ? wl : {ptPerFt: ev.ptPerFt, label: "1 ft = " + ev.ptPerFt.toFixed(3) + " pt"};
   ev.agree = ev.est.filter(v => Math.abs(v / sug.ptPerFt - 1) < 0.1).length;
   sc.doubt = {label: sug.label, ptPerFt: sug.ptPerFt, ratio: +(sug.ptPerFt / sc.ptPerFt).toFixed(3), rooms: ev.rooms, agree: ev.agree}; save(); refresh();
-  if (ask2 && key === S.key) {
+  if (ask2 && key === S.key && !$("dlgBack").classList.contains("on")) {   // (a dialog already open is not cancelled for this: the chip shows the doubt)
     const pv = ask("Scale note does not match the drawing", `<p>The note says <b>${esc(sc.text)}</b>, but <b>${ev.agree} of ${ev.rooms}</b> room sizes written on this drawing${sug.walls ? ` and its ${esc(sug.walls)} walls` : ""} measure at <b>${esc(sug.label)}</b> — <b>× ${(sug.ptPerFt / sc.ptPerFt).toFixed(2)}</b> of the note. The PDF is printed at another size than the note was written for; at the note's scale every length would come out × ${(sug.ptPerFt / sc.ptPerFt).toFixed(2)} and every area × ${((sug.ptPerFt / sc.ptPerFt) ** 2).toFixed(2)} of the truth.</p>
       <p class="small" style="margin-top:8px"><b>Then verify it with one dimension printed on the drawing</b> (scale chip → Verify) — written room sizes are nominal, so this is an estimate, not a certainty. Nothing is measured until the scale is settled.</p>`, "Use " + sug.label);
     const cb = document.createElement("button"); cb.className = "btn"; cb.textContent = "Calibrate from a dimension…"; cb.style.marginRight = "auto";
@@ -632,14 +765,21 @@ function wallScale(key, est){
 const scaleDoubt = () => { const sc = P.proj && P.proj.scales[S.key]; return sc && sc.doubt && !sc.verified ? sc.doubt : null; };
 
 /* scale notes on the page: 1/8" = 1'-0", 3/16"=1'-0", 1" = 20', 1:100 (with "@ A1" paper size if given) */
-const ISO = {A0: 3370.39, A1: 2383.94, A2: 1683.78, A3: 1190.55, A4: 841.89};   // ISO 216 long side in pt (A1 594 × 841 → 841 / 25.4 × 72)
+const ISO = {A0: 3370.39, A1: 2383.94, A2: 1683.78, A3: 1190.55, A4: 841.89};
+/* paper sizes a drawing may be drawn for (long side in pt): ISO A and ARCH / ANSI */
+const PAPER = Object.assign({}, ISO, {"ARCH C 18×24 in": 1728, "ARCH D 24×36 in": 2592, "ARCH E 36×48 in": 3456, "ANSI C 17×22 in": 1584, "ANSI D 22×34 in": 2448, "ANSI E 34×44 in": 3168});
+const MAN_SCALES = [["Architectural (inch = foot)", ["3/32\" = 1'-0\"", "1/8\" = 1'-0\"", "3/16\" = 1'-0\"", "1/4\" = 1'-0\"", "3/8\" = 1'-0\"", "1/2\" = 1'-0\"", "3/4\" = 1'-0\"", "1\" = 1'-0\"", "1-1/2\" = 1'-0\"", "3\" = 1'-0\"", "1/16\" = 1'-0\"", "1/32\" = 1'-0\""]],
+  ["Engineering (1 inch = feet)", ["1\" = 10'", "1\" = 20'", "1\" = 30'", "1\" = 40'", "1\" = 50'", "1\" = 60'", "1\" = 100'"]],
+  ["Metric (ratio)", ["1:20", "1:25", "1:50", "1:75", "1:100", "1:125", "1:150", "1:200", "1:250", "1:500", "1:1000"]]];   // ISO 216 long side in pt (A1 594 × 841 → 841 / 25.4 × 72)
 /* "1/8\" = 1'-0\"", "1\" = 20'", "1:100" -> inches on paper per foot (0 if none). loose: a bare 1:N counts */
 function inPerFtOf(raw, loose){
-  const s = String(raw || "").replace(/[’′]/g, "'").replace(/[”″“]/g, '"');
+  const s = vulgar(String(raw || "")).replace(/[’′]/g, "'").replace(/[”″“]/g, '"');
   let m;
-  if ((m = /(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?)\s*"\s*=\s*1\s*'\s*-?\s*0?\s*"?/.exec(s))) {
-    const t = m[1].trim(), q = /^(\d+)\s+(\d+)\/(\d+)$/.exec(t), f = /^(\d+)\/(\d+)$/.exec(t);
-    return {v: q ? +q[1] + +q[2] / +q[3] : f ? +f[1] / +f[2] : +t, label: m[0].replace(/\s+/g, " ").trim()};
+  // 1/8" = 1'-0" · 1 1/2" = 1'-0" · 1-1/2" = 1'-0" (a mixed number written with a hyphen is 1½", not ½")
+  if ((m = /(\d+\s*-\s*\d+\/\d+|\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?)\s*"\s*=\s*1\s*'\s*-?\s*0?\s*"?/.exec(s))) {
+    const t = m[1].trim(), q = /^(\d+)\s*[-\s]\s*(\d+)\/(\d+)$/.exec(t), f = /^(\d+)\/(\d+)$/.exec(t);
+    const v = q ? +q[1] + +q[2] / +q[3] : f ? +f[1] / +f[2] : +t;
+    if (v > 0 && isFinite(v)) return {v, label: m[0].replace(/\s+/g, " ").trim()};
   }
   if ((m = /\b1\s*"\s*=\s*(\d+(?:\.\d+)?)\s*'/.exec(s))) return {v: 1 / +m[1], label: m[0]};
   if ((m = /(?:^|[^\d.:\/])1\s*:\s*(\d{1,4})(?![\d:])/.exec(s)) && (loose || /scale|^\s*1\s*:/i.test(s))) return {v: 12 / +m[1], label: "1:" + m[1]};
@@ -647,7 +787,7 @@ function inPerFtOf(raw, loose){
 }
 function scaleCandidates(key){
   const T = S.texts[key] || [], out = [], seen = {};
-  const longPt = S.base ? Math.max(S.base.width, S.base.height) : 0;
+  const sz = key === S.key && S.base ? [S.base.width, S.base.height] : (S.sizes || {})[key], longPt = sz ? Math.max(sz[0], sz[1]) : 0;   // that page's own size (the "@ A1" correction)
   const lines = T.map(t => t.s).concat(T.map((t, i) => T[i + 1] && Math.abs(T[i + 1].y - t.y) < 3 ? t.s + " " + T[i + 1].s : "")).filter(Boolean);
   for (const raw of lines) {
     const s = raw.replace(/[’′]/g, "'").replace(/[”″“]/g, '"');
@@ -716,8 +856,20 @@ function doorSymbols(g, ids, k){   // -> Set of segment ids that are door swings
         if (Math.abs(t) > 0.6 || Math.abs(t) < 0.004 || (sign && Math.sign(t) !== sign)) ok = false; sign = Math.sign(t); turn += Math.abs(t); }
       arc = ok && turn > 0.7;
     }
+    if (arc && !swingLike(c, A, B)) arc = false;   // a round room, a curved wall: a wall, not a door swing
     if (arc) { c.forEach(i => skip.add(i)); if (dist(A, B) > 0.8 * k) { const mi = G[c[Math.floor(c.length / 2)]]; arcs.push([A, B, [mi[0], mi[1]]]); } }
   });
+  /* a door swing: a short curve, or a quarter turn or so (35°–120°) of radius 1.2–6.5 ft whose centre (the hinge) is the end
+     of a straight line (the leaf, or the jamb). A whole circle, a long curved wall or an arc centred in the open is not. */
+  function swingLike(c, A, B){
+    const tot = c.reduce((t, i) => t + len(i), 0); if (tot <= 2 * k) return true;
+    let turn = 0; for (let j = 1; j < c.length; j++) { const p = G[c[j - 1]], q = G[c[j]]; let t = Math.atan2(q[3] - q[1], q[2] - q[0]) - Math.atan2(p[3] - p[1], p[2] - p[0]); while (t > Math.PI) t -= 2 * Math.PI; while (t < -Math.PI) t += 2 * Math.PI; turn += t; }
+    const sweep = Math.abs(turn) * c.length / Math.max(1, c.length - 1); if (sweep < 0.6 || sweep > 2.1) return false;
+    const mi = G[c[Math.floor(c.length / 2)]], C = circumcentre(A, [mi[0], mi[1]], B); if (!C) return false;
+    const Rr = (dist(C, A) + dist(C, B)) / 2; if (Rr < 1.2 * k || Rr > 6.5 * k) return false;
+    const mine = new Set(c), r = 0.35 * k;
+    return segsIn(g, C[0] - r, C[1] - r, C[0] + r, C[1] + r).some(i => !mine.has(i) && !(G[i][4] & 1) && (dist([G[i][0], G[i][1]], C) < r || dist([G[i][2], G[i][3]], C) < r));
+  }
   // a door leaf runs from the hinge to one end of the swing, as long as the swing's radius (hinge to the other end)
   if (arcs.length) ids.forEach(i => {
     if (skip.has(i)) return; const s = G[i], p = [s[0], s[1]], q = [s[2], s[3]], L = dist(p, q);
@@ -807,17 +959,50 @@ function labelMask(x0, y0, W, H, px, own){   // own: the name of the room being 
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) m[yy * W + xx] = 1; } });
   return m;
 }
+/* floor tile grids, stair treads, ramp lines: five or more parallel lines, 2 ft or longer, evenly spaced 0.4–3 ft apart and
+   lying side by side — the pattern on a floor, not its walls. Found once per page. */
+function hatchIds(g, k){
+  if (g.hatchK && g.hatchK.k === k) return g.hatchK.set;
+  const groups = new Map(), set = new Set();
+  g.segs.forEach((s, i) => { if (s[4] & 9) return; const dx = s[2] - s[0], dy = s[3] - s[1], L = Math.hypot(dx, dy); if (L < 2 * k) return;
+    let a = Math.atan2(dy, dx); if (a < 0) a += Math.PI; if (a >= Math.PI - 0.0087) a -= Math.PI; const b = Math.round(a / 0.0175);
+    let G = groups.get(b) || groups.get(b - 1) || groups.get(b + 1); if (!G) { G = {u: [Math.cos(a), Math.sin(a)], L: []}; groups.set(b, G); }
+    const n = [-G.u[1], G.u[0]], t0 = G.u[0] * s[0] + G.u[1] * s[1], t1 = G.u[0] * s[2] + G.u[1] * s[3];
+    G.L.push({i, o: n[0] * (s[0] + s[2]) / 2 + n[1] * (s[1] + s[3]) / 2, t0: Math.min(t0, t1), t1: Math.max(t0, t1)}); });
+  groups.forEach(G => {
+    const L = G.L.sort((a, b) => a.o - b.o), used = new Set();
+    for (let i = 0; i < L.length; i++) { if (used.has(i)) continue;
+      const run = [i]; let last = i, sp = null;
+      for (;;) { let nx = -1;
+        for (let j = last + 1; j < L.length && L[j].o - L[last].o <= 3 * k; j++) { if (used.has(j)) continue; const d = L[j].o - L[last].o; if (d < 0.4 * k) continue;
+          const ov = Math.min(L[last].t1, L[j].t1) - Math.max(L[last].t0, L[j].t0); if (ov < 0.7 * Math.min(L[last].t1 - L[last].t0, L[j].t1 - L[j].t0)) continue;
+          if (sp != null && Math.abs(d - sp) > 0.12 * sp) continue; nx = j; break; }
+        if (nx < 0) break; sp = L[nx].o - L[last].o; run.push(nx); last = nx; }
+      if (run.length < 5) continue;
+      // the end lines of a run are a wall's face when the wall's other face runs beside them, outside the pattern (tiles laid from the wall)
+      const face = (j, sg) => L.some((q, m) => m !== j && (q.o - L[j].o) * sg >= 0.25 * k && (q.o - L[j].o) * sg <= 1.6 * k && Math.min(q.t1, L[j].t1) - Math.max(q.t0, L[j].t0) >= 0.5 * (L[j].t1 - L[j].t0));
+      run.forEach((j, n) => { used.add(j); if ((n === 0 && face(j, -1)) || (n === run.length - 1 && face(j, 1))) return; set.add(L[j].i); }); }
+  });
+  g.hatchK = {k, set}; return set;
+}
 function barrierIds(g, ids, k, o){
-  const door = o.skipDoors ? doorSymbols(g, ids, k) : new Set(), minL = o.minLen * k, cloud = cloudIds(g, k);
+  const door = o.skipDoors ? doorSymbols(g, ids, k) : new Set(), minL = o.minLen * k, cloud = cloudIds(g, k), hat = hatchIds(g, k);
   const wall = o.wall ? {col: o.wall.split("|")[0], w: +o.wall.split("|")[1] || 0} : null;
   const out = ids.filter(i => { const s = g.segs[i];
-    if (door.has(i) || cloud.has(i) || (s[4] & 8) || (!o.dashBound && (s[4] & 2))) return false;
+    if (door.has(i) || cloud.has(i) || hat.has(i) || (s[4] & 8) || (!o.dashBound && (s[4] & 2))) return false;
     if (Math.hypot(s[2] - s[0], s[3] - s[1]) < minL) return false;
     if (wall) { const st = (g.styles[s[6]] || "|0").split("|"); if (st[0] !== wall.col || +st[1] < 0.9 * wall.w) return false; }
     return true; });
   out.doors = (door.lines || []).concat(jambLines(out, k, o.gap)); out.doorIds = [...door].concat(ids.filter(i => cloud.has(i)));
+  out.hatch = ids.filter(i => hat.has(i)).map(i => { const s = g.segs[i], L = Math.hypot(s[2] - s[0], s[3] - s[1]), e = Math.min(0.2 * k, L / 4) / L, dx = (s[2] - s[0]) * e, dy = (s[3] - s[1]) * e; return [s[0] + dx, s[1] + dy, s[2] - dx, s[3] - dy]; });   // erased from the picture short of their ends, so the wall they touch stays whole
   return out;
 }
+/* long work (auto area) hands the page back to the browser about every 40 ms, so clicks, scrolling and the busy note
+   stay live while a room is traced instead of the page freezing for seconds */
+let lastBreath = 0;
+function breathe(){ if (performance.now() - lastBreath < 40) return null;
+  return new Promise(r => { const c = new MessageChannel(); c.port1.onmessage = () => { lastBreath = performance.now(); r(); }; c.port2.postMessage(0); }); }
+function sliced(task){ task.onContinue = go => { const b = breathe(); if (b) b.then(go); else go(); }; return task; }   // a pdf.js render that lets the browser in between its 15 ms chunks
 function edt2(f, W, H){   // squared Euclidean distance transform in place (Felzenszwalb & Huttenlocher); f = 0 on features, 1e20 elsewhere
   const n = Math.max(W, H), g = new Float64Array(n), d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
   const one = len => {
@@ -832,7 +1017,19 @@ function edt2(f, W, H){   // squared Euclidean distance transform in place (Felz
   for (let x = 0; x < W; x++) { for (let y = 0; y < H; y++) g[y] = f[y * W + x]; one(H); for (let y = 0; y < H; y++) f[y * W + x] = d[y]; }
   for (let y = 0; y < H; y++) { for (let x = 0; x < W; x++) g[x] = f[y * W + x]; one(W); for (let x = 0; x < W; x++) f[y * W + x] = d[x]; }
 }
-function closeMask(m, W, H, R){   // morphological closing with a disc of radius R px: fills pockets and notches narrower than 2R
+/* runs fn on the part of the window round the mask's extent (pad px each way) and writes the mask back: the pocket and
+   closing steps can only change pixels that near the room, and a room is a small part of the 90 ft window */
+function cropRun(m, W, H, pad, others, fn){
+  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for (let i = 0; i < m.length; i++) if (m[i]) { const x = i % W, y = (i - x) / W; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W - 1, x1 + pad); y1 = Math.min(H - 1, y1 + pad);
+  if (x1 < x0 || (x0 === 0 && y0 === 0 && x1 === W - 1 && y1 === H - 1)) return fn(m, W, H, others);
+  const w = x1 - x0 + 1, h = y1 - y0 + 1, cut = a => { if (!a) return a; const o = new a.constructor(w * h); for (let y = 0; y < h; y++) o.set(a.subarray((y + y0) * W + x0, (y + y0) * W + x0 + w), y * w); return o; };
+  const mc = cut(m); fn(mc, w, h, others.map(cut));
+  for (let y = 0; y < h; y++) m.set(mc.subarray(y * w, (y + 1) * w), (y + y0) * W + x0);
+}
+function closeMask(m, W, H, R){ cropRun(m, W, H, Math.ceil(R) + 3, [], (mm, w, h) => closeMaskWin(mm, w, h, R)); }
+function closeMaskWin(m, W, H, R){   // morphological closing with a disc of radius R px: fills pockets and notches narrower than 2R
   const N = W * H, f = new Float32Array(N), R2 = R * R;
   for (let i = 0; i < N; i++) f[i] = m[i] ? 0 : 1e20;
   edt2(f, W, H);
@@ -843,8 +1040,11 @@ function closeMask(m, W, H, R){   // morphological closing with a disc of radius
 /* pockets: with the walls right round the room counted as room, whatever is then fully enclosed — furniture or a
    wardrobe against a wall, a door swing — is a pocket of this room and is added (up to maxPx pixels). The next room is
    never enclosed: its own walls, further off, join it to the outside. */
-function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx, named){
+function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx, named){   // (a pocket lies within the walls round the room)
+  cropRun(m, W, H, Math.ceil(wallPx) + 10, [ink, named], (mm, w, h, [ic, nc]) => fillPocketsWin(mm, ic, w, h, wallPx, maxPx, minTouch, minPx, nc)); }
+function fillPocketsWin(m, ink, W, H, wallPx, maxPx, minTouch, minPx, named){
   const N = W * H, f = new Float32Array(N);
+  let rx0 = W, ry0 = H, rx1 = -1, ry1 = -1; for (let i = 0; i < N; i++) if (m[i]) { const x = i % W, y = (i - x) / W; if (x < rx0) rx0 = x; if (x > rx1) rx1 = x; if (y < ry0) ry0 = y; if (y > ry1) ry1 = y; }   // the room's extent
   for (let i = 0; i < N; i++) f[i] = m[i] ? 0 : 1e20;
   edt2(f, W, H);
   const solid = new Uint8Array(N), w2 = wallPx * wallPx;
@@ -852,15 +1052,16 @@ function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx, named){
   const seen = new Uint8Array(N), st = new Int32Array(N);
   for (let i0 = 0; i0 < N; i0++) {
     if (solid[i0] || seen[i0]) continue;
-    const comp = []; let top = 0, open = false, touch = 0; seen[i0] = 1; st[top++] = i0;
-    while (top) { const i = st[--top], x = i % W, y = (i - x) / W; comp.push(i);
+    const comp = []; let top = 0, open = false, touch = 0, cnt = 0, cx0 = W, cy0 = H, cx1 = -1, cy1 = -1; seen[i0] = 1; st[top++] = i0;
+    while (top) { const i = st[--top], x = i % W, y = (i - x) / W; if (!open && ++cnt <= maxPx) comp.push(i); if (x < cx0) cx0 = x; if (x > cx1) cx1 = x; if (y < cy0) cy0 = y; if (y > cy1) cy1 = y;
       if (x === 0 || y === 0 || x === W - 1 || y === H - 1) open = true;
       if (f[i] <= 64) touch++;   // within 8 px of the room: only an outline between
       if (x > 0 && !solid[i - 1] && !seen[i - 1]) { seen[i - 1] = 1; st[top++] = i - 1; }
       if (x < W - 1 && !solid[i + 1] && !seen[i + 1]) { seen[i + 1] = 1; st[top++] = i + 1; }
       if (y > 0 && !solid[i - W] && !seen[i - W]) { seen[i - W] = 1; st[top++] = i - W; }
       if (y < H - 1 && !solid[i + W] && !seen[i + W]) { seen[i + W] = 1; st[top++] = i + W; } }
-    if (!open && touch >= minTouch && comp.length >= minPx && comp.length <= maxPx && !(named && comp.some(i => named[i]))) comp.forEach(i => { m[i] = 1; });   // gaps in a wall's hatching are smaller
+    const ring = rx1 >= rx0 && cx1 - cx0 >= 0.9 * (rx1 - rx0) && cy1 - cy0 >= 0.9 * (ry1 - ry0);   // all the way round the room: the hollow of its wall (a round room's), not furniture
+    if (!open && !ring && touch >= minTouch && cnt >= minPx && cnt <= maxPx && !(named && comp.some(i => named[i]))) comp.forEach(i => { m[i] = 1; });   // gaps in a wall's hatching are smaller
   }
   // the room's own ink inside it (furniture outlines, text) is part of the floor too
   for (let i = 0; i < N; i++) if (!m[i] && ink[i]) { const x = i % W; let n = 0;
@@ -942,7 +1143,7 @@ function squareUp(Q, tol, gap, maxD){   // near-rectilinear outline -> rectiline
    the wall's thickness, leaving a tab (out and back) or a step (the face jumps out and carries on). A tab up to 1 ft deep
    and 3 ft wide, or a step up to 0.75 ft, is cut back to the room's face when that face is a drawn line (ink along at
    least 30% of it) or the bite is under 1.5 Sft. Only bites outward (that add area) are cut. */
-function deTab(Q, k, inkAt, px){
+function deTab(Q, k, inkAt, px, gap){
   const ink = (a, b) => { const L = dist(a, b), n = Math.max(2, Math.ceil(L / px)); let h = 0; for (let i = 0; i <= n; i++) if (inkAt(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n)) h++; return h / (n + 1); };
   const ok = (cut, rem) => rem > 0 && rem <= 4 * k * k && (rem <= 1.5 * k * k || ink(cut[0], cut[1]) >= 0.3);
   const dir = (a, b) => { const d = [b[0] - a[0], b[1] - a[1]], l = Math.hypot(d[0], d[1]) || 1; return [d[0] / l, d[1] / l]; };
@@ -955,9 +1156,14 @@ function deTab(Q, k, inkAt, px){
       const b = at(i), c = at(i + 1), d = at(i + 2), e = at(i + 3);
       // tab: b→c out, c→d across, d→e back
       if (n >= 6) { const u1 = dir(b, c), u2 = dir(c, d), u3 = dir(d, e), l1 = dist(b, c), l2 = dist(c, d), l3 = dist(d, e);
-        if (Math.abs(dot(u1, u2)) < 0.05 && dot(u1, u3) < -0.95 && l1 <= k && l3 <= k && Math.abs(l1 - l3) <= 0.15 * k && l2 <= 3 * k) {
+        if (Math.abs(dot(u1, u2)) < 0.05 && dot(u1, u3) < -0.95 && Math.abs(l1 - l3) <= 0.15 * k) {
           const Q2 = Q.filter((_, j) => j !== (i + 1) % n && j !== (i + 2) % n), rem = A0 - polyArea(Q2);
-          if (ok([b, e], rem)) { Q = Q2; done = true; continue; } } }
+          if (l1 <= k && l3 <= k && l2 <= 3 * k && ok([b, e], rem)) { Q = Q2; done = true; continue; }
+          // a doorway: the tab's far side crosses open space (where the gap was closed) and its two sides run along the
+          // jambs — the opening is closed on the room's face of the wall, whatever its width up to the door gap
+          if (gap && l1 <= 1.25 * k && l3 <= 1.25 * k && l2 <= (gap + 0.5) * k && rem > 0 && rem <= (gap + 0.5) * 1.25 * k * k
+            && ink([c[0] + (d[0] - c[0]) * 0.15, c[1] + (d[1] - c[1]) * 0.15], [c[0] + (d[0] - c[0]) * 0.85, c[1] + (d[1] - c[1]) * 0.85]) < 0.15   // (its ends pass the jambs' corners)
+            && ink(b, c) >= 0.5 && ink(d, e) >= 0.5) { Q = Q2; done = true; continue; } } }
       // step: a→b along, b→c short jog, c→d along the same way
       const a = at(i - 1), z = at(i - 2), l = dist(b, c), ua = dir(a, b), uj = dir(b, c), ud = dir(c, d);
       if (l <= 0.75 * k && Math.abs(dot(ua, uj)) < 0.05 && dot(ua, ud) > 0.95) {
@@ -977,6 +1183,59 @@ function deTab(Q, k, inkAt, px){
   }
   return Q;
 }
+/* a scanned drawing has no lines to snap to: a side of a square outline that lies inside a wall — where it runs along the
+   wall it is several pixels into the wall's ink (the room grown back through an opening as wide as the door gap) — goes
+   back to the wall's face. Sides only move inward, and only when most of the ink they run along is deep. */
+function pushSides(Q, inkPx, px, k){
+  const n = Q.length; if (n < 4) return Q;
+  const A0 = polyArea(Q); let R = Q.map(p => p.slice());
+  for (let i = 0; i < n; i++) {
+    const a = R[i], b = R[(i + 1) % n], L = dist(a, b); if (L < 3 * px) continue;
+    const ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L; if (Math.abs(ux) > 1e-6 && Math.abs(uy) > 1e-6) continue;   // square sides only
+    let nx = -uy, ny = ux; if (!pointInPoly([(a[0] + b[0]) / 2 + nx * px, (a[1] + b[1]) / 2 + ny * px], R)) { nx = -nx; ny = -ny; }   // inward
+    const ds = []; let cnt = 0;
+    for (let t = 2 * px; t <= L - 2 * px; t += px) { cnt++; const x = a[0] + ux * t, y = a[1] + uy * t; if (!inkPx(x, y)) continue;   // (not at the corners)
+      let d = 0; while (d < 0.6 * k && inkPx(x + nx * d, y + ny * d)) d += px / 2; if (d < 0.6 * k) ds.push(d); }   // (ink on and on: another wall met end-on)
+    if (!ds.length || ds.length < 0.15 * cnt) continue;
+    // the ink of a scan reaches about 1.5 px past the wall's face, and a side on the face sits that far into it
+    ds.sort((p, q) => p - q); const med = ds[ds.length >> 1]; if (med < 3.5 * px) continue;
+    const sh = med - 1.5 * px, R2 = R.map(p => p.slice()); R2[i] = [a[0] + nx * sh, a[1] + ny * sh]; R2[(i + 1) % n] = [b[0] + nx * sh, b[1] + ny * sh];
+    if (!selfCross(R2) && polyArea(R2) < polyArea(R) && polyArea(R2) > 0.9 * A0) R = R2;
+  }
+  return R;
+}
+/* an outline that is not square to the sheet (a room turned 45°, a bay, a round room): a round one is fitted as a circle on
+   the wall it follows; otherwise each side long enough is moved onto the drawing line parallel to it within tol (the
+   outward one first: a wall face is outside the room), the rest out by dflt, and the corners re-made where the sides
+   meet. Falls back to the plain offset if the result is not a clean outline near the traced one. */
+function snapPoly(Q, segs, tol, k, dflt, slack){
+  const base = offsetPoly(Q, dflt), n = Q.length; if (n < 3) return base;
+  const A0 = polyArea(base);
+  // round: every corner about as far from the centre
+  if (n >= 10) { const c = [Q.reduce((a, q) => a + q[0], 0) / n, Q.reduce((a, q) => a + q[1], 0) / n], rr = Q.map(q => dist(q, c)), r = rr.reduce((a, v) => a + v, 0) / n;
+    if (r > 1.5 * k && rr.every(v => Math.abs(v - r) < 0.04 * r)) {
+      const near = []; segs.forEach(s => { if (!(s[4] & 1)) return; const d = (dist([s[0], s[1]], c) + dist([s[2], s[3]], c)) / 2; if (Math.abs(d - r) < tol) near.push(d); });
+      let R0 = r + dflt; if (near.length >= 6) { near.sort((a, b) => a - b); const inner = near.filter(d => d >= r - slack); R0 = (inner.length ? inner : near)[0]; R0 = near.filter(d => Math.abs(d - R0) < 0.05 * k).reduce((a, v, _, z) => a + v / z.length, 0); }
+      const m = 120, f = Math.sqrt(2 * Math.PI / (m * Math.sin(2 * Math.PI / m)));   // a 120-gon with the circle's area (its corners just outside the circle)
+      const C = Array.from({length: m}, (_, i) => [c[0] + R0 * f * Math.cos(2 * Math.PI * i / m), c[1] + R0 * f * Math.sin(2 * Math.PI * i / m)]);
+      if (Math.abs(polyArea(C) / A0 - 1) < 0.15) return C; } }
+  const sg = signedArea(Q) > 0 ? 1 : -1, L = [];
+  for (let i = 0; i < n; i++) {
+    const a = Q[i], b = Q[(i + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1, u = [dx / len, dy / len], nn = [sg * dy / len, -sg * dx / len];
+    let best = null;
+    if (len >= 0.75 * k) segs.forEach(s => { const sx = s[2] - s[0], sy = s[3] - s[1], sl = Math.hypot(sx, sy); if (sl < 0.3 * k) return;
+      if (Math.abs(u[0] * sy - u[1] * sx) / sl > 0.035) return;   // not parallel (2°)
+      const off = (s[0] - (a[0] + b[0]) / 2) * nn[0] + (s[1] - (a[1] + b[1]) / 2) * nn[1]; if (Math.abs(off) > tol) return;
+      const t = (x, y) => (x - a[0]) * u[0] + (y - a[1]) * u[1], t0 = Math.min(t(s[0], s[1]), t(s[2], s[3])), t1 = Math.max(t(s[0], s[1]), t(s[2], s[3]));
+      if (Math.min(len, t1) - Math.max(0, t0) < Math.min(0.3 * len, k)) return;
+      const o = off >= -(slack || 0) ? 0 : 1; if (!best || o < best.o || (o === best.o && Math.abs(off) < Math.abs(best.off))) best = {off, o}; });
+    const d = best ? best.off : dflt; L.push({p: [a[0] + nn[0] * d, a[1] + nn[1] * d], u, n: nn, d});
+  }
+  const out = Q.map((q, i) => { const A = L[(i + n - 1) % n], B = L[i], den = A.u[0] * B.u[1] - A.u[1] * B.u[0];
+    if (Math.abs(den) < 0.05) return [q[0] + (A.n[0] * A.d + B.n[0] * B.d) / 2, q[1] + (A.n[1] * A.d + B.n[1] * B.d) / 2];
+    const t = ((B.p[0] - A.p[0]) * B.u[1] - (B.p[1] - A.p[1]) * B.u[0]) / den; return [A.p[0] + A.u[0] * t, A.p[1] + A.u[1] * t]; });
+  return selfCross(out) || Math.abs(polyArea(out) / A0 - 1) > 0.15 ? base : out;
+}
 function offsetPoly(Q, d){   // every edge moved outward by d
   const n = Q.length, s = signedArea(Q) > 0 ? 1 : -1, L = [];
   for (let i = 0; i < n; i++) { const a = Q[i], b = Q[(i + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, nn = [s * dy / l, -s * dx / l];
@@ -985,14 +1244,15 @@ function offsetPoly(Q, d){   // every edge moved outward by d
     if (Math.abs(den) < 1e-6) return [q[0] + B.n[0] * d, q[1] + B.n[1] * d];
     const t = ((B.p[0] - A.p[0]) * B.u[1] - (B.p[1] - A.p[1]) * B.u[0]) / den; return [A.p[0] + A.u[0] * t, A.p[1] + A.u[1] * t]; });
 }
-function snapToWalls(Q, g, ids, tol, k, slack){   // rectilinear outline: each edge onto the nearest parallel drawing line it runs along —
+function snapToWalls(Q, g, ids, tol, k, slack, extra){   // rectilinear outline: each edge onto the nearest parallel drawing line it runs along —
   const E = orthoEdges(Q), sgn = signedArea(Q) > 0 ? 1 : -1;   // on the outward side first: a wall face is outside the room, furniture inside
   if (E.some(e => e.o === "D")) return Q;
+  const segs = ids.map(i => g.segs[i]).concat(extra || []);   // (extra: the lines closing door openings — they run along the wall face)
   E.forEach(e => {
     const out = e.o === "H" ? -sgn * e.dir : sgn * e.dir;   // outward normal of this edge along y (H) or x (V)
     const lo = Math.min(e.o === "H" ? e.a[0] : e.a[1], e.o === "H" ? e.b[0] : e.b[1]), hi = Math.max(e.o === "H" ? e.a[0] : e.a[1], e.o === "H" ? e.b[0] : e.b[1]);
     let best = null;
-    ids.forEach(i => { const s = g.segs[i], h = Math.abs(s[3] - s[1]) <= 0.02 * Math.abs(s[2] - s[0]), v = Math.abs(s[2] - s[0]) <= 0.02 * Math.abs(s[3] - s[1]);
+    segs.forEach(s => { const h = Math.abs(s[3] - s[1]) <= 0.02 * Math.abs(s[2] - s[0]), v = Math.abs(s[2] - s[0]) <= 0.02 * Math.abs(s[3] - s[1]);
       if (e.o === "H" ? !h : !v) return;
       const c = e.o === "H" ? (s[1] + s[3]) / 2 : (s[0] + s[2]) / 2, d = Math.abs(c - e.c); if (d > tol) return;
       const a0 = Math.min(e.o === "H" ? s[0] : s[1], e.o === "H" ? s[2] : s[3]), a1 = Math.max(e.o === "H" ? s[0] : s[1], e.o === "H" ? s[2] : s[3]);
@@ -1008,7 +1268,8 @@ function snapToWalls(Q, g, ids, tol, k, slack){   // rectilinear outline: each e
 async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  await S.page.render({...(ocb ? {optionalContentConfigPromise: Promise.resolve(ocb)} : lay(S.fileId)), canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}).promise;
+  const rt = sliced(S.page.render({...(ocb ? {optionalContentConfigPromise: Promise.resolve(ocb)} : lay(S.fileId)), canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}));
+  await rt.promise; await breathe();
   const d = ctx.getImageData(0, 0, W, H).data, N = W * H, m = new Uint8Array(N);
   for (let i = 0; i < N; i++) m[i] = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) < 190 ? 1 : 0;
   if (erase && erase.length) {   // door swings and leaves: not walls, and a leaf open against a wall must not fuse into it
@@ -1031,7 +1292,7 @@ async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
   };
   // small separate marks go first: letters, stipple dots, dashed door swings — and the dashes of dashed lines, unless they
   // run on in a straight row (a dashed boundary of an open area): those rows are joined into one solid line and kept
-  const small = [];
+  const small = []; await breathe();
   comps(m, (c, w, h) => { if (Math.max(w, h) < minPx) small.push({c, x0: c.reduce((a, i) => Math.min(a, i % W), W), y0: c.reduce((a, i) => Math.min(a, (i - i % W) / W), H), w, h}); });
   if (dashBound) {
     const G = 0.8 * kft / px, L = 2 * kft / px, keep = new Set();
@@ -1057,17 +1318,18 @@ async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
   } else small.forEach(d => d.c.forEach(i => { m[i] = 0; }));
   // then ink closer than ~0.4 ft fuses (hatching into a solid wall, so no fill runs between its strokes), 1 px thicker
   // so an 8-neighbour step cannot slip between diagonal pixels
+  await breathe();
   const rc = Math.max(1.5, 0.2 * kft / px), f = new Float32Array(N);
   for (let i = 0; i < N; i++) f[i] = m[i] ? 0 : 1e20;
-  edt2(f, W, H);
+  edt2(f, W, H); await breathe();
   const dil = new Uint8Array(N); for (let i = 0; i < N; i++) dil[i] = f[i] <= rc * rc ? 1 : 0;
   for (let i = 0; i < N; i++) f[i] = dil[i] ? 1e20 : 0;
-  edt2(f, W, H);
+  edt2(f, W, H); await breathe();
   const thin = new Uint8Array(N), keep = (rc - 1) * (rc - 1);
   for (let i = 0; i < N; i++) thin[i] = m[i] || f[i] > keep ? 1 : 0;
   // the wall network: marks spanning 8 ft or more. Loose marks inside a room (a word, a tag, a free-standing bed) bound
   // the room but must not split its core when openings are closed
-  const big = new Uint8Array(N), bigPx = 8 * kft / px;
+  await breathe(); const big = new Uint8Array(N), bigPx = 8 * kft / px;
   comps(thin, (c, w, h) => { if (Math.max(w, h) >= bigPx) c.forEach(i => { big[i] = 1; }); });
   return {thin, big};
 }
@@ -1120,19 +1382,27 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
       fences.forEach(f => f.pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke();
       const d = ctx.getImageData(0, 0, W, H).data, b = new Uint8Array(W * H); for (let i = 0; i < b.length; i++) b[i] = d[i * 4 + 3] > 24 ? 1 : 0; return b; };
     let thin, bar, ink = null;
-    if (img) { ink = await inkMask(x0, y0, W, H, px, Math.max(o.minLen, 1) * k / px, o.dashBound, k, (ids.doorIds || []).map(i => g.segs[i]), ocb); thin = ink.thin;   // a solid door swing stays in: its area is a pocket, added back
+    if (img) { ink = await inkMask(x0, y0, W, H, px, Math.max(o.minLen, 1) * k / px, o.dashBound, k, (ids.doorIds || []).map(i => g.segs[i]).concat(ids.hatch || []), ocb); thin = ink.thin;   // a solid door swing stays in: its area is a pocket, added back
       if (ids.doors.length) { const dl = raster(2 * px, true); for (let i = 0; i < N; i++) if (dl[i]) { thin[i] = 1; ink.big[i] = 1; } }
-      bar = widen(ink.big, W, H, o.gap * k / px / 2); }
+      await breathe(); bar = widen(ink.big, W, H, o.gap * k / px / 2); }
     else { thin = raster(2 * px); bar = raster(Math.max(o.gap * k, 2 * px)); }
+    await breathe();
     if (g.segs.length) { const cav = wallCavities(x0, y0, W, H, px, k, img ? ink.big : null, ids); for (let i = 0; i < N; i++) if (cav[i]) thin[i] = 1; }   // hollow walls are wall, not a recess of the room
     if (fences.length) { const fm = fenceMask(); for (let i = 0; i < N; i++) if (fm[i]) { thin[i] = 1; bar[i] = 1; } }   // the user's fences close what the drawing leaves open
     if (o.show) S.autoShow = {key: S.key, x0, y0, px, W, H, url: maskUrl(thin, W, H)};
-    const named = labelMask(x0, y0, W, H, px, o.own);
+    await breathe(); const named = labelMask(x0, y0, W, H, px, o.own);
+    // the click in a space narrower than the door gap (a passage, a corridor as wide as a door): its width and length here
+    const csx = Math.floor((seed[0] - x0) / px), csy = Math.floor((seed[1] - y0) / px); let passage = null;
+    if (csx > 0 && csy > 0 && csx < W - 1 && csy < H - 1 && !thin[csy * W + csx] && bar[csy * W + csx]) {
+      const run = (dx, dy) => { let n = 0, x = csx, y = csy; while (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !thin[y * W + x]) { x += dx; y += dy; n++; } return n; };
+      const hx = run(1, 0) + run(-1, 0), vy = run(0, 1) + run(0, -1), rm = Math.ceil(o.gap * k / px);
+      let d2 = Infinity; for (let dy = -rm; dy <= rm; dy++) for (let dx = -rm; dx <= rm; dx++) { const x = csx + dx, y = csy + dy, q = dx * dx + dy * dy; if (q < d2 && x >= 0 && y >= 0 && x < W && y < H && thin[y * W + x]) d2 = q; }
+      passage = {w: 2 * Math.sqrt(d2) * px / k, along: Math.max(hx, vy) * px / k, horiz: hx >= vy}; }   // width: twice the way to the nearest wall (a ray across could run out through a doorway)
     // B: every line widened to the door gap, so all openings close — the room's core — grown back out to the wall faces
     const sb = seedIn(bar, rpx), sa = seedIn(thin, 4);
     let m;
     if (sb >= 0) {
-      const B = fill(bar, sb, true); if (!B) continue;
+      await breathe(); const B = fill(bar, sb, true); if (!B) continue; await breathe();
       m = B.m; let front = []; for (let i = 0; i < N; i++) if (m[i]) front.push(i);
       for (let layer = 0; layer < rpx && front.length; layer++) {
         const nf = [];
@@ -1143,7 +1413,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
       // A: the thin lines with the door swings' openings closed. What A reaches beyond B is added back where it is too
       // narrow to be a room of its own (the strip beside a bed or a wardrobe); a part with an open core of its own is the
       // next room, through an opening with no door drawn, and stays out.
-      const A = sa >= 0 ? fill(thin, sa, false) : null;
+      await breathe(); const A = sa >= 0 ? fill(thin, sa, false) : null; await breathe();
       if (A) {
         const seen = new Uint8Array(N), st = new Int32Array(N);
         for (let i0 = 0; i0 < N; i0++) {
@@ -1157,19 +1427,27 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
       }
     } else {   // narrower than the gap all over (a passage): the thin-line fill alone, if it stays closed
       const A = sa >= 0 ? fill(thin, sa, true) : null;
-      if (!A) return {err: "This space is narrower than the door gap (" + f3(o.gap) + " ft) and is not closed — lower ‘Close gaps’ in the auto-area settings (⚙), or draw it."};
+      if (!A) return {err: "This space is narrower than the door gap (" + f3(o.gap) + " ft) and is not closed — lower ‘Close gaps’ in the auto-area settings (⚙), or draw it.", passage};
       m = A.m;
     }
-    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2, named); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
-    const loop = outerLoop(m, W, H); if (!loop || loop.length < 4) return {err: "No closed space found at that point."};
+    await breathe();
+    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) { await breathe(); fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2, named); } await breathe(); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
+    let partial = false;
+    if (passage) { let n = 0; if (passage.horiz) { for (let x = 0; x < W; x++) if (m[csy * W + x]) n++; } else for (let y = 0; y < H; y++) if (m[y * W + csx]) n++;
+      partial = n * px / k < 0.6 * passage.along; }   // the outline takes in less than 60 % of the passage's length: a piece by a doorway, not the passage
+    await breathe(); const loop = outerLoop(m, W, H); if (!loop || loop.length < 4) return {err: "No closed space found at that point.", passage};
     let Q = dpClosed(loop.map(p => [x0 + p[0] * px, y0 + p[1] * px]), 1.6 * px);
     const sq = squareUp(Q, 3 * px, o.gap * k, Math.max(o.gap, o.pocket) * k);
-    Q = sq ? (ids.length ? snapToWalls(sq, g, ids, Math.max(4 * px, 0.35 * k), k, px) : offsetPoly(sq, (img ? 1.5 : 1) * px)) : offsetPoly(Q, (img ? 1.5 : 1) * px);
+    Q = sq ? (ids.length ? snapToWalls(sq, g, ids, Math.max(4 * px, 0.35 * k), k, px, ids.doors) : offsetPoly(sq, (img ? 1.5 : 1) * px))
+      : ids.length ? snapPoly(Q, ids.map(i => g.segs[i]).concat(ids.doors), Math.max(4 * px, 0.35 * k), k, (img ? 1.5 : 1) * px, px) : offsetPoly(Q, (img ? 1.5 : 1) * px);
     Q = cleanPoly(Q);
+    const inkPx = (x, y) => { const u = Math.round((x - x0) / px), v = Math.round((y - y0) / px); return u >= 0 && v >= 0 && u < W && v < H && !!thin[v * W + u]; };
+    if (sq && !ids.length) Q = cleanPoly(pushSides(Q, inkPx, px, k));   // (before the tabs: a doorway's two jambs then line up)
     if (sq) Q = cleanPoly(deTab(Q, k, (x, y) => { const xx = Math.round((x - x0) / px), yy = Math.round((y - y0) / px);
-      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const u = xx + dx, v = yy + dy; if (u >= 0 && v >= 0 && u < W && v < H && thin[v * W + u]) return true; } return false; }, px));
-    if (Q.length < 3 || polyArea(Q) < 1e-6) return {err: "No closed space found at that point."};
-    return {pts: Q, rect: !!sq};
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const u = xx + dx, v = yy + dy; if (u >= 0 && v >= 0 && u < W && v < H && thin[v * W + u]) return true; } return false; }, px, o.gap));
+    if (sq && !ids.length) Q = cleanPoly(pushSides(Q, inkPx, px, k));
+    if (Q.length < 3 || polyArea(Q) < 1e-6) return {err: "No closed space found at that point.", passage};
+    return {pts: Q, rect: !!sq, passage, partial};
   }
   return {err: "The space leaks — an opening wider than the door gap (" + f3(autoOpt().gap) + " ft) joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it."};
 }
@@ -1206,23 +1484,35 @@ async function autoAt(p){
   const c = S.cond ? cond(S.cond) : null; if (!c) return;
   if (P.proj.items.some(it => it.cond === c.id && it.file === S.fileId && it.page === S.pageNo && it.kind === "shape" && c.type === "area" && pointInPoly(p, it.pts)))
     return toast("Already measured — this point is inside an area of " + c.name);
-  busy("Finding the room…");
+  if (S.autoBusy) return toast("Still tracing the last room…", 1500);
+  busy("Finding the room…"); S.autoBusy = true;
+  const key = S.key;
   await new Promise(r => setTimeout(r, 20));
   let res; try { res = await autoRoomGuarded(p); } catch (e) { res = {err: "Auto area failed: " + (e.message || e)}; }
-  busy("");
+  busy(""); S.autoBusy = false;
+  if (S.key !== key || !cond(c.id)) return toast("The page changed while the room was traced — nothing added; click again", 4000);   // never a room of one page put on another
   if (res.err) return toast(res.err, 6000);
   const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "";
   mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm}); });
   S.sel = id; draw(); renderSheet();
   const k = hereScale(p);
+  if (res.short && !res.leak) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — " + res.short + ".", 9000);
   if (res.leak) { if (!autoOpt().show) { P.proj.auto = Object.assign({}, P.proj.auto || {}, {show: true}); save(); }
-    return toast("⚠ " + (nm || "Room") + " " + f2(polyArea(res.pts) / k / k) + " Sft — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
-  toast((nm || "Room") + " " + f2(polyArea(res.pts) / k / k) + " Sft" + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
+    return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
+  toast((nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
 }
 /* Leak guard: a room's outline must not swallow another room's name, nor grow far past its own written size.
    When it does, trace again closing wider gaps and dashed lines, and keep the first clean outline. */
 async function autoRoomGuarded(p){
-  const first = await autoRoom(p); if (first.err) return first;
+  let first = await autoRoom(p);
+  // a passage about as narrow as the door gap (a 4 ft corridor, gap 4 ft): traced again closing openings just under its width
+  // (doorways on it close, it does not), when the first trace failed or took in only a piece of it
+  if (first.passage && (first.err || first.partial)) {
+    for (const f of [0.9, 0.8, 0.7, 0.6]) { const g2 = Math.max(1.2, f * autoOpt().gap); busy("A passage as narrow as the door gap — closing openings up to " + f3(g2) + " ft…");
+      const r2 = await autoRoom(p, {gap: g2}); if (!r2.err && !r2.partial) { r2.note = "passage narrower than the door gap: openings closed up to " + f3(g2) + " ft"; first = r2; break; } }
+    if (!first.err && first.partial) first.short = "only part of a passage narrower than the door gap was found — Ctrl+Z, set ‘Close gaps’ (⚙) below the passage's width and click again";
+  }
+  if (first.err) return first;
   let F = null; try { F = await drawingFacts(S.fileId, S.pageNo); } catch (e) {}
   if (!F || !F.rooms.length) return first;
   const k = hereScale(p), o = autoOpt();
@@ -1401,7 +1691,7 @@ function renderBill(){
       const amt = l.qty * l.rate; tot += amt;
       h += `<tr class="${l.kind === "cond" ? "ch2" : "it"}"><td>${l.kind === "asm" ? "↳ " : `${++n}. <span class="sw" style="background:${l.c.color}"></span>`}${l.boq ? `<span class="boq">${esc(l.boq)}</span> ` : ""}${esc(l.name)}${l.kind === "cond" ? ` <button class="rn" data-asm="${esc(l.c.id)}" title="Items this condition drives, and rates">&#9881; Assembly</button>` : ""}
         <div class="ds">${l.kind === "asm" ? (l.err ? '<span style="color:var(--red)">' + esc(l.err) + "</span>" : "= " + esc(l.f)) : "measured"} · ${rateNote(l)}</div></td>
-        <td class="n">${f2(l.qty)}<div class="ds">${esc(l.unit)}</div></td><td class="n">${l.rate ? f2(l.rate) : "—"}</td><td class="n">${l.rate ? f2(amt) : "—"}</td></tr>`;
+        <td class="n">${fq(l.qty, l.unit)}<div class="ds">${esc(l.unit)}</div></td><td class="n">${l.rate ? f2(l.rate) : "—"}</td><td class="n">${l.rate ? f2(amt) : "—"}</td></tr>`;
     });
     all += tot;
     h += `<tr class="tot"><td>Total${g.name ? " " + esc(g.name) : ""}</td><td></td><td></td><td class="n">${f2(tot)}</td></tr>`;
@@ -1420,7 +1710,7 @@ async function asmDialog(c){
     <td><input type="text" data-k="f" value="${esc(a.f || "")}" placeholder="A*1.05"></td><td><input type="text" data-k="boq" value="${esc(a.boq || "")}" style="width:78px" placeholder="BOQ code"></td><td><input type="text" data-k="ra" value="${esc(a.ra || "")}" style="width:92px" placeholder="RA code" list="dlRa2"></td><td><input type="number" data-k="rate" value="${a.rate || ""}" style="width:80px" placeholder="0"></td>
     <td><input type="text" data-k="src" value="${esc(a.src || "")}" placeholder="source"></td><td><input type="date" data-k="date" value="${esc(a.date || "")}"></td><td><button class="btn sm dng" data-del="${n}" type="button">&times;</button></td></tr>`;
   const cr = rateOf(c, c.unit);
-  const body = () => `<p class="small">Now: Q = ${f2(vars.Q)} ${esc(c.unit)}${c.type === "area" ? ` · A = ${f2(vars.A)} Sft · P = ${f3(vars.P)} ft · PD = ${f3(vars.PD)} ft (P less ${f3(vars.D)} ft of doors)` : ""}${c.type === "linear" ? ` · L = ${f3(vars.L)} ft` : ""} · N = ${vars.N}${vars.H ? " · H = " + f3(vars.H) : ""}${vars.T ? " · T = " + f3(vars.T) : ""}.
+  const body = () => `<p class="small">Now: Q = ${fq(vars.Q, c.unit)} ${esc(c.unit)}${c.type === "area" ? ` · A = ${fq(vars.A)} Sft · P = ${f3(vars.P)} ft · PD = ${f3(vars.PD)} ft (P less ${f3(vars.D)} ft of doors)` : ""}${c.type === "linear" ? ` · L = ${f3(vars.L)} ft` : ""} · N = ${vars.N}${vars.H ? " · H = " + f3(vars.H) : ""}${vars.T ? " · T = " + f3(vars.T) : ""}.
     Formulas use Q A P PD D L N H T and ceil floor round min max abs sqrt, e.g. <code>A*1.05</code>, <code>PD</code> (skirting), <code>ceil(A/4)</code>.</p>
     ${c.ra ? `<p class="small" style="margin-top:6px">${esc(c.name)} is linked to Rate Analysis <b>${esc(c.ra)}</b> (condition editor): ${cr.na ? `<span style="color:var(--red)">${esc(cr.na)}</span>` : "PKR " + f2(cr.rate) + " / " + esc(c.unit) + " — the typed rate below is not used"}.</p>` : ""}
     <div class="grid" style="margin:8px 0"><div class="fg"><label>Rate for ${esc(c.name)} (PKR / ${esc(c.unit)})</label><input type="number" id="crRate" value="${c.rate || ""}" placeholder="0"></div>
@@ -1628,7 +1918,7 @@ function onUp(e){
   if (S.touches) { delete S.touches[e.pointerId]; if (Object.keys(S.touches).length < 2) S.pinch = null; }
   if (S.drag && S.drag.move) { endMove(); return; }
   if (S.drag && S.drag.vertex != null && S.drag.moved) { const D = S.drag, it = P.proj.items.find(i => i.id === D.item);
-    if (it) { const pts = it.pts.slice(); it.pts = D.orig; if (D.arcs) it.arcs = D.arcs; mutate(() => { it.pts = pts; if (D.ins) delete it.arcs; qaMoved(it); }, D.ins ? "Add point" : "Move point"); if (D.ins) S.lastIns = {id: it.id, vi: D.vertex, t: Date.now()}; } }
+    if (it) { const pts = it.pts.slice(); it.pts = D.orig; if (D.arcs) it.arcs = D.arcs; mutate(() => { it.pts = pts; if (D.ins) delete it.arcs; qaMoved(it); }, D.ins ? "Add point" : "Move point"); if (D.ins) S.lastIns = {id: it.id, vi: D.vertex, t: Date.now()}; if (crossed(it)) toast(crossMsg, 6000); } }
   S.drag = null; stage().classList.remove("panning");
 }
 const qaMoved = it => { if (it.qa === "checked") { it.qa = ""; it.qaNote = "outline changed after it was checked"; } };
@@ -1928,7 +2218,7 @@ async function finish(pts){
   }
   if (t === "circle") { if (dist(pts[0], pts[1]) < 0.5) { draw(); return; } mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", shape: "circle", pts, nos: 1, label: ""}); }); return; }
   const area = c.type === "area";
-  if (area && (pts.length < 3 || polyArea(pts) < 1e-6)) { draw(); return; }
+  if (area && (pts.length < 3 || polyArea(pts) < 1e-6)) { if (selfCross(pts)) toast("⚠ This outline crosses itself and its two halves cancel out (0 Sft) — nothing added. Draw it again without crossing the sides.", 7000); draw(); return; }   // a figure of eight with equal halves: said why, never dropped silently
   if (!area && pts.length < 2) { draw(); return; }
   const ri = resume && P.proj.items.find(i => i.id === resume.id);
   if (ri) {   // a run continued (right-click → Continue drawing): the same measurement, longer
@@ -1940,40 +2230,46 @@ async function finish(pts){
   const ni = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: t === "ded" ? "ded" : "shape", pts, nos: 1, label: nm};
   if (arcs.length) ni.arcs = arcs;
   mutate(() => { P.proj.items.push(ni); }, (t === "ded" ? "Deduction" : area ? "Area" : "Run") + " in " + c.name);
-  if (nm) toast("Named " + nm + " from the drawing", 1800);
+  if (area && crossed(ni)) toast(crossMsg, 7000);
+  else if (nm) toast("Named " + nm + " from the drawing", 1800);
 }
 
 /* ------------------------------------------------------------------ overlay */
 let raf = 0;
 function draw(){ if (!raf) raf = requestAnimationFrame(() => { raf = 0; drawNow(); }); }
 function drawNow(){
-  const svg = $("ov"), tip = $("tip");
-  if (!S.page || !P.proj) { svg.innerHTML = ""; tip.style.display = "none"; return; }
-  let k = curScale(); const h = [];
-  h.push('<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="rgba(208,59,59,.08)"/><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(208,59,59,.55)" stroke-width="1.5"/></pattern></defs>');
+  const svg = $("ov"), svg2 = $("ov2"), tip = $("tip");
+  if (!S.page || !P.proj) { svg.innerHTML = ""; svg2.innerHTML = ""; S.ovSig = null; S.ovHtml = ""; tip.style.display = "none"; return; }
+  /* two layers: the takeoff (measurements, markups, labels — rebuilt only when it or the view changes) and, above it,
+     what follows the cursor (the shape being drawn, snap marker, selection box). A mouse move over a page with a
+     thousand measurements then redraws only the cursor layer. */
+  let k = curScale(); const h = [], dyn = [];
+  const sig = [P.proj.id, S.ver, S.key, S.view.s, S.view.tx, S.view.ty, S.sel, S.selMark, [...S.multi].join(","), S.hover, S.selPt, S.tool, S.hideMk, JSON.stringify(S.lbl), S.drag || S.typ ? Math.random() : 0, S.autoShow ? S.autoShow.key + S.autoShow.url.length : ""].join("|");
+  const keep = sig === S.ovSig;
+  if (!keep) h.push('<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="rgba(208,59,59,.08)"/><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(208,59,59,.55)" stroke-width="1.5"/></pattern></defs>');
   const ptsS = P => P.map(p => toScr(p).map(v => v.toFixed(1)).join(",")).join(" ");
-  const A = S.autoShow; if (A && A.key === S.key) { const q = toScr([A.x0, A.y0]); h.push(`<image href="${A.url}" x="${q[0].toFixed(1)}" y="${q[1].toFixed(1)}" width="${(A.W * A.px * S.view.s).toFixed(1)}" height="${(A.H * A.px * S.view.s).toFixed(1)}" preserveAspectRatio="none" style="image-rendering:pixelated"/>`); }
-  ((P.proj.viewports || {})[S.key] || []).forEach(v => { const a = toScr([v.r[0], v.r[1]]), b = toScr([v.r[2], v.r[3]]);
+  const A = S.autoShow; if (!keep && A && A.key === S.key) { const q = toScr([A.x0, A.y0]); h.push(`<image href="${A.url}" x="${q[0].toFixed(1)}" y="${q[1].toFixed(1)}" width="${(A.W * A.px * S.view.s).toFixed(1)}" height="${(A.H * A.px * S.view.s).toFixed(1)}" preserveAspectRatio="none" style="image-rendering:pixelated"/>`); }
+  if (!keep) ((P.proj.viewports || {})[S.key] || []).forEach(v => { const a = toScr([v.r[0], v.r[1]]), b = toScr([v.r[2], v.r[3]]);
     h.push(`<rect x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="none" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`);
     h.push(label([a[0] + 6 + (v.name.length + 14) * 3.2, a[1] + 12], v.name + " · " + (v.ptPerFt ? v.text || "own scale" : "scale not set"), "#4b3b8f")); });
-  if (!S.hideMk) (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo).forEach(m => h.push(markSvg(m, toScr, 1)));
-  if (S.typ) {   // typical copy: reference points, and the copies placed by them (dashed) before they are confirmed
+  if (!keep && !S.hideMk) (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo).forEach(m => h.push(markSvg(m, toScr, 1)));
+  if (!keep && S.typ) {   // typical copy: reference points, and the copies placed by them (dashed) before they are confirmed
     const T = S.typ;
     if (T.T && S.key !== T.src) T.mine.forEach(it => { const c = cond(it.cond), Q = (it.shape === "circle" ? itemPoly(it) : it.pts).map(T.T.f);
       if (c && c.type === "count") Q.forEach(p => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="7" fill="none" stroke="#7b5ce0" stroke-width="2" stroke-dasharray="3 2"/>`); });
       else h.push(`<${c && c.type === "area" || it.shape === "circle" ? "polygon" : "polyline"} points="${ptsS(Q)}" fill="${c && c.type === "area" ? "rgba(123,92,224,.10)" : "none"}" stroke="#7b5ce0" stroke-width="2" stroke-dasharray="7 4"/>`); });
     (S.key === T.src ? T.a : T.b).forEach((p, i) => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="9" fill="rgba(255,45,85,.15)" stroke="#ff2d55" stroke-width="2"/><text x="${(q[0] + 12).toFixed(1)}" y="${(q[1] - 10).toFixed(1)}" font-size="13" font-weight="700" fill="#ff2d55" stroke="#fff" stroke-width="3" paint-order="stroke">${i + 1}</text>`); });
   }
-  if (S.tool === "vsearch" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); h.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(42,120,214,.08)" stroke="#2a78d6" stroke-width="1.5" stroke-dasharray="4 3"/>`); }
-  if (["cloud", "hilite", "arrow"].indexOf(S.tool) >= 0 && S.draft.length && S.cursor) h.push(markSvg({type: S.tool, pts: [S.draft[0], S.cursor], color: "#d03b3b"}, toScr, 1));
-  if (S.flash && S.flash.key === S.key && Date.now() < S.flash.until) { const q = toScr(S.flash.p); h.push(`<circle cx="${q[0]}" cy="${q[1] - 5}" r="26" fill="none" stroke="#ff2d55" stroke-width="3"><animate attributeName="r" values="18;30;18" dur="1s" repeatCount="indefinite"/></circle>`); }
-  if (S.tool === "vp" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); h.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(123,92,224,.06)" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`); }
+  if (S.tool === "vsearch" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(42,120,214,.08)" stroke="#2a78d6" stroke-width="1.5" stroke-dasharray="4 3"/>`); }
+  if (["cloud", "hilite", "arrow"].indexOf(S.tool) >= 0 && S.draft.length && S.cursor) dyn.push(markSvg({type: S.tool, pts: [S.draft[0], S.cursor], color: "#d03b3b"}, toScr, 1));
+  if (S.flash && S.flash.key === S.key && Date.now() < S.flash.until) { const q = toScr(S.flash.p); dyn.push(`<circle cx="${q[0]}" cy="${q[1] - 5}" r="26" fill="none" stroke="#ff2d55" stroke-width="3"><animate attributeName="r" values="18;30;18" dur="1s" repeatCount="indefinite"/></circle>`); }
+  if (S.tool === "vp" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(123,92,224,.06)" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`); }
   if (S.box && !S.box.pending) { const a = S.box.a, b = S.box.b, cr = b[0] < a[0];   // window (left → right, blue, solid) / crossing (right → left, green, dashed)
-    h.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="${cr ? "rgba(27,175,122,.10)" : "rgba(42,120,214,.10)"}" stroke="${cr ? "#139a68" : "#2a78d6"}" stroke-width="1.5" ${cr ? 'stroke-dasharray="6 4"' : ""}/>`);
-    h.push(label([Math.min(a[0], b[0]) + 52, Math.min(a[1], b[1]) - 12], cr ? "touching ← crossing" : "window → wholly inside", cr ? "#0e7a52" : "#1d5fae")); }
-  if (S.lasso && S.lasso.pts.length > 1) h.push(`<polygon points="${S.lasso.pts.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ")}" fill="rgba(27,175,122,.10)" stroke="#139a68" stroke-width="1.5" stroke-dasharray="6 4"/>`);
-  if (S.zbox) { const a = S.zbox.a, b = S.zbox.b; h.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(15,41,66,.06)" stroke="#0f2942" stroke-width="1.5" stroke-dasharray="3 3"/>`); }
-  if (!S.hideMk) P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).forEach(it => {
+    dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="${cr ? "rgba(27,175,122,.10)" : "rgba(42,120,214,.10)"}" stroke="${cr ? "#139a68" : "#2a78d6"}" stroke-width="1.5" ${cr ? 'stroke-dasharray="6 4"' : ""}/>`);
+    dyn.push(label([Math.min(a[0], b[0]) + 52, Math.min(a[1], b[1]) - 12], cr ? "touching ← crossing" : "window → wholly inside", cr ? "#0e7a52" : "#1d5fae")); }
+  if (S.lasso && S.lasso.pts.length > 1) dyn.push(`<polygon points="${S.lasso.pts.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ")}" fill="rgba(27,175,122,.10)" stroke="#139a68" stroke-width="1.5" stroke-dasharray="6 4"/>`);
+  if (S.zbox) { const a = S.zbox.a, b = S.zbox.b; dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(15,41,66,.06)" stroke="#0f2942" stroke-width="1.5" stroke-dasharray="3 3"/>`); }
+  if (!keep && !S.hideMk) P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).forEach(it => {
     const c = cond(it.cond); if (!c) return;
     const col = c.color, sel = it.id === S.sel || S.multi.has(it.id), k = itemScale(it), pts0 = it.pts;
     if (it.shape === "circle") it = Object.assign({}, it, {pts: itemPoly(it), _pts: pts0});
@@ -2014,38 +2310,39 @@ function drawNow(){
   { const kk = hereScale(S.draft[0] || cur); if (kk) k = kk; }
   if (S.draft.length && cur && S.tool === "circle") {
     const a = S.draft[0], r = dist(a, cur), q = toScr(a), col = c ? c.color : "#0b0b0b";
-    h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(r * S.view.s).toFixed(1)}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>`);
-    if (k) live = "dia " + f3(2 * r / k) + " ft · " + f2(Math.PI * r * r / k / k) + " Sft · round " + f3(2 * Math.PI * r / k) + " ft";
+    dyn.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(r * S.view.s).toFixed(1)}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>`);
+    if (k) live = "dia " + f3(2 * r / k) + " ft · " + fq(Math.PI * r * r / k / k) + " Sft · round " + f3(2 * Math.PI * r / k) + " ft";
   } else if (S.draft.length && cur) {
     const D = S.arcMid && S.draft.length ? S.draft.concat(arcPts(S.draft[S.draft.length - 1], S.arcMid, cur)) : S.draft.concat([S.tool === "rect" ? null : cur]).filter(Boolean);
-    if (S.arcMode && !S.arcMid && S.draft.length) { const q = toScr(cur); h.push(`<text x="${(q[0] + 12).toFixed(1)}" y="${(q[1] - 12).toFixed(1)}" font-size="11" font-weight="700" fill="#4b3b8f" stroke="#fff" stroke-width="3" paint-order="stroke">arc: point on it</text>`); }
-    if (S.arcMid) { const q = toScr(S.arcMid); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="3.5" fill="#4b3b8f"/>`); }
-    if (S.tool === "rect") { const a = S.draft[0]; const R = [a, [cur[0], a[1]], cur, [a[0], cur[1]]]; h.push(`<polygon points="${ptsS(R)}" fill="${c.color}" fill-opacity=".15" stroke="${c.color}" stroke-width="2"/>`);
-      if (k) live = f3(Math.abs(cur[0] - a[0]) / k) + " × " + f3(Math.abs(cur[1] - a[1]) / k) + " ft = " + f2(Math.abs(cur[0] - a[0]) * Math.abs(cur[1] - a[1]) / k / k) + " Sft"; }
+    if (S.arcMode && !S.arcMid && S.draft.length) { const q = toScr(cur); dyn.push(`<text x="${(q[0] + 12).toFixed(1)}" y="${(q[1] - 12).toFixed(1)}" font-size="11" font-weight="700" fill="#4b3b8f" stroke="#fff" stroke-width="3" paint-order="stroke">arc: point on it</text>`); }
+    if (S.arcMid) { const q = toScr(S.arcMid); dyn.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="3.5" fill="#4b3b8f"/>`); }
+    if (S.tool === "rect") { const a = S.draft[0]; const R = [a, [cur[0], a[1]], cur, [a[0], cur[1]]]; dyn.push(`<polygon points="${ptsS(R)}" fill="${c.color}" fill-opacity=".15" stroke="${c.color}" stroke-width="2"/>`);
+      if (k) live = f3(Math.abs(cur[0] - a[0]) / k) + " × " + f3(Math.abs(cur[1] - a[1]) / k) + " ft = " + fq(Math.abs(cur[0] - a[0]) * Math.abs(cur[1] - a[1]) / k / k) + " Sft"; }
     else {
       const col = S.tool === "fence" ? "#ff7a00" : S.tool === "ded" || S.tool === "open" ? "#d03b3b" : S.tool === "measure" || S.tool === "cal" ? "#0b0b0b" : c ? c.color : "#0b0b0b";
-      if (isAreaDraft() && D.length >= 3) h.push(`<polygon points="${ptsS(D)}" fill="${col}" fill-opacity=".12" stroke="none"/>`);
-      h.push(`<polyline points="${ptsS(D)}" fill="none" stroke="${col}" stroke-width="2" stroke-dasharray="${S.tool === "measure" || S.tool === "cal" ? "6 3" : "none"}"/>`);
-      S.draft.forEach(p => { const q = toScr(p); h.push(`<circle cx="${q[0]}" cy="${q[1]}" r="3.5" fill="#fff" stroke="${col}" stroke-width="2"/>`); });
+      if (isAreaDraft() && D.length >= 3) dyn.push(`<polygon points="${ptsS(D)}" fill="${col}" fill-opacity=".12" stroke="none"/>`);
+      dyn.push(`<polyline points="${ptsS(D)}" fill="none" stroke="${col}" stroke-width="2" stroke-dasharray="${S.tool === "measure" || S.tool === "cal" ? "6 3" : "none"}"/>`);
+      S.draft.forEach(p => { const q = toScr(p); dyn.push(`<circle cx="${q[0]}" cy="${q[1]}" r="3.5" fill="#fff" stroke="${col}" stroke-width="2"/>`); });
       if (k) { const L = polyLen(D) / k, seg = dist(D[D.length - 2], D[D.length - 1]) / k;
         const a1 = D[D.length - 2], a2 = D[D.length - 1], ang = (Math.atan2(a1[1] - a2[1], a2[0] - a1[0]) * 180 / Math.PI + 360) % 360;
-        live = (isAreaDraft() && D.length >= 3 ? f2(polyArea(D) / k / k) + " Sft · perimeter " + f3(polyLen(D, true) / k) + " ft" : (D.length > 2 ? "run " + f3(seg) + " · total " : "") + f3(L) + " ft") + " · ∠ " + ang.toFixed(1) + "°"; }
+        live = (isAreaDraft() && D.length >= 3 ? fq(polyArea(D) / k / k) + " Sft · perimeter " + f3(polyLen(D, true) / k) + " ft" : (D.length > 2 ? "run " + f3(seg) + " · total " : "") + f3(L) + " ft") + " · ∠ " + ang.toFixed(1) + "°"; }
       else if (S.tool === "cal") live = (dist(D[0], D[D.length - 1])).toFixed(2) + " pt";
     }
   }
   S.measures.forEach(m => {   // finished measurements stay until Esc
-    h.push(`<polyline points="${ptsS(m)}" fill="none" stroke="#0b0b0b" stroke-width="2" stroke-dasharray="6 3"/>`);
-    m.forEach(p => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="2.5" fill="#0b0b0b"/>`); });
-    if (k) { const q = toScr(m[m.length - 1]); h.push(label([q[0] + 8, q[1] - 10], f3(polyLen(m) / k) + " ft", "#0b0b0b")); }
+    dyn.push(`<polyline points="${ptsS(m)}" fill="none" stroke="#0b0b0b" stroke-width="2" stroke-dasharray="6 3"/>`);
+    m.forEach(p => { const q = toScr(p); dyn.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="2.5" fill="#0b0b0b"/>`); });
+    if (k) { const q = toScr(m[m.length - 1]); dyn.push(label([q[0] + 8, q[1] - 10], f3(polyLen(m) / k) + " ft", "#0b0b0b")); }
   });
   if (S.snap && cur && ((S.tool !== "select" && S.tool !== "pan") || S.drag)) {
     const q = toScr(S.snap.p), t = S.snap.type;
-    if (/endpoint|point/.test(t)) h.push(`<rect x="${q[0] - 6}" y="${q[1] - 6}" width="12" height="12" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
-    else if (/intersection/.test(t)) h.push(`<path d="M${q[0] - 6} ${q[1] - 6}L${q[0] + 6} ${q[1] + 6}M${q[0] + 6} ${q[1] - 6}L${q[0] - 6} ${q[1] + 6}" stroke="#1baf7a" stroke-width="2.2"/>`);
-    else if (/midpoint/.test(t)) h.push(`<path d="M${q[0]} ${q[1] - 7}L${q[0] + 6} ${q[1] + 5}L${q[0] - 6} ${q[1] + 5}Z" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
-    else h.push(`<circle cx="${q[0]}" cy="${q[1]}" r="5" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
+    if (/endpoint|point/.test(t)) dyn.push(`<rect x="${q[0] - 6}" y="${q[1] - 6}" width="12" height="12" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
+    else if (/intersection/.test(t)) dyn.push(`<path d="M${q[0] - 6} ${q[1] - 6}L${q[0] + 6} ${q[1] + 6}M${q[0] + 6} ${q[1] - 6}L${q[0] - 6} ${q[1] + 6}" stroke="#1baf7a" stroke-width="2.2"/>`);
+    else if (/midpoint/.test(t)) dyn.push(`<path d="M${q[0]} ${q[1] - 7}L${q[0] + 6} ${q[1] + 5}L${q[0] - 6} ${q[1] + 5}Z" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
+    else dyn.push(`<circle cx="${q[0]}" cy="${q[1]}" r="5" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
   }
-  svg.innerHTML = h.join("");
+  if (!keep) { S.ovSig = sig; const html = h.join(""); if (html !== S.ovHtml) { svg.innerHTML = html; S.ovHtml = html; } }
+  svg2.innerHTML = dyn.join("");
   $("stMeas").innerHTML = live ? "<b>" + esc(live) + "</b>" : "";
   if (S.typed && S.draft.length) live = (S.tool === "rect" ? "L x W: " : "Length: ") + S.typed + " ▏ Enter to place · Esc clears";
   if (!live && S.tool === "select" && S.hover && !S.drag && !S.box && S.cursorScr) live = hoverText(S.hover);   // what is under the cursor, as Bluebeam's tooltip
@@ -2058,7 +2355,7 @@ function hoverText(id){
   if (!o.cond) return MARK_TOOLS[o.type] + (o.text ? " — " + o.text : "") + (o.locked ? " · locked" : "");
   const c = cond(o.cond), k = itemScale(o); if (!c) return "";
   const q = k ? rowsOf(o, k).reduce((a, r) => a + r.qty, 0) : null;
-  return (o.label ? o.label + " · " : "") + c.name + (q == null ? " · scale not set" : " · " + f2(q) + " " + c.unit) + (o.locked ? " · locked" : "");
+  return (o.label ? o.label + " · " : "") + c.name + (q == null ? " · scale not set" : " · " + fq(q, c.unit) + " " + c.unit) + (o.locked ? " · locked" : "");
 }
 function label(p, text, col){
   const t = esc(text), w = text.length * 6.4 + 10;
@@ -2074,14 +2371,14 @@ function capLines(it, c, k){
   if (o.cond) out.push(c.name);
   if (c.type === "area") {
     const A = polyArea(poly) / k / k * (it.kind === "ded" ? -1 : 1), P = polyLen(poly, true) / k, r = rows[0];
-    if (o.qty) out.push(f2(q) + u(c.unit));
-    if (o.area && !(o.qty && c.unit === "Sft")) out.push("A " + f2(A) + u("Sft"));
+    if (o.qty) out.push(fq(q, c.unit) + u(c.unit));
+    if (o.area && !(o.qty && c.unit === "Sft")) out.push("A " + fq(A) + u("Sft"));
     if (o.perim) out.push("P " + f3(P) + u("ft"));
     if (o.dims && r) { if (r.how === "rect") out.push(f3(r.L) + " × " + f3(r.W) + u("ft")); else if (r.how === "circle") out.push("Ø " + f3(r.D) + u("ft")); }
   } else if (c.type === "linear") {
     const L = (it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k;
     if (o.len) out.push("L " + f3(it.kind === "ded" ? -L : L) + u("ft"));
-    if (o.qty && (c.unit !== "ft" || !o.len)) out.push(f2(q) + u(c.unit));
+    if (o.qty && (c.unit !== "ft" || !o.len)) out.push(fq(q, c.unit) + u(c.unit));
     if (o.dims && c.unit !== "ft") out.push((+c.h ? "H " + f3(+c.h) : "") + (+c.t ? (+c.h ? " · " : "") + "T " + f3(+c.t) : "") + ((+c.faces || 1) > 1 && c.unit === "Sft" ? " · " + c.faces + " faces" : ""));
   }
   if (!out.length && it.label) out.push(it.label);
@@ -2127,7 +2424,9 @@ async function labelDialog(){
   if (P.proj && S.page) { const n = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !i.label && i.kind === "shape" && (cond(i.cond) || {}).type === "area").length;
     if (n && S.lbl.autoName && await ask("Name the areas already drawn?", `<p>${n} area${n > 1 ? "s" : ""} on this page ${n > 1 ? "have" : "has"} no name. Name ${n > 1 ? "them" : "it"} from the room text inside?</p>`, "Name them")) nameAreas(); }
 }
-function setLblOn(on){ S.lbl.on = on; pref("zdTakeoffLbl", JSON.stringify(S.lbl)); $("bLbl").classList.toggle("on", on); $("bLbl").title = on ? "Labels shown — click (or L) to hide" : "Labels hidden — click (or L) to show"; draw(); }
+function setLblOn(on){ S.lbl.on = on; pref("zdTakeoffLbl", JSON.stringify(S.lbl)); $("bLbl").classList.toggle("on", on); $("bLbl").title = on ? "Labels shown — click (or L) to hide" : "Labels hidden — click (or L) to show"; viewMark(); draw(); }
+/* the View button shows a dot while something is dimmed, thinned or hidden — so a hidden markup is never a surprise */
+function viewMark(){ const b = $("bView"); if (b) b.classList.toggle("mod", !!(S.dim || S.thin || S.hideMk || (S.lbl && !S.lbl.on))); }
 /* the room name written inside an outline (BEDROOM 2, LOUNGE…), from the PDF's own text; "" if none */
 function roomNameAt(poly, key){
   const T = S.texts[key || S.key]; if (!T || !T.length || !poly || poly.length < 3) return "";
@@ -2142,14 +2441,14 @@ function nameAreas(){
   toast(n ? n + " area" + (n > 1 ? "s" : "") + " named from the drawing" : "No room names found inside the unnamed areas");
 }
 /* ------------------------------------------------------------------ panels */
-function refresh(){ S.doorIx = null; renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); draw(); draftBtns(); }
+function refresh(){ S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); draw(); draftBtns(); }
 let sheetT = null;
 function refreshSheetSoon(){ clearTimeout(sheetT); sheetT = setTimeout(() => { renderSheet(); renderConds(); }, 120); }
 function renderScaleChip(){
   const ch = $("scaleChip"), sc = P.proj && P.proj.scales[S.key];
   if (!S.page) { ch.className = "chip bad"; ch.lastElementChild.textContent = "No page"; return; }
   if (!sc) { ch.className = "chip bad"; ch.lastElementChild.textContent = "Scale not set — press K"; }
-  else { ch.className = "chip " + (sc.verified ? "ok" : "warn"); ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "inherited" ? "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · inherited from " + keyName(sc.from) : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · calibrated") + (sc.verified ? " · verified" : " · not verified"); }
+  else { ch.className = "chip " + scaleState(sc).k; ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "manual" ? sc.text + " · chosen" : sc.how === "inherited" ? "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · inherited from " + keyName(sc.from) : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · calibrated") + (sc.verified ? " · verified" : sc.doubt ? " · doubtful" : " · not verified"); ch.title = "Page scale: " + scaleState(sc).t + " — click to set or check"; }
   markPageSel();
 }
 /* a page's scale status: Verified / Calibrated (both checked against a known length), Inherited (copied from another page,
@@ -2159,6 +2458,7 @@ function scaleState(sc){
   if (sc.doubt && !sc.verified) return {k: "bad", ic: "✕", t: "Doubtful — the drawing measures " + sc.doubt.label};
   if (sc.how === "inherited") return sc.verified ? {k: "ok", ic: "✓", t: "Inherited · verified"} : {k: "warn", ic: "⚠", t: "Inherited from " + keyName(sc.from)};
   if (sc.how === "calibrated") return {k: "ok", ic: "✓", t: "Calibrated"};
+  if (sc.how === "manual") return sc.verified ? {k: "ok", ic: "✓", t: "Chosen · verified"} : {k: "warn", ic: "⚠", t: "Chosen by hand — not verified"};
   return sc.verified ? {k: "ok", ic: "✓", t: "Verified"} : {k: "warn", ic: "⚠", t: "From note — not verified"};
 }
 function keyName(key){ if (!key) return "?"; const [f, p] = String(key).split(":"); return pageName({file: f, page: +p}); }
@@ -2167,6 +2467,52 @@ function markPageSel(){
   [...$("pageSel").options].forEach(o => { const [f, p] = o.value.split("|"); if (!p) return; const sh = (P.proj.sheets || {})[keyOf(f, +p)] || {}, st = scaleState(P.proj.scales[keyOf(f, +p)]);
     const t = (sh.no ? sh.no + (sh.rev ? " " + sh.rev : "") + " · " : "") + ((P.proj.files.find(x => x.id === f) || {name: "?"}).name.replace(/\.pdf$/i, "")) + " — p." + p + "  " + st.ic;
     if (o.textContent !== t) o.textContent = t; o.title = "Scale: " + st.t; });
+}
+/* the Pages tab: a thumbnail of every page (drawn when it scrolls into view, one at a time, and kept), its sheet no.,
+   scale status and how many measurements are on it; click to open. Remove PDF takes a wrong drawing out of the project. */
+function renderPages(){
+  const el = $("pageList"); if (!el || !P.proj) return;
+  if (!P.proj.files.length) { el.innerHTML = '<div class="empty">No PDF yet — add one with <b>+ PDF</b>.</div>'; return; }
+  const cnt = new Map(); P.proj.items.forEach(i => { const k = keyOf(i.file, i.page); cnt.set(k, (cnt.get(k) || 0) + 1); });
+  S.thumbs = S.thumbs || {};
+  el.innerHTML = P.proj.files.map(f => `<div class="pgf"><b title="${esc(f.name)}">${esc(f.name.replace(/\.pdf$/i, ""))}</b><span class="small">${f.pages} p.</span><button class="btn sm dng" data-rmpdf="${esc(f.id)}" title="Remove this PDF and its measurements from the project">Remove</button></div>
+    <div class="pgg">${Array.from({length: f.pages}, (_, n) => { const i = n + 1, k = keyOf(f.id, i), st = scaleState(P.proj.scales[k]), sh = (P.proj.sheets || {})[k] || {}, th = S.thumbs[k];
+      return `<div class="pgt${k === S.key ? " on" : ""}" data-pg="${esc(f.id)}|${i}" title="${esc(f.name)} p.${i} — scale: ${esc(st.t)}"><img data-th="${esc(k)}" alt="" ${th && th !== "x" ? `src="${th}"` : ""}><div class="pgl">${sh.no ? esc(sh.no) + " · " : ""}p.${i} · ${cnt.get(k) || 0}</div><div class="pgl ${st.k}">${st.ic} ${esc(st.k === "bad" && !P.proj.scales[k] ? "no scale" : st.t.split(" — ")[0])}</div></div>`; }).join("")}</div>`).join("");
+  if (!S.thumbIO) S.thumbIO = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { S.thumbIO.unobserve(e.target); thumbWant(e.target.dataset.th); } }), {root: el, rootMargin: "200px"});
+  el.querySelectorAll("img[data-th]").forEach(im => { if (!im.getAttribute("src")) S.thumbIO.observe(im); });
+}
+function thumbWant(k){ S.thumbQ = S.thumbQ || []; if ((S.thumbs || {})[k] || S.thumbQ.includes(k)) return; S.thumbQ.push(k); thumbRun(); }
+async function thumbRun(){
+  if (S.thumbBusy) return; S.thumbBusy = true;
+  const pr = P.proj;
+  while (S.thumbQ.length && P.proj === pr) {
+    const k = S.thumbQ.shift(); if (S.thumbs[k]) continue; const [f, p] = k.split(":");
+    try { const pg = await (await doc(f)).getPage(+p), v0 = pg.getViewport({scale: 1}), vp = pg.getViewport({scale: 200 / Math.max(v0.width, v0.height)}), cv = document.createElement("canvas");
+      cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height); const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
+      await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp})).promise; S.thumbs[k] = cv.toDataURL("image/png"); }
+    catch (e) { S.thumbs[k] = "x"; }   // PDF not attached in this browser: left blank
+    const im = [...document.querySelectorAll("#pageList img[data-th]")].find(x => x.dataset.th === k); if (im && S.thumbs[k] !== "x") im.src = S.thumbs[k];
+  }
+  S.thumbBusy = false;
+}
+async function removePdf(fid){
+  const f = P.proj.files.find(x => x.id === fid); if (!f) return;
+  const its = P.proj.items.filter(i => i.file === fid).length, mks = (P.proj.marks || []).filter(m => m.file === fid && m.type !== "fence").length;
+  const ok = await ask("Remove PDF", `<p>Remove <b>${esc(f.name)}</b> (${f.pages} page${f.pages > 1 ? "s" : ""}) from this project${its || mks ? ` with its <b>${its}</b> measurement${its === 1 ? "" : "s"}${mks ? " and " + mks + " markup" + (mks > 1 ? "s" : "") : ""}` : ""}?</p>
+    <p class="small" style="margin-top:6px">The project is backed up first (Export → Backups… brings the measurements back; the PDF is then added again with + PDF). Ctrl+Z history is cleared.</p>`, "Remove");
+  if (!ok) return;
+  savePr = P.proj; await flushSave(); await backupNow("before removing " + f.name).catch(() => {});
+  const pr = P.proj, mine = k => String(k).split(":")[0] === fid;
+  pr.files = pr.files.filter(x => x.id !== fid); pr.items = pr.items.filter(i => i.file !== fid); pr.marks = (pr.marks || []).filter(m => m.file !== fid);
+  ["scales", "viewports", "sheets"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) delete pr[n][k]; }));
+  if (pr.layersOff) delete pr.layersOff[fid]; if (pr.last && pr.last.file === fid) pr.last = {};
+  S.undo = []; S.redo = []; S.multi.clear(); S.sel = null; S.selMark = null; Object.keys(S.thumbs || {}).forEach(k => { if (mine(k)) delete S.thumbs[k]; });
+  if (S.docs[fid]) { try { S.docs[fid].destroy(); } catch (e) {} delete S.docs[fid]; }
+  const others = (await dbAll("projects")).filter(x => x.id !== pr.id); if (!others.some(x => (x.files || []).some(y => y.id === fid))) await dbDel("pdfs", fid).catch(() => {});   // (a duplicated project keeps its copy)
+  save(); buildPageSel();
+  if (S.fileId === fid) { S.navSeq = (S.navSeq || 0) + 1; S.page = null; S.base = null; S.fileId = null; S.key = ""; S.rendered = null; $("hi").style.display = "none"; { const lc = $("low"); lc.width = lc.width; }
+    if (pr.files[0]) await gotoPage(pr.files[0].id, 1); else showDrop(true); }
+  refresh(); toast(f.name + " removed" + (its ? " with " + its + " measurement" + (its > 1 ? "s" : "") : "") + " — a backup was taken first", 4000);
 }
 function scaleLabel(sc){ const c = (S.texts[S.key] ? scaleCandidates(S.key) : []).find(x => Math.abs(x.ptPerFt - sc.ptPerFt) < 1e-6); return c ? c.label : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt"; }
 function renderConds(){
@@ -2179,7 +2525,7 @@ function renderConds(){
       : `<button class="btn sm" data-cact="allon" title="Show every condition">All on</button><button class="btn sm" data-cact="alloff" title="Hide every condition">All off</button><span class="small">tick conditions to show / hide several</span>`}</div>`;
   L.innerHTML = bar + P.proj.conds.map((c, i) => { const t = condTotals(c);
     return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}</span></div>
-      <div class="q">${f2(t.net)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; }).join("");
+      <div class="q">${fq(t.net, c.unit)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; }).join("");
 }
 function renderSheet(){
   const el = $("sheet");
@@ -2188,8 +2534,9 @@ function renderSheet(){
   const unv = Object.values(P.proj.scales).filter(s => !s.verified && s.how !== "inherited").length, inh = Object.values(P.proj.scales).filter(s => !s.verified && s.how === "inherited").length;
   const wb = $("warnbar"), msgs = [];
   if (missing) msgs.push(missing + " measurement" + (missing > 1 ? "s are" : " is") + " on a page with no scale — set it with <b>K</b>; they are left out of the totals.");
-  if (unv) msgs.push(unv + " page scale" + (unv > 1 ? "s were" : " was") + " read from the drawing note and not yet checked — click the scale chip → <b>Verify</b> with a known dimension.");
+  if (unv) msgs.push(unv + " page scale" + (unv > 1 ? "s were" : " was") + " read from the drawing note or chosen by hand, and not yet checked — click the scale chip → <b>Verify</b> with a known dimension.");
   if (inh) msgs.push(inh + " page scale" + (inh > 1 ? "s were" : " was") + " copied from another page (inherited) and not yet checked on that page — open it, click the scale chip → <b>Verify</b>.");
+  if (S.otherTab) msgs.unshift(`<b>⚠ This project is ${esc(S.otherTab)}.</b> Two open copies overwrite each other's work when they save — keep one open. <button class="btn sm" data-reload="1">Reload this one</button>`);
   wb.innerHTML = msgs.join("<br>"); wb.classList.toggle("on", msgs.length > 0);
   if (!P.proj.items.length) { el.innerHTML = '<div class="empty">Measurements appear here as you draw, in the house format: <b>Nos × L × W × H</b> in decimal feet, deductions as their own rows.</div>'; $("shInfo").textContent = ""; return; }
   let h = '<table class="sh"><thead><tr><th>#</th><th>Description</th><th class="n">Nos × L × W × H</th><th class="n">Qty</th></tr></thead><tbody>', n = 0;
@@ -2204,12 +2551,13 @@ function renderSheet(){
         const desc = (r.sign < 0 ? "Ded. " : "") + (it.label || kindName(it, c)) + (r.part ? " — part " + String.fromCharCode(96 + r.part) : "");
         const sub = [pg, r.runs && r.runs.length > 1 ? "runs " + r.runs.map(f3).join(" + ") : "", r.how === "poly" ? "plan area of the " + r.sides + "-sided outline" : "", r.how === "circle" ? "circle, dia " + f3(r.D) + " ft" + (c.type === "area" ? " — area = π/4 × D²" : " — length = π × D") : "",
                      c.type === "linear" && c.unit === "Sft" && (+c.faces || 1) > 1 && it.kind !== "ded" ? "Nos includes " + c.faces + " faces" : "",
-                     r.below ? "≤ " + f2(+c.dedMin || 0) + " " + (c.unit === "cft" && c.type === "area" ? "cft" : "Sft") + " — not deducted (house rule)" : ""].filter(Boolean).join(" · ");
+                     r.below ? "≤ " + f2(+c.dedMin || 0) + " " + (c.unit === "cft" && c.type === "area" ? "cft" : "Sft") + " — not deducted (house rule)" : "",
+                     i === 0 && crossed(it) ? "⚠ OUTLINE CROSSES ITSELF — area not right, fix the points" : ""].filter(Boolean).join(" · ");
         h += `<tr class="it${r.sign < 0 ? " ded" : ""}${r.below ? " below" : ""}${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${i === 0 ? ++n : ""}</td><td>${esc(desc)}${i === 0 ? qaBadges(it) + `<button class="rn" title="Rename (e.g. Bedroom 1)" data-rename="${esc(it.id)}">&#9998;</button>` : ""}<div class="ds">${esc(sub)}</div></td>
-          <td class="n">${dimText(r)}</td><td class="n">${r.below ? "0.00" : f2(r.qty)}</td></tr>`;
+          <td class="n">${dimText(r)}</td><td class="n">${fq(r.below ? 0 : r.qty, c.unit)}</td></tr>`;
       });
     });
-    h += `<tr class="tot"><td></td><td>Total ${esc(c.name)}${t.ded ? `<div class="ds">gross ${f2(t.gross)} − deductions ${f2(t.ded)}</div>` : ""}</td><td></td><td class="n">${f2(t.net)} ${esc(c.unit)}</td></tr>`;
+    h += `<tr class="tot"><td></td><td>Total ${esc(c.name)}${t.ded ? `<div class="ds">gross ${fq(t.gross, c.unit)} − deductions ${fq(t.ded, c.unit)}</div>` : ""}</td><td></td><td class="n">${fq(t.net, c.unit)} ${esc(c.unit)}</td></tr>`;
   });
   el.innerHTML = h + "</tbody></table>";
   $("shInfo").textContent = P.proj.items.length + " measurements";
@@ -2241,8 +2589,8 @@ function renderProps(){
       <button class="btn sm" data-act="lock">${mk.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn dng" data-act="delMark"${mk.locked ? " disabled" : ""}>Delete</button></div>`; el.classList.add("on"); return; }
   if (!it) { el.classList.remove("on"); el.innerHTML = ""; return; }
   const c = cond(it.cond), k = itemScale(it), poly = itemPoly(it);
-  const meas = !k ? "scale not set" : it.shape === "circle" ? "dia " + f3(2 * dist(it.pts[0], it.pts[1]) / k) + " ft · " + (c.type === "area" ? f2(polyArea(poly) / k / k) + " Sft" : f3(polyLen(poly, true) / k) + " ft round")
-    : c.type === "area" ? f2(polyArea(it.pts) / k / k) + " Sft measured · perimeter " + f3(polyLen(it.pts, true) / k) + " ft" : c.type === "linear" ? f3(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k) + " ft measured" : it.pts.length + " points";
+  const meas = !k ? "scale not set" : it.shape === "circle" ? "dia " + f3(2 * dist(it.pts[0], it.pts[1]) / k) + " ft · " + (c.type === "area" ? fq(polyArea(poly) / k / k) + " Sft" : f3(polyLen(poly, true) / k) + " ft round")
+    : c.type === "area" ? fq(polyArea(it.pts) / k / k) + " Sft measured · perimeter " + f3(polyLen(it.pts, true) / k) + " ft" : c.type === "linear" ? f3(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k) + " ft measured" : it.pts.length + " points";
   el.innerHTML = `<h4>${esc(c.name)} — ${esc(kindName(it, c))} <span style="font-weight:400;color:var(--muted);font-size:11px">${esc(meas)}</span></h4>
     <div class="row"><div class="fg" style="flex:2"><label>Label</label><input type="text" data-prop="label" value="${esc(it.label)}" placeholder="e.g. Bed room 1"></div>
     <div class="fg"><label>Nos (×)</label><input type="number" min="1" step="1" data-prop="nos" value="${+it.nos || 1}"></div>
@@ -2405,7 +2753,7 @@ function toArea(it, condId){
   LOC_KEYS.forEach(lk => { if (it[lk]) nb[lk] = it[lk]; });
   mutate(() => { P.proj.items.push(nb); }, "Area in " + c.name);
   S.cond = condId; setSel([nb.id]); refresh();
-  const k = itemScale(nb); toast("Area added to " + c.name + (k ? ": " + f2(polyArea(pts) / k / k) + " Sft" : ""), 2600);
+  const k = itemScale(nb); toast("Area added to " + c.name + (k ? ": " + fq(polyArea(pts) / k / k) + " Sft" : ""), 2600);
 }
 function explodeRun(it){   // PlanSwift "segment" takeoff: every leg its own run (an arc stays one piece)
   if (it.locked) return lockedMsg();
@@ -2597,7 +2945,7 @@ function rot90(m, w, h){ const o = new Uint8Array(w * h); for (let y = 0; y < h;
 async function renderInk(page, sc){
   const vp = page.getViewport({scale: sc}), W = Math.ceil(vp.width), H = Math.ceil(vp.height), cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  await page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp}).promise;
+  await sliced(page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp})).promise;
   return {m: inkOf(ctx, W, H), W, H};
 }
 function matchInk(I, W, H, T, tw, th, thr){
@@ -2675,7 +3023,7 @@ async function pageTexts(fileId, pageNo){
   if (S.texts[key]) return S.texts[key];
   try {
     const pg = await (await doc(fileId)).getPage(pageNo), base = pg.getViewport({scale: 1}), tc = await pg.getTextContent();
-    S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: t.str, x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
+    S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
   } catch (e) { S.texts[key] = []; }
   return S.texts[key];
 }
@@ -2702,14 +3050,14 @@ async function findText(q){
 async function countTextHits(q, hits){   // text found on the drawings -> count markers (one count condition, per page)
   const ex = P.proj.conds.filter(x => x.type === "count");
   const v = await ask("Count “" + q + "”", `<p>${hits.length} marker${hits.length > 1 ? "s go" : " goes"} on the found text, page by page.</p>
-    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Count into</label><select id="ctC"><option value="">+ New count condition “${esc(q.toUpperCase())}”</option>${ex.map(c => `<option value="${esc(c.id)}"${c.id === S.cond ? " selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Count into</label><select id="ctC"><option value="">+ New count condition “${esc(q.toUpperCase())}”</option>${ex.map(c => `<option value="${esc(c.id)}"${c.name.trim().toUpperCase() === q.trim().toUpperCase() ? " selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
     <div class="fg"><label>Symbol (new condition)</label><select id="ctS">${Object.entries(SYMS).map(([k2, v2]) => `<option value="${k2}"${k2 === "check" ? " selected" : ""}>${v2}</option>`).join("")}</select></div>
     <div class="fg"><label>Caption (new condition)</label><select id="ctP"><option value="seq">Number</option><option value="name">Name</option><option value="none">None</option></select></div></div>`, "Count",
     () => ({c: $("ctC").value, sym: $("ctS").value, cap: $("ctP").value}));
   if (!v) return;
   let added = 0;
   mutate(() => {
-    let c = v.c ? cond(v.c) : null;
+    let c = v.c ? cond(v.c) : P.proj.conds.find(x => x.type === "count" && x.name.trim().toUpperCase() === q.trim().toUpperCase()) || null;   // (a new "D2" count, never the last one used; an existing "D2" is added to)
     if (!c) { c = {id: uid("C"), name: q.toUpperCase(), type: "count", unit: "Nos", color: COLORS[P.proj.conds.length % COLORS.length], h: "", t: "", faces: 1, dedMin: 0, sym: v.sym, cap: v.cap}; P.proj.conds.push(c); }
     hits.forEach(h => { let it = P.proj.items.find(i => i.cond === c.id && i.file === h.f.id && i.page === h.i && i.kind === "shape");
       if (!it) { it = {id: uid("I"), cond: c.id, file: h.f.id, page: h.i, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
@@ -2778,11 +3126,13 @@ function colorPop(anchor, c){
 
 /* ------------------------------------------------------------------ dialogs */
 function ask(title, body, okLabel, read, focusId){
+  if (ask.cur) ask.cur(null);   // a dialog opened over another: the one underneath is cancelled, never left listening for Enter
   return new Promise(res => {
     $("dlgT").textContent = title; $("dlgB").innerHTML = body + '<div class="err" id="dlgErr"></div>';
     $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Cancel</button>${okLabel ? `<button class="btn pri" id="dlgOk">${esc(okLabel)}</button>` : ""}`;
     $("dlgBack").classList.add("on");
-    const done = v => { $("dlgBack").classList.remove("on"); document.removeEventListener("keydown", key, true); res(v); };
+    const done = v => { if (ask.cur === done) ask.cur = null; $("dlgBack").classList.remove("on"); document.removeEventListener("keydown", key, true); res(v); };
+    ask.cur = done;
     const ok = () => { const v = read ? read() : true; if (typeof v === "string") { $("dlgErr").textContent = v; return; } done(v); };
     const key = e => { if (e.key === "Escape") { e.stopPropagation(); done(null); } else if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); e.stopPropagation(); ok(); } };
     document.addEventListener("keydown", key, true);
@@ -2876,10 +3226,16 @@ document.addEventListener("change", e => {   // dialog: preset and type change
 async function scaleDialog(){
   if (!S.page) return;
   const sc = P.proj.scales[S.key], cands = scaleCandidates(S.key);
-  const body = `<p>Current: <b>${sc ? (sc.how === "note" ? esc(scaleLabel(sc)) + " (from the drawing note)" : sc.how === "inherited" ? "inherited — " + esc(sc.text) : "calibrated — " + esc(sc.text)) : "not set"}</b>${sc ? (sc.verified ? " · <span style='color:var(--green)'>verified</span>" : " · <span style='color:var(--amber)'>not verified</span>") : ""} · status <b>${esc(scaleState(sc).ic + " " + scaleState(sc).t)}</b></p>
+  const body = `<p>Current: <b>${sc ? (sc.how === "note" ? esc(scaleLabel(sc)) + " (from the drawing note)" : sc.how === "manual" ? esc(sc.text) + " (chosen by hand)" : sc.how === "inherited" ? "inherited — " + esc(sc.text) : "calibrated — " + esc(sc.text)) : "not set"}</b>${sc ? (sc.verified ? " · <span style='color:var(--green)'>verified</span>" : " · <span style='color:var(--amber)'>not verified</span>") : ""} · status <b>${esc(scaleState(sc).ic + " " + scaleState(sc).t)}</b></p>
     ${sc && sc.note ? `<p class="small">${esc(sc.note)}</p>` : ""}
     ${cands.length ? `<p style="margin-top:10px"><b>Scale notes found on this page</b></p>` + cands.map((c, i) => `<div class="cand" data-cand="${i}"><b>${esc(c.label)}</b><span class="small">“${esc(c.text.slice(0, 70))}”${c.note ? " · " + esc(c.note) : ""}</span></div>`).join("") : '<p class="small" style="margin-top:10px">No scale note was found in the text of this page (scanned drawings have no text).</p>'}
     <p class="small" style="margin-top:10px">A scale note is only right if the PDF is printed at the drawing's paper size. <b>Verify</b> by measuring a dimension you know; <b>Calibrate</b> sets the scale from it.</p>
+    <p style="margin-top:12px"><b>Or choose the scale</b> <span class="small">— architectural, engineering or metric, for a page with no note or a wrong one</span></p>
+    <div class="grid" style="margin-top:6px"><div class="fg"><label>Scale</label><select id="msSel"><option value="">— pick —</option>${MAN_SCALES.map(g => `<optgroup label="${esc(g[0])}">${g[1].map(t => `<option>${esc(t)}</option>`).join("")}</optgroup>`).join("")}</select></div>
+      <div class="fg"><label>…or type it</label><input type="text" id="msTxt" placeholder='3/16" = 1&#39;-0" · 1" = 40&#39; · 1:75' autocomplete="off"></div>
+      <div class="fg"><label>Drawn for paper size</label><select id="msPaper"><option value="">This PDF page as it is (${(S.base.width / 72).toFixed(1)} × ${(S.base.height / 72).toFixed(1)} in)</option>${Object.keys(PAPER).map(p2 => `<option value="${p2}">${esc(p2)} — printed on this page: × ${(Math.max(S.base.width, S.base.height) / PAPER[p2]).toFixed(3)}</option>`).join("")}</select></div>
+      <div class="fg" style="justify-content:flex-end"><button class="btn" id="msSet" type="button">Use this scale</button></div></div>
+    <div class="small" id="msInfo" style="margin-top:4px;min-height:1.2em"></div>
     <p style="margin-top:12px"><b>Viewports</b> <span class="small">— parts of this sheet drawn at another scale (enlarged details, sections). Measurements inside one use its scale.</span></p>
     ${((P.proj.viewports || {})[S.key] || []).map(v => `<div class="cand"><b>${esc(v.name)}</b><span class="small">${v.ptPerFt ? esc(v.text || "1 ft = " + v.ptPerFt.toFixed(3) + " pt") : "scale not set"}</span><span style="flex:1"></span><button class="btn sm" data-vpcal="${esc(v.id)}">Calibrate</button><button class="btn sm dng" data-vpdel="${esc(v.id)}">Delete</button></div>`).join("") || '<p class="small">None on this page.</p>'}`;
   $("dlgT").textContent = "Page scale"; $("dlgB").innerHTML = body;
@@ -2897,6 +3253,15 @@ async function scaleDialog(){
     $("dlgVer").onclick = () => { close(); S.verify = true; setTool("measure"); toast("Measure a dimension you know, then press Enter"); };
     $("dlgAll").onclick = () => { close(); copyScaleDialog(); };
   }
+  const manRead = () => { const t = $("msTxt").value.trim() || $("msSel").value, sc2 = t ? inPerFtOf(t, true) : {v: 0}, paper = $("msPaper").value;
+    if (!t) return {err: ""}; if (!(sc2.v > 0) || sc2.v > 12 * 10) return {err: "Write it like 1/4\" = 1'-0\", 1\" = 20' or 1:100"};
+    const f = paper ? Math.max(S.base.width, S.base.height) / PAPER[paper] : 1;
+    return {ptPerFt: 72 * sc2.v * f, label: sc2.label + (paper ? " @ " + paper : ""), f, paper}; };
+  const manShow = () => { const r = manRead(); $("msInfo").innerHTML = r.err != null ? (r.err ? `<span style="color:var(--red)">${esc(r.err)}</span>` : "") : `1 ft = <b>${r.ptPerFt.toFixed(4)} pt</b> on this page${r.paper ? " (× " + r.f.toFixed(3) + " for " + esc(r.paper) + " printed on this page)" : ""} — marked not verified until a known dimension is measured`; };
+  ["msSel", "msPaper"].forEach(id => $(id).addEventListener("change", () => { if (id === "msSel") $("msTxt").value = ""; manShow(); })); $("msTxt").addEventListener("input", manShow);
+  $("msSet").onclick = () => { const r = manRead(); if (r.err != null) { $("msInfo").innerHTML = `<span style="color:var(--red)">${esc(r.err || "Pick or type a scale first")}</span>`; return; }
+    close(); mutate(() => { P.proj.scales[S.key] = {ptPerFt: r.ptPerFt, how: "manual", text: r.label, note: r.paper ? "drawn for " + r.paper + ", this PDF page is × " + r.f.toFixed(3) : "", factor: r.f, verified: false, at: new Date().toISOString()}; }, "Scale " + r.label);
+    toast("Scale set: " + r.label + " — verify it with a dimension printed on the drawing (scale chip → Verify)", 4500); };
   $("dlgB").querySelectorAll("[data-cand]").forEach(el => el.onclick = () => { const c = cands[+el.dataset.cand]; close(); mutate(() => { P.proj.scales[S.key] = {ptPerFt: c.ptPerFt, how: "note", text: c.text, note: c.note || "", factor: c.factor || 1, verified: false, at: new Date().toISOString()}; }); });
 }
 async function verifyMeasure(){
@@ -2962,7 +3327,7 @@ async function exportExcel(){
         });
         const q = rr.getCell(8);
         q.value = r.below ? {formula: "0", result: 0} : {formula: (r.sign < 0 ? "-" : "") + `PRODUCT(D${row}:G${row})`, result: r.qty};
-        q.fill = r.below ? YELLOW : GREEN; q.numFmt = "#,##0.00";
+        q.fill = r.below ? YELLOW : GREEN; q.numFmt = qFmt(r.unit);
         rr.getCell(9).value = r.unit;
         if (i === 0) { rr.getCell(10).value = locText(locOf(it)); rr.getCell(11).value = QA_NAMES[it.qa || ""] + (it.qa === "checked" ? " — " + it.qaBy + ", " + dmy(it.qaAt) : "") + (it.ai && it.qa !== "checked" ? " · AI-generated" : "") + (it.copied && it.qa !== "checked" ? " · copied, not checked" : "");
           if (it.qa !== "checked") rr.getCell(11).fill = YELLOW; }
@@ -2970,7 +3335,7 @@ async function exportExcel(){
         row++;
       });
       const tr = ws.getRow(row); tr.getCell(2).value = "Total " + g.c.name; tr.getCell(9).value = g.c.unit;
-      tr.getCell(8).value = {formula: `SUM(H${first}:H${row - 1})`, result: g.t.net}; tr.getCell(8).numFmt = "#,##0.00";
+      tr.getCell(8).value = {formula: `SUM(H${first}:H${row - 1})`, result: g.t.net}; tr.getCell(8).numFmt = qFmt(g.c.unit);
       tr.font = {bold: true}; for (let n = 1; n <= 9; n++) tr.getCell(n).fill = GREY;
       totals.push({c: g.c, cell: "H" + row, t: g.t}); row++;
     }
@@ -2981,7 +3346,7 @@ async function exportExcel(){
     let bn = 0, br = 2; const BL = billLines();
     BL.forEach(l => { const r = bl.addRow([l.kind === "cond" ? ++bn : "", l.boq || "", (l.kind === "asm" ? "   " : "") + l.name, l.kind === "asm" ? l.f : "measured", +l.qty.toFixed(3), l.unit, l.rate || 0, {formula: `E${br}*G${br}`, result: l.qty * (l.rate || 0)}, l.ra || "",
         l.na ? l.na : l.rate ? (rateOk(l) ? l.src + (l.ra ? "" : ", " + dmy(l.date)) : "ASSUMPTION — no dated source") : "rate not set"]);
-      r.getCell(5).numFmt = "#,##0.000"; r.getCell(7).numFmt = "#,##0.00"; r.getCell(8).numFmt = "#,##0.00"; r.getCell(5).fill = GREEN; r.getCell(7).fill = BLUE; r.getCell(8).fill = GREEN;
+      r.getCell(5).numFmt = qFmt(l.unit); r.getCell(7).numFmt = "#,##0.00"; r.getCell(8).numFmt = "#,##0.00"; r.getCell(5).fill = GREEN; r.getCell(7).fill = BLUE; r.getCell(8).fill = GREEN;
       if (l.kind === "cond") r.font = {bold: true}; if (!rateOk(l) || !(l.rate > 0)) r.getCell(10).fill = YELLOW; br++; });
     const bt = bl.addRow(["", "", "Total", "", "", "", "", {formula: `SUM(H2:H${br - 1})`, result: BL.reduce((a, l) => a + l.qty * (l.rate || 0), 0)}]); bt.font = {bold: true}; bt.getCell(8).numFmt = "#,##0.00"; bt.eachCell(c2 => { c2.fill = GREY; });
     const lc = wb.addWorksheet("By location");
@@ -2993,7 +3358,7 @@ async function exportExcel(){
       const os = wb.addWorksheet("Openings");
       os.columns = [{header: "Mark", width: 10}, {header: "Type", width: 10}, {header: "Width ft", width: 11}, {header: "Height ft", width: 11}, {header: "Area Sft", width: 11}, {header: "Placed", width: 9}];
       os.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; os.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
-      P.proj.openings.forEach(o => { const r = os.addRow([o.mark, o.type, +o.w, +o.h, {formula: `C${os.rowCount + 1}*D${os.rowCount + 1}`, result: o.w * o.h}, P.proj.items.filter(i => i.sch === o.id).length]); r.getCell(3).numFmt = "0.000"; r.getCell(4).numFmt = "0.000"; r.getCell(5).numFmt = "#,##0.00"; });
+      P.proj.openings.forEach(o => { const r = os.addRow([o.mark, o.type, +o.w, +o.h, {formula: `C${os.rowCount + 1}*D${os.rowCount + 1}`, result: o.w * o.h}, P.proj.items.filter(i => i.sch === o.id).length]); r.getCell(3).numFmt = "0.000"; r.getCell(4).numFmt = "0.000"; r.getCell(5).numFmt = "#,##0.000"; });
     }
     const V = validation(), vs = wb.addWorksheet("Validation");
     vs.columns = [{header: "Status", width: 12}, {header: "Check — " + V.lvl, width: 110}];
@@ -3002,18 +3367,18 @@ async function exportExcel(){
     const sm = wb.addWorksheet("Summary");
     sm.columns = [{header: "Condition", width: 48}, {header: "Qty", width: 14}, {header: "Unit", width: 8}, {header: "Measurements", width: 14}];
     sm.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; sm.getRow(1).eachCell(c => { c.fill = HEAD; });
-    totals.forEach(t => { const r = sm.addRow([t.c.name, {formula: "Measurement!" + t.cell, result: t.t.net}, t.c.unit, P.proj.items.filter(i => i.cond === t.c.id).length]); r.getCell(2).numFmt = "#,##0.00"; r.getCell(2).fill = GREEN; });
+    totals.forEach(t => { const r = sm.addRow([t.c.name, {formula: "Measurement!" + t.cell, result: t.t.net}, t.c.unit, P.proj.items.filter(i => i.cond === t.c.id).length]); r.getCell(2).numFmt = qFmt(t.c.unit); r.getCell(2).fill = GREEN; });
     const au = wb.addWorksheet("Scale & audit");
     au.columns = [{header: "Drawing", width: 34}, {header: "Page", width: 7}, {header: "Scale", width: 26}, {header: "1 ft on the sheet (pt)", width: 18}, {header: "How", width: 12}, {header: "Verified", width: 10}, {header: "Check", width: 40}, {header: "Status", width: 26}];
     au.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; au.getRow(1).eachCell(c => { c.fill = HEAD; });
     Object.entries(P.proj.scales).forEach(([kk, sc]) => { const [fid, pg] = kk.split(":"), f = P.proj.files.find(x => x.id === fid); if (!f) return;
-      const r = au.addRow([f.name, +pg, sc.how === "note" ? sc.text : sc.how === "inherited" ? sc.text : "calibrated: " + sc.text, +sc.ptPerFt.toFixed(5), sc.how === "note" ? "scale note" : sc.how === "inherited" ? "inherited" : "calibrated", sc.verified ? "yes" : "NO", sc.check ? `measured ${f3(sc.check.measured)} ft vs printed ${f3(sc.check.printed)} ft` : sc.note || "", scaleState(sc).t]);
+      const r = au.addRow([f.name, +pg, sc.how === "calibrated" ? "calibrated: " + sc.text : sc.text, +sc.ptPerFt.toFixed(5), sc.how === "note" ? "scale note" : sc.how === "inherited" ? "inherited" : sc.how === "manual" ? "chosen" : "calibrated", sc.verified ? "yes" : "NO", sc.check ? `measured ${f3(sc.check.measured)} ft vs printed ${f3(sc.check.printed)} ft` : sc.note || "", scaleState(sc).t]);
       if (!sc.verified) r.eachCell(c => { c.fill = YELLOW; }); });
     const as = wb.addWorksheet("Assumptions");
     as.columns = [{header: "#", width: 5}, {header: "Item to confirm", width: 90}];
     as.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; as.getRow(1).eachCell(c => { c.fill = HEAD; });
     let an = 0;
-    Object.entries(P.proj.scales).forEach(([kk, sc]) => { if (!sc.verified) { const [fid, pg] = kk.split(":"), f = P.proj.files.find(x => x.id === fid); as.addRow([++an, `Scale of ${f ? f.name : fid} p.${pg} read from its note (${sc.text}) and not checked against a printed dimension`]).getCell(2).fill = YELLOW; } });
+    Object.entries(P.proj.scales).forEach(([kk, sc]) => { if (!sc.verified) { const [fid, pg] = kk.split(":"), f = P.proj.files.find(x => x.id === fid); as.addRow([++an, `Scale of ${f ? f.name : fid} p.${pg} ${sc.how === "manual" ? "chosen by hand" : sc.how === "inherited" ? "copied from another page" : "read from its note"} (${sc.text}) and not checked against a printed dimension`]).getCell(2).fill = YELLOW; } });
     P.proj.conds.filter(c => c.h || c.t).forEach(c => as.addRow([++an, `${c.name}: ${c.h ? "height H " + f3(+c.h) + " ft" : ""}${c.h && c.t ? ", " : ""}${c.t ? "thickness T " + f3(+c.t) + " ft" : ""} entered for the condition — confirm against the sections`]));
     P.proj.items.filter(i => i.kind === "open").forEach(i => as.addRow([++an, `Opening ${i.label || ""} on ${pageName(i)}: height ${f3(+i.oh || 0)} ft entered — confirm against the door / window schedule`]));
     if (!an) as.addRow([1, "None"]);
@@ -3022,11 +3387,14 @@ async function exportExcel(){
   } catch (e) { toast(e.message || String(e), 5000); }
   busy("");
 }
+const isNos = u => /^\s*nos?\.?\s*$/i.test(String(u || ""));
+const qFmt = u => isNos(u) ? "#,##0" : "#,##0.000";   // Excel: quantities 3 dp, Nos whole
+const qCsv = (v, u) => { v = +v || 0; const x = isNos(u) && Math.abs(v - Math.round(v)) < 1e-9 ? Math.round(v) : Math.round(v * 1000) / 1000; return (x === 0 ? 0 : x).toFixed(isNos(u) && Number.isInteger(x) ? 0 : 3); };
 function exportCsv(){
   const rows = [["S.No", "Condition", "Description", "Drawing / page", "Nos", "L (ft) / Area (Sft)", "W (ft)", "H (ft)", "Qty", "Unit", "BOQ code", "Location", "QA"]];
   let sn = 0;
-  sheetRows().forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.A != null ? f3(r.A) : r.L == null ? "" : f3(r.L), r.W == null ? "" : f3(r.W), r.H == null ? "" : f3(r.H), (r.qty).toFixed(2), r.unit, g.c.boq || "", x.i === 0 ? locText(locOf(x.it)) : "", x.i === 0 ? QA_NAMES[x.it.qa || ""] + (x.it.ai && x.it.qa !== "checked" ? " · AI" : "") + (x.it.copied && x.it.qa !== "checked" ? " · copied" : "") : ""]); });
-    rows.push(["", g.c.name, "Total " + g.c.name, "", "", "", "", "", g.t.net.toFixed(2), g.c.unit, g.c.boq || "", "", ""]); });
+  sheetRows().forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.A != null ? f3(r.A) : r.L == null ? "" : f3(r.L), r.W == null ? "" : f3(r.W), r.H == null ? "" : f3(r.H), qCsv(r.qty, r.unit), r.unit, g.c.boq || "", x.i === 0 ? locText(locOf(x.it)) : "", x.i === 0 ? QA_NAMES[x.it.qa || ""] + (x.it.ai && x.it.qa !== "checked" ? " · AI" : "") + (x.it.copied && x.it.qa !== "checked" ? " · copied" : "") : ""]); });
+    rows.push(["", g.c.name, "Total " + g.c.name, "", "", "", "", "", qCsv(g.t.net, g.c.unit), g.c.unit, g.c.boq || "", "", ""]); });
   const t = rows.map(r => r.map(v => { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
   saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Measurement.csv");
 }
@@ -3052,7 +3420,7 @@ function pageOverlaySvg(file, page, sc, W, H, legend){
   });
   (P.proj.marks || []).filter(m => m.file === file && m.page === page && m.type !== "fence").forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
   if (legend) {
-    const lines = [[P.proj.name + " — " + pageName({file, page}), "#0b0b0b", ""]].concat(P.proj.conds.filter(c => tot[c.id] !== undefined).map(c => [c.name + ": " + f2(tot[c.id]) + " " + c.unit, "#0b0b0b", c.color]));
+    const lines = [[P.proj.name + " — " + pageName({file, page}), "#0b0b0b", ""]].concat(P.proj.conds.filter(c => tot[c.id] !== undefined).map(c => [c.name + ": " + fq(tot[c.id], c.unit) + " " + c.unit, "#0b0b0b", c.color]));
     const lw = Math.max(...lines.map(l => l[0].length)) * 6.6 * z + 30 * z;
     h.push(`<rect x="${8 * z}" y="${8 * z}" width="${lw}" height="${(lines.length * 17 + 10) * z}" fill="rgba(255,255,255,.93)" stroke="#c9d6e4"/>`);
     lines.forEach((l, i) => { const y = (24 + i * 17) * z; if (l[2]) h.push(`<rect x="${16 * z}" y="${y - 9 * z}" width="${9 * z}" height="${9 * z}" fill="${l[2]}"/>`);
@@ -3068,7 +3436,7 @@ async function exportPng(){
     const sc = Math.min(4, 6000 / Math.max(S.base.width, S.base.height)), vp = S.page.getViewport({scale: sc}), cv = document.createElement("canvas");
     cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
     const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
-    await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp}).promise;
+    await sliced(S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp})).promise;
     await svgOnto(ctx, pageOverlaySvg(S.fileId, S.pageNo, sc, cv.width, cv.height, true));
     cv.toBlob(b => saveBlob(b, fileBase() + "_p" + S.pageNo + "_markup.png"), "image/png");
   } catch (e) { toast(e.message || String(e), 5000); }
@@ -3092,12 +3460,12 @@ async function exportPdf(all){
       const pg = await (await doc(f)).getPage(p), base = pg.getViewport({scale: 1}), sc = Math.min(3, 4000 / Math.max(base.width, base.height));
       const W = Math.ceil(base.width * sc), H = Math.ceil(base.height * sc), cv = document.createElement("canvas"); cv.width = W; cv.height = H;
       const ctx = cv.getContext("2d");
-      const flat = pg.rotate % 360 !== 0;
-      if (flat) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); await loadLayers(f); await pg.render({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})}).promise; }
+      if (!srcCache[f]) { const rec = await dbGet("pdfs", f); srcCache[f] = await L.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); }
+      const flat = pg.rotate % 360 !== 0 || srcCache[f].isEncrypted;   // an encrypted PDF cannot be copied page for page (its content would stay encrypted): flattened like a turned page
+      if (flat) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); await loadLayers(f); await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})})).promise; }
       await svgOnto(ctx, pageOverlaySvg(f, p, sc, W, H, true));
       const png = await out.embedPng(await (await new Promise(r => cv.toBlob(r, "image/png"))).arrayBuffer());
       if (flat) { const np = out.addPage([base.width, base.height]); np.drawImage(png, {x: 0, y: 0, width: base.width, height: base.height}); continue; }
-      if (!srcCache[f]) { const rec = await dbGet("pdfs", f); srcCache[f] = await L.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); }
       const [cp] = await out.copyPages(srcCache[f], [p - 1]); out.addPage(cp);
       const vb = pg.view;   // [x0, y0, x1, y1] of the shown box, in PDF space
       cp.drawImage(png, {x: vb[0], y: vb[1], width: vb[2] - vb[0], height: vb[3] - vb[1]});
@@ -3290,8 +3658,8 @@ const needsReview = it => (it.ai || it.copied) && it.qa !== "checked";
 function qaUser(){ return pref("zdTakeoffUser") || ""; }
 async function askUser(){
   let u = qaUser(); if (u) return u;
-  const v = await ask("Your name", '<div class="fg w2"><label>Name for the QA record (kept in this browser)</label><input type="text" id="dlgUser" placeholder="e.g. Sajjad"></div>', "Save", () => $("dlgUser").value.trim() || "Enter your name", "dlgUser");
-  if (!v) return ""; pref("zdTakeoffUser", v); return v;
+  const v = await ask("Your name", '<div class="fg w2"><label>Name for the QA record (kept in this browser)</label><input type="text" id="dlgUser" placeholder="e.g. Sajjad"></div>', "Save", () => { const n = $("dlgUser").value.trim(); return n ? {n} : "Enter your name"; }, "dlgUser");   // (a plain string from read() is an error message to ask(): the name goes in an object)
+  if (!v) return ""; pref("zdTakeoffUser", v.n); return v.n;
 }
 async function setQa(items, qa){
   if (!items.length) return;
@@ -3369,10 +3737,11 @@ function validate(){
     if (c.type === "linear" && c.unit !== "ft" && !(+c.h > 0)) E("ERROR", `${c.name}: height H missing (needed for ${c.unit})`);
     if (c.unit === "cft" && !(+c.t > 0)) E("ERROR", `${c.name}: thickness T missing (needed for cft)`);
     if (!String(c.boq || "").trim()) E("WARNING", `${c.name}: no BOQ code`);
-    const t = condTotals(c); if (t.net < 0) E("ERROR", `${c.name}: net quantity is negative (${f2(t.net)} ${c.unit}) — deductions exceed the gross`);
+    const t = condTotals(c); if (t.net < 0) E("ERROR", `${c.name}: net quantity is negative (${fq(t.net, c.unit)} ${c.unit}) — deductions exceed the gross`);
     its.forEach(it => { const k = itemScale(it); if (!k) return; const q = rowsOf(it, k).reduce((a, r) => a + Math.abs(r.qty), 0);
       if (!(q > 0) && !rowsOf(it, k).some(r => r.below)) E("ERROR", `${c.name} — ${it.label || kindName(it, c)} on ${pageName(it)}: zero quantity`);
       if (it.kind === "open" && c.unit !== "ft" && !(openH(it) > 0)) E("ERROR", `${c.name} — opening ${it.label || ""} on ${pageName(it)}: height missing`);
+      if (crossed(it)) E("ERROR", `${c.name} — ${it.label || kindName(it, c)} on ${pageName(it)}: the outline crosses itself, so its area is not the area drawn`);
       if (!locOf(it).floor) noFloor.add(c.name); });
   });
   if (noFloor.size) E("WARNING", `No floor given (Sheet info or the measurement) for some measurements of: ${[...noFloor].join(", ")}`);
@@ -3433,8 +3802,8 @@ async function revCompareDialog(){
   $("dlgT").textContent = "Revision quantity compare";
   $("dlgB").innerHTML = `<p class="small">Old: <b>${esc(rl(v.o))}</b> → New: <b>${esc(rl(v.n))}</b></p>
     <div style="overflow:auto;margin-top:6px"><table class="sh"><thead><tr><th>Item</th><th class="n">Old</th><th class="n">New</th><th class="n">Variance</th><th class="n">%</th><th class="n">Cost impact PKR</th></tr></thead><tbody>
-    ${rows.map(r => `<tr class="${r.kind === "asm" ? "" : "ch2"}"><td>${r.kind === "asm" ? "↳ " : ""}${esc(r.name)} <span class="small">${esc(r.unit)}</span>${r.boq ? `<div class="ds">${esc(r.boq)}</div>` : ""}</td><td class="n">${f2(r.old)}</td><td class="n">${f2(r.neu)}</td>
-      <td class="n" style="color:${r.var > 0 ? "var(--red)" : r.var < 0 ? "var(--green)" : "inherit"}">${r.var > 0 ? "+" : ""}${f2(r.var)}</td><td class="n">${r.pct == null ? "new" : (r.pct > 0 ? "+" : "") + r.pct.toFixed(2) + "%"}</td><td class="n">${r.cost == null ? `<span class="small" title="${esc(r.na || "rate not set")}">no rate</span>` : f2(r.cost)}</td></tr>`).join("")}
+    ${rows.map(r => `<tr class="${r.kind === "asm" ? "" : "ch2"}"><td>${r.kind === "asm" ? "↳ " : ""}${esc(r.name)} <span class="small">${esc(r.unit)}</span>${r.boq ? `<div class="ds">${esc(r.boq)}</div>` : ""}</td><td class="n">${fq(r.old, r.unit)}</td><td class="n">${fq(r.neu, r.unit)}</td>
+      <td class="n" style="color:${r.var > 0 ? "var(--red)" : r.var < 0 ? "var(--green)" : "inherit"}">${r.var > 0 ? "+" : ""}${fq(r.var, r.unit)}</td><td class="n">${r.pct == null ? "new" : (r.pct > 0 ? "+" : "") + r.pct.toFixed(2) + "%"}</td><td class="n">${r.cost == null ? `<span class="small" title="${esc(r.na || "rate not set")}">no rate</span>` : f2(r.cost)}</td></tr>`).join("")}
     <tr class="tot"><td>Total cost impact (lines with a rate)</td><td></td><td></td><td></td><td></td><td class="n">${f2(tot)}</td></tr></tbody></table></div>
     <p class="small" style="margin-top:8px">Variance = new − old. Cost impact = variance × the line's rate; lines without a usable rate show “no rate” — never assumed.</p>`;
   $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn pri" id="rcCsv">Change Management CSV</button>`;
@@ -3485,19 +3854,23 @@ async function backupsDialog(pid){
   $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button>${P.proj && P.proj.id === pid ? '<button class="btn pri" id="bakNow">Back up now</button>' : ""}`;
   $("dlgBack").classList.add("on");
   $("dlgCancel").onclick = () => $("dlgBack").classList.remove("on");
-  if ($("bakNow")) $("bakNow").onclick = async () => { clearTimeout(saveT); await dbPut("projects", P.proj); toast((await backupNow("manual")) ? "Backed up" : "No change since the last backup"); backupsDialog(pid); };
+  if ($("bakNow")) $("bakNow").onclick = async () => { savePr = P.proj; await flushSave(); toast((await backupNow("manual")) ? "Backed up" : "No change since the last backup"); backupsDialog(pid); };
   $("dlgB").querySelectorAll("[data-rest]").forEach(b => b.onclick = async () => {
     const bk = list.find(x => x.id === b.dataset.rest), old = JSON.parse(bk.data);
     const ok = await ask("Restore this backup?", `<p>Replace <b>${esc(pr ? pr.name : "")}</b> (${pr ? pr.items.length : 0} measurements, changed ${esc(pr ? fmt(pr.updated) : "—")}) with the backup of <b>${esc(fmt(bk.at))}</b> (${bk.n} measurements)?</p><p class="small" style="margin-top:6px">The project as it is now is backed up first, so this can be undone from this list.</p>`, "Restore");
     if (!ok) return backupsDialog(pid);
-    if (P.proj && P.proj.id === pid) { clearTimeout(saveT); await dbPut("projects", P.proj); }
+    if (P.proj && P.proj.id === pid) { savePr = P.proj; await flushSave(); }
     const cur = await dbGet("projects", pid); if (cur) await backupNow("before restore", cur);
     old.id = pid; migrate(old); old.updated = new Date().toISOString(); await dbPut("projects", old);
     if (P.proj && P.proj.id === pid) await openProject(pid); else showStart();
     toast("Restored the backup of " + fmt(bk.at), 4000);
   });
 }
-setInterval(() => { if (P.proj && document.visibilityState !== "hidden") dbPut("projects", P.proj).then(() => backupNow("every 10 min")).catch(() => {}); }, 600000);
+setInterval(() => { if (P.proj && document.visibilityState !== "hidden") { savePr = P.proj; flushSave().then(ok => ok && backupNow("every 10 min")).catch(() => {}); } }, 600000);
+/* leaving or hiding the page writes the pending change at once (the 300 ms timer would not run) */
+window.addEventListener("pagehide", () => { flushSave(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave(); });
+window.addEventListener("beforeunload", () => { flushSave(); });
 
 /* ------------------------------------------------------------------ project import: lossless, then validated */
 async function importProject(text){
@@ -3505,7 +3878,7 @@ async function importProject(text){
   if (!o || o.format !== "zd-takeoff" || !Array.isArray(o.items)) throw new Error("not a takeoff project file");
   const pr = JSON.parse(JSON.stringify(o)); delete pr.format; delete pr.exported;
   pr.id = uid("P"); pr.name = pr.name || "Imported takeoff"; pr.created = pr.created || new Date().toISOString(); pr.updated = new Date().toISOString();
-  const fromV = migrate(pr);
+  const repairs = [], fromV = migrate(pr, repairs);
   await dbPut("projects", pr);
   const back = await dbGet("projects", pr.id), miss = [];
   for (const f of back.files) if (!(await dbGet("pdfs", f.id))) miss.push(f.name);
@@ -3514,7 +3887,8 @@ async function importProject(text){
   const same = k => JSON.stringify(ref[k] === undefined ? null : ref[k]) === JSON.stringify(back[k] === undefined ? null : back[k]);
   const rows = [], add = (what, a, b, st, note) => rows.push({what, a, b, st, note});
   [["files", "PDFs"], ["conds", "Conditions"], ["items", "Measurements"], ["scales", "Page scales"], ["viewports", "Viewports"], ["marks", "Markups"], ["sheets", "Sheet info"], ["openings", "Opening schedule"]].forEach(([k, n]) =>
-    add(n, cnt(o[k]), cnt(back[k]), o[k] === undefined || same(k) ? "PASS" : "FAIL", o[k] === undefined ? "not in this file (older version) — empty" : ""));
+    add(n, cnt(o[k]), cnt(back[k]), o[k] === undefined || (same(k) && cnt(o[k]) === cnt(back[k])) ? "PASS" : "FAIL", o[k] === undefined ? "not in this file (older version) — empty" : cnt(o[k]) !== cnt(back[k]) ? "the file holds entries that could not be read — see Repaired below" : ""));
+  repairs.forEach(r => add("Repaired", "", "", /left out|removed/.test(r) ? "FAIL" : "WARNING", r));
   ["auto", "layersOff", "last"].forEach(k => { if (o[k] !== undefined) add({auto: "Auto area settings", layersOff: "PDF layers off", last: "Last page"}[k], "kept", same(k) ? "kept" : "changed", same(k) ? "PASS" : "FAIL", ""); });
   const known = new Set(["format", "exported", "id", "name", "created", "updated", "v", "files", "conds", "items", "scales", "viewports", "marks", "sheets", "openings", "auto", "layersOff", "last"]);
   Object.keys(o).filter(k => !known.has(k)).forEach(k => add("Other: " + k, "kept", same(k) ? "kept" : "changed", same(k) ? "PASS" : "FAIL", "kept as it was"));
@@ -3573,13 +3947,13 @@ const ctxArrange = () => ({t: "Arrange / rotate", sub: [{t: "Bring to front", fn
 function selTotals(ids){   // "Floor area 312.00 Sft · Doors 4 Nos" for the selection
   const T = new Map();
   [...ids].map(id => P.proj.items.find(i => i.id === id)).filter(Boolean).forEach(it => { const c = cond(it.cond), k = itemScale(it); if (!c || !k) return; const q = rowsOf(it, k).reduce((a, r) => a + r.qty, 0); const t = T.get(c.id) || {c, q: 0, n: 0}; t.q += q; t.n++; T.set(c.id, t); });
-  return [...T.values()].map(t => t.c.name + " " + f2(t.q) + " " + t.c.unit).join(" · ");
+  return [...T.values()].map(t => t.c.name + " " + fq(t.q, t.c.unit) + " " + t.c.unit).join(" · ");
 }
 function ctxItem(hi, sp, q, e){
   const it = hi.it, c = cond(it.cond), ids = selIds(), many = ids.size > 1, k = itemScale(it), sel = [...ids].map(id => P.proj.items.find(i => i.id === id)).filter(Boolean);
   const runs = sel.filter(isRun), vi = !many && editPts(it) ? vertexAt(it, sp) : -1, sg = !many && (editPts(it) || it.shape === "circle") ? segAt(it, sp) : null;
   const cut = sg || (vi > 0 && vi < it.pts.length - 1 ? {i: vi - 1, p: it.pts[vi]} : null), lk = sel.some(o => o.locked), allLk = sel.length && sel.every(o => o.locked);
-  const qty = k ? f2(rowsOf(it, k).reduce((a, r) => a + r.qty, 0)) + " " + c.unit : "scale not set";
+  const qty = k ? fq(rowsOf(it, k).reduce((a, r) => a + r.qty, 0), c.unit) + " " + c.unit : "scale not set";
   const L = [{h: many ? ids.size + " selected" : (it.label || kindName(it, c)), s: many ? selTotals(ids) : c.name + " · " + qty + (it.locked ? " · locked" : "")}];
   if (!many) L.push({t: "Properties…", k: "Dbl-click", fn: focusProps}, {t: "Rename…", k: "F2", fn: () => renameItem(it)});
   L.push({sep: 1});
@@ -3627,7 +4001,7 @@ function ctxCanvas(q){
     {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {sep: 1},
     {t: "Undo" + (u ? ": " + u : ""), k: "Ctrl+Z", fn: undoAny, dis: !S.undo.length}, {t: "Redo" + (r ? ": " + r : ""), k: "Ctrl+Y", fn: redoAny, dis: !S.redo.length}, {sep: 1},
     {t: "Tools", sub: [T("select", "Select", "V"), T("lasso", "Lasso select", "Shift+O"), T("pan", "Pan", "H"), {sep: 1}, T("draw", "Draw", "A"), T("rect", "Rectangle", "R"), T("auto", "Auto area", "W"), T("circle", "Circle", "E"), T("count", "Count", "C"), T("ded", "Deduct", "D"), T("open", "Opening", "O"), {sep: 1}, T("break", "Break a run", "B"), T("measure", "Measure", "M"), T("cal", "Set scale", "K")]},
-    {t: "View", sub: [{t: "Fit page", k: "F", fn: () => { fit(); renderHi(); }}, {t: "Zoom window", k: "Z", fn: () => setTool("zoomwin")}, {t: "Zoom in", k: "+", fn: () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2)}, {t: "Zoom out", k: "−", fn: () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2)}, {sep: 1},
+    {t: "View", sub: [{t: "Fit page", k: "F", fn: () => { fit(); renderHi(); }}, {t: "Fit width", k: "Shift+F", fn: fitWidth}, {t: "Zoom window", k: "Z", fn: () => setTool("zoomwin")}, {t: "Zoom in", k: "+", fn: () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2)}, {t: "Zoom out", k: "−", fn: () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2)}, {sep: 1},
       {t: "Labels", k: "L", fn: () => setLblOn(!S.lbl.on), on: S.lbl.on}, {t: "Snap to drawing lines", k: "S", fn: () => { $("snapOn").checked = !$("snapOn").checked; }, on: $("snapOn").checked}, {t: "Markups", fn: () => $("bHideMk").click(), on: !S.hideMk}]},
     {sep: 1}, {t: "Keyboard & mouse shortcuts…", k: "?", fn: keysDialog}];
 }
@@ -3639,16 +4013,25 @@ function keysDialog(){
     ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
     ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"]])}
-    ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Ctrl+F", "find text"], ["1–9", "pick a condition"]])}
+    ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"]])}
   </table>`, "Close");
 }
 /* ------------------------------------------------------------------ events */
 function wire(){
   const st = stage();
+  document.addEventListener("keydown", e => {   // Ctrl+S: save now (not the browser's "Save page as")
+    if (!((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s")) return;
+    e.preventDefault(); if (!P.proj) return;
+    const a = document.activeElement; if (a && a.closest && a.closest("#props,header") && /^(INPUT|SELECT)$/.test(a.tagName)) a.blur();   // a field being typed in is taken first
+    savePr = P.proj; flushSave().then(ok => toast(ok ? "Saved in this browser — " + P.proj.items.length + " measurement" + (P.proj.items.length === 1 ? "" : "s") + " · Export → Project (.json) to keep a copy elsewhere" : "Not saved — see the message above", 2600));
+  }, true);
+  $("warnbar").addEventListener("click", e => { if (e.target.closest("[data-reload]")) { clearTimeout(saveT); savePr = null; location.reload(); } });   // this tab's pending change is dropped, not written over the other's
   st.addEventListener("pointerdown", onDown);
   st.addEventListener("pointermove", onMove);
   st.addEventListener("pointerup", onUp); st.addEventListener("pointercancel", onUp);
   st.addEventListener("contextmenu", e => e.preventDefault());
+  st.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });   // middle button pans — not the browser's autoscroll
+  window.addEventListener("blur", () => { if (S.space) { S.space = false; stage().classList.toggle("pan", S.tool === "pan"); } });   // Space released in another window must not leave pan on
   st.addEventListener("dblclick", e => {
     if (["draw", "ded", "measure", "fence"].indexOf(S.tool) >= 0 && S.draft.length) return endDraft();
     if (S.tool !== "select" || !P.proj || !S.page) return;
@@ -3684,8 +4067,13 @@ function wire(){
   $("bDim").onclick = () => setDim(!S.dim);
   $("dimPct").oninput = e => setDim(+e.target.value);
   $("bTypical").onclick = () => P.proj && copyPageDialog();
-  const leftTab = t => { $("condList").style.display = t ? "none" : ""; $("layerList").style.display = t ? "" : "none"; $("tCond").classList.toggle("on", !t); $("tLay").classList.toggle("on", t); $("bNewCond").style.display = t ? "none" : ""; if (t) renderLayers(); };
-  $("tCond").onclick = () => leftTab(false); $("tLay").onclick = () => leftTab(true);
+  const leftTab = t => { t = t === true ? "lay" : t || "cond"; S.leftTab = t;   // conditions · pages · the PDF's layers
+    $("condList").style.display = t === "cond" ? "" : "none"; $("layerList").style.display = t === "lay" ? "" : "none"; $("pageList").style.display = t === "pages" ? "" : "none";
+    $("tCond").classList.toggle("on", t === "cond"); $("tLay").classList.toggle("on", t === "lay"); $("tPages").classList.toggle("on", t === "pages"); $("bNewCond").style.display = t === "cond" ? "" : "none";
+    if (t === "lay") renderLayers(); if (t === "pages") renderPages(); };
+  $("tCond").onclick = () => leftTab("cond"); $("tLay").onclick = () => leftTab("lay"); $("tPages").onclick = () => leftTab("pages");
+  $("pageList").addEventListener("click", e => { const rm = e.target.closest("[data-rmpdf]"); if (rm) return removePdf(rm.dataset.rmpdf);
+    const t = e.target.closest("[data-pg]"); if (t) { const [f, p] = t.dataset.pg.split("|"); gotoPage(f, +p); } });
   $("layerList").addEventListener("change", e => { if (e.target.dataset.lid) setLayer([e.target.dataset.lid], e.target.checked); });
   $("layerList").addEventListener("click", e => { const pr = e.target.closest("[data-lpre]");
     if (pr) { const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; const G = Object.entries(cfg.getGroups()), t = pr.dataset.lpre;
@@ -3721,9 +4109,15 @@ function wire(){
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
   $("bLw").onclick = () => setThin(!S.thin);
-  $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => labelDialog();
-  $("bHideMk").onclick = () => { S.hideMk = !S.hideMk; $("bHideMk").classList.toggle("on", !S.hideMk); $("bHideMk").title = S.hideMk ? "Markups hidden — click to show all" : "Hide all markups (measurements and notes) to see the drawing"; draw(); toast(S.hideMk ? "All markups hidden" : "Markups shown", 1500); };
-  $("bLayers").onclick = () => { S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };
+  const vpop = $("viewPop"), vOpen = on => { vpop.classList.toggle("on", on); $("bView").setAttribute("aria-expanded", on ? "true" : "false"); };
+  $("bView").onclick = e => { e.stopPropagation(); vOpen(!vpop.classList.contains("on")); };
+  document.addEventListener("pointerdown", e => { if (vpop.classList.contains("on") && !e.target.closest("#viewPop,#bView")) vOpen(false); }, true);
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && vpop.classList.contains("on")) { vOpen(false); e.stopPropagation(); } }, true);
+  $("bFitW").onclick = () => { fitWidth(); vOpen(false); };
+  { const hd = document.querySelector("header"); new ResizeObserver(() => document.documentElement.style.setProperty("--hh", hd.offsetHeight + "px")).observe(hd); }   // the bar's height (one row, or two on a narrower screen)
+  $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => { vOpen(false); labelDialog(); };
+  $("bHideMk").onclick = () => { S.hideMk = !S.hideMk; $("bHideMk").classList.toggle("on", !S.hideMk); $("bHideMk").title = S.hideMk ? "Markups hidden — click to show all" : "Hide all markups (measurements and notes) to see the drawing"; viewMark(); draw(); toast(S.hideMk ? "All markups hidden" : "Markups shown", 1500); };
+  $("bLayers").onclick = () => { vOpen(false); S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };
   $("bDel").onclick = () => delSelected();
   $("bKeys").onclick = keysDialog;
   $("bZw").onclick = () => P.proj && S.page && setTool("zoomwin");
@@ -3783,7 +4177,7 @@ function wire(){
     const it = P.proj.items.find(i => i.id === S.sel), f = e.target.dataset.prop; if (!it || !f) return;
     if (f === "qa") return setQa([it], e.target.value);
     mutate(() => {
-      if (f === "nos") it.nos = Math.max(1, Math.round(+e.target.value || 1));
+      if (f === "nos") { const v = Math.round(+e.target.value || 1); it.nos = Math.max(1, Math.min(100000, v)); if (v > 100000) toast("Nos is limited to 100,000 — check the number typed", 3500); }
       else if (f === "ow" || f === "oh") { const v = e.target.value.trim() ? parseFt(e.target.value) : 0; if (!isNaN(v)) it[f] = v; }
       else if (f === "doorW") { const s = e.target.value.trim(); if (!s) delete it.doorW; else { const v = s.split("+").reduce((a, x) => a + parseFt(x), 0); if (!isNaN(v) && v >= 0) it.doorW = r3(v); } }
       else if (f === "sch") { const s = schOf(e.target.value); if (s) { it.sch = s.id; it.label = s.mark; } else delete it.sch; }
@@ -3871,9 +4265,10 @@ function wire(){
     if (T[k]) { setTool(T[k]); return; }
     if (k === "l") return setLblOn(!S.lbl.on);
     if (k === "s") { $("snapOn").checked = !$("snapOn").checked; toast("Snap " + ($("snapOn").checked ? "on" : "off")); return; }
-    if (k === "f") { fit(); renderHi(); return; }
+    if (k === "f") { if (e.shiftKey) fitWidth(); else { fit(); renderHi(); } return; }
     if (k === "+" || k === "=") return zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2);
     if (k === "-") return zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2);
+    if (e.key === "Home" || e.key === "End") { const o = [...$("pageSel").options].map(x => x.value).filter(v => v.indexOf("|") > 0), n = e.key === "Home" ? o[0] : o[o.length - 1]; if (n) { e.preventDefault(); const [f, p] = n.split("|"); gotoPage(f, +p); } return; }
     if (e.key === "PageDown") return stepPage(1);
     if (e.key === "PageUp") return stepPage(-1);
     if (/^[1-9]$/.test(k) && P.proj.conds[+k - 1]) { S.cond = P.proj.conds[+k - 1].id; setTool(S.tool === "select" || S.tool === "pan" ? "draw" : S.tool); refresh(); }
@@ -3967,7 +4362,7 @@ async function aiSnapshot(maxMp){   // the part of the page on screen, long side
   const w = bx1 - bx0, h = by1 - by0, sc = Math.min(1600 / Math.max(w, h), 8, maxMp ? Math.sqrt(maxMp / (w * h)) : 8), W = Math.max(1, Math.round(w * sc)), H = Math.max(1, Math.round(h * sc));
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: sc}), transform: [1, 0, 0, 1, -bx0 * sc, -by0 * sc]}).promise;
+  await sliced(S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: sc}), transform: [1, 0, 0, 1, -bx0 * sc, -by0 * sc]})).promise;
   return {data: cv.toDataURL("image/png").split(",")[1], x0: bx0, y0: by0, sc, W, H, key: S.key};
 }
 const aiToPx = (V, p) => [Math.round((p[0] - V.x0) * V.sc), Math.round((p[1] - V.y0) * V.sc)];
@@ -3988,7 +4383,7 @@ function aiContext(V){   // page text and measured areas inside the view, in ima
   return `Image: ${V.W} × ${V.H} px. Scale: ${k ? "1 ft = " + (k * V.sc).toFixed(3) + " px in this image" : "not set — areas cannot be measured until the scale is set (K)"}.
 Text on the page in view (text @ x,y px):
 ${texts.length ? texts.map(t => `"${t.s}" @ ${t.q[0]},${t.q[1]}`).join("\n") : "(none — the drawing may be a scan; read the image)"}
-Already measured here: ${areas.length ? areas.map(a => `${a.it.id} "${a.it.label || "area"}" ${f2(polyArea(a.it.pts) / k / k)} Sft`).join("; ") : "none"}`;
+Already measured here: ${areas.length ? areas.map(a => `${a.it.id} "${a.it.label || "area"}" ${fq(polyArea(a.it.pts) / k / k)} Sft`).join("; ") : "none"}`;
 }
 function condByName(name, type){   // an existing condition of this type with this name, else a new one
   const n = String(name || "").trim() || (type === "count" ? "Count" : type === "linear" ? "Length" : "Floor area");
@@ -4070,7 +4465,7 @@ function aiToolMsg(name, inp, out){   // one line in the panel for a tool step
   if (o.deleted) return "Deleted an area";
   if (o.length_ft != null) return `${esc(inp.condition)} ${esc(inp.name || "")}: <b>${f3(o.length_ft)} ft</b> ${nm(name)}`;
   if (o.count_on_page != null && name === "add_counts") return `${esc(o.name)}: <b>${o.count_on_page} Nos</b> on this page ${nm(name)}`;
-  if (o.area_sft != null) return `${esc(o.name || inp.name || "")}: <b>${f2(o.area_sft)} Sft</b> ${nm(name)}${o.corners_snapped ? ' <span class="small">corners snapped ' + esc(o.corners_snapped) + "</span>" : ""}`;
+  if (o.area_sft != null) return `${esc(o.name || inp.name || "")}: <b>${fq(o.area_sft)} Sft</b> ${nm(name)}${o.corners_snapped ? ' <span class="small">corners snapped ' + esc(o.corners_snapped) + "</span>" : ""}`;
   return `${esc(name.replace(/_/g, " "))} ✓`;
 }
 function aiLog(kind, html){ const d = document.createElement("div"); d.className = "aimsg " + kind; d.innerHTML = html; $("aiLog").appendChild(d); $("aiLog").scrollTop = 1e9; return d; }
@@ -4227,12 +4622,12 @@ async function freeImport(){
     let pts = null, how = "";
     if (inImg(r.seed)) { const res = await autoRoom(aiToBase(V, r.seed[0], r.seed[1])); if (res.pts) { pts = res.pts; how = "traced"; } }
     const ar = q => polyArea(q) / k / k;
-    if (pts && want && Math.abs(ar(pts) - want) / want > 0.05 && corners.length >= 3) { how = "from Claude's corners (trace gave " + f2(ar(pts)) + ")"; pts = corners; }
+    if (pts && want && Math.abs(ar(pts) - want) / want > 0.05 && corners.length >= 3) { how = "from Claude's corners (trace gave " + fq(ar(pts)) + ")"; pts = corners; }
     if (!pts && corners.length >= 3) { pts = corners; how = "from Claude's corners"; }
     if (!pts) { aiLog("err", esc(r.name || "room") + ": no usable seed or corners"); continue; }
     const c = aiAreaCond(), id = uid("I"), a2 = ar(pts);
     mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(r.name || "").slice(0, 60)}); });
-    aiLog("tool", `${esc(r.name || "")}: <b>${f2(a2)} Sft</b> <span class="small">${esc(how)}${want ? " · written " + f2(want) + " Sft" + (Math.abs(a2 - want) / want > 0.05 ? " — check" : " ✓") : ""}</span>`);
+    aiLog("tool", `${esc(r.name || "")}: <b>${fq(a2)} Sft</b> <span class="small">${esc(how)}${want ? " · written " + fq(want) + " Sft" + (Math.abs(a2 - want) / want > 0.05 ? " — check" : " ✓") : ""}</span>`);
   }
   for (const l of (J.lengths || [])) { const pts = (l.points || []).filter(inImg).map(q => aiToBase(V, q[0], q[1])); if (pts.length < 2) continue;
     const c = condByName(l.condition, "linear"); mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(l.name || "").slice(0, 60)}); });
@@ -4503,7 +4898,7 @@ async function agentDetails(){
   const d = aiLog("bot", `<b>Drawing details — ${esc(pageName({file: S.fileId, page: S.pageNo}))}</b>
     ${sec("Scale", (F.scales.length ? "Written: " + F.scales.map(esc).join(", ") : "No scale text found") + " · set: " + (k ? "yes" : "<span style='color:#b3261e'>not set — press K</span>"))}
     ${sec("Unit / type", F.types.map(esc).join("<br>"))}
-    ${sec("Rooms (" + F.rooms.length + ")", F.rooms.map(r => `${esc(r.name)}${r.size ? ` — ${esc(r.size)} = <b>${f2(r.sft)} Sft</b>` : ""}`).join("<br>") + (tot ? `<br><span class="small">Written sizes total ${f2(tot)} Sft (inside dimensions, not the covered area)</span>` : ""))}
+    ${sec("Rooms (" + F.rooms.length + ")", F.rooms.map(r => `${esc(r.name)}${r.size ? ` — ${esc(r.size)} = <b>${fq(r.sft)} Sft</b>` : ""}`).join("<br>") + (tot ? `<br><span class="small">Written sizes total ${fq(tot)} Sft (inside dimensions, not the covered area)</span>` : ""))}
     ${Object.entries(groups).map(([g, l]) => sec(g + " (" + l.reduce((a, x) => a + x[1], 0) + " Nos)", l.sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})).map(x => `${esc(x[0])} × ${x[1]}${F.sched[x[0]] ? ` <span class="small">(${f3(F.sched[x[0]].w)} × ${f3(F.sched[x[0]].h)} ft${F.sched[x[0]].qty ? ", sch. qty " + F.sched[x[0]].qty : ""})</span>` : ""}`).join(" · "))).join("")}
     ${Object.keys(F.sched).length ? sec("Door / window schedule (" + Object.keys(F.sched).length + " marks)", Object.entries(F.sched).sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})).map(([k2, v2]) => `${esc(k2)} ${f3(v2.w)} × ${f3(v2.h)} ft${v2.qty ? " · qty " + v2.qty : ""}`).join("<br>")) : ""}
     ${sec("Levels", F.levels.map(esc).join(" · "))}
@@ -4547,7 +4942,7 @@ async function agentMeasure(filter, only){   // only: these rooms (an apartment)
     if (!best) { res.push({name: r.name, error: "could not close the room"}); aiLog("err", `${esc(r.name)}: auto area could not close the room — use the Fence tool on the open side, or draw it`); continue; }
     const cen = q => [q.reduce((a, v) => a + v[0], 0) / q.length, q.reduce((a, v) => a + v[1], 0) / q.length];
     const same = got.find(o => Math.abs(o.a - best.a) / best.a < 0.005 && dist(cen(o.pts), cen(best.pts)) < k);
-    if (same) { same2++; res.push({name: r.name, error: "leaked into " + same.name}); aiLog("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${f2(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
+    if (same) { same2++; res.push({name: r.name, error: "leaked into " + same.name}); aiLog("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${fq(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
     const inside = F.rooms.filter(q => q !== r && pointInPoly([q.x + q.w / 2, q.y - q.h / 2], best.pts));
     const hit = inside.find(q => q.name !== r.name && got.some(o => sameRoom(o.room, q)));   // runs into a room already measured on its own: a leak, not open plan
     if (hit) { same2++; res.push({name: r.name, error: "leaked into " + hit.name}); aiLog("err", `${esc(r.name)}: runs on into <b>${esc(hit.name)}</b> (already measured) — an opening is not closed. Draw a <b>Fence</b> across it and run again, or draw this room.`); continue; }
@@ -4560,7 +4955,7 @@ async function agentMeasure(filter, only){   // only: these rooms (an apartment)
     mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, ai: true, label: nm}); });
     const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;   // best.err is against the written sizes of every room in the space
     res.push({name: nm, area_sft: +best.a.toFixed(2), written_sft: r.sft ? +wrt.toFixed(2) : null, check: !!bad, open_plan_with: others.map(q => q.name)});
-    aiLog("tool", `${esc(nm)}: <b>${f2(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? f2(wrt) + " Sft together" : esc(r.size) + " = " + f2(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + f2(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
+    aiLog("tool", `${esc(nm)}: <b>${fq(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? fq(wrt) + " Sft together" : esc(r.size) + " = " + fq(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + fq(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
   }
   busy(""); refresh();
   aiLog("bot", `Measured ${ok + chk} of ${rooms.length} into <b>${esc(c.name)}</b>${chk ? ` — <b>${chk} to check</b> (more than 5% off the written size: fix with Fence, or the room is not a rectangle)` : ""}${same2 ? ` — <b>${same2}</b> leaked into a neighbour, not added` : ""}. Undo (Ctrl+Z) removes them one by one.`);
@@ -4590,7 +4985,7 @@ async function agentUnit(no){
   aiLog("bot", `<b>Apartment ${esc(u.no)}</b>${u.type ? " — " + esc(u.type) : ""}: ${mine.length} rooms (${mine.map(r => esc(r.name)).join(", ")}).`);
   const r = await agentMeasure("", mine); if (!r || r.error) return r;
   const tot = r.rooms.reduce((a, x) => a + (x.area_sft || 0), 0);
-  aiLog("bot", `Apartment ${esc(u.no)}: rooms measured <b>${f2(tot)} Sft</b>${u.sft ? ` · written on the drawing <b>${f2(u.sft)} Sft</b> (that figure usually includes the walls and is not a floor-finish area)` : ""}.`);
+  aiLog("bot", `Apartment ${esc(u.no)}: rooms measured <b>${fq(tot)} Sft</b>${u.sft ? ` · written on the drawing <b>${fq(u.sft)} Sft</b> (that figure usually includes the walls and is not a floor-finish area)` : ""}.`);
   return Object.assign(r, {unit: u.no, type: u.type, unit_written_sft: u.sft || null, rooms_total_sft: +tot.toFixed(2)});
 }
 async function unitDialog(){
@@ -4638,7 +5033,7 @@ function faceLines(rect, k, only, join){   // straight drawing lines in rect (or
     let a = Math.atan2(dy, dx); if (a < 0) a += Math.PI; if (a >= Math.PI - 0.0044) a -= Math.PI;
     const key = Math.round(a / 0.0087);   // 0.5° bins
     let G = groups.get(key) || groups.get(key - 1) || groups.get(key + 1);
-    if (!G) { G = {a: key * 0.0087, L: []}; G.u = [Math.cos(G.a), Math.sin(G.a)]; G.n = [-G.u[1], G.u[0]]; groups.set(key, G); }
+    if (!G) { G = {a: Math.abs(a - Math.PI / 2) < 0.0044 ? Math.PI / 2 : a, L: []}; G.u = [Math.cos(G.a), Math.sin(G.a)]; G.n = [-G.u[1], G.u[0]]; groups.set(key, G); }   // the group's own direction (not its 0.5° bin's): a vertical wall stays vertical, so pieces of one face line up
     const t0 = G.u[0] * s[0] + G.u[1] * s[1], t1 = G.u[0] * s[2] + G.u[1] * s[3];
     G.L.push({o: (G.n[0] * (s[0] + s[2]) + G.n[1] * (s[1] + s[3])) / 2, t0: Math.min(t0, t1), t1: Math.max(t0, t1)}); });
   const out = [...groups.values()];
@@ -4672,15 +5067,29 @@ function wallThicknesses(rect){   // the wall thicknesses drawn here, most wall 
 }
 function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-line runs, page units
   const k = curScale(), ids = k && wallLineIds(rect, k), G = ids && faceLines(null, k, ids); if (!k || !G) return null;
-  const tol = Math.max(0.04, 0.08 * T) * k, bridge = Math.max(1.6 * T, bridgeFt || 0) * k, runs = [];
+  const tol = Math.max(0.04, 0.08 * T) * k, bridge = Math.max(1.6 * T, bridgeFt || 0) * k, runs = [], gg = S.geo[S.key];
+  /* a gap is bridged (a door or window opening) only if no other line crosses the wall's band inside it: a cross wall,
+     a corridor's partition — then the two pieces are separate walls with a room or passage between them */
+  const crossed = (g, o, ta, tb) => { const u = g.u, n = g.n, hw = 0.4 * T * k, P = (t, oo) => [u[0] * t + n[0] * oo, u[1] * t + n[1] * oo], a = P(ta, o - hw), b = P(tb, o + hw), c2 = P(ta, o + hw), d2 = P(tb, o - hw);
+    const xs = [a[0], b[0], c2[0], d2[0]], ys = [a[1], b[1], c2[1], d2[1]];
+    return segsIn(gg, Math.min(...xs) - 1, Math.min(...ys) - 1, Math.max(...xs) + 1, Math.max(...ys) + 1).some(i => { const s2 = gg.segs[i]; if (s2[4] & 9) return false;
+      const t1 = u[0] * s2[0] + u[1] * s2[1], o1 = n[0] * s2[0] + n[1] * s2[1], t2 = u[0] * s2[2] + u[1] * s2[3], o2 = n[0] * s2[2] + n[1] * s2[3];
+      if (Math.min(o1, o2) > o - hw || Math.max(o1, o2) < o + hw) return false;   // must cross the whole band
+      const tc = t1 + (t2 - t1) * (o - o1) / ((o2 - o1) || 1e-9); return tc > ta + 0.1 * k && tc < tb - 0.1 * k; }); };
   G.forEach(g => {
     const C = [];   // centre lines of this direction
-    facePairs(g, T * k - tol, T * k + tol, 0.3 * k, (d, o, t0, t1) => C.push({o, t0, t1}));
+    facePairs(g, T * k - tol, T * k + tol, 0.3 * k, (d, o, t0, t1) => {
+      // a third line of this direction between the two faces over half their length: not a wall's two faces (a window's
+      // glass beside a bed, a cupboard against a wall) — a wall's hollow is empty but for its windows
+      // (counted: lines that run on past the pair — a window's glass lines stop within its wall and do not count)
+      const iv = []; g.L.forEach(l => { if (l.o > o - d / 2 + 0.04 * k && l.o < o + d / 2 - 0.04 * k && (l.t0 < t0 - 0.5 * k || l.t1 > t1 + 0.5 * k)) { const a = Math.max(t0, l.t0), b = Math.min(t1, l.t1); if (b > a) iv.push([a, b]); } });
+      iv.sort((a, b) => a[0] - b[0]); let inside = 0, e = -Infinity; iv.forEach(([a, b]) => { if (b > e) { inside += b - Math.max(a, e); e = b; } });
+      if (inside <= 0.5 * (t1 - t0)) C.push({o, t0, t1}); });
     C.sort((a, b) => a.o - b.o);
     const lines = []; C.forEach(c => { const l = lines[lines.length - 1]; if (l && c.o - l.o <= 0.12 * k) { l.iv.push([c.t0, c.t1]); l.o = (l.o * l.n + c.o) / (l.n + 1); l.n++; } else lines.push({o: c.o, n: 1, iv: [[c.t0, c.t1]]}); });
     lines.forEach(l => {
       l.iv.sort((a, b) => a[0] - b[0]); const m = [];
-      l.iv.forEach(v => { const q = m[m.length - 1]; if (q && v[0] - q[1] <= bridge) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
+      l.iv.forEach(v => { const q = m[m.length - 1]; if (q && (v[0] - q[1] <= 0.1 * k || (v[0] - q[1] <= bridge && !crossed(g, l.o, q[1], v[0])))) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
       m.forEach(v => { if (v[1] - v[0] >= 0.6 * k) runs.push({u: g.u, n: g.n, a: [g.u[0] * v[0] + g.n[0] * l.o, g.u[1] * v[0] + g.n[1] * l.o], b: [g.u[0] * v[1] + g.n[0] * l.o, g.u[1] * v[1] + g.n[1] * l.o]}); });
     });
   });
@@ -4692,6 +5101,17 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
     const ea = dist(A.a, X) <= reach ? "a" : dist(A.b, X) <= reach ? "b" : null, eb = dist(B.a, X) <= reach ? "a" : dist(B.b, X) <= reach ? "b" : null;
     if (ea && eb) { A[ea] = X.slice(); B[eb] = X.slice(); }
   }
+  /* + junctions: two runs crossing in their middles — the longer goes through, the shorter is cut at its faces, so the
+     square where they cross is counted once */
+  for (let changed = true, guard = 0; changed && guard < 500; guard++) { changed = false;
+    for (let i = 0; i < runs.length && !changed; i++) for (let j = 0; j < runs.length && !changed; j++) {
+      const A = runs[i], B = runs[j]; if (i === j || Math.abs(A.u[0] * B.u[0] + A.u[1] * B.u[1]) > 0.2) continue;
+      const LA = dist(A.a, A.b), LB = dist(B.a, B.b); if (LA > LB || (LA === LB && i > j)) continue;   // A, the shorter, is cut
+      const X = segXInf(A.a, A.b, B.a, B.b), h = T * k / 2; if (!X) continue;
+      const inA = dist(A.a, X) + dist(X, A.b) - LA < 0.01 * k, inB = dist(B.a, X) + dist(X, B.b) - LB < 0.01 * k;
+      if (!inA || !inB || dist(A.a, X) <= h + 0.05 * k || dist(X, A.b) <= h + 0.05 * k || dist(B.a, X) <= h || dist(X, B.b) <= h) continue;
+      const v = [(A.b[0] - A.a[0]) / LA, (A.b[1] - A.a[1]) / LA];
+      runs.splice(i, 1, Object.assign({}, A, {b: [X[0] - v[0] * h, X[1] - v[1] * h]}), Object.assign({}, A, {a: [X[0] + v[0] * h, X[1] + v[1] * h]})); changed = true; } }
   return runs.filter(r => dist(r.a, r.b) >= 0.6 * k);
 }
 function segXInf(a, b, c, d){ const r = [b[0] - a[0], b[1] - a[1]], s2 = [d[0] - c[0], d[1] - c[1]], den = r[0] * s2[1] - r[1] * s2[0]; if (Math.abs(den) < 1e-9) return null; const t = ((c[0] - a[0]) * s2[1] - (c[1] - a[1]) * s2[0]) / den; return [a[0] + t * r[0], a[1] + t * r[1]]; }
@@ -4794,16 +5214,16 @@ function setDim(on){   // on = true/false, or a dimming level 0-90 %
   const d = S.dim ? S.dimPct / 100 : 0, c = 1 - d, b = 1 / (0.5 + 0.5 * c);
   stage().style.setProperty("--dimf", d ? `contrast(${c.toFixed(3)}) brightness(${b.toFixed(3)})` : "none");
   $("bDim").classList.toggle("on", S.dim); $("dimPct").value = S.dimPct || 50; $("dimLbl").textContent = (S.dim ? S.dimPct : 0) + "%";
-  pref("zdTakeoffDim", S.dim ? String(S.dimPct) : "0");
+  pref("zdTakeoffDim", S.dim ? String(S.dimPct) : "0"); viewMark();
 }
-function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); if (S.page) { renderLow(); renderHi(true); } }
+function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); viewMark(); if (S.page) { renderLow(); renderHi(true); } }
 
 /* ------------------------------------------------------------------ start */
 (async function init(){
   loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on);
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, explodeRun, closeRun, offsetItem, offsetRun, typedPoint};   // for tests and the console
+  window.zdTakeoff = {save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, explodeRun, closeRun, offsetItem, offsetRun, typedPoint};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();

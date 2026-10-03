@@ -591,7 +591,7 @@ dashboard sidebar (QS Cost Control → PDF Takeoff) and the landing page.
   area, length in a run), opening (`O` — door / window width measured on the plan, height typed), measure
   (`M`, not saved), select and drag points (`V`), undo / redo, Nos multiplier per measurement.
 - **Measurement sheet** in the house format: every row `Nos × L × W × H` in decimal feet (3 dp), Sft / cft
-  (2 dp), ft, Nos; a quantity is the product of the dimensions as printed, so the sheet re-measures from its
+  / ft (3 dp), Nos (whole); a quantity is the product of the dimensions as printed, so the sheet re-measures from its
   own figures. Rectangles are one row `L × W`; any other outline is one row with its plan area by coordinates;
   a run lists its legs (`12.000 + 14.000 + …`). Deductions are their
   own negative rows; openings / voids at or under the condition's threshold (masonry and plaster 1.00 Sft,
@@ -684,17 +684,52 @@ v11.0.0.191 with Takeoff Boost; the full table is `docs/takeoff-bluebeam-planswi
   *count door swings* counts doors from their swing symbols (arcs of 1.2–6 ft; double doors once) on drawings with no
   tags.
 
-Phase 2 (planned): click-inside room areas with door gaps closed, walls found by thickness, symbol counting,
-a command bar, typical-floor multipliers and sending quantities to the Project BOQ. Phase 3: room tags and
-door / window marks read from the drawing, revision overlay, a scanned-PDF mode.
+**QA pass** (02-Oct-2026 — full audit, bug hunt and regression test; the report with the bug register,
+calculation table and live-retest checklist is `docs/takeoff-qa-report-2026-10-02.md`):
+
+- **Pages tab** beside Sheet / Conditions: a thumbnail of every page of every PDF (drawn as it scrolls into view) with
+  its scale status and number of measurements; **remove a PDF** from the project (a backup is taken first, its
+  measurements go with it).
+- **View menu** (header): fit page (`F`), **fit width** (`Shift+F`), dim the drawing, line weights on / off, PDF layers, hide
+  markups, labels; `Home` / `End` go to the first / last page. The header wraps on narrow screens instead of
+  pushing buttons off the edge.
+- **Chosen scale** for a sheet with no note: architectural (1/32" … 3" = 1'-0"), engineering (1" = 10' … 100') or
+  metric ratio (1:20 … 1:1000), with the paper size it was drawn for (ISO A0–A4, ARCH C–E, ANSI C–E) so a reduced
+  print is corrected; shown as *Chosen by hand — not verified* until a known dimension is checked.
+- **Scale check by room sizes**: on opening a sheet, the room sizes written on it (`12'-0" x 14'-0"`) are measured
+  across the room and a scale note that disagrees is flagged with the scale they suggest.
+- **Password-protected PDFs** ask for the open password (kept with the PDF in this browser); the marked-up PDF export
+  flattens locked and rotated pages.
+- **Auto area** now closes corridors and passages as narrow as the door gap (trying smaller gaps when the click is
+  off-centre), rooms drawn at an angle, round rooms, rooms with hatched / tiled walls, L-shaped rooms and scanned
+  sheets; door swings, furniture and hatching no longer close or leak a room. A self-crossing outline is flagged on
+  the sheet and by *Check before export*.
+- **Walls agent** runs across corridors and splits walls at + junctions (no double count where walls cross).
+- **Saving**: `Ctrl+S` saves now; closing or hiding the tab saves at once; a second tab with the same project shows
+  a warning with *Reload this one*. A damaged project file is repaired on import (bad points, colours, conditions)
+  and the repairs are listed as *Repaired* rows in the import validation.
+- **Quantities to 3 dp** everywhere (sheet, CSV, Excel `#,##0.000`), Nos whole; undo keeps 200 steps (fewer on very
+  large projects, never under 20).
+
+Phase 2 / 3 status: click-inside room areas, walls by thickness, symbol / tag counting, room sizes and door /
+window marks read from the drawing, the revision overlay and scanned-PDF measuring are in. Still planned: a command
+bar, typical-floor multipliers, sending quantities to the Project BOQ, OCR of scanned sheets, and page reorder /
+rotate inside a PDF.
 
 `takeoff/index.html` (layout) and `takeoff/takeoff.js` (the app) load pdf.js 4.10.38 and ExcelJS from the jsDelivr
 CDN. Tests use a hand-written 3-page vector PDF with known dimensions (`tools/takeoff_fixture.js`):
 
 ```sh
 python3 -m http.server 8765 &
-TK_LIBS=/path/with/pdfjs-dist+exceljs node tools/test_takeoff.js   # 150 browser checks
+TK_LIBS=/path/with/pdfjs-dist+exceljs node tools/test_takeoff.js      # 150 browser checks
+TK_LIBS=/path/with/pdfjs-dist+exceljs+pdf-lib node tools/test_takeoff_qa.js   # full QA audit: 406 checks in 23 sections
 ```
+
+The QA audit (`tools/test_takeoff_qa.js`, fixtures in `tools/takeoff_qa_fixture.js`) builds an 8-page drawing set
+(a house at 1/4" = 1'-0" with known room areas, a rotated page, an offset page box, a blank page, a 1:50 metric
+sheet, a sheet with a detail at another scale, angled / round / hatched rooms, an A4 page with no note), a 120-page
+PDF, a 200 dpi scanned sheet and a 150,000-line CAD sheet, and checks every quantity against the hand-worked
+figure. `TK_REPORT=file.json` writes every check, calculation and timing to a file.
 
 ## Calculator tab
 
@@ -887,6 +922,9 @@ tools/test_rfq_tracker.js           browser tests for the RFQ Tracker (playwrigh
 tools/test_price_trends.js          browser tests for Price Trends & Staleness (playwright)
 docs/takeoff-bluebeam-planswift-parity.md  PDF Takeoff vs Bluebeam Revu 21 / Max and PlanSwift 11 (Takeoff Boost), feature by feature
 tools/takeoff_fixture.js            hand-written 3-page vector test PDF for the takeoff tests
+tools/takeoff_qa_fixture.js         QA drawing set: 8-page house / odd-page PDF, 120-page PDF, scanned sheet, 150,000-line sheet
+tools/test_takeoff_qa.js            full QA audit of the PDF Takeoff (sections 1-23, playwright)
+docs/takeoff-qa-report-2026-10-02.md  QA audit report: bug register, calculation checks, performance, retest checklist
 tools/test_takeoff.js               browser tests for the PDF Takeoff (playwright)
 tools/calc_data.py                  build the Calculator tab's section / pipe / material data block
 .github/workflows/rate-watch.yml    runs the rate watch daily and offers updates as a pull request
