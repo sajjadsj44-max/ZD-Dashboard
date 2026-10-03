@@ -247,6 +247,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     await T(id => { zdTakeoff.S.cond = id; zdTakeoff.setTool("auto"); }, cf);
     const expectArea = {"BED ROOM 1": 144, "BATH 1": 72, "BED ROOM 2": 144, "CORRIDOR": 123, "LIVING": 257.25, "KITCHEN": 168, "BED ROOM 3": 144, "BATH 2": 72, "STORE": 144};
     R.auto = [];
+    await page.evaluate(() => { window.__lt = []; try { new PerformanceObserver(l => l.getEntries().forEach(e => window.__lt.push(Math.round(e.duration)))).observe({entryTypes: ["longtask"]}); } catch (e) {} });
     for (const [nm, x0, y0, x1, y1] of FX.HOUSE) {
       const px = x0 + (x1 - x0) * 0.82, py = y0 + (y1 - y0) * (nm === "CORRIDOR" ? 0.5 : 0.7), n0 = await T(() => zdTakeoff.P.proj.items.length);
       const t0 = Date.now(); await click(hx(px), hy(py));
@@ -258,6 +259,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
       else { R.auto.push({room: nm, expected: expectArea[nm], got: null, ms, msg}); calc("Auto area " + nm + " — " + msg.slice(0, 90), expectArea[nm], NaN, 0.5, "Sft"); }
       perf("auto area " + nm, ms, 6000);
     }
+    const flt = await T(() => window.__lt.slice()); perf("longest freeze during the 9 auto-area traces (the page stays live)", Math.max(0, ...flt), 400, flt.length + " tasks over 50 ms");
     const n0 = await T(() => zdTakeoff.P.proj.items.length);
     await click(hx(10.5), hy(9)); await wait(400);
     ok((await T(() => zdTakeoff.P.proj.items.length)) === n0 && /Already measured/.test(await page.innerText("#toast")), "a second click in a measured room is refused (no duplicate area)");
@@ -946,10 +948,16 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     // wait on the heavy file by name: the scan is still the last file until the new one is stored
     await page.waitForFunction(() => { const Z = zdTakeoff, f = Z.P.proj.files.find(x => x.name === "heavy.pdf"); return f && Z.S.page && Z.S.page.pageNumber === 1 && Z.S.fileId === f.id && Z.S.geo[Z.S.key]; }, null, {timeout: 60000});
     perf("open a sheet of 150,000 lines (shown and indexed)", Date.now() - t0, 8000, (await T(() => zdTakeoff.S.geo[zdTakeoff.S.key].segs.length)) + " lines");
-    const lt = await T(() => window.__lt.slice()); perf("…longest freeze while it loads", Math.max(0, ...lt), 2000);
-    await setScale(await key(), 18); await T(id => { zdTakeoff.S.cond = id; zdTakeoff.setTool("auto"); }, cf);
+    // the freeze when the sheet is opened (its lines indexed, the page drawn) — timed on a page change, as the upload above
+    // also counts the test tool's own copying of the file into the page
+    await T(() => { const Z = zdTakeoff, f = Z.P.proj.files.find(x => x.name === "scan.pdf"); Z.gotoPage(f.id, 1); }); await page.waitForFunction(() => zdTakeoff.P.proj.files.find(x => x.name === "scan.pdf").id === zdTakeoff.S.fileId && zdTakeoff.S.geo[zdTakeoff.S.key], null, {timeout: 30000}); await wait(800);
+    await T(() => { const Z = zdTakeoff, f = Z.P.proj.files.find(x => x.name === "heavy.pdf"); Object.keys(Z.S.geo).filter(k => k.startsWith(f.id)).forEach(k => { delete Z.S.geo[k]; delete Z.S.texts[k]; }); window.__lt = []; Z.gotoPage(f.id, 1); });
+    await page.waitForFunction(() => { const Z = zdTakeoff, f = Z.P.proj.files.find(x => x.name === "heavy.pdf"); return Z.S.fileId === f.id && Z.S.geo[Z.S.key]; }, null, {timeout: 60000}); await wait(1500);
+    const lt = await T(() => window.__lt.slice()); perf("…longest freeze opening it (lines indexed, page drawn)", Math.max(0, ...lt), 400);
+    await setScale(await key(), 18); await T(id => { zdTakeoff.S.cond = id; zdTakeoff.setTool("auto"); }, cf); await T(() => { window.__lt = []; });
     t0 = Date.now(); await click(FX.OX + 10.5 * 18, FX.OY + 9.5 * 18); await page.waitForFunction(() => !zdTakeoff.S.autoBusy, null, {timeout: 30000}); await wait(100);
     perf("auto area on the 150,000-line sheet", Date.now() - t0, 6000);
+    const lta = await T(() => window.__lt.slice()); perf("…longest freeze during that trace", Math.max(0, ...lta), 400);
     calc("…BED ROOM 1 on the heavy sheet", 144, await qtyOf((await lastItem()).id), 0.72, "Sft");
     await T(() => zdTakeoff.setTool("draw")); const b = await page.locator("#stage").boundingBox(); await T(() => { window.__lt = []; });
     t0 = Date.now(); for (let i = 0; i < 30; i++) await page.mouse.move(b.x + 400 + i * 5, b.y + 300); perf("30 mouse moves with snapping on the heavy sheet", Date.now() - t0, 3000);

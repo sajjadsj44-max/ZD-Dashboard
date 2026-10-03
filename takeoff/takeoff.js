@@ -526,7 +526,7 @@ async function overlayCmp(ctx, w, h, scale, tx, ty){
   tint(ctx, w, h, true);
   const o = document.createElement("canvas"); o.width = w; o.height = h;
   const c2 = o.getContext("2d", {willReadFrequently: true}); c2.fillStyle = "#fff"; c2.fillRect(0, 0, w, h);
-  try { await S.cmp.pg.render({...lay(S.cmp.file), canvasContext: thinLines(c2), viewport: S.cmp.pg.getViewport({scale}), transform: [1, 0, 0, 1, tx + S.cmp.dx * scale, ty + S.cmp.dy * scale]}).promise; } catch (e) { return; }
+  try { await sliced(S.cmp.pg.render({...lay(S.cmp.file), canvasContext: thinLines(c2), viewport: S.cmp.pg.getViewport({scale}), transform: [1, 0, 0, 1, tx + S.cmp.dx * scale, ty + S.cmp.dy * scale]})).promise; } catch (e) { return; }
   tint(c2, w, h, false);
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "multiply"; ctx.drawImage(o, 0, 0); ctx.restore();
 }
@@ -550,7 +550,7 @@ async function renderLow(){   // drawn off screen, then shown only if the page i
   const vp = page.getViewport({scale: sc}), off = document.createElement("canvas");
   off.width = Math.ceil(vp.width); off.height = Math.ceil(vp.height);
   const ctx = thinLines(off.getContext("2d")); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, off.width, off.height);
-  try { await page.render({...lay(fileId), canvasContext: ctx, viewport: vp}).promise; } catch (e) {}
+  try { await sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vp})).promise; } catch (e) {}
   if (S.page !== page) return;
   await overlayCmp(ctx, off.width, off.height, sc, 0, 0);
   if (S.page !== page) return;
@@ -568,7 +568,7 @@ function renderHi(now){
     const w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
     const off = document.createElement("canvas"); off.width = w; off.height = h;
     const ctx = thinLines(off.getContext("2d"));
-    const task = S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]});
+    const task = sliced(S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}));
     S.renderTask = task;
     try { await task.promise; } catch (e) { return; }
     if (S.renderTask !== task) return;
@@ -997,6 +997,12 @@ function barrierIds(g, ids, k, o){
   out.hatch = ids.filter(i => hat.has(i)).map(i => { const s = g.segs[i], L = Math.hypot(s[2] - s[0], s[3] - s[1]), e = Math.min(0.2 * k, L / 4) / L, dx = (s[2] - s[0]) * e, dy = (s[3] - s[1]) * e; return [s[0] + dx, s[1] + dy, s[2] - dx, s[3] - dy]; });   // erased from the picture short of their ends, so the wall they touch stays whole
   return out;
 }
+/* long work (auto area) hands the page back to the browser about every 40 ms, so clicks, scrolling and the busy note
+   stay live while a room is traced instead of the page freezing for seconds */
+let lastBreath = 0;
+function breathe(){ if (performance.now() - lastBreath < 40) return null;
+  return new Promise(r => { const c = new MessageChannel(); c.port1.onmessage = () => { lastBreath = performance.now(); r(); }; c.port2.postMessage(0); }); }
+function sliced(task){ task.onContinue = go => { const b = breathe(); if (b) b.then(go); else go(); }; return task; }   // a pdf.js render that lets the browser in between its 15 ms chunks
 function edt2(f, W, H){   // squared Euclidean distance transform in place (Felzenszwalb & Huttenlocher); f = 0 on features, 1e20 elsewhere
   const n = Math.max(W, H), g = new Float64Array(n), d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
   const one = len => {
@@ -1011,7 +1017,19 @@ function edt2(f, W, H){   // squared Euclidean distance transform in place (Felz
   for (let x = 0; x < W; x++) { for (let y = 0; y < H; y++) g[y] = f[y * W + x]; one(H); for (let y = 0; y < H; y++) f[y * W + x] = d[y]; }
   for (let y = 0; y < H; y++) { for (let x = 0; x < W; x++) g[x] = f[y * W + x]; one(W); for (let x = 0; x < W; x++) f[y * W + x] = d[x]; }
 }
-function closeMask(m, W, H, R){   // morphological closing with a disc of radius R px: fills pockets and notches narrower than 2R
+/* runs fn on the part of the window round the mask's extent (pad px each way) and writes the mask back: the pocket and
+   closing steps can only change pixels that near the room, and a room is a small part of the 90 ft window */
+function cropRun(m, W, H, pad, others, fn){
+  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for (let i = 0; i < m.length; i++) if (m[i]) { const x = i % W, y = (i - x) / W; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W - 1, x1 + pad); y1 = Math.min(H - 1, y1 + pad);
+  if (x1 < x0 || (x0 === 0 && y0 === 0 && x1 === W - 1 && y1 === H - 1)) return fn(m, W, H, others);
+  const w = x1 - x0 + 1, h = y1 - y0 + 1, cut = a => { if (!a) return a; const o = new a.constructor(w * h); for (let y = 0; y < h; y++) o.set(a.subarray((y + y0) * W + x0, (y + y0) * W + x0 + w), y * w); return o; };
+  const mc = cut(m); fn(mc, w, h, others.map(cut));
+  for (let y = 0; y < h; y++) m.set(mc.subarray(y * w, (y + 1) * w), (y + y0) * W + x0);
+}
+function closeMask(m, W, H, R){ cropRun(m, W, H, Math.ceil(R) + 3, [], (mm, w, h) => closeMaskWin(mm, w, h, R)); }
+function closeMaskWin(m, W, H, R){   // morphological closing with a disc of radius R px: fills pockets and notches narrower than 2R
   const N = W * H, f = new Float32Array(N), R2 = R * R;
   for (let i = 0; i < N; i++) f[i] = m[i] ? 0 : 1e20;
   edt2(f, W, H);
@@ -1022,7 +1040,9 @@ function closeMask(m, W, H, R){   // morphological closing with a disc of radius
 /* pockets: with the walls right round the room counted as room, whatever is then fully enclosed — furniture or a
    wardrobe against a wall, a door swing — is a pocket of this room and is added (up to maxPx pixels). The next room is
    never enclosed: its own walls, further off, join it to the outside. */
-function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx, named){
+function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx, named){   // (a pocket lies within the walls round the room)
+  cropRun(m, W, H, Math.ceil(wallPx) + 10, [ink, named], (mm, w, h, [ic, nc]) => fillPocketsWin(mm, ic, w, h, wallPx, maxPx, minTouch, minPx, nc)); }
+function fillPocketsWin(m, ink, W, H, wallPx, maxPx, minTouch, minPx, named){
   const N = W * H, f = new Float32Array(N);
   let rx0 = W, ry0 = H, rx1 = -1, ry1 = -1; for (let i = 0; i < N; i++) if (m[i]) { const x = i % W, y = (i - x) / W; if (x < rx0) rx0 = x; if (x > rx1) rx1 = x; if (y < ry0) ry0 = y; if (y > ry1) ry1 = y; }   // the room's extent
   for (let i = 0; i < N; i++) f[i] = m[i] ? 0 : 1e20;
@@ -1032,8 +1052,8 @@ function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx, named){
   const seen = new Uint8Array(N), st = new Int32Array(N);
   for (let i0 = 0; i0 < N; i0++) {
     if (solid[i0] || seen[i0]) continue;
-    const comp = []; let top = 0, open = false, touch = 0, cx0 = W, cy0 = H, cx1 = -1, cy1 = -1; seen[i0] = 1; st[top++] = i0;
-    while (top) { const i = st[--top], x = i % W, y = (i - x) / W; comp.push(i); if (x < cx0) cx0 = x; if (x > cx1) cx1 = x; if (y < cy0) cy0 = y; if (y > cy1) cy1 = y;
+    const comp = []; let top = 0, open = false, touch = 0, cnt = 0, cx0 = W, cy0 = H, cx1 = -1, cy1 = -1; seen[i0] = 1; st[top++] = i0;
+    while (top) { const i = st[--top], x = i % W, y = (i - x) / W; if (!open && ++cnt <= maxPx) comp.push(i); if (x < cx0) cx0 = x; if (x > cx1) cx1 = x; if (y < cy0) cy0 = y; if (y > cy1) cy1 = y;
       if (x === 0 || y === 0 || x === W - 1 || y === H - 1) open = true;
       if (f[i] <= 64) touch++;   // within 8 px of the room: only an outline between
       if (x > 0 && !solid[i - 1] && !seen[i - 1]) { seen[i - 1] = 1; st[top++] = i - 1; }
@@ -1041,7 +1061,7 @@ function fillPockets(m, ink, W, H, wallPx, maxPx, minTouch, minPx, named){
       if (y > 0 && !solid[i - W] && !seen[i - W]) { seen[i - W] = 1; st[top++] = i - W; }
       if (y < H - 1 && !solid[i + W] && !seen[i + W]) { seen[i + W] = 1; st[top++] = i + W; } }
     const ring = rx1 >= rx0 && cx1 - cx0 >= 0.9 * (rx1 - rx0) && cy1 - cy0 >= 0.9 * (ry1 - ry0);   // all the way round the room: the hollow of its wall (a round room's), not furniture
-    if (!open && !ring && touch >= minTouch && comp.length >= minPx && comp.length <= maxPx && !(named && comp.some(i => named[i]))) comp.forEach(i => { m[i] = 1; });   // gaps in a wall's hatching are smaller
+    if (!open && !ring && touch >= minTouch && cnt >= minPx && cnt <= maxPx && !(named && comp.some(i => named[i]))) comp.forEach(i => { m[i] = 1; });   // gaps in a wall's hatching are smaller
   }
   // the room's own ink inside it (furniture outlines, text) is part of the floor too
   for (let i = 0; i < N; i++) if (!m[i] && ink[i]) { const x = i % W; let n = 0;
@@ -1248,7 +1268,8 @@ function snapToWalls(Q, g, ids, tol, k, slack, extra){   // rectilinear outline:
 async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  await S.page.render({...(ocb ? {optionalContentConfigPromise: Promise.resolve(ocb)} : lay(S.fileId)), canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}).promise;
+  const rt = sliced(S.page.render({...(ocb ? {optionalContentConfigPromise: Promise.resolve(ocb)} : lay(S.fileId)), canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}));
+  await rt.promise; await breathe();
   const d = ctx.getImageData(0, 0, W, H).data, N = W * H, m = new Uint8Array(N);
   for (let i = 0; i < N; i++) m[i] = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) < 190 ? 1 : 0;
   if (erase && erase.length) {   // door swings and leaves: not walls, and a leaf open against a wall must not fuse into it
@@ -1271,7 +1292,7 @@ async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
   };
   // small separate marks go first: letters, stipple dots, dashed door swings — and the dashes of dashed lines, unless they
   // run on in a straight row (a dashed boundary of an open area): those rows are joined into one solid line and kept
-  const small = [];
+  const small = []; await breathe();
   comps(m, (c, w, h) => { if (Math.max(w, h) < minPx) small.push({c, x0: c.reduce((a, i) => Math.min(a, i % W), W), y0: c.reduce((a, i) => Math.min(a, (i - i % W) / W), H), w, h}); });
   if (dashBound) {
     const G = 0.8 * kft / px, L = 2 * kft / px, keep = new Set();
@@ -1297,17 +1318,18 @@ async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
   } else small.forEach(d => d.c.forEach(i => { m[i] = 0; }));
   // then ink closer than ~0.4 ft fuses (hatching into a solid wall, so no fill runs between its strokes), 1 px thicker
   // so an 8-neighbour step cannot slip between diagonal pixels
+  await breathe();
   const rc = Math.max(1.5, 0.2 * kft / px), f = new Float32Array(N);
   for (let i = 0; i < N; i++) f[i] = m[i] ? 0 : 1e20;
-  edt2(f, W, H);
+  edt2(f, W, H); await breathe();
   const dil = new Uint8Array(N); for (let i = 0; i < N; i++) dil[i] = f[i] <= rc * rc ? 1 : 0;
   for (let i = 0; i < N; i++) f[i] = dil[i] ? 1e20 : 0;
-  edt2(f, W, H);
+  edt2(f, W, H); await breathe();
   const thin = new Uint8Array(N), keep = (rc - 1) * (rc - 1);
   for (let i = 0; i < N; i++) thin[i] = m[i] || f[i] > keep ? 1 : 0;
   // the wall network: marks spanning 8 ft or more. Loose marks inside a room (a word, a tag, a free-standing bed) bound
   // the room but must not split its core when openings are closed
-  const big = new Uint8Array(N), bigPx = 8 * kft / px;
+  await breathe(); const big = new Uint8Array(N), bigPx = 8 * kft / px;
   comps(thin, (c, w, h) => { if (Math.max(w, h) >= bigPx) c.forEach(i => { big[i] = 1; }); });
   return {thin, big};
 }
@@ -1362,12 +1384,13 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
     let thin, bar, ink = null;
     if (img) { ink = await inkMask(x0, y0, W, H, px, Math.max(o.minLen, 1) * k / px, o.dashBound, k, (ids.doorIds || []).map(i => g.segs[i]).concat(ids.hatch || []), ocb); thin = ink.thin;   // a solid door swing stays in: its area is a pocket, added back
       if (ids.doors.length) { const dl = raster(2 * px, true); for (let i = 0; i < N; i++) if (dl[i]) { thin[i] = 1; ink.big[i] = 1; } }
-      bar = widen(ink.big, W, H, o.gap * k / px / 2); }
+      await breathe(); bar = widen(ink.big, W, H, o.gap * k / px / 2); }
     else { thin = raster(2 * px); bar = raster(Math.max(o.gap * k, 2 * px)); }
+    await breathe();
     if (g.segs.length) { const cav = wallCavities(x0, y0, W, H, px, k, img ? ink.big : null, ids); for (let i = 0; i < N; i++) if (cav[i]) thin[i] = 1; }   // hollow walls are wall, not a recess of the room
     if (fences.length) { const fm = fenceMask(); for (let i = 0; i < N; i++) if (fm[i]) { thin[i] = 1; bar[i] = 1; } }   // the user's fences close what the drawing leaves open
     if (o.show) S.autoShow = {key: S.key, x0, y0, px, W, H, url: maskUrl(thin, W, H)};
-    const named = labelMask(x0, y0, W, H, px, o.own);
+    await breathe(); const named = labelMask(x0, y0, W, H, px, o.own);
     // the click in a space narrower than the door gap (a passage, a corridor as wide as a door): its width and length here
     const csx = Math.floor((seed[0] - x0) / px), csy = Math.floor((seed[1] - y0) / px); let passage = null;
     if (csx > 0 && csy > 0 && csx < W - 1 && csy < H - 1 && !thin[csy * W + csx] && bar[csy * W + csx]) {
@@ -1379,7 +1402,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
     const sb = seedIn(bar, rpx), sa = seedIn(thin, 4);
     let m;
     if (sb >= 0) {
-      const B = fill(bar, sb, true); if (!B) continue;
+      await breathe(); const B = fill(bar, sb, true); if (!B) continue; await breathe();
       m = B.m; let front = []; for (let i = 0; i < N; i++) if (m[i]) front.push(i);
       for (let layer = 0; layer < rpx && front.length; layer++) {
         const nf = [];
@@ -1390,7 +1413,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
       // A: the thin lines with the door swings' openings closed. What A reaches beyond B is added back where it is too
       // narrow to be a room of its own (the strip beside a bed or a wardrobe); a part with an open core of its own is the
       // next room, through an opening with no door drawn, and stays out.
-      const A = sa >= 0 ? fill(thin, sa, false) : null;
+      await breathe(); const A = sa >= 0 ? fill(thin, sa, false) : null; await breathe();
       if (A) {
         const seen = new Uint8Array(N), st = new Int32Array(N);
         for (let i0 = 0; i0 < N; i0++) {
@@ -1407,11 +1430,12 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
       if (!A) return {err: "This space is narrower than the door gap (" + f3(o.gap) + " ft) and is not closed — lower ‘Close gaps’ in the auto-area settings (⚙), or draw it.", passage};
       m = A.m;
     }
-    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2, named); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
+    await breathe();
+    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) { await breathe(); fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2, named); } await breathe(); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
     let partial = false;
     if (passage) { let n = 0; if (passage.horiz) { for (let x = 0; x < W; x++) if (m[csy * W + x]) n++; } else for (let y = 0; y < H; y++) if (m[y * W + csx]) n++;
       partial = n * px / k < 0.6 * passage.along; }   // the outline takes in less than 60 % of the passage's length: a piece by a doorway, not the passage
-    const loop = outerLoop(m, W, H); if (!loop || loop.length < 4) return {err: "No closed space found at that point.", passage};
+    await breathe(); const loop = outerLoop(m, W, H); if (!loop || loop.length < 4) return {err: "No closed space found at that point.", passage};
     let Q = dpClosed(loop.map(p => [x0 + p[0] * px, y0 + p[1] * px]), 1.6 * px);
     const sq = squareUp(Q, 3 * px, o.gap * k, Math.max(o.gap, o.pocket) * k);
     Q = sq ? (ids.length ? snapToWalls(sq, g, ids, Math.max(4 * px, 0.35 * k), k, px, ids.doors) : offsetPoly(sq, (img ? 1.5 : 1) * px))
@@ -2465,7 +2489,7 @@ async function thumbRun(){
     const k = S.thumbQ.shift(); if (S.thumbs[k]) continue; const [f, p] = k.split(":");
     try { const pg = await (await doc(f)).getPage(+p), v0 = pg.getViewport({scale: 1}), vp = pg.getViewport({scale: 200 / Math.max(v0.width, v0.height)}), cv = document.createElement("canvas");
       cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height); const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
-      await pg.render({...lay(f), canvasContext: ctx, viewport: vp}).promise; S.thumbs[k] = cv.toDataURL("image/png"); }
+      await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp})).promise; S.thumbs[k] = cv.toDataURL("image/png"); }
     catch (e) { S.thumbs[k] = "x"; }   // PDF not attached in this browser: left blank
     const im = [...document.querySelectorAll("#pageList img[data-th]")].find(x => x.dataset.th === k); if (im && S.thumbs[k] !== "x") im.src = S.thumbs[k];
   }
@@ -2921,7 +2945,7 @@ function rot90(m, w, h){ const o = new Uint8Array(w * h); for (let y = 0; y < h;
 async function renderInk(page, sc){
   const vp = page.getViewport({scale: sc}), W = Math.ceil(vp.width), H = Math.ceil(vp.height), cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  await page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp}).promise;
+  await sliced(page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp})).promise;
   return {m: inkOf(ctx, W, H), W, H};
 }
 function matchInk(I, W, H, T, tw, th, thr){
@@ -3412,7 +3436,7 @@ async function exportPng(){
     const sc = Math.min(4, 6000 / Math.max(S.base.width, S.base.height)), vp = S.page.getViewport({scale: sc}), cv = document.createElement("canvas");
     cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
     const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
-    await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp}).promise;
+    await sliced(S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp})).promise;
     await svgOnto(ctx, pageOverlaySvg(S.fileId, S.pageNo, sc, cv.width, cv.height, true));
     cv.toBlob(b => saveBlob(b, fileBase() + "_p" + S.pageNo + "_markup.png"), "image/png");
   } catch (e) { toast(e.message || String(e), 5000); }
@@ -3438,7 +3462,7 @@ async function exportPdf(all){
       const ctx = cv.getContext("2d");
       if (!srcCache[f]) { const rec = await dbGet("pdfs", f); srcCache[f] = await L.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); }
       const flat = pg.rotate % 360 !== 0 || srcCache[f].isEncrypted;   // an encrypted PDF cannot be copied page for page (its content would stay encrypted): flattened like a turned page
-      if (flat) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); await loadLayers(f); await pg.render({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})}).promise; }
+      if (flat) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); await loadLayers(f); await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})})).promise; }
       await svgOnto(ctx, pageOverlaySvg(f, p, sc, W, H, true));
       const png = await out.embedPng(await (await new Promise(r => cv.toBlob(r, "image/png"))).arrayBuffer());
       if (flat) { const np = out.addPage([base.width, base.height]); np.drawImage(png, {x: 0, y: 0, width: base.width, height: base.height}); continue; }
@@ -4338,7 +4362,7 @@ async function aiSnapshot(maxMp){   // the part of the page on screen, long side
   const w = bx1 - bx0, h = by1 - by0, sc = Math.min(1600 / Math.max(w, h), 8, maxMp ? Math.sqrt(maxMp / (w * h)) : 8), W = Math.max(1, Math.round(w * sc)), H = Math.max(1, Math.round(h * sc));
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  await S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: sc}), transform: [1, 0, 0, 1, -bx0 * sc, -by0 * sc]}).promise;
+  await sliced(S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: sc}), transform: [1, 0, 0, 1, -bx0 * sc, -by0 * sc]})).promise;
   return {data: cv.toDataURL("image/png").split(",")[1], x0: bx0, y0: by0, sc, W, H, key: S.key};
 }
 const aiToPx = (V, p) => [Math.round((p[0] - V.x0) * V.sc), Math.round((p[1] - V.y0) * V.sc)];

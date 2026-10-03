@@ -24,9 +24,9 @@ Units throughout: decimal feet (3 dp), Sft, cft, Nos. Scale factors are in PDF p
 
 | | Result |
 |---|---|
-| QA audit checks (`test_takeoff_qa.js`) | **404 passed, 0 failed** |
+| QA audit checks (`test_takeoff_qa.js`) | **406 passed, 0 failed** |
 | of which calculation checks | 157 passed, 0 failed |
-| performance timings | 31 within limit, 0 over |
+| performance timings | 33 within limit, 0 over |
 | original suite (`test_takeoff.js`) | 150 / 150 |
 | page errors / console errors during the run | none |
 
@@ -35,7 +35,7 @@ Units throughout: decimal feet (3 dp), Sft, cft, Nos. Scale factors are in PDF p
 | PDF loading, rendering, navigation | 1. PDF loading, pages, view | 24 | 0 |
 | PDF loading; edge cases | 2. Bad, locked and odd PDFs | 17 | 0 |
 | Scale (zoom never changes a quantity) | 3. Scale — notes, chosen, calibrated, per page, zoom | 78 | 0 |
-| Single-click area | 4. Single-click area (Auto area) | 34 | 0 |
+| Single-click area | 4. Single-click area (Auto area) | 35 | 0 |
 | Single-click area; calculation | 4b. Free agents, scale check against room sizes, viewport, turned page | 24 | 0 |
 | Data accuracy; layers | 5. Data integrity and conditions (layers) | 15 | 0 |
 | Editing | 6. Editing stress — 60 measurements, 80 random edits, undo all, redo all | 5 | 0 |
@@ -55,8 +55,8 @@ Units throughout: decimal feet (3 dp), Sft, cft, Nos. Scale factors are in PDF p
 | Data validation | 20. Input validation — no NaN, Infinity or undefined quantities | 12 | 0 |
 | Calculation validation | 21. Calculation validation (independent of the app's formulas) | 24 | 0 |
 | Security | 22. Security and data integrity | 5 | 0 |
-| Performance; edge cases | 23. Scanned drawing (raster, no lines, no text) and a 150,000-line CAD sheet | 18 | 0 |
-| | **Total** | **404** | **0** |
+| Performance; edge cases | 23. Scanned drawing (raster, no lines, no text) and a 150,000-line CAD sheet | 19 | 0 |
+| | **Total** | **406** | **0** |
 
 The other areas of the brief: **inventory** — the whole source (`takeoff.js`, ~5,200 lines, and `index.html`) was read before testing and the feature list is in the README; **code quality** — no page or console errors in either suite, syntax checked after every change, attempts that did not work were reverted rather than left in; **regression** — the original suite was re-run after every fix and the full QA suite at the end, on the final code.
 
@@ -112,13 +112,10 @@ Severity: P0 Critical (silently wrong quantities, lost work or a security hole),
 | B33 | Validation | Nos accepted 99,999,999,999. | P3 Low | No upper limit. | Capped at 100,000 with a message. | Yes — §17 (abc, -5, 0, 2.6, 1e3, 99999999999) |
 | B34 | Drawing | An area drawn as a figure of eight with equal halves (net 0 Sft) vanished on Enter with no message. | P3 Low | Zero-area outlines were dropped silently. | Refused with a message saying the outline crosses itself and its halves cancel out; an uneven figure of eight is kept and flagged (B14). | Yes — §17 (both cases) |
 | B35 | Auto area (scan) | Scanned sheet, CORRIDOR (a 4 ft passage as wide as the door gap): 128.751 Sft against 123.000 (+4.7 %) — the room grown back through the 3 ft entrance came out past the building's outer face, and the faces beside the entrance sat 0.26 ft inside the wall. | P2 Medium | Gap closing on a raster widens the walls and grows the room back; with the passage barely wider than the gap the regrowth pushed through the opening. The tab trim only took tabs up to 3 ft wide with ink along the cut, and a doorway has none. | A tab whose far side crosses open space and whose two sides run along the jambs is a doorway: closed on the room's face of the wall (up to the door-gap width). On scans, a side lying deep in a wall's ink goes back to its face. Now 123.547–124.721 Sft (+0.4 to +1.4 %, ±1 px a side). | Yes — §23 (tolerance tightened from 6 % to 1.5 %); vector drawings unchanged (§4, original suite) |
+| B36 | Performance | Auto area froze the page for the whole trace — about 3 s on the house at 1/4", 3 s+ on a 150,000-line sheet (one unbroken task; clicks, scrolling and the busy note stopped). | P3 Low | The trace ran as one block on the page's main thread; the pocket steps flooded the whole 90 ft window, and pdf.js resumed its 15 ms render chunks at once instead of letting the browser in. | The trace hands the page back to the browser about every 40 ms; the pocket and closing steps work on the room's area only (same result); pdf.js renders resume on the browser's next turn. Longest freeze now 198 ms (house), 229 ms (150,000 lines); a room traces in about 1,148 ms. | Yes — §4 and §23 longest-freeze checks (limit 400 ms); all auto-area areas unchanged |
+| B37 | Performance | Opening a 150,000-line sheet froze the page for 0.6–1 s while it was drawn. | P3 Low | pdf.js page renders resumed each 15 ms chunk straight away, so a dense page drew in one block. | Every page render (sheet, detail, thumbnails, compare, exports) resumes on the browser's next turn. Longest freeze opening the sheet now 240 ms. | Yes — §23 (limit 400 ms) |
 
-**Known issues left open** (not hidden — listed here and in the live checklist):
-
-| ID | Feature | Issue | Severity | Status / workaround |
-|---|---|---|---|---|
-| K2 | Performance | Auto area runs on the page's main thread: the page does not respond for ~2,303 ms per room on a normal sheet, 4,711 ms on a 150,000-line sheet. | P3 Low | Open — within limit (6,000 ms); moving the trace to a worker would remove it. |
-| K3 | Performance | Opening a 150,000-line sheet: longest single freeze 987 ms. | P3 Low | Open — within limit (2,000 ms). |
+**Known issues left open:** none.
 
 By design (not a bug): a hidden condition stays in the totals — hiding is a view filter, as in Bluebeam / PlanSwift; the sheet still lists it.
 
@@ -130,15 +127,15 @@ Single-click auto area on the house (p.1, 1/4" = 1'-0"):
 
 | Room | Expected Sft | Got Sft | Time ms |
 |---|---:|---:|---:|
-| BED ROOM 1 | 144.000 | 144.000 | 2,303 |
-| BATH 1 | 72.000 | 72.000 | 2,248 |
-| BED ROOM 2 | 144.000 | 144.000 | 1,967 |
-| CORRIDOR | 123.000 | 123.000 | 2,041 |
-| LIVING | 257.250 | 257.250 | 2,155 |
-| KITCHEN | 168.000 | 168.000 | 2,089 |
-| BED ROOM 3 | 144.000 | 144.000 | 1,987 |
-| BATH 2 | 72.000 | 72.000 | 2,049 |
-| STORE | 144.000 | 144.000 | 1,926 |
+| BED ROOM 1 | 144.000 | 144.000 | 1,148 |
+| BATH 1 | 72.000 | 72.000 | 1,007 |
+| BED ROOM 2 | 144.000 | 144.000 | 1,035 |
+| CORRIDOR | 123.000 | 123.000 | 993 |
+| LIVING | 257.250 | 257.250 | 972 |
+| KITCHEN | 168.000 | 168.000 | 1,185 |
+| BED ROOM 3 | 144.000 | 144.000 | 952 |
+| BATH 2 | 72.000 | 72.000 | 942 |
+| STORE | 144.000 | 144.000 | 976 |
 | **Total** | **1,268.250** | **1,268.250** | |
 
 | # | Test | Expected | Actual | Difference | Tolerance | Unit | Result |
@@ -307,37 +304,39 @@ Headless Chromium on the build machine (no GPU); times include the test's own ov
 
 | Test | Time ms | Limit ms | Result | Note |
 |---|---:|---:|---|---|
-| open the 8-page QA set (to page 1 indexed, scale read) | 366 | 5,000 | PASS |  |
-| auto area BED ROOM 1 | 2,303 | 6,000 | PASS |  |
-| auto area BATH 1 | 2,248 | 6,000 | PASS |  |
-| auto area BED ROOM 2 | 1,967 | 6,000 | PASS |  |
-| auto area CORRIDOR | 2,041 | 6,000 | PASS |  |
-| auto area LIVING | 2,155 | 6,000 | PASS |  |
-| auto area KITCHEN | 2,089 | 6,000 | PASS |  |
-| auto area BED ROOM 3 | 1,987 | 6,000 | PASS |  |
-| auto area BATH 2 | 2,049 | 6,000 | PASS |  |
-| auto area STORE | 1,926 | 6,000 | PASS |  |
-| Rooms agent: 9 rooms traced and checked | 15,409 | 30,000 | PASS |  |
-| Excel export (6 conditions) | 610 | 8,000 | PASS |  |
-| marked-up PDF, all measured pages | 1,947 | 15,000 | PASS |  |
-| 100 measurements: one edit (undo snapshot + sheet + drawing) | 21 | 150 | PASS |  |
-| 100 measurements: 20 mouse moves | 337 | 1,200 | PASS | ≈17 ms each incl. test overhead |
-| 500 measurements: one edit (undo snapshot + sheet + drawing) | 68 | 150 | PASS |  |
-| 500 measurements: 20 mouse moves | 331 | 1,200 | PASS | ≈17 ms each incl. test overhead |
-| 1000 measurements: one edit (undo snapshot + sheet + drawing) | 85 | 300 | PASS |  |
-| 1000 measurements: 20 mouse moves | 492 | 2,500 | PASS | ≈25 ms each incl. test overhead |
-| Excel export with 1000+ measurements | 745 | 15,000 | PASS |  |
-| project JSON export with 1000+ measurements | 302 | 3,000 | PASS |  |
-| open a 120-page PDF (first page shown and indexed) | 344 | 6,000 | PASS |  |
-| 10 page changes on the 120-page PDF (each shown and indexed) | 1,159 | 6,000 | PASS | 116 ms each |
-| Pages tab: first thumbnails of 120 drawn | 96 | 8,000 | PASS |  |
-| Find text across 120 pages | 146 | 15,000 | PASS |  |
+| open the 8-page QA set (to page 1 indexed, scale read) | 325 | 5,000 | PASS |  |
+| auto area BED ROOM 1 | 1,148 | 6,000 | PASS |  |
+| auto area BATH 1 | 1,007 | 6,000 | PASS |  |
+| auto area BED ROOM 2 | 1,035 | 6,000 | PASS |  |
+| auto area CORRIDOR | 993 | 6,000 | PASS |  |
+| auto area LIVING | 972 | 6,000 | PASS |  |
+| auto area KITCHEN | 1,185 | 6,000 | PASS |  |
+| auto area BED ROOM 3 | 952 | 6,000 | PASS |  |
+| auto area BATH 2 | 942 | 6,000 | PASS |  |
+| auto area STORE | 976 | 6,000 | PASS |  |
+| longest freeze during the 9 auto-area traces (the page stays live) | 198 | 400 | PASS | 61 tasks over 50 ms |
+| Rooms agent: 9 rooms traced and checked | 7,425 | 30,000 | PASS |  |
+| Excel export (6 conditions) | 601 | 8,000 | PASS |  |
+| marked-up PDF, all measured pages | 1,976 | 15,000 | PASS |  |
+| 100 measurements: one edit (undo snapshot + sheet + drawing) | 13 | 150 | PASS |  |
+| 100 measurements: 20 mouse moves | 340 | 1,200 | PASS | ≈17 ms each incl. test overhead |
+| 500 measurements: one edit (undo snapshot + sheet + drawing) | 45 | 150 | PASS |  |
+| 500 measurements: 20 mouse moves | 328 | 1,200 | PASS | ≈16 ms each incl. test overhead |
+| 1000 measurements: one edit (undo snapshot + sheet + drawing) | 81 | 300 | PASS |  |
+| 1000 measurements: 20 mouse moves | 433 | 2,500 | PASS | ≈22 ms each incl. test overhead |
+| Excel export with 1000+ measurements | 668 | 15,000 | PASS |  |
+| project JSON export with 1000+ measurements | 303 | 3,000 | PASS |  |
+| open a 120-page PDF (first page shown and indexed) | 351 | 6,000 | PASS |  |
+| 10 page changes on the 120-page PDF (each shown and indexed) | 1,199 | 6,000 | PASS | 120 ms each |
+| Pages tab: first thumbnails of 120 drawn | 100 | 8,000 | PASS |  |
+| Find text across 120 pages | 227 | 15,000 | PASS |  |
 | JS heap after the 120-page run | 13 MB | 1,500 MB | PASS |  |
-| open a 200 dpi scanned sheet | 1,492 | 6,000 | PASS |  |
-| open a sheet of 150,000 lines (shown and indexed) | 3,494 | 8,000 | PASS | 150180 lines |
-| …longest freeze while it loads | 987 | 2,000 | PASS |  |
-| auto area on the 150,000-line sheet | 4,711 | 6,000 | PASS |  |
-| 30 mouse moves with snapping on the heavy sheet | 819 | 3,000 | PASS |  |
+| open a 200 dpi scanned sheet | 1,556 | 6,000 | PASS |  |
+| open a sheet of 150,000 lines (shown and indexed) | 3,505 | 8,000 | PASS | 150180 lines |
+| …longest freeze opening it (lines indexed, page drawn) | 240 | 400 | PASS |  |
+| auto area on the 150,000-line sheet | 3,357 | 6,000 | PASS |  |
+| …longest freeze during that trace | 229 | 400 | PASS |  |
+| 30 mouse moves with snapping on the heavy sheet | 886 | 3,000 | PASS |  |
 
 ## E. Remaining risks
 
@@ -346,7 +345,7 @@ Headless Chromium on the build machine (no GPU); times include the test's own ov
 - **One browser only.** Projects live in the browser's IndexedDB; clearing site data or a different browser / host loses them unless exported (*Export → Project .json*). Backups (last 10) are in the same browser.
 - **Browser crash** (not a normal close) inside the 300 ms save window could lose the last change; normal close / reload / tab hide now save at once (tested).
 - **Only Chromium tested** — Firefox / Safari untested; the app uses standard APIs (IndexedDB, BroadcastChannel, IntersectionObserver, ResizeObserver) that both support.
-- **Main-thread tracing** — auto area freezes the page for the length of the trace (K2: ~1.3–1.5 s a room, ~4 s on a 150,000-line sheet).
+- **Slow machines** — auto area and dense sheets now hand the page back to the browser every ~40 ms (longest freeze under 0.3 s on the test machine); a much slower computer stretches the trace itself, not the freezes.
 - **Claude API agent** untested (no key) — its answers are flagged AI until checked, as before.
 - **Rates** are not part of this audit: the takeoff takes rates only from the Rate Analysis library with a dated source (*RATE NOT AVAILABLE* otherwise) — no rate was added or changed.
 
@@ -370,12 +369,12 @@ On a real project PDF, in Chrome. Before merging, the PR's deploy preview is htt
 ## QA status
 
 ```
-QA STATUS: PASS WITH KNOWN ISSUES
+QA STATUS: PASS
 Critical Bugs: 0 open (4 found and fixed: B01, B02, B03, B04)
 High Bugs: 0 open (17 found and fixed: B05, B06, B07, B08, B09, B10, B11, B12, B13, B14, B15, B16, B17, B18, B19, B20, B21)
 Medium Bugs: 0 open; 10 found and fixed
-Low Bugs: 2 open (K2, K3 main-thread freezes); 4 found and fixed
-Fixed Today: 35 (B01–B35)
+Low Bugs: 0 open; 6 found and fixed
+Fixed Today: 37 (B01–B37)
 Not Tested: OCR of scanned drawings; Reorder / duplicate / rotate / delete single pages of a PDF; Sort / search / pagination of the measurement sheet; Claude API agent (the 🤖 Claude panel's model calls); Firefox, Safari; Touch / pinch zoom / press-and-hold on a tablet; Real project drawings (Revit / AutoCAD exports); Browser storage quota (very large PDFs filling IndexedDB)
 Tomorrow's Retest Priority: 1 scale on a real sheet (note, verify, zoom), 2 rapid paging keeps each page's scale, 3 auto area + walls on a real floor plan, 4 save on close / two tabs, 5 Excel totals and 3 dp
 ```

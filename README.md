@@ -722,7 +722,7 @@ CDN. Tests use a hand-written 3-page vector PDF with known dimensions (`tools/ta
 ```sh
 python3 -m http.server 8765 &
 TK_LIBS=/path/with/pdfjs-dist+exceljs node tools/test_takeoff.js      # 150 browser checks
-TK_LIBS=/path/with/pdfjs-dist+exceljs+pdf-lib node tools/test_takeoff_qa.js   # full QA audit: 404 checks in 23 sections
+TK_LIBS=/path/with/pdfjs-dist+exceljs+pdf-lib node tools/test_takeoff_qa.js   # full QA audit: 406 checks in 23 sections
 ```
 
 The QA audit (`tools/test_takeoff_qa.js`, fixtures in `tools/takeoff_qa_fixture.js`) builds an 8-page drawing set
