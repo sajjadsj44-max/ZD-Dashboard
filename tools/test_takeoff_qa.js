@@ -11,7 +11,8 @@
    TK_SHOTS  folder for screenshots
 
    Sections: PDF loading and pages · scale (notes, chosen, calibrated, paper size, per page, zoom never changes a
-   quantity) · single-click areas · data kept through navigation, reload, export and import · conditions (layers) ·
+   quantity) · single-click areas · the free agents (full takeoff, finishes, checker, answers, chained commands) · data
+   kept through navigation, reload, export and import · conditions (layers) ·
    editing stress with undo / redo · markups · PDF text · compare · page management · a house measured as a QS would ·
    measurement sheet · exports · save / recovery · undo / redo master test · performance · edge cases · UI · keyboard
    and mouse · input validation · calculation table · security. Every check is independent of the app's own
@@ -330,6 +331,102 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     const pf = await dl("#exPdf1"), PL = require(path.join(LIBS, "pdf-lib")), pd = await PL.PDFDocument.load(fs.readFileSync(pf));
     ok(pd.getPageCount() === 1 && Math.round(pd.getPage(0).getWidth()) === 595 && Math.round(pd.getPage(0).getHeight()) === 842, "marked-up PDF of the turned page: upright 595 × 842, as on screen");
     await T(id => { zdTakeoff.P.proj.items = zdTakeoff.P.proj.items.filter(i => i.id !== id); zdTakeoff.setSel([]); }, tp); await go(1);
+  });
+
+  /* ---------------------------------------------------------------- 4c. free agents II: ⚡ full takeoff, 🎨 finishes, ✅ check, answers, chained commands */
+  await run("4c. Free agents II — full takeoff, finishes, checker, instant answers, chained commands", async () => {
+    await go(1); await setScale(await key(), 18); await closeDlg();
+    const saved = await T(() => { const Z = zdTakeoff, P = Z.P.proj; return JSON.stringify({items: P.items, conds: P.conds, openings: P.openings, scales: P.scales, cond: Z.S.cond, undo: Z.S.undo.length}); });
+    await T(() => { const Z = zdTakeoff, P = Z.P.proj; P.items = P.items.filter(i => !(i.page === 1 && i.file === Z.S.fileId));
+      P.conds.push({id: "CFA", name: "Floor area — agents", type: "area", unit: "Sft", color: "#4a3aa7", h: "", t: "", faces: 1, dedMin: 0}); Z.S.cond = "CFA";
+      P.openings = [{id: "OD1", mark: "D1", type: "door", w: 3, h: 7}, {id: "OD2", mark: "D2", type: "door", w: 2.5, h: 7}, {id: "OW1", mark: "W1", type: "window", w: 4, h: 4}, {id: "OW2", mark: "W2", type: "window", w: 5, h: 4}];
+      if (!document.getElementById("aiPanel").classList.contains("on")) document.getElementById("bClaude").click(); });
+    // expected, from the drawing's known dimensions: each room's wall finish at H = 10 ft less its doors (D1 3 × 7, D2 2.5 × 7 —
+    // the corridor's entrance too: a D1 tag with no swing) and windows (W1 4 × 4, W2 5 × 4), and its skirting less the doors
+    const SZ = {D1: [3, 7], D2: [2.5, 7]}, eq = (a, b) => Math.abs(a - b) < 1e-9, exp = {};
+    FX.HOUSE.forEach(([nm, x0, y0, x1, y1]) => {
+      const per = 2 * (x1 - x0 + y1 - y0); let dw = 0, da = 0, wa = 0;
+      FX.DOORS.forEach(([d0, d1, ya, yb, dir, tag]) => { if ((eq(ya, y1) || eq(yb, y0)) && d0 >= x0 - 1e-9 && d1 <= x1 + 1e-9) { dw += SZ[tag][0]; da += SZ[tag][0] * SZ[tag][1]; } });
+      if (nm === "CORRIDOR") { dw += 3; da += 21; }
+      FX.WINDOWS.forEach(([side, a, b], i) => { const m = (a + b) / 2, A = i < 3 || i > 5 ? 16 : 20;
+        const along = side === "top" || side === "bottom" ? m > x0 && m < x1 : m > y0 && m < y1;
+        const face = side === "top" ? eq(y0, FX.Y.r1a) : side === "bottom" ? eq(y1, FX.Y.r4b) : side === "left" ? eq(x0, FX.X.a0) : eq(x1, FX.X.c1);
+        if (along && face) wa += A; });
+      exp[nm] = {wall: per * 10 - da - wa, skirt: per - dw}; });
+    const totW = Object.values(exp).reduce((a, e) => a + e.wall, 0), totS = Object.values(exp).reduce((a, e) => a + e.skirt, 0);
+    const n0 = await T(() => zdTakeoff.P.proj.items.length), u0 = await T(() => zdTakeoff.S.undo.length);
+    let t0 = Date.now();
+    const r = await T(() => zdTakeoff.fullTakeoff({scope: "page", rooms: true, walls: true, doors: true, fin: true, H: 10, DH: 0}));
+    perf("⚡ Full takeoff of the house (9 rooms, walls, tags, finishes)", Date.now() - t0, 60000);
+    const R = r.pages[0];
+    ok(!R.skip && R.rooms.named === 9 && R.rooms.ok === 9 && !R.rooms.chk.length && !R.rooms.bad.length, `rooms: ${R.rooms.ok} of ${R.rooms.named} measured, none to check or left open`);
+    calc("Full takeoff: rooms", 1268.25, R.rooms.sft, 0.01, "Sft");
+    const w9 = R.walls.find(w => w.t === 0.75), w45 = R.walls.find(w => w.t === 0.375);
+    calc("Full takeoff: 9\" walls (centre line)", 150.75, w9 ? w9.ft : NaN, 0.01, "ft"); calc("Full takeoff: 4.5\" walls", 154.25, w45 ? w45.ft : NaN, 0.01, "ft");
+    ok(R.walls.length === 2 && R.wallOther.length >= 1, `only standard wall thicknesses taken (${R.walls.map(w => w.t).join(", ")} ft); other parallel spacings listed, not measured (${R.wallOther.map(w => (w.t * 12).toFixed(1) + '"').join(", ")})`);
+    ok(JSON.stringify(R.tags) === JSON.stringify({D1: 7, D2: 2, W1: 5, W2: 3}), "door / window tags counted: " + JSON.stringify(R.tags));
+    const fin = Object.fromEntries((R.fin.rooms || []).map(x => [x.name, x]));
+    Object.entries(exp).forEach(([nm, e]) => { const f = fin[nm];
+      calc(`Finishes ${nm}: wall finish net`, e.wall, f ? f.wallNet : NaN, 0.01, "Sft"); calc(`Finishes ${nm}: skirting less doors`, e.skirt, f ? f.skirt : NaN, 0.01, "ft"); });
+    calc("Finishes: wall finish, whole house", totW, (R.fin.rooms || []).reduce((a, x) => a + x.wallNet, 0), 0.01, "Sft");
+    calc("Finishes: skirting, whole house", totS, (R.fin.rooms || []).reduce((a, x) => a + x.skirt, 0), 0.01, "ft");
+    ok((R.fin.rooms || []).every(x => !x.notes.length), "every door and window deducted (sizes from the opening schedule; the entrance by its tag, no swing drawn)");
+    ok(await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.finAgent === "wall"); return Z.P.proj.items.filter(i => i.cond === c.id && i.kind === "open").every(i => Z.rowsOf(i, 18).every(rw => rw.qty < 0)); }), "…each opening its own negative row on the sheet");
+    const ceil = await T(() => zdTakeoff.billLines().filter(l => l.c.id === "CFA" && /Ceiling finish/.test(l.name)).map(l => l.qty));
+    ok(ceil.length === 1 && near(ceil[0], 1268.25, 0.01), "ceiling finish in the Bill as an assembly of the room condition: " + ceil.join(", ") + " Sft");
+    ok(await T(u0 => zdTakeoff.S.undo.length === u0 + 1 && zdTakeoff.S.undo.slice(-1)[0].label === "Full takeoff", u0), "the whole run is one undo step (“Full takeoff”)");
+    ok((await T(() => zdTakeoff.S.cond)) === "CFA", "the condition picked before the run is still picked after it");
+    const n1 = await T(() => zdTakeoff.P.proj.items.length);
+    await T(() => zdTakeoff.undoAny()); ok((await T(() => zdTakeoff.P.proj.items.length)) === n0, `one Ctrl+Z takes the whole run back (${n1} → ${n0} measurements)`);
+    await T(() => zdTakeoff.redoAny()); ok((await T(() => zdTakeoff.P.proj.items.length)) === n1, "…and Ctrl+Y puts it back");
+    const r2 = await T(() => zdTakeoff.fullTakeoff({scope: "page", rooms: true, walls: true, doors: true, fin: true, H: 10, DH: 0})), R2 = r2.pages[0];
+    ok(R2.rooms.had === 9 && R2.rooms.ok === 0 && (await T(() => zdTakeoff.P.proj.items.length)) === n1 && JSON.stringify(R2.tags) === JSON.stringify(R.tags),
+      `run again: the 9 rooms left as they are, walls / counts / finishes replaced — nothing doubled (${n1} measurements both times)`);
+    // instant answers, from what is measured
+    const ans = async q => T(q => zdTakeoff.agentAnswer(q).answer, q);
+    const aD1 = await ans("how many D1"), aD = await ans("how many doors"), aF = await ans("total floor area"), aB = await ans("total bedroom area");
+    const d1Tot = await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.type === "count" && x.name === "D1"); return Z.condTotals(c).net; });
+    ok(aD1.length === 1 && aD1[0].name === "D1" && aD1[0].qty === d1Tot, "“how many D1” → " + JSON.stringify(aD1));
+    ok(["D1", "D2"].every(m => aD.some(x => x.name === m)), "“how many doors” → every door mark: " + aD.map(x => x.name + " " + x.qty).join(", "));
+    ok(aF.some(x => x.name === "Floor area — agents" && near(x.qty, 1268.25, 0.01)), "“total floor area” → " + aF.map(x => x.name + " " + x.qty).join(", "));
+    ok(aB.length === 1 && near(aB[0].qty, 432, 0.01) && aB[0].rooms === 3, "“total bedroom area” → the 3 BED ROOMs, " + (aB[0] ? aB[0].qty : "—") + " Sft");
+    // ✅ the checker: clean, then with a mistake of each kind planted
+    const P1 = /^qa-set p\.1/, mine = f => /not measured|overlap by|on top of another|not counted|counts differ|measured \d/.test(f.text);
+    const c0 = await T(() => zdTakeoff.agentCheck("page"));
+    ok(!c0.findings.some(f => P1.test(f.text) && mine(f)) && c0.passed >= 4, `checker on the full takeoff: nothing to fix on p.1 (${c0.passed} passed)`);
+    await T(() => { const Z = zdTakeoff, P = Z.P.proj, b1 = P.items.find(i => i.cond === "CFA" && i.label === "BED ROOM 1"), b2 = P.items.find(i => i.cond === "CFA" && i.label === "BED ROOM 2");
+      P.items.push(Object.assign(JSON.parse(JSON.stringify(b1)), {id: "IDUP"})); P.items = P.items.filter(i => i !== b2);
+      const d1 = P.items.find(i => i.page === 1 && i.file === Z.S.fileId && (P.conds.find(c => c.id === i.cond) || {}).name === "D1"); d1.pts.push([d1.pts[0][0] + 2, d1.pts[0][1] + 1]);
+      const w2 = P.conds.find(c => c.name === "W2"); P.items = P.items.filter(i => !(i.cond === w2.id && i.page === 1)); });
+    const c1 = await T(() => zdTakeoff.agentCheck("page")), has = (rx, lvl) => c1.findings.some(f => rx.test(f.text) && (!lvl || f.lvl === lvl));
+    ok(has(/1 of 9 rooms written on the drawing not measured — BED ROOM 2/, "warn"), "checker: a room written on the drawing but not measured (BED ROOM 2)");
+    ok(has(/BED ROOM 1 and BED ROOM 1 overlap by about 144\.000 Sft/, "err"), "checker: the same room measured twice (144.000 Sft overlap)");
+    ok(has(/D1: 1 marker on top of another/, "err"), "checker: a count marker on top of another");
+    ok(has(/tags not counted — W2 ×3/, "warn"), "checker: tags on the drawing not counted (W2 ×3)");
+    ok(has(/D1: 8 counted, 7 on the drawing/, "warn"), "checker: a count that differs from the drawing (D1: 8 counted, 7 tags)");
+    const fixed = await T(async () => { const b = [...document.querySelectorAll("#aiLog [data-ca]")].reverse().find(x => /Measure them/.test(x.textContent)); if (!b) return -1; b.click();
+      for (let i = 0; i < 300 && !zdTakeoff.P.proj.items.some(it => it.cond === "CFA" && it.label === "BED ROOM 2"); i++) await new Promise(r => setTimeout(r, 50));
+      return zdTakeoff.P.proj.items.filter(it => it.cond === "CFA" && it.label === "BED ROOM 2").length; });
+    ok(fixed === 1, "…its 🏠 Measure them button measures BED ROOM 2, into the condition holding the other rooms");
+    // chained commands, a typing slip, never twice
+    ok(JSON.stringify(await T(() => zdTakeoff.cmdSteps('measure all rooms, then count doors and walls 9"; how many D1'))) === JSON.stringify(["measure all rooms", "count doors", 'walls 9"', "how many D1"]), "a chained command is split into its steps");
+    ok((await T(() => zdTakeoff.cmdSteps("apartment no. 107"))).length === 1 && (await T(() => zdTakeoff.cmdSteps("count D1 and D2"))).length === 1, "…but not inside one (apartment no. 107 · count D1 and D2)");
+    await T(() => { const P = zdTakeoff.P.proj; P.items = P.items.filter(i => !(i.cond === "CFA" && i.label === "KITCHEN")); zdTakeoff.S.cond = "CFA"; });
+    const kt = await T(() => zdTakeoff.agentCmd("measure kitchn")), kr = kt && kt.rooms ? kt.rooms.find(x => x.name === "KITCHEN") : null;
+    calc("“measure kitchn” (a typing slip) measures the KITCHEN", 168, kr ? kr.area_sft : NaN, 0.01, "Sft");
+    const again = await T(() => zdTakeoff.agentCmd("measure kitchen"));
+    ok(again && again.rooms && again.rooms.length === 1 && again.rooms[0].already, "…asked again, it is left as it is — the Rooms agent never measures a room twice");
+    // every page of the PDF: blank and unscaled pages are skipped with the reason, and the view comes back to p.1
+    const rp = await T(() => zdTakeoff.fullTakeoff({scope: "pdf", rooms: true, doors: true}));
+    ok(rp.pages.length === 8 && (await T(() => zdTakeoff.S.pageNo)) === 1, `every page of the PDF: ${rp.pages.length} pages, back on p.1 after (${(rp.ms / 1000).toFixed(1)} s)`);
+    const p4 = rp.pages.find(x => x.no === 4); ok(p4 && /blank/.test(p4.skip || ""), "the blank p.4 is skipped and says why: " + (p4 && p4.skip));
+    ok(rp.pages.find(x => x.no === 1).rooms.had === 9, "p.1's rooms left as they are");
+    // the panel
+    ok(await T(() => ["agFull", "agFin", "agCheck"].every(id => document.getElementById(id))), "⚡ Full takeoff, 🎨 Finishes and ✅ Check buttons in the Claude panel");
+    await page.click("#agFull"); await wait(250); ok(await page.isVisible("#ftScope"), "⚡ Full takeoff opens its dialog (where, what, room and door heights)"); await closeDlg();
+    await page.click("#agFin"); await wait(250); ok(await page.isVisible("#fnH"), "🎨 Finishes opens its dialog (rooms, room height, door height)"); await closeDlg();
+    await T(s => { const Z = zdTakeoff, P = Z.P.proj, o = JSON.parse(s); P.items = o.items; P.conds = o.conds; P.openings = o.openings; P.scales = o.scales; Z.S.cond = o.cond; Z.S.undo.length = Math.min(Z.S.undo.length, o.undo); Z.S.redo = []; Z.setSel([]); }, saved);
+    await go(1);
   });
 
   /* ---------------------------------------------------------------- 5. data kept, conditions (layers) */

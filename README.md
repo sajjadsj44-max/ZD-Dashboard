@@ -711,6 +711,37 @@ calculation table and live-retest checklist is `docs/takeoff-qa-report-2026-10-0
 - **Quantities to 3 dp** everywhere (sheet, CSV, Excel `#,##0.000`), Nos whole; undo keeps 200 steps (fewer on very
   large projects, never under 20).
 
+**Free agents** (03-Oct-2026 — in the Claude panel; no API key, no cost, nothing leaves the browser; they read the
+PDF's own lines and text, so vector drawings — a scanned sheet has neither):
+
+- **⚡ Full takeoff**: rooms, walls, doors / windows and finishes in one run, on this page, every page of the PDF or
+  the whole project, with one report (page by page, the run's totals, counts against the schedule's quantities, the
+  pages skipped and why). *Rooms* — auto area at every room name not yet measured, checked against its written size.
+  *Walls* — every **standard** thickness drawn (4", 4.5", 5", 6", 8", 9", 10", 12", 13.5", 18") on the centre line, into
+  your existing wall condition of that thickness when there is one; other spacings of parallel lines (window glass, a
+  counter) are listed, never measured. *Doors / windows* — every tag counted, a schedule table's sizes into the opening
+  schedule. A page with no scale, or a scale its written room sizes disagree with, is skipped — nothing is measured at
+  a doubtful scale. Running it again leaves measured rooms as they are and replaces its own walls, counts and finishes,
+  so nothing is doubled; **one Ctrl+Z takes the whole run back**.
+- **🎨 Finishes**: for each room measured on the page, its **wall finish** (plaster / paint) as one run round the room,
+  Nos × L × H at the room height given, with **every door and window its own deduction row** (house threshold:
+  1.00 Sft or less not deducted); its **skirting** less its doors; its **ceiling** as an assembly line (= A) of the room
+  condition, for the Bill. Doors are found from their swings (hinge to jamb; a double door once), sized from the opening
+  schedule when a door tag is beside them, else drawn width × the door height given; a door tag with no swing drawn (an
+  entrance) is placed by its tag. Windows are found from their tags and sized from the opening schedule only — a
+  window's height is never on a plan, so one with no size is listed as *not deducted*, never assumed. A room finishes
+  table (floor, ceiling, perimeter, doors, windows, skirting, gross, deductions, net) copies to Excel.
+- **✅ Check**: audits the takeoff the way a checking QS would — rooms written on the drawing but not measured (with
+  *Measure them*), the same room measured twice (two outlines of one condition overlapping), a count marker on top of
+  another, door / window tags not counted or counted differently (with *Count them*), measured against written room
+  sizes (over 5 %), counts against the schedule's quantities, the drawing's schedule sizes against the opening
+  schedule (a revised size), walls with length only, and unchecked agent work; each finding has **Show** (goes to the
+  page and selects it) or a fix. The export check's notes (BOQ codes, rates, floors) are folded underneath.
+- **Chat without a key**: *how many D1*, *how many doors*, *total floor area*, *total bedroom area* are answered from what
+  is measured; commands can be chained (*measure all rooms, then count doors and walls 9"*); *measure all rooms on every
+  page* runs the rooms over the whole PDF; a typing slip (*bedrom*, *kitchn*) still finds the room. The 🏠 Rooms agent
+  no longer measures a room twice — one already measured in the condition is left as it is.
+
 Phase 2 / 3 status: click-inside room areas, walls by thickness, symbol / tag counting, room sizes and door /
 window marks read from the drawing, the revision overlay and scanned-PDF measuring are in. Still planned: a command
 bar, typical-floor multipliers, sending quantities to the Project BOQ, OCR of scanned sheets, and page reorder /
@@ -722,7 +753,7 @@ CDN. Tests use a hand-written 3-page vector PDF with known dimensions (`tools/ta
 ```sh
 python3 -m http.server 8765 &
 TK_LIBS=/path/with/pdfjs-dist+exceljs node tools/test_takeoff.js      # 150 browser checks
-TK_LIBS=/path/with/pdfjs-dist+exceljs+pdf-lib node tools/test_takeoff_qa.js   # full QA audit: 406 checks in 23 sections
+TK_LIBS=/path/with/pdfjs-dist+exceljs+pdf-lib node tools/test_takeoff_qa.js   # full QA audit: 459 checks in 24 sections
 ```
 
 The QA audit (`tools/test_takeoff_qa.js`, fixtures in `tools/takeoff_qa_fixture.js`) builds an 8-page drawing set
