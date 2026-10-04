@@ -239,11 +239,21 @@ function migrate(p, rep){
    closing the tab is not lost. The project is taken when the change is made, not when the timer fires. */
 let saveT = null, savePr = null;
 const TAB = uid("T");
-function save(){ if (!P.proj) return; S.ver = (S.ver || 0) + 1; P.proj.updated = new Date().toISOString(); savePr = P.proj; clearTimeout(saveT); saveT = setTimeout(flushSave, 300); }
+function save(){ if (!P.proj) return; S.ver = (S.ver || 0) + 1; P.proj.updated = new Date().toISOString(); savePr = P.proj; clearTimeout(saveT); saveT = setTimeout(flushSave, 300); saveSay("wait"); }
 function flushSave(){
   clearTimeout(saveT); saveT = null; const pr = savePr; savePr = null;
   if (!pr || !DB) return Promise.resolve(false);
-  return dbPut("projects", pr).then(() => { tabSay({t: "saved", id: pr.id, at: pr.updated}); return true; }).catch(e => { toast("Could not save: " + e.message, 5000); return false; });
+  return dbPut("projects", pr).then(() => { tabSay({t: "saved", id: pr.id, at: pr.updated}); if (!savePr && P.proj === pr) saveSay("ok", pr.updated); return true; })
+    .catch(e => { toast("Could not save: " + e.message, 5000); if (P.proj === pr) saveSay("bad", e.message); return false; });
+}
+/* the save state next to the project name: "Saved 14:32" · "Saving…" · "NOT SAVED" (stays until a save works) */
+function saveSay(st, x){
+  const el = $("saveSt"); if (!el) return;
+  if (st === "wait" && el.classList.contains("bad")) return;
+  el.className = "savest " + st;
+  const t = iso => { const d = new Date(iso); return isNaN(d) ? "" : String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+  el.textContent = st === "ok" ? "✓ Saved " + t(x) : st === "wait" ? "Saving…" : st === "bad" ? "⚠ NOT SAVED" : "";
+  el.title = st === "ok" ? "Saved in this browser at " + t(x) + " — Export → Project + PDFs to keep a copy elsewhere" : st === "bad" ? "The last change could not be saved in this browser: " + x + " — press Ctrl+S to try again, and export a copy" : "Writing the last change to this browser's storage";
 }
 /* the same project open in two tabs: each would overwrite the other's work on its next save — say so in both */
 const TABCH = typeof BroadcastChannel === "function" ? new BroadcastChannel("zdTakeoff") : null;
@@ -324,7 +334,7 @@ async function openProject(id){
   S.cond = (pr.conds[0] || {}).id || null;
   localStorage.setItem("zdTakeoffLast", pr.id);
   $("start").classList.remove("on");
-  $("projName").value = pr.name;
+  $("projName").value = pr.name; saveSay("ok", pr.updated);
   buildPageSel();
   const first = pr.last && pr.last.file && pr.files.some(f => f.id === pr.last.file) ? pr.last : pr.files[0] ? {file: pr.files[0].id, page: 1} : null;
   if (first) await gotoPage(first.file, first.page || 1); else showDrop(true);
@@ -373,25 +383,75 @@ async function openPdfData(lib, data, name){
     }
   }
 }
+/* a PDF is known by a fingerprint of its content (SHA-256), not by its name and size: the same drawing added again
+   (under any name) is re-attached to its measurements; a different drawing under a name already in the project is asked
+   about — add it as a new drawing, or replace the old one as its revision — never swapped in silently */
+async function sha256(buf){ try { const h = await crypto.subtle.digest("SHA-256", buf); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join(""); } catch (e) { return ""; } }
+async function pdfSha(id){   // the stored PDF's fingerprint (worked out once for a PDF stored before fingerprints); null = not in this browser
+  const rec = await dbGet("pdfs", id); if (!rec) return null; if (rec.sha) return rec.sha;
+  const h = await sha256(rec.data); if (h) { rec.sha = h; await dbPut("pdfs", rec, id).catch(() => {}); } return h;
+}
+/* a dialog with its own buttons: resolves to the chosen button's v, or null (Cancel / Esc / Enter) */
+function choose(title, body, btns){
+  const p = ask(title, body, ""), cur = ask.cur;
+  $("dlgF").insertAdjacentHTML("beforeend", btns.map((b, i) => `<button class="btn${b.pri ? " pri" : ""}" data-ch="${i}">${esc(b.t)}</button>`).join(""));
+  $("dlgF").querySelectorAll("[data-ch]").forEach(x => x.onclick = () => cur(btns[+x.dataset.ch].v));
+  return p.then(v => v === true ? null : v);
+}
+/* the project's references to one PDF moved to a new id (its measurements, markups, scales, viewports, sheet info, layers) */
+function remapFileId(text, from, to){ return text.split('"' + from + '"').join('"' + to + '"').split('"' + from + ':').join('"' + to + ':'); }
+function dropFileCache(fid){
+  if (S.docs[fid]) { try { S.docs[fid].destroy(); } catch (e) {} delete S.docs[fid]; }
+  const mine = k => String(k).split(":")[0] === fid;
+  [S.geo, S.texts, S.sizes, S.thumbs].forEach(o => o && Object.keys(o).forEach(k => { if (mine(k)) delete o[k]; }));
+  if (S.ocgs) delete S.ocgs[fid]; if (S.ocBound) delete S.ocBound[fid];
+}
 async function addFiles(files){
   if (!P.proj) return;
   for (const f of files) {
     if (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") { toast(f.name + " is not a PDF"); continue; }
     busy("Opening " + f.name + "…");
     try {
-      const data = await f.arrayBuffer();
-      let meta = P.proj.files.find(x => x.name === f.name && x.size === f.size);
+      const data = await f.arrayBuffer(), sha = await sha256(data);
       const lib = await loadPdfjs();
       const {d, pw} = await openPdfData(lib, data, f.name);
+      for (const x of P.proj.files) if (!x.sha) { const h = await pdfSha(x.id); if (h) x.sha = h; }   // PDFs added before fingerprints
+      let meta = sha ? P.proj.files.find(x => x.sha === sha) : null, name = f.name, how = meta ? "same" : "new";
+      const named = meta ? null : P.proj.files.find(x => x.name === f.name);
+      if (named && !sha) { if (named.size === f.size) { meta = named; how = "same"; } }   // no fingerprint in this browser: the old name + size rule
+      else if (named && !named.sha && named.size === f.size && !(await dbGet("pdfs", named.id))) { meta = named; how = "same"; }   // nothing to compare with: re-attached as before
+      else if (named) {
+        busy("");
+        const here = !!(await dbGet("pdfs", named.id)), n = P.proj.items.filter(i => i.file === named.id).length;
+        const v = await choose("Different drawing, same name — " + f.name, `<p><b>${esc(f.name)}</b> is already in this project, but the file you added is a <b>different drawing</b> (its content does not match${here ? "" : " the one the project was measured on"}).</p>
+          <p style="margin-top:6px"><b>${n}</b> measurement${n === 1 ? " is" : "s are"} on the drawing already here.</p>
+          <ul class="small" style="margin:6px 0 0 18px"><li><b>Add as new drawing</b> — kept side by side; nothing already measured moves.</li>
+          <li><b>${here ? "Replace — it is a revision" : "Attach anyway"}</b> — the measurements stay where they are and now sit on this drawing: check them against it.${here ? " The project is backed up first." : ""}</li></ul>`,
+          [{t: here ? "Replace — it is a revision" : "Attach anyway", v: "replace"}, {t: "Add as new drawing", v: "new", pri: true}]);
+        if (!v) { toast(f.name + " not added"); continue; }
+        busy("Opening " + f.name + "…");
+        if (v === "replace") { meta = named; how = "replace"; }
+        else { const used = new Set(P.proj.files.map(x => x.name)), stem = f.name.replace(/\.pdf$/i, ""); for (let i = 2; used.has(name); i++) name = stem + " (" + i + ").pdf"; }
+      }
+      if (how === "replace") {
+        savePr = P.proj; await flushSave(); await backupNow("before replacing " + meta.name).catch(() => {});
+        const shared = (await dbAll("projects")).some(x => x.id !== P.proj.id && (x.files || []).some(y => y.id === meta.id));
+        if (shared) {   // a duplicated project shares the stored PDF: it keeps the old drawing, this project gets its own
+          const nid = uid("F"), o = JSON.parse(remapFileId(JSON.stringify(P.proj), meta.id, nid));
+          dropFileCache(meta.id); Object.keys(o).forEach(k => { P.proj[k] = o[k]; }); S.undo = []; S.redo = []; S.sel = null; S.selMark = null; S.multi.clear();
+          meta = P.proj.files.find(x => x.id === nid);
+        }
+      }
       const id = meta ? meta.id : uid("F");
-      await dbPut("pdfs", Object.assign({name: f.name, size: f.size, data}, pw ? {pw} : {}), id);   // stored first: a PDF listed in the project is always one that can be opened
-      if (!meta) { meta = {id, name: f.name, size: f.size, pages: d.numPages, added: new Date().toISOString()}; P.proj.files.push(meta); }
-      else if (meta.pages !== d.numPages) meta.pages = d.numPages;
-      if (S.docs[meta.id]) S.docs[meta.id].destroy();
+      await dbPut("pdfs", Object.assign({name, size: f.size, data, sha}, pw ? {pw} : {}), id);   // stored first: a PDF listed in the project is always one that can be opened
+      if (!meta) { meta = {id, name, size: f.size, sha, pages: d.numPages, added: new Date().toISOString()}; P.proj.files.push(meta); }
+      else { meta.pages = d.numPages; meta.size = f.size; if (sha) meta.sha = sha; if (how === "replace") meta.replaced = new Date().toISOString(); }
+      dropFileCache(meta.id);
       S.docs[meta.id] = d;
       save(); buildPageSel();
       await gotoPage(meta.id, 1);
-      toast(f.name + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""));
+      toast(how === "replace" ? f.name + " replaced — " + d.numPages + " page" + (d.numPages > 1 ? "s" : "") + " · check the measurements sit on the new drawing"
+        : name + (name !== f.name ? " (added as a new drawing)" : how === "same" ? " (same drawing — re-attached)" : "") + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""), how === "new" && name === f.name ? 2600 : 5000);
     } catch (e) { const m = e && e.message || String(e); toast(/password/i.test(m) ? m : f.name + " could not be opened — " + m + (/Invalid PDF|empty/i.test(m) ? " (is it a PDF, and complete?)" : ""), 6000); }
     busy("");
   }
@@ -3481,6 +3541,51 @@ async function exportPdf(all){
   busy("");
 }
 function exportJson(){ saveBlob(new Blob([JSON.stringify(Object.assign({format: "zd-takeoff", exported: new Date().toISOString()}, P.proj), null, 1)], {type: "application/json"}), fileBase() + ".takeoff.json"); }
+/* Project + PDFs in one file, to move a takeoff to another browser or computer with its drawings:
+   "ZDTAKEOFF-BUNDLE-1\n", a 4-byte length, a JSON header (the project and each PDF's name, size, fingerprint, place), then the PDFs */
+const BUNDLE_MAGIC = "ZDTAKEOFF-BUNDLE-1\n";
+async function exportBundle(){
+  savePr = P.proj; await flushSave();
+  busy("Packing the project and its PDFs…");
+  try {
+    const exported = new Date().toISOString(), parts = [], pdfs = [], miss = []; let off = 0;
+    for (const f of P.proj.files) {
+      const rec = await dbGet("pdfs", f.id); if (!rec) { miss.push(f.name); continue; }
+      const sha = rec.sha || await sha256(rec.data);
+      pdfs.push(Object.assign({id: f.id, name: f.name, size: rec.data.byteLength, sha, off}, rec.pw ? {pw: rec.pw} : {}));
+      parts.push(rec.data); off += rec.data.byteLength;
+    }
+    const head = new TextEncoder().encode(JSON.stringify({format: "zd-takeoff-bundle", exported, project: Object.assign({format: "zd-takeoff", exported}, P.proj), pdfs}));
+    const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, head.length);
+    saveBlob(new Blob([BUNDLE_MAGIC, len, head, ...parts], {type: "application/octet-stream"}), fileBase() + ".zdtakeoff");
+    toast(miss.length ? "Saved without " + miss.join(", ") + " — not in this browser (add it with + PDF first)" : "Project + " + pdfs.length + " PDF" + (pdfs.length === 1 ? "" : "s") + " saved in one file — open it with Import project", miss.length ? 7000 : 4000);
+  } catch (e) { toast("Export failed: " + (e.message || e), 6000); }
+  busy("");
+}
+function isBundle(buf){ const m = new TextEncoder().encode(BUNDLE_MAGIC), u = new Uint8Array(buf, 0, Math.min(buf.byteLength, m.length)); return u.length === m.length && m.every((b, i) => u[i] === b); }
+async function importBundle(buf){
+  const start = BUNDLE_MAGIC.length + 4;
+  if (buf.byteLength < start) throw new Error("the file is cut short");
+  const hl = new DataView(buf, BUNDLE_MAGIC.length, 4).getUint32(0);
+  let h; try { h = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, start, Math.min(hl, buf.byteLength - start)))); } catch (e) { throw new Error("the file is damaged (its header cannot be read)"); }
+  if (!h || h.format !== "zd-takeoff-bundle" || !h.project || !Array.isArray(h.pdfs)) throw new Error("not a takeoff project file");
+  let text = JSON.stringify(h.project); const base = start + hl, pre = [];
+  busy("Unpacking the PDFs…");
+  try {
+    for (const p of h.pdfs) {
+      const a = base + (+p.off || 0), b = a + (+p.size || 0);
+      if (!(p.size > 0) || b > buf.byteLength) { pre.push({what: "PDF in the file: " + p.name, a: "1", b: "0", st: "FAIL", note: "cut short — not attached"}); continue; }
+      const data = buf.slice(a, b), sha = await sha256(data);
+      if (p.sha && sha && sha !== p.sha) { pre.push({what: "PDF in the file: " + p.name, a: "1", b: "0", st: "FAIL", note: "damaged — its fingerprint does not match — not attached"}); continue; }
+      let id = String(p.id); const have = await pdfSha(id);
+      if (have !== null && have === sha && sha) continue;   // the same drawing is already in this browser
+      if (have !== null) { const nid = uid("F"); text = remapFileId(text, id, nid); id = nid; }   // another drawing already uses this id here: this one gets its own
+      await dbPut("pdfs", Object.assign({name: p.name, size: data.byteLength, data, sha}, p.pw ? {pw: p.pw} : {}), id);
+    }
+  } finally { busy(""); }
+  if (!pre.length) pre.push({what: "PDFs in the file", a: h.pdfs.length, b: h.pdfs.length, st: "PASS", note: "fingerprints checked"});
+  return importProject(text, pre);
+}
 async function exportMenu(){
   if (!P.proj) return;
   const V = validation(), nE = V.L.filter(x => x.lvl === "ERROR").length, nW = V.L.length - nE;
@@ -3488,12 +3593,12 @@ async function exportMenu(){
   $("dlgB").innerHTML = `<div class="wide"></div><p><b>Takeoff check: <span style="color:${lvlCol(V.lvl)}">${V.lvl}</span></b>${V.L.length ? ` — ${nE} error${nE === 1 ? "" : "s"}, ${nW} warning${nW === 1 ? "" : "s"}` : " — scales, heights, thicknesses, codes, rates, QA all in order"}</p>
     ${V.L.length ? `<div style="max-height:240px;overflow:auto;margin:6px 0;border:1px solid var(--line);border-radius:6px">${V.L.map(x => `<div style="padding:4px 8px;border-bottom:1px solid #f0f4f8;font-size:12px"><b style="color:${lvlCol(x.lvl)};display:inline-block;width:70px">${x.lvl}</b>${esc(x.msg)}</div>`).join("")}</div>` : ""}
     <p class="small">${V.lvl === "PASS" ? "" : "You can still export; the Excel file carries this list on its Validation sheet. "}Measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as rows).</p>`;
-  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="exBak">Backups…</button><button class="btn" id="exJson">Project (.json)</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA">All marked-up pages (.pdf)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
+  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="exBak">Backups…</button><button class="btn" id="exJson" title="Measurements only — the PDFs are not inside">Project (.json)</button><button class="btn" id="exBnd" title="The project and its PDFs in one file, to move it to another browser or computer">Project + PDFs</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA">All marked-up pages (.pdf)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
   $("dlgBack").classList.add("on");
   const close = () => $("dlgBack").classList.remove("on");
   $("dlgCancel").onclick = close;
   $("exXls").onclick = () => { close(); exportExcel(); }; $("exCsv").onclick = () => { close(); exportCsv(); };
-  $("exPng").onclick = () => { close(); exportPng(); }; $("exPdf1").onclick = () => { close(); exportPdf(false); }; $("exPdfA").onclick = () => { close(); exportPdf(true); }; $("exJson").onclick = () => { close(); exportJson(); }; $("exBak").onclick = () => backupsDialog();
+  $("exPng").onclick = () => { close(); exportPng(); }; $("exPdf1").onclick = () => { close(); exportPdf(false); }; $("exPdfA").onclick = () => { close(); exportPdf(true); }; $("exJson").onclick = () => { close(); exportJson(); }; $("exBnd").onclick = () => { close(); exportBundle(); }; $("exBak").onclick = () => backupsDialog();
 }
 
 /* ------------------------------------------------------------------ pages: list, paper sizes */
@@ -3879,7 +3984,7 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 window.addEventListener("beforeunload", () => { flushSave(); });
 
 /* ------------------------------------------------------------------ project import: lossless, then validated */
-async function importProject(text){
+async function importProject(text, pre){
   let o; try { o = JSON.parse(text); } catch (e) { throw new Error("the file is not valid JSON"); }
   if (!o || o.format !== "zd-takeoff" || !Array.isArray(o.items)) throw new Error("not a takeoff project file");
   const pr = JSON.parse(JSON.stringify(o)); delete pr.format; delete pr.exported;
@@ -3887,11 +3992,12 @@ async function importProject(text){
   const repairs = [], fromV = migrate(pr, repairs);
   await dbPut("projects", pr);
   const back = await dbGet("projects", pr.id), miss = [];
-  for (const f of back.files) if (!(await dbGet("pdfs", f.id))) miss.push(f.name);
+  const diff = [];
+  for (const f of back.files) { const h = await pdfSha(f.id); if (h === null) miss.push(f.name); else if (f.sha && h && h !== f.sha) diff.push(f.name); }
   const cnt = v => Array.isArray(v) ? v.length : v && typeof v === "object" ? Object.values(v).reduce((a, x) => a + (Array.isArray(x) ? x.length : 1), 0) : v == null ? 0 : 1;
   const ref = JSON.parse(JSON.stringify(o)); migrate(ref);   // the file as upgraded: defaults a v1 file lacks are not losses
   const same = k => JSON.stringify(ref[k] === undefined ? null : ref[k]) === JSON.stringify(back[k] === undefined ? null : back[k]);
-  const rows = [], add = (what, a, b, st, note) => rows.push({what, a, b, st, note});
+  const rows = (pre || []).slice(), add = (what, a, b, st, note) => rows.push({what, a, b, st, note});
   [["files", "PDFs"], ["conds", "Conditions"], ["items", "Measurements"], ["scales", "Page scales"], ["viewports", "Viewports"], ["marks", "Markups"], ["sheets", "Sheet info"], ["openings", "Opening schedule"]].forEach(([k, n]) =>
     add(n, cnt(o[k]), cnt(back[k]), o[k] === undefined || (same(k) && cnt(o[k]) === cnt(back[k])) ? "PASS" : "FAIL", o[k] === undefined ? "not in this file (older version) — empty" : cnt(o[k]) !== cnt(back[k]) ? "the file holds entries that could not be read — see Repaired below" : ""));
   repairs.forEach(r => add("Repaired", "", "", /left out|removed/.test(r) ? "FAIL" : "WARNING", r));
@@ -3901,7 +4007,8 @@ async function importProject(text){
   const orphanC = back.items.filter(i => !back.conds.some(c => c.id === i.cond)).length, orphanF = back.items.filter(i => !back.files.some(f => f.id === i.file)).length;
   add("Measurements → condition", back.items.length, back.items.length - orphanC, orphanC ? "FAIL" : "PASS", orphanC ? orphanC + " point to a condition that is not in the file" : "");
   add("Measurements → PDF", back.items.length, back.items.length - orphanF, orphanF ? "FAIL" : "PASS", orphanF ? orphanF + " point to a PDF that is not in the file" : "");
-  add("PDFs attached in this browser", back.files.length, back.files.length - miss.length, miss.length ? "WARNING" : "PASS", miss.length ? "add " + miss.join(", ") + " with + PDF (matched by name)" : "");
+  add("PDFs attached in this browser", back.files.length, back.files.length - miss.length, miss.length ? "WARNING" : "PASS", miss.length ? "add " + miss.join(", ") + " with + PDF — checked against the drawing it was measured on" : "");
+  if (diff.length) add("PDFs are the drawings measured on", back.files.length - miss.length, back.files.length - miss.length - diff.length, "FAIL", "the copy of " + diff.join(", ") + " in this browser is a different drawing (content does not match) — add the right PDF with + PDF");
   add("File version", "v" + fromV, "v" + back.v, "PASS", fromV < SCHEMA ? "upgraded" : "");
   await openProject(pr.id);
   const lvl = rows.some(r => r.st === "FAIL") ? "FAIL" : rows.some(r => r.st === "WARNING") ? "WARNING" : "PASS";
@@ -4029,7 +4136,7 @@ function wire(){
     if (!((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s")) return;
     e.preventDefault(); if (!P.proj) return;
     const a = document.activeElement; if (a && a.closest && a.closest("#props,header") && /^(INPUT|SELECT)$/.test(a.tagName)) a.blur();   // a field being typed in is taken first
-    savePr = P.proj; flushSave().then(ok => toast(ok ? "Saved in this browser — " + P.proj.items.length + " measurement" + (P.proj.items.length === 1 ? "" : "s") + " · Export → Project (.json) to keep a copy elsewhere" : "Not saved — see the message above", 2600));
+    savePr = P.proj; flushSave().then(ok => toast(ok ? "Saved in this browser — " + P.proj.items.length + " measurement" + (P.proj.items.length === 1 ? "" : "s") + " · Export → Project + PDFs to keep a copy elsewhere" : "Not saved — see the message above", 2600));
   }, true);
   $("warnbar").addEventListener("click", e => { if (e.target.closest("[data-reload]")) { clearTimeout(saveT); savePr = null; location.reload(); } });   // this tab's pending change is dropped, not written over the other's
   st.addEventListener("pointerdown", onDown);
@@ -4138,7 +4245,7 @@ function wire(){
     if (!v) return; const pr = newProject(v.name); await dbPut("projects", pr); await openProject(pr.id); };
   $("bImport").onclick = () => $("impIn").click();
   $("impIn").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return;
-    try { await importProject(await f.text()); } catch (er) { toast("Could not import: " + er.message, 5000); } };
+    try { const buf = await f.arrayBuffer(); await (isBundle(buf) ? importBundle(buf) : importProject(new TextDecoder().decode(buf))); } catch (er) { toast("Could not import: " + er.message, 5000); } };
   $("projList").addEventListener("click", async e => {
     const o = e.target.closest("[data-open],[data-dup],[data-del],[data-bak]"); if (!o) return;
     if (o.dataset.open) return openProject(o.dataset.open);

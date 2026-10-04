@@ -34,6 +34,7 @@ header .btn{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.25);
 header .btn:hover{background:rgba(255,255,255,.16)}
 header select,header input{background:rgba(255,255,255,.95);color:var(--txt);height:30px}
 #projName{width:180px;font-weight:600}
+.savest{font-size:11px;color:#cfe0f5;white-space:nowrap;min-width:64px}.savest.bad{color:#fff;background:var(--red);border-radius:10px;padding:2px 8px;font-weight:700}
 #pageSel{max-width:240px}
 #zoomPct{width:52px;text-align:center;font-variant-numeric:tabular-nums;font-size:12px;color:#cfe0f5}
 .chip{display:inline-flex;align-items:center;gap:6px;border-radius:14px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;border:1px solid transparent}
@@ -274,6 +275,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <div class="sep"></div>
   <button class="btn sm" id="bProjects" title="All projects">&#9776; Projects</button>
   <input type="text" id="projName" title="Project name" aria-label="Project name">
+  <span id="saveSt" class="savest" role="status" aria-live="polite"></span>
   <button class="btn sm" id="bAdd" title="Add a PDF to this project">+ PDF</button>
   <input type="file" id="fileIn" accept="application/pdf,.pdf" multiple hidden>
   <div class="sep"></div>
@@ -388,11 +390,11 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <h2>PDF Takeoff</h2>
   <p class="sub">Measure areas, lengths and counts straight off PDF drawings, with the scale read from the drawing, snapping to the
     drawing's own lines, and a measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as their own rows).</p>
-  <div class="card"><div class="hd"><h3>Projects</h3><button class="btn" id="bImport">Import project (.json)</button><input type="file" id="impIn" accept=".json,application/json" hidden>
+  <div class="card"><div class="hd"><h3>Projects</h3><button class="btn" id="bImport">Import project</button><input type="file" id="impIn" accept=".json,.zdtakeoff,application/json" hidden>
     <button class="btn pri" id="bNewProj">+ New project</button></div><div id="projList"></div></div>
   <div class="note"><b>Your drawings stay on this computer.</b> PDFs and takeoffs are saved in this browser's storage (IndexedDB) on this device only —
-    nothing is uploaded, and another browser or computer will not see them. Use <b>Export → Project (.json)</b> to move a takeoff; the PDF is re-attached by
-    its file name. Vector PDFs exported from CAD snap to their lines; scanned PDFs can be measured but do not snap.</div>
+    nothing is uploaded, and another browser or computer will not see them. Use <b>Export → Project + PDFs</b> to move a takeoff with its drawings in one file (<b>Project (.json)</b> carries the measurements only; a PDF added again
+    is checked against the drawing it was measured on, by its content, not its name). Vector PDFs exported from CAD snap to their lines; scanned PDFs can be measured but do not snap.</div>
 </div></div>
 
 <div id="dlgBack"><div class="dlg" role="dialog" aria-modal="true"><div class="dh" id="dlgT"></div><div class="db" id="dlgB"></div><div class="df" id="dlgF"></div></div></div>
@@ -413,6 +415,6 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-03b"></script>
+<script type="module" src="takeoff.js?v=2026-10-04a"></script>
 </body>
 </html>
