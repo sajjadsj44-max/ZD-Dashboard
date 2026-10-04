@@ -3008,10 +3008,10 @@ function focusProps(){ if (S.rHide) { S.rHide = false; setPanels(); } renderProp
 function inkOf(ctx, W, H){ const d = ctx.getImageData(0, 0, W, H).data, m = new Uint8Array(W * H); for (let i = 0; i < m.length; i++) m[i] = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) < 170 ? 1 : 0; return m; }
 function dil1(m, W, H){ const o = new Uint8Array(m.length); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x; if (!m[i]) continue; o[i] = 1; if (x) o[i - 1] = 1; if (x < W - 1) o[i + 1] = 1; if (y) o[i - W] = 1; if (y < H - 1) o[i + W] = 1; } return o; }
 function rot90(m, w, h){ const o = new Uint8Array(w * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) o[x * h + (h - 1 - y)] = m[y * w + x]; return {m: o, w: h, h: w}; }
-async function renderInk(page, sc){
+async function renderInk(page, sc, fid){
   const vp = page.getViewport({scale: sc}), W = Math.ceil(vp.width), H = Math.ceil(vp.height), cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  await sliced(page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp})).promise;
+  await sliced(page.render({...lay(fid || S.fileId), canvasContext: ctx, viewport: vp})).promise;
   return {m: inkOf(ctx, W, H), W, H};
 }
 function matchInk(I, W, H, T, tw, th, thr){
@@ -3033,11 +3033,14 @@ function matchInk(I, W, H, T, tw, th, thr){
   }
   return out;
 }
+/* Find similar: the boxed symbol is looked for on this page, every page of this PDF, or every PDF of the project; what
+   is found is shown as a list of small pictures, weakest match first, to tick or untick — only the ticked ones are counted */
 async function findSimilar(rect){
   const c0 = cond(S.cond); if (!c0 || c0.type !== "count") { setTool("count"); }
   const c = cond(S.cond);
-  const v = await ask("Find similar — " + esc(c.name), `<p>Every symbol that looks like the one you boxed is counted into <b>${esc(c.name)}</b>. Check the result and delete any wrong ones (Select, click the marker, Delete).</p>
-    <div class="grid" style="margin-top:10px"><div class="fg"><label>Search</label><select id="vsWhere"><option value="page">This page</option><option value="pdf">Every page of this PDF</option></select></div>
+  const nPdf = P.proj.files.length;
+  const v = await ask("Find similar — " + esc(c.name), `<p>Every symbol that looks like the one you boxed is found and shown to you first — untick any wrong ones, and only the ticked ones are counted into <b>${esc(c.name)}</b>.</p>
+    <div class="grid" style="margin-top:10px"><div class="fg"><label>Search</label><select id="vsWhere"><option value="page">This page</option><option value="pdf">Every page of this PDF</option>${nPdf > 1 ? `<option value="all">Every PDF of the project (${nPdf})</option>` : ""}</select></div>
     <div class="fg"><label>Match</label><select id="vsThr"><option value="0.9">Strict (90%)</option><option value="0.82" selected>Normal (82%)</option><option value="0.72">Loose (72%)</option></select></div>
     <div class="fg w2"><label><input type="checkbox" id="vsRot" style="width:auto" checked> Also find it turned 90°, 180°, 270°</label></div></div>`, "Find",
     () => ({where: $("vsWhere").value, thr: +$("vsThr").value, rot: $("vsRot").checked}));
@@ -3045,7 +3048,7 @@ async function findSimilar(rect){
   const longSym = Math.max(rect[2] - rect[0], rect[3] - rect[1]); if (longSym < 1) return;
   const sc = Math.max(0.5, Math.min(6, 30 / longSym, 7000 / Math.max(S.base.width, S.base.height)));
   busy("Reading the symbol…"); await new Promise(r => setTimeout(r, 20));
-  let total = 0, pagesHit = 0;
+  const cands = [], skipped = [], fid0 = S.fileId, pn0 = S.pageNo;
   try {
     const here = await renderInk(S.page, sc);
     let x0 = Math.floor(rect[0] * sc), y0 = Math.floor(rect[1] * sc), x1 = Math.ceil(rect[2] * sc), y1 = Math.ceil(rect[3] * sc);
@@ -3056,31 +3059,70 @@ async function findSimilar(rect){
     const tw = bx1 - bx0 + 1, th = by1 - by0 + 1, T0 = new Uint8Array(tw * th);
     for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) T0[y * tw + x] = here.m[(by0 + y) * here.W + bx0 + x];
     const vars = [{m: T0, w: tw, h: th}]; if (v.rot) for (let r = 0; r < 3; r++) vars.push(rot90(vars[r].m, vars[r].w, vars[r].h));
-    const pages = v.where === "pdf" ? Array.from({length: (P.proj.files.find(f => f.id === S.fileId) || {pages: 1}).pages}, (_, i) => i + 1) : [S.pageNo];
-    const found = {};
-    for (const pn of pages) {
-      busy("Searching page " + pn + (pages.length > 1 ? " of " + pages.length : "") + "…"); await new Promise(r => setTimeout(r, 10));
-      const pg = pn === S.pageNo ? S.page : await (await doc(S.fileId)).getPage(pn), ink = pn === S.pageNo ? here : await renderInk(pg, sc);
+    const files = v.where === "all" ? P.proj.files : P.proj.files.filter(f => f.id === fid0);
+    const pages = []; files.forEach(f => { if (v.where === "page") pages.push({f, pn: pn0}); else for (let i = 1; i <= f.pages; i++) pages.push({f, pn: i}); });
+    for (let k = 0; k < pages.length; k++) {
+      const {f, pn} = pages[k], cur = f.id === fid0 && pn === pn0;
+      busy("Searching " + (pages.length > 1 ? "page " + (k + 1) + " of " + pages.length + " — " : "") + f.name.replace(/\.pdf$/i, "") + " p." + pn + "…"); await new Promise(r => setTimeout(r, 10));
+      let pg, ink;
+      try {
+        pg = cur ? S.page : await (await doc(f.id)).getPage(pn);
+        const bv = pg.getViewport({scale: 1}); if (!cur && Math.max(bv.width, bv.height) * sc > 12000) { skipped.push(f.name.replace(/\.pdf$/i, "") + " p." + pn + " (sheet too large at this symbol size)"); continue; }
+        if (!cur) await loadLayers(f.id);
+        ink = cur ? here : await renderInk(pg, sc, f.id);
+      } catch (e) { skipped.push(f.name.replace(/\.pdf$/i, "") + " p." + pn + " (" + (e.message || e) + ")"); continue; }
       let hits = [];
       vars.forEach(t => { hits = hits.concat(matchInk(ink.m, ink.W, ink.H, t.m, t.w, t.h, v.thr).map(q => Object.assign(q, {r: Math.max(t.w, t.h)}))); });
       hits.sort((a, b) => b.F - a.F);
       const keep = [];
       hits.forEach(q => { if (!keep.some(k2 => Math.hypot(k2.x - q.x, k2.y - q.y) < 0.6 * Math.max(k2.r, q.r))) keep.push(q); });
-      if (keep.length) found[pn] = keep.map(q => [q.x / sc, q.y / sc]);
+      const it = P.proj.items.find(i => i.cond === c.id && i.file === f.id && i.page === pn && i.kind === "shape"), near = Math.max(4, longSym * 0.5);
+      keep.forEach(q => { const pt = [q.x / sc, q.y / sc]; if (it && it.pts.some(p2 => dist(p2, pt) < near)) return;   // already counted
+        cands.push({f, pn, pt, F: q.F, img: inkThumb(ink, q.x, q.y, q.r)}); });
     }
-    mutate(() => {
-      Object.entries(found).forEach(([pn, pts]) => {
-        pn = +pn;
-        let it = P.proj.items.find(i => i.cond === c.id && i.file === S.fileId && i.page === pn && i.kind === "shape");
-        if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: pn, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
-        const near = Math.max(4, longSym * 0.5);
-        pts.forEach(p => { if (!it.pts.some(q => dist(q, p) < near)) { it.pts.push(p); total++; } });
-        pagesHit++;
-      });
+  } catch (e) { busy(""); toast("Search failed: " + (e.message || e), 5000); setTool("count"); return; }
+  busy("");
+  if (!cands.length) { setTool("count"); return toast("No other matches" + (skipped.length ? " (" + skipped.length + " page" + (skipped.length > 1 ? "s" : "") + " skipped)" : "") + " — try Loose, or box the symbol more tightly", 5000); }
+  const ok = await reviewMatches(c, cands, v.thr, skipped);
+  if (S.fileId !== fid0 || S.pageNo !== pn0) await gotoPage(fid0, pn0);
+  setTool("count");
+  if (!ok || !ok.length) return toast("Nothing counted");
+  let total = 0; const pagesHit = new Set(), near = Math.max(4, longSym * 0.5);
+  mutate(() => {
+    ok.forEach(m => {
+      let it = P.proj.items.find(i => i.cond === c.id && i.file === m.f.id && i.page === m.pn && i.kind === "shape");
+      if (!it) { it = {id: uid("I"), cond: c.id, file: m.f.id, page: m.pn, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
+      if (!it.pts.some(q => dist(q, m.pt) < near)) { it.pts.push(m.pt); total++; pagesHit.add(m.f.id + ":" + m.pn); }
     });
-  } catch (e) { toast("Search failed: " + (e.message || e), 5000); }
-  busy(""); setTool("count");
-  toast(total ? "Counted " + total + " matching symbol" + (total > 1 ? "s" : "") + (pagesHit > 1 ? " on " + pagesHit + " pages" : "") + " — check them" : "No other matches — try Loose, or box the symbol more tightly", 5000);
+  }, "Find similar");
+  refresh();
+  toast("Counted " + total + " matching symbol" + (total === 1 ? "" : "s") + (pagesHit.size > 1 ? " on " + pagesHit.size + " pages" : "") + " into " + c.name, 5000);
+}
+/* a small picture of a match, cut from the page's ink: what the eye needs to tick or untick it */
+function inkThumb(ink, cx, cy, r){
+  const half = Math.max(8, Math.round(r * 0.85)), sz = 2 * half, cv = document.createElement("canvas"); cv.width = sz; cv.height = sz;
+  const ctx = cv.getContext("2d"), im = ctx.createImageData(sz, sz), x0 = Math.round(cx) - half, y0 = Math.round(cy) - half;
+  for (let y = 0; y < sz; y++) for (let x = 0; x < sz; x++) { const X = x0 + x, Y = y0 + y, on = X >= 0 && Y >= 0 && X < ink.W && Y < ink.H && ink.m[Y * ink.W + X], o = 4 * (y * sz + x); im.data[o] = im.data[o + 1] = im.data[o + 2] = on ? 30 : 255; im.data[o + 3] = 255; }
+  ctx.putImageData(im, 0, 0); return cv.toDataURL("image/png");
+}
+/* the found symbols, weakest match first, each ticked; a page can be ticked / unticked at once; resolves to the ticked ones or null */
+function reviewMatches(c, cands, thr, skipped){
+  const groups = []; cands.forEach((m, i) => { m.i = i; let g = groups.find(x => x.f === m.f && x.pn === m.pn); if (!g) groups.push(g = {f: m.f, pn: m.pn, L: []}); g.L.push(m); });
+  groups.forEach(g => g.L.sort((a, b) => a.F - b.F));
+  const weak = m => m.F < thr + 0.05, shown = 400;
+  let n = 0;
+  const body = `<p>${cands.length} possible match${cands.length > 1 ? "es" : ""} on ${groups.length} page${groups.length > 1 ? "s" : ""} for <b>${esc(c.name)}</b> — weakest first, the doubtful ones framed in amber. Untick the wrong ones; only the ticked ones are counted.</p>
+    <div style="display:flex;gap:6px;margin:8px 0"><button class="btn sm" data-rv="all">Tick all</button><button class="btn sm" data-rv="none">Untick all</button><button class="btn sm" data-rv="weak">Untick the doubtful</button><span class="small" id="rvN" style="align-self:center"></span></div>
+    <div style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px">${groups.map(g => `<div style="margin-bottom:8px"><label style="font-weight:700;font-size:12px;display:flex;gap:6px;align-items:center"><input type="checkbox" checked data-rvg="${g.L[0].i}" style="width:auto"> ${esc(g.f.name.replace(/\.pdf$/i, ""))} — p.${g.pn} <span class="small" style="font-weight:400">(${g.L.length})</span></label>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">${g.L.map(m => (n++ < shown) ? `<label title="${Math.round(m.F * 100)}% match" style="display:flex;flex-direction:column;align-items:center;border:2px solid ${weak(m) ? "var(--amber)" : "var(--line)"};border-radius:5px;padding:2px;cursor:pointer;font-size:10px;background:#fff"><img src="${m.img}" width="44" height="44" style="image-rendering:pixelated;display:block"><span><input type="checkbox" checked data-rvm="${m.i}" data-g="${g.L[0].i}" style="width:auto;margin:0 2px 0 0">${Math.round(m.F * 100)}%</span></label>` : `<input type="checkbox" checked data-rvm="${m.i}" data-g="${g.L[0].i}" hidden>`).join("")}</div></div>`).join("")}
+      ${n > shown ? `<p class="small">${n - shown} more not pictured (ticked) — tick / untick them with their page.</p>` : ""}</div>
+    ${skipped.length ? `<p class="small" style="margin-top:6px;color:#8a5a00">Not searched: ${esc(skipped.slice(0, 5).join(" · "))}${skipped.length > 5 ? " · …" : ""}</p>` : ""}`;
+  const p = ask("Check the matches — " + c.name, body, "Count ticked", () => cands.filter(m => { const b = $("dlgB").querySelector(`[data-rvm="${m.i}"]`); return b && b.checked; }));
+  const B = $("dlgB"), boxes = () => [...B.querySelectorAll("[data-rvm]")];
+  const upd = () => { const k = boxes().filter(x => x.checked).length; $("rvN").textContent = k + " of " + cands.length + " ticked"; if ($("dlgOk")) $("dlgOk").textContent = "Count " + k; };
+  B.addEventListener("change", e => { const g = e.target.dataset.rvg; if (g != null) boxes().filter(x => x.dataset.g === g).forEach(x => { x.checked = e.target.checked; }); upd(); });
+  B.querySelectorAll("[data-rv]").forEach(b => b.onclick = () => { const w = b.dataset.rv; boxes().forEach(x => { if (w === "all") x.checked = true; else if (w === "none") x.checked = false; else if (weak(cands[+x.dataset.rvm])) x.checked = false; }); upd(); });
+  upd(); return p;
 }
 
 /* ------------------------------------------------------------------ find text on the drawings */
@@ -3785,13 +3827,30 @@ function qaCounts(){
           scale: Object.values(P.proj.scales).filter(s => !s.verified).length + new Set(its.filter(i => !itemScale(i)).map(i => keyOf(i.file, i.page))).size};
 }
 function qaFilterOk(it){ const f = S.qaFilter; return !f || (f === "checked" ? it.qa === "checked" : f === "pending" ? it.qa !== "checked" : f === "recheck" ? it.qa === "recheck" : f === "review" ? needsReview(it) : true); }
+/* the next measurement not yet checked, in page order across every PDF (after the selected one); it is opened, selected and zoomed to */
+async function nextUnchecked(){
+  if (!P.proj) return;
+  const fi = id => P.proj.files.findIndex(f => f.id === id);
+  const L = P.proj.items.map((it, n) => ({it, n})).filter(o => o.it.qa !== "checked" && !hiddenItem(o.it) && fi(o.it.file) >= 0)
+    .sort((a, b) => fi(a.it.file) - fi(b.it.file) || a.it.page - b.it.page || a.n - b.n).map(o => o.it);
+  if (!L.length) return toast("Every measurement is checked ✓", 3000);
+  const cur = S.sel && L.findIndex(x => x.id === S.sel);
+  let k = cur != null && cur >= 0 ? (cur + 1) % L.length : L.findIndex(x => fi(x.file) > fi(S.fileId) || (x.file === S.fileId && x.page >= S.pageNo));
+  if (k < 0) k = 0;
+  const it = L[k];
+  if (it.file !== S.fileId || it.page !== S.pageNo) await gotoPage(it.file, it.page);
+  setTool("select"); setSel([it.id]); zoomTo([it.id]); refresh();
+  const c = cond(it.cond);
+  toast("Unchecked " + (k + 1) + " of " + L.length + " — " + (it.label || (c ? c.name : "measurement")) + " · " + pageName(it) + (it.qa === "recheck" ? " · marked RECHECK" : ""), 3500);
+}
 function renderQaBar(){
   const el = $("qaBar"); if (!P.proj || !P.proj.items.length) { el.innerHTML = ""; el.style.display = "none"; return; }
   const q = qaCounts(), ch = (f, n, t, cls) => `<button class="qa${cls ? " " + cls : ""}${S.qaFilter === f ? " on" : ""}" data-qf="${f}" title="Show only these on the sheet">${n} ${t}</button>`;
   el.style.display = "";
   el.innerHTML = ch("", q.n, "measured") + ch("checked", q.checked, "checked", "g") + ch("pending", q.n - q.checked, "pending") + ch("recheck", q.recheck, "recheck", q.recheck ? "r" : "") +
     ch("review", q.review, "AI / copied to check", q.review ? "a" : "") + `<span class="qa${q.rate ? " a" : ""}" title="Bill lines without a usable rate">${q.rate} missing rate</span><span class="qa${q.scale ? " a" : ""}" title="Page scales not verified, or measurements on a page with no scale">${q.scale} unverified scale</span>` +
-    (S.page ? `<button class="btn sm" data-qact="page" title="Mark every measurement on this page as checked by you">✓ Check this page</button>` : "");
+    (S.page ? `<button class="btn sm" data-qact="page" title="Mark every measurement on this page as checked by you">✓ Check this page</button>` : "") +
+    (q.n - q.checked ? `<button class="btn sm" data-qact="next" title="Go to the next measurement not yet checked — on any page">Next unchecked &#8594;</button>` : "");
 }
 
 /* ------------------------------------------------------------------ rates from the ZD Rate Analysis library.
@@ -4018,6 +4077,78 @@ async function importProject(text, pre){
   return S.lastImport;
 }
 
+/* ------------------------------------------------------------------ command palette (Ctrl+K)
+   Every tool, button, export, dialog, page and condition by name: type a few letters, arrows to choose, Enter to run.
+   The buttons on screen are read as they are, so a tool added later is listed without being added here. */
+const PAL_KEY = "zdTakeoffPal";
+function palClean(t){ return String(t || "").replace(/[\u2190-\u2BFF\u{1F300}-\u{1FAFF}\uFE0F]/gu, "").replace(/\s+/g, " ").trim(); }
+function paletteCmds(){
+  const L = [], seen = new Set();
+  const add = (t, run, g, k) => { t = palClean(t); if (!t || seen.has(g + "|" + t)) return; seen.add(g + "|" + t); L.push({t, run, g, k: k || ""}); };
+  const btn = (b, g) => {
+    if (b.disabled || b.closest("#dlgBack,#pal,#ctx")) return;
+    const k = [...b.querySelectorAll("kbd")].map(x => x.textContent).join("+"), c = b.cloneNode(true); c.querySelectorAll("kbd,.vdot").forEach(x => x.remove());
+    let t = palClean(c.textContent); const ti = palClean((b.title || "").split(/ — | \(|: /)[0]);
+    if (t.length < 3) t = ti; else if (ti && ti.toLowerCase() !== t.toLowerCase() && ti.length < 50 && !ti.toLowerCase().includes(t.toLowerCase())) t = t + " — " + ti;
+    add(t, () => b.click(), g, k);
+  };
+  if (!P.proj) {
+    add("New project", () => $("bNewProj").click(), "Project"); add("Import project (.json or .zdtakeoff)", () => $("impIn").click(), "Project");
+    return L;
+  }
+  document.querySelectorAll("#tools [data-tool]").forEach(b => btn(b, "Tool"));
+  add("Next unchecked measurement", nextUnchecked, "Check");
+  add("Check before export (errors and warnings)", exportMenu, "Check");
+  add("Excel measurement sheet", exportExcel, "Export"); add("CSV", exportCsv, "Export");
+  if (S.page) { add("Marked-up page (.png)", exportPng, "Export"); add("Marked-up page (.pdf)", () => exportPdf(false), "Export"); }
+  add("All marked-up pages (.pdf)", () => exportPdf(true), "Export"); add("Project (.json) — measurements only", exportJson, "Export");
+  add("Project + PDFs (.zdtakeoff) — to move to another computer", exportBundle, "Export"); add("Backups of this project", () => backupsDialog(), "Project");
+  add("Save now", () => { savePr = P.proj; flushSave().then(ok => toast(ok ? "Saved in this browser" : "Not saved — see the message above")); }, "Project", "Ctrl+S");
+  add("Undo", undoAny, "Edit", "Ctrl+Z"); add("Redo", redoAny, "Edit", "Ctrl+Y");
+  add("Find text on the drawings", () => { $("findIn").focus(); $("findIn").select(); }, "View", "Ctrl+F");
+  add("Set scale", scaleDialog, "Page", "K"); add("Keyboard shortcuts", keysDialog, "Help");
+  add("New condition", () => editCond(null), "Condition"); add("All projects", showStart, "Project");
+  document.querySelectorAll("header button[id], #viewPop button[id], #qaBar button, aside button[id], .panel button[id]").forEach(b => btn(b, b.closest("#viewPop") ? "View" : b.closest("#qaBar") ? "Check" : "Button"));
+  P.proj.conds.forEach(c => add("Use condition: " + c.name + " (" + (c.type === "count" ? "count" : c.unit || c.type) + ")", () => { S.cond = c.id; setTool(c.type === "count" ? "count" : "draw"); refresh(); toast("Condition: " + c.name, 1800); }, "Condition"));
+  let n = 0; P.proj.files.forEach(f => { for (let i = 1; i <= f.pages && n < 600; i++, n++) { const sh = (P.proj.sheets || {})[keyOf(f.id, i)] || {}; add("Go to: " + f.name.replace(/\.pdf$/i, "") + " p." + i + (sh.no ? " · " + sh.no : "") + (sh.title ? " " + sh.title : ""), () => gotoPage(f.id, i), "Page"); } });
+  return L;
+}
+function palScore(c, q){
+  if (!q) return 1;
+  const t = (c.t + " " + c.g).toLowerCase(), w = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!w.every(x => t.includes(x))) return 0;
+  const tl = c.t.toLowerCase();
+  return 10 + (tl.startsWith(w[0]) ? 6 : new RegExp("(^|[\\s:(—-])" + w[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(tl) ? 3 : 0) + (c.g === "Page" ? -2 : 0) - tl.length / 200;
+}
+function openPalette(){
+  if ($("dlgBack").classList.contains("on")) return;
+  let el = $("pal");
+  if (!el) { el = document.createElement("div"); el.id = "pal"; el.innerHTML = '<div class="pbx" role="dialog" aria-label="Command palette"><input id="palIn" type="text" placeholder="Type a command, tool, page or condition…" autocomplete="off" spellcheck="false"><div id="palL" role="listbox"></div><div class="pf small">&#8593;&#8595; choose · Enter run · Esc close</div></div>'; document.body.appendChild(el); }
+  const cmds = paletteCmds(), inp = $("palIn"), list = $("palL");
+  let recent = []; try { recent = JSON.parse(pref(PAL_KEY) || "[]"); } catch (e) { recent = []; }
+  let shown = [], at = 0;
+  const close = () => { el.classList.remove("on"); document.removeEventListener("keydown", key, true); };
+  const run = c => { close(); if (!c) return; try { pref(PAL_KEY, JSON.stringify([c.t].concat(recent.filter(x => x !== c.t)).slice(0, 8))); } catch (e) {} Promise.resolve().then(c.run).catch(e => toast(String(e && e.message || e), 5000)); };
+  const draw = () => {
+    const q = inp.value.trim();
+    shown = q ? cmds.map(c => ({c, s: palScore(c, q)})).filter(o => o.s > 0).sort((a, b) => b.s - a.s).slice(0, 60).map(o => o.c)
+      : recent.map(t => cmds.find(c => c.t === t)).filter(Boolean).concat(cmds.filter(c => !recent.includes(c.t) && c.g !== "Page")).slice(0, 60);
+    at = Math.min(at, Math.max(0, shown.length - 1));
+    list.innerHTML = shown.length ? shown.map((c, i) => `<div class="pi${i === at ? " on" : ""}" data-pi="${i}" role="option"><span class="pt">${!q && recent.includes(c.t) ? '<span class="pr">recent</span>' : ""}${esc(c.t)}</span><span class="pg">${esc(c.g)}</span>${c.k ? `<kbd>${esc(c.k)}</kbd>` : ""}</div>`).join("") : '<div class="pi small">Nothing matches — try fewer letters</div>';
+    const on = list.querySelector(".pi.on"); if (on) on.scrollIntoView({block: "nearest"});
+  };
+  const key = e => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); at = (at + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % Math.max(1, shown.length); draw(); }
+    else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); run(shown[at]); }
+  };
+  inp.value = ""; at = 0; inp.oninput = () => { at = 0; draw(); };
+  list.onmousedown = e => { const r = e.target.closest("[data-pi]"); if (r) { e.preventDefault(); run(shown[+r.dataset.pi]); } };
+  el.onmousedown = e => { if (e.target === el) close(); };
+  document.addEventListener("keydown", key, true);
+  el.classList.add("on"); draw(); inp.focus();
+}
+
 /* ------------------------------------------------------------------ right-click menu (Bluebeam / PlanSwift)
    Right-click (without dragging — a right-drag pans) on a measurement, a markup or the drawing opens a menu of what
    can be done there: points and segments, break / gap / join / continue, cut-out and openings, make a perimeter run or
@@ -4124,6 +4255,7 @@ function keysDialog(){
   const G = (t, rows) => `<tr><td colspan="2" style="padding:8px 0 2px;font-weight:700;color:var(--navy)">${esc(t)}</td></tr>` + rows.map(x => R(x[0], x[1])).join("");
   ask("Keyboard & mouse", `<table class="keyt" style="font-size:12px;border-collapse:collapse;width:100%">
     ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
+    ${G("Find anything", [["Ctrl+K", "command palette: type the name of any tool, export, dialog, page or condition"], ["Ctrl+F", "find text on the drawings"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
     ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"]])}
     ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"]])}
@@ -4132,6 +4264,9 @@ function keysDialog(){
 /* ------------------------------------------------------------------ events */
 function wire(){
   const st = stage();
+  document.addEventListener("keydown", e => {   // Ctrl+K: command palette (not the browser's search box)
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") { e.preventDefault(); e.stopPropagation(); if ($("pal") && $("pal").classList.contains("on")) return; openPalette(); }
+  }, true);
   document.addEventListener("keydown", e => {   // Ctrl+S: save now (not the browser's "Save page as")
     if (!((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s")) return;
     e.preventDefault(); if (!P.proj) return;
@@ -4204,7 +4339,7 @@ function wire(){
   $("bSheet").onclick = () => P.proj && sheetInfoDialog();
   $("qaBar").addEventListener("click", e => {
     const f = e.target.closest("[data-qf]"); if (f) { S.qaFilter = S.qaFilter === f.dataset.qf ? "" : f.dataset.qf; renderSheet(); renderQaBar(); return; }
-    const a = e.target.closest("[data-qact]"); if (a) setQa(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.qa !== "checked"), "checked");
+    const a = e.target.closest("[data-qact]"); if (a && a.dataset.qact === "next") return nextUnchecked(); if (a) setQa(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.qa !== "checked"), "checked");
   });
   let findT = null; $("findIn").addEventListener("input", e => { clearTimeout(findT); findT = setTimeout(() => findText(e.target.value), 350); });
   $("findIn").addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(findT); findText(e.target.value); } if (e.key === "Escape") { $("findRes").classList.remove("on"); e.target.blur(); } });
@@ -5792,7 +5927,7 @@ function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw"
   loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on);
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, explodeRun, closeRun, offsetItem, offsetRun, typedPoint};   // for tests and the console
+  window.zdTakeoff = {fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();

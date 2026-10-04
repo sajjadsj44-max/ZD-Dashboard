@@ -219,6 +219,17 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 .note b{color:var(--txt)}
 
 /* dialog */
+#pal{position:fixed;inset:0;background:rgba(15,41,66,.28);display:none;align-items:flex-start;justify-content:center;z-index:40;padding:10vh 16px 16px}
+#pal.on{display:flex}
+#pal .pbx{width:min(620px,100%);background:#fff;border-radius:10px;box-shadow:0 18px 48px rgba(15,41,66,.35);overflow:hidden;display:flex;flex-direction:column;max-height:70vh}
+#palIn{border:0;border-bottom:1px solid var(--line);padding:14px 16px;font-size:15px;outline:none;width:100%}
+#palL{overflow:auto;padding:4px 0}
+#pal .pi{display:flex;align-items:center;gap:8px;padding:7px 16px;font-size:13px;cursor:pointer}
+#pal .pi.on{background:#eef1fb}
+#pal .pt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pal .pg{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+#pal .pr{font-size:9.5px;color:var(--purple);border:1px solid currentColor;border-radius:4px;padding:0 4px;margin-right:6px}
+#pal .pf{padding:6px 16px;border-top:1px solid var(--line);color:var(--muted)}
 #dlgBack{position:fixed;inset:0;background:rgba(15,41,66,.35);display:none;align-items:center;justify-content:center;z-index:10;padding:16px}
 #dlgBack.on{display:flex}
 .dlg{background:#fff;border-radius:10px;box-shadow:0 10px 40px rgba(15,41,66,.3);width:min(520px,100%);max-height:calc(100vh - 32px);display:flex;flex-direction:column}
@@ -415,6 +426,6 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-04a"></script>
+<script type="module" src="takeoff.js?v=2026-10-04b"></script>
 </body>
 </html>
