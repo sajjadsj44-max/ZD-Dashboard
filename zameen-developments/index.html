@@ -301,6 +301,179 @@ body[data-mod="cm"]{--head:#17375e}
 .zc-f .zc-gsel{flex:1;min-width:0}
 @media(max-width:820px){.zc-gstd{flex-direction:column;align-items:stretch}.zc-gstd select{font-size:15px;min-height:40px}}
 </style>
+
+<style id="zk-colour-icons">
+/* ===== Coloured icon tiles — same colour system as SAJJAD QSCALCULATOR (Material Calculator) =====
+   Each module / category carries three variables: --k (deep), --k2 (bright), --kl (light tint).
+   Icons sit on gradient tiles (k -> k2) or tinted tiles (kl). Styling only; no logic changes. */
+:root{--k:#1971c2;--k2:#4dabf7;--kl:#e7f5ff}
+.zk-ic svg,.zk-kic svg{display:block}
+
+/* ---- sidebar: module buttons get gradient icon tiles ---- */
+#mainSidebar .modbtn{padding:7px 14px 7px 13px;gap:11px}
+#mainSidebar .modbtn .ic{flex:none;width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;background:linear-gradient(140deg,var(--k) 0%,var(--k2) 100%);box-shadow:0 6px 14px -6px var(--k),inset 0 1px 0 rgba(255,255,255,.28);transition:transform .15s,box-shadow .15s}
+#mainSidebar .modbtn .ic svg{width:17px;height:17px}
+#mainSidebar .modbtn:hover .ic{transform:translateY(-1px) scale(1.04)}
+#mainSidebar .modbtn.on{color:#fff;border-left-color:var(--gold);background:rgba(255,255,255,.12);background:linear-gradient(90deg,color-mix(in srgb,var(--k) 62%,transparent) 0%,color-mix(in srgb,var(--k) 14%,transparent) 100%)}
+#mainSidebar .modbtn.on .ic{box-shadow:0 0 0 2px rgba(255,255,255,.9),0 8px 16px -6px rgba(0,0,0,.5)}
+
+/* ---- sidebar: sub-items get small tinted tiles in their own colour ---- */
+#mainSidebar .navitem{padding:7px 16px}
+#mainSidebar .navitem2{padding:6px 16px 6px 26px}
+#mainSidebar .navitem .ic,#mainSidebar .navitem2 .ic{flex:none;width:23px;height:23px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1;font-weight:700;opacity:1;color:#d7e4f3;color:color-mix(in srgb,var(--k2) 72%,#fff);background:rgba(255,255,255,.08);background:color-mix(in srgb,var(--k2) 22%,transparent);transition:background .15s,color .15s}
+#mainSidebar .navitem:hover .ic,#mainSidebar .navitem2:hover .ic{background:rgba(255,255,255,.14);background:color-mix(in srgb,var(--k2) 36%,transparent)}
+#mainSidebar .navitem.active .ic,#mainSidebar .navitem2.on .ic,#mainSidebar .navitem2.active .ic{color:#fff;background:linear-gradient(140deg,var(--k),var(--k2));box-shadow:0 4px 10px -4px var(--k)}
+#mainSidebar .navitem2.active{background:rgba(255,255,255,.09);color:#fff;border-left-color:var(--gold);font-weight:600}
+#mainSidebar .navgroup .navlabel,#mainSidebar .navgroup .navlabel2{color:#9fb8d3}
+
+/* ---- executive dashboard: section headings with a colour bar ---- */
+.exec-sect{padding-left:10px;border-left:4px solid var(--k);line-height:1.35;color:#0f2d57;letter-spacing:1.2px}
+
+/* ---- KPI cards: gradient top bar + tinted icon tile ---- */
+.exec-k{--k:#c9a24b;--k2:#f2b632;--kl:#fff9db;position:relative;overflow:hidden;border-top:1px solid var(--line);border-radius:12px;box-shadow:0 6px 16px -14px rgba(15,41,66,.5);transition:transform .15s,box-shadow .15s}
+.exec-k::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,var(--k),var(--k2))}
+.exec-k:hover{transform:translateY(-1px);box-shadow:0 12px 22px -14px rgba(15,41,66,.5)}
+.exec-k .zk-khd{display:flex;align-items:center;gap:9px;margin-bottom:9px;min-width:0}
+.exec-k .zk-khd h6{margin-bottom:0;min-width:0;white-space:normal;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.exec-k .zk-kic{flex:none;width:30px;height:30px;border-radius:9px;background:var(--kl);color:var(--k);display:flex;align-items:center;justify-content:center}
+.exec-k .zk-kic svg{width:17px;height:17px}
+
+/* ---- module cards: colour bar on the left + gradient icon tile ---- */
+.exec-mcard{position:relative;overflow:hidden;border-radius:14px;padding:14px 15px 14px 19px;box-shadow:0 6px 16px -12px rgba(15,41,66,.4);transition:transform .15s,box-shadow .15s,border-color .15s}
+.exec-mcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:linear-gradient(180deg,var(--k),var(--k2))}
+.exec-mcard:hover{border-color:var(--k);box-shadow:0 14px 26px -14px rgba(15,41,66,.45);transform:translateY(-2px)}
+.exec-mcard h4{font-size:13px;margin-bottom:10px;gap:10px}
+.exec-mcard h4 .zk-ic{flex:none;width:32px;height:32px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fff;background:linear-gradient(140deg,var(--k),var(--k2));box-shadow:0 6px 12px -6px var(--k)}
+.exec-mcard h4 .zk-ic svg{width:17px;height:17px}
+.exec-mcard .cta{color:var(--k)}
+
+/* ---- Change Management KPI cards: icon on a tinted tile in the card's colour ---- */
+.kpi .ic{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;opacity:1;background:var(--kl);color:var(--k)}
+
+/* ---- QS Cost Control + Admin tab bars: colour chips (tinted on hover, gradient when open) ---- */
+.rasub{gap:5px}
+.rasub button{--k:#6741d9;--k2:#9775fa;--kl:#f3f0ff;color:var(--k);font-weight:600;border-radius:999px;padding:8px 14px;transition:background .15s,color .15s,box-shadow .15s}
+.rasub button:hover{background:var(--kl);color:var(--k)}
+.rasub button.on{background:linear-gradient(135deg,var(--k),var(--k2));color:#fff;box-shadow:0 6px 14px -8px var(--k)}
+
+/* ---- Calculator module: category tiles, card icons, chips, section bars ---- */
+#appCALC .zc-sech{font-size:11.5px;letter-spacing:1.2px;color:#0f2d57;font-weight:800;padding-left:10px;border-left:4px solid var(--k);line-height:1.35}
+#appCALC .zc-lnk{color:var(--k)}
+#appCALC .zc-cats{grid-template-columns:repeat(auto-fill,minmax(205px,1fr));gap:14px}
+#appCALC .zc-cat{position:relative;overflow:hidden;border:0;border-radius:18px;padding:16px 16px 14px;min-height:156px;color:#fff;background:linear-gradient(140deg,var(--k) 0%,var(--k2) 100%);box-shadow:0 14px 26px -16px var(--k);transition:transform .15s,box-shadow .15s}
+#appCALC .zc-cat::after{content:"";position:absolute;right:-34px;top:-34px;width:118px;height:118px;border-radius:50%;background:rgba(255,255,255,.13);pointer-events:none}
+#appCALC .zc-cat:hover{border:0;transform:translateY(-3px);box-shadow:0 20px 32px -16px var(--k)}
+#appCALC .zc-cat b{color:#fff;font-size:15px;margin-top:8px}
+#appCALC .zc-cat span{color:rgba(255,255,255,.92);font-size:12px}
+#appCALC .zc-cat em{position:relative;color:#fff;background:rgba(255,255,255,.24);border-radius:999px;padding:3px 11px;align-self:flex-start;margin-top:auto;font-size:11px}
+#appCALC .zc-cat .zc-cat-ic{width:46px;height:46px;border-radius:14px;background:rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;color:#fff!important;font-size:22px!important}
+#appCALC .zc-cc{overflow:hidden;border:1px solid #e2e8f1;border-radius:16px;padding:12px 40px 12px 16px;min-height:78px;background:#fff;box-shadow:0 6px 16px -12px rgba(15,41,66,.4)}
+#appCALC .zc-cc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:linear-gradient(180deg,var(--k),var(--k2))}
+#appCALC .zc-cc:hover{border-color:var(--k);box-shadow:0 14px 26px -14px rgba(15,41,66,.45);transform:translateY(-2px)}
+#appCALC .zc-cc-ic{width:54px;height:50px;border-radius:13px;background:var(--kl);display:flex;align-items:center;justify-content:center;color:var(--k)}
+#appCALC .zc-cc-ic .zc-mini{width:42px;height:36px}
+#appCALC .zc-cc-t b{color:#0f2d57}
+#appCALC .zc-add{border-style:dashed}
+#appCALC .zc-chips{gap:8px}
+#appCALC .zc-chip{border:1.5px solid var(--k);color:var(--k);background:var(--kl);font-weight:700;border-radius:999px;padding:6px 13px}
+#appCALC .zc-chip:hover,#appCALC .zc-chip.on{background:linear-gradient(135deg,var(--k),var(--k2));color:#fff;border-color:transparent}
+#appCALC .zc-hist{border-radius:14px;box-shadow:0 6px 16px -12px rgba(15,41,66,.4)}
+#appCALC .zc-search{border-color:var(--k)}
+/* calculator page in its category colour */
+#appCALC .zc-head{background:#fff;border-radius:16px;padding:14px 16px;border-top:5px solid var(--k);box-shadow:0 8px 20px -14px rgba(15,41,66,.45);align-items:center}
+#appCALC .zc-back{width:42px;height:42px;border:0;border-radius:50%;color:#fff;font-size:18px;background:linear-gradient(135deg,var(--k),var(--k2));box-shadow:0 8px 16px -8px var(--k)}
+#appCALC .zc-crumb{display:inline-block;color:var(--k);background:var(--kl);border-radius:999px;padding:3px 11px}
+#appCALC .zc-acts button{border-radius:999px;font-weight:700;border:1.5px solid #d8e1ec;transition:transform .12s,filter .12s}
+#appCALC .zc-acts button:hover{transform:translateY(-1px);filter:brightness(.97)}
+#appCALC .zc-acts [data-act="reset"]{color:#495057;background:#f8f9fa}
+#appCALC .zc-acts [data-act="copy"]{color:#1864ab;border-color:#a5d8ff;background:#e7f5ff}
+#appCALC .zc-acts [data-act="print"]{color:#5f3dc4;border-color:#d0bfff;background:#f3f0ff}
+#appCALC .zc-acts [data-act="csv"]{color:#2b8a3e;border-color:#b2f2bb;background:#ebfbee}
+#appCALC .zc-acts [data-act="xls"]{color:#fff;border-color:transparent;background:linear-gradient(135deg,#2b8a3e,#40c057)}
+#appCALC .zc-card{border-radius:16px}
+#appCALC .zc-ct{color:var(--k)}
+#appCALC .zc-f select:focus,#appCALC .zc-f input:focus{border-color:var(--k);box-shadow:0 0 0 3px var(--kl)}
+#appCALC .zc-more summary,#appCALC .zc-wh{color:var(--k)}
+#appCALC .zc-main{border:0;border-radius:14px;background:linear-gradient(135deg,var(--k),var(--k2));box-shadow:0 14px 26px -16px var(--k)}
+#appCALC .zc-main span,#appCALC .zc-main em,#appCALC .zc-main i,#appCALC .zc-main b small{color:rgba(255,255,255,.92)!important}
+#appCALC .zc-main b{color:#fff}
+#appCALC .zc-r{border-color:transparent;background:var(--kl)}
+#appCALC .zc-t th{background:var(--kl)}
+#appCALC .zc-sticky{background:linear-gradient(90deg,#0a1f3d,var(--k))}
+@media(max-width:820px){
+  #appCALC .zc-cats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  #appCALC .zc-cat{min-height:120px;padding:13px}
+  #appCALC .zc-cat b{font-size:14px}
+  #appCALC .zc-cat span:not(.zc-cat-ic){display:none}
+}
+@media print{.exec-k,.exec-mcard,#appCALC .zc-cc,#appCALC .zc-cat{box-shadow:none!important;transform:none!important}}
+
+/* ---- colour assignments ---- */
+#modExec{--k:#1971c2;--k2:#4dabf7;--kl:#e7f5ff}
+#tabCM,#navgroup-cm,[data-open-mod="cm"]{--k:#364fc7;--k2:#5c7cfa;--kl:#edf2ff}
+#tabPAY,#navgroup-pay,[data-open-mod="pay"]{--k:#087f5b;--k2:#20c997;--kl:#e6fcf5}
+#tabRA,#navgroup-ra,[data-open-mod="ra"]{--k:#6741d9;--k2:#9775fa;--kl:#f3f0ff}
+#tabFEAS,#navgroup-feas,[data-open-mod="feas"]{--k:#2b8a3e;--k2:#51cf66;--kl:#ebfbee}
+#modAdmin,#navgroup-admin{--k:#495057;--k2:#868e96;--kl:#f1f3f5}
+#modCalc,#navgroup-calc,#appCALC{--k:#0c8599;--k2:#22b8cf;--kl:#e3fafc}
+#modTakeoff{--k:#e8590c;--k2:#ff922b;--kl:#fff4e6}
+.navitem[data-view="register"]{--k:#1971c2;--k2:#4dabf7;--kl:#e7f5ff}
+.navitem[data-view="missing"]{--k:#e67700;--k2:#fcc419;--kl:#fff9db}
+.navitem[data-view="errors"]{--k:#c92a2a;--k2:#ff6b6b;--kl:#fff5f5}
+.navitem[data-view="cost"]{--k:#9c36b5;--k2:#da77f2;--kl:#f8f0fc}
+.navitem[data-view="time"]{--k:#c2255c;--k2:#f06595;--kl:#fff0f6}
+.navitem[data-view="projects"]{--k:#087f5b;--k2:#20c997;--kl:#e6fcf5}
+[data-scroll="pyProjWrap"]{--k:#1971c2;--k2:#4dabf7;--kl:#e7f5ff}
+[data-scroll="pyVendTbl"]{--k:#364fc7;--k2:#5c7cfa;--kl:#edf2ff}
+[data-scroll="pyPipeline"]{--k:#e67700;--k2:#fcc419;--kl:#fff9db}
+[data-scroll="pyRegTbl"]{--k:#6741d9;--k2:#9775fa;--kl:#f3f0ff}
+[data-scroll="pyHistWrap"]{--k:#495057;--k2:#868e96;--kl:#f1f3f5}
+[data-scroll="feasSheet1"]{--k:#087f5b;--k2:#20c997;--kl:#e6fcf5}
+.rasub button[data-rv="dash"],[data-rvgo="dash"]{--k:#1971c2;--k2:#4dabf7;--kl:#e7f5ff}
+.rasub button[data-rv="lib"],[data-rvgo="lib"]{--k:#364fc7;--k2:#5c7cfa;--kl:#edf2ff}
+.rasub button[data-rv="an"],[data-rvgo="an"]{--k:#6741d9;--k2:#9775fa;--kl:#f3f0ff}
+.rasub button[data-rv="qsr"]{--k:#9c36b5;--k2:#da77f2;--kl:#f8f0fc}
+.rasub button[data-rv="qsa"]{--k:#c92a2a;--k2:#ff6b6b;--kl:#fff5f5}
+.rasub button[data-rv="grn"],[data-rvgo="grn"]{--k:#e8590c;--k2:#ff922b;--kl:#fff4e6}
+.rasub button[data-rv="mrs"],[data-rvgo="mrs"]{--k:#8d5a2b;--k2:#c58b4e;--kl:#f8efe6}
+.rasub button[data-rv="kpk"],[data-rvgo="kpk"]{--k:#e67700;--k2:#fcc419;--kl:#fff9db}
+.rasub button[data-rv="lmx"]{--k:#0c8599;--k2:#22b8cf;--kl:#e3fafc}
+.rasub button[data-rv="mat"],[data-rvgo="mat"]{--k:#087f5b;--k2:#20c997;--kl:#e6fcf5}
+.rasub button[data-rv="rfq"],[data-rvgo="rfq"]{--k:#c2255c;--k2:#f06595;--kl:#fff0f6}
+.rasub button[data-rv="pt"],[data-rvgo="pt"]{--k:#5c940d;--k2:#94d82d;--kl:#f4fce3}
+.rasub button[data-rv="boq"],[data-rvgo="boq"]{--k:#2b8a3e;--k2:#51cf66;--kl:#ebfbee}
+.rasub button[data-rv="data"],[data-rvgo="data"]{--k:#495057;--k2:#868e96;--kl:#f1f3f5}
+.rasub button[data-admtab="projects"],[data-admgo="projects"]{--k:#1971c2;--k2:#4dabf7;--kl:#e7f5ff}
+.rasub button[data-admtab="users"],[data-admgo="users"]{--k:#6741d9;--k2:#9775fa;--kl:#f3f0ff}
+.rasub button[data-admtab="sources"],[data-admgo="sources"]{--k:#0c8599;--k2:#22b8cf;--kl:#e3fafc}
+.rasub button[data-admtab="backup"],[data-admgo="backup"]{--k:#e67700;--k2:#fcc419;--kl:#fff9db}
+.rasub button[data-admtab="settings"],[data-admgo="settings"]{--k:#495057;--k2:#868e96;--kl:#f1f3f5}
+[data-zcgo="cat:items"]{--k:#0c8599;--k2:#22b8cf;--kl:#e3fafc}
+[data-zcgo="cat:steel"],[data-zcgo="secdb"],[data-zcgo="gaugelib"]{--k:#364fc7;--k2:#5c7cfa;--kl:#edf2ff}
+[data-zcgo="cat:civil"]{--k:#e8590c;--k2:#ff922b;--kl:#fff4e6}
+[data-zcgo="cat:fin"]{--k:#9c36b5;--k2:#da77f2;--kl:#f8f0fc}
+[data-zcgo="cat:mep"]{--k:#c92a2a;--k2:#ff6b6b;--kl:#fff5f5}
+[data-zcgo="conv"],[data-zcgo="formlib"],[data-zcgo="convlib"],[data-zcgo="consts"],[data-zcgo="settings"]{--k:#2b8a3e;--k2:#51cf66;--kl:#ebfbee}
+[data-zcgo="custom"]{--k:#c2255c;--k2:#f06595;--kl:#fff0f6}
+.k-blue{--k:#1971c2;--k2:#4dabf7;--kl:#e7f5ff}
+.k-indigo{--k:#364fc7;--k2:#5c7cfa;--kl:#edf2ff}
+.k-violet{--k:#6741d9;--k2:#9775fa;--kl:#f3f0ff}
+.k-grape{--k:#9c36b5;--k2:#da77f2;--kl:#f8f0fc}
+.k-pink{--k:#c2255c;--k2:#f06595;--kl:#fff0f6}
+.k-red{--k:#c92a2a;--k2:#ff6b6b;--kl:#fff5f5}
+.k-orange{--k:#e8590c;--k2:#ff922b;--kl:#fff4e6}
+.k-amber{--k:#e67700;--k2:#fcc419;--kl:#fff9db}
+.k-lime{--k:#5c940d;--k2:#94d82d;--kl:#f4fce3}
+.k-green{--k:#2b8a3e;--k2:#51cf66;--kl:#ebfbee}
+.k-teal{--k:#087f5b;--k2:#20c997;--kl:#e6fcf5}
+.k-cyan{--k:#0c8599;--k2:#22b8cf;--kl:#e3fafc}
+.k-brown{--k:#8d5a2b;--k2:#c58b4e;--kl:#f8efe6}
+.k-slate{--k:#495057;--k2:#868e96;--kl:#f1f3f5}
+</style>
+<script>/* coloured icon set (stroke icons, drawn for this dashboard) */
+window.ZK_ICONS={"exec":"<rect x=\"3\" y=\"3\" width=\"7.5\" height=\"9\" rx=\"2\"/><rect x=\"13.5\" y=\"3\" width=\"7.5\" height=\"5.5\" rx=\"2\"/><rect x=\"13.5\" y=\"11.5\" width=\"7.5\" height=\"9.5\" rx=\"2\"/><rect x=\"3\" y=\"15\" width=\"7.5\" height=\"6\" rx=\"2\"/>","cm":"<path d=\"M17 2.5 20.5 6 17 9.5\"/><path d=\"M3.5 11v-1a4 4 0 0 1 4-4h13\"/><path d=\"M7 21.5 3.5 18 7 14.5\"/><path d=\"M20.5 13v1a4 4 0 0 1-4 4h-13\"/>","pay":"<rect x=\"2.5\" y=\"5\" width=\"19\" height=\"14\" rx=\"2.5\"/><path d=\"M2.5 10h19\"/><path d=\"M6.5 15h4\"/>","ra":"<rect x=\"5\" y=\"4\" width=\"14\" height=\"17.5\" rx=\"2.5\"/><path d=\"M9 2.5h6V6H9z\"/><path d=\"M8.5 11h7M8.5 14.5h7M8.5 18h4\"/>","feas":"<path d=\"M3 3.5v17h17.5\"/><path d=\"m7 15 4-4.5 3 3 5.5-6\"/><path d=\"M15.5 7.5h4v4\"/>","admin":"<path d=\"M4 6.5h9M17 6.5h3M4 12h3M11 12h9M4 17.5h11M19 17.5h1\"/><circle cx=\"15\" cy=\"6.5\" r=\"2\"/><circle cx=\"9\" cy=\"12\" r=\"2\"/><circle cx=\"17\" cy=\"17.5\" r=\"2\"/>","calc":"<rect x=\"4.5\" y=\"2.5\" width=\"15\" height=\"19\" rx=\"2.5\"/><rect x=\"7.5\" y=\"5.5\" width=\"9\" height=\"4\" rx=\"1\"/><path stroke-width=\"2.6\" d=\"M8.5 13.5h.01M12 13.5h.01M15.5 13.5h.01M8.5 17.5h.01M12 17.5h.01M15.5 17.5h.01\"/>","takeoff":"<path d=\"M3.5 3.5v17h17z\"/><path d=\"M7.5 16.5v-4l4 4z\"/><path d=\"M3.5 8h2M3.5 12h2\"/>","building":"<path d=\"M4 21V4.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1V21\"/><path d=\"M14 9h5a1 1 0 0 1 1 1v11\"/><path d=\"M2.5 21h19\"/><path d=\"M7.5 7.5h3M7.5 11.5h3M7.5 15.5h3\"/><path stroke-width=\"2.6\" d=\"M17 13h.01M17 17h.01\"/>","cash":"<rect x=\"2.5\" y=\"6\" width=\"19\" height=\"12\" rx=\"2.5\"/><circle cx=\"12\" cy=\"12\" r=\"2.5\"/><path stroke-width=\"2.6\" d=\"M6 12h.01M18 12h.01\"/>","trend":"<path d=\"m3 17 6-6 4 4 8-8\"/><path d=\"M15 7h6v6\"/>","scale":"<path d=\"M12 3.5v17M7.5 20.5h9M4.5 7h15\"/><path d=\"m4.5 7-2.5 6a2.5 2.5 0 0 0 5 0z\"/><path d=\"m19.5 7-2.5 6a2.5 2.5 0 0 0 5 0z\"/>","area":"<rect x=\"3.5\" y=\"3.5\" width=\"17\" height=\"17\" rx=\"2.5\"/><path d=\"M3.5 8.5h3M3.5 13h3M8.5 3.5v3M13 3.5v3\"/><path d=\"m10 17.5 7.5-7.5\"/>","check":"<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"m8 12.5 2.7 2.7 5.5-5.7\"/>","clock":"<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7.5V12l3 2\"/>","coins":"<ellipse cx=\"12\" cy=\"5.5\" rx=\"7.5\" ry=\"3\"/><path d=\"M4.5 5.5v6c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3v-6\"/><path d=\"M4.5 11.5v6c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3v-6\"/>","calendar":"<rect x=\"3.5\" y=\"5\" width=\"17\" height=\"15.5\" rx=\"2.5\"/><path d=\"M3.5 10h17M8 3v4M16 3v4\"/>","land":"<path d=\"m2.5 20.5 6.5-10 4 6 3-4 5.5 8z\"/><circle cx=\"16.5\" cy=\"6\" r=\"2\"/>","tag":"<path d=\"M3.5 12.6V4.5a1 1 0 0 1 1-1h8.1l8 8a1.5 1.5 0 0 1 0 2.1l-7 7a1.5 1.5 0 0 1-2.1 0z\"/><circle cx=\"8.5\" cy=\"8.5\" r=\"1.5\"/>","percent":"<path d=\"m18.5 5.5-13 13\"/><circle cx=\"7\" cy=\"7\" r=\"2.5\"/><circle cx=\"17\" cy=\"17\" r=\"2.5\"/>"};
+window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+p+'</svg>':'';};
+</script>
 </head>
 <body>
 
@@ -313,14 +486,14 @@ body[data-mod="cm"]{--head:#17375e}
   </div>
 
   <div class="navlabel2">MODULES</div>
-  <div class="modbtn on" id="modExec" data-mod="exec"><span class="ic">&#9673;</span> Executive Dashboard</div>
-  <div class="modbtn" id="tabCM" data-app="cm"><span class="ic">&#9636;</span> Change Management <span class="badge" id="tabCMn" style="background:transparent;font-weight:400"></span></div>
-  <div class="modbtn" id="tabPAY" data-app="pay"><span class="ic">&#128179;</span> Payments <span class="badge" id="tabPAYn" style="background:transparent;font-weight:400"></span></div>
-  <div class="modbtn" id="tabRA" data-app="ra"><span class="ic">&#128209;</span> QS Cost Control <span class="badge" id="tabRAn" style="background:transparent;font-weight:400"></span></div>
-  <div class="modbtn" id="tabFEAS" data-app="feas"><span class="ic">&#128200;</span> Feasibility</div>
-  <div class="modbtn" id="modAdmin" data-mod="admin"><span class="ic">&#9881;</span> Admin</div>
-  <div class="modbtn" id="modCalc" data-mod="calc"><span class="ic">&#128207;</span> Calculator</div>
-  <a class="modbtn" id="modTakeoff" href="../takeoff/" target="_blank" rel="noopener" style="text-decoration:none" title="Measure quantities from PDF drawings (opens in a new tab)"><span class="ic">&#128208;</span> PDF Takeoff &#8599;</a>
+  <div class="modbtn on" id="modExec" data-mod="exec"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="9" rx="2"/><rect x="13.5" y="3" width="7.5" height="5.5" rx="2"/><rect x="13.5" y="11.5" width="7.5" height="9.5" rx="2"/><rect x="3" y="15" width="7.5" height="6" rx="2"/></svg></span> Executive Dashboard</div>
+  <div class="modbtn" id="tabCM" data-app="cm"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11v-1a4 4 0 0 1 4-4h13"/><path d="M7 21.5 3.5 18 7 14.5"/><path d="M20.5 13v1a4 4 0 0 1-4 4h-13"/></svg></span> Change Management <span class="badge" id="tabCMn" style="background:transparent;font-weight:400"></span></div>
+  <div class="modbtn" id="tabPAY" data-app="pay"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19"/><path d="M6.5 15h4"/></svg></span> Payments <span class="badge" id="tabPAYn" style="background:transparent;font-weight:400"></span></div>
+  <div class="modbtn" id="tabRA" data-app="ra"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17.5" rx="2.5"/><path d="M9 2.5h6V6H9z"/><path d="M8.5 11h7M8.5 14.5h7M8.5 18h4"/></svg></span> QS Cost Control <span class="badge" id="tabRAn" style="background:transparent;font-weight:400"></span></div>
+  <div class="modbtn" id="tabFEAS" data-app="feas"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3.5v17h17.5"/><path d="m7 15 4-4.5 3 3 5.5-6"/><path d="M15.5 7.5h4v4"/></svg></span> Feasibility</div>
+  <div class="modbtn" id="modAdmin" data-mod="admin"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5h9M17 6.5h3M4 12h3M11 12h9M4 17.5h11M19 17.5h1"/><circle cx="15" cy="6.5" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17.5" r="2"/></svg></span> Admin</div>
+  <div class="modbtn" id="modCalc" data-mod="calc"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="2.5" width="15" height="19" rx="2.5"/><rect x="7.5" y="5.5" width="9" height="4" rx="1"/><path stroke-width="2.6" d="M8.5 13.5h.01M12 13.5h.01M15.5 13.5h.01M8.5 17.5h.01M12 17.5h.01M15.5 17.5h.01"/></svg></span> Calculator</div>
+  <a class="modbtn" id="modTakeoff" href="../takeoff/" target="_blank" rel="noopener" style="text-decoration:none" title="Measure quantities from PDF drawings (opens in a new tab)"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 3.5v17h17z"/><path d="M7.5 16.5v-4l4 4z"/><path d="M3.5 8h2M3.5 12h2"/></svg></span> PDF Takeoff &#8599;</a>
 
   <div class="navgroup on" id="navgroup-cm">
     <div class="navlabel">CHANGE MANAGEMENT</div>
@@ -1135,32 +1308,32 @@ body[data-mod="cm"]{--head:#17375e}
     </div>
 
     <div class="kpis">
-      <div class="kpi" style="border-top-color:var(--blue)">
+      <div class="kpi k-blue" style="border-top-color:var(--blue)">
         <h5>TOTAL CHANGE ORDERS</h5>
         <div class="row"><div class="val" id="kTotal">0</div><div class="ic">▤</div></div>
         <div class="link" data-goto="register"><span>View All</span><span>›</span></div>
       </div>
-      <div class="kpi" style="border-top-color:var(--green)">
+      <div class="kpi k-green" style="border-top-color:var(--green)">
         <h5>APPROVED CHANGES</h5>
         <div class="row"><div class="val" style="color:var(--green)" id="kApp">0</div><div class="ic">✓</div></div>
         <div class="link" data-goto="register"><span>View Details</span><span>›</span></div>
       </div>
-      <div class="kpi" style="border-top-color:var(--amber)">
+      <div class="kpi k-amber" style="border-top-color:var(--amber)">
         <h5>PENDING / OPEN</h5>
         <div class="row"><div class="val" style="color:var(--amber)" id="kPend">0</div><div class="ic">◷</div></div>
         <div class="link" data-goto="register"><span>View Details</span><span>›</span></div>
       </div>
-      <div class="kpi" style="border-top-color:var(--red)">
+      <div class="kpi k-red" style="border-top-color:var(--red)">
         <h5>STATUS NOT SET</h5>
         <div class="row"><div class="val" style="color:var(--red)" id="kNoSt">0</div><div class="ic">⊘</div></div>
         <div class="link" data-goto="missing"><span>View Details</span><span>›</span></div>
       </div>
-      <div class="kpi" style="border-top-color:var(--purple)">
+      <div class="kpi k-violet" style="border-top-color:var(--purple)">
         <h5>TOTAL COST IMPACT</h5>
         <div class="row"><div class="val" style="color:var(--purple)" id="kCost">0</div><div class="ic">▣</div></div>
         <div class="link" data-goto="cost"><span>View Details</span><span>›</span></div>
       </div>
-      <div class="kpi" style="border-top-color:#0d9488">
+      <div class="kpi k-teal" style="border-top-color:#0d9488">
         <h5>TOTAL SCHEDULE IMPACT</h5>
         <div class="row"><div class="val" style="color:#0d9488" id="kDays">0</div><div class="ic">▦</div></div>
         <div class="link" data-goto="time"><span>View Details</span><span>›</span></div>
@@ -1241,10 +1414,10 @@ body[data-mod="cm"]{--head:#17375e}
   
   <section class="view" id="v-missing">
     <div class="mini">
-      <div class="kpi"><h5>ROWS WITH MISSING DATA</h5><div class="row"><div class="val" style="color:var(--amber)" id="mRows">0</div><div class="ic">▧</div></div></div>
-      <div class="kpi"><h5>MANDATORY FIELDS BLANK</h5><div class="row"><div class="val" style="color:var(--red)" id="mMand">0</div><div class="ic">✕</div></div></div>
-      <div class="kpi"><h5>OPTIONAL FIELDS BLANK</h5><div class="row"><div class="val" style="color:var(--muted)" id="mOpt">0</div><div class="ic">○</div></div></div>
-      <div class="kpi"><h5>REGISTER COMPLETENESS</h5><div class="row"><div class="val" id="mPct">0<small>%</small></div><div class="ic">◎</div></div></div>
+      <div class="kpi k-amber"><h5>ROWS WITH MISSING DATA</h5><div class="row"><div class="val" style="color:var(--amber)" id="mRows">0</div><div class="ic">▧</div></div></div>
+      <div class="kpi k-red"><h5>MANDATORY FIELDS BLANK</h5><div class="row"><div class="val" style="color:var(--red)" id="mMand">0</div><div class="ic">✕</div></div></div>
+      <div class="kpi k-slate"><h5>OPTIONAL FIELDS BLANK</h5><div class="row"><div class="val" style="color:var(--muted)" id="mOpt">0</div><div class="ic">○</div></div></div>
+      <div class="kpi k-blue"><h5>REGISTER COMPLETENESS</h5><div class="row"><div class="val" id="mPct">0<small>%</small></div><div class="ic">◎</div></div></div>
     </div>
     <div class="grid-27">
       <div class="panel"><h3>BLANKS BY FIELD</h3>
@@ -1523,26 +1696,27 @@ body[data-mod="cm"]{--head:#17375e}
     +'</div>';
   }
 
-  function kpiCard(label, value, sub){
-    return '<div class="exec-k"><h6>'+esc(label)+'</h6><div class="v">'+esc(value||'—')+'</div>'+(sub?'<div class="p">'+esc(sub)+'</div>':'')+'</div>';
+  function kpiCard(label, value, sub, kind, ic){
+    var hd = (ic && window.zkIc) ? '<div class="zk-khd"><span class="zk-kic">'+window.zkIc(ic)+'</span><h6>'+esc(label)+'</h6></div>' : '<h6>'+esc(label)+'</h6>';
+    return '<div class="exec-k'+(kind?' '+kind:'')+'">'+hd+'<div class="v">'+esc(value||'—')+'</div>'+(sub?'<div class="p">'+esc(sub)+'</div>':'')+'</div>';
   }
 
   function execKpisHtml(){
     var cards=[
-      ['Total Projects', cmHasData() ? String(projectOptionList('projSel').length) : '—', 'active in the change log'],
-      ['Original Cost', txt('pOrig'), 'from Project Details'],
-      ['Forecast / Revised Cost', txt('pRev'), safeSub('pRevSub')],
-      ['Cost Variance', txt('pVar'), safeSub('pVarSub')],
-      ['Cost / Sft (Original)', txt('pORate'), ''],
-      ['Cost / Sft (Revised)', txt('pRRate'), safeSub('pRRateSub')],
-      ['Change Requests', cmTxt('kTotal'), 'total logged'],
-      ['Approved Changes', cmTxt('kApp'), ''],
-      ['Pending Changes', cmTxt('kPend'), ''],
-      ['Change Cost Impact', cmTxt('kCost'), 'declared, PKR'],
-      ['Schedule Impact (days)', cmTxt('kDays'), ''],
-      ['Total Payments Made', txt('pyPaid')||'open Payments module', safeSub('pyPaidS')]
+      ['Total Projects', cmHasData() ? String(projectOptionList('projSel').length) : '—', 'active in the change log', 'k-blue', 'building'],
+      ['Original Cost', txt('pOrig'), 'from Project Details', 'k-indigo', 'cash'],
+      ['Forecast / Revised Cost', txt('pRev'), safeSub('pRevSub'), 'k-cyan', 'trend'],
+      ['Cost Variance', txt('pVar'), safeSub('pVarSub'), 'k-orange', 'scale'],
+      ['Cost / Sft (Original)', txt('pORate'), '', 'k-teal', 'area'],
+      ['Cost / Sft (Revised)', txt('pRRate'), safeSub('pRRateSub'), 'k-lime', 'area'],
+      ['Change Requests', cmTxt('kTotal'), 'total logged', 'k-violet', 'cm'],
+      ['Approved Changes', cmTxt('kApp'), '', 'k-green', 'check'],
+      ['Pending Changes', cmTxt('kPend'), '', 'k-amber', 'clock'],
+      ['Change Cost Impact', cmTxt('kCost'), 'declared, PKR', 'k-grape', 'coins'],
+      ['Schedule Impact (days)', cmTxt('kDays'), '', 'k-pink', 'calendar'],
+      ['Total Payments Made', txt('pyPaid')||'open Payments module', safeSub('pyPaidS'), 'k-teal', 'pay']
     ];
-    return '<div class="exec-kgrid">'+cards.map(function(c){ return kpiCard(c[0],c[1],c[2]); }).join('')+'</div>';
+    return '<div class="exec-kgrid">'+cards.map(function(c){ return kpiCard(c[0],c[1],c[2],c[3],c[4]); }).join('')+'</div>';
   }
 
   function safeSub(id){ return txt(id); }
@@ -1587,11 +1761,11 @@ body[data-mod="cm"]{--head:#17375e}
       }
     }catch(err){}
     var cards=[
-      {mod:'cm',title:'&#9636; Change Management',rows:[['Open changes',cmTxt('kPend')],['Approved',cmTxt('kApp')],['Missing data',cmTxt('navMiss')]]},
-      {mod:'pay',title:'&#128179; Payments',rows:[['Total paid',txt('pyPaid')],['In approval',txt('pyPipe')],['Retention held',txt('pyRet')]]},
-      {mod:'ra',title:'&#128209; QS Cost Control',rows:[['Current BOQ total',raGrand],['Cost / Sft',raSft||'enter covered area'],['Item library',(typeof RA!=='undefined'&&RA&&RA.items)?RA.items.length+' items':'—'],
+      {mod:'cm',title:'<span class="zk-ic">'+(window.zkIc?window.zkIc('cm'):'')+'</span> Change Management',rows:[['Open changes',cmTxt('kPend')],['Approved',cmTxt('kApp')],['Missing data',cmTxt('navMiss')]]},
+      {mod:'pay',title:'<span class="zk-ic">'+(window.zkIc?window.zkIc('pay'):'')+'</span> Payments',rows:[['Total paid',txt('pyPaid')],['In approval',txt('pyPipe')],['Retention held',txt('pyRet')]]},
+      {mod:'ra',title:'<span class="zk-ic">'+(window.zkIc?window.zkIc('ra'):'')+'</span> QS Cost Control',rows:[['Current BOQ total',raGrand],['Cost / Sft',raSft||'enter covered area'],['Item library',(typeof RA!=='undefined'&&RA&&RA.items)?RA.items.length+' items':'—'],
         ['Open RFQs',(window.zdRfq&&RA)?window.zdRfq.openCount()+(window.zdRfq.overdueCount()?' ('+window.zdRfq.overdueCount()+' overdue)':''):'—']]},
-      {mod:'feas',title:'&#128200; Feasibility',rows:[['Source','Live Google Sheet workbook'],['Scope','Original vs forecast tracking'],['Note','Not parsed — open workbook for figures']]}
+      {mod:'feas',title:'<span class="zk-ic">'+(window.zkIc?window.zkIc('feas'):'')+'</span> Feasibility',rows:[['Source','Live Google Sheet workbook'],['Scope','Original vs forecast tracking'],['Note','Not parsed — open workbook for figures']]}
     ];
     return '<div class="exec-modrow">'+cards.map(function(c){
       return '<div class="exec-mcard" data-open-mod="'+c.mod+'"><h4>'+c.title+'</h4>'
@@ -1610,10 +1784,10 @@ body[data-mod="cm"]{--head:#17375e}
       + '<button class="btn" id="execResetBtn">Reset Filters</button>'
       + '<span style="margin-left:auto;font-size:11px;color:var(--muted)">Portfolio KPIs, alerts and payment position update live from the Change Management, Payments and QS Cost Control modules.</span>'
       + '</div>'
-      + '<div class="exec-sect">Portfolio KPIs</div>'
+      + '<div class="exec-sect k-blue">Portfolio KPIs</div>'
       + execKpisHtml()
       + execAlertsHtml()
-      + '<div class="exec-sect">Module Position</div>'
+      + '<div class="exec-sect k-violet">Module Position</div>'
       + execModuleCardsHtml()
       + '<div class="exec-note"><b style="display:block;margin-bottom:3px">Feasibility figures</b>Land cost, revenue, profit and cost/Sft feasibility tracking are maintained in the linked Google Sheet workbook (see the Feasibility module) and are intentionally not re-typed or estimated here.</div>';
 
@@ -1879,21 +2053,22 @@ body[data-mod="cm"]{--head:#17375e}
     return out;
   }
 
-  function feasKpiCard(label,value,sub){
-    return '<div class="exec-k"><h6>'+esc(label)+'</h6><div class="v">'+esc(value||'—')+'</div>'+(sub?'<div class="p">'+esc(sub)+'</div>':'')+'</div>';
+  function feasKpiCard(label,value,sub,kind,ic){
+    var hd = (ic && window.zkIc) ? '<div class="zk-khd"><span class="zk-kic">'+window.zkIc(ic)+'</span><h6>'+esc(label)+'</h6></div>' : '<h6>'+esc(label)+'</h6>';
+    return '<div class="exec-k'+(kind?' '+kind:'')+'">'+hd+'<div class="v">'+esc(value||'—')+'</div>'+(sub?'<div class="p">'+esc(sub)+'</div>':'')+'</div>';
   }
 
   function renderFeasKpis(){
     var t=feasTotals();
     var cards=[
-      ['Total Projects', t.n?String(t.n):'—', ''],
-      ['Total Land Cost', fmtMoney(t.land), ''],
-      ['Total Revenue / Sale Value', fmtMoney(t.revenue), ''],
-      ['Total Profit', fmtMoney(t.profit), t.profitDerived?'derived: revenue − (land + cost)':''],
-      ['Profit Margin', t.margin!=null?t.margin.toFixed(1)+'%':'—', ''],
-      ['Avg Cost / Sft', t.avgCostSft!=null?('PKR '+fmtNum(t.avgCostSft,0)):'—', t.avgCostSftDerived?'derived: total cost ÷ total area':'']
+      ['Total Projects', t.n?String(t.n):'—', '', 'k-blue', 'building'],
+      ['Total Land Cost', fmtMoney(t.land), '', 'k-brown', 'land'],
+      ['Total Revenue / Sale Value', fmtMoney(t.revenue), '', 'k-indigo', 'tag'],
+      ['Total Profit', fmtMoney(t.profit), t.profitDerived?'derived: revenue − (land + cost)':'', 'k-green', 'trend'],
+      ['Profit Margin', t.margin!=null?t.margin.toFixed(1)+'%':'—', '', 'k-teal', 'percent'],
+      ['Avg Cost / Sft', t.avgCostSft!=null?('PKR '+fmtNum(t.avgCostSft,0)):'—', t.avgCostSftDerived?'derived: total cost ÷ total area':'', 'k-orange', 'area']
     ];
-    $('feasKpis').innerHTML = cards.map(function(c){ return feasKpiCard(c[0],c[1],c[2]); }).join('');
+    $('feasKpis').innerHTML = cards.map(function(c){ return feasKpiCard(c[0],c[1],c[2],c[3],c[4]); }).join('');
   }
 
   function killChart(){
@@ -7271,6 +7446,10 @@ function saveFav(){ store.set('fav',FAV); }
 function isFav(id){ return FAV.indexOf(id)>=0; }
 function toggleFav(id){ var i=FAV.indexOf(id); if(i>=0) FAV.splice(i,1); else FAV.unshift(id); saveFav(); }
 var catName={}; CATS.forEach(function(c){ catName[c.id]=c.name; });
+/* colour per category / trade — same palette as the SAJJAD QSCALCULATOR page */
+var ZK_CAT={conv:'k-green',items:'k-cyan',steel:'k-indigo',civil:'k-orange',fin:'k-grape',mep:'k-red',custom:'k-pink'};
+var ZK_TRADE={'Sheet metal & gauges':'k-slate','Earthwork':'k-brown','Concrete (grey structure)':'k-blue','Masonry':'k-orange','Reinforcement':'k-indigo','Plaster & mortar':'k-amber','Flooring & tiles':'k-green','Painting & coatings':'k-pink','Waterproofing':'k-cyan','Ceiling & partitions':'k-violet','Plumbing':'k-teal','Electrical':'k-red','HVAC':'k-lime'};
+function zkKind(c){ if(!c) return ''; if(c.cat==='items') return ZK_TRADE[c.trade]||ZK_CAT.items; return ZK_CAT[c.cat]||''; }
 var MINI={rebar:'rebar',plate:'plate',rect:'rect',round:'round',hex:'hex',chs:'chs',rhs:'rhs',L:'L',C:'C',I:'I',T:'T',CL:'CL',Z:'Z',box:'box',trench:'trench',wall:'wall',tile:'tile',form:'form',cyl:'cyl',insul:'insul',cable:'cable',duct:'duct',grid:'grid'};
 function mini(ic){ var f=SH[MINI[ic]||'grid']; var s; try{ s=f({}); }catch(e){ s=''; } return s.replace('class="zc-svg"','class="zc-svg zc-mini"').replace(/<g class="zc-dim">[\s\S]*?<\/g>/g,'').replace(/<text[\s\S]*?<\/text>/g,''); }
 
@@ -7280,6 +7459,7 @@ function syncNav(){ document.querySelectorAll('[data-zcgo]').forEach(function(el
 function render(){
   if(!ROOT) return;
   var body=$('zcView'); CUR=null;
+  var zk=VIEW.v==='calc'?calcById(VIEW.id):null; body.className=zk?zkKind(zk):(VIEW.v==='cat'||VIEW.v==='home'?'':(VIEW.v==='custom'?ZK_CAT.custom:VIEW.v==='secdb'||VIEW.v==='gaugelib'?ZK_CAT.steel:ZK_CAT.conv));
   var v=VIEW.v;
   if(v==='calc'){ var c=calcById(VIEW.id); if(!c){ VIEW={v:'home'}; return render(); } return renderCalc(body,c,VIEW); }
   if(v==='conv') return renderConverter(body);
@@ -7295,7 +7475,7 @@ function render(){
 }
 
 /* ---------------- home */
-function card(c){ return '<div class="zc-cc" data-open="'+esc(c.id)+'"><div class="zc-cc-ic">'+mini(c.ic)+'</div><div class="zc-cc-t"><b>'+esc(c.name)+'</b><span>'+esc(c.sub||'')+'</span></div>'+
+function card(c){ return '<div class="zc-cc '+zkKind(c)+'" data-open="'+esc(c.id)+'"><div class="zc-cc-ic">'+mini(c.ic)+'</div><div class="zc-cc-t"><b>'+esc(c.name)+'</b><span>'+esc(c.sub||'')+'</span></div>'+
   '<button class="zc-star'+(isFav(c.id)?' on':'')+'" data-fav="'+esc(c.id)+'" title="Favourite">★</button></div>'; }
 var LIBS=[{v:'conv',name:'Unit Converter',sub:'Length, area, volume, mass, force, pressure, flow, power… two-way',ic:'grid'},
   {v:'secdb',name:'Steel Section & Unit Weight Database',sub:SERIES.reduce(function(n,s){return n+s.rows.length;},0).toLocaleString()+' sections & pipes — IS 808, EN, BS, AISC, ASME',ic:'I'},
@@ -7303,7 +7483,7 @@ var LIBS=[{v:'conv',name:'Unit Converter',sub:'Length, area, volume, mass, force
   {v:'convlib',name:'Conversion Library',sub:'Every conversion factor with its definition',ic:'grid'},{v:'formlib',name:'Formula Library',sub:'All calculator formulas in one place',ic:'grid'},
   {v:'consts',name:'Engineering Constants / Unit Weights',sub:'Material densities, rebar, cable, gauge, AWG tables with sources',ic:'grid'},{v:'settings',name:'Density Settings',sub:'Standard vs user-defined densities',ic:'grid'},
   {v:'custom',name:'Custom Calculations',sub:'Define your own named formulas',ic:'grid'}];
-function libCard(l){ return '<div class="zc-cc zc-lib" data-lib="'+l.v+'"><div class="zc-cc-ic">'+mini(l.ic)+'</div><div class="zc-cc-t"><b>'+esc(l.name)+'</b><span>'+esc(l.sub)+'</span></div></div>'; }
+function libCard(l){ return '<div class="zc-cc zc-lib '+(l.v==='custom'?ZK_CAT.custom:l.v==='secdb'||l.v==='gaugelib'?ZK_CAT.steel:ZK_CAT.conv)+'" data-lib="'+l.v+'"><div class="zc-cc-ic">'+mini(l.ic)+'</div><div class="zc-cc-t"><b>'+esc(l.name)+'</b><span>'+esc(l.sub)+'</span></div></div>'; }
 function renderHome(body,cat){
   var h='', all=allCalcs();
   if(!cat){
@@ -7311,14 +7491,14 @@ function renderHome(body,cat){
     h+='<div class="zc-sec"><div class="zc-sech">★ Favourites</div>'+(favs.length?'<div class="zc-cards">'+favs.map(card).join('')+'</div>':'<div class="zc-empty">Mark calculators with ★ to pin them here.</div>')+'</div>';
     h+='<div class="zc-sec"><div class="zc-sech">Recent calculations '+(HIST.length?'<button class="zc-lnk" data-act="clearhist">Clear history</button>':'')+'</div>'+histHtml()+'</div>';
     h+='<div class="zc-sec"><div class="zc-sech">Categories</div><div class="zc-cats">'+CATS.map(function(c){ var n=c.id==='conv'?LIBS.length:c.id==='items'?ITEMS.length:all.filter(function(x){return x.cat===c.id;}).length;
-      return '<div class="zc-cat" data-cat="'+c.id+'"><span class="zc-cat-ic">'+esc(c.ic)+'</span><b>'+esc(c.name)+'</b><span>'+esc(c.d)+'</span><em>'+n+' tools</em></div>'; }).join('')+'</div></div>';
+      return '<div class="zc-cat '+(ZK_CAT[c.id]||'')+'" data-cat="'+c.id+'"><span class="zc-cat-ic">'+esc(c.ic)+'</span><b>'+esc(c.name)+'</b><span>'+esc(c.d)+'</span><em>'+n+' tools</em></div>'; }).join('')+'</div></div>';
   }
   CATS.forEach(function(c){ if(cat&&cat!==c.id) return;
-    if(c.id==='items'){ if(!cat){ h+='<div class="zc-sec" id="zcsec-items"><div class="zc-sech">'+esc(c.name)+' <button class="zc-lnk" data-cat="items">Open all '+ITEMS.length+' items →</button></div><div class="zc-chips">'+TRADES.map(function(t){ return '<button class="zc-chip" data-cat="items" data-trade="'+esc(t)+'">'+esc(t)+' ('+ITEMS.filter(function(x){return x.trade===t;}).length+')</button>'; }).join('')+'</div></div>'; return; }
-      TRADES.forEach(function(t){ if(VIEW.trade&&VIEW.trade!==t) return; var l=ITEMS.filter(function(x){return x.trade===t;}); if(!l.length) return; h+='<div class="zc-sec" id="zcsec-'+esc(t)+'"><div class="zc-sech">'+esc(t)+'</div><div class="zc-cards">'+l.map(card).join('')+'</div></div>'; }); return; }
+    if(c.id==='items'){ if(!cat){ h+='<div class="zc-sec '+ZK_CAT.items+'" id="zcsec-items"><div class="zc-sech">'+esc(c.name)+' <button class="zc-lnk" data-cat="items">Open all '+ITEMS.length+' items →</button></div><div class="zc-chips">'+TRADES.map(function(t){ return '<button class="zc-chip '+(ZK_TRADE[t]||'')+'" data-cat="items" data-trade="'+esc(t)+'">'+esc(t)+' ('+ITEMS.filter(function(x){return x.trade===t;}).length+')</button>'; }).join('')+'</div></div>'; return; }
+      TRADES.forEach(function(t){ if(VIEW.trade&&VIEW.trade!==t) return; var l=ITEMS.filter(function(x){return x.trade===t;}); if(!l.length) return; h+='<div class="zc-sec '+(ZK_TRADE[t]||'')+'" id="zcsec-'+esc(t)+'"><div class="zc-sech">'+esc(t)+'</div><div class="zc-cards">'+l.map(card).join('')+'</div></div>'; }); return; }
     var items=c.id==='conv'?LIBS.map(libCard).join(''):all.filter(function(x){return x.cat===c.id;}).map(card).join('');
     if(c.id==='custom') items+='<div class="zc-cc zc-lib zc-add" data-lib="custom"><div class="zc-cc-t"><b>+ New custom calculation</b><span>Name, inputs, formula, result unit</span></div></div>';
-    h+='<div class="zc-sec" id="zcsec-'+c.id+'"><div class="zc-sech">'+esc(c.name)+'</div><div class="zc-cards">'+items+'</div></div>'; });
+    h+='<div class="zc-sec '+(ZK_CAT[c.id]||'')+'" id="zcsec-'+c.id+'"><div class="zc-sech">'+esc(c.name)+'</div><div class="zc-cards">'+items+'</div></div>'; });
   body.innerHTML=h;
 }
 function histHtml(){
