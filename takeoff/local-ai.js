@@ -105,7 +105,7 @@
     }
     loading = (async () => {
       $("localAiStatus").textContent = "Loading the local AI engine…";
-      const webllm = await import("https://esm.sh/@mlc-ai/web-llm@0.2.85");
+      const webllm = await import("https://esm.run/@mlc-ai/web-llm@0.2.85");
       engine = await webllm.CreateMLCEngine(MODEL_ID, {
         initProgressCallback: report => { $("localAiStatus").textContent = report.text || "Preparing local model…"; }
       });
