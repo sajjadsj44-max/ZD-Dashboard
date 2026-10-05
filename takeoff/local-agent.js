@@ -176,13 +176,14 @@ async function start() {
       if (readButton) readButton.hidden = true;
       const handoff = doc.getElementById("aiCopy");
       if (handoff && handoff.parentElement) handoff.parentElement.hidden = true;
-      input.placeholder = "Try: measure all rooms · count doors · how many baths · walls 9\"";
+      input.placeholder = "Try: measure all rooms · count doors · export pages with takeoff to pdf · read sheet info · ocr this page";
       send.textContent = "Run local command";
       panel.classList.add("on");
       openButton.classList.add("on");
       const log = doc.getElementById("aiLog");
       log.replaceChildren();
       addMessage(doc, "bot", "Free drawing agents. They use searchable PDF text and CAD/vector lines; scanned drawings, untagged symbols, and uncertain geometry need review. Try ‘measure all rooms’, ‘count doors’, ‘how many baths’, or ‘walls 9 inch’. ‘How many’ questions only report text/tag evidence. ‘Count doors’ opens a review dialog before placing editable AI-marked count results. Check or undo measurements before using them in a bill.");
+      addMessage(doc, "bot", "Pages, as in Forma Takeoff and Bluebeam: ‘export pages with takeoff to pdf’, ‘export all pages as png 300 dpi’, ‘read sheet info’ (sheet no. and title from the title blocks), ‘ocr this page’ (scanned drawings), ‘select pages 1-5’, ‘go to A-101’, ‘import pdfs’, ‘report’, ‘focus mode’. The Pages tab ticks several pages for export; ▾ next to + PDF chooses pages, a folder or photos as pages. Type ‘help’ for everything.");
       send.addEventListener("click", event => {
         event.preventDefault();
         event.stopImmediatePropagation();

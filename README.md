@@ -709,13 +709,18 @@ v11.0.0.191 with Takeoff Boost; the full table is `docs/takeoff-bluebeam-planswi
 **QA pass** (02-Oct-2026 — full audit, bug hunt and regression test; the report with the bug register,
 calculation table and live-retest checklist is `docs/takeoff-qa-report-2026-10-02.md`):
 
-- **Sheets tab** beside Conditions / Layers: searchable thumbnail cards for every page of every PDF, showing sheet
-  number, title, revision, scale and measurement count; edit per-sheet info or read it from PDF text / on-demand OCR.
-  Scanned-sheet OCR runs in this browser (OCR code and English language data load from a CDN; drawing data is not
-  uploaded). **Remove a PDF** from the project (a backup is taken first, its measurements go with it).
-- **Multi-sheet output**: add one or several multi-page PDFs to a project; **Export → All project sheets (.pdf)**
-  preserves every sheet in project order, including sheets without markups, and overlays measurements where present.
-  **Project + PDFs** packages every source PDF and the takeoff together for transfer.
+- **Pages tab** beside Conditions / Layers (Forma Takeoff's Sheets panel): thumbnail cards for every page of every PDF,
+  showing sheet number, title, scale and measurement count; search, filter (with takeoff, no scale, pinned, read by OCR,
+  version set), sort and pin; tick several pages to export, read sheet info or OCR together. **Info** / **Read** on a
+  card edit its sheet info or read it from the PDF text (OCR for a scan). Sheet info for many pages comes from the title
+  blocks (by labels, or capture areas picked once). OCR runs in this browser (Tesseract; the engine and English data
+  load from a CDN; the drawing is not uploaded) and its words are kept with the project. **Remove a PDF** from the
+  project (a backup is taken first, its measurements go with it).
+- **Multi-sheet import / output**: **+ PDF ▾** chooses pages and a version set, a folder of PDFs, or photos / scans as
+  pages. **Export → Pages** exports this page, pages with takeoff, ticked pages or every page as one PDF, a PDF per page,
+  PNG or JPEG (up to 600 DPI) with a legend; **All project sheets (.pdf)** keeps every sheet in project order, including
+  sheets without markups; **Report** prints the takeoff report. **Project + PDFs** packages every source PDF and the
+  takeoff together for transfer.
 - **View menu** (header): fit page (`F`), **fit width** (`Shift+F`), dim the drawing, line weights on / off, PDF layers, hide
   markups, labels; `Home` / `End` go to the first / last page. The header wraps on narrow screens instead of
   pushing buttons off the edge.
