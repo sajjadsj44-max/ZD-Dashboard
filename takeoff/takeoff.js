@@ -11,6 +11,8 @@ const COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"
                 "#ff1493", "#6b8e23", "#1e90ff", "#a0522d", "#20b2aa", "#9acd32", "#ff6347", "#000000"];
 const SNAP_PX = 11, HIT_PX = 7;
 let pdfjs = null;
+const CADV = (() => { try { return new URL(import.meta.url).search; } catch (e) { return ""; } })();   // cad.js comes with takeoff.js's ?v=
+let CAD = null;                       // cad.js (AutoCAD drawings), loaded on first use
 
 /* ------------------------------------------------------------------ utilities */
 const $ = id => document.getElementById(id);
@@ -330,7 +332,7 @@ async function openProject(id){
   if (rep.length) setTimeout(() => toast("The stored project had damaged entries, repaired: " + rep.slice(0, 2).join(" · ") + (rep.length > 2 ? " · …" : ""), 8000), 400);
   Object.values(S.docs).forEach(d => d.destroy && d.destroy());
   P.proj = pr; S.docs = {}; S.geo = {}; S.texts = {}; S.sizes = {}; S.thumbs = {}; S.thumbQ = []; S.ocgs = {}; S.ocBound = {}; S.undo = []; S.redo = []; S.sel = null; S.multi.clear(); S.selMark = null; draftClear(); S.page = null; S.fileId = null; S.otherTab = "";
-  S.pgSel = new Set(); S.pgLast = null; S.pgQ = ""; S.pgF = "";
+  S.pgSel = new Set(); S.pgLast = null; S.pgQ = ""; S.pgF = ""; S.cadSc = {}; S.cadP = {}; S.iso = null; freeCadBitmap();
   tabSay({t: "open", id: pr.id});
   S.cond = (pr.conds[0] || {}).id || null;
   localStorage.setItem("zdTakeoffLast", pr.id);
@@ -405,15 +407,17 @@ function dropFileCache(fid){
   if (S.docs[fid]) { try { S.docs[fid].destroy(); } catch (e) {} delete S.docs[fid]; }
   const mine = k => String(k).split(":")[0] === fid;
   [S.geo, S.texts, S.sizes, S.thumbs].forEach(o => o && Object.keys(o).forEach(k => { if (mine(k)) delete o[k]; }));
-  if (S.ocgs) delete S.ocgs[fid]; if (S.ocBound) delete S.ocBound[fid]; if (S.pdfVp) delete S.pdfVp[fid];
+  if (S.ocgs) delete S.ocgs[fid]; if (S.ocBound) delete S.ocBound[fid]; if (S.pdfVp) delete S.pdfVp[fid]; if (S.cadSc) delete S.cadSc[fid]; if (S.cadP) delete S.cadP[fid];
 }
 async function addFiles(files){
   if (!P.proj) return;
   for (const f of files) {
-    if (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") { toast(f.name + " is not a PDF"); continue; }
+    const cadF = isCadFile(f);
+    if (!cadF && !/\.pdf$/i.test(f.name) && f.type !== "application/pdf") { toast(f.name + " is not a PDF or an AutoCAD drawing (DWG / DXF)"); continue; }
     busy("Opening " + f.name + "…");
     try {
-      const data = await f.arrayBuffer(), sha = await sha256(data);
+      let data = await f.arrayBuffer(), cad = null; const sha = await sha256(data);
+      if (cadF) { const pre = P.proj.files.find(x => x.sha === sha && x.cad); cad = await cadImport(f, data, pre && pre.cad.map); data = cad.pdf; }   // the drawing as a layered vector PDF (+ its scene)
       const lib = await loadPdfjs();
       const {d, pw} = await openPdfData(lib, data, f.name);
       for (const x of P.proj.files) if (!x.sha) { const h = await pdfSha(x.id); if (h) x.sha = h; }   // PDFs added before fingerprints
@@ -432,7 +436,7 @@ async function addFiles(files){
         if (!v) { toast(f.name + " not added"); continue; }
         busy("Opening " + f.name + "…");
         if (v === "replace") { meta = named; how = "replace"; }
-        else { const used = new Set(P.proj.files.map(x => x.name)), stem = f.name.replace(/\.pdf$/i, ""); for (let i = 2; used.has(name); i++) name = stem + " (" + i + ").pdf"; }
+        else { const used = new Set(P.proj.files.map(x => x.name)), ext = (/\.(pdf|dwg|dxf)$/i.exec(f.name) || [".pdf"])[0], stem = f.name.slice(0, f.name.length - (/\.(pdf|dwg|dxf)$/i.test(f.name) ? ext.length : 0)); for (let i = 2; used.has(name); i++) name = stem + " (" + i + ")" + ext; }
       }
       if (how === "replace") {
         savePr = P.proj; await flushSave(); await backupNow("before replacing " + meta.name).catch(() => {});
@@ -444,15 +448,17 @@ async function addFiles(files){
         }
       }
       const id = meta ? meta.id : uid("F");
-      await dbPut("pdfs", Object.assign({name, size: f.size, data, sha}, pw ? {pw} : {}), id);   // stored first: a PDF listed in the project is always one that can be opened
-      if (!meta) { meta = {id, name, size: f.size, sha, pages: d.numPages, added: new Date().toISOString()}; P.proj.files.push(meta); }
-      else { meta.pages = d.numPages; meta.size = f.size; if (sha) meta.sha = sha; if (how === "replace") meta.replaced = new Date().toISOString(); }
+      await dbPut("pdfs", Object.assign({name, size: f.size, data, sha}, pw ? {pw} : {}, cad ? {src: cad.src, scene: cad.scene, pdfSha: await sha256(data)} : {}), id);   // stored first: a PDF listed in the project is always one that can be opened
+      if (!meta) { meta = {id, name, size: f.size, sha, pages: d.numPages, added: new Date().toISOString()}; if (cad) meta.cad = cad.meta; P.proj.files.push(meta); }
+      else { meta.pages = d.numPages; meta.size = f.size; if (sha) meta.sha = sha; if (how === "replace") meta.replaced = new Date().toISOString(); if (cad) meta.cad = cad.meta; else delete meta.cad; }
+      if (cad) cadAdopt(meta, cad, how);
       dropFileCache(meta.id);
-      S.docs[meta.id] = d;
+      S.docs[meta.id] = d; if (cad) { S.cadSc = S.cadSc || {}; S.cadSc[meta.id] = cad.scene; }
       save(); buildPageSel();
       await gotoPage(meta.id, 1);
       toast(how === "replace" ? f.name + " replaced — " + d.numPages + " page" + (d.numPages > 1 ? "s" : "") + " · check the measurements sit on the new drawing"
         : name + (name !== f.name ? " (added as a new drawing)" : how === "same" ? " (same drawing — re-attached)" : "") + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""), how === "new" && name === f.name ? 2600 : 5000);
+      if (cad) setTimeout(() => toast(cadSay(name, cad.meta), 9000), 300);
     } catch (e) { const m = e && e.message || String(e); toast(/password/i.test(m) ? m : f.name + " could not be opened — " + m + (/Invalid PDF|empty/i.test(m) ? " (is it a PDF, and complete?)" : ""), 6000); }
     busy("");
   }
@@ -506,13 +512,17 @@ function renderLayers(){
   const el = $("layerList"); if (!el) return;
   const cfg = S.ocgs && S.ocgs[S.fileId];
   if (!S.page) { el.innerHTML = ""; return; }
-  if (!cfg) { el.innerHTML = '<div class="empty">This PDF has no layers. AutoCAD keeps them when you plot with <b>DWG To PDF.pc3</b> and “Include layer information” ticked (Page Setup → PDF Options).</div>'; return; }
-  const G = Object.entries(cfg.getGroups()).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  if (!cfg) { el.innerHTML = '<div class="empty">This PDF has no layers. AutoCAD keeps them when you plot with <b>DWG To PDF.pc3</b> and “Include layer information” ticked (Page Setup → PDF Options) — or add the <b>DWG</b> itself with <b>+ PDF</b>: its AutoCAD layers come with it.</div>'; return; }
+  const cm = cadMeta(S.fileId), CL = cm ? new Map(cm.layers.map(l => [l.name, l])) : null, dark = darkNow();
+  const G = Object.entries(cfg.getGroups()).sort((a, b) => a[1].name.localeCompare(b[1].name, undefined, {numeric: true}));
   const RN = {wall: "wall", opening: "door / window", column: "column", railing: "railing", glass: "glass", hatch: "hatch", text: "text / dims", tag: "tags", unit: "unit area", fixture: "fixtures / MEP", other: ""};
-  el.innerHTML = `<div class="lyrbar"><button class="btn sm" data-lall="1">All on</button><button class="btn sm" data-lall="0">All off</button><input type="search" id="lyrQ" placeholder="Filter layers"></div>
-    <div class="lyrbar"><span class="small" style="width:100%">Clean the drawing:</span><button class="btn sm pri" data-lpre="clean" title="Only walls, doors / windows, columns and railings">Walls & openings only</button><button class="btn sm" data-lpre="text" title="Text, dimensions, grid, titles, clouds">Text off</button><button class="btn sm" data-lpre="fixture" title="Furniture, sanitary, kitchen, MEP, electrical">Fixtures off</button><button class="btn sm" data-lpre="hatch">Hatch off</button><button class="btn sm" data-lpre="tag">Tags off</button></div>` +
-    G.map(([id, g]) => { const r = layerRole(g.name); return `<label class="lyr" data-name="${esc(g.name.toLowerCase())}"><input type="checkbox" data-lid="${esc(id)}"${ocOn(cfg, id) ? " checked" : ""}> <span style="flex:1">${esc(g.name)}</span>${RN[r] ? `<span class="tag ${BOUND.has(r) ? "g" : "a"}" title="${BOUND.has(r) ? "Bounds rooms for auto area" : "Ignored by auto area"}">${RN[r]}</span>` : ""}</label>`; }).join("") +
-    '<div class="small" style="padding:8px 12px">Green roles bound rooms for <b>Auto area</b> and the agents (setting ⚙ “Use the PDF\'s layers”). Layers switched off here are left out of snapping, auto area and the agents too.</div>';
+  const sw = l => l ? `<span class="lsw" style="background:${l.c === -1 ? (dark ? "#ffffff" : "#000000") : "#" + (l.c & 0xffffff).toString(16).padStart(6, "0")}" title="${l.aci ? "Colour " + l.aci : "True colour"}"></span>` : "";
+  el.innerHTML = (cm ? `<div class="lyrbar"><b style="flex:1;color:var(--navy)">AutoCAD layers · ${G.length}</b><button class="btn sm" data-cadq="1" title="Quantities from the drawing's own objects: lengths and areas by layer, blocks by name">CAD quantities…</button></div>` : "") +
+    `<div class="lyrbar"><button class="btn sm" data-lall="1">All on</button><button class="btn sm" data-lall="0">All off</button><input type="search" id="lyrQ" placeholder="Filter layers"></div>
+    <div class="lyrbar"><span class="small" style="width:100%">Clean the drawing:</span><button class="btn sm pri" data-lpre="clean" title="Only walls, doors / windows, columns and railings">Walls & openings only</button><button class="btn sm" data-lpre="text" title="Text, dimensions, grid, titles, clouds">Text off</button><button class="btn sm" data-lpre="fixture" title="Furniture, sanitary, kitchen, MEP, electrical">Fixtures off</button><button class="btn sm" data-lpre="hatch">Hatch off</button></div>` +
+    G.map(([id, g]) => { const r = layerRole(g.name), l = CL && CL.get(g.name);
+      return `<label class="lyr" data-name="${esc(g.name.toLowerCase())}"><input type="checkbox" data-lid="${esc(id)}"${ocOn(cfg, id) ? " checked" : ""}> ${sw(l)}<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis" title="${l ? esc(g.name + " · linetype " + l.lt.toLowerCase() + (l.frozen ? " · frozen in the drawing" : l.off ? " · off in the drawing" : "") + (l.plot ? "" : " · not plotted")) : esc(g.name)}">${esc(g.name)}</span>${RN[r] ? `<span class="tag ${BOUND.has(r) ? "g" : "a"}" title="${BOUND.has(r) ? "Bounds rooms for auto area" : "Ignored by auto area"}">${RN[r]}</span>` : ""}${cm ? `<button type="button" class="lyiso${S.iso === id ? " on" : ""}" data-liso="${esc(id)}" title="Only this layer (AutoCAD's LAYISO) — again: every layer back">&#9678;</button>` : ""}</label>`; }).join("") +
+    '<div class="small" style="padding:8px 12px">Green roles bound rooms for <b>Auto area</b> and the agents (setting ⚙ “Use the PDF\'s layers”). Layers switched off here are left out of snapping, auto area and the agents too.' + (cm ? " Right-click an object on the drawing to take it off, or isolate its layer." : "") + "</div>";
 }
 let layT = null;
 function setLayer(ids, on){
@@ -535,17 +545,19 @@ async function gotoPage(fileId, pageNo){
   pageNo = Math.max(1, Math.min(d.numPages, +pageNo || 1));
   await loadLayers(fileId);
   if (stale()) return;
+  if (cadMeta(fileId)) { await cadLoad(fileId); if (stale()) return; }   // an AutoCAD drawing: its scene draws the screen
   let pg; try { pg = await d.getPage(pageNo); } catch (e) { if (!stale()) toast("Page " + pageNo + " could not be read: " + (e.message || e), 6000); return; }
   if (stale()) return;
   if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) {} S.renderTask = null; }
   S.fileId = fileId; S.pageNo = pageNo; S.key = keyOf(fileId, pageNo);
   S.page = pg;
+  if (S.cadBmp && S.cadBmp.page !== pg) freeCadBitmap();
   S.base = S.page.getViewport({scale: 1});
   S.rendered = null; $("hi").style.display = "none"; { const lc = $("low"); lc.width = lc.width; }   // the last page's picture goes at once
   draftClear(); S.resume = null; S.gap = null; S.multi.clear(); S.hover = null; S.measure = null; S.measures = []; S.snap = null; S.autoShow = null; S.cmp = null; $("cmpLegend").style.display = "none";
   P.proj.last = {file: fileId, page: pageNo}; save();
   $("pageSel").value = fileId + "|" + pageNo; pgMark();
-  showDrop(false);
+  showDrop(false); S.iso = null; bgMark();
   fit(); renderLayers();
   await renderLow();
   if (stale()) return;
@@ -607,11 +619,12 @@ async function compareDialog(){
   renderLow(); renderHi(true);
 }
 async function renderLow(){   // drawn off screen, then shown only if the page is still the one on screen
+  if (cadOn()) return cadLow();   // an AutoCAD drawing: from its scene
   const page = S.page, fileId = S.fileId, longSide = Math.max(S.base.width, S.base.height), sc = Math.min(3, 3000 / longSide);
   const vp = page.getViewport({scale: sc}), off = document.createElement("canvas");
   off.width = Math.ceil(vp.width); off.height = Math.ceil(vp.height);
-  const ctx = thinLines(off.getContext("2d")); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, off.width, off.height);
-  try { await sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vp})).promise; } catch (e) {}
+  const ctx = inkCtx(thinLines(off.getContext("2d")), !S.cmp && darkNow(), !S.cmp && !!S.mono);
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, off.width, off.height); try { await sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vp})).promise; } catch (e) {}
   if (S.page !== page) return;
   await overlayCmp(ctx, off.width, off.height, sc, 0, 0);
   if (S.page !== page) return;
@@ -622,13 +635,14 @@ async function renderLow(){   // drawn off screen, then shown only if the page i
 let hiT = null;
 function renderHi(now){
   clearTimeout(hiT);
+  if (cadOn()) { if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) {} S.renderTask = null; } return cadHi(!!now); }   // a CAD drawing: drawn from its scene, at once
   hiT = setTimeout(async () => {
     if (!S.page) return;
     if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) {} }
     const st = stage(), dpr = Math.min(window.devicePixelRatio || 1, 2), c = $("hi"), v = Object.assign({}, S.view);
     const w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
     const off = document.createElement("canvas"); off.width = w; off.height = h;
-    const ctx = thinLines(off.getContext("2d"));
+    const ctx = inkCtx(thinLines(off.getContext("2d")), !S.cmp && darkNow(), !S.cmp && !!S.mono);
     const task = sliced(S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}));
     S.renderTask = task;
     try { await task.promise; } catch (e) { return; }
@@ -648,6 +662,7 @@ function applyView(){
   const r = S.rendered, hi = $("hi");
   if (r) { const k = v.s / r.s; hi.style.transform = `translate(${v.tx - r.tx * k}px,${v.ty - r.ty * k}px) scale(${k})`; hi.style.display = Math.abs(k - 1) < 1e-9 || k > 0.25 ? "block" : "none"; }
   $("zoomPct").textContent = S.base ? Math.round(v.s * 100) + "%" : "—";
+  if (cadOn()) cadHi(false);   // a CAD drawing follows every zoom / pan step at once
   draw(); miniUpdate();
 }
 function zoomAt(f, sx, sy){
@@ -662,7 +677,15 @@ const toBase = (x, y) => [(x - S.view.tx) / S.view.s, (y - S.view.ty) / S.view.s
 const mul = (A, B) => [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1], A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3], A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
 const app = (M, x, y) => [M[0] * x + M[2] * y + M[4], M[1] * x + M[3] * y + M[5]];
 async function indexPage(){
-  const key = S.key, page = S.page, base = S.base, file = S.fileId, pageNo = S.pageNo;
+  const key = S.key, page = S.page, base = S.base, file = S.fileId, pageNo = S.pageNo, cpg = cadPage();
+  if (cpg && !S.geo[key]) {   // an AutoCAD drawing: its lines and text come straight from its scene — no PDF to parse
+    const ix = CAD.cadIndex(cpg), sc = S.cadSc[file], cfg = S.ocgs && S.ocgs[file], byName = new Map(), cell = 24, grid = new Map();
+    if (cfg) Object.entries(cfg.getGroups()).forEach(([id, g]) => byName.set(g.name, id));
+    ix.segs.forEach((s2, i) => { const x0 = Math.floor(Math.min(s2[0], s2[2]) / cell), x1 = Math.floor(Math.max(s2[0], s2[2]) / cell), y0 = Math.floor(Math.min(s2[1], s2[3]) / cell), y1 = Math.floor(Math.max(s2[1], s2[3]) / cell);
+      if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4000) return; for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) { const k = x + "," + y; let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(i); } });
+    S.geo[key] = {segs: ix.segs, grid, cell, images: 0, styles: ix.styles, layerIds: sc.layers.map(l => byName.get(l.name) || null), file, cad: true};
+    if (!S.texts[key]) S.texts[key] = withOcr(key, ix.texts.map(t => ({s: normQ(t.s), x: t.x, y: t.y, w: t.w, h: t.h})));
+  }
   if (!S.geo[key]) {
     busy("Reading drawing lines…");
     try {
@@ -752,6 +775,7 @@ async function indexPage(){
     if (c.length) { P.proj.scales[key] = {ptPerFt: c[0].ptPerFt, how: "note", text: c[0].text, note: c[0].note || "", factor: c[0].factor || 1, verified: false, at: new Date().toISOString()}; save(); toast(keyName(key) + ": scale read from the drawing, " + c[0].label + " — check it against a known dimension (scale chip → Verify)", 5200);
       checkScale(key, !S.agentRun); }   // (an agent working through the pages checks it itself, with no dialog in its way)
   }
+  if (key === S.key && P.proj && (P.proj.scales[key] || {}).how === "cad") cadUnitsCheck(key);
   if (key === S.key) refresh();
 }
 /* ------------------------------------------------------------------ scale check: the room sizes written on the drawing
@@ -2648,7 +2672,7 @@ function renderScaleChip(){
   const ch = $("scaleChip"), sc = P.proj && P.proj.scales[S.key];
   if (!S.page) { ch.className = "chip bad"; ch.lastElementChild.textContent = "No page"; return; }
   if (!sc) { ch.className = "chip bad"; ch.lastElementChild.textContent = "Scale not set — press K"; }
-  else { ch.className = "chip " + scaleState(sc).k; ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "pdf" ? sc.text + " · saved in the PDF" : sc.how === "manual" ? sc.text + " · chosen" : sc.how === "inherited" ? "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · inherited from " + keyName(sc.from) : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · calibrated") + (sc.verified ? " · verified" : sc.doubt ? " · doubtful" : " · not verified"); ch.title = "Page scale: " + scaleState(sc).t + " — click to set or check"; }
+  else { ch.className = "chip " + scaleState(sc).k; ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "pdf" ? sc.text + " · saved in the PDF" : sc.how === "cad" ? sc.text + " · from the drawing" : sc.how === "manual" ? sc.text + " · chosen" : sc.how === "inherited" ? "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · inherited from " + keyName(sc.from) : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · calibrated") + (sc.verified ? " · verified" : sc.doubt ? " · doubtful" : " · not verified"); ch.title = "Page scale: " + scaleState(sc).t + " — click to set or check"; }
   markPageSel();
 }
 /* a page's scale status: Verified / Calibrated (both checked against a known length), Inherited (copied from another page,
@@ -2659,6 +2683,7 @@ function scaleState(sc){
   if (sc.how === "inherited") return sc.verified ? {k: "ok", ic: "✓", t: "Inherited · verified"} : {k: "warn", ic: "⚠", t: "Inherited from " + keyName(sc.from)};
   if (sc.how === "calibrated") return {k: "ok", ic: "✓", t: "Calibrated"};
   if (sc.how === "manual") return sc.verified ? {k: "ok", ic: "✓", t: "Chosen · verified"} : {k: "warn", ic: "⚠", t: "Chosen by hand — not verified"};
+  if (sc.how === "cad") return sc.verified ? {k: "ok", ic: "✓", t: "From the drawing's units"} : {k: "warn", ic: "⚠", t: "Drawing units not set — check it"};
   if (sc.how === "pdf") return sc.verified ? {k: "ok", ic: "✓", t: "From the PDF · verified"} : {k: "warn", ic: "⚠", t: "Saved in the PDF — not verified"};
   return sc.verified ? {k: "ok", ic: "✓", t: "Verified"} : {k: "warn", ic: "⚠", t: "From note — not verified"};
 }
@@ -2706,9 +2731,12 @@ async function thumbRun(){
   const pr = P.proj;
   while (S.thumbQ.length && P.proj === pr) {
     const k = S.thumbQ.shift(); if (S.thumbs[k]) continue; const [f, p] = k.split(":");
-    try { const pg = await (await doc(f)).getPage(+p), v0 = pg.getViewport({scale: 1}), vp = pg.getViewport({scale: 200 / Math.max(v0.width, v0.height)}), cv = document.createElement("canvas");
+    try { const csc = CAD && +p === 1 && S.cadSc && S.cadSc[f], cpg = csc && csc.pages[0];
+      if (cpg) { const s2 = 200 / Math.max(cpg.w, cpg.h), cv = document.createElement("canvas"); cv.width = Math.ceil(cpg.w * s2); cv.height = Math.ceil(cpg.h * s2);   // a CAD page: from its scene
+        await CAD.cadDrawAsync(cv.getContext("2d"), cpg, {s: s2, tx: 0, ty: 0, W: cv.width, H: cv.height}, {dark: false, mono: false, hidden: cadHidden(f, csc), dpr: 1}); S.thumbs[k] = cv.toDataURL("image/png"); }
+      else { const pg = await (await doc(f)).getPage(+p), v0 = pg.getViewport({scale: 1}), vp = pg.getViewport({scale: 200 / Math.max(v0.width, v0.height)}), cv = document.createElement("canvas");
       cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height); const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
-      await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp})).promise; S.thumbs[k] = cv.toDataURL("image/png"); }
+      await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp})).promise; S.thumbs[k] = cv.toDataURL("image/png"); } }
     catch (e) { S.thumbs[k] = "x"; }   // PDF not attached in this browser: left blank
     const im = [...document.querySelectorAll("#pageList img[data-th]")].find(x => x.dataset.th === k); if (im && S.thumbs[k] !== "x") im.src = S.thumbs[k];
     if (k === S.key) miniUpdate();
@@ -3750,6 +3778,7 @@ async function exportPdf(all){
       const vb = pg.view;   // [x0, y0, x1, y1] of the shown box, in PDF space
       cp.drawImage(png, {x: vb[0], y: vb[1], width: vb[2] - vb[0], height: vb[3] - vb[1]});
     }
+    ocFix(L, out, pages.map(x => x.f));
     saveBlob(new Blob([await out.save()], {type: "application/pdf"}), fileBase() + (all ? "_takeoff" : "_p" + S.pageNo + "_markup") + ".pdf");
   } catch (e) { toast("PDF export failed: " + (e.message || e), 6000); }
   busy("");
@@ -3765,9 +3794,10 @@ async function exportBundle(){
     const exported = new Date().toISOString(), parts = [], pdfs = [], miss = []; let off = 0;
     for (const f of P.proj.files) {
       const rec = await dbGet("pdfs", f.id); if (!rec) { miss.push(f.name); continue; }
-      const sha = rec.sha || await sha256(rec.data);
-      pdfs.push(Object.assign({id: f.id, name: f.name, size: rec.data.byteLength, sha, off}, rec.pw ? {pw: rec.pw} : {}));
+      const sha = rec.src ? rec.pdfSha || await sha256(rec.data) : rec.sha || await sha256(rec.data), e = Object.assign({id: f.id, name: f.name, size: rec.data.byteLength, sha, off}, rec.pw ? {pw: rec.pw} : {});
       parts.push(rec.data); off += rec.data.byteLength;
+      if (rec.src) { e.srcSha = rec.sha || await sha256(rec.src); e.srcOff = off; e.srcSize = rec.src.byteLength; parts.push(rec.src); off += rec.src.byteLength; }   // the DWG / DXF too
+      pdfs.push(e);
     }
     const head = new TextEncoder().encode(JSON.stringify({format: "zd-takeoff-bundle", exported, project: Object.assign({format: "zd-takeoff", exported}, P.proj), pdfs}));
     const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, head.length);
@@ -3791,10 +3821,11 @@ async function importBundle(buf){
       if (!(p.size > 0) || b > buf.byteLength) { pre.push({what: "PDF in the file: " + p.name, a: "1", b: "0", st: "FAIL", note: "cut short — not attached"}); continue; }
       const data = buf.slice(a, b), sha = await sha256(data);
       if (p.sha && sha && sha !== p.sha) { pre.push({what: "PDF in the file: " + p.name, a: "1", b: "0", st: "FAIL", note: "damaged — its fingerprint does not match — not attached"}); continue; }
-      let id = String(p.id); const have = await pdfSha(id);
-      if (have !== null && have === sha && sha) continue;   // the same drawing is already in this browser
+      let src = null; if (p.srcSize > 0) { const a2 = base + (+p.srcOff || 0), b2 = a2 + +p.srcSize; if (b2 <= buf.byteLength) { src = buf.slice(a2, b2); if (p.srcSha && await sha256(src) !== p.srcSha) src = null; } }
+      let id = String(p.id); const have = await pdfSha(id), ident = src ? p.srcSha || sha : sha;
+      if (have !== null && have === ident && ident) continue;   // the same drawing is already in this browser
       if (have !== null) { const nid = uid("F"); text = remapFileId(text, id, nid); id = nid; }   // another drawing already uses this id here: this one gets its own
-      await dbPut("pdfs", Object.assign({name: p.name, size: data.byteLength, data, sha}, p.pw ? {pw: p.pw} : {}), id);
+      await dbPut("pdfs", Object.assign({name: p.name, size: src ? src.byteLength : data.byteLength, data, sha: ident}, p.pw ? {pw: p.pw} : {}, src ? {src, pdfSha: sha} : {}), id);
     }
   } finally { busy(""); }
   if (!pre.length) pre.push({what: "PDFs in the file", a: h.pdfs.length, b: h.pdfs.length, st: "PASS", note: "fingerprints checked"});
@@ -3808,13 +3839,13 @@ async function exportMenu(){
     ${V.L.length ? `<div style="max-height:240px;overflow:auto;margin:6px 0;border:1px solid var(--line);border-radius:6px">${V.L.map(x => `<div style="padding:4px 8px;border-bottom:1px solid #f0f4f8;font-size:12px"><b style="color:${lvlCol(x.lvl)};display:inline-block;width:70px">${x.lvl}</b>${esc(x.msg)}</div>`).join("")}</div>` : ""}
     <p class="small">${V.lvl === "PASS" ? "" : "You can still export; the Excel file carries this list on its Validation sheet. "}Measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as rows).</p>`;
   $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="exBak">Backups…</button><button class="btn" id="exJson" title="Measurements only — the PDFs are not inside">Project (.json)</button><button class="btn" id="exBnd" title="The project and all its PDFs in one file, to move it to another browser or computer">Project + PDFs</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA" title="Every sheet of the project in one PDF, with or without markups">All project sheets (.pdf)</button>
-    <button class="btn pri" id="exPages" title="Choose the pages (this page, pages with takeoff, ticked pages, or any), the format (PDF, a PDF per page, PNG, JPEG), the resolution up to 600 DPI and the legend">&#8681; Pages — PDF / PNG / JPEG…</button><button class="btn" id="exRep" title="A printable takeoff report with a summary, quantities by condition and floor, the bill, the drawings measured and the check — print it or save it as PDF">&#128438; Report (print / PDF)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
+    <button class="btn pri" id="exPages" title="Choose the pages (this page, pages with takeoff, ticked pages, or any), the format (PDF, a PDF per page, PNG, JPEG), the resolution up to 600 DPI and the legend">&#8681; Pages — PDF / PNG / JPEG…</button><button class="btn" id="exPlot" title="A window, the view or the page on a paper size, at a scale, colour / monochrome — print it or save it as PDF (Ctrl+P)">&#128424; Plot / print…</button><button class="btn" id="exRep" title="A printable takeoff report with a summary, quantities by condition and floor, the bill, the drawings measured and the check — print it or save it as PDF">&#128438; Report (print / PDF)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
   $("dlgBack").classList.add("on");
   const close = () => $("dlgBack").classList.remove("on");
   $("dlgCancel").onclick = close;
   $("exXls").onclick = () => { close(); exportExcel(); }; $("exCsv").onclick = () => { close(); exportCsv(); };
   $("exPng").onclick = () => { close(); exportPng(); }; $("exPdf1").onclick = () => { close(); exportPdf(false); }; $("exPdfA").onclick = () => { close(); exportPdf(true); }; $("exJson").onclick = () => { close(); exportJson(); }; $("exBnd").onclick = () => { close(); exportBundle(); }; $("exBak").onclick = () => backupsDialog();
-  $("exPages").onclick = () => { close(); exportPagesDialog(); }; $("exRep").onclick = () => { close(); reportPrint(); };
+  $("exPages").onclick = () => { close(); exportPagesDialog(); }; $("exPlot").onclick = () => { close(); plotDialog(); }; $("exRep").onclick = () => { close(); reportPrint(); };
 }
 
 /* ------------------------------------------------------------------ pages manager (Forma Takeoff 2D "Sheets", Bluebeam batch)
@@ -3994,10 +4025,10 @@ async function expPdf(o, pr){   // the drawing stays the original vector page; t
       if (o.fade) np.drawRectangle({x: x0 + strip, y: y0, width: vw, height: vh, color: L.rgb(1, 1, 1), opacity: o.fade / 100});
       np.drawImage(png, {x: x0, y: y0, width: vw + strip, height: vh});
     }
-    if (per) files.push({name: expName(key, n) + ".pdf", data: await out.save()});
+    if (per) { ocFix(L, out, [f]); files.push({name: expName(key, n) + ".pdf", data: await out.save()}); }
   }
   pr.sub("Saving…");
-  if (!per) return saveBlob(new Blob([await out.save()], {type: "application/pdf"}), o.name + ".pdf");
+  if (!per) { ocFix(L, out, o.keys.map(k => k.split(":")[0])); return saveBlob(new Blob([await out.save()], {type: "application/pdf"}), o.name + ".pdf"); }
   if (files.length === 1) saveBlob(new Blob([files[0].data], {type: "application/pdf"}), o.name + "_" + files[0].name); else saveBlob(await zipBlob(files), o.name + ".zip");
 }
 async function expImages(o, pr){
@@ -4046,7 +4077,9 @@ function importMenu(x, y){
 }
 async function importDialog(files){
   if (!P.proj) return toast("Open or start a project first");
-  files = [...files]; const pdfs = files.filter(isPdfFile), imgs = files.filter(f => !isPdfFile(f) && isImgFile(f)), skip = files.length - pdfs.length - imgs.length;
+  files = [...files];
+  const cads = files.filter(isCadFile); if (cads.length) { await addFiles(cads); files = files.filter(f => !isCadFile(f)); if (!files.length) return; }
+  const pdfs = files.filter(isPdfFile), imgs = files.filter(f => !isPdfFile(f) && isImgFile(f)), skip = files.length - pdfs.length - imgs.length;
   if (!pdfs.length && !imgs.length) return toast(skip ? skip + " file" + (skip > 1 ? "s" : "") + " left out — only PDF, JPG and PNG drawings can be added" : "No file chosen", 4000);
   if (pdfs.length > 12) {   // a big folder: every PDF opened at once to picture its pages is heavy — ask first
     const how = await choose("Import " + pdfs.length + " PDFs", `<p><b>${pdfs.length}</b> PDFs${imgs.length ? " and " + imgs.length + " image" + (imgs.length > 1 ? "s" : "") : ""}. Add every page of each as it is, or open them all to choose their pages (slower with many large drawings)?</p>`, [{t: "Choose pages", v: "pick"}, {t: "Add every page", v: "all", pri: true}]);
@@ -5000,6 +5033,10 @@ function paletteCmds(){
   if (S.page) { add("Marked-up page (.png)", exportPng, "Export"); add("Marked-up page (.pdf)", () => exportPdf(false), "Export"); }
   add("All project sheets (.pdf)", () => exportPdf(true), "Export"); add("Project (.json) — measurements only", exportJson, "Export");
   add("Project + PDFs (.zdtakeoff) — to move to another computer", exportBundle, "Export"); add("Backups of this project", () => backupsDialog(), "Project");
+  if (S.page) add("Plot / print — a window, the view or the page, at a scale", plotDialog, "Export", "Ctrl+P");
+  if (S.page && cadMeta(S.fileId)) add("AutoCAD quantities — lengths, areas and blocks from the drawing", () => cadQtyDialog(), "Page");
+  add("Background: black, as AutoCAD's model space", () => setBg("black"), "View"); add("Background: white", () => setBg("white"), "View"); add("Background: auto — black for AutoCAD drawings, white for PDFs", () => setBg("auto"), "View");
+  add("Monochrome view on / off", () => setMono(!S.mono), "View");
   add("Export pages… — PDF, PDF per page, PNG or JPEG; pages, resolution, legend", () => exportPagesDialog(), "Export");
   add("Export the pages with takeoff as one PDF…", () => exportPagesDialog({scope: "tk", fmt: "pdf"}), "Export"); add("Export pages as PNG images (high resolution)…", () => exportPagesDialog({fmt: "png"}), "Export");
   add("Takeoff report — print or save as PDF", reportPrint, "Export");
@@ -5146,7 +5183,7 @@ function ctxMark(m){
 }
 function ctxCanvas(q){
   const u = S.undo.length ? undoEntry(S.undo[S.undo.length - 1]).label : "", r = S.redo.length ? undoEntry(S.redo[S.redo.length - 1]).label : "", T = (t, n, key) => ({t: n, k: key, fn: () => setTool(t), on: S.tool === t});
-  return [{h: pageName({file: S.fileId, page: S.pageNo}), s: S.clip ? "clipboard: " + S.clip.n + " object" + (S.clip.n > 1 ? "s" : "") : ""}, ...sheetLinkItems(q),
+  return [{h: pageName({file: S.fileId, page: S.pageNo}), s: S.clip ? "clipboard: " + S.clip.n + " object" + (S.clip.n > 1 ? "s" : "") : ""}, ...cadCtxItems(q), ...sheetLinkItems(q),
     {t: "Paste here", k: "Ctrl+V", fn: () => pasteClip("cursor", q), dis: !S.clip}, {t: "Paste in place", k: "Ctrl+Shift+V", fn: () => pasteClip("inplace"), dis: !S.clip},
     {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {sep: 1},
     {t: "Undo" + (u ? ": " + u : ""), k: "Ctrl+Z", fn: undoAny, dis: !S.undo.length}, {t: "Redo" + (r ? ": " + r : ""), k: "Ctrl+Y", fn: redoAny, dis: !S.redo.length}, {sep: 1},
@@ -5180,12 +5217,17 @@ function wire(){
     const a = document.activeElement; if (a && a.closest && a.closest("#props,header") && /^(INPUT|SELECT)$/.test(a.tagName)) a.blur();   // a field being typed in is taken first
     savePr = P.proj; flushSave().then(ok => toast(ok ? "Saved in this browser — " + P.proj.items.length + " measurement" + (P.proj.items.length === 1 ? "" : "s") + " · Export → Project + PDFs to keep a copy elsewhere" : "Not saved — see the message above", 2600));
   }, true);
+  document.addEventListener("keydown", e => {   // Ctrl+P: plot (a window, the view, the page) — not the browser's print of this screen
+    if (!((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "p")) return;
+    e.preventDefault(); e.stopPropagation(); if (P.proj && S.page && !$("dlgBack").classList.contains("on")) plotDialog();
+  }, true);
   $("warnbar").addEventListener("click", e => { if (e.target.closest("[data-reload]")) { clearTimeout(saveT); savePr = null; location.reload(); } });   // this tab's pending change is dropped, not written over the other's
   st.addEventListener("pointerdown", onDown);
   st.addEventListener("pointermove", onMove);
   st.addEventListener("pointerup", onUp); st.addEventListener("pointercancel", onUp);
   st.addEventListener("contextmenu", e => e.preventDefault());
-  st.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });   // middle button pans — not the browser's autoscroll
+  st.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });
+  { let mid = 0; st.addEventListener("pointerdown", e => { if (e.button !== 1) return; const t = Date.now(); if (t - mid < 380) { mid = 0; if (S.page) { fit(); renderHi(); } } else mid = t; }); }   // a middle double-click: zoom extents, as AutoCAD   // middle button pans — not the browser's autoscroll
   window.addEventListener("blur", () => { if (S.space) { S.space = false; stage().classList.toggle("pan", S.tool === "pan"); } });   // Space released in another window must not leave pan on
   st.addEventListener("dblclick", e => {
     if (["draw", "ded", "measure", "fence"].indexOf(S.tool) >= 0 && S.draft.length) return endDraft();
@@ -5247,7 +5289,7 @@ function wire(){
   $("bAddM").onclick = e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); importMenu(r.left, r.bottom + 4); };
   const pick = (id, f) => { $(id).onchange = e => { const L = [...e.target.files]; e.target.value = ""; if (L.length) f(L); }; };
   pick("impPdfIn", importDialog); pick("imgIn", importDialog);
-  pick("dirIn", L => { const ok = L.filter(f => isPdfFile(f) || isImgFile(f)); if (!ok.length) return toast("No PDF, JPG or PNG in that folder", 3000); importDialog(ok); });
+  pick("dirIn", L => { const ok = L.filter(f => isPdfFile(f) || isImgFile(f) || isCadFile(f)); if (!ok.length) return toast("No PDF, DWG, DXF, JPG or PNG in that folder", 3000); importDialog(ok); });
   $("bWs").onclick = e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); wsMenu(Math.max(4, r.right - 300), r.bottom + 4); };
   $("bCmd").onclick = () => openPalette();
   $("bMini").onclick = () => { wsSet({mini: !wsPref().mini}); toast(wsPref().mini ? "Minimap on — it shows when you zoom in" : "Minimap off", 1800); };
@@ -5259,7 +5301,10 @@ function wire(){
     mi.addEventListener("pointerup", e => { e.stopPropagation(); S.miniDrag = false; });
     ["dblclick", "contextmenu"].forEach(t => mi.addEventListener(t, e => { e.stopPropagation(); e.preventDefault(); })); }
   $("layerList").addEventListener("change", e => { if (e.target.dataset.lid) setLayer([e.target.dataset.lid], e.target.checked); });
-  $("layerList").addEventListener("click", e => { const pr = e.target.closest("[data-lpre]");
+  $("layerList").addEventListener("click", e => {
+    const iso = e.target.closest("[data-liso]"); if (iso) { e.preventDefault(); e.stopPropagation(); return cadIsolateId(iso.dataset.liso); }
+    if (e.target.closest("[data-cadq]")) return cadQtyDialog();
+    const pr = e.target.closest("[data-lpre]");
     if (pr) { const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; const G = Object.entries(cfg.getGroups()), t = pr.dataset.lpre;
       if (t === "clean") { setLayer(G.map(([id]) => id), true); setLayer(G.filter(([, g]) => !BOUND.has(layerRole(g.name))).map(([id]) => id), false); }
       else setLayer(G.filter(([, g]) => { const r = layerRole(g.name); return t === "text" ? r === "text" || r === "unit" : t === "fixture" ? r === "fixture" || r === "glass" : r === t; }).map(([id]) => id), false);
@@ -5294,6 +5339,7 @@ function wire(){
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
   $("bLw").onclick = () => setThin(!S.thin);
+  ["auto", "black", "white"].forEach(v => { $("bBg_" + v).onclick = () => setBg(v); }); $("bMono").onclick = () => setMono(!S.mono);
   const vpop = $("viewPop"), vOpen = on => { vpop.classList.toggle("on", on); $("bView").setAttribute("aria-expanded", on ? "true" : "false"); };
   $("bView").onclick = e => { e.stopPropagation(); vOpen(!vpop.classList.contains("on")); };
   document.addEventListener("pointerdown", e => { if (vpop.classList.contains("on") && !e.target.closest("#viewPop,#bView")) vOpen(false); }, true);
@@ -6053,6 +6099,8 @@ async function agentStep(text){
   const t = text.toLowerCase().trim(), scope = /\b(project|all\s+pdfs?|every\s+pdf|all\s+drawings)\b/.test(t) ? "all" : /\b(all|every|each)\s+(pages?|sheets?)\b|\bwhole\s+(pdf|set)\b|\bpdf\b/.test(t) ? "pdf" : "page";
   try {
     if (/^(help|\?)$/.test(t)) return agentHelp();
+    if (/\b(cad|dwg|dxf|autocad)\b.*\b(quantit\w*|take\s*-?\s*off|layers?|blocks?|counts?)\b|\b(layer|block)s?\s+quantit/.test(t)) { aiLog("bot", "AutoCAD quantities: tick the layers (lengths, areas) and blocks (counts) to take off from the drawing's own objects."); return cadQtyDialog(); }
+    if (/^\s*(plot|print)(\s+(this|the)?\s*(window|view|page|drawing|sheet))?\s*$/.test(t)) { aiLog("bot", "Plot: what to plot (a window, the view, the page), the paper and the scale — then Print or Save PDF."); return plotDialog(); }
     if (/\b(sheet\s*(?:info|names?|numbers?|nos?\.?|titles?)|title\s*-?\s*blocks?|auto\s*-?\s*names?|bookmarks?|rename\s+(?:the\s+)?(?:pages|sheets))\b/.test(t) && !/\b(export|download|print)\b/.test(t)) return agentSheets(t);
     if (/\b(export|save|download|print)\b/.test(t) && /\b(pdfs?|png|jpe?g|images?|pictures?|pages?|sheets?|drawings?|mark(?:ed)?[\s-]*ups?)\b/.test(t) && !/\b(csv|excel|xlsx|schedule|json|project)\b/.test(t)) return agentExport(t);
     if (/\breport\b/.test(t) && !/\bschedule\b/.test(t)) { aiLog("bot", "Opening the takeoff report in a new tab — print it or save it as PDF."); return reportPrint(); }
@@ -6938,14 +6986,449 @@ function setDim(on){   // on = true/false, or a dimming level 0-90 %
 }
 function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); viewMark(); if (S.page) { renderLow(); renderHi(true); } }
 
+/* ------------------------------------------------------------------ AutoCAD drawings (DWG / DXF) — cad.js
+   A drawing added with + PDF is read in this browser and kept as a layered vector PDF — so snapping, auto area, find, the
+   agents and the exports work on it as on any PDF — together with the drawing itself and its scene. The scene is what the
+   screen shows: drawn straight onto the canvas, only what is on screen, so zoom and pan are as quick as AutoCAD's, on its
+   black model space with its colours (View → Background), or monochrome. Its scale comes from the drawing's units. */
+const isCadFile = f => /\.(dwg|dxf)$/i.test(f && f.name || "");
+async function cadMod(){
+  if (!CAD) { try { CAD = await import("./cad.js" + CADV); } catch (e) { throw new Error("the AutoCAD reader (cad.js) could not be loaded — " + (e.message || e)); } }
+  return CAD;
+}
+const cadMeta = fid => { const f = P.proj && P.proj.files.find(x => x.id === fid); return f && f.cad || null; };
+const cadPage = () => { const sc = CAD && S.cadSc && S.cadSc[S.fileId]; return sc && S.pageNo === 1 ? sc.pages[0] : null; };
+const cadOn = () => !!(cadPage() && !S.cmp);
+/* a CAD file's scene: kept in this browser with the drawing; read again from the DWG when the reader has moved on — onto
+   exactly the page it was given the first time, so the measurements stay where they are */
+function cadLoad(fid){
+  S.cadSc = S.cadSc || {}; S.cadP = S.cadP || {};
+  if (S.cadSc[fid] !== undefined) return Promise.resolve(S.cadSc[fid]);
+  if (S.cadP[fid]) return S.cadP[fid];
+  const meta = cadMeta(fid); if (!meta) return Promise.resolve(null);
+  return S.cadP[fid] = (async () => {
+    const C = await cadMod(), rec = await dbGet("pdfs", fid); let sc = null;
+    if (rec && rec.scene && rec.scene.ver === C.CAD_VER) sc = rec.scene;
+    else if (rec && rec.src) {
+      try { const r = await cadWorker(rec.src, rec.name || "the drawing", meta.map);
+        if (r) sc = r.scene; else { busy("Reading " + (rec.name || "the drawing") + "…"); sc = C.cadScene(await C.cadRead(rec.src, rec.name || ""), {map: meta.map}); }
+        rec.scene = sc; await dbPut("pdfs", rec, fid).catch(() => {}); } finally { busy(""); } }
+    S.cadSc[fid] = sc; delete S.cadP[fid]; return sc;
+  })().catch(e => { S.cadSc[fid] = null; delete S.cadP[fid]; toast("Shown from its PDF — the drawing's objects could not be read here (" + (e.message || e) + ")", 6000); return null; });
+}
+/* a DWG / DXF read off the page's thread, in a worker (cad-worker.js): the page stays responsive while a big drawing is read, and
+   the reader's memory goes with the worker. Resolves {scene, pdf}, or null when this browser cannot start the worker (then it is
+   read here) */
+const PDFLIB_ESM = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.esm.min.js";
+function cadWorker(buf, name, map){
+  return new Promise((ok, bad) => {
+    let w; try { w = new Worker(new URL("./cad-worker.js" + CADV, import.meta.url), {type: "module"}); } catch (e) { return ok(null); }
+    const t0 = Date.now(), first = !S.cadRead, label = {load: "Loading the AutoCAD reader…", read: "Reading " + name + (first ? " — the first drawing loads the reader (about 10 MB, once)" : "") + "…",
+      scene: "Drawing " + name + "…", pdf: "Writing " + name + " as a layered PDF…"};
+    let step = "", started = false, last = Date.now();
+    const say = () => busy((label[step] || "Reading " + name + "…") + (Date.now() - t0 > 3000 ? " " + Math.round((Date.now() - t0) / 1000) + " s" : ""));
+    const tick = setInterval(() => { say(); if (Date.now() - last > 15 * 60000) { done(); bad(new Error("the reader stopped answering — the drawing may be too big for this browser")); } }, 1000);
+    const done = () => { clearInterval(tick); try { w.terminate(); } catch (e) {} };
+    w.onmessage = e => { const d = e.data || {}; last = Date.now(); if (d.step) { step = d.step; if (d.step !== "load") started = true; return say(); }
+      done(); if (d.ok) { S.cadRead = true; ok(d); } else bad(new Error(d.error || "the drawing could not be read")); };
+    w.onerror = e => { done(); if (!started) ok(null); else bad(new Error("the drawing was too big for this browser to read" + (e && e.message ? " (" + e.message + ")" : ""))); };
+    say(); const copy = buf.slice(0); w.postMessage({buf: copy, name, map: map || null, pdfLib: PDFLIB_ESM}, [copy]);
+  });
+}
+/* a DWG / DXF file -> the PDF to keep, the drawing itself, its scene and what the project keeps about it */
+async function cadImport(f, buf, map){
+  const C = await cadMod(); let sc, pdf;
+  const r = await cadWorker(buf, f.name, map);
+  if (r) { sc = r.scene; pdf = r.pdf.buffer.slice(r.pdf.byteOffset, r.pdf.byteOffset + r.pdf.byteLength); }
+  else {   // no worker here: read on this thread
+    busy("Reading " + f.name + (S.cadRead ? "…" : " — the first AutoCAD drawing loads the reader (about 10 MB, once)…"));
+    const md = await C.cadRead(buf, f.name); S.cadRead = true;
+    busy("Drawing " + f.name + "…"); await new Promise(r2 => setTimeout(r2, 0));
+    sc = C.cadScene(md, map ? {map} : undefined);
+    busy("Writing " + f.name + " as a layered PDF…");
+    const bytes = await C.cadPdf(sc, await loadPdfLib(), {title: f.name}); pdf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  }
+  const pg = sc.pages[0];
+  if (!pg.n && !pg.tn) throw new Error("nothing was found in its model space" + (Object.keys(sc.stats.skipped).length ? " (only " + Object.keys(sc.stats.skipped).join(", ") + ")" : "") + " — is the drawing on a layout (paper space)?");
+  const st = sc.stats, meta = {fmt: sc.fmt, ver: sc.dver, units: sc.units, unitName: sc.unitName, unitHow: sc.unitHow || "", unitFix: !!sc.unitFix, assumed: sc.assumed, den: pg.den, ptPerFt: pg.ptPerFt, conv: C.CAD_VER, map: pg.map,
+    layers: sc.layers.map(l => ({name: l.name, c: l.c, aci: l.aci, off: l.off, frozen: l.frozen, plot: l.plot, lt: l.lt, lw: l.lw})),
+    stats: {ents: st.ents, prims: st.prims, texts: st.texts, skipped: st.skipped, missing: Object.keys(st.missing).length, far: st.far, junk: st.junk || 0, trunc: st.trunc}};
+  return {pdf, src: buf, scene: sc, meta};
+}
+function cadAdopt(meta, cad, how){   // a drawing just added: its page's scale from its units; layers off or frozen in the drawing start off
+  const key = keyOf(meta.id, 1), m = cad.meta, sc = P.proj.scales[key];
+  if (!sc || sc.how === "cad" || how !== "same") P.proj.scales[key] = {ptPerFt: m.ptPerFt, how: "cad", text: "1:" + m.den + " · units " + m.unitName + (m.unitHow ? " (from " + m.unitHow + ")" : ""), verified: !m.assumed && !m.unitFix, at: new Date().toISOString()};
+  if (how === "new") { P.proj.layersOff = P.proj.layersOff || {}; P.proj.layersOff[meta.id] = m.layers.filter(l => l.off || l.frozen).map(l => l.name); }
+}
+function cadSay(name, m){
+  const off = m.layers.filter(l => l.off || l.frozen).length, sk = Object.entries(m.stats.skipped || {}).map(([t, n]) => n + " " + t).join(", ");
+  return name + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
+    (m.assumed ? " — ⚠ the drawing has no units set: check the scale (chip → Verify)" : m.unitFix ? " — ⚠ its dimensions disagree with its units setting: check the scale (chip → Verify)" : " — scale exact") +
+    " · " + m.layers.length + " layers" + (off ? " (" + off + " off / frozen)" : "") + " · " + (m.stats.ents || 0).toLocaleString() + " objects" +
+    (sk ? " · not shown: " + sk : "") + (m.stats.missing ? " · " + m.stats.missing + " block(s) missing (xrefs?)" : "") + (m.stats.far ? " · " + m.stats.far + " far-off object(s) left off the page" : "") + (m.stats.junk ? " · " + m.stats.junk + " damaged object(s) left out" : "") + (m.stats.trunc ? " · ⚠ very large: shown in part" : "");
+}
+async function cadUnitsCheck(key){   // the drawing's units against the room sizes written on it (drawn in mm, saved as inches…)
+  const sc = P.proj && P.proj.scales[key]; if (!sc || sc.how !== "cad" || sc.checked) return; sc.checked = true;
+  let ev = null; try { ev = await scaleFromRooms(key); } catch (e) { ev = null; }
+  if (!ev || ev.agree < 3) return;
+  const r = ev.ptPerFt / sc.ptPerFt; if (Math.abs(Math.log(r)) < Math.log(1.15)) return;
+  sc.doubt = {label: "1 ft = " + ev.ptPerFt.toFixed(3) + " pt", ptPerFt: ev.ptPerFt, ratio: +r.toFixed(3), rooms: ev.rooms, agree: ev.agree}; sc.verified = false; save(); refresh();
+  toast("⚠ " + keyName(key) + ": the drawing's units say " + sc.text + ", but " + ev.agree + " room sizes written on it measure × " + r.toFixed(2) + " — check the scale (chip → Verify)", 9000);
+}
+function cadHidden(fid, sc){ const off = new Set(((P.proj && P.proj.layersOff) || {})[fid] || []), h = new Uint8Array(sc.layers.length); sc.layers.forEach((l, i) => { if (off.has(l.name)) h[i] = 1; }); return h; }
+
+/* the background (black as AutoCAD's model space, white, or black for CAD drawings only) and monochrome */
+const darkNow = () => S.bg === "black" || (S.bg !== "white" && !!cadMeta(S.fileId));
+function viewOpts(dpr, fast){ const sc = S.cadSc && S.cadSc[S.fileId]; return {dark: darkNow(), mono: !!S.mono, thin: !!S.thin, hidden: sc ? cadHidden(S.fileId, sc) : null, dpr, fast}; }
+function bgMark(){
+  ["auto", "black", "white"].forEach(v => { const b = $("bBg_" + v); if (b) b.classList.toggle("on", (S.bg || "auto") === v); });
+  const m = $("bMono"); if (m) m.classList.toggle("on", !!S.mono); stage().classList.toggle("dark", darkNow());
+}
+function setBg(v){ S.bg = v; pref("zdTakeoffBg", v); bgMark(); if (S.page) { renderLow(); renderHi(true); } renderLayers(); }
+function setMono(on){ S.mono = !!on; pref("zdTakeoffMono", on ? "1" : ""); bgMark(); if (S.page) { renderLow(); renderHi(true); } }
+/* a PDF drawn dark (white paper black, black ink white, colours kept — a dark one lifted) or in one ink: the colours pdf.js sets on
+   this canvas are changed as it sets them */
+const FS = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "fillStyle"), SS = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "strokeStyle");
+function inkMap(dark, mono){
+  const cache = new Map();
+  return v => {
+    if (typeof v !== "string") return v; let r = cache.get(v); if (r !== undefined) return r;
+    let R, G, B, A = 1; const m = /^#([0-9a-f]{6})$/i.exec(v);
+    if (m) { const n = parseInt(m[1], 16); R = n >> 16 & 255; G = n >> 8 & 255; B = n & 255; }
+    else { const q = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(v); if (!q) { cache.set(v, v); return v; } R = +q[1]; G = +q[2]; B = +q[3]; A = q[4] == null ? 1 : +q[4]; }
+    const L = 0.299 * R + 0.587 * G + 0.114 * B; let o;
+    if (mono) o = L > 235 ? (dark ? [0, 0, 0] : [255, 255, 255]) : dark ? [255, 255, 255] : [0, 0, 0];
+    else if (Math.max(R, G, B) - Math.min(R, G, B) < 40) { const g = 255 - L; o = [g, g, g]; }
+    else { o = [R, G, B]; if (L < 70) o = o.map(c => c + (255 - c) * 0.45); }
+    r = A < 1 ? "rgba(" + o.map(c => Math.round(c)).join(",") + "," + A + ")" : "#" + o.map(c => Math.round(c).toString(16).padStart(2, "0")).join("");
+    cache.set(v, r); return r;
+  };
+}
+function inkCtx(ctx, dark, mono){
+  if (!dark && !mono) return ctx;
+  const f = inkMap(dark, mono);
+  Object.defineProperty(ctx, "fillStyle", {configurable: true, get(){ return FS.get.call(this); }, set(v){ FS.set.call(this, f(v)); }});
+  Object.defineProperty(ctx, "strokeStyle", {configurable: true, get(){ return SS.get.call(this); }, set(v){ SS.set.call(this, f(v)); }});
+  return ctx;
+}
+/* the screen of a CAD drawing, drawn for the view of the moment. A light view (one that draws within a frame) is drawn whole on every
+   zoom / pan step. A heavy one — a big drawing seen whole — shows the whole-page picture while it moves, and once it settles its own
+   lines, drawn a slice at a time in the background and put on screen when done, as AutoCAD regenerates */
+let cadRaf = 0, cadIdleT = null;
+function freeCadBitmap(){
+  S.cadGen = (S.cadGen || 0) + 1;
+  S.cadBmpBusy = 0;
+  if (S.cadBmp && S.cadBmp.cv) S.cadBmp.cv.width = 0;
+  S.cadBmp = null;
+}
+const CAD_FRAME = 24;   // ms
+const cadMs = cost => cost * (S.cadRate || 1.5e-4);   // ms per path step, measured on this machine as light views are drawn
+const cadLook = () => [darkNow(), !!S.mono, !!S.thin].join("|");
+const cadKey = () => cadLook() + "|" + JSON.stringify(((P.proj && P.proj.layersOff) || {})[S.fileId] || []);   // what the whole-page picture was drawn with
+function cadLowPaint(src, pg){   // the picture under the screen (shown for a moment when a big zoom step outruns the screen)
+  const lc = $("low"), sc = Math.min(3, 3000 / Math.max(S.base.width, S.base.height)); lc.width = Math.ceil(S.base.width * sc); lc.height = Math.ceil(S.base.height * sc);
+  const x = lc.getContext("2d"); if (src) x.drawImage(src, 0, 0, lc.width, lc.height); else CAD.cadDraw(x, pg, {s: sc, tx: 0, ty: 0, W: lc.width, H: lc.height}, viewOpts(1, false));
+  S.low = {s: sc}; const v = S.view; lc.style.transform = `translate(${v.tx}px,${v.ty}px) scale(${v.s / sc})`;
+}
+function cadLow(){
+  const pg = cadPage(); if (!pg) return;
+  const sc = Math.min(3, 3000 / Math.max(S.base.width, S.base.height));
+  if (cadMs(CAD.cadCost(pg, {s: sc, tx: 0, ty: 0, W: Math.ceil(S.base.width * sc), H: Math.ceil(S.base.height * sc)})) > CAD_FRAME) return void cadBitmap();
+  S.cadGen = (S.cadGen || 0) + 1; S.cadBmpBusy = 0; cadLowPaint(null, pg);   // light: drawn at once
+}
+/* a heavy drawing's whole page, drawn once a slice at a time between frames, as a picture sharp enough for every view up to ~4096 px across */
+async function cadBitmap(){
+  const pg = cadPage(), page = S.page; if (!pg) return;
+  const key = cadKey(), look = cadLook(), gen = S.cadGen = (S.cadGen || 0) + 1, lim = (navigator.deviceMemory || 8) >= 4 ? 4096 : 2560, s2 = Math.min(8, lim / Math.max(S.base.width, S.base.height));
+  const bm = document.createElement("canvas"); bm.width = Math.max(1, Math.ceil(S.base.width * s2)); bm.height = Math.max(1, Math.ceil(S.base.height * s2));
+  S.cadBmpBusy = gen; let done = false;
+  try { done = await CAD.cadDrawAsync(bm.getContext("2d"), pg, {s: s2, tx: 0, ty: 0, W: bm.width, H: bm.height}, viewOpts(1, false), () => gen !== S.cadGen || S.page !== page); } catch (e) { console.warn(e); }
+  if (S.cadBmpBusy === gen) S.cadBmpBusy = 0;
+  if (!done || gen !== S.cadGen || S.page !== page) { bm.width = 0; return; }
+  if (S.cadBmp && S.cadBmp.cv !== bm) S.cadBmp.cv.width = 0;
+  S.cadBmp = {cv: bm, s: s2, page, key, look}; cadLowPaint(bm, pg);
+  if (!S.cadExOk && S.cadExBusy !== S.cadEx) cadHi(true);   // the screen still shows a quick sketch: the picture now, the lines when it settles
+}
+function cadHi(full){
+  if (full) { clearTimeout(cadIdleT); S.cadFull = true; }
+  if (cadRaf) return;
+  cadRaf = requestAnimationFrame(() => {
+    cadRaf = 0; const pg = cadPage(); if (!pg || !S.page || S.cmp) return;
+    const st = stage(), dpr = Math.min(window.devicePixelRatio || 1, 2), c = $("hi"), v = Object.assign({}, S.view), w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; } c.style.width = st.clientWidth + "px"; c.style.height = st.clientHeight + "px";
+    const full2 = !!S.cadFull; S.cadFull = false; const ex = S.cadEx = (S.cadEx || 0) + 1;   // a new frame: lines still being drawn for the last view are not wanted
+    const x = c.getContext("2d"), dv = {s: v.s * dpr, tx: v.tx * dpr, ty: v.ty * dpr, W: w, H: h}, cost = CAD.cadCost(pg, dv), heavy = cadMs(cost) > CAD_FRAME;
+    const bm = S.cadBmp, key = cadKey(), mine = !!bm && bm.page === S.page;
+    if (mine && bm.key !== key && !S.cadBmpBusy) cadBitmap();   // the picture is out of date (a layer switched off…): made again
+    const pic = heavy && mine && dv.s <= bm.s * 1.02 && (bm.key === key || (!!S.cadBmpBusy && bm.look === cadLook()));   // (while it is made again, the last one)
+    S.cadExOk = !heavy; S.cadExBusy = 0;
+    if (pic) {   // as sharp as the screen here: the picture, at once
+      x.setTransform(1, 0, 0, 1, 0, 0); x.fillStyle = darkNow() ? "#000000" : "#ffffff"; x.fillRect(0, 0, w, h); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high";
+      const k = dv.s / bm.s; x.drawImage(bm.cv, dv.tx, dv.ty, bm.cv.width * k, bm.cv.height * k);
+    } else {   // the lines (a heavy view without a picture yet: fewer small things)
+      const t0 = performance.now();
+      try { CAD.cadDraw(x, pg, dv, viewOpts(dpr, heavy)); } catch (e) { console.warn(e); }
+      if (!heavy && cost > 20000) { const r = (performance.now() - t0) / cost; S.cadRate = S.cadRate ? 0.7 * S.cadRate + 0.3 * r : r; }
+    }
+    if (heavy && full2) cadExact(pg, dv, dpr, ex);
+    S.rendered = Object.assign({dpr}, v); c.style.transform = "none"; c.style.display = "block";
+    if (!full2) { clearTimeout(cadIdleT); cadIdleT = setTimeout(() => cadHi(true), 180); }
+  });
+}
+async function cadExact(pg, dv, dpr, ex){   // a settled heavy view's own lines, a slice at a time; on screen if the view is still this one
+  const cv = document.createElement("canvas"), key = cadKey(), stale = () => ex !== S.cadEx || cadPage() !== pg || cadKey() !== key; cv.width = dv.W; cv.height = dv.H; S.cadExBusy = ex;
+  let ok = false; try { ok = await CAD.cadDrawAsync(cv.getContext("2d"), pg, dv, viewOpts(dpr, false), stale); } catch (e) { console.warn(e); }
+  if (S.cadExBusy === ex) S.cadExBusy = 0;
+  const c = $("hi"); if (ok && !stale() && c.width === dv.W && c.height === dv.H) { c.getContext("2d").drawImage(cv, 0, 0); S.cadExOk = true; }
+  cv.width = 0;
+}
+function cadIsolateId(id){   // AutoCAD's LAYISO: only this layer on — again: every layer back on
+  const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; const all = Object.keys(cfg.getGroups());
+  if (S.iso === id) { S.iso = null; setLayer(all, true); } else { S.iso = id; setLayer(all.filter(x => x !== id), false); setLayer([id], true); }
+  renderLayers();
+}
+function cadIsolate(name){ const cfg = S.ocgs && S.ocgs[S.fileId], e = cfg && Object.entries(cfg.getGroups()).find(([, g]) => g.name === name); if (e) cadIsolateId(e[0]); }
+
+/* the drawing's own objects into the takeoff: lines and polylines (lengths), closed outlines (areas), blocks (counts) */
+const cadPts = P => P.filter((p, i) => !i || dist(p, P[i - 1]) > 1e-4).map(p => [+p[0].toFixed(3), +p[1].toFixed(3)]);
+function cadAddGeom(sc, pg, ei, how, cnd, counts){   // one object -> measurements; inside mutate. how: area | line | count
+  const r = pg.ents[ei], g = CAD.cadGeom(pg, ei); if (!r || !g) return 0;
+  const lname = (sc.layers[r.L] || {}).name || "0", fid = S.fileId; let n = 0;
+  if (how === "count") { if (!r.at) return 0; const c = cnd && cnd.type === "count" ? cnd : condByName(r.n || lname, "count");
+    let it = counts && counts.get(c.id) || P.proj.items.find(i => i.cond === c.id && i.file === fid && i.page === 1 && i.kind === "shape");
+    if (!it) { it = {id: uid("I"), cond: c.id, file: fid, page: 1, kind: "shape", pts: [], nos: 1, label: "", ai: true}; P.proj.items.push(it); }
+    if (counts) counts.set(c.id, it); if (!it.pts.some(q => dist(q, r.at) < 0.5)) { it.pts.push(r.at.slice()); n++; } return n; }
+  if (how === "area") { if (g.kind !== "area") return 0; const c = cnd && cnd.type === "area" ? cnd : condByName(lname, "area");
+    const L = g.loops.map(cadPts).filter(l => l.length >= 3 && polyArea(l) > 1e-6);
+    L.forEach((l, i) => { const hole = L.some((o, j) => j !== i && polyArea(o) > polyArea(l) && pointInPoly(l[0], o));
+      P.proj.items.push({id: uid("I"), cond: c.id, file: fid, page: 1, kind: hole ? "ded" : "shape", pts: l, nos: 1, ai: true, label: hole ? "" : roomNameAt(l) || ""}); n++; });
+    return n; }
+  const c = cnd && cnd.type === "linear" ? cnd : condByName(lname, "linear");
+  (g.kind === "area" ? g.loops.map(l => l.concat([l[0]])) : g.runs).forEach(run => { const p = cadPts(run); if (p.length >= 2) { P.proj.items.push({id: uid("I"), cond: c.id, file: fid, page: 1, kind: "shape", pts: p, nos: 1, ai: true, label: ""}); n++; } });
+  return n;
+}
+function cadPick(ei, how){   // the object under the cursor, in the condition picked when its type fits (else one named after its layer / block)
+  const sc = S.cadSc[S.fileId], pg = cadPage(); if (!pg) return; let n = 0;
+  mutate(() => { n = cadAddGeom(sc, pg, ei, how, S.cond ? cond(S.cond) : null, null); }, "AutoCAD object into the takeoff");
+  refresh(); toast(n ? "Taken off from the drawing: " + n + " measurement" + (n > 1 ? "s" : "") + " — marked AI, check them" : "Nothing to take off from that object", 3000);
+}
+function cadCtxItems(q){   // right-click: the AutoCAD object under the cursor
+  const pg = cadPage(); if (!pg || !q) return [];
+  const sc = S.cadSc[S.fileId], h = CAD.cadHit(pg, q[0], q[1], 7 / S.view.s, cadHidden(S.fileId, sc)); if (!h) return [];
+  const r = pg.ents[h.e]; if (!r || r.L < 0) return [];
+  const lname = (sc.layers[r.L] || {}).name || "0", L = [{h: "AutoCAD: " + (r.t === "INSERT" ? "block " + (r.n || "") : r.t.toLowerCase()) + " · " + lname, s: [r.area ? f2(r.area) + " Sft" : "", r.len ? f2(r.len) + " ft" : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ")}];
+  if (r.t === "INSERT") { const same = pg.ents.filter(x => x.t === "INSERT" && x.n === r.n).length; L.push({t: "Count this " + (r.n || "block"), fn: () => cadPick(h.e, "count")}, {t: "Count every " + (r.n || "block") + " (" + same + ")…", fn: () => cadQtyDialog({B: r.n})}); }
+  else { if (r.cl && r.area > 0) L.push({t: "Take off its area — " + f2(r.area) + " Sft", fn: () => cadPick(h.e, "area")}); if (r.len > 0) L.push({t: "Take off its length — " + f2(r.len) + " ft", fn: () => cadPick(h.e, "line")}); }
+  L.push({t: "Quantities on layer " + lname + "…", fn: () => cadQtyDialog({L: r.L})}, {t: "Isolate layer " + lname + " (LAYISO)", fn: () => cadIsolate(lname)}, {sep: 1});
+  return L;
+}
+async function cadQtyDialog(pre){
+  if (!S.page || !cadMeta(S.fileId)) return toast("Open an AutoCAD drawing first — + PDF adds a DWG or DXF", 4000);
+  const sc = await cadLoad(S.fileId); if (!sc || !CAD) return toast("The drawing's objects are not in this browser — add the DWG again with + PDF", 5000);
+  pre = pre || {}; const pg = sc.pages[0], Q = CAD.cadQty(sc, pg), hid = cadHidden(S.fileId, sc), dark = darkNow();
+  const sw = c => `<span class="lsw" style="background:${CAD.cadCss(c, dark, false)}"></span>`;
+  const att = b => [...b.att].map(([t, m]) => t + ": " + [...m].slice(0, 6).map(([v, n]) => v + (n > 1 ? " ×" + n : "")).join(", ") + (m.size > 6 ? ", …" : "")).join(" · ");
+  const LS = Q.layers.filter(l => l.runs || l.areas), BS = Q.blocks;
+  const body = `<div class="wide"></div><p>Read from the drawing's own objects, at its own scale: lines and polylines by layer (length), closed outlines — polylines, circles, hatches — by layer (area), and blocks by name (count). Tick what to take off: each becomes measurements in a condition named after its layer or block, marked <b>AI</b> for you to check.</p>
+    <div class="cq"><table class="sh cqt"><thead><tr><th>Layer</th><th class="n">Lines → length</th><th class="n">Closed → area</th></tr></thead><tbody>${LS.map(l => `<tr${hid[l.li] ? ' class="dim"' : ""}><td>${sw(sc.layers[l.li].c)} ${esc(l.name)}${hid[l.li] ? ' <span class="small">(off)</span>' : ""}</td>
+      <td class="n">${l.runs ? `<label class="pk"><input type="checkbox" data-ql="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.runs} · ${f2(l.len)} ft</label>` : ""}</td>
+      <td class="n">${l.areas ? `<label class="pk"><input type="checkbox" data-qa="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.areas} · ${f2(l.area)} Sft</label>` : ""}</td></tr>`).join("") || '<tr><td colspan="3" class="small">No lines or outlines on these layers</td></tr>'}</tbody></table></div>
+    <div class="cq"><table class="sh cqt"><thead><tr><th>Block</th><th class="n">Count</th><th>Layer</th><th>Attributes</th></tr></thead><tbody>${BS.map((b, i) => `<tr><td><label class="pk"><input type="checkbox" data-qb="${i}"${pre.B === b.name ? " checked" : ""}> ${esc(b.name)}</label></td><td class="n">${b.n}</td><td class="small">${esc([...b.layers].join(", "))}</td><td class="small">${esc(att(b))}</td></tr>`).join("") || '<tr><td colspan="4" class="small">No blocks in model space</td></tr>'}</tbody></table></div>
+    <label class="pk"><input type="checkbox" id="cqVis" checked> Only objects on layers that are switched on</label>`;
+  const v = await ask("AutoCAD quantities — " + pageName({file: S.fileId, page: 1}), body, "Add to takeoff", () => {
+    const g = a => new Set([...document.querySelectorAll("#dlgB [data-" + a + "]")].filter(x => x.checked).map(x => x.dataset[a]));
+    const o = {lens: new Set([...g("ql")].map(Number)), areas: new Set([...g("qa")].map(Number)), blocks: new Set([...g("qb")].map(i => BS[+i].name)), vis: $("cqVis").checked};
+    return o.lens.size || o.areas.size || o.blocks.size ? o : "Tick at least one layer or block";
+  });
+  if (v) cadTakeoff(sc, pg, v);
+}
+function cadTakeoff(sc, pg, sel){   // sel: {lens: Set(layer index), areas: Set(layer index), blocks: Set(name), vis}
+  if (S.pageNo !== 1) return;
+  const hid = sel.vis ? cadHidden(S.fileId, sc) : null, got = {area: 0, line: 0, count: 0}, counts = new Map();
+  mutate(() => {
+    pg.ents.forEach((r, ei) => {
+      if (r.L < 0 || (hid && hid[r.L])) return;
+      if (r.t === "INSERT") { if (sel.blocks.has(r.n)) got.count += cadAddGeom(sc, pg, ei, "count", null, counts); return; }
+      if (r.cl && r.area > 0 && sel.areas.has(r.L)) got.area += cadAddGeom(sc, pg, ei, "area", null, null);
+      else if (!r.cl && r.len > 0 && sel.lens.has(r.L)) got.line += cadAddGeom(sc, pg, ei, "line", null, null);
+    });
+  }, "AutoCAD takeoff");
+  refresh();
+  toast("From the drawing: " + [got.area && got.area + " area" + (got.area > 1 ? "s" : ""), got.line && got.line + " run" + (got.line > 1 ? "s" : ""), got.count && got.count + " count marker" + (got.count > 1 ? "s" : "")].filter(Boolean).join(", ") + " — marked AI, check them", 5000);
+  return got;
+}
+
+/* ------------------------------------------------------------------ plot / print (Ctrl+P), as AutoCAD's PLOT
+   What to plot (a window picked on the drawing, the view on screen, the drawing's extents or the whole page), the paper and its
+   orientation, the scale (fit, or 1:N from the page's scale), colours as drawn / monochrome / grayscale, lineweights, the takeoff
+   on top, a legend and a title line. The result is a vector PDF, printed through the browser's print dialog or saved. */
+const PAPERS = [["A4", 210, 297], ["A3", 297, 420], ["A2", 420, 594], ["A1", 594, 841], ["A0", 841, 1189], ["Letter", 215.9, 279.4], ["Legal", 215.9, 355.6], ["Tabloid 11×17", 279.4, 431.8],
+  ["ARCH C 18×24", 457.2, 609.6], ["ARCH D 24×36", 609.6, 914.4], ["ARCH E 36×48", 914.4, 1219.2]];
+const PLOT_SC = [[1, "1:1"], [2, "1:2"], [5, "1:5"], [10, "1:10"], [20, "1:20"], [25, "1:25"], [50, "1:50"], [75, "1:75"], [100, "1:100"], [125, "1:125"], [150, "1:150"], [200, "1:200"], [250, "1:250"],
+  [300, "1:300"], [400, "1:400"], [500, "1:500"], [1000, "1:1000"], [12, "1\" = 1'-0\""], [16, "3/4\" = 1'-0\""], [24, "1/2\" = 1'-0\""], [32, "3/8\" = 1'-0\""], [48, "1/4\" = 1'-0\""], [64, "3/16\" = 1'-0\""],
+  [96, "1/8\" = 1'-0\""], [128, "3/32\" = 1'-0\""], [192, "1/16\" = 1'-0\""], [120, "1\" = 10'"], [240, "1\" = 20'"], [360, "1\" = 30'"], [480, "1\" = 40'"], [600, "1\" = 50'"]];
+function plotPref(){ let o = null; try { o = JSON.parse(pref("zdTakeoffPlot") || "null"); } catch (e) { o = null; }
+  return Object.assign({area: "display", paper: "A3", orient: "auto", scale: "fit", style: "color", lw: true, tk: true, legend: true, stamp: true, center: true, np: true}, o && typeof o === "object" ? o : {}); }
+function plotWin(o){   // the part of the page plotted, page points [x0, y0, x1, y1]
+  const W = S.base.width, H = S.base.height, m = (cadMeta(S.fileId) || {}).map;
+  if (o.area === "window" && o.win) return o.win.slice();
+  if (o.area === "page") return [0, 0, W, H];
+  if (o.area === "extents") return m && S.pageNo === 1 ? [m.ox, m.oy, W - m.ox, H - m.oy] : [0, 0, W, H];
+  const st = stage(), a = toBase(0, 0), b = toBase(st.clientWidth, st.clientHeight), r = [Math.max(0, a[0]), Math.max(0, a[1]), Math.min(W, b[0]), Math.min(H, b[1])];
+  return r[2] - r[0] > 1 && r[3] - r[1] > 1 ? r : [0, 0, W, H];
+}
+function plotLayout(o, win){   // the paper (pt), the scale (paper pt per page pt) and where the window lands on the paper
+  const pp = PAPERS.find(p => p[0] === o.paper) || PAPERS[1], ww = win[2] - win[0], wh = win[3] - win[1], land = o.orient === "landscape" || (o.orient === "auto" && ww >= wh);
+  const PW = (land ? pp[2] : pp[1]) * 72 / 25.4, PH = (land ? pp[1] : pp[2]) * 72 / 25.4, mg = 10 * 72 / 25.4, foot = o.stamp ? 14 : 0, aw = PW - 2 * mg, ah = PH - 2 * mg - foot, k = curScale();
+  let s = Math.min(aw / ww, ah / wh), note = "", fixed = o.scale !== "fit" && +o.scale > 0 && k > 0;
+  if (fixed) { s = 864 / +o.scale / k; if (ww * s > aw + 0.5 || wh * s > ah + 0.5) note = "At this scale the window is bigger than the paper — it is cut at the paper's edge."; }
+  const pw = Math.min(ww * s, aw), ph = Math.min(wh * s, ah), x = o.center ? mg + (aw - pw) / 2 : mg, y = mg + foot + (o.center ? (ah - ph) / 2 : ah - ph);
+  const scTxt = fixed ? (PLOT_SC.find(p => p[0] === +o.scale) || [0, "1:" + o.scale])[1] : k > 0 ? "1:" + (864 / (s * k)).toFixed(1).replace(/\.0$/, "") + " (fit)" : "fit to paper";
+  return {PW, PH, s, x, y, pw, ph, land, note, scTxt, mg, paper: pp[0], win: [win[0], win[1], win[0] + pw / s, win[1] + ph / s]};
+}
+function pickWindow(msg){   // AutoCAD's window: click one corner, then the other (or drag) -> [x0, y0, x1, y1] page points, or null (Esc)
+  return new Promise(res => {
+    const ov = document.createElement("div"), bx = document.createElement("div"), tip = document.createElement("div");
+    ov.className = "tbpick"; bx.className = "tbbox"; tip.className = "tbtip"; tip.textContent = msg; ov.append(bx, tip); stage().appendChild(ov);
+    let a = null, d0 = null, moved = false;
+    const box = sp => { if (!a) return; const p = toScr(a); Object.assign(bx.style, {display: "block", left: Math.min(p[0], sp[0]) + "px", top: Math.min(p[1], sp[1]) + "px", width: Math.abs(sp[0] - p[0]) + "px", height: Math.abs(sp[1] - p[1]) + "px"}); };
+    const done = v => { ov.remove(); document.removeEventListener("keydown", key, true); res(v); };
+    const fin = sp => { const b = toBase(sp[0], sp[1]), r = [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+      if ((r[2] - r[0]) * S.view.s < 4 || (r[3] - r[1]) * S.view.s < 4) { a = null; bx.style.display = "none"; return; } done(r); };
+    const key = e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(null); } };
+    document.addEventListener("keydown", key, true);
+    ov.addEventListener("pointerdown", e => { if (e.button !== 0 || S.space) return; e.preventDefault(); e.stopPropagation(); const sp = evPos(e);
+      if (!a) { a = toBase(sp[0], sp[1]); d0 = sp; moved = false; ov.setPointerCapture(e.pointerId); tip.textContent = "Now the opposite corner — Esc to go back"; } else fin(sp); });
+    ov.addEventListener("pointermove", e => { if (!a) return; const sp = evPos(e); if (d0 && Math.hypot(sp[0] - d0[0], sp[1] - d0[1]) > 6) moved = true; box(sp); });
+    ov.addEventListener("pointerup", e => { if (a && moved && d0) { d0 = null; fin(evPos(e)); } else d0 = null; });
+  });
+}
+function plotPreview(o){   // the paper, small, with the drawing on it as it will be plotted
+  const cv = $("plPrev"); if (!cv || !S.page) return;
+  const win = plotWin(o), L = plotLayout(o, win), k = Math.min((cv.width - 16) / L.PW, (cv.height - 16) / L.PH), ox = (cv.width - L.PW * k) / 2, oy = (cv.height - L.PH * k) / 2, c = cv.getContext("2d");
+  c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = "#e9edf3"; c.fillRect(0, 0, cv.width, cv.height); c.fillStyle = "#fff"; c.fillRect(ox, oy, L.PW * k, L.PH * k); c.strokeStyle = "#9fb0c6"; c.strokeRect(ox + 0.5, oy + 0.5, L.PW * k - 1, L.PH * k - 1);
+  const s = L.s * k, dx = ox + L.x * k - L.win[0] * s, dy = oy + (L.PH - L.y - L.ph) * k - L.win[1] * s, px = ox + L.x * k, py = oy + (L.PH - L.y - L.ph) * k;
+  c.save(); c.beginPath(); c.rect(px, py, L.pw * k, L.ph * k); c.clip();
+  const pg = cadOn() ? cadPage() : null;
+  if (pg) { const off = document.createElement("canvas"), gen = S.plGen = (S.plGen || 0) + 1; off.width = Math.max(1, Math.ceil(L.pw * k)); off.height = Math.max(1, Math.ceil(L.ph * k));
+    CAD.cadDrawAsync(off.getContext("2d"), pg, {s, tx: dx - px, ty: dy - py, W: off.width, H: off.height}, {dark: false, mono: o.style === "mono", hidden: cadHidden(S.fileId, S.cadSc[S.fileId]), dpr: 1}, () => gen !== S.plGen)
+      .then(ok => { if (ok && gen === S.plGen && $("plPrev") === cv) c.drawImage(off, px, py); off.width = 0; }).catch(() => {}); }
+  else if (S.low) { const lw = $("low"), r = S.low.s; c.filter = o.style === "mono" ? "grayscale(1) contrast(4)" : o.style === "gray" ? "grayscale(1)" : "none"; c.drawImage(lw, L.win[0] * r, L.win[1] * r, (L.win[2] - L.win[0]) * r, (L.win[3] - L.win[1]) * r, px, py, L.pw * k, L.ph * k); c.filter = "none"; }
+  c.restore();
+  const info = $("plInfo"); if (info) info.innerHTML = esc(L.paper + " " + (L.land ? "landscape" : "portrait") + " · " + L.scTxt) + (L.note ? '<br><span style="color:#8a5a00">' + esc(L.note) + "</span>" : "");
+  const wi = $("plWin"); if (wi) wi.textContent = o.win ? "window picked" : "no window yet — pick one";
+}
+async function plotDialog(){
+  if (!P.proj || !S.page) return toast("Open a drawing first");
+  const o = Object.assign(plotPref(), S.plotWin ? {win: S.plotWin, area: "window"} : {});
+  for (;;) {
+    const r = await plotAsk(o); if (!r) { S.plotWin = null; return; }
+    Object.assign(o, r.o);
+    const keep = Object.assign({}, o); delete keep.win; if (keep.area === "window") keep.area = "display"; pref("zdTakeoffPlot", JSON.stringify(keep));
+    if (r.pick) { const w = await pickWindow("Plot window: click one corner, then the opposite corner (or drag a box) — Esc to go back"); if (w) { o.win = w; o.area = "window"; S.plotWin = w; } continue; }
+    S.plotWin = o.win || null; return plotRun(o, r.go);
+  }
+}
+function plotAsk(o){
+  const k = curScale(), cad = !!cadOn(), opt = (v, t, cur) => `<option value="${esc(String(v))}"${String(cur) === String(v) ? " selected" : ""}>${esc(t)}</option>`;
+  const rad = (v, t) => `<label class="pk"><input type="radio" name="plA" value="${v}"${o.area === v ? " checked" : ""}> ${t}</label>`;
+  const body = `<div class="wide"></div><div class="plotw"><div class="grid" style="flex:1;min-width:280px">
+    <div class="fg w2"><label>What to plot</label><div class="xrad">${rad("window", "Window")}${rad("display", "Display (the view on screen)")}${rad("extents", cad ? "Extents (the whole drawing)" : "The whole page")}${cad ? rad("page", "The whole page") : ""}</div>
+      <div class="xrow"><button class="btn sm" type="button" id="plPick" title="Pick the window on the drawing: one corner, then the other">&#9634; Pick window &lt;</button><span class="small" id="plWin"></span></div></div>
+    <div class="fg"><label>Paper size</label><select id="plPaper">${PAPERS.map(p => opt(p[0], p[0] + " (" + p[1] + " × " + p[2] + " mm)", o.paper)).join("")}</select></div>
+    <div class="fg"><label>Orientation</label><select id="plOr">${[["auto", "Auto — as the window"], ["landscape", "Landscape"], ["portrait", "Portrait"]].map(([v, t]) => opt(v, t, o.orient)).join("")}</select></div>
+    <div class="fg"><label>Plot scale</label><select id="plSc">${opt("fit", "Fit to paper", o.scale)}${k > 0 ? PLOT_SC.map(([v, t]) => opt(v, t, o.scale)).join("") : ""}</select>${k > 0 ? "" : '<span class="small">Set the page\'s scale (K) to plot at a true scale</span>'}</div>
+    <div class="fg"><label>Plot style</label><select id="plSt">${[["color", "As drawn — colours"], ["mono", "Monochrome — all black"], ["gray", "Grayscale"]].map(([v, t]) => opt(v, t, o.style)).join("")}</select></div>
+    <div class="fg w2"><label>Plot options</label><label class="pk"><input type="checkbox" id="plLw"${o.lw ? " checked" : ""}> Plot lineweights</label><label class="pk"><input type="checkbox" id="plTk"${o.tk ? " checked" : ""}> The takeoff on top (measurements, labels, markups)</label>
+      <label class="pk"><input type="checkbox" id="plLg"${o.legend ? " checked" : ""}> Legend — the conditions on this sheet and their quantities</label><label class="pk"><input type="checkbox" id="plTi"${o.stamp ? " checked" : ""}> Title line — project, sheet, scale, date</label>
+      <label class="pk"><input type="checkbox" id="plCe"${o.center ? " checked" : ""}> Centre the plot</label>${cad ? `<label class="pk"><input type="checkbox" id="plNp"${o.np ? " checked" : ""}> Leave out layers not set to plot (Defpoints…)</label>` : ""}</div></div>
+    <div class="plprev"><canvas id="plPrev" width="300" height="300"></canvas><span class="small" id="plInfo"></span></div></div>
+    <p class="small" style="margin-top:6px">A vector PDF: <b>Print</b> opens the browser's print dialog with it (choose the printer, or Save as PDF there); <b>Save PDF</b> downloads it. ${cad ? "The drawing is plotted from its own lines, so monochrome and grayscale are exact." : "Monochrome is plotted as a 200 DPI picture of the page."}</p>`;
+  const read = () => ({area: (document.querySelector('#dlgB input[name="plA"]:checked') || {}).value || "display", paper: $("plPaper").value, orient: $("plOr").value, scale: $("plSc").value, style: $("plSt").value,
+    lw: $("plLw").checked, tk: $("plTk").checked, legend: $("plLg").checked, stamp: $("plTi").checked, center: $("plCe").checked, np: $("plNp") ? $("plNp").checked : o.np});
+  let go = "print", pick = false, snap = null;
+  const p = ask("Plot — " + pageName({file: S.fileId, page: S.pageNo}), body, "Print", () => { const v = read(); if (v.area === "window" && !o.win) return "Pick the window first (Pick window <)"; return v; });
+  const sv = document.createElement("button"); sv.className = "btn"; sv.textContent = "Save PDF"; sv.onclick = () => { go = "pdf"; $("dlgOk").click(); }; $("dlgOk").before(sv);
+  $("plPick").onclick = () => { pick = true; snap = read(); $("dlgCancel").click(); };
+  const upd = () => plotPreview(Object.assign({}, o, read()));
+  $("dlgB").addEventListener("change", upd); upd();
+  return p.then(v => pick ? {o: snap, pick: true} : v ? {o: v, go} : null);
+}
+async function plotRun(o, go){
+  busy("Plotting…");
+  try { const bytes = await plotPdf(o), name = fileBase() + "_plot_" + String(pageName({file: S.fileId, page: S.pageNo})).replace(/[^A-Za-z0-9]+/g, "_").slice(0, 40) + ".pdf";
+    if (go === "pdf") { saveBlob(new Blob([bytes], {type: "application/pdf"}), name); toast("Plot saved — " + name, 3000); } else printPdf(bytes); }
+  catch (e) { toast("Plot failed: " + (e.message || e), 6000); }
+  busy("");
+}
+async function plotPdf(o){
+  const Lb = await loadPdfLib(), out = await Lb.PDFDocument.create(), lo = plotLayout(o, plotWin(o)), win = lo.win, f = S.fileId, p = S.pageNo, pgp = S.page;
+  out.setTitle(P.proj.name + " — " + pageName({file: f, page: p})); out.setCreator("ZD PDF Takeoff — plot"); out.setProducer("ZD PDF Takeoff");
+  const page = out.addPage([lo.PW, lo.PH]), font = await out.embedFont(Lb.StandardFonts.Helvetica), cp = cadOn() ? cadPage() : null;
+  if (cp) {
+    const sc = S.cadSc[f], hid = cadHidden(f, sc); if (o.np) sc.layers.forEach((l, i) => { if (!l.plot || /^defpoints$/i.test(l.name)) hid[i] = 1; });
+    await CAD.cadPlotPage(Lb, out, page, cp, {win, s: lo.s, at: [lo.x, lo.y], style: o.style, hidden: hid, lw: o.lw, font});
+  } else {
+    const rec = await dbGet("pdfs", f); let src = null; try { src = rec && await Lb.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); } catch (e) { src = null; }
+    if (!src || src.isEncrypted || pgp.rotate % 360 || o.style === "mono") {   // as a picture: a turned or locked page, or monochrome
+      const cs = Math.min(200 / 72 * lo.s, 9000 / Math.max(win[2] - win[0], win[3] - win[1])), W = Math.max(1, Math.ceil((win[2] - win[0]) * cs)), H = Math.max(1, Math.ceil((win[3] - win[1]) * cs));
+      const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = inkCtx(thinLines(cv.getContext("2d")), false, o.style === "mono"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+      await loadLayers(f); await sliced(pgp.render({...lay(f), canvasContext: ctx, viewport: pgp.getViewport({scale: cs}), transform: [1, 0, 0, 1, -win[0] * cs, -win[1] * cs]})).promise;
+      if (o.style === "gray") { const im = ctx.getImageData(0, 0, W, H), d = im.data; for (let i = 0; i < d.length; i += 4) { const y = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; d[i] = d[i + 1] = d[i + 2] = y; } ctx.putImageData(im, 0, 0); }
+      page.drawImage(await out.embedPng(await blobBuf(cv, "image/png")), {x: lo.x, y: lo.y, width: lo.pw, height: lo.ph}); cv.width = 0;
+    } else {
+      const vb = pgp.view, ep = await out.embedPage(src.getPage(p - 1), {left: vb[0] + win[0], right: vb[0] + win[2], top: vb[3] - win[1], bottom: vb[3] - win[3]});
+      page.drawPage(ep, {x: lo.x, y: lo.y, width: lo.pw, height: lo.ph});
+      if (o.style === "gray") page.drawRectangle({x: lo.x, y: lo.y, width: lo.pw, height: lo.ph, color: Lb.rgb(0.5, 0.5, 0.5), blendMode: Lb.BlendMode.Saturation});
+      ocFix(Lb, out, [f]);
+    }
+  }
+  if (o.tk) {   // the takeoff over the window, as a transparent picture at about 200 DPI
+    const cs = Math.min(200 / 72 * lo.s, 6000 / Math.max(win[2] - win[0], win[3] - win[1])), W = Math.max(1, Math.ceil((win[2] - win[0]) * cs)), H = Math.max(1, Math.ceil((win[3] - win[1]) * cs));
+    const full = pageOverlaySvg(f, p, cs, Math.ceil(S.base.width * cs), Math.ceil(S.base.height * cs), {legend: "none", stamp: false}), inner = full.replace(/^<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
+    const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+    await svgOnto(cv.getContext("2d"), `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${(win[0] * cs).toFixed(2)} ${(win[1] * cs).toFixed(2)} ${W} ${H}">${inner}</svg>`);
+    page.drawImage(await out.embedPng(await blobBuf(cv, "image/png")), {x: lo.x, y: lo.y, width: lo.pw, height: lo.ph}); cv.width = 0;
+  }
+  const ink = Lb.rgb(0.12, 0.17, 0.23);
+  if (o.legend) {   // the conditions measured on this sheet, with their quantities
+    const tot = new Map(); P.proj.items.filter(i => i.file === f && i.page === p && !hiddenItem(i)).forEach(it => { const c = cond(it.cond), kk = itemScale(it); if (!c || !kk) return; tot.set(c.id, (tot.get(c.id) || 0) + rowsOf(it, kk).reduce((a, r) => a + r.qty, 0)); });
+    const rows = P.proj.conds.filter(c => tot.has(c.id)).map(c => [c, (c.boq ? c.boq + " · " : "") + c.name + ": " + fq(tot.get(c.id), c.unit) + " " + c.unit]).slice(0, 24);
+    if (rows.length) { const fs = 7.5, w = Math.min(lo.pw, 26 + Math.max(...rows.map(r => font.widthOfTextAtSize(r[1], fs)))), h = rows.length * 10 + 8, x = lo.x + 4, y = lo.y + 4;
+      page.drawRectangle({x, y, width: w, height: h, color: Lb.rgb(1, 1, 1), opacity: 0.92, borderColor: Lb.rgb(0.79, 0.84, 0.89), borderWidth: 0.5});
+      rows.forEach(([c, t], i) => { const yy = y + h - 12 - i * 10, col = /^#[0-9a-f]{6}$/i.test(c.color) ? Lb.rgb(parseInt(c.color.slice(1, 3), 16) / 255, parseInt(c.color.slice(3, 5), 16) / 255, parseInt(c.color.slice(5, 7), 16) / 255) : ink;
+        page.drawRectangle({x: x + 6, y: yy, width: 7, height: 7, color: col}); page.drawText(t, {x: x + 18, y: yy + 0.5, size: fs, font, color: ink}); }); }
+  }
+  if (o.stamp) { const t = [P.proj.name, pageName({file: f, page: p}), "scale " + lo.scTxt, lo.paper, "plotted " + dmy(today())].filter(Boolean).join("   ·   ");
+    page.drawText(t.length > 160 ? t.slice(0, 159) + "…" : t, {x: lo.mg, y: lo.mg, size: 7.5, font, color: ink}); }
+  return out.save();
+}
+function printPdf(bytes){   // the PDF in the browser's own print dialog (a hidden frame; a new tab if the browser will not print a frame)
+  const url = URL.createObjectURL(new Blob([bytes], {type: "application/pdf"})), fr = document.createElement("iframe");
+  fr.style.cssText = "position:fixed;right:0;bottom:0;width:2px;height:2px;border:0;opacity:0;pointer-events:none"; fr.src = url;
+  fr.onload = () => setTimeout(() => { try { fr.contentWindow.focus(); fr.contentWindow.print(); } catch (e) { window.open(url, "_blank"); } }, 400);
+  document.body.appendChild(fr); setTimeout(() => { fr.remove(); URL.revokeObjectURL(url); }, 300000);
+  toast("Plot ready — the print dialog opens (choose the printer, or Save as PDF)", 3500);
+}
+/* the layers switched off in the takeoff stay off in a PDF made from the drawing's pages (copied pages lose the PDF's own layer list) */
+function ocFix(Lb, out, fids){
+  const off = new Set(); (fids || []).forEach(f => (((P.proj && P.proj.layersOff) || {})[f] || []).forEach(n => off.add(n)));
+  const N = Lb.PDFName.of, all = [], hide = [];
+  out.context.enumerateIndirectObjects().forEach(([ref, obj]) => { if (!(obj instanceof Lb.PDFDict) || obj.get(N("Type")) !== N("OCG")) return; all.push(ref);
+    const nm = obj.lookup(N("Name")); let s = ""; try { s = nm && nm.decodeText ? nm.decodeText() : ""; } catch (e) { s = ""; } if (off.has(s)) hide.push(ref); });
+  if (all.length) out.catalog.set(N("OCProperties"), out.context.obj({OCGs: all, D: {Order: all, ON: all.filter(r => !hide.includes(r)), OFF: hide}}));
+}
+
 /* ------------------------------------------------------------------ start */
 (async function init(){
   loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on); iconize(); wsApply();
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
+  S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   window.zdTakeoff = {dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
-    ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu};   // for tests and the console
+    ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
+    cadLoad, cadMod, cadPage, cadOn, cadHidden, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid)};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
