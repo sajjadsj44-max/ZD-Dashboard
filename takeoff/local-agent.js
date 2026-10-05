@@ -140,9 +140,17 @@ async function countCurrentPageDoors(api, doc, question) {
   if (Array.isArray(swings) && swings.length) {
     addMessage(doc, "bot", `No searchable door text tags were found on this page; ${text.length} searchable text items are present. There are ${swings.length} possible vector door-swing candidates only, not confirmed doors. “Also door swing symbols on this page” is preselected for your review. Review the candidates in the dialog, then confirm the separate count step; nothing has been counted or placed yet.`);
     const dialog = api.doorWinDialog();
-    const swingOption = doc.getElementById("dwSw");
+    let swingOption = null;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const back = doc.getElementById("dlgBack");
+      if (back && back.classList.contains("on") && doc.getElementById("dlgT").textContent === "Doors / windows agent") {
+        swingOption = doc.getElementById("dwSw");
+        if (swingOption) break;
+      }
+      await wait(10);
+    }
     if (!swingOption) {
-      const cancel = doc.getElementById("dlgCancel");
+      const cancel = doc.getElementById("dlgBack").classList.contains("on") && doc.getElementById("dlgCancel");
       if (cancel) cancel.click();
       await dialog;
       throw new Error("The door swing review option was not available, so no count was started.");
