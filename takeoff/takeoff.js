@@ -404,7 +404,7 @@ function dropFileCache(fid){
   if (S.docs[fid]) { try { S.docs[fid].destroy(); } catch (e) {} delete S.docs[fid]; }
   const mine = k => String(k).split(":")[0] === fid;
   [S.geo, S.texts, S.sizes, S.thumbs].forEach(o => o && Object.keys(o).forEach(k => { if (mine(k)) delete o[k]; }));
-  if (S.ocgs) delete S.ocgs[fid]; if (S.ocBound) delete S.ocBound[fid];
+  if (S.ocgs) delete S.ocgs[fid]; if (S.ocBound) delete S.ocBound[fid]; if (S.pdfVp) delete S.pdfVp[fid];
 }
 async function addFiles(files){
   if (!P.proj) return;
@@ -661,7 +661,7 @@ const toBase = (x, y) => [(x - S.view.tx) / S.view.s, (y - S.view.ty) / S.view.s
 const mul = (A, B) => [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1], A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3], A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
 const app = (M, x, y) => [M[0] * x + M[2] * y + M[4], M[1] * x + M[3] * y + M[5]];
 async function indexPage(){
-  const key = S.key, page = S.page, base = S.base, file = S.fileId;
+  const key = S.key, page = S.page, base = S.base, file = S.fileId, pageNo = S.pageNo;
   if (!S.geo[key]) {
     busy("Reading drawing lines…");
     try {
@@ -739,6 +739,12 @@ async function indexPage(){
       const tc = await page.getTextContent();
       S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
     } catch (e) { S.texts[key] = []; }
+  }
+  if (key === S.key && P.proj && !P.proj.scales[key]) {   // a scale saved in the PDF first, then a scale note in its text
+    let V = []; try { V = await pdfScalesOn(file, pageNo, base); } catch (e) {}
+    if (key === S.key && !P.proj.scales[key] && V.length) { const r = applyPdfScales(key, V); save();
+      toast(keyName(key) + ": " + (r.main ? "scale saved in the PDF, " + r.main.label : "no page scale in the PDF") + (r.vps ? " · " + r.vps + " viewport" + (r.vps > 1 ? "s" : "") + " at another scale" : "") + " — check it against a known dimension (scale chip → Verify)", 5200);
+      if (r.main) checkScale(key, !S.agentRun); }
   }
   if (key === S.key && P.proj && !P.proj.scales[key]) {
     const c = scaleCandidates(key);
@@ -860,6 +866,64 @@ function scaleCandidates(key){
     out.push({ptPerFt, label, text: raw.trim(), note, factor});
   }
   return out.sort((x, y) => (/scale/i.test(y.text) ? 1 : 0) - (/scale/i.test(x.text) ? 1 : 0));
+}
+/* ------------------------------------------------------------------ scale saved in the PDF itself
+   Bluebeam, Acrobat and other PDF tools keep a page's calibration in the page's /VP entries: a box on the page with a
+   /Measure dictionary whose first number format says how many real units one PDF point is (/C) and in what unit (/U).
+   Read once per PDF with pdf-lib (only when the file can hold one); the box is put on this app's page by pdf.js.
+   Geographic measures, pages with a /UserUnit and units not known here are left alone. Such a scale is exact for the
+   page as printed, but it is still only "from the PDF" — not verified until a known dimension is measured. */
+const FT_PER = [[/^(ft|feet|foot|')$/, 1], [/^(in|inch|inches|")$/, 1 / 12], [/^mm$/, 1 / 304.8], [/^cm$/, 1 / 30.48], [/^(m|meter|meters|metre|metres)$/, 1 / 0.3048], [/^(yd|yard|yards)$/, 3], [/^km$/, 1000 / 0.3048]];
+function bytesHave(b, s){ const c = [...s].map(x => x.charCodeAt(0)), n = c.length; outer: for (let i = 0; i + n <= b.length; i++) { if (b[i] !== c[0]) continue; for (let j = 1; j < n; j++) if (b[i + j] !== c[j]) continue outer; return true; } return false; }
+function pdfVpRead(fileId){   // -> {pageNo: [{bbox, ptPerFt, label, name}]}; {} when the PDF has none or cannot be read
+  S.pdfVp = S.pdfVp || {};
+  return S.pdfVp[fileId] = S.pdfVp[fileId] || (async () => {
+    const out = {};
+    try {
+      const rec = await dbGet("pdfs", fileId); if (!rec) return out;
+      const raw = new Uint8Array(rec.data.slice(0));
+      if (!bytesHave(raw, "/VP") && !bytesHave(raw, "/ObjStm")) return out;   // no viewport anywhere (and none hidden in a compressed object stream)
+      const L = await loadPdfLib(), d = await L.PDFDocument.load(raw, {ignoreEncryption: true, updateMetadata: false, throwOnInvalidObject: false, parseSpeed: 1500});
+      const N = n => L.PDFName.of(n), num = o => o instanceof L.PDFNumber ? o.asNumber() : NaN, txt = o => { try { return o && o.decodeText ? o.decodeText() : ""; } catch (e) { return ""; } };
+      d.getPages().forEach((pg, i) => {
+        const node = pg.node, vp = node.lookup(N("VP")); if (!(vp instanceof L.PDFArray)) return;
+        const uu = node.lookup(N("UserUnit")); if (uu && num(uu) !== 1) return;
+        const list = [];
+        for (let j = 0; j < vp.size(); j++) {
+          const v = vp.lookup(j); if (!(v instanceof L.PDFDict)) continue;
+          const m = v.lookup(N("Measure")); if (!(m instanceof L.PDFDict)) continue;
+          const sub = m.lookup(N("Subtype")); if (sub && String(sub) !== "/RL") continue;
+          const X = m.lookup(N("X")); if (!(X instanceof L.PDFArray) || !X.size()) continue;
+          const f0 = X.lookup(0); if (!(f0 instanceof L.PDFDict)) continue;
+          const C = num(f0.lookup(N("C"))), U = txt(f0.lookup(N("U"))).trim().toLowerCase(), u = FT_PER.find(([re]) => re.test(U));
+          if (!(C > 0) || !u) continue;
+          const ptPerFt = 1 / (C * u[1]); if (!(ptPerFt > 0.01 && ptPerFt < 900)) continue;
+          const bb = v.lookup(N("BBox")), box = bb instanceof L.PDFArray && bb.size() === 4 ? [0, 1, 2, 3].map(k => num(bb.lookup(k))) : null;
+          list.push({bbox: box && box.every(isFinite) ? box : null, ptPerFt, label: txt(m.lookup(N("R"))).trim(), name: txt(v.lookup(N("Name"))).trim()});
+        }
+        if (list.length) out[i + 1] = list;
+      });
+    } catch (e) { /* encrypted or unreadable — no scale from the PDF */ }
+    return out;
+  })();
+}
+async function pdfScalesOn(fileId, pageNo, base){   // that page's saved scales on the page (pt, y down), largest box first
+  const L = (await pdfVpRead(fileId))[pageNo]; if (!L || !base) return [];
+  const W = base.width, H = base.height;
+  return L.map(v => { let r = v.bbox ? base.convertToViewportRectangle(v.bbox) : [0, 0, W, H];
+    r = [Math.max(0, Math.min(r[0], r[2])), Math.max(0, Math.min(r[1], r[3])), Math.min(W, Math.max(r[0], r[2])), Math.min(H, Math.max(r[1], r[3]))];
+    const share = Math.max(0, r[2] - r[0]) * Math.max(0, r[3] - r[1]) / (W * H);
+    return Object.assign({}, v, {r, share, label: v.label || "1 ft = " + v.ptPerFt.toFixed(3) + " pt"}); }).filter(v => v.share > 0).sort((a, b) => b.share - a.share);
+}
+/* a box covering a quarter of the sheet or more gives the page's scale; boxes at another scale become viewports (only on
+   a page with none yet) */
+function applyPdfScales(key, V){
+  const now = new Date().toISOString(), main = V.find(v => v.share >= 0.25) || null;
+  const vps = V.filter(v => v !== main && (!main || Math.abs(v.ptPerFt - main.ptPerFt) / main.ptPerFt > 0.005));
+  if (main) P.proj.scales[key] = {ptPerFt: main.ptPerFt, how: "pdf", text: main.label, note: "scale saved in the PDF" + (main.name ? " (viewport “" + main.name + "”)" : ""), factor: 1, verified: false, at: now};
+  const add = vps.length && !(P.proj.viewports[key] || []).length;
+  if (add) P.proj.viewports[key] = vps.map((v, i) => ({id: uid("V"), name: v.name || "PDF viewport " + (i + 1), r: v.r, ptPerFt: v.ptPerFt, text: v.label + " · saved in the PDF"}));
+  return {main, vps: add ? vps.length : 0};
 }
 
 function snapAt(q, ex){   // ex(item, i): points of the drawing's own takeoff to leave out (what is being dragged)
@@ -2514,7 +2578,7 @@ function renderScaleChip(){
   const ch = $("scaleChip"), sc = P.proj && P.proj.scales[S.key];
   if (!S.page) { ch.className = "chip bad"; ch.lastElementChild.textContent = "No page"; return; }
   if (!sc) { ch.className = "chip bad"; ch.lastElementChild.textContent = "Scale not set — press K"; }
-  else { ch.className = "chip " + scaleState(sc).k; ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "manual" ? sc.text + " · chosen" : sc.how === "inherited" ? "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · inherited from " + keyName(sc.from) : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · calibrated") + (sc.verified ? " · verified" : sc.doubt ? " · doubtful" : " · not verified"); ch.title = "Page scale: " + scaleState(sc).t + " — click to set or check"; }
+  else { ch.className = "chip " + scaleState(sc).k; ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "pdf" ? sc.text + " · saved in the PDF" : sc.how === "manual" ? sc.text + " · chosen" : sc.how === "inherited" ? "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · inherited from " + keyName(sc.from) : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · calibrated") + (sc.verified ? " · verified" : sc.doubt ? " · doubtful" : " · not verified"); ch.title = "Page scale: " + scaleState(sc).t + " — click to set or check"; }
   markPageSel();
 }
 /* a page's scale status: Verified / Calibrated (both checked against a known length), Inherited (copied from another page,
@@ -2525,6 +2589,7 @@ function scaleState(sc){
   if (sc.how === "inherited") return sc.verified ? {k: "ok", ic: "✓", t: "Inherited · verified"} : {k: "warn", ic: "⚠", t: "Inherited from " + keyName(sc.from)};
   if (sc.how === "calibrated") return {k: "ok", ic: "✓", t: "Calibrated"};
   if (sc.how === "manual") return sc.verified ? {k: "ok", ic: "✓", t: "Chosen · verified"} : {k: "warn", ic: "⚠", t: "Chosen by hand — not verified"};
+  if (sc.how === "pdf") return sc.verified ? {k: "ok", ic: "✓", t: "From the PDF · verified"} : {k: "warn", ic: "⚠", t: "Saved in the PDF — not verified"};
   return sc.verified ? {k: "ok", ic: "✓", t: "Verified"} : {k: "warn", ic: "⚠", t: "From note — not verified"};
 }
 function keyName(key){ if (!key) return "?"; const [f, p] = String(key).split(":"); return pageName({file: f, page: +p}); }
@@ -3333,10 +3398,13 @@ document.addEventListener("change", e => {   // dialog: preset and type change
 });
 async function scaleDialog(){
   if (!S.page) return;
+  const key0 = S.key; let pv = []; try { pv = await pdfScalesOn(S.fileId, S.pageNo, S.base); } catch (e) {}
+  if (key0 !== S.key) return;
   const sc = P.proj.scales[S.key], cands = scaleCandidates(S.key);
-  const body = `<p>Current: <b>${sc ? (sc.how === "note" ? esc(scaleLabel(sc)) + " (from the drawing note)" : sc.how === "manual" ? esc(sc.text) + " (chosen by hand)" : sc.how === "inherited" ? "inherited — " + esc(sc.text) : "calibrated — " + esc(sc.text)) : "not set"}</b>${sc ? (sc.verified ? " · <span style='color:var(--green)'>verified</span>" : " · <span style='color:var(--amber)'>not verified</span>") : ""} · status <b>${esc(scaleState(sc).ic + " " + scaleState(sc).t)}</b></p>
+  const body = `<p>Current: <b>${sc ? (sc.how === "note" ? esc(scaleLabel(sc)) + " (from the drawing note)" : sc.how === "pdf" ? esc(sc.text) + " (saved in the PDF)" : sc.how === "manual" ? esc(sc.text) + " (chosen by hand)" : sc.how === "inherited" ? "inherited — " + esc(sc.text) : "calibrated — " + esc(sc.text)) : "not set"}</b>${sc ? (sc.verified ? " · <span style='color:var(--green)'>verified</span>" : " · <span style='color:var(--amber)'>not verified</span>") : ""} · status <b>${esc(scaleState(sc).ic + " " + scaleState(sc).t)}</b></p>
     ${sc && sc.note ? `<p class="small">${esc(sc.note)}</p>` : ""}
     ${cands.length ? `<p style="margin-top:10px"><b>Scale notes found on this page</b></p>` + cands.map((c, i) => `<div class="cand" data-cand="${i}"><b>${esc(c.label)}</b><span class="small">“${esc(c.text.slice(0, 70))}”${c.note ? " · " + esc(c.note) : ""}</span></div>`).join("") : '<p class="small" style="margin-top:10px">No scale note was found in the text of this page (scanned drawings have no text).</p>'}
+    ${pv.length ? `<p style="margin-top:10px"><b>Scale saved in this PDF</b> <span class="small">— by Bluebeam, Acrobat or the CAD plot; exact for the page as printed</span></p>` + pv.map((v, i) => `<div class="cand" data-pv="${i}"><b>${esc(v.label)}</b><span class="small">${v.name ? esc(v.name) + " · " : ""}${v.share >= 0.999 ? "whole page" : Math.round(v.share * 100) + "% of the sheet"} · 1 ft = ${v.ptPerFt.toFixed(4)} pt</span></div>`).join("") : ""}
     <p class="small" style="margin-top:10px">A scale note is only right if the PDF is printed at the drawing's paper size. <b>Verify</b> by measuring a dimension you know; <b>Calibrate</b> sets the scale from it.</p>
     <p style="margin-top:12px"><b>Or choose the scale</b> <span class="small">— architectural, engineering or metric, for a page with no note or a wrong one</span></p>
     <div class="grid" style="margin-top:6px"><div class="fg"><label>Scale</label><select id="msSel"><option value="">— pick —</option>${MAN_SCALES.map(g => `<optgroup label="${esc(g[0])}">${g[1].map(t => `<option>${esc(t)}</option>`).join("")}</optgroup>`).join("")}</select></div>
@@ -3370,6 +3438,9 @@ async function scaleDialog(){
   $("msSet").onclick = () => { const r = manRead(); if (r.err != null) { $("msInfo").innerHTML = `<span style="color:var(--red)">${esc(r.err || "Pick or type a scale first")}</span>`; return; }
     close(); mutate(() => { P.proj.scales[S.key] = {ptPerFt: r.ptPerFt, how: "manual", text: r.label, note: r.paper ? "drawn for " + r.paper + ", this PDF page is × " + r.f.toFixed(3) : "", factor: r.f, verified: false, at: new Date().toISOString()}; }, "Scale " + r.label);
     toast("Scale set: " + r.label + " — verify it with a dimension printed on the drawing (scale chip → Verify)", 4500); };
+  $("dlgB").querySelectorAll("[data-pv]").forEach(el => el.onclick = () => { const v = pv[+el.dataset.pv]; close();
+    mutate(() => { P.proj.scales[S.key] = {ptPerFt: v.ptPerFt, how: "pdf", text: v.label, note: "scale saved in the PDF" + (v.name ? " (viewport “" + v.name + "”)" : ""), factor: 1, verified: false, at: new Date().toISOString()}; }, "Scale " + v.label);
+    toast("Scale set from the PDF: " + v.label + " — verify it with a dimension printed on the drawing", 4500); });
   $("dlgB").querySelectorAll("[data-cand]").forEach(el => el.onclick = () => { const c = cands[+el.dataset.cand]; close(); mutate(() => { P.proj.scales[S.key] = {ptPerFt: c.ptPerFt, how: "note", text: c.text, note: c.note || "", factor: c.factor || 1, verified: false, at: new Date().toISOString()}; }); });
 }
 async function verifyMeasure(){
@@ -3480,13 +3551,13 @@ async function exportExcel(){
     au.columns = [{header: "Drawing", width: 34}, {header: "Page", width: 7}, {header: "Scale", width: 26}, {header: "1 ft on the sheet (pt)", width: 18}, {header: "How", width: 12}, {header: "Verified", width: 10}, {header: "Check", width: 40}, {header: "Status", width: 26}];
     au.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; au.getRow(1).eachCell(c => { c.fill = HEAD; });
     Object.entries(P.proj.scales).forEach(([kk, sc]) => { const [fid, pg] = kk.split(":"), f = P.proj.files.find(x => x.id === fid); if (!f) return;
-      const r = au.addRow([f.name, +pg, sc.how === "calibrated" ? "calibrated: " + sc.text : sc.text, +sc.ptPerFt.toFixed(5), sc.how === "note" ? "scale note" : sc.how === "inherited" ? "inherited" : sc.how === "manual" ? "chosen" : "calibrated", sc.verified ? "yes" : "NO", sc.check ? `measured ${f3(sc.check.measured)} ft vs printed ${f3(sc.check.printed)} ft` : sc.note || "", scaleState(sc).t]);
+      const r = au.addRow([f.name, +pg, sc.how === "calibrated" ? "calibrated: " + sc.text : sc.text, +sc.ptPerFt.toFixed(5), sc.how === "note" ? "scale note" : sc.how === "pdf" ? "PDF scale data" : sc.how === "inherited" ? "inherited" : sc.how === "manual" ? "chosen" : "calibrated", sc.verified ? "yes" : "NO", sc.check ? `measured ${f3(sc.check.measured)} ft vs printed ${f3(sc.check.printed)} ft` : sc.note || "", scaleState(sc).t]);
       if (!sc.verified) r.eachCell(c => { c.fill = YELLOW; }); });
     const as = wb.addWorksheet("Assumptions");
     as.columns = [{header: "#", width: 5}, {header: "Item to confirm", width: 90}];
     as.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; as.getRow(1).eachCell(c => { c.fill = HEAD; });
     let an = 0;
-    Object.entries(P.proj.scales).forEach(([kk, sc]) => { if (!sc.verified) { const [fid, pg] = kk.split(":"), f = P.proj.files.find(x => x.id === fid); as.addRow([++an, `Scale of ${f ? f.name : fid} p.${pg} ${sc.how === "manual" ? "chosen by hand" : sc.how === "inherited" ? "copied from another page" : "read from its note"} (${sc.text}) and not checked against a printed dimension`]).getCell(2).fill = YELLOW; } });
+    Object.entries(P.proj.scales).forEach(([kk, sc]) => { if (!sc.verified) { const [fid, pg] = kk.split(":"), f = P.proj.files.find(x => x.id === fid); as.addRow([++an, `Scale of ${f ? f.name : fid} p.${pg} ${sc.how === "manual" ? "chosen by hand" : sc.how === "inherited" ? "copied from another page" : sc.how === "pdf" ? "read from the scale saved in the PDF" : "read from its note"} (${sc.text}) and not checked against a printed dimension`]).getCell(2).fill = YELLOW; } });
     P.proj.conds.filter(c => c.h || c.t).forEach(c => as.addRow([++an, `${c.name}: ${c.h ? "height H " + f3(+c.h) + " ft" : ""}${c.h && c.t ? ", " : ""}${c.t ? "thickness T " + f3(+c.t) + " ft" : ""} entered for the condition — confirm against the sections`]));
     P.proj.items.filter(i => i.kind === "open").forEach(i => as.addRow([++an, `Opening ${i.label || ""} on ${pageName(i)}: height ${f3(+i.oh || 0)} ft entered — confirm against the door / window schedule`]));
     if (!an) as.addRow([1, "None"]);
@@ -3921,10 +3992,50 @@ function validate(){
     else if (!(l.rate > 0)) E("WARNING", `${l.name}: rate not set`);
     else if (!rateOk(l)) E("WARNING", `${l.name}: rate has no dated source — ASSUMPTION`);
   });
+  dupFind().forEach(d => E("WARNING", d.count ? `${d.c.name} on ${pageName(d.a)}: ${d.n} count marker${d.n > 1 ? "s" : ""} placed twice on the same spot — counted twice`
+    : `${d.c.name} — ${d.a.label || kindName(d.a, d.c)} on ${pageName(d.a)} is drawn twice (same outline${d.b.label && d.b.label !== d.a.label ? " as " + d.b.label : ""}) — counted twice`));
+  floorGaps().forEach(g => E("WARNING", `${g.c.name}: measured on ${g.have} floor${g.have > 1 ? "s" : ""}${g.bldg ? " of " + g.bldg : ""} but not on ${g.miss.join(", ")} — check nothing was missed there`));
   const rc = P.proj.items.filter(i => i.qa === "recheck").length, ai = P.proj.items.filter(i => i.ai && i.qa !== "checked").length, cp = P.proj.items.filter(i => i.copied && i.qa !== "checked").length;
   if (rc) E("ERROR", `${rc} measurement${rc > 1 ? "s" : ""} marked Recheck required`);
   if (ai) E("WARNING", `${ai} AI-generated measurement${ai > 1 ? "s" : ""} not yet checked`);
   if (cp) E("WARNING", `${cp} typical-floor cop${cp > 1 ? "ies" : "y"} not yet checked`);
+  return out;
+}
+/* measurements drawn twice: same condition, page and kind, every point within 1 pt of the other's; for counts, two
+   markers of one condition on one spot */
+function dupFind(){
+  const out = [], groups = new Map(), D = 1;
+  P.proj.items.forEach(it => { const c = cond(it.cond); if (!c || !Array.isArray(it.pts) || !it.pts.length) return;
+    const k = [it.file, it.page, it.cond, c.type === "count" ? "" : it.kind + "|" + (it.shape || "")].join("|"); if (!groups.has(k)) groups.set(k, {c, its: []}); groups.get(k).its.push(it); });
+  groups.forEach(({c, its}) => {
+    if (c.type === "count") {   // markers sorted by x, each compared with the ones close to it
+      const M = []; its.forEach(it => it.pts.forEach(p => M.push({p, it}))); M.sort((a, b) => a.p[0] - b.p[0]);
+      let n = 0, first = null;
+      for (let i = 0; i < M.length; i++) for (let j = i + 1; j < M.length && M[j].p[0] - M[i].p[0] <= D; j++) if (Math.abs(M[j].p[1] - M[i].p[1]) <= D) { n++; first = first || M[i].it; break; }
+      if (n) out.push({c, a: first, n, count: true});
+      return;
+    }
+    if (its.length < 2) return;
+    const cen = it => it.pts.reduce((a, p) => [a[0] + p[0] / it.pts.length, a[1] + p[1] / it.pts.length], [0, 0]);
+    const L = its.map(it => ({it, m: cen(it)})).sort((a, b) => a.m[0] - b.m[0]), used = new Set();
+    const same = (A, B) => A.length === B.length && A.every(p => B.some(q => Math.abs(p[0] - q[0]) <= D && Math.abs(p[1] - q[1]) <= D)) && B.every(p => A.some(q => Math.abs(p[0] - q[0]) <= D && Math.abs(p[1] - q[1]) <= D));
+    for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length && L[j].m[0] - L[i].m[0] <= D; j++) {
+      if (used.has(L[j].it.id) || Math.abs(L[j].m[1] - L[i].m[1]) > D || !same(L[i].it.pts, L[j].it.pts)) continue;
+      used.add(L[j].it.id); out.push({c, a: L[i].it, b: L[j].it});
+    }
+  });
+  return out;
+}
+/* a condition taken off on most floors of a building but missing on another floor of it that has other measurements
+   (tiles on GF, FF and SF but none on TF) — a reminder, since a roof or a basement may rightly have none */
+function floorGaps(){
+  const B = new Map(), out = [];
+  P.proj.items.forEach(it => { if (!cond(it.cond)) return; const L = locOf(it); if (!L.floor) return;
+    if (!B.has(L.bldg)) B.set(L.bldg, {floors: new Set(), by: new Map()}); const b = B.get(L.bldg); b.floors.add(L.floor);
+    if (!b.by.has(it.cond)) b.by.set(it.cond, new Set()); b.by.get(it.cond).add(L.floor); });
+  B.forEach((b, bldg) => { if (b.floors.size < 3) return;
+    b.by.forEach((fl, cid) => { const miss = [...b.floors].filter(f => !fl.has(f)).sort((x, y) => x.localeCompare(y, undefined, {numeric: true}));
+      if (fl.size >= 2 && miss.length && fl.size * 2 >= b.floors.size) out.push({c: cond(cid), bldg, have: fl.size, miss}); }); });
   return out;
 }
 const noFloor = new Set();
@@ -5927,7 +6038,7 @@ function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw"
   loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on);
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint};   // for tests and the console
+  window.zdTakeoff = {dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
