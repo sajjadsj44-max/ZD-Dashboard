@@ -16,6 +16,15 @@ seg(9.55, 4, 10, 4); seg(9.55, 4.75, 10, 4.75); seg(9.55, 4, 9.55, 4.75);   // a
 rect(9.43, 4, 9.55, 7);                                                  // the door frame beside it
 seg(2, 9, 10, 9); seg(2.75, 9.75, 10, 9.75);                             // a 9" wall into it, with a short return at its far end
 seg(2, 9, 2, 10.25); seg(2.75, 9.75, 2.75, 10.25); seg(2, 10.25, 2.75, 10.25);
+// a door beside a wall corner, as drawn in CAD: the wall over the door broken where a 4.5" partition meets it from above,
+// a door leaf / frame drawn inside that wall's band running on past the partition; a jamb stub; a nib below the door with
+// its frame running up into the opening; a column; the wall on below it (columns are never bridged)
+seg(14, 1, 19, 1); seg(19.375, 1, 30, 1); seg(14.75, 1.75, 30, 1.75); seg(19, -2, 19, 1); seg(19.375, -2, 19.375, 1);
+seg(15, 1.5, 21, 1.5);
+seg(14, 1, 14, 3); seg(14.75, 1.75, 14.75, 3); seg(14, 3, 14.75, 3);
+seg(14, 7, 14.75, 7); seg(14, 7, 14, 9); seg(14.75, 7, 14.75, 9); rect(14.2, 6.3, 14.4, 8.5);
+rect(14, 9, 16, 11);
+seg(14, 11, 14, 14); seg(14.75, 11, 14.75, 14); seg(14, 14, 14.75, 14);
 let fails = 0; const ok = (c, m) => { console.log((c ? "  ✓ " : "  ✗ ") + m); if (!c) fails++; };
 (async () => {
   if (!LIBS) { console.log("TK_LIBS must hold pdfjs-dist — see the header"); process.exit(2); }
@@ -34,9 +43,12 @@ let fails = 0; const ok = (c, m) => { console.log((c ? "  ✓ " : "  ✗ ") + m)
     return {w, runs: Z.P.proj.items.filter(i => i.wallAuto).map(i => i.pts.map(p => [(p[0] - 100) / 18, (p[1] - 100) / 18]))}; });
   const has = (pts, want) => r.runs.some(q => q.length === want.length && q.every((p, i) => Math.abs(p[0] - want[i][0]) < 0.01 && Math.abs(p[1] - want[i][1]) < 0.01) ||
     q.length === want.length && q.slice().reverse().every((p, i) => Math.abs(p[0] - want[i][0]) < 0.01 && Math.abs(p[1] - want[i][1]) < 0.01));
-  ok(Math.abs(r.w.total_length_ft - 22.95) < 0.01, `9" walls: 22.950 ft (0.450 nib + 8.500 wall with its return + 14.000), got ${r.w.total_length_ft}`);
-  ok(r.w.runs === 3, `…in 3 runs, got ${r.w.runs}`);
+  if (process.env.TK_DEBUG) console.log(JSON.stringify(r.runs.map(q => q.map(p => p.map(v => +v.toFixed(3))))));
+  ok(Math.abs(r.w.total_length_ft - 49.2) < 0.01, `9" walls: 49.200 ft (0.450 nib + 8.500 wall with its return + 14.000; 23.250 wall over the door, its jamb, the door bridged and the nib + 3.000), got ${r.w.total_length_ft}`);
+  ok(r.w.runs === 5, `…in 5 runs, got ${r.w.runs}`);
   ok(has(null, [[9.55, 4.375], [10, 4.375]]), "the 0.45 ft nib at the door jamb, from its end to the wall's face");
   ok(has(null, [[2.375, 10.25], [2.375, 9.375], [10, 9.375]]), "the 0.5 ft return joined to its wall on the centre line");
+  ok(has(null, [[14.375, 9], [14.375, 1.375], [30, 1.375]]), "the wall over the door (a door leaf drawn in its band) whole, the partition's T bridged; its jamb, the door (bridged, deducted as an opening) and the nib below it, whose frame runs up into the opening, down to the column");
+  ok(has(null, [[14.375, 11], [14.375, 14]]), "the wall below the column, not bridged through it (the column is not masonry)");
   await b.close(); console.log(fails ? fails + " failed" : "all passed"); process.exit(fails ? 1 : 0);
 })();

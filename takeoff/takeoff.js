@@ -5519,14 +5519,17 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
     return segsIn(gg, Math.min(...xs) - 1, Math.min(...ys) - 1, Math.max(...xs) + 1, Math.max(...ys) + 1).some(i => { const s2 = gg.segs[i]; if (s2[4] & 9) return false;
       const t1 = u[0] * s2[0] + u[1] * s2[1], o1 = n[0] * s2[0] + n[1] * s2[1], t2 = u[0] * s2[2] + u[1] * s2[3], o2 = n[0] * s2[2] + n[1] * s2[3];
       if (Math.min(o1, o2) > o - hw || Math.max(o1, o2) < o + hw) return false;   // must cross the whole band
-      const tc = t1 + (t2 - t1) * (o - o1) / ((o2 - o1) || 1e-9); return tc > ta + 0.1 * k && tc < tb - 0.1 * k; }); };
+      const tc = t1 + (t2 - t1) * (o - o1) / ((o2 - o1) || 1e-9); if (tc > ta + 0.1 * k && tc < tb - 0.1 * k) return true;
+      // at the gap's end, a line running on well past a face is a column's (or a wider block's) edge, not a jamb's end cap
+      return Math.abs(tc - (tc - ta < tb - tc ? ta : tb)) <= 0.1 * k && (Math.min(o1, o2) < o - T * k / 2 - 0.3 * k || Math.max(o1, o2) > o + T * k / 2 + 0.3 * k); }); };
   G.forEach(g => {
     const C = [];   // centre lines of this direction
     facePairs(g, T * k - tol, T * k + tol, 0.2 * k, (d, o, t0, t1) => {
       // a third line of this direction between the two faces over half their length: not a wall's two faces (a window's
       // glass beside a bed, a cupboard against a wall) — a wall's hollow is empty but for its windows
-      // (counted: lines that run on past the pair — a window's glass lines stop within its wall and do not count)
-      const iv = []; g.L.forEach(l => { if (l.o > o - d / 2 + 0.04 * k && l.o < o + d / 2 - 0.04 * k && (l.t0 < t0 - 0.5 * k || l.t1 > t1 + 0.5 * k)) { const a = Math.max(t0, l.t0), b = Math.min(t1, l.t1); if (b > a) iv.push([a, b]); } });
+      // (counted: lines that run on past the pair at both ends — a window's glass lines stop within its wall, and a door's
+      // leaf or frame drawn in the wall's band runs on past one end only, into the opening: neither counts)
+      const iv = []; g.L.forEach(l => { if (l.o > o - d / 2 + 0.04 * k && l.o < o + d / 2 - 0.04 * k && l.t0 < t0 - 0.5 * k && l.t1 > t1 + 0.5 * k) { const a = Math.max(t0, l.t0), b = Math.min(t1, l.t1); if (b > a) iv.push([a, b]); } });
       iv.sort((a, b) => a[0] - b[0]); let inside = 0, e = -Infinity; iv.forEach(([a, b]) => { if (b > e) { inside += b - Math.max(a, e); e = b; } });
       if (inside <= 0.5 * (t1 - t0)) C.push({o, t0, t1}); });
     C.sort((a, b) => a.o - b.o);
