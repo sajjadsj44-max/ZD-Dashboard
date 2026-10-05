@@ -5469,11 +5469,11 @@ async function agentSchedule(){
    own rows (Opening tool), and runs meeting at an L corner are joined at their centre lines — so the cft is exact:
    corners by the centre line, T-junctions face to face, never counted twice. */
 function viewRect(){ const st = stage(), v = S.view; return [Math.max(0, -v.tx / v.s), Math.max(0, -v.ty / v.s), Math.min(S.base.width, (st.clientWidth - v.tx) / v.s), Math.min(S.base.height, (st.clientHeight - v.ty) / v.s)]; }
-function faceLines(rect, k, only, join){   // straight drawing lines in rect (or the given ids), grouped by direction -> [{u, n, L: [{o, t0, t1}]}]; join: bridge collinear gaps up to this (pt)
+function faceLines(rect, k, only, join, minFt){   // straight drawing lines in rect (or the given ids), grouped by direction -> [{u, n, L: [{o, t0, t1}]}]; join: bridge collinear gaps up to this (pt); minFt: shortest line taken (0.4 ft)
   const g = S.geo[S.key]; if (!g || !g.segs.length) return null;
   const ids = only || (rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i)), groups = new Map();
   ids.forEach(i => { const s = g.segs[i]; if (s[4] & 11) return;   // curves, dashed lines and clip paths are not wall faces
-    const dx = s[2] - s[0], dy = s[3] - s[1], L = Math.hypot(dx, dy); if (L < 0.4 * k) return;
+    const dx = s[2] - s[0], dy = s[3] - s[1], L = Math.hypot(dx, dy); if (L < (minFt || 0.4) * k) return;
     let a = Math.atan2(dy, dx); if (a < 0) a += Math.PI; if (a >= Math.PI - 0.0044) a -= Math.PI;
     const key = Math.round(a / 0.0087);   // 0.5° bins
     let G = groups.get(key) || groups.get(key - 1) || groups.get(key + 1);
@@ -5510,7 +5510,7 @@ function wallThicknesses(rect){   // the wall thicknesses drawn here, most wall 
   return out.slice(0, 5).map(o => ({t: o.t, len: o.len}));
 }
 function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-line runs, page units
-  const k = curScale(), ids = k && wallLineIds(rect, k), G = ids && faceLines(null, k, ids); if (!k || !G) return null;
+  const k = curScale(), ids = k && wallLineIds(rect, k), G = ids && faceLines(null, k, ids, 0, 0.2); if (!k || !G) return null;   // (short lines too: a nib at a door jamb)
   const tol = Math.max(0.04, 0.08 * T) * k, bridge = Math.max(1.6 * T, bridgeFt || 0) * k, runs = [], gg = S.geo[S.key];
   /* a gap is bridged (a door or window opening) only if no other line crosses the wall's band inside it: a cross wall,
      a corridor's partition — then the two pieces are separate walls with a room or passage between them */
@@ -5522,7 +5522,7 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
       const tc = t1 + (t2 - t1) * (o - o1) / ((o2 - o1) || 1e-9); return tc > ta + 0.1 * k && tc < tb - 0.1 * k; }); };
   G.forEach(g => {
     const C = [];   // centre lines of this direction
-    facePairs(g, T * k - tol, T * k + tol, 0.3 * k, (d, o, t0, t1) => {
+    facePairs(g, T * k - tol, T * k + tol, 0.2 * k, (d, o, t0, t1) => {
       // a third line of this direction between the two faces over half their length: not a wall's two faces (a window's
       // glass beside a bed, a cupboard against a wall) — a wall's hollow is empty but for its windows
       // (counted: lines that run on past the pair — a window's glass lines stop within its wall and do not count)
@@ -5534,11 +5534,17 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
     lines.forEach(l => {
       l.iv.sort((a, b) => a[0] - b[0]); const m = [];
       l.iv.forEach(v => { const q = m[m.length - 1]; if (q && (v[0] - q[1] <= 0.1 * k || (v[0] - q[1] <= bridge && !crossed(g, l.o, q[1], v[0])))) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
-      m.forEach(v => { if (v[1] - v[0] >= 0.6 * k) runs.push({u: g.u, n: g.n, a: [g.u[0] * v[0] + g.n[0] * l.o, g.u[1] * v[0] + g.n[1] * l.o], b: [g.u[0] * v[1] + g.n[0] * l.o, g.u[1] * v[1] + g.n[1] * l.o]}); });
+      m.forEach(v => { if (v[1] - v[0] >= 0.2 * k) runs.push({u: g.u, n: g.n, short: v[1] - v[0] < 0.6 * k, a: [g.u[0] * v[0] + g.n[0] * l.o, g.u[1] * v[0] + g.n[1] * l.o], b: [g.u[0] * v[1] + g.n[0] * l.o, g.u[1] * v[1] + g.n[1] * l.o]}); });
     });
   });
-  // L corners: two runs ending within ~T/2 of where their centre lines cross are both taken to that point
   const reach = 0.65 * T * k + 0.05 * k;
+  /* a short piece (under 0.6 ft) is a wall only when it stands square off a longer wall — a nib at a door jamb, the
+     return at a corner beside a door: one of its ends at the other's centre line (a T) or at its end (an L). Loose short
+     pairs (hatching, ticks, a frame) are dropped. */
+  const attached = A => runs.some(B => { if (B === A || B.short || Math.abs(A.u[0] * B.u[0] + A.u[1] * B.u[1]) > 0.2) return false;
+    const X = segXInf(A.a, A.b, B.a, B.b); return !!X && Math.min(dist(A.a, X), dist(A.b, X)) <= reach && distSeg(X, B.a, B.b) <= reach; });
+  for (let i = runs.length - 1; i >= 0; i--) if (runs[i].short && !attached(runs[i])) runs.splice(i, 1);
+  // L corners: two runs ending within ~T/2 of where their centre lines cross are both taken to that point
   for (let i = 0; i < runs.length; i++) for (let j = i + 1; j < runs.length; j++) {
     const A = runs[i], B = runs[j]; if (Math.abs(A.u[0] * B.u[0] + A.u[1] * B.u[1]) > 0.2) continue;
     const X = segXInf(A.a, A.b, B.a, B.b); if (!X) continue;
@@ -5556,7 +5562,7 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
       if (!inA || !inB || dist(A.a, X) <= h + 0.05 * k || dist(X, A.b) <= h + 0.05 * k || dist(B.a, X) <= h || dist(X, B.b) <= h) continue;
       const v = [(A.b[0] - A.a[0]) / LA, (A.b[1] - A.a[1]) / LA];
       runs.splice(i, 1, Object.assign({}, A, {b: [X[0] - v[0] * h, X[1] - v[1] * h]}), Object.assign({}, A, {a: [X[0] + v[0] * h, X[1] + v[1] * h]})); changed = true; } }
-  return runs.filter(r => dist(r.a, r.b) >= 0.6 * k);
+  return runs.filter(r => dist(r.a, r.b) >= (r.short ? 0.2 : 0.6) * k);
 }
 function segXInf(a, b, c, d){ const r = [b[0] - a[0], b[1] - a[1]], s2 = [d[0] - c[0], d[1] - c[1]], den = r[0] * s2[1] - r[1] * s2[0]; if (Math.abs(den) < 1e-9) return null; const t = ((c[0] - a[0]) * s2[1] - (c[1] - a[1]) * s2[0]) / den; return [a[0] + t * r[0], a[1] + t * r[1]]; }
 function chainRuns(runs, eps){   // runs sharing an end (and only two at that point) joined into polylines
