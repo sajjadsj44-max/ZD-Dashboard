@@ -1,0 +1,60 @@
+;; Test drawing for the PDF Takeoff DWG import: known geometry in inches (INSUNITS 1).
+(setvar "CMDECHO" 1)
+(setvar "INSUNITS" 1) (setvar "LUNITS" 4) (setvar "MEASUREMENT" 0) (setvar "LTSCALE" 12.0)
+(defun mklayer (nm col lt lw flags)
+  (if (not (tblsearch "LAYER" nm))
+    (entmake (list '(0 . "LAYER") '(100 . "AcDbSymbolTableRecord") '(100 . "AcDbLayerTableRecord")
+                   (cons 2 nm) (cons 70 flags) (cons 62 col) (cons 6 lt) (cons 370 lw)))))
+(command "._-LINETYPE" "_L" "CENTER" "acad.lin" "")
+(command "._-LINETYPE" "_L" "DASHED" "acad.lin" "")
+(mklayer "A-WALL" 1 "Continuous" 50 0)
+(mklayer "A-DOOR" 2 "Continuous" -3 0)
+(mklayer "A-TEXT" 7 "Continuous" -3 0)
+(mklayer "A-HATCH" 8 "Continuous" -3 0)
+(mklayer "A-DIMS" 4 "Continuous" -3 0)
+(mklayer "A-FURN" -3 "Continuous" -3 0)      ; negative colour = layer OFF
+(mklayer "A-FROZEN" 5 "Continuous" -3 1)     ; flag 1 = frozen
+(mklayer "A-GRID" 6 "CENTER" -3 0)
+(defun pl (lay pts closed / L)
+  (entmake (append (list '(0 . "LWPOLYLINE") '(100 . "AcDbEntity") (cons 8 lay) '(100 . "AcDbPolyline")
+                         (cons 90 (length pts)) (cons 70 (if closed 1 0)))
+                   (mapcar '(lambda (p) (cons 10 p)) pts))))
+;; room 10'-0" x 12'-0" (inner face) and the outer face of a 9" wall
+(pl "A-WALL" '((0.0 0.0) (120.0 0.0) (120.0 144.0) (0.0 144.0)) T)
+(pl "A-WALL" '((-9.0 -9.0) (129.0 -9.0) (129.0 153.0) (-9.0 153.0)) T)
+;; a 20'-0" line
+(entmake '((0 . "LINE") (8 . "A-WALL") (10 200.0 0.0 0.0) (11 440.0 0.0 0.0)))
+;; circle r 2'-0" on layer 0, an ellipse, a point
+(entmake '((0 . "CIRCLE") (8 . "0") (10 300.0 100.0 0.0) (40 . 24.0)))
+(entmake '((0 . "ELLIPSE") (100 . "AcDbEntity") (8 . "0") (100 . "AcDbEllipse") (10 380.0 100.0 0.0) (11 30.0 0.0 0.0) (210 0.0 0.0 1.0) (40 . 0.5) (41 . 0.0) (42 . 6.283185307179586)))
+(entmake '((0 . "POINT") (8 . "0") (10 420.0 140.0 0.0)))
+;; a door swing arc and a magenta line (colour override, ACI 6)
+(entmake '((0 . "ARC") (8 . "A-DOOR") (10 60.0 144.0 0.0) (40 . 30.0) (50 . 3.141592653589793) (51 . 0.0)))
+(entmake '((0 . "LINE") (8 . "0") (62 . 6) (10 200.0 20.0 0.0) (11 440.0 20.0 0.0)))
+;; text and mtext
+(entmake '((0 . "TEXT") (8 . "A-TEXT") (10 30.0 80.0 0.0) (40 . 6.0) (1 . "BEDROOM")))
+(entmake '((0 . "TEXT") (8 . "A-TEXT") (10 30.0 70.0 0.0) (40 . 4.0) (1 . "12'-0\" x 10'-0\"")))
+(entmake '((0 . "MTEXT") (100 . "AcDbEntity") (8 . "A-TEXT") (100 . "AcDbMText") (10 200.0 200.0 0.0) (40 . 5.0) (41 . 80.0) (71 . 1) (1 . "LIVING\PROOM 2")))
+;; a block DOOR3 (3'-0" leaf + swing) inserted twice
+(entmake '((0 . "BLOCK") (2 . "DOOR3") (70 . 0) (10 0.0 0.0 0.0)))
+(entmake '((0 . "LINE") (8 . "0") (10 0.0 0.0 0.0) (11 0.0 36.0 0.0)))
+(entmake '((0 . "ARC") (8 . "0") (10 0.0 0.0 0.0) (40 . 36.0) (50 . 0.0) (51 . 1.5707963267948966)))
+(entmake '((0 . "ENDBLK")))
+(entmake '((0 . "INSERT") (8 . "A-DOOR") (2 . "DOOR3") (10 30.0 0.0 0.0) (41 . 1.0) (42 . 1.0) (43 . 1.0) (50 . 0.0)))
+(entmake '((0 . "INSERT") (8 . "A-DOOR") (2 . "DOOR3") (10 120.0 60.0 0.0) (41 . 1.0) (42 . 1.0) (43 . 1.0) (50 . 1.5707963267948966)))
+;; hatch: a solid one and an ANSI31 pattern
+(pl "A-HATCH" '((200.0 100.0) (260.0 100.0) (260.0 160.0) (200.0 160.0)) T)
+(command "._-HATCH" "_P" "_S" "_S" (entlast) "" "")
+(pl "A-HATCH" '((280.0 160.0) (340.0 160.0) (340.0 220.0) (280.0 220.0)) T)
+(command "._-HATCH" "_P" "ANSI31" 12.0 0.0 "_S" (entlast) "" "")
+;; a linear dimension of the room width, and a spline
+(setvar "CLAYER" "A-DIMS")
+(command "._DIMLINEAR" "_non" '(0.0 0.0) "_non" '(120.0 0.0) "_non" '(60.0 -30.0))
+(setvar "CLAYER" "0")
+(command "._SPLINE" "_non" '(460.0 0.0) "_non" '(480.0 40.0) "_non" '(500.0 0.0) "_non" '(520.0 40.0) "" "" "")
+;; layers that start hidden, and a centre line
+(pl "A-FURN" '((20.0 20.0) (60.0 20.0) (60.0 50.0) (20.0 50.0)) T)
+(entmake '((0 . "LINE") (8 . "A-FROZEN") (10 0.0 -60.0 0.0) (11 120.0 -60.0 0.0)))
+(entmake '((0 . "LINE") (8 . "A-GRID") (10 -40.0 72.0 0.0) (11 560.0 72.0 0.0)))
+(command "._ZOOM" "_E")
+(princ "\nTEST DRAWING MADE\n")
