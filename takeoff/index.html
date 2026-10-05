@@ -63,12 +63,13 @@ header .btn.tg2.on{background:#fff;color:var(--navy);border-color:#fff}
 .pgf{display:flex;align-items:center;gap:6px;padding:8px 10px 2px;font-size:12px;border-top:1px solid var(--line)}
 .pgf:first-child{border-top:0}
 .pgf b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--navy)}
-.pgg{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;padding:6px 10px 10px}
+.pgg{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;padding:6px 10px 10px}
 .pgt{border:1px solid var(--line);border-radius:6px;padding:4px;cursor:pointer;background:#fff;display:flex;flex-direction:column;gap:3px;align-items:stretch;min-width:0}
 .pgt:hover{border-color:var(--blue)}.pgt.on{border-color:var(--purple);box-shadow:0 0 0 2px #d9d2ff}
-.pgt img{width:100%;height:84px;background:#f4f7fb;border:1px solid #eef2f7;object-fit:contain;display:block}
+.pgt img{width:100%;height:94px;background:#f4f7fb;border:1px solid #eef2f7;object-fit:contain;display:block}
 .pgt .pgl{font-size:10.5px;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pgt .pgl.ok{color:var(--green)}.pgt .pgl.warn{color:#8a5a00}.pgt .pgl.bad{color:var(--red)}
+.pgact{display:flex;gap:4px;justify-content:center}.pgact .btn{flex:1;min-width:0;padding:2px 4px;font-size:10px}
 table.sh.bill td:first-child{width:52%}
 table.sh tr.ch2 td{background:#f7f9fc;font-weight:600;border-top:1px solid var(--line)}
 table.asm{width:100%;border-collapse:collapse;font-size:11.5px}table.asm th{font-size:9.5px;text-align:left;color:var(--muted);padding:3px}table.asm td{padding:2px}table.asm input{width:100%;min-width:0;padding:4px 5px;font-size:11.5px}
@@ -327,7 +328,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 <div class="app" id="app">
   <aside class="panel">
     <div class="rz" id="rzL" title="Drag to resize"></div>
-    <div class="ph"><span class="seg"><button class="btn sm on" id="tCond">Conditions</button><button class="btn sm" id="tPages" title="Every page of the project: thumbnails, scale status, measurements — click to open">Pages</button><button class="btn sm" id="tLay">Layers</button></span><span style="flex:1"></span><button class="btn sm pri" id="bNewCond">+ New</button><button class="hidebtn" id="hideL" title="Hide this panel">&#10216;</button></div>
+    <div class="ph"><span class="seg"><button class="btn sm on" id="tCond">Conditions</button><button class="btn sm" id="tPages" title="Every sheet in the project: search by number or title, edit sheet info, run OCR, and open a page">Sheets</button><button class="btn sm" id="tLay">Layers</button></span><span style="flex:1"></span><button class="btn sm pri" id="bNewCond">+ New</button><button class="hidebtn" id="hideL" title="Hide this panel">&#10216;</button></div>
     <div class="pb" id="condList"></div>
     <div class="pb" id="layerList" style="display:none"></div>
     <div class="pb" id="pageList" style="display:none"></div>
@@ -427,6 +428,6 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-05c"></script>
+<script type="module" src="takeoff.js?v=2026-10-05f"></script>
 </body>
 </html>

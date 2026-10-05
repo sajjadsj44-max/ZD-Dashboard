@@ -6,11 +6,13 @@
    Nothing leaves the browser: PDFs and projects are kept in IndexedDB. */
 const PDFJS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/";
 const EXCELJS = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
+const TESSERACT = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/";
 const COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948",
                 "#00a3c4", "#8e44ad", "#c0392b", "#d35400", "#16a085", "#7f8c8d", "#2c3e50", "#b8860b",
                 "#ff1493", "#6b8e23", "#1e90ff", "#a0522d", "#20b2aa", "#9acd32", "#ff6347", "#000000"];
 const SNAP_PX = 11, HIT_PX = 7;
 let pdfjs = null;
+let tesseract = null, ocrWorker = null;
 
 /* ------------------------------------------------------------------ utilities */
 const $ = id => document.getElementById(id);
@@ -151,6 +153,7 @@ const S = {                           // session state (not saved)
   tool: "select", cond: null, draft: [], cursor: null, snap: null, sel: null, selPt: -1,
   geo: {},                            // "fileId:page" -> {segs, grid, cell, n}
   texts: {},                          // "fileId:page" -> [{s, x, y}]
+  ocr: {},                            // pages OCRed in this browser session
   undo: [], redo: [], drag: null, space: false, measure: null, measures: [], pinch: null,
   multi: new Set(), box: null, condSel: new Set(), matchSource: null   // multi-selection (shift-click, box, Ctrl+A); conditions ticked in the list
 };
@@ -329,7 +332,7 @@ async function openProject(id){
   if ((+pr.v || 1) < SCHEMA) { const from = migrate(pr, rep); await dbPut("projects", pr); toast("Project upgraded from file version " + from + " to " + SCHEMA, 3000); } else migrate(pr, rep);
   if (rep.length) setTimeout(() => toast("The stored project had damaged entries, repaired: " + rep.slice(0, 2).join(" · ") + (rep.length > 2 ? " · …" : ""), 8000), 400);
   Object.values(S.docs).forEach(d => d.destroy && d.destroy());
-  P.proj = pr; S.docs = {}; S.geo = {}; S.texts = {}; S.sizes = {}; S.thumbs = {}; S.thumbQ = []; S.ocgs = {}; S.ocBound = {}; S.undo = []; S.redo = []; S.sel = null; S.multi.clear(); S.selMark = null; draftClear(); S.page = null; S.fileId = null; S.otherTab = "";
+  P.proj = pr; S.docs = {}; S.geo = {}; S.texts = {}; S.ocr = {}; S.sizes = {}; S.thumbs = {}; S.thumbQ = []; S.ocgs = {}; S.ocBound = {}; S.undo = []; S.redo = []; S.sel = null; S.multi.clear(); S.selMark = null; draftClear(); S.page = null; S.fileId = null; S.otherTab = "";
   tabSay({t: "open", id: pr.id});
   S.cond = (pr.conds[0] || {}).id || null;
   localStorage.setItem("zdTakeoffLast", pr.id);
@@ -403,7 +406,7 @@ function remapFileId(text, from, to){ return text.split('"' + from + '"').join('
 function dropFileCache(fid){
   if (S.docs[fid]) { try { S.docs[fid].destroy(); } catch (e) {} delete S.docs[fid]; }
   const mine = k => String(k).split(":")[0] === fid;
-  [S.geo, S.texts, S.sizes, S.thumbs].forEach(o => o && Object.keys(o).forEach(k => { if (mine(k)) delete o[k]; }));
+  [S.geo, S.texts, S.ocr, S.sizes, S.thumbs].forEach(o => o && Object.keys(o).forEach(k => { if (mine(k)) delete o[k]; }));
   if (S.ocgs) delete S.ocgs[fid]; if (S.ocBound) delete S.ocBound[fid]; if (S.pdfVp) delete S.pdfVp[fid];
 }
 async function addFiles(files){
@@ -2667,16 +2670,16 @@ function markPageSel(){
     const t = (sh.no ? sh.no + (sh.rev ? " " + sh.rev : "") + " · " : "") + ((P.proj.files.find(x => x.id === f) || {name: "?"}).name.replace(/\.pdf$/i, "")) + " — p." + p + "  " + st.ic;
     if (o.textContent !== t) o.textContent = t; o.title = "Scale: " + st.t; });
 }
-/* the Pages tab: a thumbnail of every page (drawn when it scrolls into view, one at a time, and kept), its sheet no.,
-   scale status and how many measurements are on it; click to open. Remove PDF takes a wrong drawing out of the project. */
+/* the Sheets tab: searchable sheet cards for every PDF page, with its sheet info, scale, measurement count and actions. */
 function renderPages(){
   const el = $("pageList"); if (!el || !P.proj) return;
   if (!P.proj.files.length) { el.innerHTML = '<div class="empty">No PDF yet — add one with <b>+ PDF</b>.</div>'; return; }
   const cnt = new Map(); P.proj.items.forEach(i => { const k = keyOf(i.file, i.page); cnt.set(k, (cnt.get(k) || 0) + 1); });
   S.thumbs = S.thumbs || {};
-  el.innerHTML = P.proj.files.map(f => `<div class="pgf"><b title="${esc(f.name)}">${esc(f.name.replace(/\.pdf$/i, ""))}</b><span class="small">${f.pages} p.</span><button class="btn sm dng" data-rmpdf="${esc(f.id)}" title="Remove this PDF and its measurements from the project">Remove</button></div>
+  el.innerHTML = `<div class="lyrbar"><input type="search" id="sheetQ" placeholder="Find a sheet, drawing number or title" aria-label="Filter sheets"><span class="small">${allPages().length} sheets</span></div>` + P.proj.files.map(f => `<div class="pgf"><b title="${esc(f.name)}">${esc(f.name.replace(/\.pdf$/i, ""))}</b><span class="small">${f.pages} sheets</span><button class="btn sm dng" data-rmpdf="${esc(f.id)}" title="Remove this PDF and its measurements from the project">Remove</button></div>
     <div class="pgg">${Array.from({length: f.pages}, (_, n) => { const i = n + 1, k = keyOf(f.id, i), st = scaleState(P.proj.scales[k]), sh = (P.proj.sheets || {})[k] || {}, th = S.thumbs[k];
-      return `<div class="pgt${k === S.key ? " on" : ""}" data-pg="${esc(f.id)}|${i}" title="${esc(f.name)} p.${i} — scale: ${esc(st.t)}"><img data-th="${esc(k)}" alt="" ${th && th !== "x" ? `src="${th}"` : ""}><div class="pgl">${sh.no ? esc(sh.no) + " · " : ""}p.${i} · ${cnt.get(k) || 0}</div><div class="pgl ${st.k}">${st.ic} ${esc(st.k === "bad" && !P.proj.scales[k] ? "no scale" : st.t.split(" — ")[0])}</div></div>`; }).join("")}</div>`).join("");
+      const sheetTitle = [sh.no, sh.rev].filter(Boolean).join(" · "), title = sh.title || (sheetTitle ? "Untitled sheet" : "Sheet info not set");
+      return `<div class="pgt${k === S.key ? " on" : ""}" data-pg="${esc(f.id)}|${i}" data-sheet-search="${esc([f.name, sh.no, sh.title, sh.rev, sh.disc, sh.bldg, sh.floor, "p." + i].join(" ").toLowerCase())}" title="${esc(f.name)} p.${i} — scale: ${esc(st.t)}"><img data-th="${esc(k)}" alt="" ${th && th !== "x" ? `src="${th}"` : ""}><div class="pgl">${esc(sheetTitle || "Sheet info needed")}</div><div class="pgl" title="${esc(title)}">${esc(title)}</div><div class="pgl">p.${i} · ${cnt.get(k) || 0} measurements</div><div class="pgl ${st.k}">${st.ic} ${esc(st.k === "bad" && !P.proj.scales[k] ? "no scale" : st.t.split(" — ")[0])}</div><div class="pgact"><button class="btn sm" data-sheet="${esc(f.id)}|${i}" title="Edit sheet number, title, revision, discipline, building and floor">Info</button><button class="btn sm" data-ocr="${esc(f.id)}|${i}" title="Read this sheet’s text and use OCR for scanned pages">Read</button></div></div>`; }).join("")}</div>`).join("");
   if (!S.thumbIO) S.thumbIO = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { S.thumbIO.unobserve(e.target); thumbWant(e.target.dataset.th); } }), {root: el, rootMargin: "200px"});
   el.querySelectorAll("img[data-th]").forEach(im => { if (!im.getAttribute("src")) S.thumbIO.observe(im); });
 }
@@ -3268,6 +3271,54 @@ async function pageTexts(fileId, pageNo){
   } catch (e) { S.texts[key] = []; }
   return S.texts[key];
 }
+async function loadTesseract(){
+  if (window.Tesseract) return window.Tesseract;
+  if (tesseract) return tesseract;
+  tesseract = new Promise((resolve, reject) => {
+    const script = document.createElement("script"); script.src = TESSERACT + "tesseract.min.js";
+    script.onload = () => window.Tesseract ? resolve(window.Tesseract) : reject(new Error("OCR engine loaded without its API"));
+    script.onerror = () => reject(new Error("OCR engine could not be loaded — check the internet connection"));
+    document.head.appendChild(script);
+  });
+  try { return await tesseract; } catch (e) { tesseract = null; throw e; }
+}
+async function ocrPage(fileId, pageNo){
+  const key = keyOf(fileId, pageNo);
+  if (S.ocr[key]) return S.texts[key] || [];
+  let cv = null;
+  try {
+    const lib = await loadTesseract();
+    if (!ocrWorker) ocrWorker = await lib.createWorker("eng", 1, {
+      workerPath: TESSERACT + "worker.min.js",
+      corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1",
+      langPath: "https://tessdata.projectnaptha.com/4.0.0",
+      logger: m => { if (m.status === "recognizing text" && m.progress > 0) busy("Reading sheet with OCR… " + Math.round(m.progress * 100) + "%"); }
+    });
+    const pg = await (await doc(fileId)).getPage(pageNo), base = pg.getViewport({scale: 1});
+    const scale = Math.min(2.5, 2200 / Math.max(base.width, base.height)), vp = pg.getViewport({scale});
+    cv = document.createElement("canvas"); cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+    const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
+    busy("Preparing sheet for OCR…");
+    await sliced(pg.render({...lay(fileId), canvasContext: ctx, viewport: vp})).promise;
+    busy("Reading sheet with OCR…");
+    const result = await ocrWorker.recognize(cv, {}, {blocks: true});
+    const layoutLines = result.data.lines && result.data.lines.length ? result.data.lines
+      : (result.data.blocks || []).flatMap(b => (b.paragraphs || []).flatMap(p => p.lines || []));
+    const lines = layoutLines.filter(l => l.text && l.text.trim()).map(l => ({
+      s: normQ(l.text.trim()), x: l.bbox.x0 / scale, y: l.bbox.y0 / scale,
+      w: (l.bbox.x1 - l.bbox.x0) / scale, h: (l.bbox.y1 - l.bbox.y0) / scale
+    }));
+    const native = await pageTexts(fileId, pageNo);
+    if (!lines.length) throw new Error("OCR found no readable text on this sheet");
+    S.texts[key] = native.concat(lines); S.ocr[key] = true;
+    return S.texts[key];
+  } catch (e) {
+    throw new Error("OCR failed: " + (e && e.message || e));
+  } finally {
+    if (cv) { cv.width = 0; cv.height = 0; }
+    busy("");
+  }
+}
 async function findText(q){
   const box = $("findRes"); q = String(q || "").trim();
   if (!q || !P.proj) { box.classList.remove("on"); return; }
@@ -3689,18 +3740,17 @@ async function exportPng(){
   } catch (e) { toast(e.message || String(e), 5000); }
   busy("");
 }
-/* marked-up PDF: the original page stays vector (sharp at any zoom); the takeoff goes on top as a transparent image.
-   Rotated pages are flattened to an image instead. */
+/* The source page stays vector (sharp at any zoom); its takeoff goes on top as a transparent image. All-pages export
+   includes unmarked sheets too. Rotated or encrypted pages are flattened to an image instead. */
 const PDFLIB = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
 function loadPdfLib(){ return window.PDFLib ? Promise.resolve(window.PDFLib) : new Promise((ok, bad) => { const s2 = document.createElement("script"); s2.src = PDFLIB; s2.onload = () => ok(window.PDFLib); s2.onerror = () => bad(new Error("PDF library could not be loaded (offline?)")); document.head.appendChild(s2); }); }
 async function exportPdf(all){
-  if (!S.page) return;
+  if (!all && !S.page) return;
   busy("Building marked-up PDF…");
   try {
     const L = await loadPdfLib(), out = await L.PDFDocument.create();
-    const pages = all ? [...new Set(P.proj.items.concat(P.proj.marks || []).map(i => i.file + "|" + i.page))].map(x => x.split("|")).map(([f, p]) => ({f, p: +p}))
-      .sort((a, b) => P.proj.files.findIndex(x => x.id === a.f) - P.proj.files.findIndex(x => x.id === b.f) || a.p - b.p) : [{f: S.fileId, p: S.pageNo}];
-    if (!pages.length) throw new Error("Nothing measured yet");
+    const pages = all ? allPages().map(o => ({f: o.f.id, p: o.i})) : [{f: S.fileId, p: S.pageNo}];
+    if (!pages.length) throw new Error("There are no project sheets to export");
     const srcCache = {};
     for (const {f, p} of pages) {
       busy("Building marked-up PDF… page " + (pages.findIndex(x => x.f === f && x.p === p) + 1) + " of " + pages.length);
@@ -3774,7 +3824,7 @@ async function exportMenu(){
   $("dlgB").innerHTML = `<div class="wide"></div><p><b>Takeoff check: <span style="color:${lvlCol(V.lvl)}">${V.lvl}</span></b>${V.L.length ? ` — ${nE} error${nE === 1 ? "" : "s"}, ${nW} warning${nW === 1 ? "" : "s"}` : " — scales, heights, thicknesses, codes, rates, QA all in order"}</p>
     ${V.L.length ? `<div style="max-height:240px;overflow:auto;margin:6px 0;border:1px solid var(--line);border-radius:6px">${V.L.map(x => `<div style="padding:4px 8px;border-bottom:1px solid #f0f4f8;font-size:12px"><b style="color:${lvlCol(x.lvl)};display:inline-block;width:70px">${x.lvl}</b>${esc(x.msg)}</div>`).join("")}</div>` : ""}
     <p class="small">${V.lvl === "PASS" ? "" : "You can still export; the Excel file carries this list on its Validation sheet. "}Measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as rows).</p>`;
-  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="exBak">Backups…</button><button class="btn" id="exJson" title="Measurements only — the PDFs are not inside">Project (.json)</button><button class="btn" id="exBnd" title="The project and its PDFs in one file, to move it to another browser or computer">Project + PDFs</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA">All marked-up pages (.pdf)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
+  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="exBak">Backups…</button><button class="btn" id="exJson" title="Measurements only — the PDFs are not inside">Project (.json)</button><button class="btn" id="exBnd" title="The project and all its PDFs in one file, to move it to another browser or computer">Project + PDFs</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA">All project sheets (.pdf)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
   $("dlgBack").classList.add("on");
   const close = () => $("dlgBack").classList.remove("on");
   $("dlgCancel").onclick = close;
@@ -3933,13 +3983,55 @@ const LOC_KEYS = ["bldg", "floor", "zone", "room"], LOC_NAMES = {bldg: "Building
 function locOf(it){ const sh = (P.proj.sheets || {})[keyOf(it.file, it.page)] || {}; return {bldg: it.bldg || sh.bldg || "", floor: it.floor || sh.floor || "", zone: it.zone || "", room: it.room || ""}; }
 const locText = L => [L.bldg, L.floor, L.zone, L.room].filter(Boolean).join(" · ");
 function locValues(k){ const s = new Set(); P.proj.items.forEach(it => { const v = locOf(it)[k]; if (v) s.add(v); }); Object.values(P.proj.sheets || {}).forEach(sh => { if (sh[k]) s.add(sh[k]); }); return [...s].sort(); }
-async function sheetInfoDialog(){
+function sheetInfoSuggestions(T){
+  const L = textLines(T).map(x => x.s.replace(/\s+/g, " ").trim()).filter(Boolean), out = {};
+  const labelled = (rx, valueRx, limit) => {
+    for (let i = 0; i < L.length; i++) {
+      const m = rx.exec(L[i]); if (!m) continue;
+      const direct = valueRx ? valueRx.exec(m[1] || "") : null;
+      if (direct && direct[1]) return direct[1].trim().slice(0, limit);
+      if (m[1] && m[1].trim() && !valueRx) return m[1].trim().slice(0, limit);
+      if (m[1] && m[1].trim()) continue;
+      const next = L[i + 1] || "";
+      if (next && !rx.test(next) && !/^(?:SHEET|DRAWING|DWG|TITLE|REV(?:ISION)?|DATE|DISCIPLINE|BUILDING|BLOCK|TOWER|FLOOR|LEVEL)\b/i.test(next)) return next.slice(0, limit);
+    }
+    return "";
+  };
+  out.no = labelled(/^\s*(?:SHEET(?:\s*(?:NO\.?|NUMBER))?|DWG(?:\.|G)?\s*(?:NO\.?|NUMBER)|DRAWING\s*(?:NO\.?|NUMBER))\s*[:#-]?\s*(.*)$/i,
+    /^\s*([A-Z0-9][A-Z0-9.-]{1,19})\b/i, 20);
+  out.title = labelled(/^\s*(?:(?:DRAWING)\s+)?TITLE\s*[:#-]?\s*(.*)$/i, null, 80);
+  out.rev = labelled(/^\s*REV(?:ISION)?\.?(?!\s*DATE)\s*[:#-]?\s*(.*)$/i, /^\s*([A-Z0-9][A-Z0-9.-]{0,15})\b/i, 16);
+  out.revDate = labelled(/^\s*(?:REV(?:ISION)?\s*)?DATE\s*[:#-]?\s*(.*)$/i, /^\s*(\d{4}-\d{2}-\d{2})\b/, 10);
+  out.disc = labelled(/^\s*DISCIPLINE\s*[:#-]?\s*(.*)$/i, null, 40);
+  out.bldg = labelled(/^\s*(?:BUILDING|BLOCK|TOWER)\s*[:#-]?\s*(.*)$/i, null, 40);
+  out.floor = labelled(/^\s*(?:FLOOR|LEVEL|STOREY|STORY)\s*[:#-]\s*(.*)$/i, null, 40);
+  Object.keys(out).forEach(k => { if (!out[k]) delete out[k]; });
+  return out;
+}
+async function sheetInfoDialog(readFirst){
   if (!S.page) return;
   const sh = Object.assign({}, (P.proj.sheets || {})[S.key] || {}), F = [["no", "Sheet no.", "e.g. A-103"], ["title", "Drawing title", "e.g. Typical floor plan"], ["rev", "Revision", "e.g. Rev-03"], ["revDate", "Revision date", ""], ["disc", "Discipline", "e.g. Architectural"], ["bldg", "Building / block", "e.g. Tower A"], ["floor", "Floor", "e.g. Level 12"]];
-  const v = await ask("Sheet info — " + pageName({file: S.fileId, page: S.pageNo}), `<div class="grid">${F.map(([k, l, ph]) => `<div class="fg"><label>${l}</label><input type="${k === "revDate" ? "date" : "text"}" id="si_${k}" value="${esc(sh[k] || "")}" placeholder="${esc(ph)}"${k === "bldg" || k === "floor" ? ` list="dl_${k}"` : ""}></div>`).join("")}</div>
+  const dlg = ask("Sheet info — " + pageName({file: S.fileId, page: S.pageNo}), `<div class="grid">${F.map(([k, l, ph]) => `<div class="fg"><label>${l}</label><input type="${k === "revDate" ? "date" : "text"}" id="si_${k}" value="${esc(sh[k] || "")}" placeholder="${esc(ph)}"${k === "bldg" || k === "floor" ? ` list="dl_${k}"` : ""}></div>`).join("")}</div>
     <datalist id="dl_bldg">${locValues("bldg").map(x => `<option value="${esc(x)}">`).join("")}</datalist><datalist id="dl_floor">${locValues("floor").map(x => `<option value="${esc(x)}">`).join("")}</datalist>
-    <p class="small" style="margin-top:8px">Measurements on this sheet take its building and floor unless they are given their own. The sheet no. and revision are used by the revision quantity compare. Nothing here is guessed — leave a field blank if the drawing does not say.</p>`, "Save",
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px"><button class="btn sm" type="button" id="siRead">Read text / OCR</button><span class="small" id="siReadStatus">Auto-fill only suggests labeled fields; review before saving.</span></div>
+    <p class="small" style="margin-top:8px">Measurements on this sheet take its building and floor unless they are given their own. The sheet no. and revision are used by the revision quantity compare. Suggestions are not saved until you review and save them.</p>`, "Save",
     () => { const o = {}; F.forEach(([k]) => { const x = $("si_" + k).value.trim(); if (x) o[k] = x; }); return o; }, "si_no");
+  $("siRead").onclick = async () => {
+    const status = $("siReadStatus"); if (!status) return;
+    $("siRead").disabled = true; status.textContent = "Reading PDF text…";
+    try {
+      let T = await pageTexts(S.fileId, S.pageNo), usedOcr = false;
+      if (!T.length) { T = await ocrPage(S.fileId, S.pageNo); usedOcr = true; }
+      const guesses = sheetInfoSuggestions(T), keys = Object.keys(guesses);
+      keys.forEach(k => { const field = $("si_" + k); if (field && !field.value.trim()) field.value = guesses[k]; });
+      if (!keys.length) status.textContent = `Read ${T.length} text entries${usedOcr ? " with OCR" : " from the PDF"}; no labeled sheet fields were recognized.`;
+      else status.textContent = `${usedOcr ? "OCR" : "PDF text"} suggested ${keys.length} field${keys.length === 1 ? "" : "s"}: ${keys.map(k => F.find(f => f[0] === k)[1]).join(", ")}. Review before saving.`;
+    } catch (e) {
+      const current = $("siReadStatus"); if (current) current.textContent = e.message || String(e);
+    } finally { const b = $("siRead"); if (b) b.disabled = false; }
+  };
+  if (readFirst) $("siRead").click();
+  const v = await dlg;
   if (!v) return;
   mutate(() => { P.proj.sheets[S.key] = v; });
 }
@@ -4280,7 +4372,7 @@ function paletteCmds(){
   add("Check before export (errors and warnings)", exportMenu, "Check");
   add("Excel measurement sheet", exportExcel, "Export"); add("CSV", exportCsv, "Export");
   if (S.page) { add("Marked-up page (.png)", exportPng, "Export"); add("Marked-up page (.pdf)", () => exportPdf(false), "Export"); }
-  add("All marked-up pages (.pdf)", () => exportPdf(true), "Export"); add("Project (.json) — measurements only", exportJson, "Export");
+  add("All project sheets (.pdf)", () => exportPdf(true), "Export"); add("Project (.json) — measurements only", exportJson, "Export");
   add("Project + PDFs (.zdtakeoff) — to move to another computer", exportBundle, "Export"); add("Backups of this project", () => backupsDialog(), "Project");
   add("Save now", () => { savePr = P.proj; flushSave().then(ok => toast(ok ? "Saved in this browser" : "Not saved — see the message above")); }, "Project", "Ctrl+S");
   add("Undo", undoAny, "Edit", "Ctrl+Z"); add("Redo", redoAny, "Edit", "Ctrl+Y");
@@ -4499,8 +4591,17 @@ function wire(){
     $("tCond").classList.toggle("on", t === "cond"); $("tLay").classList.toggle("on", t === "lay"); $("tPages").classList.toggle("on", t === "pages"); $("bNewCond").style.display = t === "cond" ? "" : "none";
     if (t === "lay") renderLayers(); if (t === "pages") renderPages(); };
   $("tCond").onclick = () => leftTab("cond"); $("tLay").onclick = () => leftTab("lay"); $("tPages").onclick = () => leftTab("pages");
-  $("pageList").addEventListener("click", e => { const rm = e.target.closest("[data-rmpdf]"); if (rm) return removePdf(rm.dataset.rmpdf);
+  $("pageList").addEventListener("click", async e => { const rm = e.target.closest("[data-rmpdf]"); if (rm) return removePdf(rm.dataset.rmpdf);
+    const info = e.target.closest("[data-sheet]"), read = e.target.closest("[data-ocr]");
+    if (info || read) {
+      e.preventDefault(); e.stopPropagation();
+      const [f, p] = (info || read).dataset[info ? "sheet" : "ocr"].split("|");
+      try { await gotoPage(f, +p); await sheetInfoDialog(!!read); } catch (er) { toast("Could not open sheet info: " + er.message, 5000); }
+      return;
+    }
     const t = e.target.closest("[data-pg]"); if (t) { const [f, p] = t.dataset.pg.split("|"); gotoPage(f, +p); } });
+  $("pageList").addEventListener("input", e => { if (e.target.id !== "sheetQ") return; const q = e.target.value.trim().toLowerCase();
+    $("pageList").querySelectorAll(".pgt[data-sheet-search]").forEach(card => { card.style.display = !q || card.dataset.sheetSearch.includes(q) ? "" : "none"; }); });
   $("layerList").addEventListener("change", e => { if (e.target.dataset.lid) setLayer([e.target.dataset.lid], e.target.checked); });
   $("layerList").addEventListener("click", e => { const pr = e.target.closest("[data-lpre]");
     if (pr) { const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; const G = Object.entries(cfg.getGroups()), t = pr.dataset.lpre;

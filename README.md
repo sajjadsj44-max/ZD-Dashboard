@@ -709,9 +709,13 @@ v11.0.0.191 with Takeoff Boost; the full table is `docs/takeoff-bluebeam-planswi
 **QA pass** (02-Oct-2026 — full audit, bug hunt and regression test; the report with the bug register,
 calculation table and live-retest checklist is `docs/takeoff-qa-report-2026-10-02.md`):
 
-- **Pages tab** beside Sheet / Conditions: a thumbnail of every page of every PDF (drawn as it scrolls into view) with
-  its scale status and number of measurements; **remove a PDF** from the project (a backup is taken first, its
-  measurements go with it).
+- **Sheets tab** beside Conditions / Layers: searchable thumbnail cards for every page of every PDF, showing sheet
+  number, title, revision, scale and measurement count; edit per-sheet info or read it from PDF text / on-demand OCR.
+  Scanned-sheet OCR runs in this browser (OCR code and English language data load from a CDN; drawing data is not
+  uploaded). **Remove a PDF** from the project (a backup is taken first, its measurements go with it).
+- **Multi-sheet output**: add one or several multi-page PDFs to a project; **Export → All project sheets (.pdf)**
+  preserves every sheet in project order, including sheets without markups, and overlays measurements where present.
+  **Project + PDFs** packages every source PDF and the takeoff together for transfer.
 - **View menu** (header): fit page (`F`), **fit width** (`Shift+F`), dim the drawing, line weights on / off, PDF layers, hide
   markups, labels; `Home` / `End` go to the first / last page. The header wraps on narrow screens instead of
   pushing buttons off the edge.

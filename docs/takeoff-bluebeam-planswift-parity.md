@@ -108,7 +108,7 @@ A right-drag still pans; only a right-click without dragging opens the menu, and
 
 | Feature | Bluebeam | PlanSwift | ZD Takeoff |
 |---|---|---|---|
-| Page thumbnails / page navigator | ✓ Thumbnails panel | ✓ Pages tab | ★ Pages tab: every PDF, thumbnails drawn as they scroll into view, scale status and measurement count per page |
+| Page thumbnails / page navigator | ✓ Thumbnails panel | ✓ Pages tab | ★ Sheets tab: searchable sheet cards for every PDF page, thumbnails drawn as they scroll into view, sheet number / title, scale and measurement count; edit sheet info or run OCR |
 | Fit page / fit width | ✓ | ✓ | ✓ fit page (`F`) + ★ fit width (`Shift+F`), View menu |
 | First / last page | ✓ | ✓ | ★ Home / End |
 | Pick a standard scale from a list | ✓ | ✓ | ★ architectural, engineering, metric ratio, typed; with the paper size it was drawn for (ISO / ARCH / ANSI) |
@@ -124,7 +124,7 @@ A right-drag still pans; only a right-click without dragging opens the menu, and
 | Quantity Link (live link to Excel cells) | Bluebeam Complete | Excel export is formula-driven instead (PRODUCT / SUM in the house format). |
 | Stitching sheets, Smart Overlay with AI, AI-REVIEW / AI-MATCH | Bluebeam Max | Compare (colour overlay of two revisions) and Revision compare (quantities) cover the QS side. |
 | Auto Bookmark | PlanSwift Takeoff Boost | Sheet info (sheet no., title, revision, floor) is entered per page. |
-| OCR of scanned drawings | both | Scanned PDFs measure but have no text or lines to read. |
+| OCR of scanned drawings | both | ★ On-demand, in-browser English OCR for scanned sheets; recognized text can be searched and labeled sheet-info fields are suggested for review. OCR assets are loaded from CDN; the drawing itself stays in the browser. |
 | Slope / pitch factor on areas | both | Use the assembly formula on the condition. |
 | Group / ungroup | Bluebeam | Multi-select and conditions instead. |
 | Reorder / rotate / delete pages inside a PDF | both | The PDF is kept as issued; a turned page is shown as the PDF turns it. |
