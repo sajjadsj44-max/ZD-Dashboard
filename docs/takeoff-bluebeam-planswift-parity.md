@@ -108,7 +108,7 @@ A right-drag still pans; only a right-click without dragging opens the menu, and
 
 | Feature | Bluebeam | PlanSwift | ZD Takeoff |
 |---|---|---|---|
-| Page thumbnails / page navigator | ✓ Thumbnails panel | ✓ Pages tab | ★ Pages tab: every PDF, thumbnails drawn as they scroll into view, scale status and measurement count per page |
+| Page thumbnails / page navigator | ✓ Thumbnails panel | ✓ Pages tab | ★ Pages tab: searchable sheet cards for every PDF page, thumbnails drawn as they scroll into view, sheet number / title, scale and measurement count; edit sheet info or run OCR |
 | Fit page / fit width | ✓ | ✓ | ✓ fit page (`F`) + ★ fit width (`Shift+F`), View menu |
 | First / last page | ✓ | ✓ | ★ Home / End |
 | Pick a standard scale from a list | ✓ | ✓ | ★ architectural, engineering, metric ratio, typed; with the paper size it was drawn for (ISO / ARCH / ANSI) |
