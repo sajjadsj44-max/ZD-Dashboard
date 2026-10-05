@@ -46,6 +46,11 @@ header > *{flex:none}
 header .sp{flex:1}
 header .btn.tg2.on{background:#fff;color:var(--navy);border-color:#fff}
 #stage canvas{filter:var(--dimf,none)}
+#stage.dark{background:#000}
+.lsw{display:inline-block;flex:none;width:12px;height:12px;border:1px solid #9fb0c6;border-radius:2px;vertical-align:-2px}
+.lyiso{flex:none;border:0;background:none;color:#8a9bb2;cursor:pointer;font-size:14px;line-height:1;padding:0 2px}.lyiso:hover,.lyiso.on{color:var(--purple)}
+.plotw{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}.plprev{display:flex;flex-direction:column;gap:4px;align-items:center;max-width:300px}.plprev canvas{border:1px solid var(--line);border-radius:6px;max-width:100%}
+.cq{max-height:32vh;overflow:auto;border:1px solid var(--line);border-radius:6px;margin:8px 0}table.cqt{width:100%}table.cqt td.n,table.cqt th.n{text-align:right;white-space:nowrap}table.cqt tr.dim td{color:var(--muted)}
 .dimw{display:inline-flex;align-items:center;gap:4px}.dimw input{width:70px;height:16px;padding:0}#dimLbl{font-size:11px;color:#cfe0f5;width:28px}
 .panel{position:relative}.rz{position:absolute;top:0;bottom:0;width:6px;cursor:col-resize;z-index:6}.rz:hover{background:rgba(75,59,143,.18)}
 .panel:not(.right) .rz{right:-3px}.panel.right .rz{left:-3px}
@@ -321,9 +326,9 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <button class="btn sm" id="bProjects" title="All projects">&#9776; Projects</button>
   <input type="text" id="projName" title="Project name" aria-label="Project name">
   <span id="saveSt" class="savest" role="status" aria-live="polite"></span>
-  <button class="btn sm" id="bAdd" title="Add PDFs to this project (every page)">+ PDF</button><button class="btn sm" id="bAddM" title="Import: choose pages and a version set, a folder of PDFs, photos / scans as pages, sheet info, OCR" aria-haspopup="true">&#9662;</button>
-  <input type="file" id="fileIn" accept="application/pdf,.pdf" multiple hidden>
-  <input type="file" id="impPdfIn" accept="application/pdf,.pdf,image/jpeg,image/png,image/webp" multiple hidden>
+  <button class="btn sm" id="bAdd" title="Add PDFs or AutoCAD drawings (DWG / DXF) to this project">+ PDF</button><button class="btn sm" id="bAddM" title="Import: choose pages and a version set, a folder of PDFs, photos / scans as pages, sheet info, OCR" aria-haspopup="true">&#9662;</button>
+  <input type="file" id="fileIn" accept="application/pdf,.pdf,.dwg,.dxf" multiple hidden>
+  <input type="file" id="impPdfIn" accept="application/pdf,.pdf,.dwg,.dxf,image/jpeg,image/png,image/webp" multiple hidden>
   <input type="file" id="dirIn" webkitdirectory multiple hidden>
   <input type="file" id="imgIn" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,.jpg,.jpeg,.png" multiple hidden>
   <div class="sep"></div>
@@ -343,6 +348,9 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
       <span class="vh">Drawing</span>
       <span class="dimw"><button class="btn sm tg2" id="bDim" title="Dimmer — fade the drawing so the takeoff stands out">&#9728; Dimmer</button><input type="range" id="dimPct" min="0" max="90" step="5" value="50" title="Dimming %"><span id="dimLbl">0%</span></span>
       <button class="btn sm tg2" id="bLw" title="Line weights are on — click to draw every line thin">&#9472; Line weights</button>
+      <span class="vh">Background</span>
+      <span class="seg"><button class="btn sm tg2" id="bBg_auto" title="Black for AutoCAD drawings, as AutoCAD's model space; white for PDFs">Auto</button><button class="btn sm tg2" id="bBg_black" title="Black, as AutoCAD's model space — colour 7 white, colours as AutoCAD shows them">&#9632; Black</button><button class="btn sm tg2" id="bBg_white" title="White paper">&#9633; White</button></span>
+      <button class="btn sm tg2" id="bMono" title="Monochrome — every line in one ink, as a monochrome plot (black on white, white on black)">&#9680; Monochrome</button>
       <button class="btn sm" id="bLayers" title="The PDF's own CAD layers: switch them on / off to clean the drawing">&#128450; PDF layers…</button>
       <span class="vh">Takeoff</span>
       <button class="btn sm tg2 on" id="bHideMk" title="Hide all markups (measurements and notes) to see the drawing">&#128065; Markups</button>
@@ -424,7 +432,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
       <div id="busy"></div>
       <div id="cmpLegend"></div>
       <div id="mini" title="Minimap — click or drag to move round the page"><img id="miniImg" alt=""><div id="miniVp"></div></div>
-      <div id="drop"><div class="box"><b style="font-size:15px;color:var(--navy)">Drop PDF drawings here</b><br>or use <b>+ PDF</b> above — <b>&#9662;</b> next to it chooses pages, a whole folder, or photos / scans (JPG, PNG) as pages.<br>
+      <div id="drop"><div class="box"><b style="font-size:15px;color:var(--navy)">Drop PDF or AutoCAD drawings (DWG / DXF) here</b><br>or use <b>+ PDF</b> above — <b>&#9662;</b> next to it chooses pages, a whole folder, or photos / scans (JPG, PNG) as pages.<br>
         <span style="font-size:11.5px">The PDF opens in this browser only — it is not uploaded anywhere.</span></div></div>
     </div>
     <div class="status" id="status"><span id="stPos">—</span><span id="stSnap"></span><span id="stMeas"></span><span class="hint" id="stHint"></span></div>
@@ -470,6 +478,35 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-05h"></script>
+<script type="module" src="takeoff.js?v=2026-10-05i"></script>
+<script>
+(function () {
+  var unlockedKey = 'zd-dashboard-unlocked';
+  if (sessionStorage.getItem(unlockedKey) === '1') return;
+  var style = document.createElement('style');
+  style.textContent = '.zd-locked > :not(#zd-lock){filter:blur(5px);pointer-events:none;user-select:none}.zd-lock{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:20px;background:rgba(15,41,66,.72)}.zd-lock-card{width:min(100%,360px);padding:28px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.25);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a}.zd-lock-card .mark{width:40px;height:40px;border:2px solid #0f2942;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;margin-bottom:16px;color:#0f2942}.zd-lock-card h2{color:#0f2942;font-size:21px;margin:0 0 6px}.zd-lock-card p{color:#6b7d92;margin:0 0 18px}.zd-lock-card label{display:block;color:#0f2942;font-size:12px;font-weight:600;margin-bottom:6px}.zd-lock-card input{width:100%;padding:11px 12px;border:1px solid #dde5ee;border-radius:7px;font:inherit;margin-bottom:12px;box-sizing:border-box}.zd-lock-card button{width:100%;border:0;border-radius:7px;padding:11px;background:#2b7de9;color:#fff;font:inherit;font-weight:700;cursor:pointer}.zd-lock-error{margin-top:10px;color:#b42318;font-size:12px}';
+  document.head.appendChild(style);
+  document.body.classList.add('zd-locked');
+  var lock = document.createElement('div');
+  lock.id = 'zd-lock';
+  lock.className = 'zd-lock';
+  lock.innerHTML = '<form class="zd-lock-card"><div class="mark">ZD</div><h2>ZD Dashboard</h2><p>Enter the password to continue.</p><label for="zd-password">Password</label><input id="zd-password" type="password" autocomplete="current-password" autofocus required><button type="submit">Unlock</button><div class="zd-lock-error" role="alert" hidden>Incorrect password.</div></form>';
+  document.body.appendChild(lock);
+  var form = lock.querySelector('form');
+  var password = lock.querySelector('input');
+  var error = lock.querySelector('.zd-lock-error');
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    if (password.value === '123') {
+      sessionStorage.setItem(unlockedKey, '1');
+      lock.remove();
+      document.body.classList.remove('zd-locked');
+    } else {
+      error.hidden = false;
+      password.select();
+    }
+  });
+}());
+</script>
 </body>
 </html>

@@ -8079,5 +8079,34 @@ window.zdCalc={open:showCalc,search:searchAll,calcs:function(){ return allCalcs(
 })();
 </script>
 
+<script>
+(function () {
+  var unlockedKey = 'zd-dashboard-unlocked';
+  if (sessionStorage.getItem(unlockedKey) === '1') return;
+  var style = document.createElement('style');
+  style.textContent = '.zd-locked > :not(#zd-lock){filter:blur(5px);pointer-events:none;user-select:none}.zd-lock{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:20px;background:rgba(15,41,66,.72)}.zd-lock-card{width:min(100%,360px);padding:28px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.25);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a}.zd-lock-card .mark{width:40px;height:40px;border:2px solid #0f2942;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;margin-bottom:16px;color:#0f2942}.zd-lock-card h2{color:#0f2942;font-size:21px;margin:0 0 6px}.zd-lock-card p{color:#6b7d92;margin:0 0 18px}.zd-lock-card label{display:block;color:#0f2942;font-size:12px;font-weight:600;margin-bottom:6px}.zd-lock-card input{width:100%;padding:11px 12px;border:1px solid #dde5ee;border-radius:7px;font:inherit;margin-bottom:12px;box-sizing:border-box}.zd-lock-card button{width:100%;border:0;border-radius:7px;padding:11px;background:#2b7de9;color:#fff;font:inherit;font-weight:700;cursor:pointer}.zd-lock-error{margin-top:10px;color:#b42318;font-size:12px}';
+  document.head.appendChild(style);
+  document.body.classList.add('zd-locked');
+  var lock = document.createElement('div');
+  lock.id = 'zd-lock';
+  lock.className = 'zd-lock';
+  lock.innerHTML = '<form class="zd-lock-card"><div class="mark">ZD</div><h2>ZD Dashboard</h2><p>Enter the password to continue.</p><label for="zd-password">Password</label><input id="zd-password" type="password" autocomplete="current-password" autofocus required><button type="submit">Unlock</button><div class="zd-lock-error" role="alert" hidden>Incorrect password.</div></form>';
+  document.body.appendChild(lock);
+  var form = lock.querySelector('form');
+  var password = lock.querySelector('input');
+  var error = lock.querySelector('.zd-lock-error');
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    if (password.value === '123') {
+      sessionStorage.setItem(unlockedKey, '1');
+      lock.remove();
+      document.body.classList.remove('zd-locked');
+    } else {
+      error.hidden = false;
+      password.select();
+    }
+  });
+}());
+</script>
 </body>
 </html>
