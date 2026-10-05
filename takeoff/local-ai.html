@@ -11,10 +11,15 @@ html,body,iframe{width:100%;height:100%;margin:0;border:0}body{overflow:hidden;b
 <body>
 <iframe id="takeoffFrame" title="ZD PDF Takeoff" src="./index.html" allow="fullscreen" allowfullscreen></iframe>
 <div id="agentStatus" role="status">Starting the free drawing agent…</div>
+<script src="local-door-fallback.js?v=2026-10-05a"></script>
 <script>
 const takeoffFrame = document.getElementById("takeoffFrame");
-Object.defineProperty(window, "zdTakeoff", {get: () => takeoffFrame.contentWindow.zdTakeoff});
+Object.defineProperty(window, "zdTakeoff", {get: () => {
+  const api = takeoffFrame.contentWindow.zdTakeoff;
+  if (api && window.installLocalDoorFallback) window.installLocalDoorFallback(api, takeoffFrame.contentDocument);
+  return api;
+}});
 </script>
-<script type="module" src="local-agent.js?v=2026-10-05a"></script>
+<script type="module" src="local-agent.js?v=2026-10-05g"></script>
 </body>
 </html>

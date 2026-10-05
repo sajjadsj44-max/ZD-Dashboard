@@ -107,6 +107,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     await page.waitForFunction(() => [...document.querySelectorAll("#pageList img")].filter(i => i.getAttribute("src")).length >= 4, null, {timeout: 15000}).catch(() => {});
     ok((await T(() => [...document.querySelectorAll("#pageList img")].filter(i => (i.getAttribute("src") || "").startsWith("data:image/png")).length)) >= 4, "thumbnails drawn as they come into view");
     await page.click('#pageList .pgt[data-pg$="|7"]'); await page.waitForFunction(() => zdTakeoff.S.pageNo === 7, null, {timeout: 8000}); ok(true, "click a thumbnail → that page");
+    await page.waitForSelector('#pageList .pgt.on[data-pg$="|7"]', {timeout: 3000}).catch(() => {});
     ok(/7/.test(await page.getAttribute("#pageList .pgt.on", "data-pg")), "current page highlighted in Pages");
     await page.click("#tCond"); await go(1);
     // zoom / fit / pan
