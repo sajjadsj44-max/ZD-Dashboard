@@ -29,24 +29,39 @@ function pageLabel(api, file, page) {
   return [file.name, sheet.no, sheet.title, "p." + page].filter(Boolean).join(" · ");
 }
 
+function roomMatcher(question) {
+  const q = question.toLowerCase();
+  if (/\b(bath(?:room)?s?|toilets?|w\.?c\.?|powder(?:\s+rooms?)?|wash\s?rooms?)\b/.test(q)) {
+    return {label: "bath / toilet", test: name => /\b(BATH(?:ROOM)?|TOILET|W\.?C\.?|POWDER|WASH\s*ROOM)\b/i.test(name)};
+  }
+  if (/\b(master\s+)?bed(?:room)?s?\b/.test(q)) {
+    return {label: "bedroom", test: name => /\b(MASTER\s+)?BED\s*ROOM\b/i.test(name)};
+  }
+  if (/\bkitchens?\b/.test(q)) return {label: "kitchen", test: name => /\b(KITCHEN|KIT)\b/i.test(name)};
+  if (/\blounges?|living\s+rooms?\b/.test(q)) return {label: "lounge / living room", test: name => /\b(LOUNGE|LIVING|FAMILY|DRAWING)\b/i.test(name)};
+  if (/\brooms?\b/.test(q)) return {label: "room", test: () => true};
+  return null;
+}
+
 async function drawingCount(api, question) {
   const pages = targetPages(api, question);
   if (!pages.length) return "Open a drawing page first.";
   const limit = 300;
   const scan = pages.slice(0, limit);
-  const scope = scan.length === 1 ? pageLabel(api, scan[0].file, scan[0].page) : scan.length + " selected drawing pages";
+  const partial = scan.length < pages.length;
+  const scope = scan.length === 1 ? pageLabel(api, scan[0].file, scan[0].page) : `${scan.length} drawing pages${partial ? ` (only the first ${scan.length} of ${pages.length} were searched)` : ""}`;
   const q = question.toLowerCase();
+  const coverageNote = partial ? ` Partial result: ${pages.length - scan.length} pages were not searched, so this is not a complete project count.` : "";
 
   if (/\b(apartments?|units?|flats?)\b/.test(q)) {
     const found = [];
     for (const {file, page} of scan) {
       const units = await api.unitsOf(file.id, page);
-      units.forEach(unit => found.push({file, page, unit}));
+      const onThisPage = new Map(units.map(unit => [unit.no, unit]));
+      onThisPage.forEach(unit => found.push({file, page, unit}));
     }
-    if (!found.length) return `No confidently labelled apartment/unit numbers were detected on ${scope}. This is not a visual zero: the local agent reads searchable PDF text, not drawing pixels. Open the sheet and use the Apartment agent to inspect its labels.`;
-    const unique = new Map(found.map(row => [row.file.id + ":" + row.unit.no, row]));
-    const rows = [...unique.values()];
-    return `${rows.length} likely apartment/unit labels on ${scope}: ${rows.map(row => `${row.unit.no}${row.unit.type ? " (" + row.unit.type + ")" : ""}`).join(", ")}. Read-only estimate from searchable text; check the plan labels.`;
+    if (!found.length) return `No confidently labelled apartment/unit numbers were detected on ${scope}. This is not a visual zero: the local agent reads searchable PDF text, not drawing pixels. Open the sheet and use the Apartment agent to inspect its labels.${coverageNote}`;
+    return `${found.length} likely apartment/unit labels on ${scope}: ${found.map(row => `${row.unit.no}${row.unit.type ? " (" + row.unit.type + ")" : ""} — ${pageLabel(api, row.file, row.page)}`).join("; ")}. Labels are counted once per page; repeated numbers on different floors remain separate. Read-only text estimate, not a verified visual unit count.${coverageNote}`;
   }
 
   if (/\b(door|doors|window|windows|ventilator|ventilators)\b/.test(q)) {
@@ -63,35 +78,31 @@ async function drawingCount(api, question) {
       }
     }
     const total = found.reduce((sum, row) => sum + row.count, 0);
-    if (!total) return `No searchable ${requested ? requested.k : family.toLowerCase()} tags were found on ${scope}. This does not prove there are none: untagged symbols and scanned drawings need the Doors / Windows agent's symbol option or a visual check.`;
+    if (!total) return `No searchable ${requested ? requested.k : family.toLowerCase()} tags were found on ${scope}. This does not prove there are none: untagged symbols and scanned drawings need the Doors / Windows agent's symbol option or a visual check.${coverageNote}`;
     const breakdown = found.map(row => `${row.mark}: ${row.count} (${pageLabel(api, row.file, row.page)})`).join("; ");
-    return `${total} tagged ${family.toLowerCase()} on ${scope}: ${breakdown}. Read-only count from plan tags; schedule-table entries are excluded, but verify untagged symbols.`;
+    return `${total} tagged ${family.toLowerCase()} placements on ${scope}: ${breakdown}. Read-only count from plan tags; schedule-table entries are excluded, but untagged symbols are not included and still need review.${coverageNote}`;
   }
 
-  const roomType = /\b(bath(?:room)?s?|toilets?|w\.?c\.?|powder(?:\s+rooms?)?|wash\s?rooms?|bed(?:room)?s?|kitchens?|lounges?|living\s+rooms?)\b/i.exec(question);
-  if (roomType || /\brooms?\b/i.test(q)) {
-    const roomName = roomType && roomType[0].toLowerCase();
+  const matcher = roomMatcher(question);
+  if (matcher) {
     const matches = [];
     for (const {file, page} of scan) {
       const facts = await api.drawingFacts(file.id, page);
-      const rooms = roomName
-        ? facts.rooms.filter(room => api.nameLike(room.name, roomName.replace(/s$/, "")) || new RegExp(roomName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/s\??$/, "s?"), "i").test(room.name))
-        : facts.rooms;
-      rooms.forEach(room => matches.push({file, page, room}));
+      facts.rooms.filter(room => matcher.test(room.name)).forEach(room => matches.push({file, page, room}));
     }
-    if (!matches.length) return `No searchable ${roomName || "room"} labels were detected on ${scope}. This is not a visual zero; scanned drawings or unlabeled symbols need manual review.`;
+    if (!matches.length) return `No searchable ${matcher.label} room labels were detected on ${scope}. This is not a visual zero; scanned drawings, alternate abbreviations, or unlabeled rooms need manual review.${coverageNote}`;
     const names = matches.map(row => `${row.room.name} (${pageLabel(api, row.file, row.page)})`);
-    return `${matches.length} likely ${roomName || "room"} labels on ${scope}: ${names.join(", ")}. Read-only count from PDF text; check repeated or split room labels.`;
+    return `${matches.length} likely ${matcher.label} room labels on ${scope}: ${names.join(", ")}. This counts matching PDF text labels, not visually verified rooms or fixture symbols; check the plan before using it as a takeoff quantity.${coverageNote}`;
   }
   return null;
 }
 
 function addClarification(doc, question) {
   const q = question.toLowerCase();
-  const feet = /\b\d+(?:\.\d+)?\s*(?:ft|feet|foot|['’′])/.test(q);
+  const dimension = /\b\d+(?:\.\d+)?\s*(?:ft|feet|foot|['’′])/.exec(q);
   const inches = /\b\d+(?:\.\d+)?\s*(?:in(?:ch(?:es)?)?|["”″])/.test(q);
-  if (!/\bwalls?\b/.test(q) || !feet || inches) return false;
-  addMessage(doc, "bot", "Before I draw anything: does 4′ mean a 4 ft wall run, 4 in wall thickness, or a 4 ft wall height? The automatic wall agent detects wall thickness from paired vector lines; it does not guess run length or height. Reply with the intended dimension, for example: ‘4 inch thick walls’. ");
+  if (!/\bwalls?\b/.test(q) || !dimension || inches) return false;
+  addMessage(doc, "bot", `Before I draw anything: does ${dimension[0].trim()} mean a wall run length, wall thickness, or wall height? The automatic wall agent detects thickness from paired vector lines; it cannot infer which one you intended. Reply with the dimension and what it describes, for example: ‘4 inch thick walls’.`);
   return true;
 }
 
@@ -118,12 +129,17 @@ async function submit(api, doc, input, button) {
       return;
     }
 
-    if (/^\s*how\s+(many|much)\b/i.test(question)) {
+    if (/^\s*how\s+(many|much)\b/i.test(question) || /^\s*count\s+(?:all\s+)?(?:baths?|bathrooms?|toilets?|w\.?c\.?|powder\s+rooms?|wash\s?rooms?|bedrooms?|kitchens?|lounges?|living\s+rooms?|apartments?|units?|flats?)\b/i.test(question)) {
       const answer = await drawingCount(api, question);
       if (answer) {
         addMessage(doc, "bot", answer);
         return;
       }
+    }
+
+    if (/^\s*count\s+(?:all\s+)?(?:doors?|windows?|ventilators?)\b/i.test(question) && !/\bswing\b/i.test(question)) {
+      await api.doorWinDialog();
+      return;
     }
 
     await api.agentCmd(question, true);
@@ -166,7 +182,7 @@ async function start() {
       openButton.classList.add("on");
       const log = doc.getElementById("aiLog");
       log.replaceChildren();
-      addMessage(doc, "bot", "Free drawing agents. Commands and takeoff counts run locally with no API key or model download. They use searchable PDF text and CAD/vector lines; scanned drawings and unclear geometry still need your review. Try ‘measure all rooms’, ‘count doors’, ‘how many baths’, or ‘walls 9 inch’. ‘How many’ questions are read-only; count/draw commands add editable AI-marked measurements that you can check or undo.");
+      addMessage(doc, "bot", "Free drawing agents. They use searchable PDF text and CAD/vector lines; scanned drawings, untagged symbols, and uncertain geometry need review. Try ‘measure all rooms’, ‘count doors’, ‘how many baths’, or ‘walls 9 inch’. ‘How many’ questions only report text/tag evidence. ‘Count doors’ opens a review dialog before placing editable AI-marked count results. Check or undo measurements before using them in a bill.");
       send.addEventListener("click", event => {
         event.preventDefault();
         event.stopImmediatePropagation();
