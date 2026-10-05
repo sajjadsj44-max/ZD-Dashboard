@@ -152,7 +152,7 @@ const S = {                           // session state (not saved)
   geo: {},                            // "fileId:page" -> {segs, grid, cell, n}
   texts: {},                          // "fileId:page" -> [{s, x, y}]
   undo: [], redo: [], drag: null, space: false, measure: null, measures: [], pinch: null,
-  multi: new Set(), box: null, condSel: new Set()   // multi-selection (shift-click, box, Ctrl+A); conditions ticked in the list
+  multi: new Set(), box: null, condSel: new Set(), matchSource: null   // multi-selection (shift-click, box, Ctrl+A); conditions ticked in the list
 };
 const keyOf = (f, p) => f + ":" + p;
 const curScale = () => P.proj && P.proj.scales[S.key] ? P.proj.scales[S.key].ptPerFt : 0;
@@ -1872,8 +1872,9 @@ function dimText(r){
 
 /* ------------------------------------------------------------------ tools and pointer */
 function setTool(t){
-  const keepSel = t === "select" || t === "lasso" || t === "zoomwin" || t === "stamp";
+  const keepSel = t === "select" || t === "lasso" || t === "zoomwin" || t === "stamp" || t === "match";
   if (!keepSel) { S.sel = null; S.selPt = -1; S.selMark = null; S.multi.clear(); }
+  if (t === "match" || S.tool === "match") S.matchSource = null;
   if (t === "zoomwin" && S.tool !== "zoomwin") S.prevTool = S.tool;
   const c = S.cond ? cond(S.cond) : null;
   if (["draw", "rect", "ded", "open", "auto"].indexOf(t) >= 0 && !c && t !== "count") { toast("Pick or create a condition first (left panel)"); t = "select"; S.pickWall = false; }
@@ -1895,6 +1896,10 @@ function setTool(t){
   if (t !== "gap") S.gap = null;
   if (t !== "typref" && S.typ) { S.typ = null; $("cmpLegend").style.display = "none"; toast("Typical copy stopped — nothing copied"); }
   S.tool = t; draftClear(); S.draftRedo = []; S.measure = t === "measure" ? S.measure : null; S.press = null; S.lasso = null; S.zbox = null; S.hover = null;
+  if (t === "match" && S.sel) {
+    const it = P.proj.items.find(i => i.id === S.sel);
+    if (it && onPage(it) && !hiddenItem(it)) S.matchSource = matchSourceOf(it);
+  }
   document.querySelectorAll("#tools .tool").forEach(b => b.classList.toggle("on", b.dataset.tool === t));
   stage().className = t === "pan" ? "pan" : t === "select" ? "" : t === "lasso" ? "lasso" : t === "zoomwin" ? "zoomwin" : "draw";
   stage().style.cursor = "";
@@ -1914,7 +1919,8 @@ function hint(){
     break: "Break: click a length run where it should be cut in two · Shift+click a segment to delete just that segment · Esc when done.",
     gap: "Cut a gap: click the other end of the gap on the same run (e.g. the far side of a door) · Esc cancels.",
     stamp: "Place copies: click each place for a copy of what you copied (" + (S.clip ? S.clip.n : 0) + " object" + (S.clip && S.clip.n === 1 ? "" : "s") + ") · Esc when done.",
-    zoomwin: "Zoom window: drag a box round the part to see (a click zooms in 2×)."};
+    zoomwin: "Zoom window: drag a box round the part to see (a click zooms in 2×).",
+    match: S.matchSource ? `Matching ${S.matchSource.name} — click compatible area, linear or count objects to apply its properties; Esc finishes.` : "Click a source area, linear or count object (or select one before starting Match), then click compatible targets; Esc finishes."};
   let h = H[t] || "";
   if (S.arcMode) h = S.arcMid ? "Arc: click the end of the arc." : "Arc: click a point on the arc (then its end) · A again for straight.";
   $("stHint").textContent = h;
@@ -1952,6 +1958,7 @@ function onDown(e){
   if (S.tool === "lasso") { S.lasso = {pts: [sp], add: e.shiftKey}; return; }
   if (S.tool === "zoomwin") { S.zbox = {a: sp, b: sp}; return; }
   if (S.tool === "select") return selectDown(sp, e);
+  if (S.tool === "match") return matchClick(sp);
   const {p} = cursorPoint(e, sp);
   if (S.tool === "break") return breakClick(sp, e);
   if (S.tool === "gap") return gapClick(sp);
@@ -2107,6 +2114,63 @@ function hitInfo(sp){   // the measurement under a screen point -> {it, edge, pt
     for (let i = 1; i < poly.length + (closed ? 1 : 0); i++) if (distSeg(sp, toScr(poly[i - 1]), toScr(poly[i % poly.length])) <= HIT_PX) return {it, edge: true, pt: -1};
     if (closed && pointInPoly(q, poly)) { const a = polyArea(poly); if (a < hitA) { hit = it; hitA = a; } } }
   return hit ? {it: hit, edge: false, pt: -1} : null;
+}
+function matchSourceOf(it){
+  const c = cond(it.cond);
+  return c ? {id: it.id, cond: c.id, name: c.name, type: c.type, kind: it.kind || "shape",
+    label: it.label || "", nos: Math.max(1, +it.nos || 1), ow: it.ow, oh: it.oh, sch: it.sch} : null;
+}
+function applyMatchProperties(it, src){
+  it.cond = src.cond;
+  it.label = src.label;
+  it.nos = src.nos;
+  if (src.type !== "count" && src.kind !== "open") it.kind = src.kind;
+  if (src.kind === "open") ["ow", "oh", "sch"].forEach(k => { if (src[k] == null) delete it[k]; else it[k] = src[k]; });
+}
+function matchClick(sp){
+  const hit = hitInfo(sp);
+  if (!hit) return toast(S.matchSource ? "Click a compatible measurement to match, or Esc to finish" : "Click the source measurement to match");
+  const it = hit.it, c = cond(it.cond);
+  if (!S.matchSource) {
+    const src = matchSourceOf(it);
+    if (!src) return toast("That measurement has no condition to match");
+    S.matchSource = src; setSel([it.id], hit.pt); refresh(); hint();
+    return toast("Source: " + src.name + " — click compatible targets; Esc to finish", 3000);
+  }
+  const src = S.matchSource, srcCond = cond(src.cond);
+  if (!srcCond) { S.matchSource = null; hint(); return toast("The source condition no longer exists — select another source"); }
+  if (it.id === src.id) return toast("That is the source object — click a target to apply its properties");
+  if (!c || c.type !== src.type) return toast("Match only works between the same measurement type (" + src.type + ")");
+  if ((it.kind === "open") !== (src.kind === "open")) return toast("Openings can only match other openings");
+  if (it.locked) return lockedMsg();
+  let matched = it, matchedPt = hit.pt;
+  if (src.type === "count") {
+    const point = it.pts[hit.pt];
+    if (!point) return toast("Could not identify that count marker — try again");
+    const host = P.proj.items.find(i => i.id !== it.id && i.cond === src.cond && i.file === it.file && i.page === it.page && i.kind === "shape");
+    if (host && host.locked) return toast("Unlock the matching count group before adding this marker");
+    if (host) {
+      matchedPt = host.pts.length;
+      mutate(() => {
+        it.pts.splice(hit.pt, 1); host.pts.push(point.slice()); applyMatchProperties(host, src);
+        if (!it.pts.length) P.proj.items = P.proj.items.filter(i => i.id !== it.id);
+      }, "Match properties");
+      matched = host;
+    } else if (it.pts.length > 1) {
+      mutate(() => {
+        it.pts.splice(hit.pt, 1);
+        matched = Object.assign(JSON.parse(JSON.stringify(it)), {id: uid("I"), pts: [point.slice()]});
+        applyMatchProperties(matched, src); P.proj.items.push(matched);
+      }, "Match properties");
+      matchedPt = 0;
+    } else {
+      mutate(() => applyMatchProperties(it, src), "Match properties");
+    }
+  } else {
+    mutate(() => applyMatchProperties(it, src), "Match properties");
+  }
+  setSel([matched.id], matchedPt); refresh(); hint();
+  toast("Matched to " + src.name + " — click another target or Esc to finish", 2600);
 }
 function hitItem(sp){ const h = hitInfo(sp); return h ? h.it : null; }
 function underCursor(sp){   // every object under a screen point, top first (Tab steps through them)
@@ -4596,12 +4660,13 @@ function wire(){
     if (e.key === "?") { keysDialog(); return; }
     if (e.key === "Escape" && S.typed) { S.typed = ""; draw(); return; }
     if (e.key === "Escape" && S.drag && (S.drag.vertex != null || S.drag.move)) { cancelDrag(); return; }
+    if (e.key === "Escape" && S.tool === "match") { setTool("select"); return; }
     if (e.key === "Escape" && S.draft.length === 0 && (S.multi.size || S.box || S.lasso)) { S.multi.clear(); S.box = null; S.lasso = null; refresh(); return; }
     if (e.key === "Escape") { if (S.autoShow) { S.autoShow = null; }
       if (S.pickWall) { S.pickWall = false; hint(); }
       else if (S.arcMode) { S.arcMode = 0; S.arcMid = null; hint(); }
       else if (S.draft.length) { if (S.resume) toast("Run left as it was", 1500); S.resume = null; draftClear(); hint(); }
-      else if (["gap", "stamp", "break", "zoomwin", "lasso"].indexOf(S.tool) >= 0) setTool("select");
+      else if (["gap", "stamp", "break", "zoomwin", "lasso", "match"].indexOf(S.tool) >= 0) setTool("select");
       else if (S.measures.length || S.measure) { S.measures = []; S.measure = null; }
       else if (S.sel || S.selMark) { setSel([]); }
       else setTool("select");
