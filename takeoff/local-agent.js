@@ -106,6 +106,65 @@ function addClarification(doc, question) {
   return true;
 }
 
+async function countCurrentPageDoors(api, doc, question) {
+  if (!api.P.proj) {
+    await api.doorWinDialog();
+    return;
+  }
+
+  const wholeDrawing = /\b(project|all\s+pdfs?|every\s+pdf|all\s+drawings|this\s+pdf|whole\s+pdf|every\s+page|all\s+pages)\b/i.test(question);
+  if (wholeDrawing) {
+    await api.doorWinDialog();
+    return;
+  }
+
+  const text = await api.pageTexts(api.S.fileId, api.S.pageNo);
+  const plan = api.tagsOf(text).plan;
+  const hasDoorTags = Object.keys(plan).some(mark => {
+    const parsed = api.tagParse(mark);
+    return parsed && parsed.fam === "Doors";
+  });
+  if (hasDoorTags) {
+    await api.doorWinDialog();
+    return;
+  }
+
+  const scale = api.P.proj.scales[api.S.fileId + ":" + api.S.pageNo];
+  const verifiedScale = !!scale && scale.verified === true && Number.isFinite(scale.ptPerFt) && scale.ptPerFt > 0 && api.scaleState(scale).k === "ok";
+  let swings = null;
+  if (verifiedScale) {
+    await api.indexPage();
+    swings = api.doorSwings();
+  }
+
+  if (Array.isArray(swings) && swings.length) {
+    addMessage(doc, "bot", `No searchable door text tags were found on this page; ${text.length} searchable text items are present. There are ${swings.length} possible vector door-swing candidates only, not confirmed doors. “Also door swing symbols on this page” is preselected for your review. Review the candidates in the dialog, then confirm the separate count step; nothing has been counted or placed yet.`);
+    const dialog = api.doorWinDialog();
+    const swingOption = doc.getElementById("dwSw");
+    if (!swingOption) {
+      const cancel = doc.getElementById("dlgCancel");
+      if (cancel) cancel.click();
+      await dialog;
+      throw new Error("The door swing review option was not available, so no count was started.");
+    }
+    swingOption.checked = true;
+    await dialog;
+    return;
+  }
+
+  let guidance;
+  if (!text.length) {
+    guidance = "No searchable PDF text was found on this page. It may be scanned or image-only, but the agent cannot confirm that or identify doors visually.";
+  } else if (!verifiedScale) {
+    guidance = `This page has ${text.length} searchable text items, so it is not text-free; door-swing search needs a verified usable page scale. Set and verify the scale (K), then retry, or inspect the plan manually.`;
+  } else if (swings === null) {
+    guidance = "The page scale is verified, but vector geometry was not available for door-swing detection. Inspect the plan manually or use Find similar on a visible symbol.";
+  } else {
+    guidance = "The page scale is verified, but no possible vector door-swing candidates were detected. This is not a confirmed zero; inspect the plan manually or use Find similar on a visible symbol.";
+  }
+  addMessage(doc, "bot", `No searchable door text tags were found on this page. ${guidance} No quantity was added.`);
+}
+
 async function submit(api, doc, input, button) {
   if (busy) return;
   const question = input.value.trim();
@@ -138,7 +197,11 @@ async function submit(api, doc, input, button) {
     }
 
     if (/^\s*count\s+(?:all\s+)?(?:doors?|windows?|ventilators?)\b/i.test(question) && !/\bswing\b/i.test(question)) {
-      await api.doorWinDialog();
+      if (/^\s*count\s+(?:all\s+)?doors?\b/i.test(question)) {
+        await countCurrentPageDoors(api, doc, question);
+      } else {
+        await api.doorWinDialog();
+      }
       return;
     }
 
