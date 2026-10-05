@@ -330,6 +330,7 @@ async function openProject(id){
   if (rep.length) setTimeout(() => toast("The stored project had damaged entries, repaired: " + rep.slice(0, 2).join(" · ") + (rep.length > 2 ? " · …" : ""), 8000), 400);
   Object.values(S.docs).forEach(d => d.destroy && d.destroy());
   P.proj = pr; S.docs = {}; S.geo = {}; S.texts = {}; S.sizes = {}; S.thumbs = {}; S.thumbQ = []; S.ocgs = {}; S.ocBound = {}; S.undo = []; S.redo = []; S.sel = null; S.multi.clear(); S.selMark = null; draftClear(); S.page = null; S.fileId = null; S.otherTab = "";
+  S.pgSel = new Set(); S.pgLast = null; S.pgQ = ""; S.pgF = "";
   tabSay({t: "open", id: pr.id});
   S.cond = (pr.conds[0] || {}).id || null;
   localStorage.setItem("zdTakeoffLast", pr.id);
@@ -543,7 +544,7 @@ async function gotoPage(fileId, pageNo){
   S.rendered = null; $("hi").style.display = "none"; { const lc = $("low"); lc.width = lc.width; }   // the last page's picture goes at once
   draftClear(); S.resume = null; S.gap = null; S.multi.clear(); S.hover = null; S.measure = null; S.measures = []; S.snap = null; S.autoShow = null; S.cmp = null; $("cmpLegend").style.display = "none";
   P.proj.last = {file: fileId, page: pageNo}; save();
-  $("pageSel").value = fileId + "|" + pageNo;
+  $("pageSel").value = fileId + "|" + pageNo; pgMark();
   showDrop(false);
   fit(); renderLayers();
   await renderLow();
@@ -647,7 +648,7 @@ function applyView(){
   const r = S.rendered, hi = $("hi");
   if (r) { const k = v.s / r.s; hi.style.transform = `translate(${v.tx - r.tx * k}px,${v.ty - r.ty * k}px) scale(${k})`; hi.style.display = Math.abs(k - 1) < 1e-9 || k > 0.25 ? "block" : "none"; }
   $("zoomPct").textContent = S.base ? Math.round(v.s * 100) + "%" : "—";
-  draw();
+  draw(); miniUpdate();
 }
 function zoomAt(f, sx, sy){
   const v = S.view, ns = Math.max(0.05, Math.min(60, v.s * f)); f = ns / v.s;
@@ -737,8 +738,8 @@ async function indexPage(){
   if (!S.texts[key]) {
     try {
       const tc = await page.getTextContent();
-      S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
-    } catch (e) { S.texts[key] = []; }
+      S.texts[key] = withOcr(key, tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; }));
+    } catch (e) { S.texts[key] = withOcr(key, []); }
   }
   if (key === S.key && P.proj && !P.proj.scales[key]) {
     const c = scaleCandidates(key);
@@ -1745,9 +1746,10 @@ const rateNote = l => l.na ? '<span style="color:var(--red)">' + esc(l.na) + "</
   : l.rate > 0 ? (l.ra ? "RA " + esc(l.ra) + (l.cached ? " (last read " + esc(dmy(l.date)) + ")" : "") + (l.assumed ? ' · <span style="color:var(--amber)">' + l.assumed + " assumed row" + (l.assumed > 1 ? "s" : "") + "</span>" : "") : "rate: " + esc(l.src) + ", " + esc(dmy(l.date))) : "rate not set";
 function renderBill(){
   const el = $("bill"); if (!P.proj) { el.innerHTML = ""; return; }
-  const bar = `<div class="billbar"><label class="small">Group <select id="billGrp"><option value="">— none —</option><option value="floor"${S.billGrp === "floor" ? " selected" : ""}>by building / floor</option></select></label><span style="flex:1"></span>
+  const bar = `<div class="billbar"><label class="small">Group <select id="billGrp"><option value="">— none —</option><option value="floor"${S.billGrp === "floor" ? " selected" : ""}>by building / floor</option><option value="file"${S.billGrp === "file" ? " selected" : ""}>by drawing (PDF)</option><option value="sheet"${S.billGrp === "sheet" ? " selected" : ""}>by sheet / page</option></select></label><span style="flex:1"></span>
     <button class="btn sm" data-bact="open" title="Door and window marks with their sizes">Opening schedule</button><button class="btn sm" data-bact="rev" title="Old revision against new: quantity and cost variance">Revision compare</button></div>`;
-  const groups = S.billGrp === "floor" ? floorGroups() : [{name: "", only: null}];
+  const groups = S.billGrp === "floor" ? floorGroups() : S.billGrp === "file" ? P.proj.files.map(f => ({name: f.name.replace(/\.pdf$/i, ""), only: it => it.file === f.id}))   // Forma inventory: group by document
+    : S.billGrp === "sheet" ? allPages().map(o => { const sh = (P.proj.sheets || {})[o.key] || {}; return {name: [sh.no, sh.title, o.f.name.replace(/\.pdf$/i, "") + " p." + o.i].filter(Boolean).join(" · "), only: it => it.file === o.f.id && it.page === o.i}; }) : [{name: "", only: null}];
   let all = 0, any = false, h = "";
   groups.forEach(g => {
     const L = billLines(g.only); if (!L.length) return; any = true;
@@ -2534,16 +2536,34 @@ function markPageSel(){
     const t = (sh.no ? sh.no + (sh.rev ? " " + sh.rev : "") + " · " : "") + ((P.proj.files.find(x => x.id === f) || {name: "?"}).name.replace(/\.pdf$/i, "")) + " — p." + p + "  " + st.ic;
     if (o.textContent !== t) o.textContent = t; o.title = "Scale: " + st.t; });
 }
-/* the Pages tab: a thumbnail of every page (drawn when it scrolls into view, one at a time, and kept), its sheet no.,
-   scale status and how many measurements are on it; click to open. Remove PDF takes a wrong drawing out of the project. */
+/* the Pages tab (Forma Takeoff's Sheets panel): a thumbnail of every page (drawn when it scrolls into view, one at a time,
+   and kept), its sheet no., title, scale status and how many measurements are on it; click to open. Search, filter (with
+   takeoff, no scale, pinned, version set…), sort, pin; tick pages to export, read or OCR them together. Remove PDF takes a
+   wrong drawing out of the project. */
 function renderPages(){
   const el = $("pageList"); if (!el || !P.proj) return;
-  if (!P.proj.files.length) { el.innerHTML = '<div class="empty">No PDF yet — add one with <b>+ PDF</b>.</div>'; return; }
-  const cnt = new Map(); P.proj.items.forEach(i => { const k = keyOf(i.file, i.page); cnt.set(k, (cnt.get(k) || 0) + 1); });
-  S.thumbs = S.thumbs || {};
-  el.innerHTML = P.proj.files.map(f => `<div class="pgf"><b title="${esc(f.name)}">${esc(f.name.replace(/\.pdf$/i, ""))}</b><span class="small">${f.pages} p.</span><button class="btn sm dng" data-rmpdf="${esc(f.id)}" title="Remove this PDF and its measurements from the project">Remove</button></div>
-    <div class="pgg">${Array.from({length: f.pages}, (_, n) => { const i = n + 1, k = keyOf(f.id, i), st = scaleState(P.proj.scales[k]), sh = (P.proj.sheets || {})[k] || {}, th = S.thumbs[k];
-      return `<div class="pgt${k === S.key ? " on" : ""}" data-pg="${esc(f.id)}|${i}" title="${esc(f.name)} p.${i} — scale: ${esc(st.t)}"><img data-th="${esc(k)}" alt="" ${th && th !== "x" ? `src="${th}"` : ""}><div class="pgl">${sh.no ? esc(sh.no) + " · " : ""}p.${i} · ${cnt.get(k) || 0}</div><div class="pgl ${st.k}">${st.ic} ${esc(st.k === "bad" && !P.proj.scales[k] ? "no scale" : st.t.split(" — ")[0])}</div></div>`; }).join("")}</div>`).join("");
+  if (!P.proj.files.length) { el.innerHTML = '<div class="empty">No PDF yet — add one with <b>+ PDF</b>, or <b>&#9662;</b> next to it to choose pages, a folder, or photos / scans.</div>'; return; }
+  S.thumbs = S.thumbs || {}; S.pgSel = S.pgSel || new Set();
+  const all = allPages(), keys = new Set(all.map(o => o.key)); [...S.pgSel].forEach(k => { if (!keys.has(k)) S.pgSel.delete(k); });
+  const L = pagesShown(), sets = [...new Set(P.proj.files.map(f => f.vset).filter(Boolean))], ns = S.pgSel.size, nShown = L.filter(o => S.pgSel.has(o.key)).length, F = S.pgF || "";
+  const opt = (v, t, cur) => `<option value="${esc(v)}"${cur === v ? " selected" : ""}>${esc(t)}</option>`;
+  const card = o => { const st = scaleState(P.proj.scales[o.key]), th = S.thumbs[o.key], t = o.sh.title || "", on = S.pgSel.has(o.key);
+    return `<div class="pgt${o.key === S.key ? " on" : ""}${on ? " sel" : ""}" data-pg="${esc(o.f.id)}|${o.i}" title="${esc(o.f.name)} p.${o.i}${t ? " — " + esc(t) : ""} · scale: ${esc(st.t)}"><input type="checkbox" class="pgck" data-pgck="${esc(o.key)}"${on ? " checked" : ""} title="Tick to export, read or OCR several pages at once (Shift+click: a range)" aria-label="Tick page"><button type="button" class="pgpin${o.pin ? " on" : ""}" data-pin="${esc(o.key)}" title="${o.pin ? "Pinned to the top — click to unpin" : "Pin to the top (bookmark)"}">${o.pin ? "&#9733;" : "&#9734;"}</button><img data-th="${esc(o.key)}" alt="" ${th && th !== "x" ? `src="${th}"` : ""}><div class="pgl">${o.sh.no ? esc(o.sh.no) + " · " : ""}p.${o.i} · ${o.n}</div>${t ? `<div class="pgl pgtt">${esc(t)}</div>` : ""}<div class="pgl ${st.k}">${st.ic} ${esc(st.k === "bad" && !P.proj.scales[o.key] ? "no scale" : st.t.split(" — ")[0])}</div></div>`; };
+  const grid = list => `<div class="pgg">${list.map(card).join("")}</div>`;
+  const bar = `<div class="pgbar"><input type="search" id="pgQ" placeholder="Search sheet no., title, PDF…" value="${esc(S.pgQ || "")}" aria-label="Search the pages"><select id="pgF" title="Show only…">${[["", "All pages"], ["tk", "With takeoff"], ["none", "No takeoff yet"], ["noscale", "No scale"], ["unver", "Scale not verified"], ["pin", "★ Pinned"], ["ocr", "Read by OCR"]].concat(sets.map(s => ["set:" + s, "Set: " + s])).map(([v, t]) => opt(v, t, F)).join("")}</select><select id="pgSort" title="Order">${[["", "Drawing order"], ["no", "Sheet no."], ["title", "Title"], ["n", "Most measured"]].map(([v, t]) => opt(v, t, S.pgSort || "")).join("")}</select></div>
+    <div class="pgsel"><input type="checkbox" data-pgall="1" title="Tick / untick every page shown"${L.length && nShown === L.length ? " checked" : ""}>${ns ? `<b>${ns} ticked</b><button class="btn sm pri" data-pga="export" title="Export the ticked pages — PDF, PNG or JPEG">&#8681; Export…</button><button class="btn sm" data-pga="sheet" title="Read sheet no., title, revision and floor from their title blocks">&#127991; Sheet info</button><button class="btn sm" data-pga="ocr" title="Read the text of scanned pages (OCR)">&#128292; OCR</button><button class="btn sm" data-pga="pin" title="Pin / unpin the ticked pages">&#9733;</button><button class="btn sm" data-pga="clear" title="Untick all">&#10005;</button>`
+      : `<span class="small">${L.length === all.length ? all.length + " page" + (all.length === 1 ? "" : "s") : L.length + " of " + all.length + " pages"} · tick to export or read several</span><span style="flex:1"></span><button class="btn sm" data-pga="tk" title="Tick every page that has takeoff or markups">Tick pages with takeoff</button>`}</div>`;
+  let body;
+  if (!L.length) body = '<div class="empty">No page matches — clear the search or the filter.</div>';
+  else if (!S.pgSort) {   // drawing order: PDF by PDF, pinned pages first
+    const pin = L.filter(o => o.pin), rest = L.filter(o => !o.pin);
+    body = (pin.length ? `<div class="pgf"><b>&#9733; Pinned</b><span class="small">${pin.length} p.</span></div>` + grid(pin) : "") + P.proj.files.map(f => { const fl = rest.filter(o => o.f.id === f.id); if (!fl.length && (S.pgQ || F || pin.some(o => o.f.id === f.id))) return "";
+      return `<div class="pgf"><b title="${esc(f.name)}">${esc(f.name.replace(/\.pdf$/i, ""))}</b>${f.vset ? `<span class="tag g" title="Version set${f.vdate ? " · issued " + esc(dmy(f.vdate)) : ""}">${esc(f.vset)}</span>` : ""}<span class="small">${f.pages} p.</span><button class="btn sm dng" data-rmpdf="${esc(f.id)}" title="Remove this PDF and its measurements from the project">Remove</button></div>` + grid(fl); }).join("");
+  } else body = grid(L);
+  const top = el.scrollTop, a = document.activeElement, foc = a && a.id === "pgQ", caret = foc ? a.selectionStart : 0;
+  el.style.setProperty("--pgw", (PG_SZ[S.pgSz] || PG_SZ.m) + "px");
+  el.innerHTML = '<div class="pghd">' + bar + "</div>" + body; el.scrollTop = top;
+  if (foc) { const q = $("pgQ"); q.focus(); try { q.setSelectionRange(caret, caret); } catch (e) {} }
   if (!S.thumbIO) S.thumbIO = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { S.thumbIO.unobserve(e.target); thumbWant(e.target.dataset.th); } }), {root: el, rootMargin: "200px"});
   el.querySelectorAll("img[data-th]").forEach(im => { if (!im.getAttribute("src")) S.thumbIO.observe(im); });
 }
@@ -2558,6 +2578,7 @@ async function thumbRun(){
       await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp})).promise; S.thumbs[k] = cv.toDataURL("image/png"); }
     catch (e) { S.thumbs[k] = "x"; }   // PDF not attached in this browser: left blank
     const im = [...document.querySelectorAll("#pageList img[data-th]")].find(x => x.dataset.th === k); if (im && S.thumbs[k] !== "x") im.src = S.thumbs[k];
+    if (k === S.key) miniUpdate();
   }
   S.thumbBusy = false;
 }
@@ -2570,7 +2591,8 @@ async function removePdf(fid){
   savePr = P.proj; await flushSave(); await backupNow("before removing " + f.name).catch(() => {});
   const pr = P.proj, mine = k => String(k).split(":")[0] === fid;
   pr.files = pr.files.filter(x => x.id !== fid); pr.items = pr.items.filter(i => i.file !== fid); pr.marks = (pr.marks || []).filter(m => m.file !== fid);
-  ["scales", "viewports", "sheets"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) delete pr[n][k]; }));
+  ["scales", "viewports", "sheets", "ocr"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) delete pr[n][k]; }));
+  if (pr.pins) pr.pins = pr.pins.filter(k => !mine(k)); if (S.pgSel) [...S.pgSel].forEach(k => { if (mine(k)) S.pgSel.delete(k); });
   if (pr.layersOff) delete pr.layersOff[fid]; if (pr.last && pr.last.file === fid) pr.last = {};
   S.undo = []; S.redo = []; S.multi.clear(); S.sel = null; S.selMark = null; Object.keys(S.thumbs || {}).forEach(k => { if (mine(k)) delete S.thumbs[k]; });
   if (S.docs[fid]) { try { S.docs[fid].destroy(); } catch (e) {} delete S.docs[fid]; }
@@ -3131,8 +3153,8 @@ async function pageTexts(fileId, pageNo){
   if (S.texts[key]) return S.texts[key];
   try {
     const pg = await (await doc(fileId)).getPage(pageNo), base = pg.getViewport({scale: 1}), tc = await pg.getTextContent();
-    S.texts[key] = tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; });
-  } catch (e) { S.texts[key] = []; }
+    S.texts[key] = withOcr(key, tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; }));
+  } catch (e) { S.texts[key] = withOcr(key, []); }   // (a PDF not attached in this browser still has its OCR words)
   return S.texts[key];
 }
 async function findText(q){
@@ -3145,7 +3167,7 @@ async function findText(q){
     (await pageTexts(f.id, i)).forEach(t => { if (t.s.toLowerCase().includes(ql) && hits.length < 300) hits.push({f, i, t}); });
   }
   box.innerHTML = hits.length ? `<div class="fr small" style="flex-direction:row;align-items:center;gap:6px;cursor:default">${hits.length}${hits.length >= 300 ? "+" : ""} found <span style="flex:1"></span><button class="btn sm pri" data-cntall="1" title="Put a count marker on every hit">&#10003; Count all</button></div>` + hits.map((h, n) => `<div class="fr" data-hit="${n}" style="flex-direction:row;align-items:center;gap:6px"><span style="flex:1;display:flex;flex-direction:column"><b>${esc(h.t.s.trim().slice(0, 60))}</b><span class="small">${esc(h.f.name.replace(/\.pdf$/i, ""))} p.${h.i}</span></span><button class="btn sm" data-cnt1="${n}" title="Count this one">+1</button></div>`).join("")
-    : '<div class="fr small">Not found in the text of these PDFs (scanned drawings have no text).</div>';
+    : '<div class="fr small">Not found in the text of these PDFs. A scanned drawing has no text until it is read: <b>Pages → tick → OCR</b>, or Ctrl+K → OCR.</div>';
   box.onclick = async e => {
     const ca = e.target.closest("[data-cntall],[data-cnt1]");
     if (ca) { e.stopPropagation(); return countTextHits(q, ca.dataset.cntall ? hits : [hits[+ca.dataset.cnt1]]); }
@@ -3506,12 +3528,16 @@ function exportCsv(){
   const t = rows.map(r => r.map(v => { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
   saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Measurement.csv");
 }
-/* the takeoff of one page as an SVG over the page at scale sc (pt -> px): areas, lengths, counts, labels, markups, legend */
+/* the takeoff of one page as an SVG over the page at scale sc (pt -> px): areas, lengths, counts, labels, markups, legend.
+   legend: true / false (the legend top left), or the export options {legend: none|tl|tr|bl|br|margin, lsz: s|m|l, lq,
+   lbl, meas, mk, stamp, conds: Set of condition ids, ox: the margin strip's width in px (the page is drawn right of it)} */
 function pageOverlaySvg(file, page, sc, W, H, legend){
-  const T = p => [p[0] * sc, p[1] * sc], z = Math.max(1, sc / 1.6), h = [];
+  const o = legend && typeof legend === "object" ? legend : {legend: legend ? "tl" : "none"}, ox = +o.ox || 0, lblOn = o.lbl == null ? S.lbl.on : !!o.lbl;
+  const T = p => [p[0] * sc + ox, p[1] * sc], z = Math.max(1, sc / 1.6), h = [];
   const ps = P => P.map(p => T(p).map(v => v.toFixed(1)).join(",")).join(" ");
-  const tot = {};
-  P.proj.items.filter(i => i.file === file && i.page === page && !hiddenItem(i)).forEach(it => {
+  const tot = {}, shown = it => o.conds ? o.conds.has(it.cond) : !hiddenItem(it);
+  if (ox) h.push(`<rect x="0" y="0" width="${ox.toFixed(1)}" height="${H}" fill="#fff"/><line x1="${ox.toFixed(1)}" y1="0" x2="${ox.toFixed(1)}" y2="${H}" stroke="#9fb0c6" stroke-width="${z}"/>`);
+  if (o.meas !== false) P.proj.items.filter(i => i.file === file && i.page === page && shown(i)).forEach(it => {
     const c = cond(it.cond); if (!c) return;
     const k = itemScale(it), rows = k ? rowsOf(it, k) : [], q = rows.reduce((a, r) => a + r.qty, 0), col = c.color, ded = it.kind === "ded";
     tot[c.id] = (tot[c.id] || 0) + q;
@@ -3520,19 +3546,27 @@ function pageOverlaySvg(file, page, sc, W, H, legend){
     const poly = itemPoly(it);
     if (c.type === "area") {
       h.push(`<polygon points="${ps(poly)}" fill="${ded ? "#d03b3b" : col}" fill-opacity="${ded ? 0.14 : 0.22}" stroke="${ded ? "#d03b3b" : col}" stroke-width="${1.8 * z}" ${ded ? `stroke-dasharray="${5 * z} ${3 * z}"` : ""}/>`);
-      if (k && S.lbl.on) { const scr = poly.map(T), L = capLines(it, c, k); if (L.length) h.push(labelBox(labelPt(scr), L, ded ? "#9b2222" : "#0b0b0b", z)); if (S.lbl.seg && it.shape !== "circle") h.push(segLabels(scr, it.pts, k, true, z)); }
+      if (k && lblOn) { const scr = poly.map(T), L = capLines(it, c, k); if (L.length) h.push(labelBox(labelPt(scr), L, ded ? "#9b2222" : "#0b0b0b", z)); if (S.lbl.seg && it.shape !== "circle") h.push(segLabels(scr, it.pts, k, true, z)); }
     } else {
       h.push(`<poly${it.shape === "circle" ? "gon" : "line"} points="${ps(poly)}" fill="none" stroke="${ded ? "#d03b3b" : col}" stroke-width="${3 * z}" stroke-linejoin="round" stroke-linecap="round" ${ded ? `stroke-dasharray="${7 * z} ${4 * z}"` : ""}/>`);
-      if (k && S.lbl.on) { const scr = poly.map(T), L = capLines(it, c, k), m = lineLabelPt(scr, z); if (L.length) h.push(labelBox(m, L, ded ? "#9b2222" : "#0b0b0b", z)); if (S.lbl.seg && it.shape !== "circle") h.push(segLabels(scr, it.pts, k, false, z)); }
+      if (k && lblOn) { const scr = poly.map(T), L = capLines(it, c, k), m = lineLabelPt(scr, z); if (L.length) h.push(labelBox(m, L, ded ? "#9b2222" : "#0b0b0b", z)); if (S.lbl.seg && it.shape !== "circle") h.push(segLabels(scr, it.pts, k, false, z)); }
     }
   });
-  (P.proj.marks || []).filter(m => m.file === file && m.page === page && m.type !== "fence").forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
-  if (legend) {
-    const lines = [[P.proj.name + " — " + pageName({file, page}), "#0b0b0b", ""]].concat(P.proj.conds.filter(c => tot[c.id] !== undefined).map(c => [c.name + ": " + fq(tot[c.id], c.unit) + " " + c.unit, "#0b0b0b", c.color]));
-    const lw = Math.max(...lines.map(l => l[0].length)) * 6.6 * z + 30 * z;
-    h.push(`<rect x="${8 * z}" y="${8 * z}" width="${lw}" height="${(lines.length * 17 + 10) * z}" fill="rgba(255,255,255,.93)" stroke="#c9d6e4"/>`);
-    lines.forEach((l, i) => { const y = (24 + i * 17) * z; if (l[2]) h.push(`<rect x="${16 * z}" y="${y - 9 * z}" width="${9 * z}" height="${9 * z}" fill="${l[2]}"/>`);
-      h.push(`<text x="${(l[2] ? 30 : 16) * z}" y="${y}" font-family="Segoe UI,Arial" font-size="${12 * z}" font-weight="${i ? 400 : 700}" fill="${l[1]}">${esc(l[0])}</text>`); });
+  if (o.mk !== false) (P.proj.marks || []).filter(m => m.file === file && m.page === page && m.type !== "fence").forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
+  const sh = (P.proj.sheets || {})[keyOf(file, page)] || {}, lz = z * ({s: 0.8, m: 1, l: 1.3}[o.lsz] || 1), pos = o.legend || "none";
+  if (pos !== "none") {
+    const lines = (pos === "margin" ? [[P.proj.name, "", 700], [[sh.no, sh.title].filter(Boolean).join(" · ") || pageName({file, page}), "", 600], [pageName({file, page}), "", 400]].filter((l, i) => i < 2 || sh.no || sh.title)
+      : [[P.proj.name + " — " + pageName({file, page}), "", 700]]).concat(P.proj.conds.filter(c => tot[c.id] !== undefined).map(c => [c.name + (o.lq === false ? "" : ": " + fq(tot[c.id], c.unit) + " " + c.unit), c.color, 400]));
+    const cw = 6.6 * lz, room = pos === "margin" ? Math.max(8, Math.floor((ox - 46 * lz) / cw)) : 200, txt = l => l[0].length > room ? l[0].slice(0, room - 1) + "…" : l[0];
+    const lw = pos === "margin" ? ox - 16 * lz : Math.max(...lines.map(l => txt(l).length)) * cw + 30 * lz, lh = (lines.length * 17 + 10) * lz;
+    const x = pos === "margin" ? 8 * lz : pos === "tr" || pos === "br" ? W - lw - 8 * z : ox + 8 * z, y = pos === "bl" || pos === "br" ? H - lh - 8 * z : 8 * z;
+    h.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${lw.toFixed(1)}" height="${lh.toFixed(1)}" fill="rgba(255,255,255,.93)" stroke="#c9d6e4"/>`);
+    lines.forEach((l, i) => { const ty = y + (16 + i * 17) * lz; if (l[1]) h.push(`<rect x="${(x + 8 * lz).toFixed(1)}" y="${(ty - 9 * lz).toFixed(1)}" width="${9 * lz}" height="${9 * lz}" fill="${l[1]}"/>`);
+      h.push(`<text x="${(x + (l[1] ? 22 : 8) * lz).toFixed(1)}" y="${ty.toFixed(1)}" font-family="Segoe UI,Arial" font-size="${12 * lz}" font-weight="${l[2]}" fill="#0b0b0b">${esc(txt(l))}</text>`); });
+  }
+  if (o.stamp) {   // project · sheet · page · date, along the bottom of the drawing
+    const t = [P.proj.name, [sh.no, sh.title].filter(Boolean).join(" "), pageName({file, page}), "takeoff " + dmy(today())].filter(Boolean).join("  ·  "), sw = t.length * 5.9 * z + 16 * z, sx = pos === "bl" ? W - sw - 8 * z : ox + 8 * z, sy = H - 26 * z;
+    h.push(`<rect x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" width="${sw.toFixed(1)}" height="${18 * z}" fill="rgba(255,255,255,.93)" stroke="#c9d6e4"/><text x="${(sx + 8 * z).toFixed(1)}" y="${(sy + 13 * z).toFixed(1)}" font-family="Segoe UI,Arial" font-size="${10.5 * z}" fill="#33475b">${esc(t)}</text>`);
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${h.join("")}</svg>`;
 }
@@ -3635,12 +3669,648 @@ async function exportMenu(){
   $("dlgB").innerHTML = `<div class="wide"></div><p><b>Takeoff check: <span style="color:${lvlCol(V.lvl)}">${V.lvl}</span></b>${V.L.length ? ` — ${nE} error${nE === 1 ? "" : "s"}, ${nW} warning${nW === 1 ? "" : "s"}` : " — scales, heights, thicknesses, codes, rates, QA all in order"}</p>
     ${V.L.length ? `<div style="max-height:240px;overflow:auto;margin:6px 0;border:1px solid var(--line);border-radius:6px">${V.L.map(x => `<div style="padding:4px 8px;border-bottom:1px solid #f0f4f8;font-size:12px"><b style="color:${lvlCol(x.lvl)};display:inline-block;width:70px">${x.lvl}</b>${esc(x.msg)}</div>`).join("")}</div>` : ""}
     <p class="small">${V.lvl === "PASS" ? "" : "You can still export; the Excel file carries this list on its Validation sheet. "}Measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as rows).</p>`;
-  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="exBak">Backups…</button><button class="btn" id="exJson" title="Measurements only — the PDFs are not inside">Project (.json)</button><button class="btn" id="exBnd" title="The project and its PDFs in one file, to move it to another browser or computer">Project + PDFs</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA">All marked-up pages (.pdf)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
+  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="exBak">Backups…</button><button class="btn" id="exJson" title="Measurements only — the PDFs are not inside">Project (.json)</button><button class="btn" id="exBnd" title="The project and its PDFs in one file, to move it to another browser or computer">Project + PDFs</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA">All marked-up pages (.pdf)</button>
+    <button class="btn pri" id="exPages" title="Choose the pages (this page, pages with takeoff, ticked pages, or any), the format (PDF, a PDF per page, PNG, JPEG), the resolution up to 600 DPI and the legend">&#8681; Pages — PDF / PNG / JPEG…</button><button class="btn" id="exRep" title="A printable takeoff report with a summary, quantities by condition and floor, the bill, the drawings measured and the check — print it or save it as PDF">&#128438; Report (print / PDF)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
   $("dlgBack").classList.add("on");
   const close = () => $("dlgBack").classList.remove("on");
   $("dlgCancel").onclick = close;
   $("exXls").onclick = () => { close(); exportExcel(); }; $("exCsv").onclick = () => { close(); exportCsv(); };
   $("exPng").onclick = () => { close(); exportPng(); }; $("exPdf1").onclick = () => { close(); exportPdf(false); }; $("exPdfA").onclick = () => { close(); exportPdf(true); }; $("exJson").onclick = () => { close(); exportJson(); }; $("exBnd").onclick = () => { close(); exportBundle(); }; $("exBak").onclick = () => backupsDialog();
+  $("exPages").onclick = () => { close(); exportPagesDialog(); }; $("exRep").onclick = () => { close(); reportPrint(); };
+}
+
+/* ------------------------------------------------------------------ pages manager (Forma Takeoff 2D "Sheets", Bluebeam batch)
+   Pages tab: search, filter, sort, pin (bookmark) and tick pages. Ticked pages are exported together — one PDF (each
+   drawing stays the original vector page), a PDF per page, or PNG / JPEG at a chosen resolution — with a legend on the
+   drawing or in a margin strip, as Forma Takeoff's "Export sheets to PDF". Their sheet no., title, revision and floor are
+   read from the title block (Forma "Extract pages and attributes", PlanSwift Auto Bookmark, Bluebeam AutoMark); scanned
+   pages are read by OCR. PDFs come in with a choice of pages and a version set; photos and scans come in as pages. */
+const PG_SZ = {s: 72, m: 92, l: 150};
+function pagesWithTakeoff(){ const s = new Set(); P.proj.items.forEach(i => s.add(keyOf(i.file, i.page))); (P.proj.marks || []).forEach(m => { if (m.type !== "fence") s.add(keyOf(m.file, m.page)); }); return allPages().map(o => o.key).filter(k => s.has(k)); }
+function pagesShown(){   // the Pages tab's pages after its search, filter and sort: [{f, i, key, sh, n, tk, pin}]
+  const q = String(S.pgQ || "").trim().toLowerCase(), F = S.pgF || "", pins = new Set(P.proj.pins || []), tk = new Set(pagesWithTakeoff()), cnt = new Map();
+  P.proj.items.forEach(i => { const k = keyOf(i.file, i.page); cnt.set(k, (cnt.get(k) || 0) + 1); });
+  let L = allPages().map(o => Object.assign(o, {sh: (P.proj.sheets || {})[o.key] || {}, n: cnt.get(o.key) || 0, tk: tk.has(o.key), pin: pins.has(o.key)}));
+  if (q) L = L.filter(o => [o.f.name, o.sh.no, o.sh.title, o.sh.rev, o.sh.disc, o.sh.bldg, o.sh.floor, o.f.vset, "p." + o.i, "page " + o.i].filter(Boolean).join(" · ").toLowerCase().includes(q));
+  const sc = o => P.proj.scales[o.key];
+  if (F === "tk") L = L.filter(o => o.tk); else if (F === "none") L = L.filter(o => !o.tk); else if (F === "noscale") L = L.filter(o => !sc(o)); else if (F === "unver") L = L.filter(o => sc(o) && !sc(o).verified);
+  else if (F === "pin") L = L.filter(o => o.pin); else if (F === "ocr") L = L.filter(o => P.proj.ocr && P.proj.ocr[o.key]); else if (F.startsWith("set:")) L = L.filter(o => (o.f.vset || "") === F.slice(4));
+  const nat = (a, b) => !a && !b ? 0 : !a ? 1 : !b ? -1 : String(a).localeCompare(String(b), undefined, {numeric: true, sensitivity: "base"});
+  if (S.pgSort === "no") L.sort((a, b) => nat(a.sh.no, b.sh.no)); else if (S.pgSort === "title") L.sort((a, b) => nat(a.sh.title, b.sh.title)); else if (S.pgSort === "n") L.sort((a, b) => b.n - a.n);
+  if (S.pgSort) L.sort((a, b) => (b.pin ? 1 : 0) - (a.pin ? 1 : 0));   // pinned pages first (a stable sort keeps the order chosen)
+  return L;
+}
+function pgTick(k, on, range){   // tick / untick a page; Shift: every page shown between the last one ticked and this one
+  S.pgSel = S.pgSel || new Set(); const L = pagesShown().map(o => o.key);
+  if (range && S.pgLast && S.pgLast !== k && L.includes(S.pgLast) && L.includes(k)) { const a = L.indexOf(S.pgLast), b = L.indexOf(k); L.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(x => { if (on) S.pgSel.add(x); else S.pgSel.delete(x); }); }
+  else if (on) S.pgSel.add(k); else S.pgSel.delete(k);
+  S.pgLast = k; renderPages();
+}
+function pgMark(){   // the page being opened is framed in the Pages tab at once (not only after it has been drawn)
+  const el = $("pageList"); if (!el) return; const k = S.fileId + "|" + S.pageNo;
+  el.querySelectorAll(".pgt").forEach(x => x.classList.toggle("on", x.dataset.pg === k));
+}
+function pinPages(keys){   // Forma "bookmark": pinned pages come first in the Pages tab
+  if (!keys.length) return;
+  const pins = new Set(P.proj.pins || []), off = keys.every(k => pins.has(k));
+  keys.forEach(k => { if (off) pins.delete(k); else pins.add(k); }); P.proj.pins = [...pins]; save(); renderPages();
+  toast(keys.length + " page" + (keys.length > 1 ? "s" : "") + (off ? " unpinned" : " pinned to the top of Pages"), 1800);
+}
+function pgAct(a){
+  const sel = allPages().map(o => o.key).filter(k => S.pgSel.has(k));
+  if (a === "export") return exportPagesDialog({keys: sel});
+  if (a === "sheet") return autoSheetDialog(sel);
+  if (a === "ocr") return ocrDialog(sel);
+  if (a === "pin") return pinPages(sel);
+  if (a === "clear") { S.pgSel.clear(); return renderPages(); }
+  if (a === "tk") { const t = pagesWithTakeoff(); t.forEach(k => S.pgSel.add(k)); if (!t.length) toast("No page has takeoff yet", 2000); return renderPages(); }
+}
+
+/* export: one dialog for every page format (Forma "Export sheets to PDF": this sheet / sheets with takeoff / chosen
+   sheets, filtered by condition, legend with or without quantities, small / medium / large) */
+const EXP_DEF = {fmt: "pdf", dpi: 300, legend: "tl", lsz: "m", lq: true, meas: true, lbl: true, mk: true, stamp: true, fade: 0};
+const EXP_STRIP = {s: 170, m: 230, l: 310};   // the margin-strip legend's width, pt
+function expPref(){ let o = null; try { o = JSON.parse(pref("zdTakeoffExp") || "null"); } catch (e) { o = null; } return Object.assign({}, EXP_DEF, o && typeof o === "object" ? o : {}); }
+async function exportPagesDialog(pre){
+  if (!P.proj || !P.proj.files.length) return toast("Add a PDF first");
+  pre = pre || {};
+  const o = Object.assign(expPref(), pre.fmt ? {fmt: pre.fmt} : {}, pre.dpi ? {dpi: pre.dpi} : {}), all = allPages(), tk = pagesWithTakeoff();
+  const sel = pre.keys && pre.keys.length ? pre.keys : all.map(x => x.key).filter(k => (S.pgSel || new Set()).has(k)), tkSet = new Set(tk);
+  const SC = {page: S.page ? [S.key] : [], tk, sel, all: all.map(x => x.key)};
+  let scope = pre.scope && SC[pre.scope] && SC[pre.scope].length ? pre.scope : sel.length ? "sel" : S.page ? "page" : tk.length ? "tk" : "all";
+  const used = P.proj.conds.filter(c => P.proj.items.some(i => i.cond === c.id)), nm = n => n + " page" + (n === 1 ? "" : "s");
+  const rad = (v, t, n) => `<label class="pk"><input type="radio" name="xSc" value="${v}"${scope === v ? " checked" : ""}${n === 0 ? " disabled" : ""}> ${t}${n != null ? ` <span class="small">(${nm(n)})</span>` : ""}</label>`;
+  const sel1 = (id, L, cur) => `<select id="${id}">${L.map(([v, t]) => `<option value="${v}"${String(cur) === String(v) ? " selected" : ""}>${t}</option>`).join("")}</select>`;
+  const lists = P.proj.files.map(f => `<div class="xpf"><label class="pk" style="font-weight:700"><input type="checkbox" data-xpf="${esc(f.id)}"> ${esc(f.name.replace(/\.pdf$/i, ""))} <span class="small">${f.pages} p.</span></label>${all.filter(x => x.f.id === f.id).map(x => { const sh = (P.proj.sheets || {})[x.key] || {};
+    return `<label class="pk xpi"><input type="checkbox" data-xp="${esc(x.key)}"> p.${x.i}${sh.no ? " · " + esc(sh.no) : ""}${sh.title ? " · " + esc(sh.title) : ""}${tkSet.has(x.key) ? ' <span class="tag g">takeoff</span>' : ""}</label>`; }).join("")}</div>`).join("");
+  const body = `<div id="xBody"><div class="wide"></div><div class="grid">
+    <div class="fg w2"><label>Pages</label><div class="xrad">${rad("page", "This page", SC.page.length)}${rad("tk", "Pages with takeoff", tk.length)}${rad("sel", "Pages ticked in the Pages tab", sel.length)}${rad("all", "Every page", all.length)}${rad("pick", "Choose…", null)}</div>
+      <div id="xPick"${scope === "pick" ? "" : ' style="display:none"'}><div class="xrow"><textarea id="xRange" rows="1" placeholder="e.g. 1-3, 7" title="Page numbers of the PDF chosen next to it; Enter ticks them"></textarea><select id="xRangeF">${P.proj.files.map(f => `<option value="${esc(f.id)}"${f.id === S.fileId ? " selected" : ""}>${esc(f.name.replace(/\.pdf$/i, ""))}</option>`).join("")}</select><button class="btn sm" type="button" id="xRangeGo">Tick these</button><button class="btn sm" type="button" data-xq="tk">With takeoff</button><button class="btn sm" type="button" data-xq="all">All</button><button class="btn sm" type="button" data-xq="none">None</button></div><div class="xlist">${lists}</div></div></div>
+    <div class="fg"><label>Format</label>${sel1("xFmt", [["pdf", "PDF — one file (drawings stay vector)"], ["pdfs", "PDF — a file per page (.zip)"], ["png", "PNG images (.zip)"], ["jpg", "JPEG images (.zip)"]], o.fmt)}</div>
+    <div class="fg"><label id="xDpiL">Resolution</label>${sel1("xDpi", [[150, "150 DPI — screen"], [200, "200 DPI"], [300, "300 DPI — print (high)"], [400, "400 DPI"], [600, "600 DPI — maximum"]], o.dpi)}<span class="small" id="xPx"></span></div>
+    <div class="fg"><label>Legend</label>${sel1("xLeg", [["none", "No legend"], ["tl", "On the drawing — top left"], ["tr", "On the drawing — top right"], ["bl", "On the drawing — bottom left"], ["br", "On the drawing — bottom right"], ["margin", "In a margin strip on the left (Forma)"]], o.legend)}</div>
+    <div class="fg"><label>Legend size</label>${sel1("xLsz", [["s", "Small"], ["m", "Medium"], ["l", "Large"]], o.lsz)}<label class="pk"><input type="checkbox" id="xLq"${o.lq ? " checked" : ""}> Quantities in the legend</label></div>
+    <div class="fg"><label>Show</label><label class="pk"><input type="checkbox" id="xMeas"${o.meas ? " checked" : ""}> Measurements and counts</label><label class="pk"><input type="checkbox" id="xLbl"${o.lbl ? " checked" : ""}> Labels (as View → Labels)</label><label class="pk"><input type="checkbox" id="xMk"${o.mk ? " checked" : ""}> Notes, clouds, arrows, highlights</label><label class="pk"><input type="checkbox" id="xStamp"${o.stamp ? " checked" : ""}> Title stamp — project · sheet · date</label></div>
+    <div class="fg"><label>Fade the drawing</label>${sel1("xFade", [[0, "No"], [25, "25 % — takeoff stands out"], [50, "50 %"], [70, "70 %"]], o.fade)}
+      <label style="margin-top:6px">Conditions</label>${sel1("xCnd", [["shown", "Shown on the drawing (eye on)"], ["all", "Every condition"]].concat(used.length ? [["pick", "Choose…"]] : []), "shown")}
+      <div id="xCndL" style="display:none;max-height:130px;overflow:auto;margin-top:4px">${used.map(c => `<label class="pk"><input type="checkbox" data-xc="${esc(c.id)}"${c.hidden ? "" : " checked"}><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${c.color}"></span> ${esc(c.name)}</label>`).join("")}</div></div>
+    <div class="fg w2"><label>File name</label><input type="text" id="xName" value="${esc(fileBase() + "_pages")}"></div></div>
+    <p class="small" style="margin-top:8px">PDF keeps each drawing as its original vector page and puts the takeoff on top at the resolution chosen; PNG / JPEG are whole pictures of the page. A very large sheet at a high resolution is made as large as this browser allows, and the export says so.</p></div>`;
+  const keysNow = () => { const sc = (document.querySelector('#xBody input[name="xSc"]:checked') || {}).value || scope; return sc === "pick" ? [...document.querySelectorAll("#xBody [data-xp]")].filter(x => x.checked).map(x => x.dataset.xp) : SC[sc] || []; };
+  const p = ask("Export pages", body, "Export", () => {
+    const keys = keysNow(); if (!keys.length) return "Tick at least one page";
+    let conds = null; const cm = $("xCnd").value;
+    if (cm === "all") conds = new Set(P.proj.conds.map(c => c.id));
+    else if (cm === "pick") { conds = new Set([...document.querySelectorAll("#xBody [data-xc]")].filter(x => x.checked).map(x => x.dataset.xc)); if (!conds.size) return "Tick at least one condition"; }
+    return {keys, fmt: $("xFmt").value, dpi: +$("xDpi").value, legend: $("xLeg").value, lsz: $("xLsz").value, lq: $("xLq").checked, meas: $("xMeas").checked, lbl: $("xLbl").checked, mk: $("xMk").checked, stamp: $("xStamp").checked, fade: +$("xFade").value, conds,
+      name: ($("xName").value.trim() || fileBase()).replace(/[\\/:*?"<>|]+/g, "_")}; });
+  const B = $("xBody"), boxes = () => [...B.querySelectorAll("[data-xp]")], tickIf = f => boxes().forEach(x => { x.checked = !!f(x.dataset.xp); });   // (listeners on the dialog's own body: it goes with the dialog)
+  const upd = () => {
+    const keys = keysNow(), dpi = +$("xDpi").value, k0 = keys[0], sz = k0 && (k0 === S.key && S.base ? [S.base.width, S.base.height] : (S.sizes || {})[k0]), img = $("xFmt").value === "png" || $("xFmt").value === "jpg";
+    $("xDpiL").textContent = img ? "Resolution" : "Takeoff sharpness";
+    $("xPx").textContent = sz ? (img ? "" : "takeoff layer ") + Math.round(sz[0] * dpi / 72) + " × " + Math.round(sz[1] * dpi / 72) + " px for " + keyName(k0) : "";
+    if ($("dlgOk")) $("dlgOk").textContent = "Export " + nm(keys.length);
+    B.querySelectorAll("[data-xpf]").forEach(g => { const L = boxes().filter(x => x.dataset.xp.split(":")[0] === g.dataset.xpf); g.checked = L.length > 0 && L.every(x => x.checked); g.indeterminate = L.some(x => x.checked) && !g.checked; });
+  };
+  tickIf(k => SC[scope === "pick" ? "page" : scope].includes(k));
+  B.addEventListener("change", e => {
+    if (e.target.name === "xSc") { const v = e.target.value; $("xPick").style.display = v === "pick" ? "" : "none"; if (v !== "pick") { scope = v; tickIf(k => (SC[v] || []).includes(k)); } }
+    if (e.target.dataset.xpf) boxes().filter(x => x.dataset.xp.split(":")[0] === e.target.dataset.xpf).forEach(x => { x.checked = e.target.checked; });
+    if (e.target.id === "xCnd") $("xCndL").style.display = e.target.value === "pick" ? "" : "none";
+    upd(); });
+  const goRange = () => { const f = P.proj.files.find(x => x.id === $("xRangeF").value), R = f ? parseRange($("xRange").value, f.pages) : new Set(); if (!R.size) return toast("Type page numbers, e.g. 1-3, 7", 2500); boxes().forEach(x => { const [fid, pg] = x.dataset.xp.split(":"); if (fid === f.id && R.has(+pg)) x.checked = true; }); upd(); };
+  $("xRangeGo").onclick = goRange;
+  $("xRange").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); goRange(); } });
+  B.querySelectorAll("[data-xq]").forEach(b => b.onclick = () => { const q = b.dataset.xq; tickIf(k => q === "all" || (q === "tk" && tkSet.has(k))); upd(); });
+  upd();
+  const v = await p; if (!v) return;
+  pref("zdTakeoffExp", JSON.stringify({fmt: v.fmt, dpi: v.dpi, legend: v.legend, lsz: v.lsz, lq: v.lq, meas: v.meas, lbl: v.lbl, mk: v.mk, stamp: v.stamp, fade: v.fade}));
+  return runExport(v);
+}
+function parseRange(s, max){   // "1-3, 7" -> Set {1, 2, 3, 7} (within 1..max)
+  const o = new Set(); String(s || "").replace(/\s*[-–]\s*/g, "-").split(/[,;\s]+/).forEach(t => { const m = /^(\d+)(?:-(\d+))?$/.exec(t.trim()); if (!m) return; let a = +m[1], b = m[2] ? +m[2] : a; if (a > b) [a, b] = [b, a]; for (let i = Math.max(1, a); i <= Math.min(max, b); i++) o.add(i); }); return o; }
+function rangeText(a){ const o = []; for (let i = 0; i < a.length; i++) { let j = i; while (j + 1 < a.length && a[j + 1] === a[j] + 1) j++; o.push(j > i ? a[i] + "-" + a[j] : String(a[i])); i = j; } return o.join(","); }
+/* a progress card with Cancel: {set(i, n, what), sub(text), stop, done()} */
+function progress(title){
+  let el = $("xprog"); if (!el) { el = document.createElement("div"); el.id = "xprog"; el.setAttribute("role", "status"); document.body.appendChild(el); }
+  el.innerHTML = '<b></b><div class="xpb"><i></i></div><span class="small"></span><button class="btn sm" type="button">Stop</button>'; el.classList.add("on");
+  const o = {stop: false, set(i, n, t){ el.querySelector("b").textContent = title + " — " + Math.min(n, i + 1) + " of " + n; el.querySelector("i").style.width = Math.round(100 * i / Math.max(1, n)) + "%"; el.querySelector(".small").textContent = t || ""; },
+    sub(t){ el.querySelector(".small").textContent = t; }, done(){ el.classList.remove("on"); }};
+  el.querySelector("b").textContent = title; el.querySelector("button").onclick = () => { o.stop = true; el.querySelector(".small").textContent = "Stopping after this page…"; };
+  return o;
+}
+async function runExport(o){
+  const pdf = o.fmt === "pdf" || o.fmt === "pdfs", pr = progress(pdf ? "Building the PDF" : "Rendering the pages");
+  o.notes = [];
+  try {
+    if (pdf) await expPdf(o, pr); else await expImages(o, pr);
+    if (pr.stop) toast("Export stopped — nothing was saved", 3000);
+    else toast((o.keys.length === 1 ? "1 page" : o.keys.length + " pages") + " exported" + (o.notes.length ? " · " + o.notes.slice(0, 2).join(" · ") + (o.notes.length > 2 ? " · …" : "") : ""), o.notes.length ? 8000 : 3500);
+  } catch (e) { toast("Export failed: " + (e.message || e), 7000); }
+  pr.done();
+}
+/* the largest canvas this browser can really hold, up to w0 × h0 pt at sc0 px per pt (16 384 px a side, 80 MP) */
+function canvasFor(W, H){
+  const c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.width === W && c.height === H && c.getContext("2d");
+  try { if (x) { x.fillStyle = "#010203"; x.fillRect(W - 1, H - 1, 1, 1); const d = x.getImageData(W - 1, H - 1, 1, 1).data; if (d[0] === 1 && d[2] === 3) { x.clearRect(W - 1, H - 1, 1, 1); return c; } } } catch (e) {}
+  c.width = 0; return null;
+}
+function expCanvas(w0, h0, sc0){
+  let sc = Math.min(sc0, 16384 / Math.max(w0, h0), Math.sqrt(80e6 / (w0 * h0)));
+  for (let t = 0; t < 6; t++, sc *= 0.75) { const W = Math.max(1, Math.ceil(w0 * sc)), H = Math.max(1, Math.ceil(h0 * sc)), cv = canvasFor(W, H); if (cv) return {cv, sc, W, H}; }
+  throw new Error("this browser cannot hold a picture that large — choose a lower resolution");
+}
+function expNote(o, sc, key){ const d = Math.round(sc * 72); if (o.notes && d < o.dpi - 2) o.notes.push(keyName(key) + " at " + d + " DPI (the largest this browser allows)"); }
+const blobBuf = (cv, type, q) => new Promise((ok, bad) => cv.toBlob(b => b ? b.arrayBuffer().then(ok, bad) : bad(new Error("the browser could not encode the picture — choose a lower resolution")), type, q));
+function expName(key, n){ const [f, p] = key.split(":"), sh = (P.proj.sheets || {})[key] || {}, fl = P.proj.files.find(x => x.id === f);
+  return (String(n + 1).padStart(2, "0") + "_" + (sh.no ? sh.no + "_" : "") + (fl ? fl.name.replace(/\.pdf$/i, "") : "page") + "_p" + p).replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 120); }
+async function expPageImage(key, o){   // the page and its takeoff as one picture at o.dpi, on white: {cv, sc, W, H}
+  const [f, p0] = key.split(":"), p = +p0, pg = await (await doc(f)).getPage(p), base = pg.getViewport({scale: 1}), strip = o.legend === "margin" ? EXP_STRIP[o.lsz] || EXP_STRIP.m : 0;
+  const {cv, sc, W, H} = expCanvas(base.width + strip, base.height, o.dpi / 72); expNote(o, sc, key);
+  const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  await loadLayers(f);
+  await sliced(pg.render(Object.assign({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})}, strip ? {transform: [1, 0, 0, 1, strip * sc, 0]} : {}))).promise;
+  if (o.fade) { ctx.fillStyle = "rgba(255,255,255," + o.fade / 100 + ")"; ctx.fillRect(strip * sc, 0, W - strip * sc, H); }
+  await svgOnto(ctx, pageOverlaySvg(f, p, sc, W, H, Object.assign({}, o, {ox: strip * sc})));
+  return {cv, sc, W, H};
+}
+async function expPdf(o, pr){   // the drawing stays the original vector page; the takeoff goes on top as a transparent picture
+  const L = await loadPdfLib(), src = {}, per = o.fmt === "pdfs", files = [], strip = o.legend === "margin" ? EXP_STRIP[o.lsz] || EXP_STRIP.m : 0;
+  let out = per ? null : await L.PDFDocument.create();
+  for (const [n, key] of o.keys.entries()) {
+    if (pr.stop) return;
+    pr.set(n, o.keys.length, keyName(key));
+    const [f, p0] = key.split(":"), p = +p0, pg = await (await doc(f)).getPage(p), base = pg.getViewport({scale: 1});
+    if (per) out = await L.PDFDocument.create();
+    if (!src[f]) { const rec = await dbGet("pdfs", f); if (!rec) throw new Error("PDF missing — add “" + ((P.proj.files.find(x => x.id === f) || {}).name || f) + "” again with + PDF"); src[f] = await L.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); }
+    if (pg.rotate % 360 !== 0 || src[f].isEncrypted) {   // a turned or password-locked page: flattened to one picture
+      const im = await expPageImage(key, o), png = await out.embedPng(await blobBuf(im.cv, "image/png")); im.cv.width = 0;
+      out.addPage([base.width + strip, base.height]).drawImage(png, {x: 0, y: 0, width: base.width + strip, height: base.height});
+    } else {
+      const vb = pg.view, vw = vb[2] - vb[0], vh = vb[3] - vb[1], {cv, sc, W, H} = expCanvas(vw + strip, vh, o.dpi / 72); expNote(o, sc, key);
+      await svgOnto(cv.getContext("2d"), pageOverlaySvg(f, p, sc, W, H, Object.assign({}, o, {ox: strip * sc})));
+      const png = await out.embedPng(await blobBuf(cv, "image/png")); cv.width = 0;
+      let np, x0 = vb[0], y0 = vb[1];
+      if (!strip) { [np] = await out.copyPages(src[f], [p - 1]); out.addPage(np); }
+      else { const ep = await out.embedPage(src[f].getPage(p - 1), {left: vb[0], bottom: vb[1], right: vb[2], top: vb[3]}); np = out.addPage([vw + strip, vh]); np.drawPage(ep, {x: strip, y: 0, width: vw, height: vh}); x0 = 0; y0 = 0; }
+      if (o.fade) np.drawRectangle({x: x0 + strip, y: y0, width: vw, height: vh, color: L.rgb(1, 1, 1), opacity: o.fade / 100});
+      np.drawImage(png, {x: x0, y: y0, width: vw + strip, height: vh});
+    }
+    if (per) files.push({name: expName(key, n) + ".pdf", data: await out.save()});
+  }
+  pr.sub("Saving…");
+  if (!per) return saveBlob(new Blob([await out.save()], {type: "application/pdf"}), o.name + ".pdf");
+  if (files.length === 1) saveBlob(new Blob([files[0].data], {type: "application/pdf"}), o.name + "_" + files[0].name); else saveBlob(await zipBlob(files), o.name + ".zip");
+}
+async function expImages(o, pr){
+  const jpg = o.fmt === "jpg", type = jpg ? "image/jpeg" : "image/png", files = [];
+  for (const [n, key] of o.keys.entries()) {
+    if (pr.stop) return;
+    pr.set(n, o.keys.length, keyName(key));
+    const im = await expPageImage(key, o);
+    const b = await new Promise((ok, bad) => im.cv.toBlob(x => x ? ok(x) : bad(new Error("the browser could not encode " + keyName(key) + " — choose a lower resolution")), type, 0.92)); im.cv.width = 0;
+    files.push({name: expName(key, n) + (jpg ? ".jpg" : ".png"), blob: b});
+  }
+  pr.sub("Saving…");
+  if (files.length === 1) saveBlob(files[0].blob, o.name + "_" + files[0].name); else saveBlob(await zipBlob(files), o.name + ".zip");
+}
+/* .zip with the files stored as they are (PNG, JPEG and PDF are compressed already); UTF-8 names */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u){ let c = 0xFFFFFFFF; for (let i = 0; i < u.length; i++) c = CRC_T[(c ^ u[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+async function zipBlob(files){   // [{name, blob | data}] -> Blob
+  const enc = new TextEncoder(), parts = [], cen = [], d = new Date(), seen = new Set(); let off = 0;
+  const dt = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(), tm = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  for (const f of files) {
+    let name = f.name; for (let i = 2; seen.has(name); i++) name = f.name.replace(/(\.[^.]+)?$/, "_" + i + "$1"); seen.add(name);
+    const data = f.data ? new Uint8Array(f.data) : new Uint8Array(await f.blob.arrayBuffer()), nmb = enc.encode(name), crc = crc32(data);
+    const h = new DataView(new ArrayBuffer(30)); [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, tm, 2], [12, dt, 2], [14, crc, 4], [18, data.length, 4], [22, data.length, 4], [26, nmb.length, 2], [28, 0, 2]].forEach(([at, v, n]) => n === 4 ? h.setUint32(at, v, true) : h.setUint16(at, v, true));
+    parts.push(new Blob([h.buffer, nmb, data]));
+    const c = new DataView(new ArrayBuffer(46)); [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, 0, 2], [12, tm, 2], [14, dt, 2], [16, crc, 4], [20, data.length, 4], [24, data.length, 4], [28, nmb.length, 2], [30, 0, 2], [32, 0, 2], [34, 0, 2], [36, 0, 2], [38, 0, 4], [42, off, 4]].forEach(([at, v, n]) => n === 4 ? c.setUint32(at, v, true) : c.setUint16(at, v, true));
+    cen.push(c.buffer, nmb); off += 30 + nmb.length + data.length;
+  }
+  const cl = cen.reduce((a, b) => a + b.byteLength, 0), e = new DataView(new ArrayBuffer(22));
+  [[0, 0x06054b50, 4], [4, 0, 2], [6, 0, 2], [8, files.length, 2], [10, files.length, 2], [12, cl, 4], [16, off, 4], [20, 0, 2]].forEach(([at, v, n]) => n === 4 ? e.setUint32(at, v, true) : e.setUint16(at, v, true));
+  return new Blob([...parts, ...cen, e.buffer], {type: "application/zip"});
+}
+
+/* import: PDFs with a choice of pages (the rest left out — the ticked pages are copied into a new PDF in this browser),
+   a version set (Forma: name + issue date), a folder of PDFs, photos and scans (JPG / PNG) as pages at their scan DPI */
+const isPdfFile = f => /\.pdf$/i.test(f.name) || f.type === "application/pdf";
+const isImgFile = f => /^image\/(jpeg|png|webp|gif|bmp)$/i.test(f.type) || /\.(jpe?g|png|webp|gif|bmp)$/i.test(f.name);
+function importMenu(x, y){
+  ctxShow([{h: "Add drawings", s: "PDFs stay in this browser — nothing is uploaded"},
+    {t: "PDFs — every page", fn: () => $("fileIn").click()},
+    {t: "PDFs — choose pages, version set…", fn: () => $("impPdfIn").click()},
+    {t: "A folder of PDFs…", fn: () => $("dirIn").click()},
+    {t: "Photos / scans as pages (JPG, PNG)…", fn: () => $("imgIn").click()}, {sep: 1},
+    {t: "Read sheet info from the title blocks…", fn: () => autoSheetDialog(), dis: !P.proj || !P.proj.files.length},
+    {t: "Read scanned pages (OCR)…", fn: () => ocrDialog(), dis: !P.proj || !P.proj.files.length}], x, y);
+}
+async function importDialog(files){
+  if (!P.proj) return toast("Open or start a project first");
+  files = [...files]; const pdfs = files.filter(isPdfFile), imgs = files.filter(f => !isPdfFile(f) && isImgFile(f)), skip = files.length - pdfs.length - imgs.length;
+  if (!pdfs.length && !imgs.length) return toast(skip ? skip + " file" + (skip > 1 ? "s" : "") + " left out — only PDF, JPG and PNG drawings can be added" : "No file chosen", 4000);
+  if (pdfs.length > 12) {   // a big folder: every PDF opened at once to picture its pages is heavy — ask first
+    const how = await choose("Import " + pdfs.length + " PDFs", `<p><b>${pdfs.length}</b> PDFs${imgs.length ? " and " + imgs.length + " image" + (imgs.length > 1 ? "s" : "") : ""}. Add every page of each as it is, or open them all to choose their pages (slower with many large drawings)?</p>`, [{t: "Choose pages", v: "pick"}, {t: "Add every page", v: "all", pri: true}]);
+    if (!how) return;
+    if (how === "all") { await addFiles(pdfs); if (imgs.length) await importDialog(imgs); return; }
+  }
+  const lib = await loadPdfjs(), E = [];
+  for (const f of pdfs) { busy("Reading " + f.name + "…"); try { const data = await f.arrayBuffer(), {d, pw} = await openPdfData(lib, data, f.name); E.push({f, data, d, pw, n: d.numPages, on: new Set(Array.from({length: d.numPages}, (_, i) => i + 1))}); } catch (e) { toast(f.name + " could not be opened — " + (e.message || e), 5000); } }
+  busy("");
+  if (!E.length && !imgs.length) return;
+  const sets = [...new Set(P.proj.files.map(f => f.vset).filter(Boolean))], SHOW = 400;
+  const body = `<div id="imBody"><div class="wide"></div><div class="grid"><div class="fg"><label>Version set (optional)</label><input type="text" id="imSet" list="dlSets" placeholder="e.g. IFC Rev-03, Tender set"><datalist id="dlSets">${sets.map(s => `<option value="${esc(s)}">`).join("")}</datalist></div><div class="fg"><label>Issue date</label><input type="date" id="imDate"></div></div>
+    ${E.map((e, n) => `<div class="imf"><div class="imh"><b title="${esc(e.f.name)}">${esc(e.f.name)}</b><span class="small" id="imN${n}"></span><span style="flex:1"></span><textarea rows="1" data-imr="${n}" placeholder="Pages e.g. 1-3, 7" title="Type page numbers and press Enter: only those stay ticked"></textarea><textarea rows="1" data-imk="${n}" placeholder="Pages saying… e.g. PLAN" title="Ticks only the pages whose own text has one of these words (commas between words)"></textarea><button class="btn sm" type="button" data-imkgo="${n}">Find</button><button class="btn sm" type="button" data-ima="${n}">All</button><button class="btn sm" type="button" data-imz="${n}">None</button></div>
+      <div class="pgg imgg">${Array.from({length: Math.min(e.n, SHOW)}, (_, i) => `<label class="pgt sel" data-imp="${n}:${i + 1}"><input type="checkbox" class="pgck" data-imc="${n}:${i + 1}" checked><img data-imt="${n}:${i + 1}" alt=""><div class="pgl">p.${i + 1}</div></label>`).join("")}</div>${e.n > SHOW ? `<p class="small">Pages after ${SHOW} are not pictured — tick them with page numbers.</p>` : ""}</div>`).join("")}
+    ${imgs.length ? `<div class="imf"><div class="imh"><b>${imgs.length} photo / scan${imgs.length > 1 ? "s" : ""}</b><span class="small">${esc(imgs.slice(0, 4).map(f => f.name).join(", "))}${imgs.length > 4 ? ", …" : ""}</span></div>
+      <div class="grid"><div class="fg"><label>Scanned at</label><select id="imDpi"><option value="0">The DPI stored in the file (else 300)</option><option value="150">150 DPI</option><option value="200">200 DPI</option><option value="300">300 DPI</option><option value="400">400 DPI</option><option value="600">600 DPI</option></select></div>
+      <div class="fg"><label>&nbsp;</label><label class="pk"><input type="checkbox" id="imOne"${imgs.length > 1 ? " checked" : ""}> One PDF with every image as a page</label></div></div>
+      <p class="small">At the right DPI a scan comes in at its paper size, so a scale written on it (1:100) holds; a phone photo has no true scale — set it with <b>K</b> from a known length. Run <b>OCR</b> on them to read their text.</p></div>` : ""}
+    <label class="pk" style="margin-top:8px"><input type="checkbox" id="imAuto" checked> Read sheet numbers and titles from the title blocks afterwards (checked by you before they are saved)</label>
+    <p class="small">A PDF with every page ticked is added as it is; with pages left out, the ticked ones are copied into a new PDF in this browser — nothing is uploaded.</p></div>`;
+  const p = ask("Import drawings", body, "Import", () => ({set: $("imSet").value.trim().slice(0, 60), date: $("imDate").value, auto: $("imAuto").checked, dpi: $("imDpi") ? +$("imDpi").value : 0, one: $("imOne") ? $("imOne").checked : true}));
+  const B = $("imBody"), me = ask.cur;
+  const show = n => { const e = E[n]; B.querySelectorAll(`[data-imc^="${n}:"]`).forEach(x => { const i = +x.dataset.imc.split(":")[1]; x.checked = e.on.has(i); x.parentElement.classList.toggle("sel", x.checked); }); const t = $("imN" + n); if (t) t.textContent = e.on.size + " of " + e.n + " page" + (e.n > 1 ? "s" : "") + " ticked"; };
+  E.forEach((_, n) => show(n));
+  B.addEventListener("change", e => { const c = e.target.dataset.imc; if (!c) return; const [n, i] = c.split(":").map(Number); if (e.target.checked) E[n].on.add(i); else E[n].on.delete(i); show(n); });
+  B.addEventListener("click", async e => {
+    const b = e.target.closest("[data-ima],[data-imz],[data-imkgo]"); if (!b) return;
+    if (b.dataset.ima != null) { const n = +b.dataset.ima; E[n].on = new Set(Array.from({length: E[n].n}, (_, i) => i + 1)); return show(n); }
+    if (b.dataset.imz != null) { const n = +b.dataset.imz; E[n].on.clear(); return show(n); }
+    const n = +b.dataset.imkgo, words = B.querySelector(`[data-imk="${n}"]`).value.split(/[,;]+/).map(w => w.trim().toUpperCase()).filter(Boolean); if (!words.length) return toast("Type a word the pages should have, e.g. PLAN", 2500);
+    b.disabled = true; const on = new Set();
+    for (let i = 1; i <= E[n].n && ask.cur === me; i++) { b.textContent = i + "/" + E[n].n; try { const tc = await (await E[n].d.getPage(i)).getTextContent(), s = tc.items.map(t => t.str).join(" ").toUpperCase().replace(/\s+/g, " "); if (words.some(w => s.includes(w))) on.add(i); } catch (er) {} }
+    b.disabled = false; b.textContent = "Find"; if (ask.cur !== me) return;
+    if (!on.size) return toast("No page's own text has " + words.join(" / ") + (E[n].d ? " (a scanned PDF has no text — tick the pages by hand)" : ""), 4000);
+    E[n].on = on; show(n); });
+  B.addEventListener("keydown", e => { const r = e.target.dataset && e.target.dataset.imr, k = e.target.dataset && e.target.dataset.imk; if (e.key !== "Enter" || (r == null && k == null)) return; e.preventDefault();
+    if (k != null) return B.querySelector(`[data-imkgo="${k}"]`).click();
+    const n = +r, R = parseRange(e.target.value, E[n].n); if (!R.size) return toast("Type page numbers, e.g. 1-3, 7", 2500); E[n].on = R; show(n); });
+  const q = [], io = new IntersectionObserver(es => es.forEach(x => { if (x.isIntersecting) { io.unobserve(x.target); q.push(x.target); pump(); } }), {root: $("dlgB"), rootMargin: "120px"});
+  let busyT = false;
+  const pump = async () => { if (busyT) return; busyT = true;
+    while (q.length && ask.cur === me) { const im = q.shift(), [n, i] = im.dataset.imt.split(":").map(Number);
+      try { const pg = await E[n].d.getPage(i), v0 = pg.getViewport({scale: 1}), vp = pg.getViewport({scale: 130 / Math.max(v0.width, v0.height)}), cv = document.createElement("canvas"); cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+        const cx = cv.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height); await pg.render({canvasContext: cx, viewport: vp}).promise; im.src = cv.toDataURL("image/png"); } catch (er) {} }
+    busyT = false; };
+  B.querySelectorAll("img[data-imt]").forEach(im => io.observe(im));
+  const v = await p; io.disconnect();
+  if (!v) { E.forEach(e => { try { e.d.destroy(); } catch (x) {} }); return; }
+  const before = new Set(P.proj.files.map(f => f.id)), add = [];
+  for (const e of E) { if (!e.on.size) continue;
+    if (e.on.size === e.n) add.push(e.f);
+    else { busy("Copying the ticked pages of " + e.f.name + "…"); try { add.push(await subsetPdf(e)); } catch (er) { toast(e.f.name + ": the pages could not be copied (" + (er.message || er) + ") — every page is added", 6000); add.push(e.f); } } }
+  E.forEach(e => { try { e.d.destroy(); } catch (x) {} });
+  if (imgs.length) { try { add.push(...await imagesToPdf(imgs, v.dpi, v.one)); } catch (er) { toast("The images could not be added: " + (er.message || er), 6000); } }
+  busy("");
+  if (!add.length) return toast("Nothing ticked — nothing added");
+  await addFiles(add);
+  const added = P.proj.files.filter(f => !before.has(f.id));
+  if (added.length && (v.set || v.date)) { added.forEach(f => { if (v.set) f.vset = v.set; if (v.date) f.vdate = v.date; }); save(); }
+  refresh();
+  if (v.auto && added.length) await autoSheetDialog(added.flatMap(f => Array.from({length: f.pages}, (_, i) => keyOf(f.id, i + 1))));
+}
+async function subsetPdf(e){   // the ticked pages of a PDF as a new PDF: "Plans (p.1-3,7).pdf"
+  const L = await loadPdfLib(), src = await L.PDFDocument.load(e.data.slice(0), {ignoreEncryption: true});
+  if (src.isEncrypted) throw new Error("it is locked with a password");
+  const out = await L.PDFDocument.create(), idx = [...e.on].sort((a, b) => a - b);
+  (await out.copyPages(src, idx.map(i => i - 1))).forEach(pg => out.addPage(pg));
+  return new File([await out.save()], e.f.name.replace(/\.pdf$/i, "") + " (p." + rangeText(idx) + ").pdf", {type: "application/pdf"});
+}
+function imgDpi(buf){   // the DPI a JPEG (JFIF) or PNG (pHYs) says it was scanned at, or 0
+  const u = new Uint8Array(buf, 0, Math.min(buf.byteLength, 65536)), dv = new DataView(u.buffer, u.byteOffset, u.length);
+  if (u[0] === 0xFF && u[1] === 0xD8) { for (let i = 2; i + 18 < u.length;) { if (u[i] !== 0xFF) break; const m = u[i + 1], len = dv.getUint16(i + 2);
+      if (m === 0xE0 && String.fromCharCode(u[i + 4], u[i + 5], u[i + 6], u[i + 7]) === "JFIF") { const un = u[i + 11], x = dv.getUint16(i + 12); return un === 1 ? x : un === 2 ? Math.round(x * 2.54) : 0; }
+      if (m === 0xDA) break; i += 2 + len; } }
+  if (u[0] === 0x89 && u[1] === 0x50) { for (let i = 8; i + 12 < u.length;) { const len = dv.getUint32(i), t = String.fromCharCode(u[i + 4], u[i + 5], u[i + 6], u[i + 7]);
+      if (t === "pHYs" && i + 17 < u.length) return u[i + 16] === 1 ? Math.round(dv.getUint32(i + 8) * 0.0254) : 0;
+      if (t === "IDAT" || t === "IEND") break; i += 12 + len; } }
+  return 0;
+}
+async function imagesToPdf(imgs, dpi0, one){   // photos / scans -> PDFs, each image a page at its paper size (px × 72 / DPI)
+  const L = await loadPdfLib(), out = [], all = one ? await L.PDFDocument.create() : null;
+  imgs = imgs.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
+  for (const f of imgs) {
+    busy("Adding " + f.name + "…");
+    const buf = await f.arrayBuffer(), d0 = imgDpi(buf), dpi = dpi0 || (d0 >= 50 && d0 <= 2400 ? d0 : 300);
+    let bmp; try { bmp = await createImageBitmap(new Blob([buf], {type: f.type || "image/" + (/png$/i.test(f.name) ? "png" : "jpeg")}), {imageOrientation: "from-image"}); } catch (e) { bmp = await createImageBitmap(new Blob([buf], {type: f.type})); }
+    const doc1 = all || await L.PDFDocument.create(), png = /png$/i.test(f.type) || /\.png$/i.test(f.name);
+    let img = null;
+    if (png) { try { img = await doc1.embedPng(buf); } catch (e) { img = null; } }   // a PNG goes in as it is (lossless)
+    if (!img) { const cv = document.createElement("canvas"); cv.width = bmp.width; cv.height = bmp.height; const cx = cv.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(bmp, 0, 0);
+      img = png ? await doc1.embedPng(await blobBuf(cv, "image/png")) : await doc1.embedJpg(await blobBuf(cv, "image/jpeg", 0.95)); cv.width = 0; }   // a photo turned as the camera held it
+    const w = bmp.width * 72 / dpi, h = bmp.height * 72 / dpi; bmp.close && bmp.close();
+    doc1.addPage([w, h]).drawImage(img, {x: 0, y: 0, width: w, height: h});
+    if (!all) out.push(new File([await doc1.save()], f.name.replace(/\.[^.]+$/, "") + ".pdf", {type: "application/pdf"}));
+  }
+  if (all) out.push(new File([await all.save()], (imgs.length === 1 ? imgs[0].name.replace(/\.[^.]+$/, "") : "Scans " + today()) + ".pdf", {type: "application/pdf"}));
+  busy(""); return out;
+}
+
+/* sheet info from the title block (no., title, revision, floor, discipline): read from the page's own text (and OCR text
+   of a scan) — by the labels and the title block's place, or inside capture areas picked once on one page (a title block
+   template). Every value is shown for checking before it is saved; nothing is guessed. */
+const SHEET_NO_RX = /^[A-Z]{1,4}\s?[-–._]?\s?\d{1,4}(?:[._-]\d{1,3})?[A-Z]?$/i;
+const TB_NO = /\b(?:SHEET|DRG|DWG|DRAWING)\.?\s*(?:NO|NUMBER|NUM|#)\b\.?\s*:?/i, TB_TITLE = /\b(?:DRAWING|SHEET|DWG|DRG)\.?\s*(?:TITLE|NAME)\b\s*:?|^\s*TITLE\b\s*:?/i, TB_REV = /\bREV(?:ISION)?\b\.?\s*(?:NO\.?)?\s*[:#-]?\s*/i;
+const TITLE_RX = /\b(PLANS?|ELEVATIONS?|SECTIONS?|DETAILS?|LAYOUTS?|SCHEDULES?|ROOF|FOUNDATIONS?|FRAMING|SITE|REFLECTED|CEILING|STAIRS?|FLOOR|BASEMENT|PLINTH|SLAB|BEAMS?|COLUMNS?|FOOTINGS?|ELECTRICAL|PLUMBING|DRAINAGE|LIGHTING|POWER|HVAC|FINISH(?:ES|ING)?|DOORS?|WINDOWS?|TOILETS?|KITCHENS?|LANDSCAPE)\b/i;
+const FLOOR_RX = /\b((?:LOWER\s+|UPPER\s+)?GROUND\s+FLOOR|MEZZANINE(?:\s+FLOOR)?|BASEMENT(?:\s*[-–]?\s*\d{1,2})?(?:\s+FLOOR)?|(?:\d{1,2}\s*(?:ST|ND|RD|TH)|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|NINTH|TENTH|TYPICAL)\s+FLOOR|ROOF(?:\s*TOP)?|TERRACE|PENTHOUSE|LEVEL\s*[-–]?\s*\d{1,3})\b/i;
+const DISC = [[/^(A|AR|ARC|ARCH)$/, "Architectural"], [/^(S|ST|STR|STRUC)$/, "Structural"], [/^(E|EL|ELE|ELEC)$/, "Electrical"], [/^(M|ME|MEC|MECH|HVAC|H|AC)$/, "Mechanical"], [/^(P|PL|PH|PLB|PLUMB)$/, "Plumbing"],
+  [/^(C|CV|CIV|CE)$/, "Civil"], [/^(L|LA|LS|LND)$/, "Landscape"], [/^(I|ID|IN|INT)$/, "Interior"], [/^(F|FP|FF|FA|FS)$/, "Fire"], [/^(G|GN|GEN)$/, "General"]];
+function sheetGuess(T, sz, tpl){   // a page's text -> {no, title, rev, floor, disc}; tpl: capture areas as fractions of the page
+  const W = sz[0], H = sz[1], L = textLines(T || []).map(l => ({s: String(l.s).replace(/\s+/g, " ").trim(), x: l.x, y: l.y, w: l.w || 0, h: l.h || 6})).filter(l => l.s), out = {};
+  const clean = s => String(s || "").replace(/^[\s:.#\-–]+|[\s:.,;\-–]+$/g, "").replace(/\s+/g, " ").trim().slice(0, 80);
+  if (tpl) {
+    const inR = (l, r) => { const cx = (l.x + l.w / 2) / W, cy = (l.y - l.h / 2) / H; return cx >= r[0] && cx <= r[2] && cy >= r[1] && cy <= r[3]; };
+    const grab = r => L.filter(l => inR(l, r)).sort((a, b) => a.y - b.y || a.x - b.x).map(l => l.s).join(" ");
+    if (tpl.no) out.no = clean(grab(tpl.no).replace(TB_NO, "")); if (tpl.title) out.title = clean(grab(tpl.title).replace(TB_TITLE, ""));
+    if (tpl.rev) out.rev = clean(grab(tpl.rev).replace(TB_REV, "")); if (tpl.floor) out.floor = clean(grab(tpl.floor));
+  } else {
+    const tb = l => l.x + l.w / 2 > 0.6 * W || l.y > 0.78 * H;   // the title block: the right-hand strip or the bottom band
+    const after = (lab, rx, ok) => {   // the value written after a label: on its line, to its right, or under it
+      const rest = clean(lab.s.replace(rx, "")); if (rest && ok(rest)) return {s: rest, l: lab};
+      const r = L.filter(l => l !== lab && Math.abs(l.y - lab.y) < 0.7 * Math.max(l.h, lab.h) && l.x > lab.x + 0.5 * lab.w && l.x - (lab.x + lab.w) < 0.2 * W && ok(clean(l.s))).sort((a, b) => a.x - b.x)[0];
+      if (r) return {s: clean(r.s), l: r};
+      const b = L.filter(l => l !== lab && l.y > lab.y + 0.3 * lab.h && l.y - lab.y < Math.max(4 * lab.h, 0.05 * H) && l.x + l.w > lab.x - 2 * lab.h && l.x < lab.x + lab.w + 0.1 * W && ok(clean(l.s))).sort((a, c) => a.y - c.y || Math.abs(a.x - lab.x) - Math.abs(c.x - lab.x))[0];
+      return b ? {s: clean(b.s), l: b} : null;
+    };
+    const okNo = s => /\d/.test(s) && s.length <= 20 && /^[A-Z0-9][A-Z0-9 .\-–\/_]*$/i.test(s) && !TB_NO.test(s);
+    for (const lab of L.filter(l => TB_NO.test(l.s))) { const v = after(lab, TB_NO, okNo); if (v) { out.no = v.s; break; } }
+    if (!out.no) { const c = L.filter(l => tb(l) && SHEET_NO_RX.test(l.s) && !/^[DWVCBRP]\s?[-.]?\s?\d{1,2}$|^A[0-4]$/i.test(l.s)).sort((a, b) => b.h - a.h || (b.x + b.y) - (a.x + a.y))[0]; if (c) out.no = clean(c.s); }
+    const okT = s => /[A-Z]{3,}/i.test(s) && s.length <= 70 && !TB_NO.test(s) && !/\b(SCALE|DATE|DRAWN|CHECKED|APPROVED|CLIENT|CONSULTANT|ARCHITECT|PROJECT|SIGN|REV(ISION)?)\b/i.test(s);
+    let tl = null;
+    for (const lab of L.filter(l => TB_TITLE.test(l.s))) { const v = after(lab, TB_TITLE, okT); if (v) { tl = v; break; } }
+    if (!tl) { const c = L.filter(l => TITLE_RX.test(l.s) && okT(l.s)).sort((a, b) => (tb(b) ? 1 : 0) - (tb(a) ? 1 : 0) || b.h - a.h)[0]; if (c) tl = {s: clean(c.s), l: c}; }
+    if (tl) { let s = tl.s; const nx = L.find(l => l !== tl.l && l.y > tl.l.y && l.y - tl.l.y < 2.2 * tl.l.h && Math.abs(l.x - tl.l.x) < 2 * tl.l.h && Math.abs(l.h - tl.l.h) < 0.35 * tl.l.h && okT(l.s) && !TB_TITLE.test(l.s));
+      if (nx && (s + " " + nx.s).length <= 80) s += " " + clean(nx.s); out.title = s; }
+    const revs = [];
+    L.forEach(l => { if (!tb(l)) return; const m = /\bREV(?:ISION)?\b\.?\s*(?:NO\.?)?\s*[:#-]?\s*([A-Z]?\d{1,2}[A-Z]?|[A-Z])\b/i.exec(l.s); if (m) revs.push(m[1].toUpperCase()); });
+    if (!revs.length) { const lab = L.find(l => tb(l) && /^\s*REV(?:ISION)?\b\.?\s*(?:NO\.?)?\s*:?\s*$/i.test(l.s)), v = lab && after(lab, /^\s*REV(?:ISION)?\b\.?\s*(?:NO\.?)?\s*:?/i, s => /^[A-Z]?\d{0,2}[A-Z]?$/i.test(s) && s.length >= 1 && s.length <= 4); if (v) revs.push(v.s.toUpperCase()); }
+    if (revs.length) out.rev = revs.sort((a, b) => a.localeCompare(b, undefined, {numeric: true})).pop();   // the latest revision in the block
+  }
+  if (!out.floor && out.title) { const m = FLOOR_RX.exec(out.title); if (m) out.floor = m[1].replace(/\s+/g, " ").toLowerCase().replace(/^\w/, c => c.toUpperCase()); }
+  if (out.no) { const m = /^([A-Z]{1,5})/i.exec(out.no.replace(/\s+/g, "")), d = m && DISC.find(([rx]) => rx.test(m[1].toUpperCase())); if (d) out.disc = d[1]; }
+  Object.keys(out).forEach(k => { if (!out[k]) delete out[k]; });
+  return out;
+}
+async function autoSheetDialog(keys){
+  if (!P.proj || !P.proj.files.length) return toast("Add a PDF first");
+  keys = keys && keys.length ? keys : allPages().map(o => o.key);
+  const tpl = P.proj.tbTpl && Array.isArray(P.proj.tbTpl.size) ? P.proj.tbTpl : null, rows = [];
+  for (const [n, key] of keys.entries()) {
+    busy("Reading title blocks… " + (n + 1) + " of " + keys.length);
+    const [f, p] = key.split(":"); let T = [], sz = null;
+    try { T = await pageTexts(f, +p); sz = await pageSize(f, +p); } catch (e) {}
+    const cur = (P.proj.sheets || {})[key] || {};
+    if (!sz) { rows.push({key, cur, g: {}, err: "PDF not attached"}); continue; }
+    const fit = tpl && Math.abs(sz[0] / sz[1] - tpl.size[0] / tpl.size[1]) < 0.03;   // the template's capture areas fit pages of the same paper shape
+    let g = sheetGuess(T, sz, fit ? tpl : null); if (fit && !g.no && !g.title) g = sheetGuess(T, sz, null);
+    rows.push({key, cur, g, scan: !T.some(t => !t.ocr)});
+  }
+  busy("");
+  const FL = [["no", "Sheet no.", 84], ["title", "Title", 210], ["rev", "Rev", 46], ["floor", "Floor", 96], ["disc", "Discipline", 96]];
+  const found = rows.filter(r => FL.some(([k]) => r.g[k])).length, scans = rows.filter(r => r.scan && !r.err && !((P.proj.ocr || {})[r.key])).length;
+  const body = `<div class="wide"></div><p><b>${found}</b> of ${rows.length} page${rows.length > 1 ? "s" : ""}: sheet information read from the drawing's own text${tpl ? " — inside the capture areas picked on " + esc(keyName(tpl.from)) : " — the title block found by its labels and its place"}. Values read are <span class="gs">highlighted</span>: check them, correct them, untick a page to leave it as it is.</p>
+    ${scans ? `<p class="small" style="color:#8a5a00;margin-top:4px">${scans} page${scans > 1 ? "s have" : " has"} no text layer (scanned) — run <b>OCR</b> first, then read again.</p>` : ""}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0"><button class="btn sm" type="button" id="asTpl" title="Drag a box round the sheet no. and round the title in this page's title block; pages of the same paper size are then read there (a title block template)">&#9634; Pick title-block areas on this page…</button>${tpl ? '<button class="btn sm" type="button" id="asTplX">Forget the areas</button>' : ""}<button class="btn sm" type="button" id="asAll" title="Put what was read into every field, over what is there now">Use what was read everywhere</button></div>
+    <div style="max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:6px"><table class="sti"><thead><tr><th><input type="checkbox" id="asCk" checked title="Tick / untick all"></th><th>Page</th>${FL.map(([, t]) => `<th>${t}</th>`).join("")}</tr></thead><tbody>${rows.map((r, n) => `<tr data-as="${n}"><td><input type="checkbox" data-asck="${n}"${!r.err && FL.some(([k]) => r.g[k] || r.cur[k]) ? " checked" : ""}${r.err ? " disabled" : ""}></td><td class="small">${esc(keyName(r.key))}${r.err ? " — " + esc(r.err) : ""}</td>${FL.map(([k, , w]) => { const v = r.cur[k] || r.g[k] || "", gs = !r.cur[k] && r.g[k];
+      return `<td><input type="text" data-asf="${k}" value="${esc(v)}" style="width:${w}px"${gs ? ' class="gs"' : ""}${r.g[k] && r.cur[k] && r.g[k] !== r.cur[k] ? ` title="Read on the drawing: ${esc(r.g[k])}"` : ""}></td>`; }).join("")}</tr>`).join("")}</tbody></table></div>
+    <p class="small" style="margin-top:6px">The discipline comes from the sheet no.'s letters (A architectural, S structural, E electrical, P plumbing, M mechanical…); the floor from the title. A field the drawing does not show stays blank.</p>`;
+  let next = "";
+  const p = ask("Sheet info from the title blocks", body, "Save sheet info", () => { const out = []; document.querySelectorAll("#dlgB tr[data-as]").forEach(tr => { const r = rows[+tr.dataset.as]; if (!tr.querySelector("[data-asck]").checked) return; const v = {}; tr.querySelectorAll("[data-asf]").forEach(i => { v[i.dataset.asf] = i.value.trim().slice(0, 120); }); out.push({key: r.key, v}); }); return out.length ? {out} : "Tick at least one page"; });
+  $("asCk").onchange = e => document.querySelectorAll("#dlgB [data-asck]:not(:disabled)").forEach(x => { x.checked = e.target.checked; });
+  $("asAll").onclick = () => document.querySelectorAll("#dlgB tr[data-as]").forEach(tr => { const r = rows[+tr.dataset.as]; tr.querySelectorAll("[data-asf]").forEach(i => { const g = r.g[i.dataset.asf]; if (g) { i.value = g; i.classList.add("gs"); } }); });
+  $("asTpl").onclick = () => { next = "tpl"; $("dlgCancel").click(); };
+  if ($("asTplX")) $("asTplX").onclick = () => { delete P.proj.tbTpl; save(); next = "again"; $("dlgCancel").click(); };
+  document.querySelectorAll("#dlgB [data-asf]").forEach(i => i.addEventListener("input", () => i.classList.remove("gs")));
+  const v = await p;
+  if (next === "tpl") { if (await pickTitleBlock()) toast("Capture areas kept — reading the pages again", 2500); return autoSheetDialog(keys); }
+  if (next === "again") return autoSheetDialog(keys);
+  if (!v) return;
+  mutate(() => { P.proj.sheets = P.proj.sheets || {}; v.out.forEach(({key, v: w}) => { const cur = Object.assign({}, P.proj.sheets[key] || {}); FL.forEach(([k]) => { if (w[k]) cur[k] = w[k]; else delete cur[k]; }); P.proj.sheets[key] = cur; }); }, "Sheet info of " + v.out.length + " page" + (v.out.length > 1 ? "s" : ""));
+  buildPageSel(); refresh();
+  toast("Sheet info saved for " + v.out.length + " page" + (v.out.length > 1 ? "s" : "") + " — shown in Pages, the page list and the exports", 3500);
+}
+async function pickTitleBlock(){   // capture areas dragged on this page: sheet no., title (revision, floor if wanted)
+  if (!S.page) { toast("Open a page with a title block first", 3000); return null; }
+  const tpl = {}, F = [["no", "the sheet no."], ["title", "the drawing title"], ["rev", "the revision (Esc to skip)"], ["floor", "the floor (Esc to skip)"]];
+  for (const [k, t] of F) { const r = await dragBox("Drag a box round " + t + " in the title block — zoom with the wheel"); if (!r) { if (k === "no" && !Object.keys(tpl).length) return null; continue; }
+    tpl[k] = [r[0] / S.base.width, r[1] / S.base.height, r[2] / S.base.width, r[3] / S.base.height]; }
+  if (!tpl.no && !tpl.title) return null;
+  P.proj.tbTpl = Object.assign(tpl, {size: [S.base.width, S.base.height], from: S.key, at: new Date().toISOString()}); save();
+  return P.proj.tbTpl;
+}
+function dragBox(msg){   // one box dragged on the drawing -> [x0, y0, x1, y1] in page points, or null (Esc); the wheel still zooms, right-drag pans
+  return new Promise(res => {
+    const ov = document.createElement("div"), bx = document.createElement("div"), tip = document.createElement("div");
+    ov.className = "tbpick"; bx.className = "tbbox"; tip.className = "tbtip"; tip.textContent = msg + " · Esc to skip"; ov.append(bx, tip); stage().appendChild(ov);
+    let a = null;
+    const done = v => { ov.remove(); document.removeEventListener("keydown", key, true); res(v); };
+    const key = e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(null); } };
+    document.addEventListener("keydown", key, true);
+    ov.addEventListener("pointerdown", e => { if (e.button !== 0 || S.space) return; e.preventDefault(); e.stopPropagation(); ov.setPointerCapture(e.pointerId); a = evPos(e); });
+    ov.addEventListener("pointermove", e => { if (!a) return; e.stopPropagation(); const b = evPos(e); Object.assign(bx.style, {display: "block", left: Math.min(a[0], b[0]) + "px", top: Math.min(a[1], b[1]) + "px", width: Math.abs(b[0] - a[0]) + "px", height: Math.abs(b[1] - a[1]) + "px"}); });
+    ov.addEventListener("pointerup", e => { if (!a) return; e.stopPropagation(); const b = evPos(e), a0 = a; a = null;
+      if (Math.abs(b[0] - a0[0]) < 4 || Math.abs(b[1] - a0[1]) < 4) { bx.style.display = "none"; return; }
+      const p = toBase(Math.min(a0[0], b[0]), Math.min(a0[1], b[1])), q = toBase(Math.max(a0[0], b[0]), Math.max(a0[1], b[1])); done([p[0], p[1], q[0], q[1]]); });
+  });
+}
+
+/* OCR of scanned pages: Tesseract (free, runs in this browser; the engine and its English data come from the jsDelivr
+   CDN once and are kept by the browser). The page is read in overlapping tiles at 150–300 DPI; the words found are kept
+   with the project (P.proj.ocr) and used like a PDF's own text — Find, the agents, scale notes, tags, sheet info. */
+const TESS = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+function loadTess(){ return window.Tesseract ? Promise.resolve(window.Tesseract) : new Promise((ok, bad) => { const s2 = document.createElement("script"); s2.src = TESS; s2.onload = () => ok(window.Tesseract); s2.onerror = () => bad(new Error("the OCR engine could not be loaded (offline?)")); document.head.appendChild(s2); }); }
+function ocrItems(key){ const o = P.proj && P.proj.ocr && P.proj.ocr[key]; return o && Array.isArray(o.items) ? o.items.filter(a => Array.isArray(a) && a.length >= 5 && [1, 2, 3, 4].every(i => isFinite(+a[i]))).map(a => ({s: normQ(String(a[0])), x: +a[1], y: +a[2], w: +a[3], h: +a[4], ocr: 1})) : []; }
+function withOcr(key, T){   // a page's text with its OCR words added (those not on top of a word the PDF has already)
+  const O = ocrItems(key); if (!O.length) return T;
+  const on = (a, b) => Math.abs(a.y - b.y) < 0.6 * Math.max(a.h, b.h) && a.x < b.x + b.w + 2 && b.x < a.x + a.w + 2;
+  return T.concat(O.filter(o => !T.some(t => on(t, o))));
+}
+async function ocrDialog(keys){
+  if (!P.proj || !P.proj.files.length) return toast("Add a PDF first");
+  keys = keys && keys.length ? keys : null;
+  const v = await ask("Read scanned pages (OCR)", `<p>Reads the words on scanned or photographed drawings with OCR running in this browser (Tesseract — free, nothing is uploaded; the first run downloads the engine, about 15 MB, kept for next time). The words are then used like a PDF's own text: <b>Find</b> (Ctrl+F), room names and sizes for the agents, scale notes, door / window tags and sheet info.</p>
+    <div class="grid" style="margin-top:8px"><div class="fg"><label>Pages</label><select id="ocP">${keys ? `<option value="keys">The ${keys.length} page${keys.length > 1 ? "s" : ""} chosen</option>` : ""}${S.page ? '<option value="page">This page</option>' : ""}<option value="scan">Pages with no text layer (scans)</option><option value="pdf">Every page of this PDF</option><option value="all">Every page of the project</option></select></div>
+    <div class="fg"><label>Detail</label><select id="ocD"><option value="200">Normal — 200 DPI</option><option value="300">Fine print — 300 DPI (slower)</option><option value="150">Fast — 150 DPI</option></select></div></div>
+    <label class="pk" style="margin-top:6px"><input type="checkbox" id="ocRe"> Read again pages that were read before</label>
+    <p class="small" style="margin-top:6px">OCR reads level text best: vertical labels and handwriting may be missed, and a misread is possible — check what the agents find. A page with a PDF text layer gains only the words missing from it. About 20–60 s a page.</p>`, "Read the text", () => ({p: $("ocP").value, dpi: +$("ocD").value, re: $("ocRe").checked}));
+  if (!v) return;
+  let L = v.p === "keys" ? keys : v.p === "page" ? [S.key] : v.p === "pdf" ? allPages().filter(o => o.f.id === S.fileId).map(o => o.key) : allPages().map(o => o.key);
+  if (v.p === "scan") { const o = []; for (const [n, x] of allPages().entries()) { busy("Finding pages with no text… " + (n + 1)); const T = await pageTexts(x.f.id, x.i); if (T.filter(t => !t.ocr).length < 3) o.push(x.key); } busy(""); L = o; if (!L.length) return toast("Every page has a text layer — no OCR needed", 4000); }
+  if (!v.re) { const n0 = L.length; L = L.filter(k => !(P.proj.ocr && P.proj.ocr[k])); if (!L.length) return toast(n0 > 1 ? "Those pages were read before — tick “Read again”" : "This page was read before — tick “Read again”", 4000); }
+  return ocrPages(L, {dpi: v.dpi});
+}
+async function ocrPages(keys, o){
+  const pr = progress("Reading text (OCR)"); let worker = null, words = 0, done = 0;
+  try {
+    pr.sub("Loading the OCR engine…");
+    const Tz = await loadTess();
+    worker = await Tz.createWorker("eng", 1, {logger: m => { if (m && m.status && /load|init/i.test(m.status)) pr.sub(m.status + (m.progress ? " " + Math.round(m.progress * 100) + " %" : "")); }});
+    await worker.setParameters({tessedit_pageseg_mode: "11", preserve_interword_spaces: "1", user_defined_dpi: String(o.dpi)});
+    for (const [n, key] of keys.entries()) {
+      if (pr.stop) break;
+      pr.set(n, keys.length, keyName(key));
+      const items = await ocrPage(worker, key, o, pr); if (pr.stop) break;
+      P.proj.ocr = P.proj.ocr || {}; P.proj.ocr[key] = {at: new Date().toISOString(), dpi: o.dpi, n: items.length, items}; words += items.length; done++;
+      delete S.texts[key]; if (key === S.key) await indexPage();   // this page: its text again (and a scale note now readable)
+      save();
+    }
+  } catch (e) { toast("OCR failed: " + (e.message || e), 7000); }
+  finally { if (worker) { try { await worker.terminate(); } catch (e) {} } pr.done(); }
+  if (done) { refresh(); toast("OCR: " + words + " text item" + (words === 1 ? "" : "s") + " read on " + done + " page" + (done > 1 ? "s" : "") + " — Find, the agents and sheet info use them now", 5000); }
+  return {pages: done, words};
+}
+async function ocrPage(worker, key, o, pr){   // one page -> [[text, x, y (baseline), w, h], …] in page points
+  const [f, p] = key.split(":"), pg = await (await doc(f)).getPage(+p), base = pg.getViewport({scale: 1});
+  const sc = Math.min(o.dpi / 72, 9000 / Math.max(base.width, base.height)), W = Math.ceil(base.width * sc), H = Math.ceil(base.height * sc), cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  await loadLayers(f); await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})})).promise;
+  const TS = 2400, OV = 200, nx = Math.max(1, Math.ceil((W - OV) / (TS - OV))), ny = Math.max(1, Math.ceil((H - OV) / (TS - OV))), out = [];
+  for (let ty = 0; ty < ny; ty++) for (let tx = 0; tx < nx; tx++) {
+    if (pr && pr.stop) { cv.width = 0; return out; }
+    const x0 = Math.max(0, Math.min(tx * (TS - OV), W - TS)), y0 = Math.max(0, Math.min(ty * (TS - OV), H - TS)), w = Math.min(TS, W - x0), h = Math.min(TS, H - y0);
+    const cx0 = tx ? x0 + OV / 2 : 0, cy0 = ty ? y0 + OV / 2 : 0, cx1 = tx < nx - 1 ? x0 + w - OV / 2 : W, cy1 = ty < ny - 1 ? y0 + h - OV / 2 : H;   // the part this tile answers for
+    const t = document.createElement("canvas"); t.width = w; t.height = h; t.getContext("2d").drawImage(cv, x0, y0, w, h, 0, 0, w, h);
+    if (pr) pr.sub(keyName(key) + " — part " + (ty * nx + tx + 1) + " of " + nx * ny);
+    const r = await worker.recognize(t, {}, {blocks: true, text: false}); t.width = 0;
+    ocrLines(r && r.data || {}).forEach(line => { let cur = null;
+      line.forEach(wd => { const b = wd.bbox || {}, mx = x0 + (b.x0 + b.x1) / 2, my = y0 + (b.y0 + b.y1) / 2, s = String(wd.text || "").trim(), cf = +wd.confidence || 0;
+        if (!(mx >= cx0 && mx < cx1 && my >= cy0 && my < cy1)) { cur = null; return; }   // the neighbouring tile reads this word
+        const an = (s.match(/[A-Za-z0-9]/g) || []).length;
+        if (!s || cf < 55 || !an || an < s.length / 2 || (s.length === 1 && cf < 80)) { cur = null; return; }   // hatch and line noise
+        const X0 = (x0 + b.x0) / sc, X1 = (x0 + b.x1) / sc, Y1 = (y0 + b.y1) / sc, hh = (b.y1 - b.y0) / sc;
+        if (cur && X0 - cur.x1 < 1.2 * Math.max(hh, cur.h)) { cur.s += " " + s; cur.x1 = X1; cur.y = Math.max(cur.y, Y1); cur.h = Math.max(cur.h, hh); }
+        else { cur = {s, x: X0, x1: X1, y: Y1, h: hh}; out.push(cur); } }); });
+  }
+  cv.width = 0;
+  return out.map(c => [normQ(c.s).slice(0, 200), +c.x.toFixed(1), +c.y.toFixed(1), +(c.x1 - c.x).toFixed(1), +c.h.toFixed(1)]);
+}
+function ocrLines(d){   // tesseract.js result -> lines of words, from whichever shape the version returns
+  const L = []; (d.blocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l => L.push(l.words || []))));
+  if (!L.length && Array.isArray(d.lines)) d.lines.forEach(l => L.push(l.words || []));
+  if (!L.length && Array.isArray(d.words)) L.push(d.words);
+  return L;
+}
+
+/* sheet links (Forma automatic hyperlinks): a sheet no. written on the drawing ("A-301", "3/A-301") opens that sheet —
+   double-click it, or right-click → Open sheet */
+const sheetNorm = s => String(s || "").toUpperCase().replace(/[\s._\-–—]+/g, "");
+function sheetIndex(){ const m = new Map(); Object.entries((P.proj && P.proj.sheets) || {}).forEach(([k, sh]) => { const n = sh && sheetNorm(sh.no); if (n && n.length >= 2 && /\d/.test(n) && /[A-Z]/.test(n) && !m.has(n)) m.set(n, k); }); return m; }   // (a letter and a figure: "01" alone is any dimension)
+function sheetRefsNear(q, r){   // sheet references written on this page ([{k, no, t}]); q: only those within r points of q
+  const idx = sheetIndex(); if (!idx.size || !S.page) return [];
+  const out = [], seen = new Set();
+  (S.texts[S.key] || []).forEach(t => { if (q && !(q[0] >= t.x - r && q[0] <= t.x + (t.w || 0) + r && q[1] >= t.y - (t.h || 6) - r && q[1] <= t.y + r)) return;
+    String(t.s).split(/[\s\/(),;:]+/).forEach(w => { const k = idx.get(sheetNorm(w)); if (k && k !== S.key && !seen.has(k + "|" + (q ? "" : w))) { seen.add(k + "|" + (q ? "" : w)); out.push({k, no: w, t}); } }); });
+  return out;
+}
+function gotoKey(k){ const i = String(k).lastIndexOf(":"); if (i > 0) return gotoPage(k.slice(0, i), +k.slice(i + 1)); }
+function sheetLinkItems(q){   // the right-click menu's sheet links
+  const near = sheetRefsNear(q, 14 / S.view.s), all = sheetRefsNear(null), name = k => { const sh = (P.proj.sheets || {})[k] || {}; return (sh.no || keyName(k)) + (sh.title ? " — " + sh.title : ""); }, L = [];
+  const uniq = A => A.filter((x, i) => A.findIndex(y => y.k === x.k) === i);
+  uniq(near).slice(0, 3).forEach(x => L.push({t: "Open sheet " + name(x.k), k: "Dbl-click", fn: () => gotoKey(x.k)}));
+  const A = uniq(all); if (A.length) L.push({t: "Sheets referenced on this page (" + A.length + ")", sub: A.slice(0, 40).map(x => ({t: name(x.k), fn: () => gotoKey(x.k)}))});
+  return L.length ? L.concat([{sep: 1}]) : [];
+}
+
+/* cut-out (Forma Takeoff 2D "Cutout"): an area drawn over another area is taken out of it as a deduction in that area's
+   condition — only the overlapping part, the area itself stays */
+const isConvex = P0 => { let sg = 0; for (let i = 0; i < P0.length; i++) { const a = P0[i], b = P0[(i + 1) % P0.length], c = P0[(i + 2) % P0.length], z = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]); if (Math.abs(z) < 1e-9) continue; if (sg && Math.sign(z) !== sg) return false; sg = Math.sign(z); } return true; };
+const polySigned = P0 => { let s = 0; for (let i = 0, j = P0.length - 1; i < P0.length; j = i++) s += P0[j][0] * P0[i][1] - P0[i][0] * P0[j][1]; return s / 2; };
+function clipPoly(subj, clip){   // Sutherland–Hodgman: subj (any outline) clipped by a convex outline
+  const n = clip.length, ccw = polySigned(clip) > 0; let out = subj.slice();
+  const cut = (p, q, a, b) => { const r = [q[0] - p[0], q[1] - p[1]], s = [b[0] - a[0], b[1] - a[1]], den = r[0] * s[1] - r[1] * s[0]; if (Math.abs(den) < 1e-12) return null; const t = ((a[0] - p[0]) * s[1] - (a[1] - p[1]) * s[0]) / den; return [p[0] + t * r[0], p[1] + t * r[1]]; };
+  for (let i = 0; i < n && out.length; i++) {
+    const a = clip[i], b = clip[(i + 1) % n], inside = p => { const z = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]); return ccw ? z >= -1e-9 : z <= 1e-9; }, inp = out; out = [];
+    for (let j = 0; j < inp.length; j++) { const p = inp[j], q = inp[(j + 1) % inp.length], pi = inside(p), qi = inside(q); if (pi) out.push(p); if (pi !== qi) { const x = cut(p, q, a, b); if (x) out.push(x); } }
+  }
+  return out;
+}
+function overlapPoly(A, B){   // the part of outline A inside outline B, or null (needs one of them convex, or A wholly inside B)
+  let X = isConvex(A) ? clipPoly(B, A) : isConvex(B) ? clipPoly(A, B) : A.every(p => pointInPoly(p, B)) ? A.slice() : null;
+  if (!X || X.length < 3) return null; X = cleanPoly(X); return X.length >= 3 && polyArea(X) > 1e-3 * Math.min(polyArea(A), polyArea(B)) ? X : null;
+}
+function cutTargets(it){ const A = itemPoly(it); return P.proj.items.filter(o => o !== it && onPage(o) && !hiddenItem(o) && o.kind === "shape" && (cond(o.cond) || {}).type === "area" && overlapPoly(A, itemPoly(o))); }
+function cutOutOf(it, T){
+  const A = itemPoly(it), adds = [], c0 = cond(it.cond);
+  (T || cutTargets(it)).forEach(o => { const X = overlapPoly(A, itemPoly(o)); if (!X) return;
+    const whole = Math.abs(polyArea(X) - polyArea(A)) < 0.005 * polyArea(A);
+    adds.push(Object.assign({id: uid("I"), cond: o.cond, file: o.file, page: o.page, kind: "ded", nos: 1, label: "Cut-out: " + (it.label || (c0 ? c0.name : "area"))}, whole ? (it.shape === "circle" ? {pts: it.pts.map(p => p.slice()), shape: "circle"} : {pts: it.pts.map(p => p.slice())}) : {pts: X})); });
+  if (!adds.length) return toast("Nothing to cut: this area overlaps no other area (or both outlines are irregular — draw the cut-out with Deduct, D)", 5000);
+  mutate(() => { P.proj.items.push(...adds); }, "Cut out of " + adds.length + " area" + (adds.length > 1 ? "s" : ""));
+  toast("Cut out of " + adds.map(a => (cond(a.cond) || {}).name).filter((x, i, A2) => A2.indexOf(x) === i).join(", ") + " as a deduction" + (adds.length > 1 ? "s" : "") + " — the area itself stays", 3500);
+}
+
+/* workspace: layouts, icon-only toolbar, minimap, full screen (kept per browser) */
+function wsPref(){ let o = null; try { o = JSON.parse(pref("zdTakeoffWs") || "null"); } catch (e) { o = null; } return Object.assign({tb: "full", mini: false}, o && typeof o === "object" ? o : {}); }
+function wsSet(ch){ const o = Object.assign(wsPref(), ch); pref("zdTakeoffWs", JSON.stringify(o)); wsApply(o); }
+function wsApply(o){ o = o || wsPref(); document.body.classList.toggle("tbicons", o.tb === "icons"); const b = $("bMini"); if (b) b.classList.toggle("on", !!o.mini); miniUpdate(); }
+function wsLayout(l){
+  if (l === "focus") { S.lHide = true; S.rHide = true; } else { S.lHide = false; S.rHide = l === "pages"; }
+  setPanels();
+  const tab = l === "pages" || l === "check" ? "tPages" : "tCond"; if ($(tab)) $(tab).click();
+  if (l === "check" && $("vSheet")) $("vSheet").click();
+  toast("Workspace: " + {takeoff: "takeoff", focus: "drawing only", pages: "pages + drawing", check: "pages + measurement sheet"}[l], 1500);
+}
+function wsMenu(x, y){
+  const W = wsPref(), sz = S.pgSz || "m";
+  ctxShow([{h: "Workspace", s: "layout, toolbar and navigation — kept in this browser"},
+    {t: "Takeoff — conditions · drawing · sheet", fn: () => wsLayout("takeoff")}, {t: "Drawing only", fn: () => wsLayout("focus")},
+    {t: "Pages + drawing", fn: () => wsLayout("pages")}, {t: "Check — pages + measurement sheet", fn: () => wsLayout("check")}, {sep: 1},
+    {t: "Toolbar: icons only", on: W.tb === "icons", fn: () => wsSet({tb: W.tb === "icons" ? "full" : "icons"})},
+    {t: "Minimap", on: !!W.mini, fn: () => wsSet({mini: !W.mini})},
+    {t: "Full screen", on: !!document.fullscreenElement, fn: fullScreen},
+    {t: "Page thumbnails", sub: [["s", "Small"], ["m", "Medium"], ["l", "Large"]].map(([z, t]) => ({t, on: sz === z, fn: () => { S.pgSz = z; pref("zdTakeoffPgSz", z); renderPages(); }}))}, {sep: 1},
+    {t: "Reset panel sizes", fn: () => { S.lw = 250; S.rw = 420; S.lHide = false; S.rHide = false; setPanels(); }},
+    {t: "All commands…", k: "Ctrl+K", fn: openPalette}], x, y);
+}
+function fullScreen(){ const d = document, el = d.documentElement; if (d.fullscreenElement) { d.exitFullscreen().catch(() => {}); return; } if (!el.requestFullscreen) return toast("Full screen is not available here — press F11", 3000); el.requestFullscreen().catch(() => toast("Full screen is not available here — press F11", 3000)); }
+function iconize(){   // each toolbar button's words in their own span, so "icons only" can hide them (the palette still reads them)
+  document.querySelectorAll("#tools .tool, header > button.btn").forEach(b => { const n = b.firstChild; if (!n || n.nodeType !== 3 || b.querySelector(".tl")) return;
+    const m = /^\s*(\S+)\s+([\s\S]+)$/.exec(n.textContent); if (!m || !/[^\x00-\x7F]/.test(m[1])) return;
+    const sp = document.createElement("span"); sp.className = "tl"; n.textContent = m[1] + " "; sp.textContent = m[2]; b.insertBefore(sp, n.nextSibling); while (sp.nextSibling) sp.appendChild(sp.nextSibling); });
+}
+/* minimap (Forma): the page small, the part on screen framed; click or drag it to move there */
+function miniUpdate(){
+  const m = $("mini"); if (!m) return;
+  if (!(wsPref().mini && S.page && S.base)) { m.style.display = "none"; return; }
+  const th = (S.thumbs || {})[S.key], im = $("miniImg");
+  if (!th) { thumbWant(S.key); m.style.display = "none"; return; }
+  if (th === "x") { m.style.display = "none"; return; }
+  if (im.getAttribute("src") !== th) im.src = th;
+  const st = stage(), a = toBase(0, 0), b = toBase(st.clientWidth, st.clientHeight), W = S.base.width, H = S.base.height;
+  if (a[0] <= 1 && a[1] <= 1 && b[0] >= W - 1 && b[1] >= H - 1) { m.style.display = "none"; return; }   // the whole page is on screen
+  const mw = W >= H ? 190 : 130, k = mw / W; im.style.width = mw + "px"; im.style.height = Math.round(H * k) + "px"; m.style.display = "block";
+  const x0 = Math.max(0, a[0]) * k, y0 = Math.max(0, a[1]) * k, x1 = Math.min(W, b[0]) * k, y1 = Math.min(H, b[1]) * k;
+  Object.assign($("miniVp").style, {left: x0 + "px", top: y0 + "px", width: Math.max(3, x1 - x0) + "px", height: Math.max(3, y1 - y0) + "px"});
+}
+function miniGo(e){ const r = $("miniImg").getBoundingClientRect(), k = S.base.width / r.width, x = (e.clientX - r.left) * k, y = (e.clientY - r.top) * k, st = stage();
+  S.view.tx = st.clientWidth / 2 - x * S.view.s; S.view.ty = st.clientHeight / 2 - y * S.view.s; applyView(); renderHi(); }
+
+/* takeoff report (Forma "Reports": a printable inventory report with a cover) — opens in a new tab to print or save as PDF */
+function reportPrint(){
+  if (!P.proj) return;
+  const V = validation(), q = qaCounts(), BL = billLines(), tot = BL.reduce((a, l) => a + l.qty * (l.rate || 0), 0), w = window.open("", "_blank");
+  if (!w) return toast("The browser blocked the new tab — allow pop-ups for this page, then try again", 5000);
+  const row = c => { const t = condTotals(c), n = P.proj.items.filter(i => i.cond === c.id).length; return n ? `<tr><td><span class="sw" style="background:${c.color}"></span>${c.boq ? esc(c.boq) + " · " : ""}${esc(c.name)}</td><td class="n">${n}</td><td class="n">${fq(t.gross, c.unit)}</td><td class="n">${t.ded ? "−" + fq(t.ded, c.unit) : ""}</td><td class="n"><b>${fq(t.net, c.unit)}</b></td><td>${esc(c.unit)}</td></tr>` : ""; };
+  const pages = allPages().filter(o => P.proj.items.some(i => i.file === o.f.id && i.page === o.i)).map(o => { const sh = (P.proj.sheets || {})[o.key] || {}, n = P.proj.items.filter(i => i.file === o.f.id && i.page === o.i), st = scaleState(P.proj.scales[o.key]);
+    return `<tr><td>${esc(sh.no || "")}</td><td>${esc(sh.title || "")}</td><td>${esc(o.f.name.replace(/\.pdf$/i, ""))} p.${o.i}</td><td>${esc([sh.bldg, sh.floor].filter(Boolean).join(" · "))}</td><td class="n">${n.length}</td><td class="n">${n.filter(i => i.qa === "checked").length}</td><td>${esc(st.t)}</td></tr>`; }).join("");
+  const fl = floorGroups(), byFloor = fl.length > 1 ? fl.map(g => `<tr class="g"><td colspan="3">${esc(g.name)}</td></tr>` + billLines(g.only).filter(l => l.kind === "cond").map(l => `<tr><td>${esc(l.name)}</td><td class="n">${fq(l.qty, l.unit)}</td><td>${esc(l.unit)}</td></tr>`).join("")).join("") : "";
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(P.proj.name)} — takeoff report</title><style>
+    body{font:12px "Segoe UI",Arial,sans-serif;color:#1e2b3a;margin:24px}h1{font-size:20px;color:#0f2942;margin:0 0 4px}h2{font-size:14px;color:#0f2942;margin:22px 0 6px;border-bottom:2px solid #0f2942;padding-bottom:3px}
+    table{width:100%;border-collapse:collapse}th{background:#12263f;color:#fff;font-size:10.5px;text-align:left;padding:5px 6px}td{padding:4px 6px;border-bottom:1px solid #e3e8ef;vertical-align:top}td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+    tr.g td{background:#f1f4f9;font-weight:700}.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}.cov{border:1px solid #dde5ee;border-radius:8px;padding:14px 16px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px 18px}
+    .cov b{display:block;font-size:16px;color:#0f2942}.muted{color:#6b7d92}.st{font-weight:700;color:${lvlCol(V.lvl)}}@media print{body{margin:10mm}h2{break-after:avoid}tr{break-inside:avoid}}</style></head><body>
+    <h1>${esc(P.proj.name)}</h1><div class="muted">Quantity takeoff report · ${esc(dmy(today()))} · decimal feet, deductions as their own rows · ZD PDF Takeoff</div>
+    <h2>Summary</h2><div class="cov"><div><span class="muted">Drawings</span><b>${P.proj.files.length} PDF · ${allPages().length} pages</b></div><div><span class="muted">Measurements</span><b>${q.n}</b></div><div><span class="muted">Checked</span><b>${q.checked} of ${q.n}</b></div>
+    <div><span class="muted">AI / copied to check</span><b>${q.review}</b></div><div><span class="muted">Takeoff check</span><b class="st">${esc(V.lvl)}</b></div><div><span class="muted">Bill amount</span><b>${tot ? "PKR " + f2(tot) : "—"}</b></div></div>
+    <h2>Quantities by condition</h2><table><thead><tr><th>Condition</th><th class="n">Measurements</th><th class="n">Gross</th><th class="n">Deductions</th><th class="n">Net</th><th>Unit</th></tr></thead><tbody>${P.proj.conds.map(row).join("")}</tbody></table>
+    ${byFloor ? `<h2>By building / floor</h2><table><thead><tr><th>Item</th><th class="n">Qty</th><th>Unit</th></tr></thead><tbody>${byFloor}</tbody></table>` : ""}
+    ${BL.length ? `<h2>Bill</h2><table><thead><tr><th>Item</th><th class="n">Qty</th><th>Unit</th><th class="n">Rate PKR</th><th class="n">Amount PKR</th></tr></thead><tbody>${BL.map(l => `<tr${l.kind === "cond" ? ' class="g"' : ""}><td>${l.kind === "asm" ? "↳ " : ""}${l.boq ? esc(l.boq) + " · " : ""}${esc(l.name)}</td><td class="n">${fq(l.qty, l.unit)}</td><td>${esc(l.unit)}</td><td class="n">${l.rate ? f2(l.rate) : "—"}</td><td class="n">${l.rate ? f2(l.qty * l.rate) : "—"}</td></tr>`).join("")}<tr class="g"><td>Total</td><td></td><td></td><td></td><td class="n">${f2(tot)}</td></tr></tbody></table>` : ""}
+    <h2>Drawings measured</h2><table><thead><tr><th>Sheet no.</th><th>Title</th><th>Drawing</th><th>Building / floor</th><th class="n">Measurements</th><th class="n">Checked</th><th>Scale</th></tr></thead><tbody>${pages || '<tr><td colspan="7" class="muted">Nothing measured yet</td></tr>'}</tbody></table>
+    <h2>Takeoff check</h2>${V.L.length ? `<table><tbody>${V.L.map(x => `<tr><td style="width:80px;font-weight:700;color:${lvlCol(x.lvl)}">${esc(x.lvl)}</td><td>${esc(x.msg)}</td></tr>`).join("")}</tbody></table>` : '<p>No errors or warnings.</p>'}
+    <script>setTimeout(function(){ window.print(); }, 400);<\/script></body></html>`);
+  w.document.close();
 }
 
 /* ------------------------------------------------------------------ pages: list, paper sizes */
@@ -4093,7 +4763,7 @@ function paletteCmds(){
     add(t, () => b.click(), g, k);
   };
   if (!P.proj) {
-    add("New project", () => $("bNewProj").click(), "Project"); add("Import project (.json or .zdtakeoff)", () => $("impIn").click(), "Project");
+    add("New project", () => $("bNewProj").click(), "Project"); add("Import project (.json or .zdtakeoff)", () => $("impIn").click(), "Project"); add("Full screen", fullScreen, "View");
     return L;
   }
   document.querySelectorAll("#tools [data-tool]").forEach(b => btn(b, "Tool"));
@@ -4103,6 +4773,14 @@ function paletteCmds(){
   if (S.page) { add("Marked-up page (.png)", exportPng, "Export"); add("Marked-up page (.pdf)", () => exportPdf(false), "Export"); }
   add("All marked-up pages (.pdf)", () => exportPdf(true), "Export"); add("Project (.json) — measurements only", exportJson, "Export");
   add("Project + PDFs (.zdtakeoff) — to move to another computer", exportBundle, "Export"); add("Backups of this project", () => backupsDialog(), "Project");
+  add("Export pages… — PDF, PDF per page, PNG or JPEG; pages, resolution, legend", () => exportPagesDialog(), "Export");
+  add("Export the pages with takeoff as one PDF…", () => exportPagesDialog({scope: "tk", fmt: "pdf"}), "Export"); add("Export pages as PNG images (high resolution)…", () => exportPagesDialog({fmt: "png"}), "Export");
+  add("Takeoff report — print or save as PDF", reportPrint, "Export");
+  add("Import PDFs — choose pages, version set…", () => $("impPdfIn").click(), "Project"); add("Add a folder of PDFs…", () => $("dirIn").click(), "Project"); add("Add photos / scans as pages (JPG, PNG)…", () => $("imgIn").click(), "Project");
+  add("Sheet info from the title blocks (AI read)…", () => autoSheetDialog(), "Page"); add("Read scanned pages — OCR…", () => ocrDialog(), "Page");
+  add("Pages panel — search, filter, pin and tick pages", () => wsLayout("pages"), "View");
+  [["takeoff", "Workspace: takeoff (all panels)"], ["focus", "Workspace: drawing only"], ["pages", "Workspace: pages + drawing"], ["check", "Workspace: pages + measurement sheet"]].forEach(([l, t]) => add(t, () => wsLayout(l), "View"));
+  add("Toolbar: icons only / icons and names", () => wsSet({tb: wsPref().tb === "icons" ? "full" : "icons"}), "View"); add("Minimap on / off", () => wsSet({mini: !wsPref().mini}), "View"); add("Full screen", fullScreen, "View");
   add("Save now", () => { savePr = P.proj; flushSave().then(ok => toast(ok ? "Saved in this browser" : "Not saved — see the message above")); }, "Project", "Ctrl+S");
   add("Undo", undoAny, "Edit", "Ctrl+Z"); add("Redo", redoAny, "Edit", "Ctrl+Y");
   add("Find text on the drawings", () => { $("findIn").focus(); $("findIn").select(); }, "View", "Ctrl+F");
@@ -4217,6 +4895,7 @@ function ctxItem(hi, sp, q, e){
   if (!many && it.kind !== "open" && c.type !== "count") L.push({t: "Offset…", fn: () => offsetDialog(it)});
   if (runs.length >= 2) L.push({t: "Join " + runs.length + " runs into one", fn: () => joinRuns(new Set(runs.map(r => r.id))), dis: lk});
   if (!many && c.type === "area" && it.kind === "shape") L.push({t: "Add a cut-out / deduction", k: "D", fn: () => { S.cond = c.id; setTool("ded"); }});
+  if (!many && c.type === "area" && it.kind === "shape") { const under = cutTargets(it); if (under.length) L.push({t: "Cut out of the area" + (under.length > 1 ? "s" : "") + " it overlaps (" + under.slice(0, 2).map(u => u.label || (cond(u.cond) || {}).name).join(", ") + (under.length > 2 ? ", …" : "") + ")", fn: () => cutOutOf(it, under), dis: it.locked}); }
   if (!many && c.type === "linear" && it.kind !== "open") L.push({t: "Add an opening (door / window)", k: "O", fn: () => { S.cond = c.id; setTool("open"); }});
   const lin = P.proj.conds.filter(x => x.type === "linear"), ar = P.proj.conds.filter(x => x.type === "area");
   if (!many && (c.type === "area" || it.shape === "circle") && it.kind === "shape") L.push({t: "Make a perimeter run in", sub: lin.map(x => ({t: x.name, fn: () => toRun(it, x.id)}))});
@@ -4240,7 +4919,7 @@ function ctxMark(m){
 }
 function ctxCanvas(q){
   const u = S.undo.length ? undoEntry(S.undo[S.undo.length - 1]).label : "", r = S.redo.length ? undoEntry(S.redo[S.redo.length - 1]).label : "", T = (t, n, key) => ({t: n, k: key, fn: () => setTool(t), on: S.tool === t});
-  return [{h: pageName({file: S.fileId, page: S.pageNo}), s: S.clip ? "clipboard: " + S.clip.n + " object" + (S.clip.n > 1 ? "s" : "") : ""},
+  return [{h: pageName({file: S.fileId, page: S.pageNo}), s: S.clip ? "clipboard: " + S.clip.n + " object" + (S.clip.n > 1 ? "s" : "") : ""}, ...sheetLinkItems(q),
     {t: "Paste here", k: "Ctrl+V", fn: () => pasteClip("cursor", q), dis: !S.clip}, {t: "Paste in place", k: "Ctrl+Shift+V", fn: () => pasteClip("inplace"), dis: !S.clip},
     {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {sep: 1},
     {t: "Undo" + (u ? ": " + u : ""), k: "Ctrl+Z", fn: undoAny, dis: !S.undo.length}, {t: "Redo" + (r ? ": " + r : ""), k: "Ctrl+Y", fn: redoAny, dis: !S.redo.length}, {sep: 1},
@@ -4256,6 +4935,7 @@ function keysDialog(){
   ask("Keyboard & mouse", `<table class="keyt" style="font-size:12px;border-collapse:collapse;width:100%">
     ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
     ${G("Find anything", [["Ctrl+K", "command palette: type the name of any tool, export, dialog, page or condition"], ["Ctrl+F", "find text on the drawings"]])}
+    ${G("Pages (Forma Takeoff sheets)", [["Tick a thumbnail | Shift+tick", "tick pages to export, read sheet info or OCR together · Shift: the pages in between"], ["Ctrl+click | Shift+click a thumbnail", "tick / untick it without opening it"], ["☆ on a thumbnail", "pin the page to the top"], ["Double-click a sheet no. on the drawing", "open that sheet (right-click lists the sheets referenced)"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
     ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"]])}
     ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"]])}
@@ -4285,6 +4965,7 @@ function wire(){
     if (S.tool !== "select" || !P.proj || !S.page) return;
     const sp = evPos(e), mk = markAt(sp);
     if (mk && selIds().has(mk.id)) { if (mk.locked) return lockedMsg(); if (mk.type !== "hilite" && mk.type !== "fence") editMarkText(mk); return; }
+    if (!mk && !hitItem(sp)) { const ln = sheetRefsNear(toBase(sp[0], sp[1]), 10 / S.view.s)[0]; if (ln) { toast("Sheet " + ln.no + " → " + keyName(ln.k), 2000); return gotoKey(ln.k); } }   // a sheet no. written on the drawing: open that sheet
     const one = selOne(); if (!one) return;
     const recent = S.lastIns && S.lastIns.id === one.id && Date.now() - S.lastIns.t < 700 && vertexAt(one, sp) === S.lastIns.vi;   // the second click of a double-click on a "+" that has just added this point
     if (editPts(one)) {   // double-click a point: remove it; double-click a side: add a point there
@@ -4301,7 +4982,8 @@ function wire(){
   st.addEventListener("pointerleave", () => { S.cursor = null; S.snap = null; S.hover = null; draw(); });
   st.addEventListener("dragover", e => { e.preventDefault(); $("drop").classList.add("over"); });
   st.addEventListener("dragleave", () => $("drop").classList.remove("over"));
-  st.addEventListener("drop", e => { e.preventDefault(); $("drop").classList.remove("over"); if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files]); });
+  st.addEventListener("drop", e => { e.preventDefault(); $("drop").classList.remove("over"); const L = [...e.dataTransfer.files]; if (!L.length) return;
+    if (L.some(f => !isPdfFile(f) && isImgFile(f))) importDialog(L); else addFiles(L); });   // photos / scans among them: the import dialog (images as pages)
   new ResizeObserver(() => { if (S.page) { applyView(); renderHi(); } }).observe(st);
   document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.addEventListener("click", () => setTool(b.dataset.tool)));
   $("bAutoSet").onclick = () => P.proj && autoSettings();
@@ -4320,8 +5002,32 @@ function wire(){
     $("tCond").classList.toggle("on", t === "cond"); $("tLay").classList.toggle("on", t === "lay"); $("tPages").classList.toggle("on", t === "pages"); $("bNewCond").style.display = t === "cond" ? "" : "none";
     if (t === "lay") renderLayers(); if (t === "pages") renderPages(); };
   $("tCond").onclick = () => leftTab("cond"); $("tLay").onclick = () => leftTab("lay"); $("tPages").onclick = () => leftTab("pages");
-  $("pageList").addEventListener("click", e => { const rm = e.target.closest("[data-rmpdf]"); if (rm) return removePdf(rm.dataset.rmpdf);
-    const t = e.target.closest("[data-pg]"); if (t) { const [f, p] = t.dataset.pg.split("|"); gotoPage(f, +p); } });
+  $("pageList").addEventListener("click", e => {
+    const ck = e.target.closest("[data-pgck]"); if (ck) return pgTick(ck.dataset.pgck, ck.checked, e.shiftKey);
+    const all = e.target.closest("[data-pgall]"); if (all) { const L = pagesShown().map(o => o.key); L.forEach(k => { if (all.checked) S.pgSel.add(k); else S.pgSel.delete(k); }); return renderPages(); }
+    const pn = e.target.closest("[data-pin]"); if (pn) return pinPages([pn.dataset.pin]);
+    const a = e.target.closest("[data-pga]"); if (a) return pgAct(a.dataset.pga);
+    if (e.target.closest(".pgbar")) return;
+    const rm = e.target.closest("[data-rmpdf]"); if (rm) return removePdf(rm.dataset.rmpdf);
+    const t = e.target.closest("[data-pg]"); if (t) { if (e.ctrlKey || e.metaKey || e.shiftKey) { const k = t.dataset.pg.replace("|", ":"); return pgTick(k, !S.pgSel.has(k), e.shiftKey); } const [f, p] = t.dataset.pg.split("|"); gotoPage(f, +p); } });
+  let pgT = null;
+  $("pageList").addEventListener("input", e => { if (e.target.id !== "pgQ") return; clearTimeout(pgT); pgT = setTimeout(() => { S.pgQ = e.target.value; renderPages(); }, 180); });
+  $("pageList").addEventListener("change", e => { if (e.target.id === "pgF") { S.pgF = e.target.value; renderPages(); } else if (e.target.id === "pgSort") { S.pgSort = e.target.value; renderPages(); } });
+  S.pgSz = pref("zdTakeoffPgSz") || "m";
+  $("bAddM").onclick = e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); importMenu(r.left, r.bottom + 4); };
+  const pick = (id, f) => { $(id).onchange = e => { const L = [...e.target.files]; e.target.value = ""; if (L.length) f(L); }; };
+  pick("impPdfIn", importDialog); pick("imgIn", importDialog);
+  pick("dirIn", L => { const ok = L.filter(f => isPdfFile(f) || isImgFile(f)); if (!ok.length) return toast("No PDF, JPG or PNG in that folder", 3000); importDialog(ok); });
+  $("bWs").onclick = e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); wsMenu(Math.max(4, r.right - 300), r.bottom + 4); };
+  $("bCmd").onclick = () => openPalette();
+  $("bMini").onclick = () => { wsSet({mini: !wsPref().mini}); toast(wsPref().mini ? "Minimap on — it shows when you zoom in" : "Minimap off", 1800); };
+  $("bFull").onclick = () => fullScreen();
+  document.addEventListener("fullscreenchange", () => { if ($("bFull")) $("bFull").classList.toggle("on", !!document.fullscreenElement); });
+  { const mi = $("mini");
+    mi.addEventListener("pointerdown", e => { e.stopPropagation(); e.preventDefault(); if (!S.base) return; mi.setPointerCapture(e.pointerId); S.miniDrag = true; miniGo(e); });
+    mi.addEventListener("pointermove", e => { e.stopPropagation(); if (S.miniDrag) miniGo(e); });
+    mi.addEventListener("pointerup", e => { e.stopPropagation(); S.miniDrag = false; });
+    ["dblclick", "contextmenu"].forEach(t => mi.addEventListener(t, e => { e.stopPropagation(); e.preventDefault(); })); }
   $("layerList").addEventListener("change", e => { if (e.target.dataset.lid) setLayer([e.target.dataset.lid], e.target.checked); });
   $("layerList").addEventListener("click", e => { const pr = e.target.closest("[data-lpre]");
     if (pr) { const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; const G = Object.entries(cfg.getGroups()), t = pr.dataset.lpre;
@@ -5116,6 +5822,14 @@ async function agentStep(text){
   const t = text.toLowerCase().trim(), scope = /\b(project|all\s+pdfs?|every\s+pdf|all\s+drawings)\b/.test(t) ? "all" : /\b(all|every|each)\s+(pages?|sheets?)\b|\bwhole\s+(pdf|set)\b|\bpdf\b/.test(t) ? "pdf" : "page";
   try {
     if (/^(help|\?)$/.test(t)) return agentHelp();
+    if (/\b(sheet\s*(?:info|names?|numbers?|nos?\.?|titles?)|title\s*-?\s*blocks?|auto\s*-?\s*names?|bookmarks?|rename\s+(?:the\s+)?(?:pages|sheets))\b/.test(t) && !/\b(export|download|print)\b/.test(t)) return agentSheets(t);
+    if (/\b(export|save|download|print)\b/.test(t) && /\b(pdfs?|png|jpe?g|images?|pictures?|pages?|sheets?|drawings?|mark(?:ed)?[\s-]*ups?)\b/.test(t) && !/\b(csv|excel|xlsx|schedule|json|project)\b/.test(t)) return agentExport(t);
+    if (/\breport\b/.test(t) && !/\bschedule\b/.test(t)) { aiLog("bot", "Opening the takeoff report in a new tab — print it or save it as PDF."); return reportPrint(); }
+    if (/\bocr\b|\bread\s+(?:the\s+)?(?:text\s+(?:of|on|from)\s+(?:the\s+)?)?scan(?:s|ned(?:\s+pages?)?)?\b/.test(t) && !/\b(measure|count|trace|draw)\b/.test(t)) return agentOcr(t, scope);
+    if (/\b(import|add|load|upload)\b.*\b(pdfs?|drawings?|images?|photos?|scans?|folders?|pages?)\b/.test(t) && !/\b(measure|count)\b/.test(t)) return agentImport();
+    { const gm = /\b(?:go\s*to|goto|open|jump\s+to)\s+(?:sheet\s+|drawing\s+)?([A-Za-z]{1,4}\s?[-–._]?\s?\d{1,4}(?:[._-]\d{1,3})?[A-Za-z]?|p(?:age)?\.?\s*\d{1,4})\s*$/i.exec(text.trim()); if (gm && !/apartment|unit|flat/i.test(text)) return agentSheetGo(gm[1]); }
+    if (/\b(select|tick|choose)\s+(?:the\s+|all\s+)?(?:pages?|sheets?)\b|\b(?:select|tick)\s+all\s+(?:the\s+)?(?:pages?|sheets?)\b/.test(t)) return agentPages(t);
+    if (/\b(workspace|focus\s+mode|drawing\s+only|full\s*-?\s*screen|mini\s*-?\s*map|icons?\s+only|compact\s+toolbar)\b/.test(t)) return agentWorkspace(t);
     if (/^(how\s+(many|much)|total\b|sum\b|what(?:'s|\s+is)\s+the\s+(?:total|number))/.test(t)) return agentAnswer(t);
     if (/\b(full|complete|whole|entire|auto(?:matic)?)\s*take\s*-?\s*off\b|^take\s*-?\s*off\b|\beverything\b|\bdo\s+(?:it\s+)?all\b|\ball\s+(?:the\s+)?agents\b/.test(t)) return fullTakeoffDialog(scope);
     if (/\b(check|audit|qa|verify|review|mistakes?|errors?|missing)\b/.test(t)) return agentCheck(/\bpage\b/.test(t) && scope === "page" ? "page" : "all");
@@ -5138,12 +5852,67 @@ async function agentStep(text){
     return agentAsk(text);
   } catch (e) { busy(""); aiLog("err", esc(e.message || String(e))); }
 }
-function agentAsk(text){   // not understood: ask back with the choices, never guess
+function agentAsk(text){   // not understood: ask back with the choices, never guess — and the commands whose names match its words
+  const words = String(text).toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !/^(the|and|for|with|this|that|all|please|can|you|how|what)$/.test(w));
+  const pal = words.length ? paletteCmds().map(c => ({c, s: words.filter(w => (c.t + " " + c.g).toLowerCase().includes(w)).length})).filter(o => o.s > 0).sort((a, b) => b.s - a.s || a.c.t.length - b.c.t.length).slice(0, 5).map(o => o.c) : [];
   const d = aiLog("bot", `I did not understand “${esc(text)}”. Did you mean one of these?<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
     <button class="btn sm pri" data-ask="full takeoff">⚡ Full takeoff</button><button class="btn sm" data-ask="measure all rooms">Measure all rooms</button><button class="btn sm" data-ask="walls">Walls…</button><button class="btn sm" data-ask="count doors">Count doors</button>
     <button class="btn sm" data-ask="count windows">Count windows</button><button class="btn sm" data-ask="finishes">🎨 Finishes</button><button class="btn sm" data-ask="check">✅ Check</button><button class="btn sm" data-ask="drawing details">Drawing details</button><button class="btn sm" data-ask="help">Help</button></div>
-    <span class="small">Or write it differently, e.g. <i>measure bedroom</i>, <i>walls 9"</i>, <i>count D1</i>, <i>how many doors</i>.</span>`);
-  d.addEventListener("click", e => { const b = e.target.closest("[data-ask]"); if (b) agentCmd(b.dataset.ask); });
+    ${pal.length ? `<div style="margin-top:6px"><span class="small">Commands with those words:</span><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${pal.map((c, i) => `<button class="btn sm" data-pal="${i}">${esc(c.t.length > 60 ? c.t.slice(0, 58) + "…" : c.t)}</button>`).join("")}</div></div>` : ""}
+    <span class="small">Or write it differently, e.g. <i>measure bedroom</i>, <i>walls 9"</i>, <i>count D1</i>, <i>how many doors</i>, <i>export pages with takeoff to pdf</i>.</span>`);
+  d.addEventListener("click", e => { const b = e.target.closest("[data-ask]"); if (b) return agentCmd(b.dataset.ask); const p = e.target.closest("[data-pal]"); if (p) Promise.resolve().then(pal[+p.dataset.pal].run).catch(er => toast(String(er && er.message || er), 5000)); });
+}
+/* the pages commands: export, OCR, sheet info, import, go to a sheet, tick pages, workspace — each opens its dialog (to be
+   checked) rather than acting unseen */
+function agentExport(t){
+  const fmt = /\bjpe?g\b/.test(t) ? "jpg" : /\b(png|images?|pictures?)\b/.test(t) ? "png" : /\b(per|each|every)\s+page\s+(?:as\s+)?(?:its\s+own|a|separate)\b|\bseparate\s+pdfs?\b|\bpdf\s+per\s+page\b/.test(t) ? "pdfs" : "pdf";
+  const scope = /\b(selected|ticked|chosen)\b/.test(t) ? "sel" : /\b(with|having)\s+(?:the\s+)?(?:takeoff|measurements?|markups?)\b|\bmarked[\s-]*up\b|\bmeasured\b/.test(t) ? "tk" : /\b(all|every|whole)\b/.test(t) ? "all" : "page", dm = /(\d{2,3})\s*dpi\b/.exec(t);
+  aiLog("bot", `Export: <b>${{pdf: "one PDF", pdfs: "a PDF per page", png: "PNG images", jpg: "JPEG images"}[fmt]}</b> of <b>${{sel: "the ticked pages", tk: "the pages with takeoff", all: "every page", page: "this page"}[scope]}</b>${dm ? " at " + dm[1] + " DPI" : ""} — check the choices and press Export.`);
+  return exportPagesDialog({fmt, scope, dpi: dm ? Math.max(72, Math.min(600, +dm[1])) : undefined});
+}
+function agentOcr(t, scope){
+  const keys = scope === "all" ? allPages().map(o => o.key) : scope === "pdf" ? allPages().filter(o => o.f.id === S.fileId).map(o => o.key) : /\bscann?ed\s+pages\b|\bscans\b/.test(t) ? null : [S.key];
+  aiLog("bot", "OCR reads the words on scanned pages in this browser (free). Choose the pages and press <b>Read the text</b>.");
+  return ocrDialog(keys);
+}
+function agentSheets(t){
+  const keys = /\bthis\s+(?:page|sheet)\b/.test(t) ? [S.key] : /\bthis\s+pdf\b/.test(t) ? allPages().filter(o => o.f.id === S.fileId).map(o => o.key) : null;
+  aiLog("bot", "Reading sheet no., title, revision and floor from the title blocks — check them, then <b>Save sheet info</b>.");
+  return autoSheetDialog(keys);
+}
+function agentImport(){
+  const d = aiLog("bot", `Choose what to add (the browser asks you to pick the files):<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"><button class="btn sm pri" data-imp="impPdfIn">PDFs — choose pages…</button><button class="btn sm" data-imp="fileIn">PDFs — every page</button><button class="btn sm" data-imp="dirIn">A folder of PDFs…</button><button class="btn sm" data-imp="imgIn">Photos / scans as pages…</button></div>`);
+  d.addEventListener("click", e => { const b = e.target.closest("[data-imp]"); if (b) $(b.dataset.imp).click(); });
+}
+function agentSheetGo(s){
+  const pm = /^p(?:age)?\.?\s*(\d{1,4})$/i.exec(s.trim());
+  if (pm) { const f = P.proj.files.find(x => x.id === S.fileId), n = +pm[1]; if (!f || n < 1 || n > f.pages) return aiLog("err", "This PDF has " + (f ? f.pages : 0) + " pages."); aiLog("bot", "Page " + n + " of " + esc(f.name.replace(/\.pdf$/i, "")) + "."); return gotoPage(f.id, n); }
+  const k = sheetIndex().get(sheetNorm(s));
+  if (!k) return aiLog("err", `No sheet numbered <b>${esc(s)}</b> — sheet numbers come from Sheet info (<i>read sheet info</i> fills them from the title blocks).`);
+  aiLog("bot", "Opening " + esc(keyName(k)) + "."); return gotoKey(k);
+}
+function agentPages(t){
+  S.pgSel = S.pgSel || new Set(); const r = /(\d[\d\s,–-]*)/.exec(t.replace(/\b(?:with|having)\b.*$/, "")), all = allPages();
+  let L;
+  if (/\b(with|having)\s+(?:the\s+)?(?:takeoff|measurements?|markups?)\b|\bmeasured\b/.test(t)) L = pagesWithTakeoff();
+  else if (/\b(without|no)\s+(?:the\s+)?(?:takeoff|measurements?)\b/.test(t)) { const tk = new Set(pagesWithTakeoff()); L = all.map(o => o.key).filter(k => !tk.has(k)); }
+  else if (/\bno\s+scale\b/.test(t)) L = all.map(o => o.key).filter(k => !P.proj.scales[k]);
+  else if (r && /\d/.test(r[1])) { const f = P.proj.files.find(x => x.id === S.fileId); L = f ? [...parseRange(r[1], f.pages)].map(i => keyOf(f.id, i)) : []; }
+  else if (/\b(all|every)\b/.test(t)) L = all.map(o => o.key);
+  else return aiLog("err", "Which pages? e.g. <i>select pages 1-5</i>, <i>select pages with takeoff</i>, <i>select all pages</i>.");
+  if (!L.length) return aiLog("bot", /\b(with|having|measured)\b/.test(t) ? "No page has takeoff yet — nothing ticked." : "No page matches — nothing ticked.");
+  S.pgSel = new Set(L); S.lHide = false; setPanels(); $("tPages").click(); renderPages();
+  const d = aiLog("bot", `<b>${L.length}</b> page${L.length === 1 ? "" : "s"} ticked in the Pages tab.${L.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"><button class="btn sm pri" data-pga="export">&#8681; Export…</button><button class="btn sm" data-pga="sheet">Sheet info…</button><button class="btn sm" data-pga="ocr">OCR…</button><button class="btn sm" data-pga="pin">&#9733; Pin</button></div>` : ""}`);
+  d.addEventListener("click", e => { const b = e.target.closest("[data-pga]"); if (b) pgAct(b.dataset.pga); });
+}
+function agentWorkspace(t){
+  if (/full\s*-?\s*screen/.test(t)) { fullScreen(); return aiLog("bot", "Full screen — Esc to leave."); }
+  if (/mini\s*-?\s*map/.test(t)) { const on = /\boff\b|\bhide\b/.test(t) ? false : /\bon\b|\bshow\b/.test(t) ? true : !wsPref().mini; wsSet({mini: on}); return aiLog("bot", "Minimap " + (on ? "on — it shows when you zoom in." : "off.")); }
+  if (/icons?\s+only|compact/.test(t)) { const on = !/\b(off|names|labels|full)\b/.test(t); wsSet({tb: on ? "icons" : "full"}); return aiLog("bot", "Toolbar: " + (on ? "icons only" : "icons and names") + "."); }
+  if (/focus|drawing\s+only/.test(t)) { wsLayout("focus"); return aiLog("bot", "Drawing only — the panels are hidden (⟩ ⟨ at the sides bring them back)."); }
+  if (/\bpages?\b/.test(t)) { wsLayout("pages"); return aiLog("bot", "Pages + drawing."); }
+  if (/\b(check|review|qa)\b/.test(t)) { wsLayout("check"); return aiLog("bot", "Pages + measurement sheet."); }
+  wsLayout("takeoff"); return aiLog("bot", "Takeoff workspace: conditions, drawing and measurement sheet.");
 }
 function agentHelp(){
   aiLog("bot", `<b>Free drawing agents</b> — no API key, no cost, nothing leaves this browser. They read the lines and text inside the PDF (so not scanned drawings) and work on the page you have open unless you say otherwise. Try:<br>
@@ -5158,11 +5927,18 @@ function agentHelp(){
     • <i>check</i> (or ✅) — audits the takeoff: rooms not measured, areas measured twice, double counts, tags not counted, schedule quantities and sizes<br>
     • <i>how many D1</i>, <i>how many doors</i>, <i>total floor area</i>, <i>total bedroom area</i> — answered from what is measured<br>
     • <i>room schedule</i> — the room list as a table you can copy<br>
+    <b>Pages</b> (as Forma Takeoff / Bluebeam):<br>
+    • <i>export pages with takeoff to pdf</i>, <i>export all pages as png 300 dpi</i>, <i>export this page as jpg</i> — the export dialog with those pages, the legend and the resolution set<br>
+    • <i>read sheet info</i> (or <i>title blocks</i>) — sheet no., title, revision and floor read from each title block, checked by you before they are saved<br>
+    • <i>ocr this page</i>, <i>read scanned pages</i> — the text of scans read in this browser, so Find, these agents and the scale note work on them<br>
+    • <i>select pages 1-5</i>, <i>select pages with takeoff</i>, <i>go to A-101</i>, <i>go to page 4</i> — page management; <i>report</i> — the printable takeoff report<br>
+    • <i>import pdfs</i>, <i>add photos as pages</i> — choose pages and a version set on the way in<br>
+    • <i>focus mode</i>, <i>full screen</i>, <i>minimap</i>, <i>icons only</i> — the workspace<br>
     Chain them: <i>measure all rooms, then count doors and walls 9"</i>.`);
 }
 async function agentDetails(){
   const F = await drawingFacts(S.fileId, S.pageNo), k = curScale();
-  if (!F.textCount) return aiLog("err", "This page has no text layer (scanned or exported as outlines) — the free agent cannot read it. Use <b>Copy for Claude</b> or an API key instead.");
+  if (!F.textCount) { const d0 = aiLog("err", 'This page has no text layer (scanned or exported as outlines) — the free agent cannot read it yet. <button class="btn sm pri" data-ocr1="1">Read it with OCR</button> (free, in this browser), or use <b>Copy for Claude</b> / an API key.'); d0.addEventListener("click", e => { if (e.target.closest("[data-ocr1]")) ocrDialog([S.key]); }); return; }
   const groups = {}; Object.entries(F.tags).forEach(([t2, pts]) => { (groups[tagKind(t2)] = groups[tagKind(t2)] || []).push([t2, pts.length]); });
   const tot = F.rooms.reduce((a, r) => a + r.sft, 0);
   const sec = (title, body) => body ? `<div style="margin-top:6px"><b>${title}</b><br>${body}</div>` : "";
@@ -5924,10 +6700,12 @@ function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw"
 
 /* ------------------------------------------------------------------ start */
 (async function init(){
-  loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on);
+  loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on); iconize(); wsApply();
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint};   // for tests and the console
+  window.zdTakeoff = {fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+    pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
+    ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();

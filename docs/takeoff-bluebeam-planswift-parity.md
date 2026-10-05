@@ -116,6 +116,32 @@ A right-drag still pans; only a right-click without dragging opens the menu, and
 | Password-protected PDFs | ✓ | ✓ | ★ asks for the open password; marked-up export flattened |
 | Remove a PDF from the project | ✓ | ✓ | ★ (backup first) |
 
+## 6c. Pages, AI and Forma Takeoff 2D (added 05-Oct-2026)
+
+Reviewed 04/05-Oct-2026 against **Autodesk Forma Takeoff** (formerly Autodesk Takeoff) 2D workflow and **Forma Data
+Management** (formerly Autodesk Docs) — the "Learn Forma Data Management and Takeoff in 90 minutes" course content —
+plus the AI features of **Bluebeam Max** (global launch 19-May-2026), **PlanSwift Takeoff Boost**, **Togal.AI** and **Kreo**.
+
+| Feature | Forma Takeoff / Data Mgmt | Bluebeam / PlanSwift / AI tools | ZD Takeoff |
+|---|---|---|---|
+| Sheets panel: search, filter (with takeoff…), sort, bookmark | ✓ Sheets & Models panel | ✓ Thumbnails | ★ Pages tab: search sheet no. / title / PDF; filter with takeoff, no takeoff, no scale, not verified, pinned, read by OCR, version set; sort by drawing order, sheet no., title, most measured; ★ pin |
+| Select several sheets at once | ✓ | ✓ | ★ tick pages (Shift+click a range, Ctrl+click a thumbnail, tick all shown, tick pages with takeoff) → Export / Sheet info / OCR / Pin |
+| Export sheets with takeoff to PDF: this sheet / all with takeoff / selected; filter by takeoff type; legend with or without quantities, S / M / L, in the margin | ✓ Export sheets to PDF | ◐ Bluebeam Flatten / Batch | ★ Export pages: this page · pages with takeoff · ticked pages · every page · choose by range (1-3, 7) per PDF; condition filter; legend on the drawing (any corner) or in a margin strip (Forma style), quantities on / off, S / M / L; title stamp; fade the drawing |
+| Formats and quality | PDF | Bluebeam Export → Image (PNG / JPEG, page range) | ★ one PDF (each drawing stays the original vector page), a PDF per page (.zip), PNG (.zip) or JPEG (.zip) at 150–600 DPI — as large as the browser can hold, and said when capped |
+| Upload many PDFs; version set (name + issue date); sheet numbers and titles extracted, reviewed before publishing | ✓ Publish sheets | ◐ | ★ Import: several PDFs or a folder, tick the pages wanted (thumbnails, range, or "pages saying PLAN"), version set + issue date kept per PDF, then sheet info read and reviewed |
+| Extract pages and attributes (title block template: capture areas for sheet no., title; OCR) | ✓ Forma Data Mgmt | ✓ Bluebeam AutoMark, PlanSwift Auto Bookmark, Kreo / Togal AI renaming | ★ Sheet info from the title blocks: by labels and the title block's place, or inside capture areas dragged once (a template for pages of the same paper size); sheet no., title, revision (the latest in the block), floor (from the title), discipline (from the sheet no.'s letters); every value shown for checking |
+| OCR of scanned drawings | ✓ (title block extraction) | ✓ | ★ Tesseract OCR in the browser (free, nothing uploaded): the words found work as the page's text — Find, the agents, scale notes (1:100 read off a scan), tags, sheet info; kept with the project |
+| Photos / scans as sheets | — | ◐ | ★ JPG / PNG added as pages at their scan DPI (read from the file), so a scan comes in at its paper size |
+| Automatic hyperlinks between sheet callouts and sheets | ✓ | ◐ Bluebeam links | ★ a sheet no. written on the drawing (A-301, 3/A-301) opens that sheet: double-click it, or right-click → Open sheet / Sheets referenced on this page |
+| Symbol detection (box a symbol, 90° turns, review, save the ticked) | ✓ | ✓ VisualSearch, Auto Count | ✓ Find similar (already) |
+| Cutout: an area over another takes out the overlap | ✓ | ◐ | ★ right-click → Cut out of the area it overlaps: the overlapping part becomes a deduction in that area's condition, the area itself stays |
+| Minimap | ✓ | — | ★ View → Minimap (shows when zoomed in; click or drag to move) |
+| Full screen | ✓ | ✓ | ★ View → Full screen, Workspace menu |
+| Inventory grouped by document / sheet | ✓ Group by Document | — | ★ Bill → Group by drawing (PDF) or by sheet / page (as well as building / floor) |
+| Reports (inventory report, cover page, PDF) | ✓ Reports | ◐ | ★ Export → Report (print / save as PDF): summary, quantities by condition (gross, deductions, net), by floor, the bill, drawings measured with QA and scale, the takeoff check |
+| Natural-language assistant | — | ✓ Bluebeam Max (Claude), Kreo Caddie, Togal.CHAT | ✓ Claude (API key) and the free agents + ★ page commands: *export pages with takeoff to pdf*, *export all pages as png 300 dpi*, *read sheet info*, *ocr this page*, *select pages 1-5*, *go to A-101*, *import pdfs*, *report*, *focus mode*; an unknown command offers the matching commands by name |
+| Workspace / command access | ✓ | ✓ Bluebeam profiles | ★ Workspace menu: takeoff, drawing only, pages + drawing, check layouts; icons-only toolbar; minimap; full screen; thumbnail size; ★ ⌘ Commands button (Ctrl+K palette) |
+
 ## 7. Not in ZD Takeoff yet (and why)
 
 | Feature | Where | Note |
@@ -123,11 +149,11 @@ A right-drag still pans; only a right-click without dragging opens the menu, and
 | Studio sessions (live multi-user markup) | Bluebeam | The takeoff is private by design (browser storage); projects move as JSON. |
 | Quantity Link (live link to Excel cells) | Bluebeam Complete | Excel export is formula-driven instead (PRODUCT / SUM in the house format). |
 | Stitching sheets, Smart Overlay with AI, AI-REVIEW / AI-MATCH | Bluebeam Max | Compare (colour overlay of two revisions) and Revision compare (quantities) cover the QS side. |
-| Auto Bookmark | PlanSwift Takeoff Boost | Sheet info (sheet no., title, revision, floor) is entered per page. |
-| OCR of scanned drawings | both | Scanned PDFs measure but have no text or lines to read. |
+| Combine areas (union of two outlines) | Forma Takeoff | Cut-out is there; a union of irregular outlines needs a polygon-clipping library — measure the combined outline instead. |
+| Packages / 3D (BIM) takeoff | Forma Takeoff | Conditions with BOQ codes and the bill's groups play the package's part; the takeoff is 2D PDF only. |
 | Slope / pitch factor on areas | both | Use the assembly formula on the condition. |
 | Group / ungroup | Bluebeam | Multi-select and conditions instead. |
-| Reorder / rotate / delete pages inside a PDF | both | The PDF is kept as issued; a turned page is shown as the PDF turns it. |
+| Reorder / rotate / delete pages inside a PDF | both | The PDF is kept as issued (import can leave pages out); a turned page is shown as the PDF turns it. |
 
 ## Sources (searched 02-Oct-2026)
 
@@ -142,3 +168,15 @@ A right-drag still pans; only a right-click without dragging opens the menu, and
 - PlanSwift — Auto Count (box a symbol, shape or label matching, up to 10 pages, verify): https://www.planswift.com/features/auto-count/
 - PlanSwift — Keyboard hotkeys (Backspace last point, A arc point, N new section, Shift ortho, Ctrl+arrow copies): https://constructconnect-help.atlassian.net/wiki/spaces/PSUPPORT/pages/49545397/Settings+Tab:+Keyboard+Hotkeys
 - PlanSwift — Copying and pasting takeoffs / Advanced Copy Pro (array, mirror, rotate, Ctrl+click copies): https://help.constructconnect.com/03-a-detailed-look-at-the-home-tab-and-drawing-takeoff-and-annotations-176/planswift-03-12-12-copying-and-pasting-takeoffs-1491
+
+## Sources for 6c (searched 04/05-Oct-2026)
+
+- Autodesk — Learn Forma Data Management and Takeoff in 90 minutes (course, available until 15-Oct-2026): https://www.autodesk.com/learn/ondemand/course/learn-docs-and-takeoff-in-90-minutes
+- Autodesk Forma Takeoff help (via Autodesk Product Help search): Export Sheets to PDF in Takeoff; Work with Sheets & Models in the Takeoff Viewer; Viewer Tools (Combine, Cutout, Minimap, Symbol Detection, Full Screen); Symbol Detection; Perform Takeoff on 2D Sheets; Publish 2D Files as Sheets; Takeoff Types; Inventory; Takeoff Reports; Comparing Sheets in the Takeoff Viewer; Formulas in Takeoff; Perform Area Takeoff With Quick Fill (Beta)
+- Autodesk Forma Data Management — Automated Drawing Extraction / Extract Pages and Attributes / Title Block Templates: https://help.autodesk.com/view/DOCS/ENU/?guid=Automated_Drawing_Extraction
+- Autodesk — AI features in Autodesk Forma (Symbol Detection in Takeoff, Autodesk Assistant…): https://www.autodesk.com/support/technical/article/caas/sfdcarticles/sfdcarticles/AI-features-in-Autodesk-Construction-Cloud.html
+- Bluebeam Max global launch, 19-May-2026 (Claude via MCP, Stitching, Magic Markups, Smart Overlay, Smart Review): https://press.bluebeam.com/2026/05/bluebeam-max-launches-globally-bringing-ai-powered-productivity-to-aec-teams-everywhere/
+- Bluebeam Revu — AutoMark page labels from a page region; Export → Image (PNG / JPEG, page range): https://novedge.com/blogs/design-news/bluebeam-tip-batch-auto-rename-in-bluebeam-revu-using-page-labels
+- PlanSwift Takeoff Boost (Auto Takeoff, Auto Count, Auto Scale, Auto Bookmark), 06-May-2026: https://help.constructconnect.com/latest-product-reveal-release-notes-229/planswift-with-takeoff-boost-ai-powered-tools-release-notes-2026-05-06-2752
+- Kreo — AI construction takeoff (Auto Measure, One-Click Area, Auto Count, Caddie, AI renaming, AI scale, PDF export): https://www.kreo.net/solutions/ai-construction-takeoff-sofware
+- Togal.AI — auto-naming of drawings, text / image / pattern search, Togal.CHAT, compare: https://www.togal.ai/
