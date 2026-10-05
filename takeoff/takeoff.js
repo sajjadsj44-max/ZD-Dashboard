@@ -1182,7 +1182,7 @@ function cleanPoly(V){
       if (Math.abs((p[0] - a[0]) * (b[1] - p[1]) - (p[1] - a[1]) * (b[0] - p[0])) < 1e-6 * Math.max(1, dist(a, b) ** 2)) { Q.splice(i, 1); changed = true; break; } } }
   return Q;
 }
-function squareUp(Q, tol, gap, maxD){   // near-rectilinear outline -> rectilinear; detours shorter than the gap (door bulges) dropped
+function squareUp(Q, tol, gap, maxD, k){   // near-rectilinear outline -> rectilinear; detours shorter than the gap (door bulges) dropped
   const all = orthoEdges(Q), tot = all.reduce((a, e) => a + e.L, 0);
   let E = all.filter(e => e.o !== "D");
   // slanted pieces may only be the short rounding left at inside corners and door openings, never a real slanted wall
@@ -1197,7 +1197,11 @@ function squareUp(Q, tol, gap, maxD){   // near-rectilinear outline -> rectiline
       for (let t = 1; t <= s; t++) drop.add((i + t) % E.length);
       E = E.map((x, j) => j === i ? m : x).filter((_, j) => !drop.has(j)); changed = true;
     } }
-  return E.length >= 4 ? edgesToPoly(E) : null;
+  if (E.length < 4) return null;
+  // squaring may only tidy: a long sloped wall (a gable, a bay, a chamfer — longer than a door gap) squared away would add or
+  // drop real area, so the outline is kept when squaring it changes the area by more than a bulge's worth
+  const R = edgesToPoly(E);
+  return R && all.some(e => e.o === "D" && e.L > gap) && Math.abs(polyArea(R) - polyArea(Q)) > 0.05 * polyArea(Q) + 1.5 * k * k ? null : R;   // (k: points per foot)
 }
 /* the outline's small bites into the walls, trimmed: at a door jamb or a wall end the fill can slip a few inches into
    the wall's thickness, leaving a tab (out and back) or a step (the face jumps out and carries on). A tab up to 1 ft deep
@@ -1503,7 +1507,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
       partial = n * px / k < 0.6 * passage.along; }   // the outline takes in less than 60 % of the passage's length: a piece by a doorway, not the passage
     await breathe(); const loop = outerLoop(m, W, H); if (!loop || loop.length < 4) return {err: "No closed space found at that point.", passage};
     let Q = dpClosed(loop.map(p => [x0 + p[0] * px, y0 + p[1] * px]), 1.6 * px);
-    const sq = squareUp(Q, 3 * px, o.gap * k, Math.max(o.gap, o.pocket) * k);
+    const sq = squareUp(Q, 3 * px, o.gap * k, Math.max(o.gap, o.pocket) * k, k);
     Q = sq ? (ids.length ? snapToWalls(sq, g, ids, Math.max(4 * px, 0.35 * k), k, px, ids.doors) : offsetPoly(sq, (img ? 1.5 : 1) * px))
       : ids.length ? snapPoly(Q, ids.map(i => g.segs[i]).concat(ids.doors), Math.max(4 * px, 0.35 * k), k, (img ? 1.5 : 1) * px, px) : offsetPoly(Q, (img ? 1.5 : 1) * px);
     Q = cleanPoly(Q);
