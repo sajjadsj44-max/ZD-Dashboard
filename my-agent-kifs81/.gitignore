@@ -1,0 +1,6 @@
+# The repo root ignores every src/ folder; the agent's code lives in one.
+!src/
+
+.env
+.venv/
+__pycache__/
