@@ -5145,7 +5145,8 @@ function ctxHtml(L){
 }
 function ctxShow(L, x, y){
   const m = $("ctx"); CTX_FN = [];
-  m.innerHTML = ctxHtml(L); m.classList.add("on");
+  const pin = {t: S.ctxPinned ? "Unpin menu" : "📌 Keep menu open for screenshot", fn: () => { S.ctxPinned = !S.ctxPinned; ctxShow(L, x, y); }};
+  m.innerHTML = ctxHtml([pin, {sep: 1}, ...L]); m.classList.add("on");
   const r = m.getBoundingClientRect(), W = window.innerWidth, H = window.innerHeight;
   m.style.left = Math.max(4, Math.min(x, W - r.width - 4)) + "px"; m.style.top = Math.max(4, Math.min(y, H - r.height - 4)) + "px";
   m.classList.toggle("flip", x + r.width + 220 > W);   // submenus open to the left near the right edge
@@ -5178,7 +5179,7 @@ function ctxItem(hi, sp, q, e){
   const cut = sg || (vi > 0 && vi < it.pts.length - 1 ? {i: vi - 1, p: it.pts[vi]} : null), lk = sel.some(o => o.locked), allLk = sel.length && sel.every(o => o.locked);
   const qty = k ? fq(rowsOf(it, k).reduce((a, r) => a + r.qty, 0), c.unit) + " " + c.unit : "scale not set";
   const L = [{h: many ? ids.size + " selected" : (it.label || kindName(it, c)), s: many ? selTotals(ids) : c.name + " · " + qty + (it.locked ? " · locked" : "")}];
-  if (!many) L.push({t: "Properties…", k: "Dbl-click", fn: focusProps}, {t: "Rename…", k: "F2", fn: () => renameItem(it)});
+  if (!many) L.push({t: "Properties…", k: "Dbl-click", fn: focusProps}, {t: "Set as default", fn: () => setDefaultsFromSelection(it)}, {t: "Rename…", k: "F2", fn: () => renameItem(it)});
   L.push({sep: 1});
   if (!many && c.type === "count" && hi.pt >= 0) L.push({t: "Delete this count point (" + (hi.pt + 1) + ")", fn: () => delPoint(it, hi.pt), dis: it.locked});
   if (!many && editPts(it)) {
@@ -5211,11 +5212,23 @@ function ctxItem(hi, sp, q, e){
   L.push({sep: 1}, {t: "Mark checked ✓", fn: () => setQa(sel, "checked")}, {t: "Needs recheck", fn: () => setQa(sel, "recheck")}, {t: "Zoom to", fn: () => zoomTo(ids)}, {sep: 1}, {t: "Delete", k: "Del", fn: delSelected, dng: 1, dis: allLk});
   return L;
 }
+function setDefaultsFromSelection(o){
+  const d = toolDefaults();
+  if (o && o.type) {
+    if (o.type === "dimension") Object.assign(d, {dimColor: o.color || d.dimColor, dimWidth: +o.width || d.dimWidth, dimSize: +o.size || d.dimSize, dimArrow: +o.arrow || d.dimArrow, dimOffset: +o.offset || d.dimOffset});
+    else if (o.type === "hilite") Object.assign(d, {hiliteColor: o.color || d.hiliteColor, hiliteOpacity: +o.opacity || d.hiliteOpacity});
+    else Object.assign(d, {markColor: o.color || d.markColor, markWidth: +o.width || d.markWidth});
+    saveToolDefaults(d); toast(MARK_TOOLS[o.type] + " saved as the default", 2200); return;
+  }
+  const c = o && o.cond ? cond(o.cond) : null;
+  if (c) { d.condColor = c.color || d.condColor; d.condWidth = +c.sw || d.condWidth; saveToolDefaults(d); toast("Measurement defaults saved from " + c.name, 2200); }
+}
+
 function ctxMark(m){
   const ids = selIds(), many = ids.size > 1, allLk = [...ids].map(objById).filter(Boolean).every(o => o.locked);
   return [{h: many ? ids.size + " selected" : MARK_TOOLS[m.type], s: many ? "" : (m.text || "markup — not a quantity") + (m.locked ? " · locked" : "")},
     !many && m.type !== "hilite" && m.type !== "fence" && m.type !== "dimension" ? {t: "Edit text…", k: "Dbl-click", fn: () => editMarkText(m)} : null,
-    !many ? {t: "Colour…", fn: focusProps} : null, {sep: 1}, ...ctxClip(null), {sep: 1}, ctxArrange(), {t: allLk ? "Unlock" : "Lock", k: "Ctrl+Shift+L", fn: lockSel},
+    !many ? {t: "Colour…", fn: focusProps} : null, !many ? {t: "Set as default", fn: () => setDefaultsFromSelection(m)} : null, {sep: 1}, ...ctxClip(null), {sep: 1}, ctxArrange(), {t: allLk ? "Unlock" : "Lock", k: "Ctrl+Shift+L", fn: lockSel},
     {t: "Select all " + MARK_TOOLS[m.type].toLowerCase() + "s on this page", fn: () => selectSimilar(m)}, {t: "Zoom to", fn: () => zoomTo(ids)}, {sep: 1}, {t: "Delete", k: "Del", fn: delSelected, dng: 1, dis: allLk}];
 }
 function ctxCanvas(q){
@@ -5280,10 +5293,10 @@ function wire(){
     } else if (vertexAt(one, sp) >= 0 && (cond(one.cond) || {}).type !== "count") return toast(one.kind === "open" ? "An opening has two ends — drag them to change it" : "A circle is its centre and edge point — drag them to change it", 2600);
     if (hitItem(sp) === one) focusProps();
   });
-  $("ctx").addEventListener("click", e => { const it = e.target.closest("[data-ci]"); if (!it || it.classList.contains("dis")) return; const fn = CTX_FN[+it.dataset.ci]; ctxClose(); if (fn) fn(); });
+  $("ctx").addEventListener("click", e => { const it = e.target.closest("[data-ci]"); if (!it || it.classList.contains("dis")) return; const fn = CTX_FN[+it.dataset.ci]; if (!(S.ctxPinned && it.dataset.ci === "0")) ctxClose(); if (fn) fn(); });
   $("ctx").addEventListener("contextmenu", e => e.preventDefault());
-  document.addEventListener("pointerdown", e => { if (!e.target.closest("#ctx")) ctxClose(); }, true);
-  window.addEventListener("blur", ctxClose);
+  document.addEventListener("pointerdown", e => { if (!S.ctxPinned && !e.target.closest("#ctx")) ctxClose(); }, true);
+  window.addEventListener("blur", () => { if (!S.ctxPinned) ctxClose(); });
   st.addEventListener("wheel", e => { if (!S.page) return; e.preventDefault(); ctxClose(); const sp = evPos(e); zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018)), sp[0], sp[1]); }, {passive: false});
   st.addEventListener("pointerleave", () => { S.cursor = null; S.snap = null; S.hover = null; draw(); });
   st.addEventListener("dragover", e => { e.preventDefault(); $("drop").classList.add("over"); });
