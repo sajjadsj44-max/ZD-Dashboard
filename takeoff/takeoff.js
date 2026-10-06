@@ -2708,6 +2708,28 @@ async function labelDialog(){
   if (P.proj && S.page) { const n = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !i.label && i.kind === "shape" && (cond(i.cond) || {}).type === "area").length;
     if (n && S.lbl.autoName && await ask("Name the areas already drawn?", `<p>${n} area${n > 1 ? "s" : ""} on this page ${n > 1 ? "have" : "has"} no name. Name ${n > 1 ? "them" : "it"} from the room text inside?</p>`, "Name them")) nameAreas(); }
 }
+/* ------------------------------------------------------------------ embedded takeoff legend (Bluebeam-style) */
+const LEGEND_COLS = [{id:'symbol',label:'Symbol',on:true},{id:'boq',label:'BOQ',on:true},{id:'description',label:'Description',on:true},{id:'unit',label:'Unit',on:true},{id:'qty',label:'Quantity',on:true},{id:'rate',label:'Rate',on:false},{id:'amount',label:'Amount',on:false}];
+function legendOfPage(file=S.fileId,page=S.pageNo){return (P.proj.marks||[]).filter(m=>m.type==='legend'&&m.file===file&&m.page===page);}
+function legendCols(m){const src=Array.isArray(m.columns)?m.columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id);return src.map(id=>LEGEND_COLS.find(x=>x.id===id)).filter(Boolean);}
+function legendRows(m){const map=new Map(), list=m.scope==='all'?P.proj.items.filter(i=>!hiddenItem(i)):P.proj.items.filter(i=>i.file===m.file&&i.page===m.page&&!hiddenItem(i));list.forEach(it=>{const c=cond(it.cond);if(!c)return;let q=0,has=false;if(c.type==='count'){q=(+it.pts?.length||0)*Math.max(1,+it.nos||1);has=true}else{const k=itemScale(it);if(k){q=rowsOf(it,k).reduce((a,r)=>a+(+r.qty||0),0);has=true}}if(!has&&!q)return;const old=map.get(c.id);map.set(c.id,{c,q:(old?old.q:0)+q,has:!!(old&&old.has)||has})});let rows=[...map.values()].filter(x=>x.has||x.q!==0);const s=m.sort||'drawing';if(s==='condition')rows.sort((a,b)=>String(a.c.name).localeCompare(String(b.c.name)));else if(s==='boq')rows.sort((a,b)=>String(a.c.boq||'').localeCompare(String(b.c.boq||'')));return rows;}
+function legendQty(x,m){const d=Math.max(0,Math.min(3,Math.round(+m.precision||3)));return x.has?(+x.q||0).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';}
+function legendRate(c,m){const r=Number(c&&c.rate);if(!isFinite(r)||r===0)return'—';const d=Math.max(0,Math.min(2,Math.round(+m.moneyPrecision||2)));return r.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function legendSvg(m,T,z){
+ const pp=m.pts||[[80,80],[420,260]],a=T(pp[0]),b=T(pp[1]),x0=Math.min(a[0],b[0]),y0=Math.min(a[1],b[1]),x1=Math.max(a[0],b[0]),y1=Math.max(a[1],b[1]),W=Math.max(80,x1-x0),H=Math.max(60,y1-y0),cols=legendCols(m),rows=legendRows(m),fs=Math.max(5,Math.min(32,+m.fontSize||9))*z,rh=Math.max(fs*1.55,Math.min(80,+m.rowH||18)*z),hh=m.showHeaders===false?0:Math.max(fs*1.8,Math.min(80,+m.headerH||22)*z),th=m.showTitle===false?0:Math.max(fs*1.9,Math.min(80,+m.titleH||24)*z),pad=Math.max(2,Math.min(20,+m.pad||5))*z,bw=Math.max(0,Math.min(8,+m.lineWidth||1))*z,fill=m.fill||'#ffffff',head=m.headerFill||'#eef2f7',border=m.border||'#40556b',textCol=m.textColor||'#172b3f';
+ const defs='<defs><clipPath id="lg'+esc(m.id)+'"><rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+H.toFixed(1)+'"/></clipPath></defs>';let out='<g>'+defs+'<rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+H.toFixed(1)+'" rx="3" fill="'+fill+'" fill-opacity="'+(m.fillOpacity==null?.96:Math.max(.05,Math.min(1,+m.fillOpacity)))+'" stroke="'+border+'" stroke-width="'+bw.toFixed(1)+'"/>';let yy=y0+pad;
+ if(th){out+='<rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+th.toFixed(1)+'" fill="'+(m.titleFill||head)+'"/><text x="'+(x0+pad).toFixed(1)+'" y="'+(y0+th*.68).toFixed(1)+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(m.title||'Takeoff Legend')+'</text>';yy+=th}
+ const widths=Array.isArray(m.colWidths)?m.colWidths.map(Number):[],weights=cols.map((c,i)=>Math.max(.05,Number(widths[i])||({symbol:.11,boq:.14,description:.31,unit:.11,qty:.16,rate:.12,amount:.15}[c.id]||.15))),sum=weights.reduce((a,b)=>a+b,0);for(let i=0;i<weights.length;i++)weights[i]/=sum;const xs=[];let xx=x0;cols.forEach((c,i)=>{xs.push(xx);xx+=W*weights[i]});
+ if(hh){out+='<rect x="'+x0.toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+hh.toFixed(1)+'" fill="'+head+'"/>';cols.forEach((c,i)=>{out+='<text x="'+(xs[i]+pad).toFixed(1)+'" y="'+(yy+hh*.67).toFixed(1)+'" font-size="'+Math.max(5,fs*.9).toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(c.label)+'</text>'});yy+=hh}
+ const cell=function(x,y,w,s,al,bold){al=al||'start';const tx=al==='end'?x+w-pad:al==='middle'?x+w/2:x+pad;return '<text x="'+tx.toFixed(1)+'" y="'+y.toFixed(1)+'" text-anchor="'+(al==='end'?'end':al==='middle'?'middle':'start')+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="'+(bold?700:400)+'" fill="'+textCol+'">'+esc(s==null?'—':s)+'</text>';};
+ rows.forEach(function(r,ri){const y=yy+ri*rh,c=r.c,color=HEXCOL.test(String(c.color||''))?c.color:'#4b3b8f';if(ri%2)out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="#f7f9fb"/>';cols.forEach(function(col,i){const cw=W*weights[i],x=xs[i];if(col.id==='symbol')out+='<rect x="'+(x+pad).toFixed(1)+'" y="'+(y+rh*.28).toFixed(1)+'" width="'+Math.min(cw-pad*2,rh*.42).toFixed(1)+'" height="'+Math.min(cw-pad*2,rh*.42).toFixed(1)+'" rx="2" fill="'+color+'" stroke="'+border+'" stroke-width=".6"/>';else if(col.id==='boq')out+=cell(x,y+rh*.67,cw,c.boq||'—');else if(col.id==='description')out+=cell(x,y+rh*.67,cw,c.name||'—');else if(col.id==='unit')out+=cell(x,y+rh*.67,cw,c.unit||'—','middle');else if(col.id==='qty')out+=cell(x,y+rh*.67,cw,legendQty(r,m),'end');else if(col.id==='rate')out+=cell(x,y+rh*.67,cw,legendRate(c,m),'end');else{const rate=Number(c.rate),amt=isFinite(rate)&&rate?(+r.q||0)*rate:null;out+=cell(x,y+rh*.67,cw,amt==null?'—':f2(amt),'end')}})});
+ if(cols.length>1)for(let i=1;i<cols.length;i++){out+='<line x1="'+xs[i].toFixed(1)+'" y1="'+(y0+pad).toFixed(1)+'" x2="'+xs[i].toFixed(1)+'" y2="'+Math.min(y1,y0+pad+th+hh+rows.length*rh).toFixed(1)+'" stroke="'+border+'" stroke-opacity=".22" stroke-width=".6"/>'}
+ out+='</g>';return out;
+}
+function defaultLegend(file=S.fileId,page=S.pageNo){const w=340,h=190,base=S.base||{width:1000,height:1000},x0=Math.max(20,Math.min(Math.max(20,base.width-w-20),base.width-80)),y0=30;return{id:uid('M'),type:'legend',file,page,pts:[[x0,y0],[x0+w,y0+h]],title:'Takeoff Legend',showTitle:true,showHeaders:true,columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id),precision:3,moneyPrecision:2,fontSize:9,rowH:18,headerH:22,titleH:24,pad:5,lineWidth:1,border:'#40556b',fill:'#ffffff',fillOpacity:.96,headerFill:'#eef2f7',textColor:'#172b3f',sort:'drawing',colWidths:[.11,.14,.31,.11,.16],subject:'Takeoff Legend',author:qaUser(),status:'',at:new Date().toISOString()};}
+async function editLegend(m){const cols=legendCols(m),body='<div class="grid"><div class="fg w2"><label>Title</label><input type="text" id="lgTitle" value="'+esc(m.title||'Takeoff Legend')+'"></div><div class="fg"><label>Font size (pt)</label><input type="number" id="lgFs" min="5" max="32" step=".5" value="'+(+m.fontSize||9)+'"></div><div class="fg"><label>Row height (pt)</label><input type="number" id="lgRh" min="8" max="60" step="1" value="'+(+m.rowH||18)+'"></div><div class="fg"><label>Precision</label><select id="lgPrec">'+[0,1,2,3].map(n=>'<option value="'+n+'" '+((+m.precision||3)===n?'selected':'')+'>'+n+' decimals</option>').join('')+'</select></div><div class="fg"><label>Sort</label><select id="lgSort"><option value="drawing">Drawing order</option><option value="condition">Condition</option><option value="boq">BOQ code</option></select></div><div class="fg"><label>Border colour</label><input type="color" id="lgBorder" value="'+(HEXCOL.test(m.border||'')?m.border:'#40556b')+'"></div><div class="fg"><label>Header fill</label><input type="color" id="lgHead" value="'+(HEXCOL.test(m.headerFill||'')?m.headerFill:'#eef2f7')+'"></div><div class="fg"><label>Fill</label><input type="color" id="lgFill" value="'+(HEXCOL.test(m.fill||'')?m.fill:'#ffffff')+'"></div><div class="fg w2"><label><input type="checkbox" id="lgTitleOn" style="width:auto" '+(m.showTitle===false?'':'checked')+'> Show title</label><label><input type="checkbox" id="lgHeadOn" style="width:auto" '+(m.showHeaders===false?'':'checked')+'> Show column headers</label></div><div class="fg w2"><label>Columns</label><div class="grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">'+LEGEND_COLS.map(c=>'<label class="pk"><input type="checkbox" data-lgcol="'+c.id+'" style="width:auto" '+(cols.some(x=>x.id===c.id)?'checked':'')+'> '+esc(c.label)+'</label>').join('')+'</div></div></div><p class="small">Unit and Quantity are live from the takeoff condition. Rate and Amount use the condition rate when one exists; no rate is invented.</p>';const v=await ask('Edit Legend',body,'Save',()=>{const columns=[...document.querySelectorAll('[data-lgcol]:checked')].map(x=>x.dataset.lgcol);if(!columns.length)return'Choose at least one column';return{title:$('lgTitle').value.trim()||'Takeoff Legend',fontSize:Math.max(5,Math.min(32,+$('lgFs').value||9)),rowH:Math.max(8,Math.min(60,+$('lgRh').value||18)),precision:+$('lgPrec').value||0,sort:$('lgSort').value,border:$('lgBorder').value,headerFill:$('lgHead').value,fill:$('lgFill').value,showTitle:$('lgTitleOn').checked,showHeaders:$('lgHeadOn').checked,columns}});if(v)mutate(()=>Object.assign(m,v),'Edit Legend');}
+async function createLegend(){if(!P.proj||!S.page)return toast('Open a drawing page first');const m=defaultLegend();mutate(()=>{(P.proj.marks=P.proj.marks||[]).push(m)},'Add Legend');setSel([m.id]);setTool('select');refresh();toast('Legend placed on the drawing — drag the corners to resize; double-click to edit',3200)}
+function legendButton(){const s=S.selMark&&objById(S.selMark);if(s&&s.type==='legend')return editLegend(s);return createLegend();}
 function setLblOn(on){ S.lbl.on = on; pref("zdTakeoffLbl", JSON.stringify(S.lbl)); $("bLbl").classList.toggle("on", on); $("bLbl").title = on ? "Labels shown — click (or L) to hide" : "Labels hidden — click (or L) to show"; viewMark(); draw(); }
 function loadLegend(){ S.legendOn = pref("zdTakeoffLegend") !== "0"; }
 function setLegendOn(on){
@@ -2715,34 +2737,8 @@ function setLegendOn(on){
   const b = $("bLegend"); if (b) { b.classList.toggle("on", S.legendOn); b.title = S.legendOn ? "Hide the takeoff legend on the drawing" : "Show the takeoff legend on the drawing"; }
   renderLiveLegend();
 }
-function renderLiveLegend(){
-  const el = $("takeoffLegend"); if (!el) return;
-  if (!S.legendOn || !P.proj || !S.page) { el.classList.remove("on"); el.innerHTML = ""; return; }
-  const totals = new Map();
-  P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).forEach(it => {
-    const c = cond(it.cond); const k = itemScale(it);
-    if (!c) return;
-    let q = 0;
-    if (k) q = rowsOf(it, k).reduce((a, r) => a + (+r.qty || 0), 0);
-    const old = totals.get(c.id); totals.set(c.id, {c, q: (old ? old.q : 0) + q, hasScale: (old ? old.hasScale : false) || !!k});
-  });
-  const rows = [...totals.values()].filter(x => x.hasScale || x.q !== 0);
-  if (!rows.length) { el.classList.remove("on"); el.innerHTML = ""; return; }
-  const fmt = x => {
-    const c = x.c;
-    if (!x.hasScale) return "scale ?";
-    return fq(x.q, c.unit) + (c.unit ? " " + c.unit : "");
-  };
-  el.innerHTML = '<div class="lh"><span>▤</span><span>Takeoff Legend</span><button class="btn sm" id="legendClose" style="margin-left:auto;padding:1px 6px">×</button></div><div class="lb">' +
-    rows.map(x => {
-      const c = x.c, type = c.type === "area" ? "area" : c.type === "count" ? "count" : "";
-      const color = /^#[0-9a-f]{6}$/i.test(c.color || "") ? c.color : "#4b3b8f";
-      const name = (c.boq ? c.boq + " · " : "") + c.name;
-      return '<div class="li"><span class="sw ' + type + '" style="background:' + color + '"></span><span class="ln" title="' + esc(name) + '">' + esc(name) + '</span><span class="q">' + esc(fmt(x)) + '</span></div>';
-    }).join("") + '</div>';
-  el.classList.add("on");
-  const close = $("legendClose"); if (close) close.onclick = () => setLegendOn(false);
-}
+function renderLiveLegend(){ const el=$("takeoffLegend"); if(el){ el.classList.remove("on"); el.innerHTML=""; } }
+
 /* the View button shows a dot while something is dimmed, thinned or hidden — so a hidden markup is never a surprise */
 function viewMark(){ const b = $("bView"); if (b) b.classList.toggle("mod", !!(S.dim || S.thin || S.hideMk || (S.lbl && !S.lbl.on))); }
 /* the room name written inside an outline (BEDROOM 2, LOUNGE…), from the PDF's own text; "" if none */
@@ -3466,6 +3462,7 @@ function markSvg(m, T, z){   // T: base -> screen; z: px per screen unit (1 on s
 }
 function markSvg0(m, T, z){
   const col = m.color || "#d03b3b", sel = m.id === S.selMark || S.multi.has(m.id);
+  if (m.type === 'legend') return legendSvg(m, T, z);
   if (MK_TYPES.has(m.type)) return mkSvg(m, T, z, sel);
   if (m.type === "fence") { const d = m.pts.map(p => T(p).map(v => v.toFixed(1)).join(",")).join(" ");
     return `<polyline points="${d}" fill="none" stroke="#ff7a00" stroke-width="${(sel ? 4 : 3) * z}" stroke-dasharray="${6 * z} ${3 * z}" stroke-linecap="round"/>`; }
@@ -3486,7 +3483,7 @@ function markSvg0(m, T, z){
 }
 function markAt(sp, only){   // the markup under a screen point (only: test just that one)
   return (only ? [only] : pageMarks().slice().reverse()).find(m => {
-    if (MK_TYPES.has(m.type)) return mkHit(m, sp);
+    if (MK_TYPES.has(m.type) || m.type === "legend") return mkHit(m, sp);
     const a = toScr(m.pts[0]), b = m.pts[1] ? toScr(m.pts[1]) : null;
     if (m.type === "note") return sp[0] >= a[0] - 4 && sp[0] <= a[0] + Math.min(320, (m.text || "Note").length * 6.6 + 14) && Math.abs(sp[1] - a[1]) <= 12;
     if (m.type === "arrow" || m.type === "dimension") return distSeg(sp, a, b) <= HIT_PX + (+m.width || 0) + 4;
@@ -3525,7 +3522,7 @@ const MK_TYPES = new Set(["text", "callout", "line", "polyline", "polygon", "box
 const MK_TOOL_NAMES = {mk_text: "Text box", mk_callout: "Callout", mk_line: "Line", mk_polyline: "Polyline", mk_polygon: "Polygon", mk_box: "Rectangle", mk_ellipse: "Ellipse",
   mk_pen: "Pen", mk_hpen: "Highlighter pen", mk_stamp: "Stamp", mk_image: "Image", mk_link: "Hyperlink", mk_attach: "File attachment", mk_redact: "Redaction", mk_erase: "Erase (white-out)"};
 const MK_MINPTS = {note: 1, attach: 1, polygon: 3, callout: 3};
-const MK_BOXY = new Set(["text", "box", "ellipse", "stamp", "image", "link", "redact", "hilite", "cloud"]);   // drawn between two opposite corners
+const MK_BOXY = new Set(["text", "box", "ellipse", "stamp", "image", "link", "redact", "hilite", "cloud", "legend"]);   // drawn between two opposite corners
 const MK_PLACE = new Set(["text", "stamp", "image", "attach"]);   // a click places it (a drag sizes it)
 const mkKindOf = m => m.type === "pen" && m.hl ? "hpen" : m.type === "redact" && m.erase ? "erase" : m.type;
 const mkTypeOf = kind => kind === "hpen" ? "pen" : kind === "erase" ? "redact" : kind;
@@ -6211,7 +6208,7 @@ function wire(){
     const sp = evPos(e), mk = markAt(sp);
     if (mk && mk.type === "link") return followLink(mk);
     if (mk && mk.type === "attach") return mk.att && openAsset(mk.att.aid, mk.att.name);
-    if (mk && selIds().has(mk.id)) { if (mk.locked) return lockedMsg(); if (mk.type !== "hilite" && mk.type !== "fence") editMarkText(mk); return; }
+    if (mk && selIds().has(mk.id)) { if (mk.locked) return lockedMsg(); if (mk.type === "legend") { editLegend(mk); return; } if (mk.type !== "hilite" && mk.type !== "fence") editMarkText(mk); return; }
     if (!mk && !hitItem(sp)) { const ln = sheetRefsNear(toBase(sp[0], sp[1]), 10 / S.view.s)[0]; if (ln) { toast("Sheet " + ln.no + " → " + keyName(ln.k), 2000); return gotoKey(ln.k); } }   // a sheet no. written on the drawing: open that sheet
     const one = selOne(); if (!one) return;
     const recent = S.lastIns && S.lastIns.id === one.id && Date.now() - S.lastIns.t < 700 && vertexAt(one, sp) === S.lastIns.vi;   // the second click of a double-click on a "+" that has just added this point
@@ -6333,7 +6330,7 @@ function wire(){
   document.addEventListener("keydown", e => { if (e.key === "Escape" && vpop.classList.contains("on")) { vOpen(false); e.stopPropagation(); } }, true);
   $("bFitW").onclick = () => { fitWidth(); vOpen(false); };
   { const hd = document.querySelector("header"); new ResizeObserver(() => document.documentElement.style.setProperty("--hh", hd.offsetHeight + "px")).observe(hd); }   // the bar's height (one row, or two on a narrower screen)
-  $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => { vOpen(false); labelDialog(); }; $("bLegend").onclick = () => setLegendOn(!S.legendOn);
+  $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => { vOpen(false); labelDialog(); }; $("bLegend").onclick = () => legendButton();
   $("bHideMk").onclick = () => { S.hideMk = !S.hideMk; $("bHideMk").classList.toggle("on", !S.hideMk); $("bHideMk").title = S.hideMk ? "Markups hidden — click to show all" : "Hide all markups (measurements and notes) to see the drawing"; viewMark(); draw(); toast(S.hideMk ? "All markups hidden" : "Markups shown", 1500); };
   $("bLayers").onclick = () => { vOpen(false); S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };
   $("bDel").onclick = () => delSelected();
