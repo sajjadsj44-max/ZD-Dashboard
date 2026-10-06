@@ -23,7 +23,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
 
 (async () => {
   const browser = await pw.chromium.launch();
-  const ctx = await browser.newContext({viewport: {width: 1440, height: 900}, acceptDownloads: true});
+  const ctx = await browser.newContext({viewport: {width: 1440, height: 900}, acceptDownloads: true}); await require("./zd_unlock")(ctx);   // the dashboard password, typed in on every page opened (nothing is remembered)
   const errors = [];
   const realChart = LIBS && fs.existsSync(path.join(LIBS, "chart.js/dist/chart.umd.js"));
   await ctx.route(/cdn\.jsdelivr\.net|docs\.google\.com|fonts\.g/, async route => {

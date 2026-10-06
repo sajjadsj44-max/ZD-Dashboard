@@ -27,7 +27,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
   if (!LIBS || !fs.existsSync(path.join(LIBS, "@mlightcad/libredwg-web/wasm/libredwg-web.wasm"))) { console.log("TK_LIBS must hold pdfjs-dist, pdf-lib, @mlightcad/libredwg-web and @mlightcad/dxf-json — see the header"); process.exit(2); }
   const PL = require(path.join(LIBS, "pdf-lib"));
   const browser = await pw.chromium.launch();
-  const ctx = await browser.newContext({viewport: {width: 1440, height: 900}, acceptDownloads: true});
+  const ctx = await browser.newContext({viewport: {width: 1440, height: 900}, acceptDownloads: true}); await require("./zd_unlock")(ctx);   // the dashboard password, typed in on every page opened (nothing is remembered)
   await ctx.route(/cdn\.jsdelivr\.net/, r => {
     const u = r.request().url(), H = {"Access-Control-Allow-Origin": "*"}, js = "text/javascript";
     if (/pdf\.worker\.min\.mjs/.test(u)) return r.fulfill({path: path.join(LIBS, "pdfjs-dist/build/pdf.worker.min.mjs"), contentType: js, headers: H});

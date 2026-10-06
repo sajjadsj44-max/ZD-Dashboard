@@ -25,7 +25,7 @@ function near(a, b, tol){ return Math.abs(a - b) <= (tol == null ? 0.005 : tol);
 (async () => {
   const exe = fs.existsSync("/opt/pw-browsers/chromium") ? undefined : undefined;
   const browser = await pw.chromium.launch(exe ? {executablePath: exe} : {});
-  const ctx = await browser.newContext({viewport: {width: 1440, height: 900}, acceptDownloads: true});
+  const ctx = await browser.newContext({viewport: {width: 1440, height: 900}, acceptDownloads: true}); await require("./zd_unlock")(ctx);   // the dashboard password, typed in on every page opened (nothing is remembered)
   const errors = [];
   await ctx.route(/cdn\.jsdelivr\.net|docs\.google\.com|fonts\.g/, async route => {
     const u = route.request().url();

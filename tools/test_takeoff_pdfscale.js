@@ -45,7 +45,7 @@ async function makeVpPdf(){
   const pdf = await makeVpPdf();
   ok(!pdf.includes("/VP"), "test PDF hides its viewports in compressed object streams");
   const browser = await pw.chromium.launch();
-  const ctx = await browser.newContext({viewport: {width: 1440, height: 900}});
+  const ctx = await browser.newContext({viewport: {width: 1440, height: 900}}); await require("./zd_unlock")(ctx);   // the dashboard password, typed in on every page opened (nothing is remembered)
   await ctx.route(/cdn\.jsdelivr\.net/, r => {
     const u = r.request().url(), H = {"Access-Control-Allow-Origin": "*"};
     if (/pdf\.worker\.min\.mjs/.test(u)) return r.fulfill({path: path.join(LIBS, "pdfjs-dist/build/pdf.worker.min.mjs"), contentType: "text/javascript", headers: H});
