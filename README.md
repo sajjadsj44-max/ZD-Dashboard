@@ -130,6 +130,8 @@ average of the 33 receipts of 30-Sep at five sites). SAND-CH 80, SILICA 130,
 BLK-S8 215, BLK-H4 135 and BLK-H8 210 keep their rates with the newer GRN as
 source and date. A saved library takes the new rates only where a line still
 holds the old published value; a rate typed in by hand is kept.
+BLK-S4 140 (Zarea quotation, 05-Sep) → 120 (NEO GRN RCP-3541, 15-Sep-2026 —
+Azmat Sons), updated the same day on request.
 
 Every sheet with GRN columns is read (the ERP export's `Site / GRN # / Item Code /
 Item Description / Rec.Qty`, or the compiled workbook's `Location / GRN# / ITEMNO /

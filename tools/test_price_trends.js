@@ -103,7 +103,8 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
      "DIESEL: several receipts on the latest day — compared with the nearest of them (+0.44%)");
   ok(by("CEM") && by("CEM").how === "ARX RCP-322" && by("CEM").dev === 0, "CEM: a GRN of a newer site (ARX) in the remarks is linked (0%)");
   ok(by("STL60") && by("STL60").dev === 0, "STL60: of the receipts within 2% on its GRN, the closest rate is taken (238, not the #10 bar at 240)");
-  ok(by("BLK-S4") && /cross-check/.test(by("BLK-S4").how) && by("BLK-S4").dev > 10, "BLK-S4: its 'Last … GRN' cross-check is compared (quotation above the last receipt)");
+  ok(by("BLK-S4") && by("BLK-S4").how === "NEO RCP-3541" && by("BLK-S4").dev === 0, "BLK-S4: linked to its own NEO GRN (0%)");
+  ok(by("GRAVEL-SB") && /cross-check/.test(by("GRAVEL-SB").how) && Math.abs(by("GRAVEL-SB").dev) > 10, "GRAVEL-SB: its 'Replaces … GRN' cross-check is compared (more than 10% off the receipt)");
   ok(!by("MAT-WB") && !by("MOULD") && !by("MAT-SND-ZDP"), "composites and assumptions are not linked to the receipts they mention");
   ok(by("GRN-PHO-ENAMEL-L") && /per Gallon/.test(by("GRN-PHO-ENAMEL-L").why), "a receipt in another unit is reported, not compared");
   ok(L.filter(o => !o.why).every(o => o.dev == null || isFinite(o.dev)), "every comparable line has a difference");
@@ -115,11 +116,11 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   await $('[data-pt-f="thr"]').fill("10");
   await $('[data-pt-f="thr"]').dispatchEvent("change");
   await page.waitForTimeout(300);
-  await $('[data-pt-sel="BLK-S4"]').check();
+  await $('[data-pt-sel="GRAVEL-SB"]').check();
   await page.waitForTimeout(150);
   await $('[data-pt-act="rfq"]').click();
   await page.waitForTimeout(400);
-  ok(await page.isVisible("#rav-rfq") && (await T(() => RA.rfq.rfqs[0].lines.map(l => l.code).join(","))) === "BLK-S4", "ticked line opens a new RFQ in the RFQ Tracker");
+  ok(await page.isVisible("#rav-rfq") && (await T(() => RA.rfq.rfqs[0].lines.map(l => l.code).join(","))) === "GRAVEL-SB", "ticked line opens a new RFQ in the RFQ Tracker");
 
   console.log("staleness map");
   await page.click('#raSub button[data-rv="pt"]');
