@@ -216,6 +216,7 @@ table.keyt td{vertical-align:top;border-bottom:1px solid #f2f5f9}
 #drop .box{border:2px dashed #9fb0c6;border-radius:12px;padding:28px 34px;background:rgba(255,255,255,.75);max-width:520px;line-height:1.6}
 #drop.over .box{border-color:var(--purple);background:#fff}
 #busy{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;border-radius:16px;padding:5px 14px;font-size:11.5px;display:none;z-index:4}
+.tcbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:8px 0}.tcbar input[type=search],.tcbar input[type=text]{flex:1;min-width:150px}.tcgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:9px;max-height:52vh;overflow:auto;padding:2px}.tccard{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:7px;min-width:0}.tccard:hover{border-color:#8b7bd1;box-shadow:0 2px 8px rgba(15,41,66,.08)}.tccard.fav{border-left:3px solid #e0aa32}.tccard .tctop{display:flex;gap:6px;align-items:center}.tccard .tcname{font-weight:700;color:var(--navy);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.tccard .tcmeta{font-size:10px;color:var(--muted);line-height:1.4;min-height:28px}.tccard .tcactions{display:flex;gap:5px;align-items:center}.tccard .tcactions .btn{flex:1}.tcstar{border:0;background:none;color:#b1bac6;font-size:17px;cursor:pointer;padding:0 4px}.tcstar.on{color:#e0aa32}.tcnameedit{width:100%;min-width:0;padding:4px 6px;border:1px solid var(--line);border-radius:5px}.tcfoot{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:6px}
 
 /* sheet */
 table.sh{width:100%;border-collapse:collapse;font-size:11.5px}
@@ -367,6 +368,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
   <span class="chip bad" id="scaleChip" title="Page scale — click to set or check"><i></i><span>Scale not set</span></span>
   <div class="sp"></div>
   <button class="btn sm" id="bCmd" title="Every command by name — tools, exports, pages, AI agents (Ctrl+K)">&#8984; Commands</button>
+  <button class="btn sm" id="bToolChest" title="Tool Chest — reusable, favorited tool profiles; click a profile to activate its saved appearance">&#129520; Tool Chest</button>
   <button class="btn sm" id="bDefaults" title="Professional defaults for new measurements, markups, dimensions and highlights">&#9881; Defaults</button>
   <button class="btn sm" id="bWs" title="Workspace: layouts (takeoff, drawing only, pages), icons-only toolbar, minimap, full screen, thumbnail size" aria-haspopup="true">&#9638; Workspace</button>
   <button class="btn sm" id="bUndo" title="Undo (Ctrl+Z)">&#8630;</button>
@@ -481,7 +483,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-06v"></script>
+<script type="module" src="takeoff.js?v=2026-10-06x"></script>
 <script>
 (function () {
   var unlockedKey = 'zd-dashboard-unlocked';

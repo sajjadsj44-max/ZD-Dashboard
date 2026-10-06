@@ -5179,7 +5179,7 @@ function ctxItem(hi, sp, q, e){
   const cut = sg || (vi > 0 && vi < it.pts.length - 1 ? {i: vi - 1, p: it.pts[vi]} : null), lk = sel.some(o => o.locked), allLk = sel.length && sel.every(o => o.locked);
   const qty = k ? fq(rowsOf(it, k).reduce((a, r) => a + r.qty, 0), c.unit) + " " + c.unit : "scale not set";
   const L = [{h: many ? ids.size + " selected" : (it.label || kindName(it, c)), s: many ? selTotals(ids) : c.name + " · " + qty + (it.locked ? " · locked" : "")}];
-  if (!many) L.push({t: "Properties…", k: "Dbl-click", fn: focusProps}, {t: "Set as default", fn: () => setDefaultsFromSelection(it)}, {t: "Rename…", k: "F2", fn: () => renameItem(it)});
+  if (!many) L.push({t: "Properties…", k: "Dbl-click", fn: focusProps}, {t: "Set as default", fn: () => setDefaultsFromSelection(it)}, {t: "Add to Tool Chest…", fn: () => toolChestDialog({object: it, name: (c.name || kindName(it, c)) + " profile"})}, {t: "Rename…", k: "F2", fn: () => renameItem(it)});
   L.push({sep: 1});
   if (!many && c.type === "count" && hi.pt >= 0) L.push({t: "Delete this count point (" + (hi.pt + 1) + ")", fn: () => delPoint(it, hi.pt), dis: it.locked});
   if (!many && editPts(it)) {
@@ -5228,7 +5228,7 @@ function ctxMark(m){
   const ids = selIds(), many = ids.size > 1, allLk = [...ids].map(objById).filter(Boolean).every(o => o.locked);
   return [{h: many ? ids.size + " selected" : MARK_TOOLS[m.type], s: many ? "" : (m.text || "markup — not a quantity") + (m.locked ? " · locked" : "")},
     !many && m.type !== "hilite" && m.type !== "fence" && m.type !== "dimension" ? {t: "Edit text…", k: "Dbl-click", fn: () => editMarkText(m)} : null,
-    !many ? {t: "Colour…", fn: focusProps} : null, !many ? {t: "Set as default", fn: () => setDefaultsFromSelection(m)} : null, {sep: 1}, ...ctxClip(null), {sep: 1}, ctxArrange(), {t: allLk ? "Unlock" : "Lock", k: "Ctrl+Shift+L", fn: lockSel},
+    !many ? {t: "Colour…", fn: focusProps} : null, !many ? {t: "Set as default", fn: () => setDefaultsFromSelection(m)} : null, !many && MARK_PROFILE_TYPES.includes(m.type) ? {t: "Add to Tool Chest…", fn: () => toolChestDialog({object: m, name: MARK_TOOLS[m.type] + " profile"})} : null, {sep: 1}, ...ctxClip(null), {sep: 1}, ctxArrange(), {t: allLk ? "Unlock" : "Lock", k: "Ctrl+Shift+L", fn: lockSel},
     {t: "Select all " + MARK_TOOLS[m.type].toLowerCase() + "s on this page", fn: () => selectSimilar(m)}, {t: "Zoom to", fn: () => zoomTo(ids)}, {sep: 1}, {t: "Delete", k: "Del", fn: delSelected, dng: 1, dis: allLk}];
 }
 function ctxCanvas(q){
@@ -5340,6 +5340,7 @@ function wire(){
   const pick = (id, f) => { $(id).onchange = e => { const L = [...e.target.files]; e.target.value = ""; if (L.length) f(L); }; };
   pick("impPdfIn", importDialog); pick("imgIn", importDialog);
   pick("dirIn", L => { const ok = L.filter(f => isPdfFile(f) || isImgFile(f) || isCadFile(f)); if (!ok.length) return toast("No PDF, DWG, DXF, JPG or PNG in that folder", 3000); importDialog(ok); });
+  $("bToolChest").onclick = () => toolChestDialog();
   $("bDefaults").onclick = () => defaultsDialog();
   $("bWs").onclick = e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); wsMenu(Math.max(4, r.right - 300), r.bottom + 4); };
   $("bCmd").onclick = () => openPalette();
@@ -7033,6 +7034,135 @@ const DEFAULTS_KEY = "zdTakeoffDefaults";
 const DEFAULTS = {condColor: "#2a78d6", condWidth: 2, markColor: "#d03b3b", markWidth: 2, dimColor: "#2b78d6", dimWidth: 2, dimSize: 13, dimArrow: 10, dimOffset: 24, hiliteColor: "#ffe14d", hiliteOpacity: .38};
 function toolDefaults(){ let o = null; try { o = JSON.parse(pref(DEFAULTS_KEY) || "null"); } catch (e) {} return Object.assign({}, DEFAULTS, o && typeof o === "object" ? o : {}); }
 function saveToolDefaults(o){ pref(DEFAULTS_KEY, JSON.stringify(Object.assign({}, DEFAULTS, o))); }
+const CHEST_KEY = "zdTakeoffToolChest";
+const MARK_PROFILE_TYPES = ["note", "cloud", "arrow", "dimension", "hilite"];
+function starterToolProfiles(){
+  const d = Object.assign({}, DEFAULTS);
+  const mk = (name, type, props, favorite) => ({id: uid("TC"), name, kind: "markup", type, props, favorite: !!favorite, created: new Date().toISOString()});
+  return [mk("Dimension — standard", "dimension", {color: d.dimColor, width: d.dimWidth, size: d.dimSize, arrow: d.dimArrow, offset: d.dimOffset}, true),
+    mk("Review arrow — red", "arrow", {color: "#d03b3b", width: 2}, true),
+    mk("Revision cloud — red", "cloud", {color: "#d03b3b", width: 2}, false),
+    mk("Highlight — yellow", "hilite", {color: d.hiliteColor, opacity: d.hiliteOpacity}, true),
+    {id: uid("TC"), name: "Floor area — Sft", kind: "condition", favorite: true, created: new Date().toISOString(), condition: {type: "area", unit: "Sft", color: d.condColor, sw: d.condWidth, faces: 1, dedMin: 0}},
+    {id: uid("TC"), name: "Count — standard", kind: "condition", favorite: false, created: new Date().toISOString(), condition: {type: "count", unit: "Nos", color: "#1e8e5a", sw: 2, faces: 1, dedMin: 0, sym: "circle", cap: "seq", sz: "m"}}];
+}
+function normalizeChestProfile(p){
+  if (!p || typeof p !== "object" || typeof p.name !== "string") return null;
+  const name = p.name.trim().slice(0, 60); if (!name) return null;
+  const color = (x, fallback) => /^#[0-9a-f]{6}$/i.test(String(x || "")) ? String(x) : fallback;
+  const num = (x, d, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(+x) ? +x : d));
+  const common = {id: String(p.id || uid("TC")), name, favorite: !!p.favorite, created: String(p.created || new Date().toISOString())};
+  if (p.kind === "markup" && MARK_PROFILE_TYPES.includes(p.type)) {
+    const q = p.props || {}, d = toolDefaults();
+    const props = {color: color(q.color, p.type === "dimension" ? d.dimColor : p.type === "hilite" ? d.hiliteColor : d.markColor), width: num(q.width, d.markWidth, 1, 12)};
+    if (p.type === "dimension") Object.assign(props, {width: num(q.width, d.dimWidth, 1, 12), size: num(q.size, d.dimSize, 8, 48), arrow: num(q.arrow, d.dimArrow, 5, 40), offset: num(q.offset, d.dimOffset, 0, 500)});
+    if (p.type === "hilite") props.opacity = num(q.opacity, d.hiliteOpacity, .05, 1);
+    return Object.assign(common, {kind: "markup", type: p.type, props});
+  }
+  if (p.kind === "condition") {
+    const q = p.condition || {}, type = ["area", "linear", "count"].includes(q.type) ? q.type : "area", units = UNITS[type], unit = units.includes(q.unit) ? q.unit : units[0];
+    const condition = {type, unit, color: color(q.color, toolDefaults().condColor), sw: num(q.sw, toolDefaults().condWidth, 1, 12), h: q.h === "" ? "" : num(q.h, 0, 0, 9999), t: q.t === "" ? "" : num(q.t, 0, 0, 9999), faces: Math.round(num(q.faces, 1, 1, 2)), dedMin: num(q.dedMin, 0, 0, 9999)};
+    if (type === "count") { condition.sym = ["check", "circle", "square", "triangle", "diamond", "cross", "dot"].includes(q.sym) ? q.sym : "circle"; condition.cap = ["seq", "name", "text", "none"].includes(q.cap) ? q.cap : "seq"; condition.capText = String(q.capText || "").slice(0, 40); condition.sz = ["s", "m", "l"].includes(q.sz) ? q.sz : "m"; }
+    return Object.assign(common, {kind: "condition", condition});
+  }
+  if (p.kind === "defaults") {
+    const q = p.settings || {}, d = toolDefaults(), settings = Object.assign({}, d);
+    ["condColor", "markColor", "dimColor", "hiliteColor"].forEach(k => settings[k] = color(q[k], d[k]));
+    ["condWidth", "markWidth", "dimWidth"].forEach(k => settings[k] = num(q[k], d[k], 1, 12));
+    settings.dimSize = num(q.dimSize, d.dimSize, 8, 48); settings.dimArrow = num(q.dimArrow, d.dimArrow, 5, 40); settings.dimOffset = num(q.dimOffset, d.dimOffset, 0, 500); settings.hiliteOpacity = num(q.hiliteOpacity, d.hiliteOpacity, .05, 1);
+    return Object.assign(common, {kind: "defaults", settings});
+  }
+  return null;
+}
+function toolChestProfiles(){
+  let raw = pref(CHEST_KEY), list = null;
+  if (raw == null) { list = starterToolProfiles(); pref(CHEST_KEY, JSON.stringify(list)); }
+  else { try { list = JSON.parse(raw); } catch (e) { list = []; } if (!Array.isArray(list)) list = []; list = list.map(normalizeChestProfile).filter(Boolean); }
+  return list;
+}
+function storeToolChestProfiles(list){ pref(CHEST_KEY, JSON.stringify((list || []).map(normalizeChestProfile).filter(Boolean))); }
+function chestConditionSnapshot(c){ return {type: c.type, unit: c.unit, color: c.color, sw: +c.sw || 2, h: c.h || "", t: c.t || "", faces: +c.faces || 1, dedMin: +c.dedMin || 0, sym: c.sym || "circle", cap: c.cap || "seq", capText: c.capText || "", sz: c.sz || "m"}; }
+function captureChestProfile(o, name){
+  const d = toolDefaults(), n = String(name || "My tool").trim().slice(0, 60) || "My tool";
+  if (o && MARK_PROFILE_TYPES.includes(o.type)) {
+    const props = {color: o.color || d.markColor, width: +o.width || d.markWidth};
+    if (o.type === "dimension") Object.assign(props, {color: o.color || d.dimColor, width: +o.width || d.dimWidth, size: +o.size || d.dimSize, arrow: +o.arrow || d.dimArrow, offset: +o.offset || d.dimOffset});
+    if (o.type === "hilite") Object.assign(props, {color: o.color || d.hiliteColor, opacity: +o.opacity || d.hiliteOpacity});
+    return {id: uid("TC"), name: n, kind: "markup", type: o.type, props, favorite: false, created: new Date().toISOString()};
+  }
+  const c = o && o.cond ? cond(o.cond) : null;
+  if (c) return {id: uid("TC"), name: n, kind: "condition", condition: chestConditionSnapshot(c), favorite: false, created: new Date().toISOString()};
+  return {id: uid("TC"), name: n, kind: "defaults", settings: d, favorite: false, created: new Date().toISOString()};
+}
+function applyChestProfile(p){
+  if (p.kind === "defaults") { saveToolDefaults(Object.assign(toolDefaults(), p.settings || {})); toast("Applied profile: " + p.name, 2200); return; }
+  if (p.kind === "markup") {
+    const d = toolDefaults(), q = p.props || {};
+    if (p.type === "dimension") Object.assign(d, {dimColor: q.color || d.dimColor, dimWidth: +q.width || d.dimWidth, dimSize: +q.size || d.dimSize, dimArrow: +q.arrow || d.dimArrow, dimOffset: +q.offset || d.dimOffset});
+    else if (p.type === "hilite") Object.assign(d, {hiliteColor: q.color || d.hiliteColor, hiliteOpacity: +q.opacity || d.hiliteOpacity});
+    else Object.assign(d, {markColor: q.color || d.markColor, markWidth: +q.width || d.markWidth});
+    saveToolDefaults(d); setTool(p.type); toast("Tool Chest: " + p.name + " — click the drawing to place", 3000); return;
+  }
+  if (!P.proj) return toast("Open a project before using a measurement profile");
+  const c = Object.assign({id: uid("C"), name: p.name, hidden: false}, JSON.parse(JSON.stringify(p.condition || {})));
+  c.id = uid("C"); c.name = p.name; c.color = /^#[0-9a-f]{6}$/i.test(c.color || "") ? c.color : toolDefaults().condColor;
+  mutate(() => { P.proj.conds.push(c); }, "Add condition from Tool Chest");
+  S.cond = c.id; setTool(c.type === "count" ? "count" : "draw"); refresh(); toast("Condition profile ready: " + p.name, 2500);
+}
+function exportToolChest(){
+  const data = {format: "zd-takeoff-tool-chest", version: 1, exported: new Date().toISOString(), profiles: toolChestProfiles()};
+  saveBlob(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}), "ZD_Takeoff_Tool_Chest.json");
+}
+async function importToolChest(file){
+  try {
+    const d = JSON.parse(await file.text()); if (!d || d.format !== "zd-takeoff-tool-chest" || !Array.isArray(d.profiles)) throw new Error("Not a ZD Takeoff Tool Chest file");
+    const list = toolChestProfiles();
+    d.profiles.forEach(p => { const n = normalizeChestProfile(Object.assign({}, p, {id: uid("TC")})); if (n) list.push(n); });
+    storeToolChestProfiles(list); toast("Imported " + d.profiles.length + " Tool Chest profile" + (d.profiles.length === 1 ? "" : "s"), 3000); toolChestDialog();
+  } catch (e) { toast("Tool Chest import failed: " + (e.message || e), 5000); }
+}
+function chestProfileSummary(p){
+  const q = p.props || {}, c = p.condition || {};
+  if (p.kind === "markup") return p.type === "dimension" ? `Dimension · ${q.color || ""} · ${q.width || 2}px · text ${q.size || 13}px · arrow ${q.arrow || 10}px` : p.type === "hilite" ? `Highlight · ${q.color || ""} · opacity ${q.opacity || .38}` : `${MARK_TOOLS[p.type]} · ${q.color || ""} · ${q.width || 2}px`;
+  if (p.kind === "condition") return `${({area: "Area", linear: "Length", count: "Count"})[c.type] || "Measurement"} · ${c.unit || ""} · ${c.color || ""}${c.h ? " · H " + c.h + " ft" : ""}${c.t ? " · T " + c.t + " ft" : ""}`;
+  return "Reusable color, line-weight and markup settings";
+}
+function toolChestDialog(options){
+  options = options || {};
+  const selected = options.object || (S.selMark && P.proj ? (P.proj.marks || []).find(m => m.id === S.selMark) : null) || (S.sel && P.proj ? P.proj.items.find(i => i.id === S.sel) : null);
+  const suggested = selected && selected.type ? MARK_TOOLS[selected.type] : selected && selected.cond ? (cond(selected.cond) || {}).name : "My professional defaults";
+  const body = `<p class="small">Reusable profiles save appearance and measurement settings, not the exact drawing geometry. Choose a profile to activate its tool with those properties. Favorites stay at the top. Your chest is saved in this browser; export JSON to share or back it up.</p>
+    <div class="tcbar"><input type="text" id="tcName" value="${esc(options.name || suggested || "My tool")}" maxlength="60" aria-label="New profile name" placeholder="Profile name"><button class="btn sm pri" type="button" data-tc="save">＋ Save selected / current style</button><button class="btn sm" type="button" data-tc="export">Export JSON</button><label class="btn sm" for="tcImport">Import JSON</label><input id="tcImport" type="file" accept=".json,application/json" hidden></div>
+    <input type="search" id="tcSearch" placeholder="Search tools and profiles…" aria-label="Search Tool Chest" style="width:100%;margin:3px 0 8px"><div class="tcgrid" id="tcList"></div><div class="tcfoot small"><span id="tcCount"></span><span>Apply = Properties mode · geometry is drawn fresh</span></div>`;
+  const p = ask("Tool Chest", body, "Done", () => true);
+  const B = $("dlgB");
+  const render = () => {
+    if (!$("tcList")) return;
+    const query = $("tcSearch").value.trim().toLowerCase();
+    const L = toolChestProfiles().slice().sort((a, b) => Number(!!b.favorite) - Number(!!a.favorite) || a.name.localeCompare(b.name)).filter(x => !query || (x.name + " " + chestProfileSummary(x)).toLowerCase().includes(query));
+    $("tcList").innerHTML = L.length ? L.map(x => `<article class="tccard${x.favorite ? " fav" : ""}" data-tcid="${esc(x.id)}"><div class="tctop"><span class="tcname" title="${esc(x.name)}">${esc(x.name)}</span><button class="tcstar${x.favorite ? " on" : ""}" data-tc="fav" data-id="${esc(x.id)}" title="${x.favorite ? "Remove favorite" : "Add favorite"}">${x.favorite ? "★" : "☆"}</button></div><div class="tcmeta">${esc(chestProfileSummary(x))}</div><input class="tcnameedit" data-tc-name value="${esc(x.name)}" aria-label="Rename ${esc(x.name)}"><div class="tcactions"><button class="btn sm pri" data-tc="use" data-id="${esc(x.id)}">Use tool</button><button class="btn sm" data-tc="rename" data-id="${esc(x.id)}">Rename</button><button class="btn sm dng" data-tc="delete" data-id="${esc(x.id)}">Delete</button></div></article>`).join("") : '<div class="empty">No profiles match. Save a selected markup or condition, or save current defaults.</div>';
+    $("tcCount").textContent = L.length + " profile" + (L.length === 1 ? "" : "s") + " · " + L.filter(x => x.favorite).length + " favorites";
+  };
+  render();
+  B.oninput = e => { if (e.target.id === "tcSearch") render(); };
+  B.onchange = e => { if (e.target.id === "tcImport" && e.target.files[0]) { const f = e.target.files[0]; e.target.value = ""; importToolChest(f); } };
+  B.onclick = e => {
+    const b = e.target.closest("[data-tc]"); if (!b) return;
+    const act = b.dataset.tc, id = b.dataset.id, list = toolChestProfiles();
+    if (act === "save") {
+      const name = $("tcName").value.trim(); if (!name) return toast("Enter a profile name", 2200);
+      list.push(captureChestProfile(selected, name)); storeToolChestProfiles(list); render(); toast("Saved to Tool Chest: " + name, 2300); return;
+    }
+    if (act === "export") { exportToolChest(); return; }
+    const profile = list.find(x => x.id === id); if (!profile) return;
+    if (act === "fav") { profile.favorite = !profile.favorite; storeToolChestProfiles(list); render(); return; }
+    if (act === "rename") { const n = b.closest(".tccard").querySelector("[data-tc-name]").value.trim(); if (!n) return toast("Profile name cannot be blank", 2200); profile.name = n.slice(0, 60); storeToolChestProfiles(list); render(); return; }
+    if (act === "delete") { if (!confirm("Delete Tool Chest profile ‘" + profile.name + "’?")) return; storeToolChestProfiles(list.filter(x => x.id !== id)); render(); return; }
+    if (act === "use") { applyChestProfile(profile); $("dlgCancel").click(); }
+  };
+  return p;
+}
+
 function setDim(on){   // on = true/false, or a dimming level 0-90 %
   if (typeof on === "number") S.dimPct = Math.max(0, Math.min(90, on)); else if (on && !S.dimPct) S.dimPct = 50;
   S.dim = typeof on === "number" ? on > 0 : on;
