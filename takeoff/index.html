@@ -318,6 +318,25 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 }
 @media print{body{overflow:visible}}
 input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, never a browser password field (nothing offered to save) */
+.stgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;max-height:260px;overflow:auto;padding:2px}   /* the stamp picker */
+.stp{position:relative;border:2px solid var(--sc);border-radius:7px;background:#fff;color:var(--sc);font:800 11px/1.2 "Segoe UI",Arial,sans-serif;letter-spacing:.3px;padding:10px 6px;cursor:pointer;text-align:center}
+.stp.on{box-shadow:0 0 0 3px rgba(43,125,233,.35);background:#f4f8ff}
+.stp .stx{position:absolute;top:1px;right:4px;color:#8a97a6;font-weight:400;font-size:13px}
+.mkl{flex:0 0 auto;display:flex;flex-direction:column;border-top:1px solid var(--line);background:#fff;position:relative;min-height:120px;overflow:hidden}   /* the Markups list */
+.mlrz{position:absolute;left:0;right:0;top:0;height:6px;cursor:ns-resize;z-index:2}
+.mlhead{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:7px 10px 6px;border-bottom:1px solid var(--line);background:#f6f8fb}
+.mlhead b{color:var(--navy);margin-right:4px}.mlhead select,.mlhead input{height:28px;font-size:12px;max-width:170px}.mlhead input[type=search]{flex:1;min-width:150px;max-width:none}
+.mlbody{flex:1;display:flex;min-height:0}.mltab{flex:1;display:flex;flex-direction:column;min-width:0}
+.mlbar{padding:4px 10px;font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center;flex-wrap:wrap}.mlbar select{height:26px;font-size:12px}
+.mlscroll{flex:1;overflow:auto}.mlt{border-collapse:collapse;width:100%;font-size:12px}
+.mlt th{position:sticky;top:0;background:#eef2f7;text-align:left;padding:5px 7px;cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--line);font-weight:600;color:var(--navy);z-index:1}
+.mlt th.on{background:#dfe8f5}.mlt td{padding:4px 7px;border-bottom:1px solid #eef2f7;vertical-align:top;white-space:nowrap}.mlt tbody tr{cursor:pointer}.mlt tbody tr:hover{background:#f4f8ff}.mlt tr.on{background:#e8efff}
+.mlt td.mltx{max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mlt td.n{text-align:right}.mlt select{font-size:11.5px;padding:1px 2px;height:24px}
+.mlsw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}.mlempty{color:var(--muted);text-align:center;padding:18px!important;cursor:default}
+.mldet{width:270px;flex:0 0 270px;border-left:1px solid var(--line);padding:8px 10px;overflow:auto;display:flex;flex-direction:column;gap:6px;font-size:12px}
+.mldh{display:flex;gap:6px;align-items:center}.mlc{white-space:pre-wrap;background:#f6f8fb;padding:6px;border-radius:6px}.mlreps{display:flex;flex-direction:column;gap:5px}
+.mlrep{border-left:3px solid #c9d6e4;padding:3px 7px;white-space:pre-wrap}.mlrx{border:0;background:none;color:#8a97a6;cursor:pointer;float:right;font-size:14px}.mldet textarea{width:100%;font:inherit;resize:vertical}
+@media (max-width:900px){.mldet{display:none}}
 </style>
 </head>
 <body>
@@ -423,6 +442,8 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
       <button class="tool" data-tool="arrow" title="Arrow with comment">&#10142; Arrow</button>
       <button class="tool" data-tool="dimension" title="Dimension — Bluebeam-style dimension with extension lines, arrows, text size and colour">&#8646; Dimension</button>
       <button class="tool" data-tool="hilite" title="Highlight an area">&#9641; Highlight</button>
+      <button class="tool" id="bMk" title="Markup tools (Bluebeam): text box, callout, line, polyline, polygon, rectangle, ellipse, pen, highlighter, stamps, image, hyperlink, file attachment, redaction">&#9998; Markup &#9662;</button>
+      <button class="tool" id="bMkList" title="Markups list (Alt+L): every markup in a table — filter, sort, statuses, replies, layers, CSV / XML / PDF summary">&#9776; List</button>
       <span class="tsep"></span>
       <button class="tool" id="bDel" title="Delete the selected measurement, count point or markup (Delete)" disabled>&#128465; Delete</button>
       <button class="tool" id="bKeys" title="Keyboard &amp; mouse shortcuts (?)">&#9000; Keys</button>
@@ -441,6 +462,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
       <div id="drop"><div class="box"><b style="font-size:15px;color:var(--navy)">Drop PDF or AutoCAD drawings (DWG / DXF) here</b><br>or use <b>+ PDF</b> above — <b>&#9662;</b> next to it chooses pages, a whole folder, or photos / scans (JPG, PNG) as pages.<br>
         <span style="font-size:11.5px">The PDF opens in this browser only — it is not uploaded anywhere.</span></div></div>
     </div>
+    <div id="mkList" class="mkl" style="display:none" aria-label="Markups list"></div>
     <div class="status" id="status"><span id="stPos">—</span><span id="stSnap"></span><span id="stMeas"></span><span class="hint" id="stHint"></span></div>
   </section>
 
@@ -484,7 +506,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-06z"></script>
+<script type="module" src="takeoff.js?v=2026-10-07b"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password

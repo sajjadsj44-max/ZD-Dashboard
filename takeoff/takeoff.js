@@ -226,9 +226,12 @@ function migrate(p, rep){
     if (it.arcs != null && !(arr(it.arcs) && it.arcs.every(a => arr(a) && a.length === 2 && Number.isInteger(a[0]) && Number.isInteger(a[1])))) delete it.arcs;
     ["ow", "oh", "doorW"].forEach(k => { if (it[k] != null && it[k] !== "" && !isFinite(num(it[k]))) delete it[k]; }); });
   bad = 0;
-  p.marks = p.marks.filter(m => { const q = obj(m) && m.id != null && MARK_TOOLS[m.type] && pts(m.pts, m.type === "note" ? 1 : 2); if (!q) { bad++; return false; } m.pts = q; m.id = String(m.id); m.text = String(m.text == null ? "" : m.text);
+  p.marks = p.marks.filter(m => { const q = obj(m) && m.id != null && MARK_TOOLS[m.type] && pts(m.pts, MK_MINPTS[m.type] || 2); if (!q) { bad++; return false; } m.pts = q; m.id = String(m.id); m.text = String(m.text == null ? "" : m.text);
+    if (MK_TYPES.has(m.type)) mkSanitize(m);
+    mkCommon(m);
     if (m.color != null && !HEXCOL.test(String(m.color))) { note("A markup's colour “" + String(m.color).slice(0, 40) + "” is not a colour — replaced"); m.color = "#d03b3b"; } return true; });
   if (bad) note(bad + " markup" + (bad > 1 ? "s" : "") + " with missing or broken points left out");
+  mkProjCommon(p);
   Object.keys(p.scales).forEach(k => { const sc = p.scales[k]; if (!obj(sc) || !(num(sc.ptPerFt) > 0) || !isFinite(num(sc.ptPerFt))) { note("Page scale " + k + " is not a number — removed (set it again)"); delete p.scales[k]; } else sc.ptPerFt = num(sc.ptPerFt); });
   Object.keys(p.viewports).forEach(k => { if (!arr(p.viewports[k])) { delete p.viewports[k]; return; }
     p.viewports[k] = p.viewports[k].filter(v => { const ok = obj(v) && arr(v.r) && v.r.length === 4 && v.r.every(x => isFinite(num(x))) && isFinite(num(v.ptPerFt || 0)); if (!ok) note("A viewport on " + k + " is broken — removed"); else { v.r = v.r.map(num); v.ptPerFt = Math.max(0, num(v.ptPerFt || 0)); v.name = String(v.name == null ? "Viewport" : v.name); } return ok; }); });
@@ -264,7 +267,7 @@ if (TABCH) TABCH.onmessage = e => { const m = e.data || {}; if (!P.proj || m.tab
   if (m.t === "open") tabSay({t: "here", id: P.proj.id});
   S.otherTab = m.t === "saved" ? "changed in another tab or window at " + String(m.at || "").slice(11, 16) : "also open in another tab or window";
   renderSheet(); };
-const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "openings"];
+const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters"];
 function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 /* every change goes through mutate(): the project before it is kept for Ctrl+Z (200 steps), with a name for the
    undo / redo buttons ("Undo: Move 3 measurements") */
@@ -278,7 +281,8 @@ function mutate(fn, label){
 /* the shape being drawn keeps its own history in steps: a click is one step, an arc (many points) is one step, so
    Ctrl+Z / Backspace take back the last click or the whole arc and Ctrl+Y puts it back. With nothing being drawn,
    Ctrl+Z / Ctrl+Y step through the project history. */
-const DRAFT_TOOLS = ["draw", "ded", "measure", "fence", "rect", "open", "cal", "circle", "vp", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref"];
+const DRAFT_TOOLS = ["draw", "ded", "measure", "fence", "rect", "open", "cal", "circle", "vp", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref",
+  "mk_polyline", "mk_polygon", "mk_line", "mk_box", "mk_ellipse", "mk_link", "mk_redact", "mk_erase", "mk_callout", "mk_text", "mk_stamp", "mk_image"];
 function draftPush(pts, arc){
   if (!S.draftSteps || S.draftSteps.reduce((a, n) => a + n, 0) !== S.draft.length) S.draftSteps = S.draft.map(() => 1);
   if (arc) (S.draftArcs = S.draftArcs || []).push([S.draft.length - 1, S.draft.length - 1 + pts.length]);
@@ -547,12 +551,12 @@ function renderLayers(){
   const el = $("layerList"); if (!el) return;
   const cfg = S.ocgs && S.ocgs[S.fileId];
   if (!S.page) { el.innerHTML = ""; return; }
-  if (!cfg) { el.innerHTML = '<div class="empty">This PDF has no layers. AutoCAD keeps them when you plot with <b>DWG To PDF.pc3</b> and “Include layer information” ticked (Page Setup → PDF Options) — or add the <b>DWG</b> itself with <b>+ PDF</b>: its AutoCAD layers come with it.</div>'; return; }
+  if (!cfg) { el.innerHTML = mkLayersHtml() + '<div class="empty">This PDF has no layers. AutoCAD keeps them when you plot with <b>DWG To PDF.pc3</b> and “Include layer information” ticked (Page Setup → PDF Options) — or add the <b>DWG</b> itself with <b>+ PDF</b>: its AutoCAD layers come with it.</div>'; return; }
   const cm = cadMeta(S.fileId), CL = cm ? new Map(cm.layers.map(l => [l.name, l])) : null, dark = darkNow();
   const G = Object.entries(cfg.getGroups()).sort((a, b) => a[1].name.localeCompare(b[1].name, undefined, {numeric: true}));
   const RN = {wall: "wall", opening: "door / window", column: "column", railing: "railing", glass: "glass", hatch: "hatch", text: "text / dims", tag: "tags", unit: "unit area", fixture: "fixtures / MEP", other: ""};
   const sw = l => l ? `<span class="lsw" style="background:${l.c === -1 ? (dark ? "#ffffff" : "#000000") : "#" + (l.c & 0xffffff).toString(16).padStart(6, "0")}" title="${l.aci ? "Colour " + l.aci : "True colour"}"></span>` : "";
-  el.innerHTML = (cm ? `<div class="lyrbar"><b style="flex:1;color:var(--navy)">AutoCAD layers · ${G.length}</b><button class="btn sm" data-cadq="1" title="Quantities from the drawing's own objects: lengths and areas by layer, blocks by name">CAD quantities…</button></div>` : "") +
+  el.innerHTML = mkLayersHtml() + (cm ? `<div class="lyrbar"><b style="flex:1;color:var(--navy)">AutoCAD layers · ${G.length}</b><button class="btn sm" data-cadq="1" title="Quantities from the drawing's own objects: lengths and areas by layer, blocks by name">CAD quantities…</button></div>` : "") +
     `<div class="lyrbar"><button class="btn sm" data-lall="1">All on</button><button class="btn sm" data-lall="0">All off</button><input type="search" id="lyrQ" placeholder="Filter layers"></div>
     <div class="lyrbar"><span class="small" style="width:100%">Clean the drawing:</span><button class="btn sm pri" data-lpre="clean" title="Only walls, doors / windows, columns and railings">Walls & openings only</button><button class="btn sm" data-lpre="text" title="Text, dimensions, grid, titles, clouds">Text off</button><button class="btn sm" data-lpre="fixture" title="Furniture, sanitary, kitchen, MEP, electrical">Fixtures off</button><button class="btn sm" data-lpre="hatch">Hatch off</button></div>` +
     G.map(([id, g]) => { const r = layerRole(g.name), l = CL && CL.get(g.name);
@@ -1956,12 +1960,15 @@ function setTool(t){
   if (t !== "draw") S.resume = null;
   if (t !== "gap") S.gap = null;
   if (t !== "typref" && S.typ) { S.typ = null; $("cmpLegend").style.display = "none"; toast("Typical copy stopped — nothing copied"); }
+  S.mkd = null;
   S.tool = t; draftClear(); S.draftRedo = []; S.measure = t === "measure" ? S.measure : null; S.press = null; S.lasso = null; S.zbox = null; S.hover = null;
   if (t === "match" && S.sel) {
     const it = P.proj.items.find(i => i.id === S.sel);
     if (it && onPage(it) && !hiddenItem(it)) S.matchSource = matchSourceOf(it);
   }
   document.querySelectorAll("#tools .tool").forEach(b => b.classList.toggle("on", b.dataset.tool === t));
+  { const mb = $("bMk"); if (mb) { mb.classList.toggle("on", mkIsTool(t)); mb.innerHTML = "&#9998; " + esc(mkIsTool(t) ? MK_TOOL_NAMES[t] : "Markup") + " &#9662;"; } }
+  if (t === "mk_stamp" && !S.stampNoPick) setTimeout(() => { if (S.tool === "mk_stamp") stampPicker().then(v => { if (!v && S.tool === "mk_stamp") setTool("select"); }); }, 0);
   stage().className = t === "pan" ? "pan" : t === "select" ? "" : t === "lasso" ? "lasso" : t === "zoomwin" ? "zoomwin" : "draw";
   stage().style.cursor = "";
   hint(); draw(); renderProps(); draftBtns();
@@ -1982,7 +1989,7 @@ function hint(){
     stamp: "Place copies: click each place for a copy of what you copied (" + (S.clip ? S.clip.n : 0) + " object" + (S.clip && S.clip.n === 1 ? "" : "s") + ") · Esc when done.",
     zoomwin: "Zoom window: drag a box round the part to see (a click zooms in 2×).",
     match: S.matchSource ? `Matching ${S.matchSource.name} — click compatible area, linear or count objects to apply its properties; Esc finishes.` : "Click a source area, linear or count object (or select one before starting Match), then click compatible targets; Esc finishes."};
-  let h = H[t] || "";
+  let h = H[t] || MK_HINTS[t] || "";
   if (S.arcMode) h = S.arcMid ? "Arc: click the end of the arc." : "Arc: click a point on the arc (then its end) · A again for straight.";
   $("stHint").textContent = h;
 }
@@ -1992,7 +1999,7 @@ function cursorPoint(e, sp){
   let p = raw, s = null;
   const free = e && (e.ctrlKey || e.metaKey) && S.tool !== "select";   // Ctrl: the point goes exactly where clicked, no snap (Bluebeam)
   const ex = S.drag && S.drag.vertex != null ? ((it, i) => it.id === S.drag.item && i === S.drag.vertex) : null;   // a dragged point never snaps onto itself
-  if (!free && (["draw", "rect", "ded", "open", "measure", "cal", "circle", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp"].indexOf(S.tool) >= 0 || (S.drag && S.drag.vertex != null))) { s = snapAt(raw, ex); if (s) p = s.p; }
+  if (!free && (["draw", "rect", "ded", "open", "measure", "cal", "circle", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
   let last = S.drag ? null : S.draft[S.draft.length - 1];
   if (S.drag && S.drag.vertex != null) { const it = P.proj.items.find(i => i.id === S.drag.item); if (it) last = S.drag.orig[S.drag.vertex - 1] || S.drag.orig[S.drag.vertex + 1] || null; }
   if (e && e.shiftKey && last && !S.arcMid) { const dx = Math.abs(p[0] - last[0]), dy = Math.abs(p[1] - last[1]); p = dx >= dy ? [p[0], last[1]] : [last[0], p[1]]; if (s) s = Object.assign({}, s, {type: s.type + " + straight"}); }
@@ -2011,7 +2018,7 @@ function onDown(e){
     if (ids.length === 1 && !S.draft.length && (S.tool === "select" || S.tool === "pan")) { const cx = e.clientX, cy = e.clientY;   // touch: press and hold for the right-click menu (tablets)
       S.lp = {sp, t: setTimeout(() => { if (!S.lp) return; S.lp.fired = true; cancelDrag0(); ctxOpen(sp, {clientX: cx, clientY: cy}); }, 550)}; }
   }
-  if (e.button === 2 && S.draft.length && ["draw", "ded", "measure", "fence"].indexOf(S.tool) >= 0) { e.preventDefault(); return endDraft(); }   // right-click ends the line / area
+  if (e.button === 2 && S.draft.length && ["draw", "ded", "measure", "fence", "mk_polyline", "mk_polygon"].indexOf(S.tool) >= 0) { e.preventDefault(); return endDraft(); }   // right-click ends the line / area
   if (e.button === 1 || S.space || S.tool === "pan" || (e.button === 2)) { S.drag = {pan: true, sp, v: Object.assign({}, S.view), rc: e.button === 2 && !S.space}; stage().classList.add("panning"); e.preventDefault(); return; }   // right-drag pans; a right-click (no drag) opens the menu
   if (e.button !== 0) return;
   if (S.pickWall) return pickWallAt(sp);
@@ -2021,6 +2028,7 @@ function onDown(e){
   if (S.tool === "select") return selectDown(sp, e);
   if (S.tool === "match") return matchClick(sp);
   const {p} = cursorPoint(e, sp);
+  if (mkIsTool(S.tool)) return mkDown(p, sp, e);
   if (S.tool === "break") return breakClick(sp, e);
   if (S.tool === "gap") return gapClick(sp);
   if (S.tool === "stamp") { stampAt(p); return; }
@@ -2071,7 +2079,7 @@ function arcPts(a, m, b){   // points along the circle from a through m to b (a 
 function endDraft(){   // finish the line / area / measurement being drawn (Enter, double-click, right-click)
   const D = S.draft.slice(), arcEnd = Math.max(0, ...(S.draftArcs || []).map(a => a[1]));
   for (let n = 0; n < 2 && D.length > 1 && D.length - 1 > arcEnd && dist(toScr(D[D.length - 1]), toScr(D[D.length - 2])) <= HIT_PX / 2; n++) D.pop();   // the extra click of a double-click (never an arc's own points)
-  if (isAreaDraft() ? D.length >= 3 : D.length >= 2) return finish(D);
+  if (isAreaDraft() || S.tool === "mk_polygon" ? D.length >= 3 : D.length >= 2) return finish(D);
   S.draft = D; draw();
 }
 function isAreaDraft(){ const c = S.cond ? cond(S.cond) : null; return c && c.type === "area" && (S.tool === "draw" || S.tool === "ded"); }
@@ -2088,11 +2096,13 @@ function onMove(e){
   if (S.drag && S.drag.pan) { if (S.drag.rc && dist(sp, S.drag.sp) > 4) S.drag.rcMoved = true; S.view = {s: S.drag.v.s, tx: S.drag.v.tx + sp[0] - S.drag.sp[0], ty: S.drag.v.ty + sp[1] - S.drag.sp[1]}; applyView(); renderHi(); return; }
   if (S.lasso) { const L = S.lasso.pts; if (dist(L[L.length - 1], sp) > 3) L.push(sp); draw(); return; }
   if (S.zbox) { S.zbox.b = sp; draw(); return; }
+  if (S.mkd) { mkMoveDrag(sp, e); S.cursorScr = sp; draw(); return; }
   if (S.press && !S.drag && dist(sp, S.press.sp) > 4) startMove(S.press, e);
   if (S.drag && S.drag.move) { moveDrag(sp, e); return; }
   if (S.box) { S.box.b = sp; if (S.box.pending && dist(S.box.a, sp) > 6) { S.box.pending = false; if (!S.box.add) S.sel = null; } if (!S.box.pending) { draw(); return; } }
   const {p, s} = cursorPoint(e, sp);
   S.cursor = p; S.snap = s; S.cursorScr = sp;
+  if (S.drag && S.drag.mh != null) { if (S.drag.moved || dist(sp, S.drag.sp0) > 2) mkHandleDrag(S.drag, p, e); draw(); return; }
   if (S.drag && S.drag.ghost != null && dist(sp, S.drag.sp0) > 3) { const G = S.drag, it = P.proj.items.find(i => i.id === G.item);   // dragging a +: a new point there
     if (it) { const orig = it.pts.map(q => q.slice()), arcs = it.arcs; it.pts.splice(G.ghost + 1, 0, midOf(it, G.ghost)); delete it.arcs; S.drag = {vertex: G.ghost + 1, item: it.id, orig, arcs, moved: true, ins: true, live: true, sp0: G.sp0}; S.selPt = G.ghost + 1; } else S.drag = null; }
   if (S.drag && S.drag.vertex != null) { const D = S.drag, it = P.proj.items.find(i => i.id === D.item);   // a point moves once the mouse has gone 3 px (a click is not a drag)
@@ -2107,11 +2117,15 @@ function onMove(e){
 function cancelDrag0(){   // a long press became the menu: drop what the press had started, without a toast
   const D = S.drag; S.press = null; S.box = null; S.lasso = null;
   if (D && D.vertex != null) { const it = P.proj.items.find(i => i.id === D.item); if (it) it.pts = D.orig; }
+  if (D && D.mh != null) { const m = objById(D.mark); if (m) m.pts = D.orig; }
   if (D && D.move) { D.orig.forEach((pts, id) => { const o = objById(id); if (o) o.pts = pts.map(p => p.slice()); }); if (D.added && D.added.length) { const a = new Set(D.added); P.proj.items = P.proj.items.filter(i => !a.has(i.id)); P.proj.marks = (P.proj.marks || []).filter(m => !a.has(m.id)); } }
   S.drag = null;
 }
 function onUp(e){
   if (S.lp) { clearTimeout(S.lp.t); const fired = S.lp.fired; S.lp = null; if (fired) { if (S.touches) delete S.touches[e.pointerId]; return; } }
+  if (S.mkd) { mkUp(); return; }
+  if (S.drag && S.drag.mh != null) { const D = S.drag, m = objById(D.mark); S.drag = null;
+    if (m && D.moved) { const np = m.pts.map(q => q.slice()); m.pts = D.orig; mutate(() => { m.pts = np; m.mod = new Date().toISOString(); }, "Edit " + (MARK_TOOLS[m.type] || "markup").toLowerCase()); } else draw(); return; }
   if (S.drag && S.drag.pan && S.drag.rc && !S.drag.rcMoved) { S.drag = null; stage().classList.remove("panning"); ctxOpen(evPos(e), e); return; }
   if (S.lasso) { lassoEnd(); return; }
   if (S.zbox) { zoomBoxEnd(); return; }
@@ -2127,6 +2141,7 @@ const qaMoved = it => { if (it.qa === "checked") { it.qa = ""; it.qaNote = "outl
 function cancelDrag(){   // Esc / Ctrl+Z during a drag: everything back where it was
   const D = S.drag; S.drag = null; if (!D) return;
   if (D.vertex != null) { const it = P.proj.items.find(i => i.id === D.item); if (it) { it.pts = D.orig; if (D.arcs) it.arcs = D.arcs; } }
+  if (D.mh != null) { const m = objById(D.mark); if (m) m.pts = D.orig; }
   if (D.move) { D.orig.forEach((pts, id) => { const o = objById(id); if (o) o.pts = pts.map(p => p.slice()); });
     if (D.added && D.added.length) { const a = new Set(D.added); P.proj.items = P.proj.items.filter(i => !a.has(i.id)); P.proj.marks = (P.proj.marks || []).filter(m => !a.has(m.id)); setSel(D.before || []); } }
   stage().style.cursor = ""; S.snap = null; refresh(); toast("Cancelled", 1200);
@@ -2141,7 +2156,7 @@ function cancelDrag(){   // Esc / Ctrl+Z during a drag: everything back where it
 const objById = id => P.proj.items.find(i => i.id === id) || (P.proj.marks || []).find(m => m.id === id) || null;
 const onPage = o => o && o.file === S.fileId && o.page === S.pageNo;
 const pageItems = () => S.hideMk ? [] : P.proj.items.filter(i => onPage(i) && !hiddenItem(i));
-const pageMarks = () => S.hideMk ? [] : (P.proj.marks || []).filter(onPage);
+const pageMarks = () => S.hideMk ? [] : (P.proj.marks || []).filter(m => onPage(m) && !mkHidden(m));
 function selOne(){ if (S.multi.size || !S.sel) return null; const it = P.proj.items.find(i => i.id === S.sel); return it && onPage(it) && !hiddenItem(it) ? it : null; }
 function setSel(ids, pt){
   S.multi.clear(); S.sel = null; S.selMark = null; S.selPt = -1;
@@ -2252,6 +2267,8 @@ function cycleSel(){
 }
 function selectDown(sp, e){
   const shift = e.shiftKey, ctrl = e.ctrlKey || e.metaKey, alt = e.altKey, one = selOne();
+  { const mo = S.selMark && !S.multi.size ? objById(S.selMark) : null;   // the selected markup's handles: resize, move a point
+    if (mo && onPage(mo) && !mo.locked && !shift && !ctrl && !alt) { const hi = mkHandleAt(mo, sp); if (hi >= 0) { S.drag = {mh: hi, mark: mo.id, orig: mo.pts.map(p => p.slice()), sp0: sp}; draw(); return; } } }
   if (one && !one.locked && !shift && !ctrl && !alt) {   // the selected outline's own handles first
     const vi = vertexAt(one, sp);
     if (vi >= 0) { S.drag = {vertex: vi, item: one.id, orig: one.pts.map(p => p.slice()), sp0: sp}; S.selPt = vi; draw(); return; }
@@ -2283,6 +2300,9 @@ function pressClick(pr){   // a press on an object that did not become a drag
 }
 function hoverAt(sp, e){
   let id = null, cur = "";
+  { const mo = S.selMark && !S.multi.size ? objById(S.selMark) : null;
+    if (mo && onPage(mo) && !mo.locked) { const hi = mkHandleAt(mo, sp); if (hi >= 0) { const box = MK_BOXY.has(mo.type) || mo.type === "pen" || (mo.type === "callout" && hi > 0), c = mo.type === "callout" ? hi - 1 : hi;
+      if (S.hover !== mo.id) S.hover = mo.id; stage().style.cursor = box ? (c % 2 ? "nesw-resize" : "nwse-resize") : "grab"; return; } } }
   const one = selOne();
   if (one && !one.locked && vertexAt(one, sp) >= 0) { cur = "grab"; id = one.id; }
   else if (one && ghostAt(one, sp) >= 0) { cur = "copy"; id = one.id; }
@@ -2338,7 +2358,7 @@ function endMove(){
   if (k) toast((D.copy ? "Copied " : "Moved ") + n + " by " + f3(Math.hypot(D.d[0], D.d[1]) / k) + " ft" + (D.copy ? "" : " — Ctrl+Z puts " + (n > 1 ? "them" : "it") + " back"), 2200);
 }
 /* box (window / crossing) and lasso: what is selected */
-function objPolyScr(o){ const c = o.cond ? cond(o.cond) : null; const poly = o.cond ? itemPoly(o) : o.pts; return {P: poly.map(toScr), closed: o.cond ? closedOf(o) : o.type === "hilite" || o.type === "cloud", count: !!(c && c.type === "count")}; }
+function objPolyScr(o){ if (!o.cond) return mkPolyScr(o); const c = o.cond ? cond(o.cond) : null; const poly = o.cond ? itemPoly(o) : o.pts; return {P: poly.map(toScr), closed: o.cond ? closedOf(o) : o.type === "hilite" || o.type === "cloud", count: !!(c && c.type === "count")}; }
 function segsCross(a, b, c, d){ const o = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])); return o(a, b, c) !== o(a, b, d) && o(c, d, a) !== o(c, d, b); }
 function touchesPoly(O, L){   // an object (screen outline) touching a closed screen polygon L
   if (O.P.some(p => pointInPoly(p, L))) return true;
@@ -2406,6 +2426,7 @@ async function finish(pts){
   const c = S.cond ? cond(S.cond) : null, t = S.tool, arcs = (S.draftArcs || []).filter(a => a[1] < pts.length).map(a => a.slice()), resume = S.resume;
   draftClear(); S.draftRedo = []; S.resume = null; hint();
   if (t === "measure") { S.measure = pts; S.measures.push(pts); draw(); return; }
+  if (t === "mk_polyline" || t === "mk_polygon") { mkPoly(t, pts); return; }
   if (t === "fence") { if (pts.length >= 2) mutate(() => { (P.proj.marks = P.proj.marks || []).push({id: uid("M"), type: "fence", file: S.fileId, page: S.pageNo, pts, text: "", color: "#ff7a00", at: new Date().toISOString()}); }); draw(); return; }
   if (t === "vp") {
     const r = [Math.min(pts[0][0], pts[1][0]), Math.min(pts[0][1], pts[1][1]), Math.max(pts[0][0], pts[1][0]), Math.max(pts[0][1], pts[1][1])];
@@ -2511,7 +2532,8 @@ function drawNow(){
   if (!keep) ((P.proj.viewports || {})[S.key] || []).forEach(v => { const a = toScr([v.r[0], v.r[1]]), b = toScr([v.r[2], v.r[3]]);
     h.push(`<rect x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="none" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`);
     h.push(label([a[0] + 6 + (v.name.length + 14) * 3.2, a[1] + 12], v.name + " · " + (v.ptPerFt ? v.text || "own scale" : "scale not set"), "#4b3b8f")); });
-  if (!keep && !S.hideMk) (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo).forEach(m => h.push(markSvg(m, toScr, 1)));
+  if (!keep && !S.hideMk) (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo && !mkHidden(m)).forEach(m => h.push(markSvg(m, toScr, 1)));
+  if (!keep && !S.hideMk && S.selMark && !S.multi.size && S.tool === "select") { const m = objById(S.selMark); if (m && onPage(m) && !m.locked) h.push(mkHandlesSvg(m)); }
   if (!keep && S.typ) {   // typical copy: reference points, and the copies placed by them (dashed) before they are confirmed
     const T = S.typ;
     if (T.T && S.key !== T.src) T.mine.forEach(it => { const c = cond(it.cond), Q = (it.shape === "circle" ? itemPoly(it) : it.pts).map(T.T.f);
@@ -2520,6 +2542,7 @@ function drawNow(){
     (S.key === T.src ? T.a : T.b).forEach((p, i) => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="9" fill="rgba(255,45,85,.15)" stroke="#ff2d55" stroke-width="2"/><text x="${(q[0] + 12).toFixed(1)}" y="${(q[1] - 10).toFixed(1)}" font-size="13" font-weight="700" fill="#ff2d55" stroke="#fff" stroke-width="3" paint-order="stroke">${i + 1}</text>`); });
   }
   if (S.tool === "vsearch" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(42,120,214,.08)" stroke="#2a78d6" stroke-width="1.5" stroke-dasharray="4 3"/>`); }
+  if (mkIsTool(S.tool)) dyn.push(mkDraftSvg());
   if (["cloud", "arrow", "dimension", "hilite"].indexOf(S.tool) >= 0 && S.draft.length && S.cursor) dyn.push(markSvg({type: S.tool, pts: [S.draft[0], S.cursor], color: S.tool === "dimension" ? "#2b7de9" : "#d03b3b", size: 13, width: 2, arrow: 10}, toScr, 1));
   if (S.flash && S.flash.key === S.key && Date.now() < S.flash.until) { const q = toScr(S.flash.p); dyn.push(`<circle cx="${q[0]}" cy="${q[1] - 5}" r="26" fill="none" stroke="#ff2d55" stroke-width="3"><animate attributeName="r" values="18;30;18" dur="1s" repeatCount="indefinite"/></circle>`); }
   if (S.tool === "vp" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(123,92,224,.06)" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`); }
@@ -2571,7 +2594,7 @@ function drawNow(){
     const a = S.draft[0], r = dist(a, cur), q = toScr(a), col = c ? c.color : "#0b0b0b";
     dyn.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(r * S.view.s).toFixed(1)}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>`);
     if (k) live = "dia " + f3(2 * r / k) + " ft · " + fq(Math.PI * r * r / k / k) + " Sft · round " + f3(2 * Math.PI * r / k) + " ft";
-  } else if (S.draft.length && cur) {
+  } else if (S.draft.length && cur && !mkIsTool(S.tool)) {
     const D = S.arcMid && S.draft.length ? S.draft.concat(arcPts(S.draft[S.draft.length - 1], S.arcMid, cur)) : S.draft.concat([S.tool === "rect" ? null : cur]).filter(Boolean);
     if (S.arcMode && !S.arcMid && S.draft.length) { const q = toScr(cur); dyn.push(`<text x="${(q[0] + 12).toFixed(1)}" y="${(q[1] - 12).toFixed(1)}" font-size="11" font-weight="700" fill="#4b3b8f" stroke="#fff" stroke-width="3" paint-order="stroke">arc: point on it</text>`); }
     if (S.arcMid) { const q = toScr(S.arcMid); dyn.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="3.5" fill="#4b3b8f"/>`); }
@@ -2611,7 +2634,7 @@ function drawNow(){
 function lockBadge(p){ return `<g><rect x="${(p[0] - 7).toFixed(1)}" y="${(p[1] - 7).toFixed(1)}" width="14" height="14" rx="3" fill="#0f2942"/><text x="${p[0].toFixed(1)}" y="${(p[1] + 4).toFixed(1)}" text-anchor="middle" font-size="9" fill="#fff">&#128274;</text></g>`; }
 function hoverText(id){
   const o = objById(id); if (!o) return "";
-  if (!o.cond) return MARK_TOOLS[o.type] + (o.text ? " — " + o.text : "") + (o.locked ? " · locked" : "");
+  if (!o.cond) return MK_TYPES.has(o.type) ? mkHover(o) : MARK_TOOLS[o.type] + (o.text ? " — " + o.text : "") + (o.locked ? " · locked" : "");
   const c = cond(o.cond), k = itemScale(o); if (!c) return "";
   const q = k ? rowsOf(o, k).reduce((a, r) => a + r.qty, 0) : null;
   return (o.label ? o.label + " · " : "") + c.name + (q == null ? " · scale not set" : " · " + fq(q, c.unit) + " " + c.unit) + (o.locked ? " · locked" : "");
@@ -2700,7 +2723,7 @@ function nameAreas(){
   toast(n ? n + " area" + (n > 1 ? "s" : "") + " named from the drawing" : "No room names found inside the unnamed areas");
 }
 /* ------------------------------------------------------------------ panels */
-function refresh(){ S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); draw(); draftBtns(); }
+function refresh(){ mlSoon(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); draw(); draftBtns(); }
 let sheetT = null;
 function refreshSheetSoon(){ clearTimeout(sheetT); sheetT = setTimeout(() => { renderSheet(); renderConds(); }, 120); }
 function renderScaleChip(){
@@ -2867,13 +2890,7 @@ function renderProps(){
     $("props").classList.add("on"); return; }
   const el = $("props"), it = S.sel && P.proj ? P.proj.items.find(i => i.id === S.sel) : null;
   const mk = !it && S.selMark && P.proj ? (P.proj.marks || []).find(m => m.id === S.selMark) : null;
-  if (mk) { el.innerHTML = `<h4>${esc(MARK_TOOLS[mk.type])} <span style="font-weight:400;color:var(--muted);font-size:11px">markup — not a quantity · drag to move</span></h4>
-      <div class="row"><div class="fg" style="flex:3"><label>Text / label</label><input type="text" data-mprop="text" value="${esc(mk.text)}" placeholder="Dimension override or markup note"></div>
-      <div class="fg"><label>Colour</label><input type="color" data-mprop="color" value="${/^#[0-9a-f]{6}$/i.test(mk.color) ? mk.color : "#d03b3b"}" style="height:30px;padding:0"></div>
-      ${mk.type !== "hilite" && mk.type !== "fence" ? `<div class="fg"><label>Line width</label><input type="number" min="1" max="12" step="1" data-mprop="width" value="${+mk.width || 2}"></div>` : ""}
-      ${mk.type === "hilite" ? `<div class="fg"><label>Opacity</label><input type="number" min="0.05" max="1" step="0.05" data-mprop="opacity" value="${+mk.opacity || .38}"></div>` : ""}
-      ${mk.type === "dimension" ? `<div class="fg"><label>Text size</label><input type="number" min="8" max="48" step="1" data-mprop="size" value="${+mk.size || 13}"></div><div class="fg"><label>Arrow size</label><input type="number" min="5" max="40" step="1" data-mprop="arrow" value="${+mk.arrow || 10}"></div><div class="fg"><label>Offset</label><input type="number" min="0" max="500" step="1" data-mprop="offset" value="${+mk.offset || 24}"></div>` : ""}
-      <button class="btn sm" data-act="lock">${mk.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn dng" data-act="delMark"${mk.locked ? " disabled" : ""}>Delete</button></div>`; el.classList.add("on"); return; }
+  if (mk) { el.innerHTML = mkPropsHtml(mk); el.classList.add("on"); return; }
   if (!it) { el.classList.remove("on"); el.innerHTML = ""; return; }
   const c = cond(it.cond), k = itemScale(it), poly = itemPoly(it);
   const meas = !k ? "scale not set" : it.shape === "circle" ? "dia " + f3(2 * dist(it.pts[0], it.pts[1]) / k) + " ft · " + (c.type === "area" ? fq(polyArea(poly) / k / k) + " Sft" : f3(polyLen(poly, true) / k) + " ft round")
@@ -3217,6 +3234,7 @@ async function renameItem(it){
   if (v) mutate(() => { it.label = v.v; }, "Rename");
 }
 async function editMarkText(m){
+  if (MK_TYPES.has(m.type)) return mkEditText(m);
   const v = await ask(MARK_TOOLS[m.type], `<div class="fg w2"><label>Text</label><input type="text" id="mkT" value="${esc(m.text || "")}"></div>`, "Save", () => ({t: $("mkT").value.trim()}), "mkT");
   if (v) mutate(() => { m.text = v.t; }, "Edit text");
 }
@@ -3398,7 +3416,8 @@ async function countTextHits(q, hits){   // text found on the drawings -> count 
 }
 
 /* ------------------------------------------------------------------ markups: notes, clouds, arrows, highlights (no quantity) */
-const MARK_TOOLS = {note: "Note", cloud: "Cloud", arrow: "Arrow", dimension: "Dimension", hilite: "Highlight", fence: "Fence (auto-area wall)"};
+const MARK_TOOLS = {note: "Note", cloud: "Cloud", arrow: "Arrow", dimension: "Dimension", hilite: "Highlight", fence: "Fence (auto-area wall)",
+  text: "Text box", callout: "Callout", line: "Line", polyline: "Polyline", polygon: "Polygon", box: "Rectangle", ellipse: "Ellipse", pen: "Pen", stamp: "Stamp", image: "Image", link: "Hyperlink", attach: "File attachment", redact: "Redaction"};
 function cloudPath(a, b, r){   // scalloped rectangle between screen points a and b
   const x0 = Math.min(a[0], b[0]), y0 = Math.min(a[1], b[1]), x1 = Math.max(a[0], b[0]), y1 = Math.max(a[1], b[1]);
   const side = (p, q) => { const L = dist(p, q), n = Math.max(1, Math.round(L / (2 * r))), out = []; for (let i = 1; i <= n; i++) { const t = i / n; out.push(`A ${(L / n / 2).toFixed(1)} ${(L / n / 2).toFixed(1)} 0 0 1 ${(p[0] + (q[0] - p[0]) * t).toFixed(1)} ${(p[1] + (q[1] - p[1]) * t).toFixed(1)}`); } return out.join(" "); };
@@ -3411,6 +3430,7 @@ function markSvg(m, T, z){   // T: base -> screen; z: px per screen unit (1 on s
 }
 function markSvg0(m, T, z){
   const col = m.color || "#d03b3b", sel = m.id === S.selMark || S.multi.has(m.id);
+  if (MK_TYPES.has(m.type)) return mkSvg(m, T, z, sel);
   if (m.type === "fence") { const d = m.pts.map(p => T(p).map(v => v.toFixed(1)).join(",")).join(" ");
     return `<polyline points="${d}" fill="none" stroke="#ff7a00" stroke-width="${(sel ? 4 : 3) * z}" stroke-dasharray="${6 * z} ${3 * z}" stroke-linecap="round"/>`; }
   if (m.type === "dimension") {
@@ -3430,6 +3450,7 @@ function markSvg0(m, T, z){
 }
 function markAt(sp, only){   // the markup under a screen point (only: test just that one)
   return (only ? [only] : pageMarks().slice().reverse()).find(m => {
+    if (MK_TYPES.has(m.type)) return mkHit(m, sp);
     const a = toScr(m.pts[0]), b = m.pts[1] ? toScr(m.pts[1]) : null;
     if (m.type === "note") return sp[0] >= a[0] - 4 && sp[0] <= a[0] + Math.min(320, (m.text || "Note").length * 6.6 + 14) && Math.abs(sp[1] - a[1]) <= 12;
     if (m.type === "arrow" || m.type === "dimension") return distSeg(sp, a, b) <= HIT_PX + (+m.width || 0) + 4;
@@ -3455,6 +3476,823 @@ async function addMark(type, pts){
   const d = toolDefaults();
   const m = {id: uid("M"), type, file: S.fileId, page: S.pageNo, pts, text, color: type === "hilite" ? d.hiliteColor : d.markColor, width: d.markWidth, opacity: type === "hilite" ? d.hiliteOpacity : undefined, at: new Date().toISOString()};
   mutate(() => { (P.proj.marks = P.proj.marks || []).push(m); });
+}
+
+/* ------------------------------------------------------------------ markup tools (Bluebeam Revu Basics)
+   Text box, callout, line, polyline, polygon, rectangle, ellipse, pen and highlighter pen, stamps (with your name and the
+   date), images, hyperlinks, file attachments, redaction and erase — each with Bluebeam's properties: subject, author,
+   status, colour, fill, opacity, line style, arrow ends, font and hatch pattern. What sits on the drawing (text, boxes, hatch
+   spacing, the highlighter's width) is in page units, so it prints at the size it was drawn; line weights are screen widths,
+   as for the other markups. Pictures and files are kept in this browser beside the PDFs, not in the project record, so undo
+   and saving stay light; Project + PDFs carries them. */
+const MK_TYPES = new Set(["text", "callout", "line", "polyline", "polygon", "box", "ellipse", "pen", "stamp", "image", "link", "attach", "redact"]);
+const MK_TOOL_NAMES = {mk_text: "Text box", mk_callout: "Callout", mk_line: "Line", mk_polyline: "Polyline", mk_polygon: "Polygon", mk_box: "Rectangle", mk_ellipse: "Ellipse",
+  mk_pen: "Pen", mk_hpen: "Highlighter pen", mk_stamp: "Stamp", mk_image: "Image", mk_link: "Hyperlink", mk_attach: "File attachment", mk_redact: "Redaction", mk_erase: "Erase (white-out)"};
+const MK_MINPTS = {note: 1, attach: 1, polygon: 3, callout: 3};
+const MK_BOXY = new Set(["text", "box", "ellipse", "stamp", "image", "link", "redact", "hilite", "cloud"]);   // drawn between two opposite corners
+const MK_PLACE = new Set(["text", "stamp", "image", "attach"]);   // a click places it (a drag sizes it)
+const mkKindOf = m => m.type === "pen" && m.hl ? "hpen" : m.type === "redact" && m.erase ? "erase" : m.type;
+const mkTypeOf = kind => kind === "hpen" ? "pen" : kind === "erase" ? "redact" : kind;
+const mkIsTool = t => typeof t === "string" && t.startsWith("mk_");
+const MK_DASH = {solid: "Solid", dash: "Dashed", dot: "Dotted", dashdot: "Dash-dot"};
+const MK_ENDS = {none: "None", arrow: "Arrow", open: "Open arrow", dot: "Dot", square: "Square", slash: "Slash (tick)"};
+const MK_FONT = {sans: "Segoe UI, Arial, Helvetica, sans-serif", serif: "Georgia, Times New Roman, serif", mono: "Consolas, Courier New, monospace"};
+const MK_STATUSES = ["", "Accepted", "Rejected", "Cancelled", "Completed", "Reviewed", "For information"];
+const mkStatusList = () => MK_STATUSES.concat((P.proj && P.proj.mkStatuses || []).filter(s => typeof s === "string" && s && MK_STATUSES.indexOf(s) < 0));
+const HATCHES = {diag: "Diagonal /", diag2: "Diagonal \\", cross: "Cross-hatch ✕", horiz: "Horizontal", vert: "Vertical", grid: "Grid", dots: "Dots", brick: "Brick", concrete: "Concrete", earth: "Earth", zigzag: "Insulation (zigzag)", custom: "Custom…"};
+
+/* each tool's style: the last one set as default (right-click → Set as default, or the Tool Chest), else these */
+const MK_STYLE_KEY = "zdTakeoffMarkStyles";
+const MK_STYLE0 = {
+  text: {color: "#d03b3b", width: 1, fill: "#ffffff", fillOp: 0.9, fs: 10, font: "sans", bold: false, align: "left", op: 1},
+  callout: {color: "#d03b3b", width: 1.5, fill: "#ffffff", fillOp: 0.9, fs: 10, font: "sans", bold: false, align: "left", a0: "arrow", op: 1},
+  line: {color: "#d03b3b", width: 2, dash: "solid", a0: "none", a1: "none", op: 1},
+  polyline: {color: "#d03b3b", width: 2, dash: "solid", a0: "none", a1: "none", op: 1},
+  polygon: {color: "#d03b3b", width: 2, dash: "solid", fill: "#d03b3b", fillOp: 0.12, hatch: null, op: 1},
+  box: {color: "#d03b3b", width: 2, dash: "solid", fill: "", fillOp: 0.15, hatch: null, op: 1},
+  ellipse: {color: "#d03b3b", width: 2, dash: "solid", fill: "", fillOp: 0.15, hatch: null, op: 1},
+  pen: {color: "#d03b3b", width: 2, op: 1},
+  hpen: {color: "#ffd400", width: 9, op: 0.4},
+  stamp: {color: "#1e8e5a", op: 0.92},
+  image: {color: "#0b0b0b", width: 0, op: 1},
+  link: {color: "#2a78d6"},
+  attach: {color: "#2a78d6"},
+  redact: {fill: "#000000"},
+  erase: {fill: "#ffffff"}
+};
+const MK_STYLE_KEYS = ["color", "width", "fill", "fillOp", "fs", "font", "bold", "align", "dash", "a0", "a1", "hatch", "op"];
+function mkClean(o){   // a markup's style fields, checked (a project or Tool Chest file can come from anywhere)
+  const r = {}, col = v => typeof v === "string" && HEXCOL.test(v), n = (v, lo, hi) => { v = +v; return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : null; };
+  o = o && typeof o === "object" ? o : {};
+  if (col(o.color)) r.color = o.color;
+  if (o.fill === "" || col(o.fill)) r.fill = o.fill;
+  [["width", 0, 40], ["fillOp", 0, 1], ["op", 0.05, 1], ["fs", 1, 500]].forEach(([k, lo, hi]) => { if (o[k] != null && n(o[k], lo, hi) != null) r[k] = n(o[k], lo, hi); });
+  if (MK_FONT[o.font]) r.font = o.font;
+  if (o.bold != null) r.bold = !!o.bold;
+  if (["left", "center", "right"].indexOf(o.align) >= 0) r.align = o.align;
+  if (MK_DASH[o.dash]) r.dash = o.dash;
+  ["a0", "a1"].forEach(k => { if (MK_ENDS[o[k]]) r[k] = o[k]; });
+  if (o.hatch === null) r.hatch = null;
+  else if (o.hatch && typeof o.hatch === "object" && HATCHES[o.hatch.p]) { const h = o.hatch; r.hatch = {p: h.p, sp: n(h.sp, 0.5, 500) || 6, lw: n(h.lw, 0.2, 12) || 0.8}; if (h.p === "custom") { r.hatch.ang = n(h.ang, -360, 360) || 0; r.hatch.x = !!h.x; } if (col(h.col)) r.hatch.col = h.col; }
+  return r;
+}
+function mkStyle(kind){ let o = null; try { o = JSON.parse(pref(MK_STYLE_KEY) || "null"); } catch (e) { o = null; } return Object.assign({}, MK_STYLE0[kind] || {}, mkClean(o && o[kind])); }
+function mkStyleOf(m){ return mkClean(m); }
+function saveMkStyle(kind, st){ let o = {}; try { o = JSON.parse(pref(MK_STYLE_KEY) || "{}") || {}; } catch (e) { o = {}; } o[kind] = mkClean(st); pref(MK_STYLE_KEY, JSON.stringify(o)); }
+const safeUrl = u => { u = String(u == null ? "" : u).trim(); return /^(https?:\/\/|mailto:)[^\s<>"'`]+$/i.test(u) ? u : ""; };
+function mkSanitize(m){   // a markup read from a project: its fields checked, so nothing in a file can break the drawing or reach a script
+  const st = mkClean(m); MK_STYLE_KEYS.forEach(k => { delete m[k]; }); Object.assign(m, st);
+  if (!m.color) m.color = (MK_STYLE0[mkKindOf(m)] || {}).color || "#d03b3b";
+  ["subject", "author", "status"].forEach(k => { if (m[k] != null) m[k] = String(m[k]).slice(0, 200); });
+  m.text = String(m.text == null ? "" : m.text).slice(0, 20000);
+  if (m.type === "stamp") { const s = m.stamp && typeof m.stamp === "object" ? m.stamp : {}; m.stamp = {label: String(s.label || m.text || "STAMP").slice(0, 80), sub: String(s.sub || "").slice(0, 200)}; if (typeof s.aid === "string") m.stamp.aid = s.aid.slice(0, 40); }
+  if (m.type === "image") { const i = m.img && typeof m.img === "object" ? m.img : {}; m.img = {aid: String(i.aid || "").slice(0, 40), w: Math.max(0, +i.w || 0), h: Math.max(0, +i.h || 0), name: String(i.name || "").slice(0, 200)}; }
+  if (m.type === "attach") { const a = m.att && typeof m.att === "object" ? m.att : {}; m.att = {aid: String(a.aid || "").slice(0, 40), name: String(a.name || "file").slice(0, 200), size: Math.max(0, +a.size || 0), type: String(a.type || "").slice(0, 100)}; }
+  if (m.type === "link") { const l = m.link && typeof m.link === "object" ? m.link : {}; m.link = safeUrl(l.url) ? {url: safeUrl(l.url)} : typeof l.key === "string" && /^[^:]+:\d+$/.test(l.key) ? {key: l.key} : {}; m.show = !!m.show; }
+  if (m.type === "pen") m.hl = !!m.hl;
+  if (m.type === "redact") m.erase = !!m.erase;
+  if (m.replies != null) m.replies = Array.isArray(m.replies) ? m.replies.filter(r => r && typeof r === "object" && typeof r.text === "string").slice(0, 500).map(r => ({id: String(r.id || uid("R")).slice(0, 40), author: String(r.author || "").slice(0, 100), at: String(r.at || "").slice(0, 40), text: r.text.slice(0, 5000)})) : [];
+}
+
+/* pictures and files of markups: in this browser's PDF store under "asset:<id>" (never listed, so nothing else reads them) */
+const ASSET_URL = new Map(), ASSET_WAIT = new Map();
+const assetKey = aid => "asset:" + aid;
+async function assetPut(blob, name){ const aid = uid("A"); await dbPut("pdfs", {asset: true, name: String(name || ""), type: blob.type || "application/octet-stream", size: blob.size, data: await blob.arrayBuffer(), at: new Date().toISOString()}, assetKey(aid)); return aid; }
+const assetRec = aid => aid ? dbGet("pdfs", assetKey(aid)) : Promise.resolve(null);
+const dataUrlOf = blob => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => bad(r.error); r.readAsDataURL(blob); });
+const IMG_TYPES = /^image\/(png|jpeg|gif|webp|bmp)$/i;
+function assetLoad(aid){   // -> a picture's data URL (or null), read once a session
+  if (!aid) return Promise.resolve(null);
+  if (ASSET_URL.has(aid)) return Promise.resolve(ASSET_URL.get(aid));
+  if (!ASSET_WAIT.has(aid)) ASSET_WAIT.set(aid, assetRec(aid).then(r => r && IMG_TYPES.test(r.type) ? dataUrlOf(new Blob([r.data], {type: r.type})) : null).catch(() => null)
+    .then(u => { ASSET_URL.set(aid, u); ASSET_WAIT.delete(aid); return u; }));
+  return ASSET_WAIT.get(aid);
+}
+function assetNow(aid){ if (!aid) return null; if (ASSET_URL.has(aid)) return ASSET_URL.get(aid); assetLoad(aid).then(() => { S.ovSig = null; draw(); }); return null; }   // drawn once it has loaded
+const mkAids = m => [m.img && m.img.aid, m.stamp && m.stamp.aid, m.att && m.att.aid].concat((m.photos || []).map(x => x && x.aid)).filter(Boolean);
+async function mkAssetsFor(file, page){ if (P.proj) await Promise.all((P.proj.marks || []).filter(m => m.file === file && m.page === page).flatMap(mkAids).map(assetLoad)); }
+function pickFiles(accept, multi){
+  return new Promise(ok => { const i = document.createElement("input"); i.type = "file"; if (accept) i.accept = accept; i.multiple = !!multi;
+    let done = false; const fin = L => { if (done) return; done = true; ok(L); }; i.onchange = () => fin([...i.files]); i.addEventListener("cancel", () => fin([])); i.click(); });
+}
+async function imageAsset(file){   // a picture for a markup, kept at most 2000 px across -> {aid, w, h, name}
+  let bmp; try { bmp = await createImageBitmap(file); } catch (e) { throw new Error(file.name + " is not a picture this browser can read (PNG, JPEG, GIF, WebP or BMP)"); }
+  const sc = Math.min(1, 2000 / Math.max(bmp.width, bmp.height)), W = Math.max(1, Math.round(bmp.width * sc)), H = Math.max(1, Math.round(bmp.height * sc));
+  let blob = file;
+  if (sc < 1 || file.size > 1.5e6 || !/^image\/(png|jpeg|gif|webp)$/i.test(file.type)) {
+    const c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.getContext("2d"), alpha = /png|gif|webp/i.test(file.type);
+    if (!alpha) { x.fillStyle = "#fff"; x.fillRect(0, 0, W, H); } x.drawImage(bmp, 0, 0, W, H);
+    blob = await new Promise(r => c.toBlob(r, alpha ? "image/png" : "image/jpeg", 0.88));
+    if (alpha && blob && blob.size > 2.5e6) { x.globalCompositeOperation = "destination-over"; x.fillStyle = "#fff"; x.fillRect(0, 0, W, H); blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.88)); }
+    c.width = 0;
+  }
+  if (bmp.close) bmp.close();
+  if (!blob) throw new Error("the picture could not be stored");
+  const aid = await assetPut(blob, file.name); ASSET_URL.delete(aid); return {aid, w: W, h: H, name: file.name};
+}
+async function attachAsset(file){ if (file.size > 60e6) throw new Error(file.name + " is larger than 60 MB — attach a smaller file"); return {aid: await assetPut(file, file.name), name: file.name, size: file.size, type: file.type || "application/octet-stream"}; }
+async function openAsset(aid, name, save){   // a file of a markup: opened (pictures, PDF, plain text) or saved; never run in this page
+  const r = await assetRec(aid); if (!r) return toast("That file is not in this browser — the project came without it (use Export → Project + PDFs to move files)", 6000);
+  const blob = new Blob([r.data], {type: r.type}), view = !save && (IMG_TYPES.test(r.type) || r.type === "application/pdf" || r.type === "text/plain");
+  if (!view) return saveBlob(blob, name || r.name || "file");
+  const u = URL.createObjectURL(blob), w = window.open(u, "_blank", "noopener"); if (!w) saveBlob(blob, name || r.name || "file"); setTimeout(() => URL.revokeObjectURL(u), 120000);
+}
+
+/* text in boxes: measured in page units, wrapped to the box */
+let MK_CTX = null; const MK_WRAP = new Map(), MK_LH = 1.22, mkPad = fs => fs * 0.35;
+function mkMeasure(t, fs, font, bold){ if (!MK_CTX) MK_CTX = document.createElement("canvas").getContext("2d"); MK_CTX.font = (bold ? "700 " : "400 ") + fs + "px " + (MK_FONT[font] || MK_FONT.sans); return MK_CTX.measureText(t).width; }
+function mkWrap(text, fs, font, bold, maxW){   // the lines of a text in a box maxW wide (page units); a word longer than a line is cut
+  const key = [text, fs, font, bold ? 1 : 0, Math.round(maxW * 10)].join("\u0001"), hit = MK_WRAP.get(key); if (hit) return hit;
+  const W = t => mkMeasure(t, fs, font, bold), out = [];
+  const cut = w => { while (w.length > 1 && W(w) > maxW) { let n = w.length - 1; while (n > 1 && W(w.slice(0, n)) > maxW) n--; out.push(w.slice(0, n)); w = w.slice(n); } return w; };
+  String(text == null ? "" : text).split(/\r?\n/).forEach(par => { let line = "";
+    par.split(/ +/).forEach(w => { const t = line ? line + " " + w : w; if (maxW <= 0 || W(t) <= maxW) { line = t; return; } if (line) out.push(line); line = cut(w); });
+    out.push(line); });
+  if (MK_WRAP.size > 600) MK_WRAP.clear(); MK_WRAP.set(key, out); return out;
+}
+function mkTextWidth(m){ const fs = +m.fs || 10; return Math.max(...String(m.text || " ").split(/\r?\n/).map(l => mkMeasure(l || " ", fs, m.font, m.bold))) + 2 * mkPad(fs) + 1; }
+function mkTextHeight(m, w){ const fs = +m.fs || 10; return mkWrap(m.text || "", fs, m.font, m.bold, w - 2 * mkPad(fs)).length * fs * MK_LH + 2 * mkPad(fs); }
+function mkFit(m, keepW){   // a text box / callout fitted to its text: as wide as its longest line (at most 40 em) unless keepW, as tall as its lines
+  const bi = m.type === "callout" ? 1 : 0, a = m.pts[bi], b = m.pts[bi + 1], fs = +m.fs || 10, x0 = Math.min(a[0], b[0]), y0 = Math.min(a[1], b[1]);
+  let w = Math.abs(b[0] - a[0]); if (!keepW || w < 2 * fs) w = Math.min(mkTextWidth(m), 40 * fs);
+  m.pts[bi] = [x0, y0]; m.pts[bi + 1] = [x0 + w, y0 + mkTextHeight(m, w)];
+}
+
+/* drawing a markup (screen and exports): T page -> px, z the screen-width factor (1 on screen) */
+let mkPatSeq = 0;
+const f1 = p => p[0].toFixed(1) + " " + p[1].toFixed(1);
+const mkBox = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+const mkCorners = r => [[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]];
+const mkTwo = (a, b) => { const r = mkBox(a, b); return [[r[0], r[1]], [r[2], r[3]]]; };   // top-left, bottom-right
+function hatchDef(id, h, col, k, z){   // a fill pattern in page units (h.sp pt apart; never closer than 4 px on screen)
+  const s = +Math.max(4, (+h.sp || 6) * k).toFixed(2), lw = Math.max(0.5, (+h.lw || 0.8) * z).toFixed(2), st = `stroke="${col}" stroke-width="${lw}" fill="none" stroke-linecap="square"`;
+  const ang = h.p === "custom" ? +h.ang || 0 : {diag: -45, diag2: 45, cross: 45, horiz: 0, vert: 90}[h.p] || 0;
+  let w = s, body;
+  switch (h.p) {
+    case "cross": case "grid": body = `<path d="M0 ${s / 2}H${s}M${s / 2} 0V${s}" ${st}/>`; break;
+    case "dots": body = `<circle cx="${s / 2}" cy="${s / 2}" r="${Math.max(0.6, +lw * 0.9).toFixed(2)}" fill="${col}"/>`; break;
+    case "brick": w = 2 * s; body = `<path d="M0 0.5H${w}M0 ${s / 2}H${w}M${s / 2} 0V${s / 2}M${s * 1.5} ${s / 2}V${s}" ${st}/>`; break;
+    case "concrete": body = `<circle cx="${(s * .22).toFixed(2)}" cy="${(s * .28).toFixed(2)}" r="${(s * .07).toFixed(2)}" fill="${col}"/><circle cx="${(s * .8).toFixed(2)}" cy="${(s * .2).toFixed(2)}" r="${(s * .045).toFixed(2)}" fill="${col}"/><path d="M${(s * .5).toFixed(2)} ${(s * .82).toFixed(2)}l${(s * .17).toFixed(2)} ${(-s * .28).toFixed(2)}l${(s * .17).toFixed(2)} ${(s * .28).toFixed(2)}z" ${st}/>`; break;
+    case "earth": body = `<path d="M0 ${s}L${s} 0M${(s * .1).toFixed(2)} ${(s * .55).toFixed(2)}H${(s * .42).toFixed(2)}" ${st}/>`; break;
+    case "zigzag": body = `<path d="M0 ${s / 2}L${s / 4} 0L${s * .75} ${s}L${s} ${s / 2}" ${st}/>`; break;
+    default: body = `<path d="M0 ${s / 2}H${s}${h.x ? `M${s / 2} 0V${s}` : ""}" ${st}/>`;   // lines: diagonal, horizontal, vertical, custom
+  }
+  return `<pattern id="${id}" width="${w}" height="${s}" patternUnits="userSpaceOnUse" patternTransform="rotate(${ang})">${body}</pattern>`;
+}
+function mkDash(d, w){ w = Math.max(1, w); return d === "dash" ? `${(5 * w).toFixed(1)} ${(3 * w).toFixed(1)}` : d === "dot" ? `0.1 ${(2.6 * w).toFixed(1)}` : d === "dashdot" ? `${(7 * w).toFixed(1)} ${(2.6 * w).toFixed(1)} 0.1 ${(2.6 * w).toFixed(1)}` : ""; }
+function mkEnd(kind, tip, from, w, col){   // an arrow head, dot, square or slash at tip, facing away from `from` (px)
+  if (!kind || kind === "none" || !from || dist(tip, from) < 0.01) return "";
+  const L = Math.max(8, 4.5 * w), ang = Math.atan2(tip[1] - from[1], tip[0] - from[0]), c = Math.cos(ang), s = Math.sin(ang);
+  const pt = (al, sd) => (tip[0] - c * al - s * sd).toFixed(1) + " " + (tip[1] - s * al + c * sd).toFixed(1);
+  if (kind === "arrow") return `<path d="M${pt(L, L * .42)}L${pt(0, 0)}L${pt(L, -L * .42)}Z" fill="${col}" stroke="${col}" stroke-width="${(w * .5).toFixed(2)}" stroke-linejoin="round"/>`;
+  if (kind === "open") return `<path d="M${pt(L, L * .45)}L${pt(0, 0)}L${pt(L, -L * .45)}" fill="none" stroke="${col}" stroke-width="${w.toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  if (kind === "dot") return `<circle cx="${tip[0].toFixed(1)}" cy="${tip[1].toFixed(1)}" r="${(L * .3).toFixed(1)}" fill="${col}"/>`;
+  if (kind === "square") { const r = L * .28; return `<rect x="${(tip[0] - r).toFixed(1)}" y="${(tip[1] - r).toFixed(1)}" width="${(2 * r).toFixed(1)}" height="${(2 * r).toFixed(1)}" fill="${col}" transform="rotate(${(ang * 180 / Math.PI).toFixed(1)} ${tip[0].toFixed(1)} ${tip[1].toFixed(1)})"/>`; }
+  if (kind === "slash") { const r = L * .55, a2 = ang + Math.PI / 4; return `<path d="M${(tip[0] - Math.cos(a2) * r).toFixed(1)} ${(tip[1] - Math.sin(a2) * r).toFixed(1)}L${(tip[0] + Math.cos(a2) * r).toFixed(1)} ${(tip[1] + Math.sin(a2) * r).toFixed(1)}" stroke="${col}" stroke-width="${(w * 1.4).toFixed(2)}" stroke-linecap="round"/>`; }
+  return "";
+}
+function mkSmooth(P){ if (P.length < 3) return "M" + P.map(f1).join("L"); let d = "M" + f1(P[0]); for (let i = 1; i < P.length - 1; i++) d += "Q" + f1(P[i]) + " " + f1([(P[i][0] + P[i + 1][0]) / 2, (P[i][1] + P[i + 1][1]) / 2]); return d + "L" + f1(P[P.length - 1]); }
+function mkTextSvg(m, r, k, col){   // the lines of a text box inside the screen box r, the font in page units
+  const fs = +m.fs || 10, pad = mkPad(fs), fpx = fs * k; if (fpx < 1.5) return "";
+  const L = mkWrap(m.text || "", fs, m.font, m.bold, (r[2] - r[0]) / k - 2 * pad), al = m.align === "center" ? "middle" : m.align === "right" ? "end" : "start";
+  const x = al === "middle" ? (r[0] + r[2]) / 2 : al === "end" ? r[2] - pad * k : r[0] + pad * k, fam = esc(MK_FONT[m.font] || MK_FONT.sans);
+  return L.map((l, i) => `<text x="${x.toFixed(1)}" y="${(r[1] + pad * k + (i + 0.8) * fs * MK_LH * k).toFixed(1)}" font-size="${fpx.toFixed(2)}" font-family="${fam}" font-weight="${m.bold ? 700 : 400}" fill="${col}" text-anchor="${al}" xml:space="preserve">${esc(l)}</text>`).join("");
+}
+function calloutKnee(r, tip, z, k, fs){ const left = tip[0] < (r[0] + r[2]) / 2, side = left ? r[0] : r[2], kl = Math.min(28 * z, Math.max(8 * z, fs * k)), cy = (r[1] + r[3]) / 2; return {knee: [side + (left ? -kl : kl), cy], foot: [side, cy]}; }
+function mkSvg(m, T, z, sel){
+  const k = Math.abs(T([1, 0])[0] - T([0, 0])[0]) || 1, ex = !!S.mkExport, col = m.color || "#d03b3b", op = m.op == null ? 1 : Math.max(0.05, Math.min(1, +m.op));
+  const w = Math.max(0, m.width == null ? 2 : +m.width) * z, P = m.pts.map(T), dash = mkDash(m.dash, w);
+  const strokeA = w > 0 ? `stroke="${col}" stroke-width="${w.toFixed(2)}"${dash ? ` stroke-dasharray="${dash}"` : ""} stroke-linecap="round" stroke-linejoin="round"` : `stroke="none"`;
+  const fillA = m.fill ? `fill="${m.fill}" fill-opacity="${m.fillOp == null ? 0.15 : Math.max(0, Math.min(1, +m.fillOp))}"` : `fill="none"`;
+  const pid = m.hatch && m.hatch.p ? "mkp" + (++mkPatSeq) : "", defs = pid ? `<defs>${hatchDef(pid, m.hatch, m.hatch.col || col, k, z)}</defs>` : "";
+  const shape = attrs => `<${attrs} ${fillA} ${strokeA}/>` + (pid ? `<${attrs} fill="url(#${pid})" stroke="none"/>` : "");
+  const rectA = r => `rect x="${r[0].toFixed(1)}" y="${r[1].toFixed(1)}" width="${Math.max(0, r[2] - r[0]).toFixed(1)}" height="${Math.max(0, r[3] - r[1]).toFixed(1)}"`;
+  const selBox = r => sel && !ex ? `<rect x="${(r[0] - 3).toFixed(1)}" y="${(r[1] - 3).toFixed(1)}" width="${(r[2] - r[0] + 6).toFixed(1)}" height="${(r[3] - r[1] + 6).toFixed(1)}" fill="none" stroke="#4b3b8f" stroke-width="1" stroke-dasharray="4 3"/>` : "";
+  const glow = d => sel && !ex ? `<path d="${d}" fill="none" stroke="#4b3b8f" stroke-width="${(w + 7).toFixed(1)}" stroke-opacity=".2" stroke-linecap="round" stroke-linejoin="round"/>` : "";
+  let out = "";
+  switch (m.type) {
+    case "box": { const r = mkBox(P[0], P[1]); out = defs + shape(rectA(r)) + selBox(r); break; }
+    case "ellipse": { const r = mkBox(P[0], P[1]); out = defs + shape(`ellipse cx="${((r[0] + r[2]) / 2).toFixed(1)}" cy="${((r[1] + r[3]) / 2).toFixed(1)}" rx="${((r[2] - r[0]) / 2).toFixed(1)}" ry="${((r[3] - r[1]) / 2).toFixed(1)}"`) + selBox(r); break; }
+    case "polygon": { const d = "M" + P.map(f1).join("L") + "Z"; out = glow(d) + defs + shape(`path d="${d}"`); break; }
+    case "line": case "polyline": {
+      const Q = P.map(p => p.slice()), L = Math.max(8, 4.5 * Math.max(1, w)), trim = (i, j, kind) => { if (kind !== "arrow") return; const d = dist(Q[i], Q[j]); if (d > L) Q[i] = [Q[i][0] + (Q[j][0] - Q[i][0]) / d * L * .6, Q[i][1] + (Q[j][1] - Q[i][1]) / d * L * .6]; };
+      if (Q.length < 2) break; trim(0, 1, m.a0); trim(Q.length - 1, Q.length - 2, m.a1);
+      out = glow("M" + P.map(f1).join("L")) + `<path d="M${Q.map(f1).join("L")}" fill="none" ${strokeA}/>` + mkEnd(m.a0, P[0], P[1], Math.max(1, w), col) + mkEnd(m.a1, P[P.length - 1], P[P.length - 2], Math.max(1, w), col); break; }
+    case "pen": { const d = mkSmooth(P), pw = m.hl ? Math.max(1, (+m.width || 9) * k) : Math.max(0.5, w); out = glow(d) + `<path d="${d}" fill="none" stroke="${col}" stroke-width="${pw.toFixed(2)}" stroke-linecap="${m.hl ? "square" : "round"}" stroke-linejoin="round"/>`; break; }
+    case "text": case "callout": {
+      const bi = m.type === "callout" ? 1 : 0, r = mkBox(P[bi], P[bi + 1]);
+      if (m.type === "callout") { const {knee, foot} = calloutKnee(r, P[0], z, k, +m.fs || 10), lw = Math.max(1, w || z);
+        out += `<path d="M${f1(P[0])}L${f1(knee)}L${f1(foot)}" fill="none" stroke="${col}" stroke-width="${lw.toFixed(2)}" stroke-linejoin="round" stroke-linecap="round"/>` + mkEnd(m.a0 || "arrow", P[0], knee, lw, col); }
+      out += defs + shape(rectA(r)) + mkTextSvg(m, r, k, col) + selBox(r); break; }
+    case "stamp": {
+      const r = mkBox(P[0], P[1]), W = r[2] - r[0], H = r[3] - r[1], st = m.stamp || {};
+      if (st.aid) { const u = assetNow(st.aid); out = u ? `<image href="${u}" x="${r[0].toFixed(1)}" y="${r[1].toFixed(1)}" width="${W.toFixed(1)}" height="${H.toFixed(1)}" preserveAspectRatio="xMidYMid meet"/>` : `<${rectA(r)} fill="none" stroke="${col}" stroke-dasharray="4 3"/>`; out += selBox(r); break; }
+      const main = st.label || m.text || "STAMP", sub = st.sub || "", bw = Math.max(0.6, Math.min(W, H) * 0.045), ins = bw * 2.4;
+      const f1s = Math.min(H * (sub ? 0.44 : 0.6), W * 0.86 / Math.max(0.01, mkMeasure(main, 1, "sans", true) * 1.06)), f2s = sub ? Math.min(H * 0.2, W * 0.9 / Math.max(0.01, mkMeasure(sub, 1, "sans", false))) : 0, cx = (r[0] + r[2]) / 2, fam = esc(MK_FONT.sans);
+      out = `<${rectA(r)} rx="${(H * .12).toFixed(1)}" fill="${col}" fill-opacity=".05" stroke="${col}" stroke-width="${bw.toFixed(2)}"/><rect x="${(r[0] + ins).toFixed(1)}" y="${(r[1] + ins).toFixed(1)}" width="${Math.max(0, W - 2 * ins).toFixed(1)}" height="${Math.max(0, H - 2 * ins).toFixed(1)}" rx="${(H * .08).toFixed(1)}" fill="none" stroke="${col}" stroke-width="${(bw * .45).toFixed(2)}"/>`
+        + (f1s * 1 >= 1 ? `<text x="${cx.toFixed(1)}" y="${(sub ? r[1] + H * .54 : r[1] + H / 2 + f1s * .36).toFixed(1)}" font-family="${fam}" font-weight="800" font-size="${f1s.toFixed(2)}" letter-spacing="${(f1s * .04).toFixed(2)}" fill="${col}" text-anchor="middle">${esc(main)}</text>` : "")
+        + (sub && f2s >= 1 ? `<text x="${cx.toFixed(1)}" y="${(r[1] + H * .8).toFixed(1)}" font-family="${fam}" font-weight="600" font-size="${f2s.toFixed(2)}" fill="${col}" text-anchor="middle">${esc(sub)}</text>` : "") + selBox(r); break; }
+    case "image": { const r = mkBox(P[0], P[1]), u = m.img && assetNow(m.img.aid);
+      out = u ? `<image href="${u}" x="${r[0].toFixed(1)}" y="${r[1].toFixed(1)}" width="${(r[2] - r[0]).toFixed(1)}" height="${(r[3] - r[1]).toFixed(1)}" preserveAspectRatio="none"/>`
+        : `<${rectA(r)} fill="#eef2f7" stroke="#9fb0c6" stroke-dasharray="4 3"/>` + (ex ? "" : `<text x="${((r[0] + r[2]) / 2).toFixed(1)}" y="${((r[1] + r[3]) / 2).toFixed(1)}" font-size="${11 * z}" text-anchor="middle" fill="#5f6b7a">${m.img && m.img.aid ? "picture…" : "picture missing"}</text>`);
+      if (w > 0) out += `<${rectA(r)} fill="none" ${strokeA}/>`; out += selBox(r); break; }
+    case "link": { const r = mkBox(P[0], P[1]);
+      if (ex) { out = m.show ? `<${rectA(r)} fill="none" stroke="${col}" stroke-width="${z}"/>` : ""; break; }
+      out = `<${rectA(r)} fill="${col}" fill-opacity=".07" stroke="${col}" stroke-width="${(1.2 * z).toFixed(1)}" stroke-dasharray="${5 * z} ${3 * z}"/><text x="${(r[2] - 4 * z).toFixed(1)}" y="${(r[1] + 12 * z).toFixed(1)}" font-size="${11 * z}" text-anchor="end" fill="${col}">&#128279;</text>` + selBox(r); break; }
+    case "attach": { const q = P[0], s2 = 9 * z, X = x => (q[0] + x * z).toFixed(1), Y = y => (q[1] + y * z).toFixed(1);
+      out = `<rect x="${(q[0] - s2).toFixed(1)}" y="${(q[1] - s2).toFixed(1)}" width="${2 * s2}" height="${2 * s2}" rx="${3 * z}" fill="#fff" stroke="${col}" stroke-width="${1.4 * z}"/><path d="M${X(-2.5)} ${Y(4)}V${Y(-3)}A${(2.5 * z).toFixed(1)} ${(2.5 * z).toFixed(1)} 0 0 1 ${X(2.5)} ${Y(-3)}V${Y(4)}A${(1.4 * z).toFixed(1)} ${(1.4 * z).toFixed(1)} 0 0 1 ${X(-0.3)} ${Y(4)}V${Y(-2)}" fill="none" stroke="${col}" stroke-width="${(1.3 * z).toFixed(2)}" stroke-linecap="round"/>`
+        + (m.att && m.att.name && !ex ? `<text x="${(q[0] + s2 + 4 * z).toFixed(1)}" y="${(q[1] + 4 * z).toFixed(1)}" font-size="${11 * z}" fill="${col}" stroke="#fff" stroke-width="${3 * z}" paint-order="stroke">${esc(m.att.name.length > 32 ? m.att.name.slice(0, 31) + "…" : m.att.name)}</text>` : "")
+        + (sel && !ex ? `<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(s2 + 4).toFixed(1)}" fill="none" stroke="#4b3b8f" stroke-dasharray="4 3"/>` : ""); break; }
+    case "redact": { const r = mkBox(P[0], P[1]), fill = m.fill || (m.erase ? "#ffffff" : "#000000"), tc = /^#(?:f|e|d|c)/i.test(fill) ? "#0b0b0b" : "#ffffff", cx = (r[0] + r[2]) / 2, cy = (r[1] + r[3]) / 2, fs = Math.min(14 * z, (r[3] - r[1]) * .5);
+      const word = m.text ? `<text x="${cx.toFixed(1)}" y="${(cy + fs * .35).toFixed(1)}" font-size="${fs.toFixed(1)}" font-family="${esc(MK_FONT.sans)}" font-weight="700" text-anchor="middle" fill="${tc}">${esc(m.text)}</text>` : "";
+      if (ex) { out = `<${rectA(r)} fill="${fill}"/>` + word; break; }
+      out = `<${rectA(r)} fill="${fill}" fill-opacity="${m.erase ? 0.92 : 0.78}" stroke="#d03b3b" stroke-width="${(1.5 * z).toFixed(1)}" stroke-dasharray="${6 * z} ${3 * z}"/>` + word
+        + (m.erase || m.text ? "" : `<text x="${cx.toFixed(1)}" y="${(cy + 4 * z).toFixed(1)}" font-size="${10 * z}" font-weight="700" text-anchor="middle" fill="#ff8a80">REDACT</text>`) + selBox(r); break; }
+  }
+  return op < 1 && out ? `<g opacity="${op}">${out}</g>` : out;
+}
+
+/* hit test and outline (selection by click, box, lasso) */
+function mkHit(m, sp){
+  const P = m.pts.map(toScr), tol = HIT_PX + Math.max(0, +m.width || 0) / 2 + 2, filled = !!(m.fill || m.hatch);
+  const near = (Q, closed, t2) => { for (let i = 1; i < Q.length + (closed ? 1 : 0); i++) if (distSeg(sp, Q[i - 1], Q[i % Q.length]) <= (t2 || tol)) return true; return false; };
+  const inR = (r, pad) => sp[0] >= r[0] - pad && sp[0] <= r[2] + pad && sp[1] >= r[1] - pad && sp[1] <= r[3] + pad;
+  switch (m.type) {
+    case "line": return distSeg(sp, P[0], P[1]) <= tol;
+    case "polyline": return near(P, false);
+    case "pen": return near(P, false, m.hl ? Math.max(tol, (+m.width || 9) * S.view.s / 2 + 2) : tol);
+    case "polygon": return near(P, true) || (filled && pointInPoly(sp, P));
+    case "box": { const r = mkBox(P[0], P[1]); return filled ? inR(r, 3) : inR(r, tol) && !inR([r[0] + tol, r[1] + tol, r[2] - tol, r[3] - tol], 0); }
+    case "ellipse": { const r = mkBox(P[0], P[1]), rx = Math.max(1, (r[2] - r[0]) / 2), ry = Math.max(1, (r[3] - r[1]) / 2), q = Math.hypot((sp[0] - (r[0] + r[2]) / 2) / rx, (sp[1] - (r[1] + r[3]) / 2) / ry);
+      return filled ? q <= 1 + tol / Math.min(rx, ry) : Math.abs(q - 1) * Math.min(rx, ry) <= tol; }
+    case "callout": { const r = mkBox(P[1], P[2]); if (inR(r, 3)) return true; const {knee, foot} = calloutKnee(r, P[0], 1, S.view.s, +m.fs || 10); return distSeg(sp, P[0], knee) <= tol || distSeg(sp, knee, foot) <= tol; }
+    case "attach": return dist(sp, P[0]) <= 13;
+    default: return inR(mkBox(P[0], P[1]), 3);   // text, stamp, image, link, redaction
+  }
+}
+function mkPolyScr(m){   // a markup's outline on screen (box / lasso selection)
+  const P = m.pts.map(toScr), t = m.type;
+  if (t === "note" || t === "attach") return {P: [P[0]], closed: false, count: false};
+  if (MK_BOXY.has(t)) return {P: mkCorners(mkBox(P[0], P[1])), closed: true, count: false};
+  if (t === "callout") return {P: mkCorners(mkBox(P[1], P[2])).concat([P[0]]), closed: false, count: false};
+  return {P, closed: t === "polygon", count: false};
+}
+
+/* the selected markup's handles: box corners (a picture or stamp keeps its shape unless Shift), line ends, points */
+function mkHandles(m){
+  const t = m.type, P = m.pts.map(toScr);
+  if (t === "note" || t === "attach") return [];
+  if (MK_BOXY.has(t)) return mkCorners(mkBox(P[0], P[1])).map((p, i) => ({p, i}));
+  if (t === "pen") { const xs = P.map(p => p[0]), ys = P.map(p => p[1]); return mkCorners([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]).map((p, i) => ({p, i})); }
+  if (t === "callout") return [{p: P[0], i: 0}].concat(mkCorners(mkBox(P[1], P[2])).map((p, j) => ({p, i: j + 1})));
+  return P.map((p, i) => ({p, i}));
+}
+function mkHandleAt(m, sp){ const H = mkHandles(m); let bi = -1, bd = 8; H.forEach(h => { const d = dist(h.p, sp); if (d <= bd) { bd = d; bi = h.i; } }); return bi; }
+function mkHandlesSvg(m){
+  return mkHandles(m).map(h => `<rect x="${(h.p[0] - 4).toFixed(1)}" y="${(h.p[1] - 4).toFixed(1)}" width="8" height="8" fill="#fff" stroke="#4b3b8f" stroke-width="1.6"/>`).join("");
+}
+function mkCornerBox(o0, o1, i, q, keep){   // a box resized by its corner i to q (keep: its shape, as a picture's)
+  const r = mkBox(o0, o1), c = mkCorners(r), opp = c[(i + 2) % 4];
+  if (keep) { const w0 = r[2] - r[0] || 1, h0 = r[3] - r[1] || 1, a = w0 / h0; let w = Math.abs(q[0] - opp[0]), h = Math.abs(q[1] - opp[1]); if (w / h > a) w = h * a; else h = w / a;
+    q = [opp[0] + (q[0] < opp[0] ? -w : w), opp[1] + (q[1] < opp[1] ? -h : h)]; }
+  return [[Math.min(q[0], opp[0]), Math.min(q[1], opp[1])], [Math.max(q[0], opp[0]), Math.max(q[1], opp[1])]];
+}
+function mkHandleDrag(D, p, e){
+  const m = objById(D.mark); if (!m) return; const o = D.orig, t = m.type; D.moved = true;
+  if (t === "pen") { const xs = o.map(q => q[0]), ys = o.map(q => q[1]), r = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], [a, b] = mkCornerBox([r[0], r[1]], [r[2], r[3]], D.mh, p, !e.shiftKey);
+    const sx = (b[0] - a[0]) / Math.max(1e-6, r[2] - r[0]), sy = (b[1] - a[1]) / Math.max(1e-6, r[3] - r[1]); m.pts = o.map(q => [a[0] + (q[0] - r[0]) * sx, a[1] + (q[1] - r[1]) * sy]); return; }
+  if (MK_BOXY.has(t)) { m.pts = mkCornerBox(o[0], o[1], D.mh, p, (t === "image" || t === "stamp") !== !!e.shiftKey); if (t === "text") mkFit(m, true); return; }
+  if (t === "callout") { if (D.mh === 0) { m.pts = [p, o[1], o[2]]; return; } const [a, b] = mkCornerBox(o[1], o[2], D.mh - 1, p, false); m.pts = [o[0], a, b]; mkFit(m, true); return; }
+  m.pts = o.map((q, i) => i === D.mh ? p : q.slice());
+}
+
+/* placing: a press-drag-release sizes a box / line; a click without a drag is its first corner (click again for the other)
+   — or, for a text box, stamp, picture or attachment, places it there */
+function mkNew(kind, pts){
+  const type = mkTypeOf(kind), m = Object.assign({id: uid("M"), type, file: S.fileId, page: S.pageNo, pts, text: "", subject: MK_TOOL_NAMES["mk_" + kind] || MARK_TOOLS[type], author: qaUser(), status: "", at: new Date().toISOString()}, JSON.parse(JSON.stringify(mkStyle(kind))));
+  if (kind === "hpen") m.hl = true; if (kind === "erase") m.erase = true;
+  return m;
+}
+const mkAdd = (m, what) => mutate(() => { (P.proj.marks = P.proj.marks || []).push(m); }, "Add " + (what || MARK_TOOLS[m.type]).toLowerCase());
+function mkDown(p, sp, e){
+  const kind = S.tool.slice(3);
+  if (kind === "polyline" || kind === "polygon") {
+    if (kind === "polygon" && S.draft.length >= 3 && dist(toScr(S.draft[0]), toScr(p)) <= SNAP_PX) return finish(S.draft.slice());
+    if (S.draft.length && dist(S.draft[S.draft.length - 1], p) < 1e-6) return;
+    draftPush([p]); draftBtns(); draw(); return;
+  }
+  if (kind === "pen" || kind === "hpen") { S.mkd = {kind, pts: [toBase(sp[0], sp[1])], last: sp}; return; }
+  if (kind === "callout" && !S.draft.length) { draftPush([p]); draftBtns(); draw(); return; }
+  if (kind !== "callout" && S.draft.length) { const a = S.draft[0]; draftClear(); draftBtns(); mkMake(kind, a, p); return; }
+  S.mkd = {kind, a: p, b: p, sp0: sp, tip: kind === "callout" ? S.draft[0] : null};
+}
+function mkMoveDrag(sp, e){
+  const D = S.mkd;
+  if (D.pts) { if (dist(sp, D.last) >= 1.5) { D.pts.push(toBase(sp[0], sp[1])); D.last = sp; } return; }
+  let q = cursorPoint(e, sp).p;
+  if (e.shiftKey) { const dx = q[0] - D.a[0], dy = q[1] - D.a[1];
+    if (D.kind === "line") q = Math.abs(dx) >= Math.abs(dy) ? [q[0], D.a[1]] : [D.a[0], q[1]];
+    else if (["box", "ellipse", "link", "redact", "erase"].indexOf(D.kind) >= 0) { const s = Math.max(Math.abs(dx), Math.abs(dy)); q = [D.a[0] + Math.sign(dx || 1) * s, D.a[1] + Math.sign(dy || 1) * s]; } }
+  D.b = q;
+}
+function mkUp(){
+  const D = S.mkd; S.mkd = null; if (!D) return;
+  if (D.pts) return mkPen(D);
+  const moved = dist(toScr(D.a), toScr(D.b)) > 4;
+  if (D.kind === "callout") { draftClear(); draftBtns(); return mkMake("callout", D.a, moved ? D.b : null, D.tip); }
+  if (moved) return mkMake(D.kind, D.a, D.b);
+  if (MK_PLACE.has(D.kind)) return mkMake(D.kind, D.a, null);
+  draftPush([D.a]); draftBtns(); draw();   // the first corner: click again for the other
+}
+function mkPen(D){
+  const sp = D.pts.map(toScr), keep = [0];   // the stroke simplified to 0.6 px on screen (Douglas–Peucker)
+  const dp = (i, j) => { let bi = -1, bd = 0.6; for (let n = i + 1; n < j; n++) { const d = distSeg(sp[n], sp[i], sp[j]); if (d > bd) { bd = d; bi = n; } } if (bi > 0) { dp(i, bi); keep.push(bi); dp(bi, j); } };
+  if (sp.length > 2) dp(0, sp.length - 1); keep.push(sp.length - 1);
+  const pts = [...new Set(keep)].sort((a, b) => a - b).map(i => D.pts[i]);
+  if (pts.length < 2 || dist(sp[0], sp[sp.length - 1]) < 2 && pts.length < 3) { draw(); return; }
+  mkAdd(mkNew(D.kind, pts), MK_TOOL_NAMES["mk_" + D.kind]);
+}
+function mkPoly(t, pts){ const kind = t.slice(3); if (pts.length < (kind === "polygon" ? 3 : 2)) { draw(); return; } mkAdd(mkNew(kind, pts)); }
+async function mkMake(kind, a, b, tip){
+  const px = v => v / S.view.s, m = mkNew(kind, null), type = m.type;
+  if (["line", "box", "ellipse", "link", "redact"].indexOf(type) >= 0 && (!b || dist(toScr(a), toScr(b)) < 3)) { draw(); return; }
+  if (type === "line") m.pts = [a, b];
+  else if (type === "text" || type === "callout") {
+    const v = await mkTextAsk(type === "callout" ? "Callout" : "Text box", "", m); if (!v) { draw(); return; }
+    m.text = v.text; Object.assign(m, v.style);
+    if (type === "text") { m.pts = b ? mkTwo(a, b) : [a, [a[0] + 1, a[1] + 1]]; mkFit(m, !!b); }
+    else { const r = b ? mkBox(a, b) : [a[0], a[1], a[0] + 1, a[1] + 1]; m.pts = [tip || a, [r[0], r[1]], [r[2], r[3]]]; mkFit(m, !!b); }
+  }
+  else if (type === "box" || type === "ellipse" || type === "redact") m.pts = mkTwo(a, b);
+  else if (type === "stamp") {
+    const s = S.stampSel || await stampPicker(); if (!s) { draw(); return; }
+    if (/\{name\}/.test(s.tpl || "") && !qaUser()) await askUser();
+    m.stamp = {label: s.label, sub: s.tpl ? stampSub(s.tpl) : ""}; if (s.aid) m.stamp.aid = s.aid; if (s.color) m.color = s.color;
+    if (b) m.pts = mkTwo(a, b);
+    else { const H = px(44), W = s.aid && s.w && s.h ? H * s.w / s.h : Math.max(px(120), mkMeasure(s.label, H * .44, "sans", true) * 1.12 + H * .5, m.stamp.sub ? mkMeasure(m.stamp.sub, H * .2, "sans", false) * 1.12 + H * .4 : 0); m.pts = [[a[0] - W / 2, a[1] - H / 2], [a[0] + W / 2, a[1] + H / 2]]; }
+    if (!m.text) m.text = s.label;
+  }
+  else if (type === "image") {
+    const [f] = await pickFiles("image/png,image/jpeg,image/gif,image/webp,image/bmp"); if (!f) { draw(); return; }
+    let im; try { busy("Reading " + f.name + "…"); im = await imageAsset(f); } catch (e2) { busy(""); toast(e2.message || String(e2), 5000); return; } busy("");
+    m.img = im; m.text = f.name;
+    if (b) { const r = mkBox(a, b); m.pts = [[r[0], r[1]], [r[2], r[3]]]; }
+    else { const W = Math.min(px(320), S.base.width / 3), H = W * im.h / im.w; m.pts = [a, [a[0] + W, a[1] + H]]; }
+    await assetLoad(im.aid);
+  }
+  else if (type === "link") { const L = await linkAsk(); if (!L) { draw(); return; } m.link = L.link; m.text = L.text; m.pts = mkTwo(a, b); }
+  else if (type === "attach") {
+    const [f] = await pickFiles(""); if (!f) { draw(); return; }
+    try { busy("Storing " + f.name + "…"); m.att = await attachAsset(f); } catch (e2) { busy(""); toast(e2.message || String(e2), 5000); return; } busy("");
+    m.pts = [a]; m.text = f.name;
+  }
+  mkAdd(m, MK_TOOL_NAMES["mk_" + kind]);
+  if (type === "text" || type === "callout" || type === "image" || type === "attach" || type === "link") { setSel([m.id]); renderProps(); draw(); }
+}
+async function mkTextAsk(title, text, m){   // the text of a text box / callout, with its size and weight
+  const v = await ask(title, `<div class="fg w2"><label>Text</label><textarea id="mkTx" rows="5" style="width:100%;font:inherit">${esc(text)}</textarea></div>
+    <div class="grid" style="margin-top:6px"><div class="fg"><label>Font size (pt on the sheet)</label><input type="number" id="mkFs" min="2" max="200" step="0.5" value="${+m.fs || 10}"></div>
+    <div class="fg"><label>Font</label><select id="mkFn">${Object.keys(MK_FONT).map(f => `<option value="${f}"${m.font === f ? " selected" : ""}>${{sans: "Sans (Arial)", serif: "Serif", mono: "Monospace"}[f]}</option>`).join("")}</select></div>
+    <div class="fg"><label>&nbsp;</label><label style="font-weight:400"><input type="checkbox" id="mkBd" style="width:auto"${m.bold ? " checked" : ""}> Bold</label></div></div>
+    <p class="small">Enter starts a new line inside the text; the box grows to fit. Change colour, fill and border in Properties.</p>`, "Place",
+    () => { const t = $("mkTx").value.replace(/\s+$/, ""); if (!t.trim()) return "Type the text"; return {text: t, style: {fs: Math.max(1, Math.min(500, +$("mkFs").value || 10)), font: $("mkFn").value, bold: $("mkBd").checked}}; }, "mkTx");
+  return v;
+}
+async function mkEditText(m){
+  if (m.type === "stamp") {
+    const s = m.stamp || {}, v = await ask("Stamp text", `<div class="grid"><div class="fg w2"><label>Stamp</label><input type="text" id="stL" value="${esc(s.label || "")}"></div><div class="fg w2"><label>Second line (name, date…)</label><input type="text" id="stS" value="${esc(s.sub || "")}"></div></div>`, "Save", () => ({l: $("stL").value.trim() || "STAMP", s: $("stS").value.trim()}), "stL");
+    if (v) mutate(() => { m.stamp = Object.assign({}, m.stamp, {label: v.l, sub: v.s}); m.text = v.l; m.mod = new Date().toISOString(); }, "Edit stamp");
+    return;
+  }
+  if (m.type === "link") { const L = await linkAsk(m); if (L) mutate(() => { m.link = L.link; m.text = L.text; m.mod = new Date().toISOString(); }, "Edit hyperlink"); return; }
+  if (m.type === "text" || m.type === "callout") {
+    const v = await mkTextAsk(MARK_TOOLS[m.type], m.text || "", m);
+    if (v) mutate(() => { m.text = v.text; Object.assign(m, v.style); mkFit(m, true); m.mod = new Date().toISOString(); }, "Edit text");
+    return;
+  }
+  const v = await ask(MARK_TOOLS[m.type], `<div class="fg w2"><label>Comment</label><textarea id="mkTx" rows="3" style="width:100%;font:inherit">${esc(m.text || "")}</textarea></div>`, "Save", () => ({t: $("mkTx").value.trim()}), "mkTx");
+  if (v) mutate(() => { m.text = v.t; m.mod = new Date().toISOString(); }, "Edit comment");
+}
+async function linkAsk(m){   // -> {link: {url} | {key}, text}
+  const cur = m && m.link || {}, pages = allPages();
+  const v = await ask("Hyperlink", `<div class="grid"><div class="fg w2"><label><input type="radio" name="lkT" value="url" style="width:auto"${cur.key ? "" : " checked"}> Web address</label><input type="text" id="lkU" placeholder="https://…" value="${esc(cur.url || "")}"></div>
+    <div class="fg w2"><label><input type="radio" name="lkT" value="key" style="width:auto"${cur.key ? " checked" : ""}> A page of this project</label><select id="lkK">${pages.map(o => `<option value="${esc(o.key)}"${o.key === cur.key ? " selected" : ""}>${esc(keyName(o.key))}</option>`).join("")}</select></div>
+    <div class="fg w2"><label>Tooltip (optional)</label><input type="text" id="lkX" value="${esc(m ? m.text || "" : "")}" placeholder="e.g. Door schedule"></div></div>
+    <p class="small">Double-click the link (Select tool) to follow it. Exported PDFs keep it as a real link.</p>`, "Save",
+    () => { const ty = (document.querySelector('input[name="lkT"]:checked') || {}).value, x = $("lkX").value.trim();
+      if (ty === "key") return $("lkK").value ? {link: {key: $("lkK").value}, text: x} : "Pick a page";
+      let u = $("lkU").value.trim(); if (u && !/^[a-z]+:/i.test(u)) u = "https://" + u; u = safeUrl(u); return u ? {link: {url: u}, text: x} : "Type a web address (https://…) or pick a page"; }, "lkU");
+  const sync = () => { const ty = (document.querySelector('input[name="lkT"]:checked') || {}).value; if ($("lkU")) { $("lkU").disabled = ty === "key"; $("lkK").disabled = ty !== "key"; } };
+  if ($("lkU")) { document.querySelectorAll('input[name="lkT"]').forEach(r => r.onchange = sync); $("lkU").oninput = () => { document.querySelector('input[name="lkT"][value="url"]').checked = true; sync(); }; sync(); }
+  return v;
+}
+function followLink(m){
+  const L = m.link || {};
+  if (L.url && safeUrl(L.url)) { window.open(L.url, "_blank", "noopener"); return; }
+  if (L.key && allPages().some(o => o.key === L.key)) { toast("Hyperlink → " + keyName(L.key), 1600); gotoKey(L.key); return; }
+  toast("This hyperlink has no target any more — double-click with the Select tool after setting one (right-click → Edit link)", 4000);
+}
+
+/* stamps: Bluebeam's standard ones, your own (text or a picture: a signature, a seal), a second line filled when it is placed */
+const STAMPS = [["APPROVED", "#1e8e5a"], ["APPROVED AS NOTED", "#1e8e5a"], ["REVIEWED", "#2a62c9"], ["REVISE AND RESUBMIT", "#d9822b"], ["REJECTED", "#c62828"], ["NOT APPROVED", "#c62828"],
+  ["FOR INFORMATION ONLY", "#2a62c9"], ["FOR CONSTRUCTION", "#1e8e5a"], ["CHECKED", "#1e8e5a"], ["RECEIVED", "#2a62c9"], ["COMPLETED", "#1e8e5a"], ["AS BUILT", "#6a3fb5"],
+  ["PRELIMINARY", "#5f6b7a"], ["DRAFT", "#5f6b7a"], ["VOID", "#c62828"], ["CONFIDENTIAL", "#c62828"]];
+const STAMP_KEY = "zdTakeoffStamps", STAMP_TPL = "{name} · {date} {time}";
+function myStamps(){ let L = []; try { L = JSON.parse(pref(STAMP_KEY) || "[]"); } catch (e) { L = []; }
+  return Array.isArray(L) ? L.filter(s => s && typeof s.label === "string").map(s => ({label: s.label.slice(0, 80), color: HEXCOL.test(s.color) ? s.color : "#c62828", aid: typeof s.aid === "string" ? s.aid : undefined, w: +s.w || 0, h: +s.h || 0})) : []; }
+function stampSub(tpl){   // the second line: {name} {date} {time} {project} {sheet} {page}
+  const sh = (P.proj.sheets || {})[S.key] || {}, d = new Date();
+  return String(tpl || "").replace(/\{(name|date|time|project|sheet|page)\}/g, (_, k) => k === "name" ? qaUser() || "—" : k === "date" ? dmy(today()) : k === "time" ? ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2) : k === "project" ? P.proj.name : k === "sheet" ? sh.no || "" : keyName(S.key)).replace(/\s*·\s*$/, "").trim();
+}
+async function stampPicker(){   // -> {label, color, tpl, aid?, w?, h?}; kept as the Stamp tool's choice
+  const L = STAMPS.map(([label, color]) => ({label, color})).concat(myStamps().map(s => Object.assign({mine: true}, s))), cur = S.stampSel || {};
+  const prev = (s, i) => `<button type="button" class="stp${cur.label === s.label ? " on" : ""}" data-st="${i}" style="--sc:${s.color}" title="${esc(s.label)}">${s.aid ? '<span class="small">&#128444; ' + esc(s.label) + "</span>" : esc(s.label)}${s.mine ? `<span class="stx" data-stdel="${i}" title="Remove this stamp">&times;</span>` : ""}</button>`;
+  let pick = Math.max(0, L.findIndex(s => s.label === cur.label));
+  const p = ask("Stamp", `<div class="stgrid" id="stGrid">${L.map(prev).join("")}</div>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label><input type="checkbox" id="stDyn" style="width:auto"${cur.tpl === "" ? "" : " checked"}> Second line, filled when placed</label><input type="text" id="stTpl" value="${esc(cur.tpl || STAMP_TPL)}"><span class="small">{name} {date} {time} {project} {sheet} {page} — your name is the one used for checking (asked once, kept in this browser)</span></div>
+    <div class="fg"><label>Your own stamp</label><input type="text" id="stNew" placeholder="e.g. ENGINEER CHECKED" maxlength="60"></div><div class="fg"><label>Colour</label><input type="color" id="stCol" value="#c62828" style="height:30px;padding:0"></div>
+    <div class="fg w2"><button type="button" class="btn sm" id="stAdd">+ Add text stamp</button> <button type="button" class="btn sm" id="stImg">+ Picture stamp (signature, seal, logo)…</button></div></div>`, "Use stamp",
+    () => { const s = L[pick]; if (!s) return "Pick a stamp"; return Object.assign({}, s, {tpl: $("stDyn").checked ? $("stTpl").value.trim() : ""}); });
+  const B = $("dlgB"), save = () => pref(STAMP_KEY, JSON.stringify(L.filter(s => s.mine).map(s => ({label: s.label, color: s.color, aid: s.aid, w: s.w, h: s.h}))));
+  const redraw = () => { $("stGrid").innerHTML = L.map(prev).join(""); B.querySelectorAll("[data-st]").forEach(b => b.classList.toggle("on", +b.dataset.st === pick)); };
+  B.onclick = async e => {
+    const d = e.target.closest("[data-stdel]"); if (d) { e.stopPropagation(); L.splice(+d.dataset.stdel, 1); pick = 0; save(); redraw(); return; }
+    const b = e.target.closest("[data-st]"); if (b) { pick = +b.dataset.st; redraw(); return; }
+    if (e.target.id === "stAdd") { const t = $("stNew").value.trim().toUpperCase(); if (!t) return toast("Type the stamp's text", 2000); L.push({label: t, color: $("stCol").value, mine: true}); pick = L.length - 1; save(); redraw(); $("stNew").value = ""; return; }
+    if (e.target.id === "stImg") { const [f] = await pickFiles("image/png,image/jpeg,image/gif,image/webp"); if (!f) return; try { const im = await imageAsset(f); L.push({label: f.name.replace(/\.[a-z0-9]+$/i, ""), color: "#0b0b0b", aid: im.aid, w: im.w, h: im.h, mine: true}); pick = L.length - 1; save(); redraw(); } catch (e2) { toast(e2.message || String(e2), 5000); } }
+  };
+  redraw();
+  const v = await p; B.onclick = null;
+  if (v) { S.stampSel = v; if (v.aid) assetLoad(v.aid); }
+  return v;
+}
+
+/* properties of a markup (the panel on the right) */
+function mkPropsHtml(mk){
+  const t = mk.type, nu = MK_TYPES.has(t), fillT = ["box", "ellipse", "polygon", "text", "callout"].includes(t), lineT = ["line", "polyline"].includes(t), textT = ["text", "callout"].includes(t);
+  const strokeT = !["image", "link", "attach", "redact", "stamp", "hilite", "fence"].includes(t) && !(t === "pen" && mk.hl), dashT = nu && ["line", "polyline", "polygon", "box", "ellipse"].includes(t);
+  const fg = (label, html, flex) => `<div class="fg"${flex ? ` style="flex:${flex}"` : ""}><label>${label}</label>${html}</div>`;
+  const colIn = (prop, v, d) => `<input type="color" data-mprop="${prop}" value="${/^#[0-9a-f]{6}$/i.test(v || "") ? v : d}" style="height:30px;padding:0">`;
+  const num = (prop, v, lo, hi, st) => `<input type="number" data-mprop="${prop}" min="${lo}" max="${hi}" step="${st}" value="${v}">`;
+  const sel = (prop, v, opts) => `<select data-mprop="${prop}">${Object.entries(opts).map(([k, n]) => `<option value="${esc(k)}"${k === String(v) ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
+  const h = mk.hatch || null, rows = [];
+  rows.push(`<div class="row">${fg("Subject", `<input type="text" data-mprop="subject" value="${esc(mk.subject || MARK_TOOLS[t])}">`, 1.4)}
+    ${textT ? fg("Text", `<textarea data-mprop="text" rows="2" style="width:100%;font:inherit;resize:vertical">${esc(mk.text)}</textarea>`, 3) : t === "stamp" ? fg("Stamp", `<input type="text" data-mprop="stamp.label" value="${esc((mk.stamp || {}).label || "")}">`, 2) + fg("Second line", `<input type="text" data-mprop="stamp.sub" value="${esc((mk.stamp || {}).sub || "")}">`, 2)
+      : fg(t === "dimension" ? "Text / label" : t === "link" ? "Tooltip" : t === "redact" ? "Overlay text" : "Comment", `<input type="text" data-mprop="text" value="${esc(mk.text)}" placeholder="${t === "dimension" ? "Override the measured length" : ""}">`, 3)}
+    ${t !== "redact" && t !== "link" && t !== "attach" && !(t === "stamp" && (mk.stamp || {}).aid) ? fg(textT ? "Text / line colour" : "Colour", colIn("color", mk.color, "#d03b3b")) : ""}
+    ${strokeT ? fg("Line width", num("width", mk.width == null ? 2 : +mk.width, t === "text" || t === "callout" ? 0 : 1, 24, 0.5)) : t === "pen" && mk.hl ? fg("Width (pt)", num("width", +mk.width || 9, 1, 200, 1)) : ""}
+    ${dashT ? fg("Line style", sel("dash", mk.dash || "solid", MK_DASH)) : ""}
+    ${nu && t !== "link" && t !== "attach" && t !== "redact" ? fg("Opacity", num("op", mk.op == null ? 1 : +mk.op, 0.05, 1, 0.05)) : ""}
+    ${t === "hilite" ? fg("Opacity", num("opacity", +mk.opacity || .38, 0.05, 1, 0.05)) : ""}</div>`);
+  if (t === "dimension") rows.push(`<div class="row">${fg("Text size", num("size", +mk.size || 13, 8, 48, 1))}${fg("Arrow size", num("arrow", +mk.arrow || 10, 5, 40, 1))}${fg("Offset", num("offset", +mk.offset || 24, 0, 500, 1))}</div>`);
+  if (fillT) rows.push(`<div class="row">${fg("Fill", `<span style="display:flex;gap:6px;align-items:center">${colIn("fill", mk.fill, "#ffffff")}<label style="font-weight:400;white-space:nowrap"><input type="checkbox" data-mprop="nofill" style="width:auto"${mk.fill ? "" : " checked"}> none</label></span>`)}
+    ${fg("Fill opacity", num("fillOp", mk.fillOp == null ? 0.15 : +mk.fillOp, 0, 1, 0.05))}
+    ${fg("Hatch", sel("hatch.p", h ? h.p : "", Object.assign({"": "None"}, HATCHES)))}
+    ${h ? fg("Spacing (pt)", num("hatch.sp", +h.sp || 6, 0.5, 500, 0.5)) + fg("Hatch line", num("hatch.lw", +h.lw || 0.8, 0.2, 12, 0.1)) + fg("Hatch colour", colIn("hatch.col", h.col || mk.color, "#d03b3b")) : ""}
+    ${h && h.p === "custom" ? fg("Angle °", num("hatch.ang", +h.ang || 0, -360, 360, 5)) + fg("&nbsp;", `<label style="font-weight:400"><input type="checkbox" data-mprop="hatch.x" style="width:auto"${h.x ? " checked" : ""}> crossed</label>`) : ""}</div>`);
+  if (lineT || t === "callout") rows.push(`<div class="row">${fg(t === "callout" ? "Leader end" : "Start", sel("a0", mk.a0 || (t === "callout" ? "arrow" : "none"), MK_ENDS))}${lineT ? fg("End", sel("a1", mk.a1 || "none", MK_ENDS)) : ""}</div>`);
+  if (textT) rows.push(`<div class="row">${fg("Font size (pt)", num("fs", +mk.fs || 10, 1, 500, 0.5))}${fg("Font", sel("font", mk.font || "sans", {sans: "Sans (Arial)", serif: "Serif", mono: "Monospace"}))}${fg("Align", sel("align", mk.align || "left", {left: "Left", center: "Centre", right: "Right"}))}${fg("&nbsp;", `<label style="font-weight:400"><input type="checkbox" data-mprop="bold" style="width:auto"${mk.bold ? " checked" : ""}> Bold</label>`)}</div>`);
+  if (t === "link") rows.push(`<div class="row"><span class="small" style="flex:1">→ ${esc(mk.link && mk.link.url ? mk.link.url : mk.link && mk.link.key ? keyName(mk.link.key) : "no target")}</span><button class="btn sm" data-mact2="link">Edit link…</button><button class="btn sm" data-mact2="follow">Open</button><label style="font-weight:400"><input type="checkbox" data-mprop="show" style="width:auto"${mk.show ? " checked" : ""}> Show a frame in exports</label></div>`);
+  if (t === "attach") rows.push(`<div class="row"><span class="small" style="flex:1">&#128206; ${esc((mk.att || {}).name || "file")} · ${fmtBytes((mk.att || {}).size || 0)}</span><button class="btn sm" data-mact2="open">Open</button><button class="btn sm" data-mact2="save">Save a copy</button><button class="btn sm" data-mact2="replace">Replace…</button></div>`);
+  if (t === "image") rows.push(`<div class="row"><span class="small" style="flex:1">${esc((mk.img || {}).name || "picture")}${mk.img && mk.img.w ? " · " + mk.img.w + " × " + mk.img.h + " px" : ""}</span><button class="btn sm" data-mact2="replace">Replace picture…</button>${fg("Border width", num("width", +mk.width || 0, 0, 24, 0.5))}</div>`);
+  if (t === "redact") rows.push(`<div class="row">${fg("Fill", colIn("fill", mk.fill || (mk.erase ? "#ffffff" : "#000000"), "#000000"))}<span class="small" style="flex:3">Applied in every export: the page is flattened to a picture so what is under it is gone for good (the PDF in this project is not changed).</span></div>`);
+  rows.push(`<div class="row">${fg("Status", sel("status", mk.status || "", Object.fromEntries(mkStatusList().map(s => [s, s || "None"]))))}
+    ${fg("Layer", sel("layer", mk.layer || "", Object.assign({"": "None"}, Object.fromEntries(mkLayers().map(l => [l.id, l.name])))))}
+    ${nu || t === "note" || t === "cloud" || t === "arrow" ? `<button class="btn sm" data-mact2="edit">${textT ? "Edit text…" : t === "stamp" ? "Edit stamp…" : t === "link" ? "Edit link…" : "Comment…"}</button>` : ""}
+    <button class="btn sm" data-mact2="default" title="Use this style for new ${esc(MARK_TOOLS[t].toLowerCase())}s">Set as default</button>
+    <button class="btn sm" data-act="lock">${mk.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn dng" data-act="delMark"${mk.locked ? " disabled" : ""}>Delete</button></div>
+    <div class="small" style="margin-top:4px">${mk.author ? "By " + esc(mk.author) + " · " : ""}${mk.at ? "added " + esc(dmy(mk.at)) : ""}${mk.mod ? " · changed " + esc(dmy(mk.mod)) : ""}</div>`);
+  return `<h4>${esc(MARK_TOOLS[t])} <span style="font-weight:400;color:var(--muted);font-size:11px">markup — not a quantity · drag to move${nu && t !== "attach" ? " · drag a handle to resize" : ""}</span></h4>` + rows.join("");
+}
+const fmtBytes = n => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : n >= 1024 ? Math.round(n / 1024) + " KB" : n + " B";
+function mkPropSet(mk, f, el){   // a field of the markup's properties changed
+  const v = el.type === "checkbox" ? el.checked : el.value, NUM = ["width", "size", "arrow", "offset", "opacity", "fs", "fillOp", "op", "hatch.sp", "hatch.lw", "hatch.ang"];
+  mutate(() => {
+    if (f === "nofill") { if (v) { mk._fill = mk.fill || mk._fill; mk.fill = ""; } else mk.fill = mk._fill || "#ffffff"; delete mk._fill; }
+    else if (f === "hatch.p") { if (!v) mk.hatch = null; else mk.hatch = Object.assign({sp: 6, lw: 0.8}, mk.hatch || {}, {p: v}, v === "custom" ? {ang: (mk.hatch || {}).ang || 45} : {}); }
+    else if (f.indexOf(".") > 0) { const [a, b] = f.split("."); mk[a] = Object.assign({}, mk[a] || {}); mk[a][b] = NUM.includes(f) ? +v || 0 : v; if (a === "stamp" && b === "label") mk.text = v; }
+    else if (NUM.includes(f)) mk[f] = Math.max(0, +v || 0);
+    else mk[f] = v;
+    if (MK_TYPES.has(mk.type)) { Object.assign(mk, mkClean(mk)); if ((mk.type === "text" || mk.type === "callout") && ["text", "fs", "font", "bold"].includes(f)) mkFit(mk, true); mk.mod = new Date().toISOString(); }
+  }, "Markup " + f.replace(/\..*/, ""));
+}
+async function mkPropAct(mk, act){
+  if (act === "edit") return mkEditText(mk);
+  if (act === "default") return setDefaultsFromSelection(mk);
+  if (act === "link") return mkEditText(mk);
+  if (act === "follow") return followLink(mk);
+  if (act === "open" || act === "save") return mk.att && openAsset(mk.att.aid, mk.att.name, act === "save");
+  if (act === "replace" && mk.type === "attach") { const [f] = await pickFiles(""); if (!f) return; try { const a = await attachAsset(f); mutate(() => { mk.att = a; mk.text = f.name; mk.mod = new Date().toISOString(); }, "Replace attachment"); } catch (e) { toast(e.message || String(e), 5000); } return; }
+  if (act === "replace" && mk.type === "image") { const [f] = await pickFiles("image/png,image/jpeg,image/gif,image/webp,image/bmp"); if (!f) return; try { const im = await imageAsset(f); await assetLoad(im.aid); mutate(() => { mk.img = im; mk.text = f.name; const r = mkBox(mk.pts[0], mk.pts[1]), W = r[2] - r[0]; mk.pts = [[r[0], r[1]], [r[2], r[1] + W * im.h / im.w]]; mk.mod = new Date().toISOString(); }, "Replace picture"); } catch (e) { toast(e.message || String(e), 5000); } }
+}
+function mkHover(o){
+  const t = o.type, nm = o.subject && o.subject !== MARK_TOOLS[t] ? o.subject : MARK_TOOLS[t];
+  if (t === "link") return nm + " → " + (o.link && o.link.url ? o.link.url : o.link && o.link.key ? keyName(o.link.key) : "no target") + (o.text ? " · " + o.text : "") + " · double-click to open";
+  if (t === "attach") return "📎 " + ((o.att || {}).name || "file") + " · double-click to open";
+  if (t === "stamp") return "Stamp " + ((o.stamp || {}).label || "") + ((o.stamp || {}).sub ? " · " + o.stamp.sub : "");
+  const txt = String(o.text || "").replace(/\s+/g, " "); return nm + (txt ? " — " + (txt.length > 60 ? txt.slice(0, 59) + "…" : txt) : "") + (o.status ? " · " + o.status : "") + (o.locked ? " · locked" : "");
+}
+function mkMenu(anchor){   // Markup ▾: every markup tool
+  const r = anchor.getBoundingClientRect(), T = (t, k) => ({t: (MK_TOOL_NAMES[t] || MARK_TOOLS[t]), k, fn: () => setTool(t), on: S.tool === t});
+  ctxShow([{h: "Markup tools", s: "Bluebeam-style · not quantities"}, T("mk_text", "T"), T("mk_callout", "Q"), T("note", "N"), {sep: 1},
+    T("mk_line", "Shift+L"), T("arrow"), T("mk_polyline", "Y"), T("mk_polygon", "G"), T("mk_box", "Shift+R"), T("mk_ellipse", "Shift+E"), T("cloud", "U"), T("dimension"), {sep: 1},
+    T("mk_pen", "P"), T("mk_hpen", "Shift+H"), T("hilite"), {sep: 1},
+    T("mk_stamp", "X"), T("mk_image", "I"), T("mk_link"), T("mk_attach"), {sep: 1},
+    T("mk_redact"), T("mk_erase")], r.left, r.bottom + 4);
+}
+async function mkAssetsCleanup(gone){   // pictures and files no project uses any more (a project deleted): taken out of this browser
+  const used = new Set(); (await dbAll("projects")).forEach(p => (p.marks || []).forEach(m => mkAids(m).forEach(a => used.add(a))));
+  try { const L = JSON.parse(pref(STAMP_KEY) || "[]"); if (Array.isArray(L)) L.forEach(s => s && s.aid && used.add(s.aid)); } catch (e) {}
+  for (const a of gone) if (!used.has(a)) await dbDel("pdfs", assetKey(a)).catch(() => {});
+}
+const MK_HINTS = {mk_text: "Text box: click to place it, or drag its width — then type (Enter makes a new line).",
+  mk_callout: "Callout: click the point it points at, then where the text goes (click, or drag the box) — then type.",
+  mk_line: "Line: drag, or click both ends (Shift: straight) · arrow ends and line style in Properties.",
+  mk_polyline: "Polyline: click the points; Enter, double-click or right-click to finish · type a length + Enter (12'-6\").",
+  mk_polygon: "Polygon: click the corners; click the first point, Enter or right-click to close.",
+  mk_box: "Rectangle: drag, or click two opposite corners (Shift: square).", mk_ellipse: "Ellipse: drag, or click two opposite corners (Shift: circle).",
+  mk_pen: "Pen: draw freehand with the mouse, a stylus or a finger.", mk_hpen: "Highlighter pen: draw over what to highlight.",
+  mk_stamp: "Stamp: click to place it (drag to size it) · its second line takes your name and the date · X picks another stamp.",
+  mk_image: "Image: click to place a picture (drag to size it).", mk_link: "Hyperlink: drag a box over what should open a web page or another sheet.",
+  mk_attach: "File attachment: click where its pin goes, then choose the file.", mk_redact: "Redaction: drag a box over what must not be seen — every export removes it for good.",
+  mk_erase: "Erase (white-out): drag a box over what to hide — exports white it out for good."};
+function mkPreview(kind, base, a, b){   // what a box / line being drawn will look like
+  if (kind === "text" || kind === "image" || kind === "attach" || kind === "callout") { const p = toScr(a), q = toScr(b); return `<rect x="${Math.min(p[0], q[0]).toFixed(1)}" y="${Math.min(p[1], q[1]).toFixed(1)}" width="${Math.abs(q[0] - p[0]).toFixed(1)}" height="${Math.abs(q[1] - p[1]).toFixed(1)}" fill="rgba(42,120,214,.06)" stroke="#2a78d6" stroke-width="1.2" stroke-dasharray="5 3"/>`; }
+  return mkSvg(Object.assign({}, base, {pts: kind === "line" ? [a, b] : mkTwo(a, b)}), toScr, 1, false);
+}
+function mkDraftSvg(){   // the markup being drawn (cursor layer)
+  const kind = S.tool.slice(3), base = Object.assign({type: mkTypeOf(kind), hl: kind === "hpen", erase: kind === "erase", text: "", stamp: {label: (S.stampSel || {}).label || "STAMP"}}, mkStyle(kind)), D = S.mkd, out = [];
+  if (D && D.pts) out.push(mkSvg(Object.assign({}, base, {pts: D.pts.length > 1 ? D.pts : D.pts.concat([D.pts[0]])}), toScr, 1, false));
+  else if (D && D.a) { if (kind === "callout" && D.tip) { const t = toScr(D.tip), a = toScr(D.a); out.push(`<line x1="${t[0]}" y1="${t[1]}" x2="${a[0]}" y2="${a[1]}" stroke="#2a78d6" stroke-width="1.2" stroke-dasharray="5 3"/>`); } if (dist(toScr(D.a), toScr(D.b)) > 3) out.push(mkPreview(kind, base, D.a, D.b)); }
+  else if (S.draft.length && S.cursor) {
+    if (kind === "polyline" || kind === "polygon") { out.push(mkSvg(Object.assign({}, base, {pts: S.draft.concat([S.cursor])}), toScr, 1, false)); S.draft.forEach(p => { const q = toScr(p); out.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="3.5" fill="#fff" stroke="${base.color || "#d03b3b"}" stroke-width="2"/>`); }); }
+    else if (kind === "callout") { const t = toScr(S.draft[0]), c = toScr(S.cursor); out.push(`<line x1="${t[0]}" y1="${t[1]}" x2="${c[0]}" y2="${c[1]}" stroke="${base.color}" stroke-width="1.5" stroke-dasharray="5 3"/>`); }
+    else out.push(mkPreview(kind, base, S.draft[0], S.cursor));
+  }
+  return out.join("");
+}
+const mkRedacted = (f, p) => !!P.proj && (P.proj.marks || []).some(m => m.type === "redact" && m.file === f && m.page === p);
+function mkPdfLinks(L, out, page, f, p, map, Q){   // the page's hyperlinks as real links in the exported PDF (a page link once its target page is in it)
+  (P.proj.marks || []).filter(m => m.type === "link" && m.file === f && m.page === p && m.link && m.pts.length > 1).forEach(m => {
+    const r = mkBox(m.pts[0], m.pts[1]), a = map(r[0], r[3]), b = map(r[2], r[1]), rect = [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+    if (m.link.url && safeUrl(m.link.url)) page.node.addAnnot(out.context.register(out.context.obj({Type: "Annot", Subtype: "Link", Rect: rect, Border: [0, 0, 0], F: 4, A: {Type: "Action", S: "URI", URI: L.PDFString.of(m.link.url)}})));
+    else if (m.link.key && Q) Q.push({page, rect, key: m.link.key});
+  });
+}
+function mkPdfLinksDone(out, Q, byKey){ (Q || []).forEach(q => { const tp = byKey[q.key]; if (tp) q.page.node.addAnnot(out.context.register(out.context.obj({Type: "Annot", Subtype: "Link", Rect: q.rect, Border: [0, 0, 0], F: 4, Dest: [tp.ref, "Fit"]}))); }); }
+async function mkPdfAttach(out, keys){   // the files attached on these pages go inside the PDF too
+  if (typeof out.attach !== "function" || !P.proj) return 0; let n = 0;
+  for (const m of (P.proj.marks || []).filter(x => x.type === "attach" && x.att && x.att.aid && keys.has(keyOf(x.file, x.page)))) {
+    const r = await assetRec(m.att.aid); if (!r) continue;
+    await out.attach(new Uint8Array(r.data), m.att.name || r.name || "file", {mimeType: r.type || "application/octet-stream", description: (m.subject || "Attachment") + " — " + keyName(keyOf(m.file, m.page)), creationDate: new Date(m.at || Date.now()), modificationDate: new Date(m.mod || m.at || Date.now())}); n++;
+  }
+  return n;
+}
+function mkCtxItems(m, many){   // right-click on a markup: what its kind can do
+  if (many) return [];
+  const t = m.type;
+  if (t === "link") return [{t: "Open link", k: "Dbl-click", fn: () => followLink(m)}, {t: "Edit link…", fn: () => mkEditText(m)}];
+  if (t === "attach") return [{t: "Open file", k: "Dbl-click", fn: () => m.att && openAsset(m.att.aid, m.att.name)}, {t: "Save a copy…", fn: () => m.att && openAsset(m.att.aid, m.att.name, true)}, {t: "Replace file…", fn: () => mkPropAct(m, "replace")}];
+  if (t === "image") return [{t: "Replace picture…", fn: () => mkPropAct(m, "replace")}];
+  if (t === "text" || t === "callout") return [{t: "Edit text…", k: "Dbl-click", fn: () => mkEditText(m)}];
+  if (t === "stamp") return [{t: "Edit stamp…", k: "Dbl-click", fn: () => mkEditText(m)}];
+  if (MK_TYPES.has(t)) return [{t: "Comment…", k: "Dbl-click", fn: () => mkEditText(m)}];
+  return t !== "hilite" && t !== "fence" && t !== "dimension" ? [{t: "Edit text…", k: "Dbl-click", fn: () => editMarkText(m)}] : [];
+}
+
+/* ------------------------------------------------------------------ Markups List (Bluebeam Revu): every markup in one table —
+   this page or the whole project — sorted by any column, filtered (and the filter saved), statuses (your own too), replies,
+   markup layers, the room each markup sits in (Spaces); summaries as CSV, XML and a printable PDF with a picture of each */
+const ML_KEY = "zdTakeoffMkList";
+function mlPref(){ let o = null; try { o = JSON.parse(pref(ML_KEY) || "null"); } catch (e) { o = null; } return Object.assign({open: false, h: 300, scope: "page", sort: "page", dir: 1}, o && typeof o === "object" ? o : {}); }
+function mlSet(ch){ pref(ML_KEY, JSON.stringify(Object.assign(mlPref(), ch))); }
+S.ml = {q: "", type: "", status: "", author: "", layer: "", space: "", ticked: new Set(), focus: null};
+const mkLayers = () => (P.proj && P.proj.mkLayers) || [];
+const mkLayerOf = m => m && m.layer ? mkLayers().find(l => l.id === m.layer) || null : null;
+const mkHidden = m => { const l = mkLayerOf(m); return !!(l && l.hidden); };
+function mkCommon(m){   // the fields every markup can carry (any kind, any age), checked when a project is opened
+  ["subject", "author", "status"].forEach(k => { if (m[k] != null) m[k] = String(m[k]).slice(0, 200); });
+  if (m.layer != null) m.layer = String(m.layer).slice(0, 40);
+  if (m.replies != null) m.replies = Array.isArray(m.replies) ? m.replies.filter(r => r && typeof r === "object" && typeof r.text === "string").slice(0, 500).map(r => ({id: String(r.id || uid("R")).slice(0, 40), author: String(r.author || "").slice(0, 100), at: String(r.at || "").slice(0, 40), text: r.text.slice(0, 5000)})) : [];
+}
+function mlFilterClean(f){ f = f && typeof f === "object" ? f : {}; const o = {}; ["q", "type", "status", "author", "layer", "space"].forEach(k => { o[k] = String(f[k] == null ? "" : f[k]).slice(0, 120); }); o.scope = f.scope === "all" ? "all" : "page"; return o; }
+function mkProjCommon(p){   // a project's markup layers, statuses and saved filters, checked
+  const arr = Array.isArray, obj = v => v && typeof v === "object" && !arr(v);
+  if (p.mkLayers != null) p.mkLayers = arr(p.mkLayers) ? p.mkLayers.filter(l => obj(l) && l.id != null).slice(0, 200).map(l => ({id: String(l.id).slice(0, 40), name: String(l.name == null ? "Layer" : l.name).slice(0, 80), hidden: !!l.hidden})) : [];
+  if (p.mkStatuses != null) p.mkStatuses = arr(p.mkStatuses) ? [...new Set(p.mkStatuses.filter(x => typeof x === "string" && x.trim()).map(x => x.trim().slice(0, 40)))].slice(0, 60) : [];
+  if (p.mkFilters != null) p.mkFilters = arr(p.mkFilters) ? p.mkFilters.filter(x => obj(x) && typeof x.name === "string" && x.name.trim()).slice(0, 60).map(x => ({id: String(x.id || uid("F")).slice(0, 40), name: x.name.trim().slice(0, 60), f: mlFilterClean(x.f)})) : [];
+}
+const mkCenter = m => { if (m.type === "note" || m.type === "attach") return m.pts[0]; const P2 = m.type === "callout" ? m.pts.slice(1) : m.pts, xs = P2.map(p => p[0]), ys = P2.map(p => p[1]); return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2]; };
+function mkSpaceOf(m){   // the room a markup sits in: the smallest named area measured under its middle (Bluebeam's Spaces)
+  const c = mkCenter(m); let best = "", ba = Infinity;
+  P.proj.items.forEach(i => { if (i.file !== m.file || i.page !== m.page || !i.label || i.kind === "ded") return; const cd = cond(i.cond); if (!cd || cd.type !== "area") return;
+    const poly = itemPoly(i); if (poly.length > 2 && pointInPoly(c, poly)) { const a = Math.abs(polyArea(poly)); if (a < ba) { ba = a; best = i.label; } } });
+  return best;
+}
+const mkName = m => MK_TOOL_NAMES["mk_" + mkKindOf(m)] || MARK_TOOLS[m.type] || m.type;
+const mkPlain = m => m.type === "stamp" ? ((m.stamp || {}).label || "") + ((m.stamp || {}).sub ? " · " + m.stamp.sub : "") : m.type === "link" ? ((m.text ? m.text + " → " : "") + (m.link && (m.link.url || (m.link.key ? keyName(m.link.key) : "")) || "")) : m.type === "attach" ? (m.att || {}).name || "" : m.type === "image" ? (m.img || {}).name || "" : String(m.text || "");
+function mlRows(){
+  const o = mlPref(), f = S.ml, q = f.q.trim().toLowerCase(), order = new Map(); allPages().forEach((x, i) => order.set(x.key, i));
+  let L = (P.proj.marks || []).filter(m => m.type !== "fence" && (o.scope === "all" || (m.file === S.fileId && m.page === S.pageNo)));
+  if (f.type) L = L.filter(m => mkKindOf(m) === f.type);
+  if (f.status) L = L.filter(m => (m.status || "") === (f.status === "(none)" ? "" : f.status));
+  if (f.author) L = L.filter(m => (m.author || "") === (f.author === "(none)" ? "" : f.author));
+  if (f.layer) L = L.filter(m => (m.layer || "") === (f.layer === "(none)" ? "" : f.layer));
+  let R = L.map(m => ({m, id: m.id, type: mkName(m), subject: m.subject || MARK_TOOLS[m.type], text: mkPlain(m), page: keyName(keyOf(m.file, m.page)), po: order.has(keyOf(m.file, m.page)) ? order.get(keyOf(m.file, m.page)) : 1e9,
+    author: m.author || "", at: m.at || "", status: m.status || "", layer: (mkLayerOf(m) || {}).name || "", space: mkSpaceOf(m), replies: (m.replies || []).length, color: m.color || ""}));
+  if (f.space) R = R.filter(r => r.space === (f.space === "(none)" ? "" : f.space));
+  if (q) R = R.filter(r => [r.type, r.subject, r.text, r.page, r.author, r.status, r.layer, r.space].concat((r.m.replies || []).map(x => x.text)).join(" ").toLowerCase().includes(q));
+  const k = o.sort, d = o.dir === -1 ? -1 : 1;
+  R.sort((a, b) => { const v = k === "page" ? a.po - b.po || mkCenter(a.m)[1] - mkCenter(b.m)[1] : k === "replies" ? a.replies - b.replies : k === "at" ? String(a.at).localeCompare(String(b.at)) : String(a[k] || "").localeCompare(String(b[k] || ""), undefined, {numeric: true, sensitivity: "base"}); return v * d || a.po - b.po; });
+  return R;
+}
+const hhmm = iso => { const d = new Date(iso); return isNaN(d) ? "" : ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2); };   // local time
+const ML_COLS = [["type", "Type"], ["subject", "Subject"], ["text", "Comments"], ["page", "Page"], ["author", "Author"], ["at", "Date"], ["status", "Status"], ["layer", "Layer"], ["space", "Space"], ["replies", "Replies"]];
+function mlToggle(open){ const o = mlPref(); mlSet({open: open == null ? !o.open : !!open}); mlRender(true); setTimeout(() => { if (S.page) { applyView(); renderHi(); } }, 0); }
+let mlT = 0;
+function mlSoon(){ if (!mlPref().open || mlT) return; mlT = requestAnimationFrame(() => { mlT = 0; mlRender(); }); }
+function mlRender(head){
+  const el = $("mkList"); if (!el) return; const o = mlPref(), on = !!(o.open && P.proj);
+  el.style.display = on ? "flex" : "none"; el.style.height = Math.max(120, Math.min(700, +o.h || 300)) + "px";
+  const tb = $("bMkList"); if (tb) tb.classList.toggle("on", on);
+  if (!on) return;
+  if (head || !$("mlHead")) {
+    const all = (P.proj.marks || []).filter(m => m.type !== "fence"), f = S.ml, opt = (v, n, cur) => `<option value="${esc(v)}"${String(cur) === String(v) ? " selected" : ""}>${esc(n)}</option>`;
+    const kinds = [...new Set(all.map(mkKindOf))].sort(), authors = [...new Set(all.map(m => m.author || ""))].sort(), sts = mkStatusList().slice(1), saved = P.proj.mkFilters || [];
+    const spaces = [...new Set(all.map(mkSpaceOf).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+    el.innerHTML = `<div class="mlrz" id="mlRz" title="Drag to resize"></div><div class="mlhead" id="mlHead"><b>Markups list</b>
+      <select id="mlScope" title="Which markups">${opt("page", "This page", o.scope)}${opt("all", "All pages", o.scope)}</select>
+      <input type="search" id="mlQ" placeholder="Search comments, subjects, authors…" value="${esc(f.q)}">
+      <select id="mlType" title="Type"><option value="">All types</option>${kinds.map(k => opt(k, MK_TOOL_NAMES["mk_" + k] || MARK_TOOLS[k] || k, f.type)).join("")}</select>
+      <select id="mlSt" title="Status"><option value="">Any status</option>${opt("(none)", "No status", f.status)}${sts.map(s => opt(s, s, f.status)).join("")}</select>
+      <select id="mlAu" title="Author"><option value="">Any author</option>${authors.map(a => opt(a || "(none)", a || "No author", f.author)).join("")}</select>
+      <select id="mlLy" title="Markup layer"><option value="">Any layer</option>${opt("(none)", "No layer", f.layer)}${mkLayers().map(l => opt(l.id, l.name, f.layer)).join("")}</select>
+      ${spaces.length ? `<select id="mlSp" title="Space (the room it sits in)"><option value="">Any space</option>${opt("(none)", "Not in a room", f.space)}${spaces.map(s => opt(s, s, f.space)).join("")}</select>` : ""}
+      <select id="mlSaved" title="Saved filters"><option value="">Filters…</option>${saved.map(x => opt(x.id, x.name, "")).join("")}<option value="+">Save this filter…</option>${saved.length ? '<option value="-">Delete a filter…</option>' : ""}</select>
+      <span class="sp"></span><button class="btn sm" id="mlExp" title="Summary of the markups listed: CSV, XML or a printable PDF">Summary ▾</button><button class="btn sm" id="mlStat" title="Your own statuses">Statuses…</button><button class="btn sm" id="mlClose" title="Close (Alt+L)">&times;</button></div>
+      <div class="mlbody" id="mlBody"></div>`;
+  }
+  const R = mlRows(), f = S.ml, foc = f.focus && objById(f.focus);
+  [...f.ticked].forEach(id => { if (!objById(id)) f.ticked.delete(id); });
+  const nT = [...f.ticked].length, sts = mkStatusList();
+  const row = r => `<tr data-mlid="${esc(r.id)}" class="${r.id === f.focus || selIds().has(r.id) ? "on" : ""}"><td><input type="checkbox" data-mlt="${esc(r.id)}"${f.ticked.has(r.id) ? " checked" : ""}></td>
+    <td><span class="mlsw" style="background:${esc(r.color || "#9fb0c6")}"></span>${esc(r.type)}</td><td>${esc(r.subject)}</td><td class="mltx" title="${esc(r.text)}">${esc(r.text.length > 90 ? r.text.slice(0, 89) + "…" : r.text)}</td>
+    <td>${esc(r.page)}</td><td>${esc(r.author)}</td><td>${esc(dmy(r.at))}</td>
+    <td><select data-mlst="${esc(r.id)}">${sts.map(s => `<option value="${esc(s)}"${s === r.status ? " selected" : ""}>${esc(s || "—")}</option>`).join("")}</select></td>
+    <td>${esc(r.layer)}</td><td>${esc(r.space)}</td><td class="n">${r.replies || ""}</td></tr>`;
+  const SHOW = 1500;
+  $("mlBody").innerHTML = `<div class="mltab"><div class="mlbar">${R.length} markup${R.length === 1 ? "" : "s"}${R.length > SHOW ? " (the first " + SHOW + " shown — filter to see the rest)" : ""}${nT ? ` · <b>${nT} ticked</b>
+      <select id="mlBSt"><option value="">Set status…</option>${sts.map(s => `<option value="${esc(s) || "(none)"}">${esc(s || "None")}</option>`).join("")}</select>
+      <select id="mlBLy"><option value="">Move to layer…</option><option value="(none)">No layer</option>${mkLayers().map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join("")}<option value="+">New layer…</option></select>
+      <button class="btn sm" id="mlBSel">Select on the drawing</button><button class="btn sm dng" id="mlBDel">Delete</button>` : ""}</div>
+    <div class="mlscroll"><table class="mlt"><thead><tr><th><input type="checkbox" id="mlAll"${R.length && R.every(r => f.ticked.has(r.id)) ? " checked" : ""} title="Tick all listed"></th>${ML_COLS.map(([k, n]) => `<th data-mls="${k}" class="${mlPref().sort === k ? "on" : ""}">${n}${mlPref().sort === k ? (mlPref().dir === -1 ? " ▾" : " ▴") : ""}</th>`).join("")}</tr></thead>
+    <tbody>${R.slice(0, SHOW).map(row).join("") || `<tr><td colspan="${ML_COLS.length + 1}" class="mlempty">No markups${S.ml.q || S.ml.type || S.ml.status || S.ml.author || S.ml.layer || S.ml.space ? " match the filter" : mlPref().scope === "page" ? " on this page — draw one with ✎ Markup ▾, or list All pages" : " yet"}.</td></tr>`}</tbody></table></div></div>
+    ${foc ? mlDetail(foc) : ""}`;
+}
+function mlDetail(m){   // the focused markup: its comment and its replies
+  const R = m.replies || [];
+  return `<div class="mldet"><div class="mldh"><b>${esc(mkName(m))}</b> · ${esc(keyName(keyOf(m.file, m.page)))}<span class="sp"></span><button class="btn sm" data-mlgo="${esc(m.id)}">Show</button><button class="btn sm" id="mlDetX" title="Close">&times;</button></div>
+    <div class="small">${esc(m.author || "—")} · ${esc(dmy(m.at))}${m.status ? " · <b>" + esc(m.status) + "</b>" : ""}</div>
+    <div class="mlc">${esc(mkPlain(m)) || '<span class="small">no comment</span>'}</div>
+    <div class="mlreps">${R.map(r => `<div class="mlrep"><div class="small"><b>${esc(r.author || "—")}</b> · ${esc(dmy(r.at))} ${esc(hhmm(r.at))}<button class="mlrx" data-mlrdel="${esc(r.id)}" title="Delete this reply">&times;</button></div>${esc(r.text)}</div>`).join("") || '<div class="small">No replies yet.</div>'}</div>
+    <textarea id="mlRep" rows="2" placeholder="Reply…"></textarea><button class="btn sm pri" id="mlRepGo">Reply</button></div>`;
+}
+async function mlGo(id){   // a row clicked: the page, the markup selected and in view
+  const m = objById(id); if (!m) return;
+  if (m.file !== S.fileId || m.page !== S.pageNo) await gotoPage(m.file, m.page);
+  if (!onPage(m)) return;
+  setTool("select"); setSel([id]); refresh();
+  const sp = toScr(mkCenter(m)), st = stage(); if (sp[0] < 0 || sp[1] < 0 || sp[0] > st.clientWidth || sp[1] > st.clientHeight) zoomTo(new Set([id]));
+  S.flash = {key: S.key, p: mkCenter(m), until: Date.now() + 1500}; draw(); setTimeout(draw, 1600);
+}
+async function mlReply(m, text){
+  text = String(text || "").trim(); if (!text) return;
+  const who = qaUser() || await askUser();
+  mutate(() => { m.replies = (m.replies || []).concat([{id: uid("R"), author: who || "", at: new Date().toISOString(), text: text.slice(0, 5000)}]); m.mod = new Date().toISOString(); }, "Reply");
+}
+async function mlStatuses(){   // your own statuses, beside Bluebeam's
+  const cur = (P.proj.mkStatuses || []).join("\n");
+  const v = await ask("Markup statuses", `<p class="small">Bluebeam's statuses are always there: ${MK_STATUSES.slice(1).map(esc).join(", ")}. Add your own, one per line (e.g. <i>Back-charge</i>, <i>Site to confirm</i>). They are kept with this project.</p>
+    <textarea id="stList" rows="7" style="width:100%;font:inherit">${esc(cur)}</textarea>`, "Save", () => ({L: [...new Set($("stList").value.split(/\r?\n/).map(x => x.trim()).filter(Boolean))].slice(0, 60).map(x => x.slice(0, 40))}), "stList");
+  if (v) { mutate(() => { P.proj.mkStatuses = v.L.filter(x => MK_STATUSES.indexOf(x) < 0); }, "Markup statuses"); mlRender(true); }
+}
+async function mkLayerNew(){
+  const v = await ask("New markup layer", `<div class="fg w2"><label>Name</label><input type="text" id="mklN" placeholder="e.g. Site comments, QS review, Client"></div>`, "Add", () => { const n = $("mklN").value.trim(); return n ? {n: n.slice(0, 80)} : "Name the layer"; }, "mklN");
+  if (!v) return null; const id = uid("L"); mutate(() => { (P.proj.mkLayers = P.proj.mkLayers || []).push({id, name: v.n, hidden: false}); }, "New markup layer"); return id;
+}
+function mkLayersHtml(){
+  const L = mkLayers(), n = id => (P.proj.marks || []).filter(m => (m.layer || "") === id).length;
+  return `<div class="lyrbar"><b style="flex:1;color:var(--navy)">Markup layers · ${L.length}</b><button class="btn sm" data-mkl="add" title="A layer for markups (yours, the site's, the client's…)">+ Layer</button><button class="btn sm" data-mkl="list" title="Markups list (Alt+L)">☰ List</button></div>`
+    + L.map(l => `<label class="lyr"><input type="checkbox" data-mklv="${esc(l.id)}"${l.hidden ? "" : " checked"}> <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(l.name)} <span class="small">(${n(l.id)})</span></span><button type="button" class="lyiso" data-mklr="${esc(l.id)}" title="Rename">&#9998;</button><button type="button" class="lyiso" data-mkld="${esc(l.id)}" title="Delete the layer (its markups stay, on no layer)">&times;</button></label>`).join("")
+    + `<div class="small" style="padding:4px 12px 10px">${L.length ? "A layer switched off is hidden on the drawing and left out of exports (a redaction still applies). " : ""}Put markups on a layer from their Properties or the Markups list.</div>`;
+}
+async function mkLayerAct(t){
+  const id = t.dataset.mklr || t.dataset.mkld, l = mkLayers().find(x => x.id === id);
+  if (t.dataset.mkl === "add") { await mkLayerNew(); renderLayers(); mlRender(true); return; }
+  if (t.dataset.mkl === "list") return mlToggle(true);
+  if (!l) return;
+  if (t.dataset.mklr) { const v = await ask("Rename layer", `<div class="fg w2"><label>Name</label><input type="text" id="mklN" value="${esc(l.name)}"></div>`, "Save", () => { const n = $("mklN").value.trim(); return n ? {n: n.slice(0, 80)} : "Name the layer"; }, "mklN"); if (v) mutate(() => { l.name = v.n; }, "Rename markup layer"); }
+  if (t.dataset.mkld) { if (!confirm("Delete the layer “" + l.name + "”? Its markups stay, on no layer.")) return; mutate(() => { P.proj.mkLayers = mkLayers().filter(x => x.id !== id); (P.proj.marks || []).forEach(m => { if (m.layer === id) delete m.layer; }); }, "Delete markup layer"); }
+  renderLayers(); mlRender(true);
+}
+/* summaries of the markups listed */
+const mlCols = r => [r.page, ((P.proj.sheets || {})[keyOf(r.m.file, r.m.page)] || {}).no || "", r.type, r.subject, r.text, r.author, r.at ? dmy(r.at) + " " + hhmm(r.at) : "", r.m.mod ? dmy(r.m.mod) : "", r.status, r.layer, r.space, r.color, (r.m.replies || []).map(x => (x.author || "—") + " (" + dmy(x.at) + "): " + x.text).join(" | ")];
+const ML_HEAD = ["Page", "Sheet", "Type", "Subject", "Comments", "Author", "Date", "Modified", "Status", "Layer", "Space", "Colour", "Replies"];
+function mlCsv(R){
+  const t = [ML_HEAD].concat(R.map(mlCols)).map(r => r.map(v => { v = String(v == null ? "" : v); return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
+  saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Markups.csv");
+}
+function mlXml(R){
+  const x = v => String(v == null ? "" : v).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;"}[c])).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "");
+  const out = [`<?xml version="1.0" encoding="UTF-8"?>`, `<Markups project="${x(P.proj.name)}" exported="${x(new Date().toISOString())}" count="${R.length}">`];
+  R.forEach(r => { const m = r.m;
+    out.push(`  <Markup id="${x(m.id)}" type="${x(mkKindOf(m))}">`, `    <Page>${x(r.page)}</Page>`, `    <Sheet>${x(((P.proj.sheets || {})[keyOf(m.file, m.page)] || {}).no || "")}</Sheet>`, `    <Subject>${x(r.subject)}</Subject>`, `    <Comments>${x(r.text)}</Comments>`,
+      `    <Author>${x(r.author)}</Author>`, `    <Date>${x(r.at)}</Date>`, `    <Modified>${x(m.mod || "")}</Modified>`, `    <Status>${x(r.status)}</Status>`, `    <Layer>${x(r.layer)}</Layer>`, `    <Space>${x(r.space)}</Space>`, `    <Color>${x(r.color)}</Color>`,
+      `    <Bounds>${x(mkPolyBounds(m).map(v => v.toFixed(2)).join(","))}</Bounds>`);
+    if ((m.replies || []).length) { out.push("    <Replies>"); m.replies.forEach(p => out.push(`      <Reply author="${x(p.author)}" date="${x(p.at)}">${x(p.text)}</Reply>`)); out.push("    </Replies>"); }
+    out.push("  </Markup>"); });
+  out.push("</Markups>");
+  saveBlob(new Blob([out.join("\n")], {type: "application/xml"}), fileBase() + "_Markups.xml");
+}
+function mkPolyBounds(m){ const xs = m.pts.map(p => p[0]), ys = m.pts.map(p => p[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; }
+async function mlSummary(R, pics){   // a printable summary (print → Save as PDF), a picture of each markup when asked
+  const w = window.open("", "_blank"); if (!w) return toast("The browser blocked the new tab — allow pop-ups for this page, then try again", 5000);
+  w.document.write("<!doctype html><title>Markups summary…</title><p style='font:14px Segoe UI,Arial'>Building the markups summary…</p>");
+  const shots = new Map();
+  if (pics) {
+    const byPage = new Map(); R.slice(0, 300).forEach(r => { const k = keyOf(r.m.file, r.m.page); if (!byPage.has(k)) byPage.set(k, []); byPage.get(k).push(r.m); });
+    for (const [k, L] of byPage) {
+      busy("Pictures of the markups… " + keyName(k));
+      try { const [f, p0] = k.split(":"), p = +p0, pg = await (await doc(f)).getPage(p), base = pg.getViewport({scale: 1}), sc = Math.min(2, 2400 / Math.max(base.width, base.height));
+        const cv = document.createElement("canvas"); cv.width = Math.ceil(base.width * sc); cv.height = Math.ceil(base.height * sc); const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
+        await loadLayers(f); await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})})).promise;
+        await mkAssetsFor(f, p); await svgOnto(ctx, pageOverlaySvg(f, p, sc, cv.width, cv.height, {legend: "none", meas: false}));
+        L.forEach(m => { const b = mkPolyBounds(m), mg = 24, x0 = Math.max(0, (b[0] - mg) * sc), y0 = Math.max(0, (b[1] - mg) * sc), x1 = Math.min(cv.width, (b[2] + mg) * sc), y1 = Math.min(cv.height, (b[3] + mg) * sc);
+          const W = Math.max(1, x1 - x0), H = Math.max(1, y1 - y0), k2 = Math.min(1, 260 / W, 180 / H), t = document.createElement("canvas"); t.width = Math.max(1, Math.round(W * k2)); t.height = Math.max(1, Math.round(H * k2));
+          t.getContext("2d").drawImage(cv, x0, y0, W, H, 0, 0, t.width, t.height); shots.set(m.id, t.toDataURL("image/jpeg", 0.82)); t.width = 0; });
+        cv.width = 0; } catch (e) { /* a page that cannot be drawn: listed without pictures */ }
+    }
+    busy("");
+  }
+  const groups = new Map(); R.forEach(r => { const k = r.page; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); });
+  const css = `body{font:12px "Segoe UI",Arial,sans-serif;color:#1e2b3a;margin:24px}h1{font-size:18px;color:#0f2942;margin:0 0 4px}h2{font-size:14px;color:#0f2942;margin:18px 0 6px;border-bottom:2px solid #0f2942;padding-bottom:3px}
+    table{border-collapse:collapse;width:100%}th,td{border:1px solid #c9d6e4;padding:4px 6px;vertical-align:top;text-align:left}th{background:#eef2f7;font-size:11px}td.p{width:180px}td.p img{max-width:260px;max-height:180px;display:block}.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+    .rep{margin-top:4px;padding:3px 6px;border-left:3px solid #c9d6e4;color:#33475b}.meta{color:#6b7d92}@media print{h2{break-after:avoid}tr{break-inside:avoid}}`;
+  const body = [...groups].map(([pg, rows]) => `<h2>${esc(pg)}</h2><table><tr>${pics ? "<th>Markup</th>" : ""}<th>Type / subject</th><th>Comments</th><th>Author · date</th><th>Status</th><th>Layer · space</th></tr>${rows.map(r => `<tr>${pics ? `<td class="p">${shots.get(r.id) ? `<img src="${shots.get(r.id)}" alt="">` : ""}</td>` : ""}
+    <td><span class="sw" style="background:${esc(r.color || "#9fb0c6")}"></span><b>${esc(r.type)}</b>${r.subject !== r.type ? "<br>" + esc(r.subject) : ""}</td><td>${esc(r.text).replace(/\n/g, "<br>")}${(r.m.replies || []).map(x => `<div class="rep"><b>${esc(x.author || "—")}</b> <span class="meta">${esc(dmy(x.at))}</span><br>${esc(x.text)}</div>`).join("")}</td>
+    <td>${esc(r.author || "—")}<br><span class="meta">${esc(dmy(r.at))}</span></td><td>${esc(r.status || "—")}</td><td>${esc([r.layer, r.space].filter(Boolean).join(" · ") || "—")}</td></tr>`).join("")}</table>`).join("");
+  w.document.open(); w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(P.proj.name)} — markups summary</title><style>${css}</style></head><body><h1>${esc(P.proj.name)} — markups summary</h1>
+    <div class="meta">${R.length} markup${R.length === 1 ? "" : "s"} · ${esc(dmy(today()))}${qaUser() ? " · " + esc(qaUser()) : ""} · Print → Save as PDF</div>${body || "<p>No markups listed.</p>"}</body></html>`); w.document.close();
+}
+async function mlExport(anchor){
+  const R = mlRows(), r = anchor.getBoundingClientRect();
+  ctxShow([{h: "Summary of " + R.length + " markup" + (R.length === 1 ? "" : "s"), s: "the markups listed, as filtered and sorted"}, {t: "PDF summary with pictures (print → Save as PDF)…", fn: () => mlSummary(R, true)}, {t: "PDF summary, text only…", fn: () => mlSummary(R, false)},
+    {sep: 1}, {t: "CSV (Excel)", fn: () => mlCsv(R)}, {t: "XML", fn: () => mlXml(R)}], r.left, r.bottom + 4);
+}
+async function mlSavedAct(v){
+  if (v === "+") { const n = await ask("Save this filter", `<div class="fg w2"><label>Name</label><input type="text" id="mlfN" placeholder="e.g. Open site comments"></div>`, "Save", () => { const x = $("mlfN").value.trim(); return x ? {x: x.slice(0, 60)} : "Name the filter"; }, "mlfN");
+    if (n) mutate(() => { (P.proj.mkFilters = P.proj.mkFilters || []).push({id: uid("F"), name: n.x, f: mlFilterClean(Object.assign({}, S.ml, {scope: mlPref().scope}))}); }, "Save filter"); mlRender(true); return; }
+  if (v === "-") { const L = P.proj.mkFilters || [], d = await ask("Delete a filter", `<div class="fg w2"><label>Filter</label><select id="mlfD">${L.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("")}</select></div>`, "Delete", () => ({id: $("mlfD").value}));
+    if (d) mutate(() => { P.proj.mkFilters = L.filter(x => x.id !== d.id); }, "Delete filter"); mlRender(true); return; }
+  const x = (P.proj.mkFilters || []).find(y => y.id === v); if (!x) return;
+  Object.assign(S.ml, mlFilterClean(x.f), {ticked: new Set(), focus: null}); mlSet({scope: x.f.scope === "all" ? "all" : "page"}); mlRender(true); toast("Filter: " + x.name, 1600);
+}
+function mlWire(){
+  const el = $("mkList"); if (!el) return;
+  el.addEventListener("input", e => { if (e.target.id === "mlQ") { S.ml.q = e.target.value; mlRender(); } });
+  el.addEventListener("change", e => {
+    const t = e.target, id = t.dataset.mlst || t.dataset.mlt;
+    if (t.id === "mlScope") { mlSet({scope: t.value}); S.ml.ticked.clear(); return mlRender(true); }
+    if (t.id === "mlType" || t.id === "mlSt" || t.id === "mlAu" || t.id === "mlLy" || t.id === "mlSp") { S.ml[{mlType: "type", mlSt: "status", mlAu: "author", mlLy: "layer", mlSp: "space"}[t.id]] = t.value; return mlRender(); }
+    if (t.id === "mlSaved") { const v = t.value; t.value = ""; if (v) mlSavedAct(v); return; }
+    if (t.dataset.mlst) { const m = objById(id); if (m) mutate(() => { m.status = t.value; m.mod = new Date().toISOString(); }, "Status " + (t.value || "none")); return; }
+    if (t.dataset.mlt) { if (t.checked) S.ml.ticked.add(id); else S.ml.ticked.delete(id); return mlRender(); }
+    if (t.id === "mlAll") { const R = mlRows(); if (t.checked) R.forEach(r => S.ml.ticked.add(r.id)); else S.ml.ticked.clear(); return mlRender(); }
+    if (t.id === "mlBSt" && t.value) { const v = t.value === "(none)" ? "" : t.value, ids = new Set(S.ml.ticked); mutate(() => (P.proj.marks || []).forEach(m => { if (ids.has(m.id)) { m.status = v; m.mod = new Date().toISOString(); } }), "Status " + (v || "none") + " on " + ids.size); return; }
+    if (t.id === "mlBLy" && t.value) { const ids = new Set(S.ml.ticked), go = async () => { let v = t.value; if (v === "+") { v = await mkLayerNew(); if (!v) return mlRender(); } mutate(() => (P.proj.marks || []).forEach(m => { if (ids.has(m.id)) { if (v === "(none)") delete m.layer; else m.layer = v; } }), "Move " + ids.size + " to a layer"); renderLayers(); mlRender(true); }; go(); return; }
+  });
+  el.addEventListener("click", e => {
+    const t = e.target;
+    if (t.id === "mlClose") return mlToggle(false);
+    if (t.id === "mlExp") return mlExport(t);
+    if (t.id === "mlStat") return mlStatuses();
+    if (t.id === "mlDetX") { S.ml.focus = null; return mlRender(); }
+    if (t.id === "mlRepGo") { const m = objById(S.ml.focus); if (m) mlReply(m, $("mlRep").value).then(() => mlRender()); return; }
+    if (t.dataset.mlrdel) { const m = objById(S.ml.focus); if (m && confirm("Delete this reply?")) mutate(() => { m.replies = (m.replies || []).filter(r => r.id !== t.dataset.mlrdel); }, "Delete reply"); return; }
+    if (t.dataset.mlgo) return mlGo(t.dataset.mlgo);
+    if (t.id === "mlBSel") { const ids = [...S.ml.ticked].filter(id => onPage(objById(id))); if (!ids.length) return toast("None of the ticked markups is on this page", 2500); setTool("select"); setSel(ids); refresh(); return; }
+    if (t.id === "mlBDel") { const ids = new Set(S.ml.ticked); if (ids.size && confirm("Delete " + ids.size + " markup" + (ids.size === 1 ? "" : "s") + "?")) { delObjects(ids); S.ml.ticked.clear(); } return; }
+    const th = t.closest("th[data-mls]"); if (th) { const o = mlPref(); mlSet(o.sort === th.dataset.mls ? {dir: -o.dir || -1} : {sort: th.dataset.mls, dir: 1}); return mlRender(); }
+    const tr = t.closest("tr[data-mlid]"); if (tr && !t.closest("input,select,button")) { S.ml.focus = tr.dataset.mlid; mlGo(tr.dataset.mlid).then(() => mlRender()); }
+  });
+  el.addEventListener("dblclick", e => { const tr = e.target.closest("tr[data-mlid]"); if (tr && !e.target.closest("input,select,button")) { const m = objById(tr.dataset.mlid); if (m) editMarkText(m); } });
+  el.addEventListener("keydown", e => { if (e.target.id === "mlRep" && e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $("mlRepGo").click(); } });
+  el.addEventListener("pointerdown", e => {   // the top edge: drag to make the list taller or shorter
+    if (e.target.id !== "mlRz") return; e.preventDefault(); const y0 = e.clientY, h0 = el.offsetHeight;
+    const mv = ev => { el.style.height = Math.max(120, Math.min(700, h0 + y0 - ev.clientY)) + "px"; };
+    const up = () => { document.removeEventListener("pointermove", mv); document.removeEventListener("pointerup", up); mlSet({h: el.offsetHeight}); if (S.page) { applyView(); renderHi(); } };
+    document.addEventListener("pointermove", mv); document.addEventListener("pointerup", up);
+  });
 }
 
 /* ------------------------------------------------------------------ colour picker (condition swatch) */
@@ -3770,7 +4608,8 @@ function exportCsv(){
 /* the takeoff of one page as an SVG over the page at scale sc (pt -> px): areas, lengths, counts, labels, markups, legend.
    legend: true / false (the legend top left), or the export options {legend: none|tl|tr|bl|br|margin, lsz: s|m|l, lq,
    lbl, meas, mk, stamp, conds: Set of condition ids, ox: the margin strip's width in px (the page is drawn right of it)} */
-function pageOverlaySvg(file, page, sc, W, H, legend){
+function pageOverlaySvg(file, page, sc, W, H, legend){ const ex0 = S.mkExport; S.mkExport = true; try { return pageOverlaySvg0(file, page, sc, W, H, legend); } finally { S.mkExport = ex0; } }
+function pageOverlaySvg0(file, page, sc, W, H, legend){
   const o = legend && typeof legend === "object" ? legend : {legend: legend ? "tl" : "none"}, ox = +o.ox || 0, lblOn = o.lbl == null ? S.lbl.on : !!o.lbl;
   const T = p => [p[0] * sc + ox, p[1] * sc], z = Math.max(1, sc / 1.6), h = [];
   const ps = P => P.map(p => T(p).map(v => v.toFixed(1)).join(",")).join(" ");
@@ -3791,7 +4630,7 @@ function pageOverlaySvg(file, page, sc, W, H, legend){
       if (k && lblOn) { const scr = poly.map(T), L = capLines(it, c, k), m = lineLabelPt(scr, z); if (L.length) h.push(labelBox(m, L, ded ? "#9b2222" : "#0b0b0b", z)); if (S.lbl.seg && it.shape !== "circle") h.push(segLabels(scr, it.pts, k, false, z)); }
     }
   });
-  if (o.mk !== false) (P.proj.marks || []).filter(m => m.file === file && m.page === page && m.type !== "fence").forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
+  if (o.mk !== false) (P.proj.marks || []).filter(m => m.file === file && m.page === page && m.type !== "fence" && (!mkHidden(m) || m.type === "redact")).forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
   const sh = (P.proj.sheets || {})[keyOf(file, page)] || {}, lz = z * ({s: 0.8, m: 1, l: 1.3}[o.lsz] || 1), pos = o.legend || "none";
   if (pos !== "none") {
     const lines = (pos === "margin" ? [[P.proj.name, "", 700], [[sh.no, sh.title].filter(Boolean).join(" · ") || pageName({file, page}), "", 600], [pageName({file, page}), "", 400]].filter((l, i) => i < 2 || sh.no || sh.title)
@@ -3818,7 +4657,7 @@ async function exportPng(){
     cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
     const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
     await sliced(S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: vp})).promise;
-    await svgOnto(ctx, pageOverlaySvg(S.fileId, S.pageNo, sc, cv.width, cv.height, true));
+    await mkAssetsFor(S.fileId, S.pageNo); await svgOnto(ctx, pageOverlaySvg(S.fileId, S.pageNo, sc, cv.width, cv.height, true));
     cv.toBlob(b => saveBlob(b, fileBase() + "_p" + S.pageNo + "_markup.png"), "image/png");
   } catch (e) { toast(e.message || String(e), 5000); }
   busy("");
@@ -3834,22 +4673,24 @@ async function exportPdf(all){
     const L = await loadPdfLib(), out = await L.PDFDocument.create();
     const pages = all ? allPages().map(o => ({f: o.f.id, p: o.i})) : [{f: S.fileId, p: S.pageNo}];
     if (!pages.length) throw new Error("There are no project sheets to export");
-    const srcCache = {};
+    const srcCache = {}, linkQ = [], byKey = {};
     for (const {f, p} of pages) {
       busy("Building marked-up PDF… page " + (pages.findIndex(x => x.f === f && x.p === p) + 1) + " of " + pages.length);
       const pg = await (await doc(f)).getPage(p), base = pg.getViewport({scale: 1}), sc = Math.min(3, 4000 / Math.max(base.width, base.height));
       const W = Math.ceil(base.width * sc), H = Math.ceil(base.height * sc), cv = document.createElement("canvas"); cv.width = W; cv.height = H;
       const ctx = cv.getContext("2d");
       if (!srcCache[f]) { const rec = await dbGet("pdfs", f); srcCache[f] = await L.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); }
-      const flat = pg.rotate % 360 !== 0 || srcCache[f].isEncrypted;   // an encrypted PDF cannot be copied page for page (its content would stay encrypted): flattened like a turned page
+      const flat = pg.rotate % 360 !== 0 || srcCache[f].isEncrypted || mkRedacted(f, p);   // an encrypted PDF cannot be copied page for page (its content would stay encrypted), and a redacted page must lose what is under the redaction: flattened like a turned page
       if (flat) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); await loadLayers(f); await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})})).promise; }
-      await svgOnto(ctx, pageOverlaySvg(f, p, sc, W, H, true));
+      await mkAssetsFor(f, p); await svgOnto(ctx, pageOverlaySvg(f, p, sc, W, H, true));
       const png = await out.embedPng(await (await new Promise(r => cv.toBlob(r, "image/png"))).arrayBuffer());
-      if (flat) { const np = out.addPage([base.width, base.height]); np.drawImage(png, {x: 0, y: 0, width: base.width, height: base.height}); continue; }
+      if (flat) { const np = out.addPage([base.width, base.height]); np.drawImage(png, {x: 0, y: 0, width: base.width, height: base.height}); byKey[keyOf(f, p)] = np; mkPdfLinks(L, out, np, f, p, (x, y) => [x, base.height - y], linkQ); continue; }
       const [cp] = await out.copyPages(srcCache[f], [p - 1]); out.addPage(cp);
       const vb = pg.view;   // [x0, y0, x1, y1] of the shown box, in PDF space
       cp.drawImage(png, {x: vb[0], y: vb[1], width: vb[2] - vb[0], height: vb[3] - vb[1]});
+      byKey[keyOf(f, p)] = cp; mkPdfLinks(L, out, cp, f, p, (x, y) => [vb[0] + x, vb[3] - y], linkQ);
     }
+    mkPdfLinksDone(out, linkQ, byKey); await mkPdfAttach(out, new Set(pages.map(x => keyOf(x.f, x.p))));
     ocFix(L, out, pages.map(x => x.f));
     saveBlob(new Blob([await out.save()], {type: "application/pdf"}), fileBase() + (all ? "_takeoff" : "_p" + S.pageNo + "_markup") + ".pdf");
   } catch (e) { toast("PDF export failed: " + (e.message || e), 6000); }
@@ -3871,7 +4712,9 @@ async function exportBundle(){
       if (rec.src) { e.srcSha = rec.sha || await sha256(rec.src); e.srcOff = off; e.srcSize = rec.src.byteLength; parts.push(rec.src); off += rec.src.byteLength; }   // the DWG / DXF too
       pdfs.push(e);
     }
-    const head = new TextEncoder().encode(JSON.stringify({format: "zd-takeoff-bundle", exported, project: Object.assign({format: "zd-takeoff", exported}, P.proj), pdfs}));
+    const assets = [];   // pictures and files of markups
+    for (const aid of [...new Set((P.proj.marks || []).flatMap(mkAids))]) { const r = await assetRec(aid); if (!r || !r.data) continue; assets.push({aid, name: r.name, type: r.type, size: r.data.byteLength, off}); parts.push(r.data); off += r.data.byteLength; }
+    const head = new TextEncoder().encode(JSON.stringify({format: "zd-takeoff-bundle", exported, project: Object.assign({format: "zd-takeoff", exported}, P.proj), pdfs, assets}));
     const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, head.length);
     saveBlob(new Blob([BUNDLE_MAGIC, len, head, ...parts], {type: "application/octet-stream"}), fileBase() + ".zdtakeoff");
     toast(miss.length ? "Saved without " + miss.join(", ") + " — not in this browser (add it with + PDF first)" : "Project + " + pdfs.length + " PDF" + (pdfs.length === 1 ? "" : "s") + " saved in one file — open it with Import project", miss.length ? 7000 : 4000);
@@ -3898,6 +4741,11 @@ async function importBundle(buf){
       if (have !== null && have === ident && ident) continue;   // the same drawing is already in this browser
       if (have !== null) { const nid = uid("F"); text = remapFileId(text, id, nid); id = nid; }   // another drawing already uses this id here: this one gets its own
       await dbPut("pdfs", Object.assign({name: p.name, size: src ? src.byteLength : data.byteLength, data, sha: ident}, src ? {src, pdfSha: sha} : {}), id);
+    }
+    for (const x of Array.isArray(h.assets) ? h.assets : []) {   // pictures and files of markups (kept as they are when already here)
+      const a = base + (+x.off || 0), b = a + (+x.size || 0);
+      if (!x || typeof x.aid !== "string" || !/^[A-Za-z0-9_-]{1,60}$/.test(x.aid) || !(x.size > 0) || b > buf.byteLength || await assetRec(x.aid)) continue;
+      await dbPut("pdfs", {asset: true, name: String(x.name || "").slice(0, 200), type: String(x.type || "application/octet-stream").slice(0, 100), size: x.size, data: buf.slice(a, b), at: new Date().toISOString()}, assetKey(x.aid));
     }
   } finally { busy(""); }
   if (!pre.length) pre.push({what: "PDFs in the file", a: h.pdfs.length, b: h.pdfs.length, st: "PASS", note: "fingerprints checked"});
@@ -4072,35 +4920,38 @@ async function expPageImage(key, o){   // the page and its takeoff as one pictur
   await loadLayers(f);
   await sliced(pg.render(Object.assign({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})}, strip ? {transform: [1, 0, 0, 1, strip * sc, 0]} : {}))).promise;
   if (o.fade) { ctx.fillStyle = "rgba(255,255,255," + o.fade / 100 + ")"; ctx.fillRect(strip * sc, 0, W - strip * sc, H); }
-  await svgOnto(ctx, pageOverlaySvg(f, p, sc, W, H, Object.assign({}, o, {ox: strip * sc})));
+  await mkAssetsFor(f, p); await svgOnto(ctx, pageOverlaySvg(f, p, sc, W, H, Object.assign({}, o, {ox: strip * sc})));
   return {cv, sc, W, H};
 }
 async function expPdf(o, pr){   // the drawing stays the original vector page; the takeoff goes on top as a transparent picture
   const L = await loadPdfLib(), src = {}, per = o.fmt === "pdfs", files = [], strip = o.legend === "margin" ? EXP_STRIP[o.lsz] || EXP_STRIP.m : 0;
-  let out = per ? null : await L.PDFDocument.create();
+  let out = per ? null : await L.PDFDocument.create(), linkQ = [], byKey = {};
   for (const [n, key] of o.keys.entries()) {
     if (pr.stop) return;
     pr.set(n, o.keys.length, keyName(key));
     const [f, p0] = key.split(":"), p = +p0, pg = await (await doc(f)).getPage(p), base = pg.getViewport({scale: 1});
-    if (per) out = await L.PDFDocument.create();
+    if (per) { out = await L.PDFDocument.create(); linkQ = []; byKey = {}; }
     if (!src[f]) { const rec = await dbGet("pdfs", f); if (!rec) throw new Error("PDF missing — add “" + ((P.proj.files.find(x => x.id === f) || {}).name || f) + "” again with + PDF"); src[f] = await L.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); }
-    if (pg.rotate % 360 !== 0 || src[f].isEncrypted) {   // a turned or password-locked page: flattened to one picture
+    if (pg.rotate % 360 !== 0 || src[f].isEncrypted || mkRedacted(f, p)) {   // a turned, password-locked or redacted page: flattened to one picture
       const im = await expPageImage(key, o), png = await out.embedPng(await blobBuf(im.cv, "image/png")); im.cv.width = 0;
-      out.addPage([base.width + strip, base.height]).drawImage(png, {x: 0, y: 0, width: base.width + strip, height: base.height});
+      const np = out.addPage([base.width + strip, base.height]); np.drawImage(png, {x: 0, y: 0, width: base.width + strip, height: base.height});
+      byKey[key] = np; mkPdfLinks(L, out, np, f, p, (x, y) => [strip + x, base.height - y], linkQ);
+      if (mkRedacted(f, p) && o.notes) o.notes.push(keyName(key) + " flattened to apply its redactions");
     } else {
       const vb = pg.view, vw = vb[2] - vb[0], vh = vb[3] - vb[1], {cv, sc, W, H} = expCanvas(vw + strip, vh, o.dpi / 72); expNote(o, sc, key);
-      await svgOnto(cv.getContext("2d"), pageOverlaySvg(f, p, sc, W, H, Object.assign({}, o, {ox: strip * sc})));
+      await mkAssetsFor(f, p); await svgOnto(cv.getContext("2d"), pageOverlaySvg(f, p, sc, W, H, Object.assign({}, o, {ox: strip * sc})));
       const png = await out.embedPng(await blobBuf(cv, "image/png")); cv.width = 0;
       let np, x0 = vb[0], y0 = vb[1];
       if (!strip) { [np] = await out.copyPages(src[f], [p - 1]); out.addPage(np); }
       else { const ep = await out.embedPage(src[f].getPage(p - 1), {left: vb[0], bottom: vb[1], right: vb[2], top: vb[3]}); np = out.addPage([vw + strip, vh]); np.drawPage(ep, {x: strip, y: 0, width: vw, height: vh}); x0 = 0; y0 = 0; }
       if (o.fade) np.drawRectangle({x: x0 + strip, y: y0, width: vw, height: vh, color: L.rgb(1, 1, 1), opacity: o.fade / 100});
       np.drawImage(png, {x: x0, y: y0, width: vw + strip, height: vh});
+      byKey[key] = np; mkPdfLinks(L, out, np, f, p, strip ? (x, y) => [strip + x, vh - y] : (x, y) => [vb[0] + x, vb[3] - y], linkQ);
     }
-    if (per) { ocFix(L, out, [f]); files.push({name: expName(key, n) + ".pdf", data: await out.save()}); }
+    if (per) { mkPdfLinksDone(out, linkQ, byKey); await mkPdfAttach(out, new Set([key])); ocFix(L, out, [f]); files.push({name: expName(key, n) + ".pdf", data: await out.save()}); }
   }
   pr.sub("Saving…");
-  if (!per) { ocFix(L, out, o.keys.map(k => k.split(":")[0])); return saveBlob(new Blob([await out.save()], {type: "application/pdf"}), o.name + ".pdf"); }
+  if (!per) { mkPdfLinksDone(out, linkQ, byKey); await mkPdfAttach(out, new Set(o.keys)); ocFix(L, out, o.keys.map(k => k.split(":")[0])); return saveBlob(new Blob([await out.save()], {type: "application/pdf"}), o.name + ".pdf"); }
   if (files.length === 1) saveBlob(new Blob([files[0].data], {type: "application/pdf"}), o.name + "_" + files[0].name); else saveBlob(await zipBlob(files), o.name + ".zip");
 }
 async function expImages(o, pr){
@@ -5099,6 +5950,8 @@ function paletteCmds(){
     return L;
   }
   document.querySelectorAll("#tools [data-tool]").forEach(b => btn(b, "Tool"));
+  Object.entries(MK_TOOL_NAMES).forEach(([t, n]) => add("Markup: " + n, () => setTool(t), "Tool"));
+  add("Markups list — filter, statuses, replies, summaries (Alt+L)", () => mlToggle(true), "View");
   add("Next unchecked measurement", nextUnchecked, "Check");
   add("Check before export (errors and warnings)", exportMenu, "Check");
   add("Excel measurement sheet", exportExcel, "Export"); add("CSV", exportCsv, "Export");
@@ -5248,6 +6101,7 @@ function ctxItem(hi, sp, q, e){
   return L;
 }
 function setDefaultsFromSelection(o){
+  if (o && MK_TYPES.has(o.type)) { const kind = mkKindOf(o); saveMkStyle(kind, mkStyleOf(o)); toast((MK_TOOL_NAMES["mk_" + kind] || MARK_TOOLS[o.type]) + ": this style is the default for new ones", 2400); return; }
   const d = toolDefaults();
   if (o && o.type) {
     if (o.type === "dimension") Object.assign(d, {dimColor: o.color || d.dimColor, dimWidth: +o.width || d.dimWidth, dimSize: +o.size || d.dimSize, dimArrow: +o.arrow || d.dimArrow, dimOffset: +o.offset || d.dimOffset});
@@ -5262,8 +6116,8 @@ function setDefaultsFromSelection(o){
 function ctxMark(m){
   const ids = selIds(), many = ids.size > 1, allLk = [...ids].map(objById).filter(Boolean).every(o => o.locked);
   return [{h: many ? ids.size + " selected" : MARK_TOOLS[m.type], s: many ? "" : (m.text || "markup — not a quantity") + (m.locked ? " · locked" : "")},
-    !many && m.type !== "hilite" && m.type !== "fence" && m.type !== "dimension" ? {t: "Edit text…", k: "Dbl-click", fn: () => editMarkText(m)} : null,
-    !many ? {t: "Colour…", fn: focusProps} : null, !many ? {t: "Set as default", fn: () => setDefaultsFromSelection(m)} : null, !many && MARK_PROFILE_TYPES.includes(m.type) ? {t: "Add to Tool Chest…", fn: () => toolChestDialog({object: m, name: MARK_TOOLS[m.type] + " profile"})} : null, {sep: 1}, ...ctxClip(null), {sep: 1}, ctxArrange(), {t: allLk ? "Unlock" : "Lock", k: "Ctrl+Shift+L", fn: lockSel},
+    ...mkCtxItems(m, many), !many ? {t: "Comments and replies…", fn: () => { S.ml.focus = m.id; mlSet({scope: "page"}); mlToggle(true); }} : null,
+    !many ? {t: "Properties…", fn: focusProps} : null, !many ? {t: "Set as default", fn: () => setDefaultsFromSelection(m)} : null, !many && MARK_PROFILE_TYPES.includes(mkKindOf(m)) ? {t: "Add to Tool Chest…", fn: () => toolChestDialog({object: m, name: MARK_TOOLS[m.type] + " profile"})} : null, {sep: 1}, ...ctxClip(null), {sep: 1}, ctxArrange(), {t: allLk ? "Unlock" : "Lock", k: "Ctrl+Shift+L", fn: lockSel},
     {t: "Select all " + MARK_TOOLS[m.type].toLowerCase() + "s on this page", fn: () => selectSimilar(m)}, {t: "Zoom to", fn: () => zoomTo(ids)}, {sep: 1}, {t: "Delete", k: "Del", fn: delSelected, dng: 1, dis: allLk}];
 }
 function ctxCanvas(q){
@@ -5285,6 +6139,7 @@ function keysDialog(){
     ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
     ${G("Find anything", [["Ctrl+K", "command palette: type the name of any tool, export, dialog, page or condition"], ["Ctrl+F", "find text on the drawings"]])}
     ${G("Pages (Forma Takeoff sheets)", [["Tick a thumbnail | Shift+tick", "tick pages to export, read sheet info or OCR together · Shift: the pages in between"], ["Ctrl+click | Shift+click a thumbnail", "tick / untick it without opening it"], ["☆ on a thumbnail", "pin the page to the top"], ["Double-click a sheet no. on the drawing", "open that sheet (right-click lists the sheets referenced)"]])}
+    ${G("Markups (Bluebeam)", [["T | Q | N", "text box · callout · note"], ["Shift+L | Y | G", "line · polyline · polygon"], ["Shift+R | Shift+E | U", "rectangle · ellipse · cloud"], ["P | Shift+H", "pen · highlighter pen"], ["X | I", "stamp · image"], ["Markup ▾", "every markup tool: hyperlink, file attachment, redaction, erase…"], ["Dbl-click a markup", "edit its text · open a link or an attached file"], ["Drag a handle", "resize a box, move a line's end or a point"], ["Alt+L", "Markups list: every markup — filter, sort, status, replies, layers, CSV / XML / PDF summary"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
     ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"]])}
     ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"]])}
@@ -5315,9 +6170,11 @@ function wire(){
   { let mid = 0; st.addEventListener("pointerdown", e => { if (e.button !== 1) return; const t = Date.now(); if (t - mid < 380) { mid = 0; if (S.page) { fit(); renderHi(); } } else mid = t; }); }   // a middle double-click: zoom extents, as AutoCAD   // middle button pans — not the browser's autoscroll
   window.addEventListener("blur", () => { if (S.space) { S.space = false; stage().classList.toggle("pan", S.tool === "pan"); } });   // Space released in another window must not leave pan on
   st.addEventListener("dblclick", e => {
-    if (["draw", "ded", "measure", "fence"].indexOf(S.tool) >= 0 && S.draft.length) return endDraft();
+    if (["draw", "ded", "measure", "fence", "mk_polyline", "mk_polygon"].indexOf(S.tool) >= 0 && S.draft.length) return endDraft();
     if (S.tool !== "select" || !P.proj || !S.page) return;
     const sp = evPos(e), mk = markAt(sp);
+    if (mk && mk.type === "link") return followLink(mk);
+    if (mk && mk.type === "attach") return mk.att && openAsset(mk.att.aid, mk.att.name);
     if (mk && selIds().has(mk.id)) { if (mk.locked) return lockedMsg(); if (mk.type !== "hilite" && mk.type !== "fence") editMarkText(mk); return; }
     if (!mk && !hitItem(sp)) { const ln = sheetRefsNear(toBase(sp[0], sp[1]), 10 / S.view.s)[0]; if (ln) { toast("Sheet " + ln.no + " → " + keyName(ln.k), 2000); return gotoKey(ln.k); } }   // a sheet no. written on the drawing: open that sheet
     const one = selOne(); if (!one) return;
@@ -5341,6 +6198,9 @@ function wire(){
   new ResizeObserver(() => { if (S.page) { applyView(); renderHi(); } }).observe(st);
   document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.addEventListener("click", () => setTool(b.dataset.tool)));
   $("bAutoSet").onclick = () => P.proj && autoSettings();
+  $("bMk").onclick = e => { e.stopPropagation(); if (P.proj && S.page) mkMenu($("bMk")); };
+  $("bMkList").onclick = () => { if (P.proj) mlToggle(); };
+  mlWire();
   $("bAdd").onclick = () => $("fileIn").click();
   $("fileIn").onchange = e => { addFiles([...e.target.files]); e.target.value = ""; };
   $("pageSel").onchange = e => { const [f, p] = e.target.value.split("|"); if (f && p) gotoPage(f, +p); };
@@ -5387,8 +6247,11 @@ function wire(){
     mi.addEventListener("pointermove", e => { e.stopPropagation(); if (S.miniDrag) miniGo(e); });
     mi.addEventListener("pointerup", e => { e.stopPropagation(); S.miniDrag = false; });
     ["dblclick", "contextmenu"].forEach(t => mi.addEventListener(t, e => { e.stopPropagation(); e.preventDefault(); })); }
-  $("layerList").addEventListener("change", e => { if (e.target.dataset.lid) setLayer([e.target.dataset.lid], e.target.checked); });
+  $("layerList").addEventListener("change", e => {
+    if (e.target.dataset.mklv) { const l = mkLayers().find(x => x.id === e.target.dataset.mklv); if (l) { mutate(() => { l.hidden = !e.target.checked; }, (e.target.checked ? "Show" : "Hide") + " layer " + l.name); renderLayers(); } return; }
+    if (e.target.dataset.lid) setLayer([e.target.dataset.lid], e.target.checked); });
   $("layerList").addEventListener("click", e => {
+    const mkl = e.target.closest("[data-mkl],[data-mklr],[data-mkld]"); if (mkl) { e.preventDefault(); e.stopPropagation(); return mkLayerAct(mkl); }
     const iso = e.target.closest("[data-liso]"); if (iso) { e.preventDefault(); e.stopPropagation(); return cadIsolateId(iso.dataset.liso); }
     if (e.target.closest("[data-cadq]")) return cadQtyDialog();
     const pr = e.target.closest("[data-lpre]");
@@ -5458,7 +6321,7 @@ function wire(){
     if (o.dataset.dup) { const pr = await dbGet("projects", o.dataset.dup); const cp = Object.assign(JSON.parse(JSON.stringify(pr)), {id: uid("P"), name: pr.name + " (copy)", updated: new Date().toISOString()}); await dbPut("projects", cp); return showStart(); }
     if (o.dataset.del) { const pr = await dbGet("projects", o.dataset.del); const ok = await ask("Delete project", `<p>Delete <b>${esc(pr.name)}</b> with its ${pr.items.length} measurements and stored PDFs? This cannot be undone.</p>`, "Delete");
       if (!ok) return; const others = (await dbAll("projects")).filter(x => x.id !== pr.id), keep = new Set(others.flatMap(x => x.files.map(f => f.id)));
-      for (const f of pr.files) if (!keep.has(f.id)) await dbDel("pdfs", f.id); await dbDel("projects", pr.id); if (P.proj && P.proj.id === pr.id) P.proj = null; showStart(); }
+      for (const f of pr.files) if (!keep.has(f.id)) await dbDel("pdfs", f.id); await dbDel("projects", pr.id); await mkAssetsCleanup((pr.marks || []).flatMap(mkAids)); if (P.proj && P.proj.id === pr.id) P.proj = null; showStart(); }
   });
   $("condList").addEventListener("click", e => {
     if (e.target.id === "bFirstCond") return editCond(null);
@@ -5492,7 +6355,7 @@ function wire(){
   });
   $("props").addEventListener("change", e => {
     const mk = e.target.dataset.mprop && (P.proj.marks || []).find(m => m.id === S.selMark);
-    if (mk) { mutate(() => { const f = e.target.dataset.mprop, v = e.target.value; if (["width", "size", "arrow", "offset", "opacity"].includes(f)) mk[f] = Math.max(0, +v || 0); else mk[f] = v; }); return; }
+    if (mk) { mkPropSet(mk, e.target.dataset.mprop, e.target); return; }
     const it = P.proj.items.find(i => i.id === S.sel), f = e.target.dataset.prop; if (!it || !f) return;
     if (f === "qa") return setQa([it], e.target.value);
     mutate(() => {
@@ -5512,6 +6375,7 @@ function wire(){
     mutate(() => P.proj.items.forEach(i => { if (ids.has(i.id) && (cond(i.cond) || {}).type === c.type) i.cond = c.id; }));
     toast("Moved to " + c.name + (bad ? " — " + bad + " of another kind (area / length / count) left as they were" : ""), 3500); });
   $("props").addEventListener("click", e => {
+    const m2 = e.target.closest("[data-mact2]"); if (m2) { const mk = S.selMark && objById(S.selMark); if (mk) mkPropAct(mk, m2.dataset.mact2); return; }
     const ma = e.target.closest("[data-mact]");
     if (ma && ma.dataset.mact === "del") return delSelected();
     if (ma && ma.dataset.mact === "join") return joinRuns(new Set(S.multi));
@@ -5534,6 +6398,7 @@ function wire(){
     if (!P.proj) return;
     const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
     if ($("ctx").classList.contains("on")) { if (e.key === "Escape") { ctxClose(); return; } ctxClose(); }
+    if (e.altKey && !mod && k === "l") { e.preventDefault(); return mlToggle(); }   // Bluebeam: Alt+L, the Markups list
     if (mod && k === "z") { e.preventDefault(); return e.shiftKey ? redoAny() : undoAny(); }
     if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); return redoAny(); }
     if (e.altKey && S.cmp && /^Arrow/.test(e.key)) { e.preventDefault(); const st2 = (e.shiftKey ? 10 : 1) / S.view.s; S.cmp.dx += e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0; S.cmp.dy += e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0; clearTimeout(S.cmpT); S.cmpT = setTimeout(() => { renderLow(); renderHi(true); }, 120); return; }
@@ -5552,7 +6417,8 @@ function wire(){
     if (e.key === " ") { S.space = true; stage().classList.add("pan"); e.preventDefault(); return; }
     if (e.key === "?") { keysDialog(); return; }
     if (e.key === "Escape" && S.typed) { S.typed = ""; draw(); return; }
-    if (e.key === "Escape" && S.drag && (S.drag.vertex != null || S.drag.move)) { cancelDrag(); return; }
+    if (e.key === "Escape" && S.mkd) { S.mkd = null; draftClear(); draw(); return; }
+    if (e.key === "Escape" && S.drag && (S.drag.vertex != null || S.drag.move || S.drag.mh != null)) { cancelDrag(); return; }
     if (e.key === "Escape" && S.tool === "match") { setTool("select"); return; }
     if (e.key === "Escape" && S.draft.length === 0 && (S.multi.size || S.box || S.lasso)) { S.multi.clear(); S.box = null; S.lasso = null; refresh(); return; }
     if (e.key === "Escape") { if (S.autoShow) { S.autoShow = null; }
@@ -5564,7 +6430,7 @@ function wire(){
       else if (S.sel || S.selMark) { setSel([]); }
       else setTool("select");
       refresh(); return; }
-    if (S.draft.length && ["draw", "ded", "measure", "fence", "rect"].indexOf(S.tool) >= 0 && !S.arcMid) {   // Bluebeam "sketch to scale": type a length (12'-6", 12.5) — or L x W for a rectangle — and Enter
+    if (S.draft.length && ["draw", "ded", "measure", "fence", "rect", "mk_polyline", "mk_polygon"].indexOf(S.tool) >= 0 && !S.arcMid) {   // Bluebeam "sketch to scale": type a length (12'-6", 12.5) — or L x W for a rectangle — and Enter
       const ch = e.key, buf = S.typed || "";
       if (/^[0-9.'"\/]$/.test(ch) || (buf && /^[- xX×]$/.test(ch))) { S.typed = buf + ch; e.preventDefault(); draw(); return; }
       if (buf && e.key === "Backspace") { S.typed = buf.slice(0, -1); e.preventDefault(); draw(); return; }
@@ -5583,7 +6449,9 @@ function wire(){
     }
     if (k === "a" && S.draft.length && ["draw", "ded", "measure", "fence"].indexOf(S.tool) >= 0) { S.arcMode = S.arcMode ? 0 : 1; S.arcMid = null; hint(); draw(); return; }   // PlanSwift: A while drawing = arc
     if (k === "o" && e.shiftKey) { setTool("lasso"); return; }   // Bluebeam: Shift+O lasso
-    const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", c: "count", e: "circle", n: "note", u: "cloud", d: "ded", o: "open", m: "measure", k: "cal", b: "break", z: "zoomwin"};
+    if (e.shiftKey) { const ST = {l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen"}; if (ST[k]) { setTool(ST[k]); return; } }
+    const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", c: "count", e: "circle", n: "note", u: "cloud", d: "ded", o: "open", m: "measure", k: "cal", b: "break", z: "zoomwin",
+      t: "mk_text", q: "mk_callout", p: "mk_pen", g: "mk_polygon", y: "mk_polyline", x: "mk_stamp", i: "mk_image"};
     if (T[k]) { setTool(T[k]); return; }
     if (k === "l") return setLblOn(!S.lbl.on);
     if (k === "s") { $("snapOn").checked = !$("snapOn").checked; toast("Snap " + ($("snapOn").checked ? "on" : "off")); return; }
@@ -7071,7 +7939,7 @@ const DEFAULTS = {condColor: "#2a78d6", condWidth: 2, markColor: "#d03b3b", mark
 function toolDefaults(){ let o = null; try { o = JSON.parse(pref(DEFAULTS_KEY) || "null"); } catch (e) {} return Object.assign({}, DEFAULTS, o && typeof o === "object" ? o : {}); }
 function saveToolDefaults(o){ pref(DEFAULTS_KEY, JSON.stringify(Object.assign({}, DEFAULTS, o))); }
 const CHEST_KEY = "zdTakeoffToolChest";
-const MARK_PROFILE_TYPES = ["note", "cloud", "arrow", "dimension", "hilite"];
+const MARK_PROFILE_TYPES = ["note", "cloud", "arrow", "dimension", "hilite", "text", "callout", "line", "polyline", "polygon", "box", "ellipse", "pen", "hpen", "stamp", "redact", "erase"];
 function starterToolProfiles(){
   const d = Object.assign({}, DEFAULTS);
   const mk = (name, type, props, favorite) => ({id: uid("TC"), name, kind: "markup", type, props, favorite: !!favorite, created: new Date().toISOString()});
@@ -7088,6 +7956,11 @@ function normalizeChestProfile(p){
   const color = (x, fallback) => /^#[0-9a-f]{6}$/i.test(String(x || "")) ? String(x) : fallback;
   const num = (x, d, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(+x) ? +x : d));
   const common = {id: String(p.id || uid("TC")), name, favorite: !!p.favorite, created: String(p.created || new Date().toISOString())};
+  if (p.kind === "markup" && MK_STYLE0[p.type] && MARK_PROFILE_TYPES.includes(p.type)) {   // the Bluebeam markup tools: their style (and a stamp's choice)
+    const props = mkClean(p.props), st = p.props && p.props.stamp;
+    if (p.type === "stamp" && st && typeof st.label === "string") props.stamp = {label: st.label.slice(0, 80), color: HEXCOL.test(st.color) ? st.color : "#1e8e5a", tpl: String(st.tpl || "").slice(0, 120)};
+    return Object.assign(common, {kind: "markup", type: p.type, props});
+  }
   if (p.kind === "markup" && MARK_PROFILE_TYPES.includes(p.type)) {
     const q = p.props || {}, d = toolDefaults();
     const props = {color: color(q.color, p.type === "dimension" ? d.dimColor : p.type === "hilite" ? d.hiliteColor : d.markColor), width: num(q.width, d.markWidth, 1, 12)};
@@ -7120,6 +7993,8 @@ function storeToolChestProfiles(list){ pref(CHEST_KEY, JSON.stringify((list || [
 function chestConditionSnapshot(c){ return {type: c.type, unit: c.unit, color: c.color, sw: +c.sw || 2, h: c.h || "", t: c.t || "", faces: +c.faces || 1, dedMin: +c.dedMin || 0, sym: c.sym || "circle", cap: c.cap || "seq", capText: c.capText || "", sz: c.sz || "m"}; }
 function captureChestProfile(o, name){
   const d = toolDefaults(), n = String(name || "My tool").trim().slice(0, 60) || "My tool";
+  if (o && MK_TYPES.has(o.type)) { const props = mkStyleOf(o); if (o.type === "stamp" && o.stamp) props.stamp = {label: o.stamp.label, color: o.color || "#1e8e5a", tpl: S.stampSel && S.stampSel.label === o.stamp.label ? S.stampSel.tpl || "" : STAMP_TPL};
+    return {id: uid("TC"), name: n, kind: "markup", type: mkKindOf(o), props, favorite: false, created: new Date().toISOString()}; }
   if (o && MARK_PROFILE_TYPES.includes(o.type)) {
     const props = {color: o.color || d.markColor, width: +o.width || d.markWidth};
     if (o.type === "dimension") Object.assign(props, {color: o.color || d.dimColor, width: +o.width || d.dimWidth, size: +o.size || d.dimSize, arrow: +o.arrow || d.dimArrow, offset: +o.offset || d.dimOffset});
@@ -7132,6 +8007,11 @@ function captureChestProfile(o, name){
 }
 function applyChestProfile(p){
   if (p.kind === "defaults") { saveToolDefaults(Object.assign(toolDefaults(), p.settings || {})); toast("Applied profile: " + p.name, 2200); return; }
+  if (p.kind === "markup" && MK_STYLE0[p.type]) {
+    const q = Object.assign({}, p.props || {}), st = q.stamp; delete q.stamp; saveMkStyle(p.type, q);
+    if (st) { S.stampSel = {label: st.label, color: st.color, tpl: st.tpl || ""}; S.stampNoPick = true; }
+    setTool("mk_" + p.type); S.stampNoPick = false; toast("Tool Chest: " + p.name + " — " + (MK_HINTS["mk_" + p.type] || "click the drawing"), 3500); return;
+  }
   if (p.kind === "markup") {
     const d = toolDefaults(), q = p.props || {};
     if (p.type === "dimension") Object.assign(d, {dimColor: q.color || d.dimColor, dimWidth: +q.width || d.dimWidth, dimSize: +q.size || d.dimSize, dimArrow: +q.arrow || d.dimArrow, dimOffset: +q.offset || d.dimOffset});
@@ -7159,6 +8039,7 @@ async function importToolChest(file){
 }
 function chestProfileSummary(p){
   const q = p.props || {}, c = p.condition || {};
+  if (p.kind === "markup" && MK_STYLE0[p.type]) return (MK_TOOL_NAMES["mk_" + p.type] || p.type) + (q.stamp ? " · " + q.stamp.label : "") + (q.color ? " · " + q.color : "") + (q.width != null ? " · " + q.width + "px" : "") + (q.fill ? " · fill " + q.fill : "") + (q.hatch ? " · " + (HATCHES[q.hatch.p] || "hatch") : "") + (q.fs ? " · " + q.fs + " pt text" : "");
   if (p.kind === "markup") return p.type === "dimension" ? `Dimension · ${q.color || ""} · ${q.width || 2}px · text ${q.size || 13}px · arrow ${q.arrow || 10}px` : p.type === "hilite" ? `Highlight · ${q.color || ""} · opacity ${q.opacity || .38}` : `${MARK_TOOLS[p.type]} · ${q.color || ""} · ${q.width || 2}px`;
   if (p.kind === "condition") return `${({area: "Area", linear: "Length", count: "Count"})[c.type] || "Measurement"} · ${c.unit || ""} · ${c.color || ""}${c.h ? " · H " + c.h + " ft" : ""}${c.t ? " · T " + c.t + " ft" : ""}`;
   return "Reusable color, line-weight and markup settings";
@@ -7596,7 +8477,7 @@ async function plotPdf(o){
     await CAD.cadPlotPage(Lb, out, page, cp, {win, s: lo.s, at: [lo.x, lo.y], style: o.style, hidden: hid, lw: o.lw, font});
   } else {
     const rec = await dbGet("pdfs", f); let src = null; try { src = rec && await Lb.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); } catch (e) { src = null; }
-    if (!src || src.isEncrypted || pgp.rotate % 360 || o.style === "mono") {   // as a picture: a turned or locked page, or monochrome
+    if (!src || src.isEncrypted || pgp.rotate % 360 || o.style === "mono" || mkRedacted(f, p)) {   // as a picture: a turned, locked or redacted page, or monochrome
       const cs = Math.min(200 / 72 * lo.s, 9000 / Math.max(win[2] - win[0], win[3] - win[1])), W = Math.max(1, Math.ceil((win[2] - win[0]) * cs)), H = Math.max(1, Math.ceil((win[3] - win[1]) * cs));
       const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = inkCtx(thinLines(cv.getContext("2d")), false, o.style === "mono"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
       await loadLayers(f); await sliced(pgp.render({...lay(f), canvasContext: ctx, viewport: pgp.getViewport({scale: cs}), transform: [1, 0, 0, 1, -win[0] * cs, -win[1] * cs]})).promise;
@@ -7611,7 +8492,7 @@ async function plotPdf(o){
   }
   if (o.tk) {   // the takeoff over the window, as a transparent picture at about 200 DPI
     const cs = Math.min(200 / 72 * lo.s, 6000 / Math.max(win[2] - win[0], win[3] - win[1])), W = Math.max(1, Math.ceil((win[2] - win[0]) * cs)), H = Math.max(1, Math.ceil((win[3] - win[1]) * cs));
-    const full = pageOverlaySvg(f, p, cs, Math.ceil(S.base.width * cs), Math.ceil(S.base.height * cs), {legend: "none", stamp: false}), inner = full.replace(/^<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
+    await mkAssetsFor(f, p); const full = pageOverlaySvg(f, p, cs, Math.ceil(S.base.width * cs), Math.ceil(S.base.height * cs), {legend: "none", stamp: false}), inner = full.replace(/^<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
     const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
     await svgOnto(cv.getContext("2d"), `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${(win[0] * cs).toFixed(2)} ${(win[1] * cs).toFixed(2)} ${W} ${H}">${inner}</svg>`);
     page.drawImage(await out.embedPng(await blobBuf(cv, "image/png")), {x: lo.x, y: lo.y, width: lo.pw, height: lo.ph}); cv.width = 0;
@@ -7654,7 +8535,8 @@ function ocFix(Lb, out, fids){
   window.zdTakeoff = {dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
-    cadLoad, cadMod, cadPage, cadOn, cadHidden, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid)};   // for tests and the console
+    cadLoad, cadMod, cadPage, cadOn, cadHidden, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
+    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();

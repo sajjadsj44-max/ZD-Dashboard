@@ -142,6 +142,57 @@ plus the AI features of **Bluebeam Max** (global launch 19-May-2026), **PlanSwif
 | Natural-language assistant | — | ✓ Bluebeam Max (Claude), Kreo Caddie, Togal.CHAT | ✓ Claude (API key) and the free agents + ★ page commands: *export pages with takeoff to pdf*, *export all pages as png 300 dpi*, *read sheet info*, *ocr this page*, *select pages 1-5*, *go to A-101*, *import pdfs*, *report*, *focus mode*; an unknown command offers the matching commands by name |
 | Workspace / command access | ✓ | ✓ Bluebeam profiles | ★ Workspace menu: takeoff, drawing only, pages + drawing, check layouts; icons-only toolbar; minimap; full screen; thumbnail size; ★ ⌘ Commands button (Ctrl+K palette) |
 
+## 6d. Bluebeam Revu Basics — every feature of the plan (reviewed 06/07-Oct-2026)
+
+Checked against Bluebeam's own plan table (bluebeam.com/pricing, *Compare plans*, Basics column). **★** added in the
+markup-tools release (07-Oct-2026) · **✓** already in · **◐** partly · **→ n** coming in part *n* of this work
+(3 pages and documents, 4 workspace and import) · **n/a** desktop / cloud only.
+
+| Bluebeam Basics | ZD Takeoff |
+|---|---|
+| Mark up PDFs with text, highlighters, shapes, stamps and vector pen annotations | ★ text box, callout, line, polyline, polygon, rectangle, ellipse, pen, highlighter pen, stamps, image · ✓ note, cloud, arrow, highlight, dimension |
+| Track and manage annotations; view, filter and sort markups and comments in the Markups List | ★ Markups list (Alt+L): this page or all pages, sort by any column, search, filter by type / status / author / layer / space; replies signed with your name |
+| Save and reuse tools from the Tool Chest; subject and comment; scale on tool sets | ✓ Tool Chest (Phase 1) · ★ every new markup tool saves to it · ★ sizes in page units, so a tool keeps its printed size |
+| Make markups on captured photos | ✓ photos / scans added as pages |
+| Multiply markups | ✓ array, place copies, copy to pages |
+| Assign markups to layers | ★ markup layers (Layers tab): hidden on the drawing and in exports |
+| Flatten PDF markups | ✓ every PDF / PNG / JPEG export |
+| Import PDF markups | → 4 |
+| Redact PDF content permanently | ★ redaction: the exported page is flattened, what is under the box is gone |
+| Translate markups | ◐ the Claude panel (API key) translates text on request |
+| Create and add dynamic stamps | ★ 16 standard stamps, your own text and picture stamps, `{name} {date} {time} {project} {sheet} {page}` |
+| 2D photo markups, photos and 360° photos / videos in markups (Capture) | ◐ ★ file attachment pins (any file, opened in the browser or saved) → 4 photos on any markup |
+| Hyperlinks, a hyperlink on an area | ★ to a web page or a page of the project; real links in exported PDFs · ✓ sheet callouts open their sheet |
+| Custom Markups List filters | ★ saved with the project |
+| Calibrate tool sets to resize with the scale / viewport | ◐ markup sizes are in page units; viewports ✓ |
+| Markup legends in the Tool Chest | ✓ export legend · → 3 a legend markup |
+| Custom hatch patterns | ★ 11 patterns + custom angle, spacing, line, crossed, colour |
+| Sketch to Scale: polygons, polylines, rectangles, ellipses | ✓ measurements (typed lengths, L x W) · ★ polyline / polygon markups take typed lengths |
+| Custom statuses | ★ Bluebeam's statuses and your own, set in Properties or the list |
+| Measure length and area; viewports of other scales | ✓ |
+| Headers and footers | → 3 |
+| Combine documents into one PDF; split documents; insert pages of another PDF | ✓ Export pages (one PDF / a PDF per page), import with page choice |
+| Size of new pages, resize pages | → 3 blank pages |
+| Embed file attachments | ★ file attachment markups, inside exported PDFs |
+| Erase and cut PDF content | ★ erase (white-out), applied in exports |
+| Extract, delete, rotate and insert blank pages | ✓ extract (export pages) → 3 rotate, remove, blank pages |
+| Table of contents from bookmarks; bookmarks and page labels by hand and automatically | ◐ sheet numbers / titles read from title blocks ✓ → 3 bookmarks, PDF outline, contents page |
+| Reduce file size | ✓ export resolution 150–600 DPI |
+| Create and edit form fields; fill PDF forms | → 3 |
+| Compare revisions with overlay pages | ✓ Compare (colour overlay) |
+| Process colours | ✓ black and white, monochrome, dimming, black background |
+| Sets (navigate many PDFs as one) | ✓ the project's Pages tab, version sets |
+| Change markup properties and save them for reuse | ★ Properties for every markup, Set as default for every kind |
+| Customise keyboard shortcuts and toolbars | ◐ workspace layouts ✓ → 4 |
+| OCR | ✓ Tesseract in the browser |
+| VisualSearch (symbols) | ✓ Find similar |
+| PDF / CSV / XML summary of markups; reports on markups in regions (Spaces) | ★ CSV, XML, printable PDF with a picture of each markup · ★ Spaces: the named room each markup sits in |
+| Digital signatures; track signatures | ◐ ★ picture stamps of a signature (not a certified digital ID) |
+| Password protection and permissions | → 3 password-protected exports (the password asked, never kept) |
+| Multiple windows, recent files, multi-monitor, local drive search | n/a desktop · ✓ projects list, a second browser tab |
+| Office / SharePoint / ProjectWise plug-ins, PDF printer, scanned PDF to Word / Excel | n/a desktop |
+| Studio Sessions and Projects, Bluebeam Cloud, DMS links | n/a cloud — the takeoff stays in this browser by design; Project + PDFs moves it |
+
 ## 7. Not in ZD Takeoff yet (and why)
 
 | Feature | Where | Note |
@@ -168,6 +219,11 @@ plus the AI features of **Bluebeam Max** (global launch 19-May-2026), **PlanSwif
 - PlanSwift — Auto Count (box a symbol, shape or label matching, up to 10 pages, verify): https://www.planswift.com/features/auto-count/
 - PlanSwift — Keyboard hotkeys (Backspace last point, A arc point, N new section, Shift ortho, Ctrl+arrow copies): https://constructconnect-help.atlassian.net/wiki/spaces/PSUPPORT/pages/49545397/Settings+Tab:+Keyboard+Hotkeys
 - PlanSwift — Copying and pasting takeoffs / Advanced Copy Pro (array, mirror, rotate, Ctrl+click copies): https://help.constructconnect.com/03-a-detailed-look-at-the-home-tab-and-drawing-takeoff-and-annotations-176/planswift-03-12-12-copying-and-pasting-takeoffs-1491
+
+## Sources for 6d (06-Oct-2026)
+
+- Bluebeam — plans and pricing, *Compare plans* table (Basics / Core / Complete / Max): https://www.bluebeam.com/pricing/
+- SolidCAD — Bluebeam plans comparison, Basics vs Core vs Complete vs Max: https://blog.solidcad.ca/en/bluebeam-plans-comparison-basics-vs-core-vs-complete-vs-max
 
 ## Sources for 6c (searched 04/05-Oct-2026)
 
