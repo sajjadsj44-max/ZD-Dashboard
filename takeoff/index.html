@@ -318,6 +318,10 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 }
 @media print{body{overflow:visible}}
 input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, never a browser password field (nothing offered to save) */
+.stgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;max-height:260px;overflow:auto;padding:2px}   /* the stamp picker */
+.stp{position:relative;border:2px solid var(--sc);border-radius:7px;background:#fff;color:var(--sc);font:800 11px/1.2 "Segoe UI",Arial,sans-serif;letter-spacing:.3px;padding:10px 6px;cursor:pointer;text-align:center}
+.stp.on{box-shadow:0 0 0 3px rgba(43,125,233,.35);background:#f4f8ff}
+.stp .stx{position:absolute;top:1px;right:4px;color:#8a97a6;font-weight:400;font-size:13px}
 </style>
 </head>
 <body>
@@ -423,6 +427,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
       <button class="tool" data-tool="arrow" title="Arrow with comment">&#10142; Arrow</button>
       <button class="tool" data-tool="dimension" title="Dimension — Bluebeam-style dimension with extension lines, arrows, text size and colour">&#8646; Dimension</button>
       <button class="tool" data-tool="hilite" title="Highlight an area">&#9641; Highlight</button>
+      <button class="tool" id="bMk" title="Markup tools (Bluebeam): text box, callout, line, polyline, polygon, rectangle, ellipse, pen, highlighter, stamps, image, hyperlink, file attachment, redaction">&#9998; Markup &#9662;</button>
       <span class="tsep"></span>
       <button class="tool" id="bDel" title="Delete the selected measurement, count point or markup (Delete)" disabled>&#128465; Delete</button>
       <button class="tool" id="bKeys" title="Keyboard &amp; mouse shortcuts (?)">&#9000; Keys</button>
@@ -484,7 +489,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-06z"></script>
+<script type="module" src="takeoff.js?v=2026-10-07a"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password

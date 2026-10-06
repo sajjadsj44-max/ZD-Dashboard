@@ -799,6 +799,27 @@ PDF's own lines and text, so vector drawings — a scanned sheet has neither):
   page* runs the rooms over the whole PDF; a typing slip (*bedrom*, *kitchn*) still finds the room. The 🏠 Rooms agent
   no longer measures a room twice — one already measured in the condition is left as it is.
 
+**Markup tools — Bluebeam Revu Basics** (added 07-Oct-2026, **✎ Markup ▾** on the toolbar):
+
+- **Text box** (`T`) and **callout** (`Q`, leader with an arrow to the point): typed text, wrapped to the box, the
+  box growing to fit; font size in points on the sheet, so it prints at that size; font, bold, alignment, fill.
+- **Line** (`Shift+L`), **polyline** (`Y`), **polygon** (`G`), **rectangle** (`Shift+R`), **ellipse** (`Shift+E`): line
+  style (solid, dashed, dotted, dash-dot), arrow ends (arrow, open, dot, square, slash), fill and opacity, and
+  **hatch patterns** (diagonal, cross-hatch, grid, dots, brick, concrete, earth, insulation, or a custom angle /
+  spacing / crossed). `Shift` keeps lines straight and boxes square; polylines take typed lengths like runs.
+- **Pen** (`P`) and **highlighter pen** (`Shift+H`): freehand, smoothed and simplified as it is drawn.
+- **Stamps** (`X`): Bluebeam's sixteen standard stamps (APPROVED, REVIEWED, REVISE AND RESUBMIT, REJECTED, FOR
+  CONSTRUCTION, AS BUILT, VOID…), your own text stamps, and picture stamps (a signature, a seal, a logo); a second
+  line filled when it is placed — `{name} · {date} {time}`, also `{project} {sheet} {page}`.
+- **Image** (`I`), **hyperlink** (to a web address or another page of the project — double-click to follow; a real
+  link in exported PDFs), **file attachment** (a pin that opens or saves the file; the file goes inside exported PDFs).
+- **Redaction** and **erase (white-out)**: every export flattens a redacted page to a picture, so what is under the
+  box is gone for good from the exported file (the PDF in the project is not changed).
+- Every markup has a **subject, author, status** and dates; a selected one shows its **handles** (resize a box, move
+  a line's end or a point) and its **Properties**; **Set as default** keeps its style for the next one of its kind and
+  **Add to Tool Chest** saves it as a tool. Pictures and files are kept in this browser beside the PDFs (not in the
+  project record), and **Project + PDFs** carries them.
+
 Phase 2 / 3 status: click-inside room areas, walls by thickness, symbol / tag counting, room sizes and door /
 window marks read from the drawing, the revision overlay and scanned-PDF measuring are in. Still planned: a command
 bar, typical-floor multipliers, sending quantities to the Project BOQ, OCR of scanned sheets, and page reorder /
@@ -811,6 +832,8 @@ CDN. Tests use a hand-written 3-page vector PDF with known dimensions (`tools/ta
 python3 -m http.server 8765 &
 TK_LIBS=/path/with/pdfjs-dist+exceljs node tools/test_takeoff.js      # 150 browser checks
 TK_LIBS=/path/with/pdfjs-dist+exceljs+pdf-lib node tools/test_takeoff_qa.js   # full QA audit: 460 checks in 24 sections
+TK_LIBS=/path/with/pdfjs-dist+pdf-lib node tools/test_takeoff_markup.js   # markup tools: 56 checks
+node tools/test_lock.js                                                   # the dashboard password lock: 61 checks
 ```
 
 The QA audit (`tools/test_takeoff_qa.js`, fixtures in `tools/takeoff_qa_fixture.js`) builds an 8-page drawing set
