@@ -350,7 +350,8 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
       <button class="btn sm tg2" id="bLw" title="Line weights are on — click to draw every line thin">&#9472; Line weights</button>
       <span class="vh">Background</span>
       <span class="seg"><button class="btn sm tg2" id="bBg_auto" title="Black for AutoCAD drawings, as AutoCAD's model space; white for PDFs">Auto</button><button class="btn sm tg2" id="bBg_black" title="Black, as AutoCAD's model space — colour 7 white, colours as AutoCAD shows them">&#9632; Black</button><button class="btn sm tg2" id="bBg_white" title="White paper">&#9633; White</button></span>
-      <button class="btn sm tg2" id="bMono" title="Monochrome — every line in one ink, as a monochrome plot (black on white, white on black)">&#9680; Monochrome</button>
+      <button class="btn sm tg2" id="bMono" title="Monochrome — every line in one ink">&#9680; Monochrome</button>
+      <button class="btn sm tg2" id="bPdfBw" title="PDF-style black and white — white working area with all CAD lines black">&#9633; PDF B/W</button>
       <button class="btn sm" id="bLayers" title="The PDF's own CAD layers: switch them on / off to clean the drawing">&#128450; PDF layers…</button>
       <span class="vh">Takeoff</span>
       <button class="btn sm tg2 on" id="bHideMk" title="Hide all markups (measurements and notes) to see the drawing">&#128065; Markups</button>
@@ -478,7 +479,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-05l"></script>
+<script type="module" src="takeoff.js?v=2026-10-06m"></script>
 <script>
 (function () {
   var unlockedKey = 'zd-dashboard-unlocked';

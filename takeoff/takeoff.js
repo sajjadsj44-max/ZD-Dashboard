@@ -5339,7 +5339,7 @@ function wire(){
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
   $("bLw").onclick = () => setThin(!S.thin);
-  ["auto", "black", "white"].forEach(v => { $("bBg_" + v).onclick = () => setBg(v); }); $("bMono").onclick = () => setMono(!S.mono);
+  ["auto", "black", "white"].forEach(v => { $("bBg_" + v).onclick = () => setBg(v); }); $("bMono").onclick = () => setMono(!S.mono); $("bPdfBw").onclick = () => setPdfBw(!(S.bg === "white" && S.mono));
   const vpop = $("viewPop"), vOpen = on => { vpop.classList.toggle("on", on); $("bView").setAttribute("aria-expanded", on ? "true" : "false"); };
   $("bView").onclick = e => { e.stopPropagation(); vOpen(!vpop.classList.contains("on")); };
   document.addEventListener("pointerdown", e => { if (vpop.classList.contains("on") && !e.target.closest("#viewPop,#bView")) vOpen(false); }, true);
@@ -7082,10 +7082,13 @@ const darkNow = () => S.bg === "black" || (S.bg !== "white" && !!cadMeta(S.fileI
 function viewOpts(dpr, fast){ const sc = S.cadSc && S.cadSc[S.fileId]; return {dark: darkNow(), mono: !!S.mono, thin: !!S.thin, hidden: sc ? cadHidden(S.fileId, sc) : null, dpr, fast}; }
 function bgMark(){
   ["auto", "black", "white"].forEach(v => { const b = $("bBg_" + v); if (b) b.classList.toggle("on", (S.bg || "auto") === v); });
-  const m = $("bMono"); if (m) m.classList.toggle("on", !!S.mono); stage().classList.toggle("dark", darkNow());
+  const m = $("bMono"); if (m) m.classList.toggle("on", !!S.mono);
+  const bw = $("bPdfBw"); if (bw) bw.classList.toggle("on", S.bg === "white" && !!S.mono);
+  stage().classList.toggle("dark", darkNow());
 }
 function setBg(v){ S.bg = v; pref("zdTakeoffBg", v); bgMark(); if (S.page) { renderLow(); renderHi(true); } renderLayers(); }
 function setMono(on){ S.mono = !!on; pref("zdTakeoffMono", on ? "1" : ""); bgMark(); if (S.page) { renderLow(); renderHi(true); } }
+function setPdfBw(on){ S.bg = on ? "white" : (pref("zdTakeoffBg") || "auto"); S.mono = !!on; pref("zdTakeoffBg", S.bg); pref("zdTakeoffMono", on ? "1" : ""); bgMark(); if (S.page) { renderLow(); renderHi(true); } renderLayers(); }
 /* a PDF drawn dark (white paper black, black ink white, colours kept — a dark one lifted) or in one ink: the colours pdf.js sets on
    this canvas are changed as it sets them */
 const FS = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "fillStyle"), SS = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "strokeStyle");
@@ -7097,7 +7100,7 @@ function inkMap(dark, mono){
     if (m) { const n = parseInt(m[1], 16); R = n >> 16 & 255; G = n >> 8 & 255; B = n & 255; }
     else { const q = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(v); if (!q) { cache.set(v, v); return v; } R = +q[1]; G = +q[2]; B = +q[3]; A = q[4] == null ? 1 : +q[4]; }
     const L = 0.299 * R + 0.587 * G + 0.114 * B; let o;
-    if (mono) o = L > 235 ? (dark ? [0, 0, 0] : [255, 255, 255]) : dark ? [255, 255, 255] : [0, 0, 0];
+    if (mono) o = dark ? [255, 255, 255] : [0, 0, 0];
     else if (Math.max(R, G, B) - Math.min(R, G, B) < 40) { const g = 255 - L; o = [g, g, g]; }
     else { o = [R, G, B]; if (L < 70) o = o.map(c => c + (255 - c) * 0.45); }
     r = A < 1 ? "rgba(" + o.map(c => Math.round(c)).join(",") + "," + A + ")" : "#" + o.map(c => Math.round(c).toString(16).padStart(2, "0")).join("");
