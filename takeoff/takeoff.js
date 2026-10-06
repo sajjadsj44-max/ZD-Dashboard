@@ -6313,6 +6313,8 @@ function wire(){
   $("projName").onchange = e => { if (P.proj) { P.proj.name = e.target.value.trim() || "Untitled takeoff"; save(); } };
   $("bSaveProj").onclick = async () => {
     if (!P.proj) return toast("Open a project first");
+    const typedName = String(($("projName") || {}).value || "").trim();
+    if (typedName) P.proj.name = typedName;
     savePr = P.proj; const ok = await flushSave();
     toast(ok ? "Project saved successfully" : "Project could not be saved", 2200);
   };
