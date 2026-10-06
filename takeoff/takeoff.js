@@ -278,7 +278,7 @@ function mutate(fn, label){
 /* the shape being drawn keeps its own history in steps: a click is one step, an arc (many points) is one step, so
    Ctrl+Z / Backspace take back the last click or the whole arc and Ctrl+Y puts it back. With nothing being drawn,
    Ctrl+Z / Ctrl+Y step through the project history. */
-const DRAFT_TOOLS = ["draw", "ded", "measure", "fence", "rect", "open", "cal", "circle", "vp", "cloud", "arrow", "hilite", "vsearch", "typref"];
+const DRAFT_TOOLS = ["draw", "ded", "measure", "fence", "rect", "open", "cal", "circle", "vp", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref"];
 function draftPush(pts, arc){
   if (!S.draftSteps || S.draftSteps.reduce((a, n) => a + n, 0) !== S.draft.length) S.draftSteps = S.draft.map(() => 1);
   if (arc) (S.draftArcs = S.draftArcs || []).push([S.draft.length - 1, S.draft.length - 1 + pts.length]);
@@ -2002,7 +2002,7 @@ function onDown(e){
   if (S.tool === "open" || S.tool === "cal" || S.tool === "circle" || S.tool === "vp") { draftPush([p]); if (S.draft.length === 2) finish(S.draft.slice()); draftBtns(); draw(); }
   if (S.tool === "note") return addMark("note", [p]);
   if (S.tool === "vsearch") { draftPush([toBase(sp[0], sp[1])]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); findSimilar([Math.min(d[0][0], d[1][0]), Math.min(d[0][1], d[1][1]), Math.max(d[0][0], d[1][0]), Math.max(d[0][1], d[1][1])]); } draftBtns(); draw(); return; }
-  if (S.tool === "cloud" || S.tool === "arrow" || S.tool === "hilite") { draftPush([p]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); addMark(S.tool, d); } draftBtns(); draw(); }
+  if (S.tool === "cloud" || S.tool === "arrow" || S.tool === "dimension" || S.tool === "hilite") { draftPush([p]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); addMark(S.tool, d); } draftBtns(); draw(); }
 }
 function typedPoint(buf){   // the next point at a typed length, along the cursor's direction (a rectangle: L x W towards the cursor)
   S.typed = "";
@@ -2485,7 +2485,7 @@ function drawNow(){
     (S.key === T.src ? T.a : T.b).forEach((p, i) => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="9" fill="rgba(255,45,85,.15)" stroke="#ff2d55" stroke-width="2"/><text x="${(q[0] + 12).toFixed(1)}" y="${(q[1] - 10).toFixed(1)}" font-size="13" font-weight="700" fill="#ff2d55" stroke="#fff" stroke-width="3" paint-order="stroke">${i + 1}</text>`); });
   }
   if (S.tool === "vsearch" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(42,120,214,.08)" stroke="#2a78d6" stroke-width="1.5" stroke-dasharray="4 3"/>`); }
-  if (["cloud", "hilite", "arrow"].indexOf(S.tool) >= 0 && S.draft.length && S.cursor) dyn.push(markSvg({type: S.tool, pts: [S.draft[0], S.cursor], color: "#d03b3b"}, toScr, 1));
+  if (["cloud", "arrow", "dimension", "hilite"].indexOf(S.tool) >= 0 && S.draft.length && S.cursor) dyn.push(markSvg({type: S.tool, pts: [S.draft[0], S.cursor], color: S.tool === "dimension" ? "#2b7de9" : "#d03b3b", size: 13, width: 2, arrow: 10}, toScr, 1));
   if (S.flash && S.flash.key === S.key && Date.now() < S.flash.until) { const q = toScr(S.flash.p); dyn.push(`<circle cx="${q[0]}" cy="${q[1] - 5}" r="26" fill="none" stroke="#ff2d55" stroke-width="3"><animate attributeName="r" values="18;30;18" dur="1s" repeatCount="indefinite"/></circle>`); }
   if (S.tool === "vp" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(123,92,224,.06)" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`); }
   if (S.box && !S.box.pending) { const a = S.box.a, b = S.box.b, cr = b[0] < a[0];   // window (left → right, blue, solid) / crossing (right → left, green, dashed)
@@ -3360,7 +3360,7 @@ async function countTextHits(q, hits){   // text found on the drawings -> count 
 }
 
 /* ------------------------------------------------------------------ markups: notes, clouds, arrows, highlights (no quantity) */
-const MARK_TOOLS = {note: "Note", cloud: "Cloud", arrow: "Arrow", hilite: "Highlight", fence: "Fence (auto-area wall)"};
+const MARK_TOOLS = {note: "Note", cloud: "Cloud", arrow: "Arrow", dimension: "Dimension", hilite: "Highlight", fence: "Fence (auto-area wall)"};
 function cloudPath(a, b, r){   // scalloped rectangle between screen points a and b
   const x0 = Math.min(a[0], b[0]), y0 = Math.min(a[1], b[1]), x1 = Math.max(a[0], b[0]), y1 = Math.max(a[1], b[1]);
   const side = (p, q) => { const L = dist(p, q), n = Math.max(1, Math.round(L / (2 * r))), out = []; for (let i = 1; i <= n; i++) { const t = i / n; out.push(`A ${(L / n / 2).toFixed(1)} ${(L / n / 2).toFixed(1)} 0 0 1 ${(p[0] + (q[0] - p[0]) * t).toFixed(1)} ${(p[1] + (q[1] - p[1]) * t).toFixed(1)}`); } return out.join(" "); };
@@ -3375,6 +3375,13 @@ function markSvg0(m, T, z){
   const col = m.color || "#d03b3b", sel = m.id === S.selMark || S.multi.has(m.id);
   if (m.type === "fence") { const d = m.pts.map(p => T(p).map(v => v.toFixed(1)).join(",")).join(" ");
     return `<polyline points="${d}" fill="none" stroke="#ff7a00" stroke-width="${(sel ? 4 : 3) * z}" stroke-dasharray="${6 * z} ${3 * z}" stroke-linecap="round"/>`; }
+  if (m.type === "dimension") {
+    const p = m.pts[0], q = m.pts[1], dx = q[0] - p[0], dy = q[1] - p[1], len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
+    const off = (+m.offset || 24), a = T([p[0] + nx * off, p[1] + ny * off]), b = T([q[0] + nx * off, q[1] + ny * off]), e1 = T(p), e2 = T(q), w = Math.max(1, +m.width || 2) * z, fs = Math.max(8, +m.size || 13) * z, al = Math.max(5, +m.arrow || 10) * z;
+    const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), arrow = (x, y, sign) => { const h1 = [x - sign * al * Math.cos(ang - .45), y - sign * al * Math.sin(ang - .45)], h2 = [x - sign * al * Math.cos(ang + .45), y - sign * al * Math.sin(ang + .45)]; return `<path d="M${h1[0]} ${h1[1]}L${x} ${y}L${h2[0]} ${h2[1]}" fill="none" stroke="${col}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"/>`; };
+    const k = scaleAt(m.file, m.page, p), val = m.text || (k ? f3(dist(p, q) / k) : f3(dist(p, q)) + " pt"), mx = (a[0] + b[0]) / 2 - Math.sin(ang) * (fs * .65), my = (a[1] + b[1]) / 2 + Math.cos(ang) * (fs * .65);
+    return `<g><line x1="${e1[0]}" y1="${e1[1]}" x2="${a[0]}" y2="${a[1]}" stroke="${col}" stroke-width="${w}"/><line x1="${e2[0]}" y1="${e2[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="${w}"/><line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="${w}"/>${arrow(a[0], a[1], -1)}${arrow(b[0], b[1], 1)}<text x="${mx}" y="${my}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="${col}" stroke="#fff" stroke-width="${Math.max(2, fs * .22)}" paint-order="stroke">${esc(val)}</text></g>`;
+  }
   if (m.type === "hilite") { const a = T(m.pts[0]), b = T(m.pts[1]); return `<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="#ffe14d" fill-opacity=".38" stroke="${sel ? "#0b0b0b" : "none"}"/>`; }
   if (m.type === "cloud") { const a = T(m.pts[0]), b = T(m.pts[1]); return `<path d="${cloudPath(a, b, 9 * z)}" fill="none" stroke="${col}" stroke-width="${(sel ? 3 : 2) * z}"/>` + (m.text ? label([Math.max(a[0], b[0]), Math.min(a[1], b[1]) - 12 * z], m.text, col) : ""); }
   if (m.type === "arrow") { const a = T(m.pts[0]), b = T(m.pts[1]), ang = Math.atan2(b[1] - a[1], b[0] - a[0]), hl = 12 * z;
@@ -3387,7 +3394,7 @@ function markAt(sp, only){   // the markup under a screen point (only: test just
   return (only ? [only] : pageMarks().slice().reverse()).find(m => {
     const a = toScr(m.pts[0]), b = m.pts[1] ? toScr(m.pts[1]) : null;
     if (m.type === "note") return sp[0] >= a[0] - 4 && sp[0] <= a[0] + Math.min(320, (m.text || "Note").length * 6.6 + 14) && Math.abs(sp[1] - a[1]) <= 12;
-    if (m.type === "arrow") return distSeg(sp, a, b) <= HIT_PX;
+    if (m.type === "arrow" || m.type === "dimension") return distSeg(sp, a, b) <= HIT_PX + (+m.width || 0) + 4;
     if (m.type === "fence") { for (let i = 1; i < m.pts.length; i++) if (distSeg(sp, toScr(m.pts[i - 1]), toScr(m.pts[i])) <= HIT_PX) return true; return false; }
     const inR = sp[0] >= Math.min(a[0], b[0]) - 4 && sp[0] <= Math.max(a[0], b[0]) + 4 && sp[1] >= Math.min(a[1], b[1]) - 4 && sp[1] <= Math.max(a[1], b[1]) + 4;
     return m.type === "hilite" ? inR : inR && (Math.abs(sp[0] - a[0]) < 10 || Math.abs(sp[0] - b[0]) < 10 || Math.abs(sp[1] - a[1]) < 10 || Math.abs(sp[1] - b[1]) < 10);
@@ -3395,6 +3402,13 @@ function markAt(sp, only){   // the markup under a screen point (only: test just
 }
 async function addMark(type, pts){
   let text = "";
+  if (type === "dimension") {
+    const v = await ask("Dimension", `<div class="grid"><div class="fg"><label>Colour</label><input type="color" id="dimCol" value="#2b78d6"></div><div class="fg"><label>Line width (px)</label><input type="number" id="dimW" min="1" max="12" step="1" value="2"></div><div class="fg"><label>Text size (px)</label><input type="number" id="dimS" min="8" max="48" step="1" value="13"></div><div class="fg"><label>Arrow size (px)</label><input type="number" id="dimA" min="5" max="40" step="1" value="10"></div><div class="fg"><label>Offset from measured line (pt)</label><input type="number" id="dimO" min="0" max="500" step="1" value="24"></div><div class="fg w2"><label>Label override (optional)</label><input type="text" id="dimT" placeholder="Leave blank for measured length"></div></div><p class="small">The default label uses the page scale. Increase text, line and arrow size for printed drawings.</p>`, "Add", () => ({color: $("dimCol").value, width: Math.max(1, Math.min(12, +$("dimW").value || 2)), size: Math.max(8, Math.min(48, +$("dimS").value || 13)), arrow: Math.max(5, Math.min(40, +$("dimA").value || 10)), offset: Math.max(0, Math.min(500, +$("dimO").value || 24)), t: $("dimT").value.trim()}));
+    if (!v) { draw(); return; }
+    const m = {id: uid("M"), type, file: S.fileId, page: S.pageNo, pts, text: v.t, color: v.color, width: v.width, size: v.size, arrow: v.arrow, offset: v.offset, at: new Date().toISOString()};
+    mutate(() => { (P.proj.marks = P.proj.marks || []).push(m); });
+    return;
+  }
   if (type === "note" || type === "cloud" || type === "arrow") {
     const v = await ask(MARK_TOOLS[type], `<div class="fg w2"><label>${type === "note" ? "Note" : "Comment (optional)"}</label><input type="text" id="mkT" placeholder="${type === "cloud" ? "e.g. Revised — check with Rev 07" : "e.g. Confirm slab thickness with structure"}"></div>`, "Add", () => { const t = $("mkT").value.trim(); return type === "note" && !t ? "Write the note" : {t}; }, "mkT");
     if (!v) { draw(); return; } text = v.t;
@@ -5177,7 +5191,7 @@ function ctxItem(hi, sp, q, e){
 function ctxMark(m){
   const ids = selIds(), many = ids.size > 1, allLk = [...ids].map(objById).filter(Boolean).every(o => o.locked);
   return [{h: many ? ids.size + " selected" : MARK_TOOLS[m.type], s: many ? "" : (m.text || "markup — not a quantity") + (m.locked ? " · locked" : "")},
-    !many && m.type !== "hilite" && m.type !== "fence" ? {t: "Edit text…", k: "Dbl-click", fn: () => editMarkText(m)} : null,
+    !many && m.type !== "hilite" && m.type !== "fence" && m.type !== "dimension" ? {t: "Edit text…", k: "Dbl-click", fn: () => editMarkText(m)} : null,
     !many ? {t: "Colour…", fn: focusProps} : null, {sep: 1}, ...ctxClip(null), {sep: 1}, ctxArrange(), {t: allLk ? "Unlock" : "Lock", k: "Ctrl+Shift+L", fn: lockSel},
     {t: "Select all " + MARK_TOOLS[m.type].toLowerCase() + "s on this page", fn: () => selectSimilar(m)}, {t: "Zoom to", fn: () => zoomTo(ids)}, {sep: 1}, {t: "Delete", k: "Del", fn: delSelected, dng: 1, dis: allLk}];
 }
