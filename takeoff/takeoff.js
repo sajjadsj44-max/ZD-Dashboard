@@ -3406,7 +3406,8 @@ function markAt(sp, only){   // the markup under a screen point (only: test just
 async function addMark(type, pts){
   let text = "";
   if (type === "dimension") {
-    const v = await ask("Dimension", `<div class="grid"><div class="fg"><label>Colour</label><input type="color" id="dimCol" value="#2b78d6"></div><div class="fg"><label>Line width (px)</label><input type="number" id="dimW" min="1" max="12" step="1" value="2"></div><div class="fg"><label>Text size (px)</label><input type="number" id="dimS" min="8" max="48" step="1" value="13"></div><div class="fg"><label>Arrow size (px)</label><input type="number" id="dimA" min="5" max="40" step="1" value="10"></div><div class="fg"><label>Offset from measured line (pt)</label><input type="number" id="dimO" min="0" max="500" step="1" value="24"></div><div class="fg w2"><label>Label override (optional)</label><input type="text" id="dimT" placeholder="Leave blank for measured length"></div></div><p class="small">The default label uses the page scale. Increase text, line and arrow size for printed drawings.</p>`, "Add", () => ({color: $("dimCol").value, width: Math.max(1, Math.min(12, +$("dimW").value || 2)), size: Math.max(8, Math.min(48, +$("dimS").value || 13)), arrow: Math.max(5, Math.min(40, +$("dimA").value || 10)), offset: Math.max(0, Math.min(500, +$("dimO").value || 24)), t: $("dimT").value.trim()}));
+    const d = toolDefaults();
+    const v = await ask("Dimension", `<div class="grid"><div class="fg"><label>Colour</label><input type="color" id="dimCol" value="${d.dimColor}"></div><div class="fg"><label>Line width (px)</label><input type="number" id="dimW" min="1" max="12" step="1" value="${d.dimWidth}"></div><div class="fg"><label>Text size (px)</label><input type="number" id="dimS" min="8" max="48" step="1" value="${d.dimSize}"></div><div class="fg"><label>Arrow size (px)</label><input type="number" id="dimA" min="5" max="40" step="1" value="${d.dimArrow}"></div><div class="fg"><label>Offset from measured line (pt)</label><input type="number" id="dimO" min="0" max="500" step="1" value="${d.dimOffset}"></div><div class="fg w2"><label>Label override (optional)</label><input type="text" id="dimT" placeholder="Leave blank for measured length"></div></div><p class="small">The default label uses the page scale. Increase text, line and arrow size for printed drawings.</p>`, "Add", () => ({color: $("dimCol").value, width: Math.max(1, Math.min(12, +$("dimW").value || 2)), size: Math.max(8, Math.min(48, +$("dimS").value || 13)), arrow: Math.max(5, Math.min(40, +$("dimA").value || 10)), offset: Math.max(0, Math.min(500, +$("dimO").value || 24)), t: $("dimT").value.trim()}));
     if (!v) { draw(); return; }
     const m = {id: uid("M"), type, file: S.fileId, page: S.pageNo, pts, text: v.t, color: v.color, width: v.width, size: v.size, arrow: v.arrow, offset: v.offset, at: new Date().toISOString()};
     mutate(() => { (P.proj.marks = P.proj.marks || []).push(m); });
@@ -3416,7 +3417,8 @@ async function addMark(type, pts){
     const v = await ask(MARK_TOOLS[type], `<div class="fg w2"><label>${type === "note" ? "Note" : "Comment (optional)"}</label><input type="text" id="mkT" placeholder="${type === "cloud" ? "e.g. Revised — check with Rev 07" : "e.g. Confirm slab thickness with structure"}"></div>`, "Add", () => { const t = $("mkT").value.trim(); return type === "note" && !t ? "Write the note" : {t}; }, "mkT");
     if (!v) { draw(); return; } text = v.t;
   }
-  const m = {id: uid("M"), type, file: S.fileId, page: S.pageNo, pts, text, color: "#d03b3b", at: new Date().toISOString()};
+  const d = toolDefaults();
+  const m = {id: uid("M"), type, file: S.fileId, page: S.pageNo, pts, text, color: type === "hilite" ? d.hiliteColor : d.markColor, width: d.markWidth, opacity: type === "hilite" ? d.hiliteOpacity : undefined, at: new Date().toISOString()};
   mutate(() => { (P.proj.marks = P.proj.marks || []).push(m); });
 }
 
@@ -3464,9 +3466,27 @@ const PRESETS = [
   {name: "Windows", type: "count", unit: "Nos"},
   {name: "Custom area", type: "area", unit: "Sft"}, {name: "Custom length", type: "linear", unit: "ft"}, {name: "Custom count", type: "count", unit: "Nos"}
 ];
+async function defaultsDialog(){
+  const d = toolDefaults();
+  const v = await ask("Professional takeoff defaults", `<p class="small">These defaults are used for new conditions, measurements, markups and dimensions. Existing objects are unchanged unless you select one of the apply options.</p>
+    <div class="grid"><div class="fg"><label>Measurement colour</label><input type="color" id="dfCond" value="${d.condColor}"></div><div class="fg"><label>Measurement line weight</label><input type="number" id="dfCondW" min="1" max="12" value="${d.condWidth}"></div>
+    <div class="fg"><label>Markup colour</label><input type="color" id="dfMark" value="${d.markColor}"></div><div class="fg"><label>Markup line weight</label><input type="number" id="dfMarkW" min="1" max="12" value="${d.markWidth}"></div>
+    <div class="fg"><label>Dimension colour</label><input type="color" id="dfDim" value="${d.dimColor}"></div><div class="fg"><label>Dimension line weight</label><input type="number" id="dfDimW" min="1" max="12" value="${d.dimWidth}"></div>
+    <div class="fg"><label>Dimension text size</label><input type="number" id="dfDimS" min="8" max="48" value="${d.dimSize}"></div><div class="fg"><label>Dimension arrow size</label><input type="number" id="dfDimA" min="5" max="40" value="${d.dimArrow}"></div>
+    <div class="fg"><label>Dimension offset</label><input type="number" id="dfDimO" min="0" max="500" value="${d.dimOffset}"></div><div class="fg"><label>Highlight colour</label><input type="color" id="dfHi" value="${d.hiliteColor}"></div>
+    <div class="fg"><label>Highlight opacity</label><input type="number" id="dfHiO" min="0.05" max="1" step="0.05" value="${d.hiliteOpacity}"></div></div>
+    <div class="row" style="margin-top:10px"><label class="pk"><input type="checkbox" id="dfApplyMk"> Apply markup defaults to existing markups</label><label class="pk"><input type="checkbox" id="dfApplyC"> Apply measurement colour / weight to all existing conditions</label></div>`, "Save defaults", () => ({
+      condColor: $("dfCond").value, condWidth: Math.max(1, Math.min(12, +$("dfCondW").value || 2)), markColor: $("dfMark").value, markWidth: Math.max(1, Math.min(12, +$("dfMarkW").value || 2)), dimColor: $("dfDim").value, dimWidth: Math.max(1, Math.min(12, +$("dfDimW").value || 2)), dimSize: Math.max(8, Math.min(48, +$("dfDimS").value || 13)), dimArrow: Math.max(5, Math.min(40, +$("dfDimA").value || 10)), dimOffset: Math.max(0, Math.min(500, +$("dfDimO").value || 24)), hiliteColor: $("dfHi").value, hiliteOpacity: Math.max(.05, Math.min(1, +$("dfHiO").value || .38)), applyMk: $("dfApplyMk").checked, applyC: $("dfApplyC").checked
+    }));
+  if (!v) return;
+  const d2 = Object.assign({}, v); delete d2.applyMk; delete d2.applyC; saveToolDefaults(d2);
+  mutate(() => { if (v.applyC) P.proj.conds.forEach(c => { c.color = v.condColor; c.sw = v.condWidth; }); if (v.applyMk) (P.proj.marks || []).forEach(m => { m.color = m.type === "dimension" ? v.dimColor : m.type === "hilite" ? v.hiliteColor : v.markColor; m.width = m.type === "dimension" ? v.dimWidth : v.markWidth; if (m.type === "dimension") { m.size = v.dimSize; m.arrow = v.dimArrow; m.offset = v.dimOffset; } if (m.type === "hilite") m.opacity = v.hiliteOpacity; }); });
+  toast("Professional defaults saved" + (v.applyMk || v.applyC ? " and applied" : ""), 2500);
+}
 async function editCond(c){
   const isNew = !c, used = c && P.proj.items.some(i => i.cond === c.id);
-  const d = c ? Object.assign({}, c) : {name: "", type: "area", unit: "Sft", color: COLORS[P.proj.conds.length % COLORS.length], h: "", t: "", faces: 1, dedMin: 0};
+  const dflt = toolDefaults();
+  const d = c ? Object.assign({}, c) : {name: "", type: "area", unit: "Sft", color: dflt.condColor, sw: dflt.condWidth, h: "", t: "", faces: 1, dedMin: 0};
   const unitOpts = t => UNITS[t].map(u => `<option${u === d.unit ? " selected" : ""}>${u}</option>`).join("");
   const body = (isNew ? `<div class="fg w2" style="margin-bottom:10px"><label>Start from</label><select id="cPre"><option value="">— choose a common item —</option>${PRESETS.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join("")}</select></div>` : "") +
     `<div class="grid"><div class="fg w2"><label>Name (as it should read on the sheet)</label><input type="text" id="cName" value="${esc(d.name)}"></div>
@@ -5307,6 +5327,7 @@ function wire(){
   const pick = (id, f) => { $(id).onchange = e => { const L = [...e.target.files]; e.target.value = ""; if (L.length) f(L); }; };
   pick("impPdfIn", importDialog); pick("imgIn", importDialog);
   pick("dirIn", L => { const ok = L.filter(f => isPdfFile(f) || isImgFile(f) || isCadFile(f)); if (!ok.length) return toast("No PDF, DWG, DXF, JPG or PNG in that folder", 3000); importDialog(ok); });
+  $("bDefaults").onclick = () => defaultsDialog();
   $("bWs").onclick = e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); wsMenu(Math.max(4, r.right - 300), r.bottom + 4); };
   $("bCmd").onclick = () => openPalette();
   $("bMini").onclick = () => { wsSet({mini: !wsPref().mini}); toast(wsPref().mini ? "Minimap on — it shows when you zoom in" : "Minimap off", 1800); };
@@ -6995,6 +7016,10 @@ function wirePanels(){
   setPanels();
 }
 function pref(k, v){ try { if (v === undefined) return localStorage.getItem(k); if (v === "") localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
+const DEFAULTS_KEY = "zdTakeoffDefaults";
+const DEFAULTS = {condColor: "#2a78d6", condWidth: 2, markColor: "#d03b3b", markWidth: 2, dimColor: "#2b78d6", dimWidth: 2, dimSize: 13, dimArrow: 10, dimOffset: 24, hiliteColor: "#ffe14d", hiliteOpacity: .38};
+function toolDefaults(){ let o = null; try { o = JSON.parse(pref(DEFAULTS_KEY) || "null"); } catch (e) {} return Object.assign({}, DEFAULTS, o && typeof o === "object" ? o : {}); }
+function saveToolDefaults(o){ pref(DEFAULTS_KEY, JSON.stringify(Object.assign({}, DEFAULTS, o))); }
 function setDim(on){   // on = true/false, or a dimming level 0-90 %
   if (typeof on === "number") S.dimPct = Math.max(0, Math.min(90, on)); else if (on && !S.dimPct) S.dimPct = 50;
   S.dim = typeof on === "number" ? on > 0 : on;
