@@ -693,8 +693,13 @@ v11.0.0.191 with Takeoff Boost; the full table is `docs/takeoff-bluebeam-planswi
   in a length condition, a run of 3+ points an area.
 - **Right-click menu** on a measurement, a selection, a markup or the empty drawing, with all of the above plus
   properties, rename (`F2`), cut-out / opening, move to condition, select all of the condition, condition (edit,
-  colour, hide, show only), QA (checked / recheck), zoom to and delete. A right-drag still pans; on a tablet, press and
-  hold. `?` lists every shortcut; `Z` is a zoom window.
+  colour, hide, show only), QA (checked / recheck), zoom to and delete. Selected objects also offer **Set as default**
+  and **Add to Tool Chest**. A right-drag still pans; on a tablet, press and hold. `?` lists every shortcut; `Z` is a zoom window.
+- **Tool Chest** (top toolbar): favorite reusable properties profiles for dimensions, arrows, revision clouds, highlights,
+  full measurement conditions, or the current defaults. Right-click a selected markup or measurement → **Add to Tool Chest**
+  saves its properties as a named profile. **Use tool** applies the profile in Properties mode (you draw fresh geometry); a
+  condition profile creates a new condition from its measurement settings. Favorites sort to the top, profiles can be searched,
+  renamed, imported or exported as JSON, and are stored locally in this browser.
 - **Doors / windows agent** (🚪 in the Claude panel, or *count doors on all pages* in its chat): every door, window and
   ventilator tag however it is written — `D1`, `D-1`, `D.01`, `DR-02`, `DOOR 3`, `SD` / `FD` / `FRD` / `MD` / `GD` / `AD` /
   `DD` / `RS`, `W1`, `WN-2`, `WIN 3`, `WINDOW 4`, `KW` / `TW` / `BW` / `CW` / `SW` / `FW` / `AW` / `SKY`, `V1`, `VT`, `VENT 1`,
