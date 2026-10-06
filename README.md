@@ -17,8 +17,13 @@ On Netlify the site root serves the dashboard itself (see the rewrite in
 Both hosts serve the same repo and update from the same push, so either link
 works. Share the Netlify one — it is shorter and easier to read out.
 
-Public and read-only — anyone with the URL opens them in any browser, phone or
-desktop, with no login and nothing to install. Viewers cannot edit anything.
+Read-only — anyone with the URL opens them in any browser, phone or desktop,
+with nothing to install, after entering the dashboard password. The password is
+asked every time a page is opened (also on Back / Forward) and is never saved:
+no "remember me", and the field is not a browser password field, so no browser
+or password manager offers to save or fill it. Viewers cannot edit anything.
+The lock only keeps casual visitors out — the pages themselves are in this
+public repo.
 
 Because the repo is public, everything committed here is publicly readable.
 Don't commit confidential data.
@@ -734,7 +739,8 @@ calculation table and live-retest checklist is `docs/takeoff-qa-report-2026-10-0
   print is corrected; shown as *Chosen by hand — not verified* until a known dimension is checked.
 - **Scale check by room sizes**: on opening a sheet, the room sizes written on it (`12'-0" x 14'-0"`) are measured
   across the room and a scale note that disagrees is flagged with the scale they suggest.
-- **Password-protected PDFs** ask for the open password (kept with the PDF in this browser); the marked-up PDF export
+- **Password-protected PDFs** ask for the open password each time they are opened — it is never saved, in this
+  browser or in an exported project (a password kept by an earlier version is deleted); the marked-up PDF export
   flattens locked and rotated pages.
 - **Auto area** now closes corridors and passages as narrow as the door gap (trying smaller gaps when the click is
   off-centre), rooms drawn at an angle, round rooms, rooms with hatched / tiled walls, L-shaped rooms and scanned

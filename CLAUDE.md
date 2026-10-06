@@ -25,3 +25,16 @@
 - Whenever `takeoff/takeoff.js` changes, bump the `?v=` on its `<script>` tag in
   `takeoff/index.html` (e.g. `?v=2026-10-03b`). GitHub Pages lets browsers cache
   files for 10 minutes, so without it a new page can run under the old script.
+- `takeoff/cad.js` and `takeoff/cad-worker.js` are loaded with takeoff.js's own
+  `?v=`, so bump that same `?v=` when either of them changes too.
+
+# Dashboard password
+
+- The dashboards' password is never saved in any browser and is asked every
+  time a page is opened: no unlock flag in sessionStorage / localStorage /
+  cookies, and no `type="password"` field or `<form>` for it (a text field drawn
+  as dots), so no browser or password manager offers to save or fill it.
+- The same for any password an app asks for (e.g. a locked PDF's open
+  password): ask each time, never keep it — not in the browser, not in exports.
+- Browser tests type the password in with `tools/zd_unlock.js`;
+  `tools/test_lock.js` checks the lock on every page.

@@ -362,29 +362,64 @@ async function loadPdfjs(){
   catch (e) { pdfjs = null; throw new Error("The PDF engine (pdf.js) could not be loaded — check the internet connection."); }
   return pdfjs;
 }
-async function doc(fileId){
+/* a stored PDF, opened once per visit. A locked one asks for its password (never kept) the first time it is needed — one question
+   for every caller waiting on it; turned down, it is not asked again by what runs in the background (thumbnails, agents, exports)
+   until one of its pages is opened (ask1) */
+async function doc(fileId, ask1){
   if (S.docs[fileId]) return S.docs[fileId];
-  const rec = await dbGet("pdfs", fileId);
-  if (!rec) throw new Error("PDF missing — add “" + ((P.proj.files.find(f => f.id === fileId) || {}).name || fileId) + "” again with + PDF to re-attach it.");
-  const lib = await loadPdfjs();
-  S.docs[fileId] = await lib.getDocument({data: new Uint8Array(rec.data.slice(0)), isEvalSupported: false, password: rec.pw || undefined}).promise;
-  return S.docs[fileId];
+  S.docP = S.docP || {}; S.pwNo = S.pwNo || new Set();
+  if (S.docP[fileId]) return S.docP[fileId];
+  const f = P.proj && P.proj.files.find(x => x.id === fileId);
+  if (S.pwNo.has(fileId) && !ask1) throw new Error(((f && f.name) || "The PDF") + " is locked with a password — open one of its pages to enter it");
+  S.docP[fileId] = (async () => {
+    const rec = await dbGet("pdfs", fileId);
+    if (!rec) throw new Error("PDF missing — add “" + ((f || {}).name || fileId) + "” again with + PDF to re-attach it.");
+    if (rec.pw) { delete rec.pw; await dbPut("pdfs", rec, fileId).catch(() => {}); }   // a password an earlier version kept with the PDF: not kept any more
+    try { const {d} = await openPdfData(await loadPdfjs(), rec.data, (f && f.name) || rec.name || "the PDF", "opened"); S.pwNo.delete(fileId); return S.docs[fileId] = d; }
+    catch (e) { if (e && e.pwNo) S.pwNo.add(fileId); throw e; }
+  })().finally(() => { delete S.docP[fileId]; });
+  return S.docP[fileId];
 }
-/* a PDF locked with an open password: asked for (wrong → asked again), kept with the PDF in this browser only */
-async function openPdfData(lib, data, name){
-  let pw;
-  for (let tries = 0; ; tries++) {
-    try { return {d: await lib.getDocument({data: new Uint8Array(data.slice(0)), isEvalSupported: false, password: pw}).promise, pw}; }
-    catch (e) {
-      if (!e || e.name !== "PasswordException") throw e;
-      busy("");
-      const v = await ask("Password — " + name, `<p>${tries ? "<b style='color:var(--red)'>That password is not right.</b> " : ""}This PDF is locked with a password. Enter it to open the drawing.</p>
-        <div class="fg w2" style="margin-top:8px"><label>Password</label><input type="password" id="dlgPw" autocomplete="off"></div>
-        <p class="small" style="margin-top:6px">Kept with the PDF in this browser only, so the drawing opens again next time.</p>`, "Open", () => ({pw: $("dlgPw").value}), "dlgPw");
-      if (!v) throw new Error(name + " is locked with a password — not added");
-      pw = v.pw; busy("Opening " + name + "…");
+/* a secret typed in (a PDF's open password, the API key): a plain text field drawn as dots — never a browser password field, so no
+   browser or password manager offers to save or fill it. Where the browser cannot draw a field as dots, dots are typed and the
+   secret kept aside */
+const SECRET_IN = 'type="text" class="secret" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"';
+const DOTS = !!(window.CSS && CSS.supports && CSS.supports("-webkit-text-security", "disc")), SECRETS = new WeakMap();
+function secretField(el){
+  if (!el || el.dataset.secret) return el; el.dataset.secret = "1";
+  ["copy", "cut", "dragstart"].forEach(t => el.addEventListener(t, e => e.preventDefault()));
+  const keep = e => {
+    if (DOTS || (e && e.isComposing)) return;
+    const v = el.value, s0 = SECRETS.get(el) || ""; let at = v.search(/[^\u2022]/); const add = at < 0 ? "" : v.slice(at).replace(/\u2022[\s\S]*$/, "");
+    if (at < 0) at = el.selectionStart == null ? v.length : el.selectionStart;
+    const s1 = s0.slice(0, at) + add + s0.slice(Math.max(at, s0.length - (v.length - at - add.length)));
+    SECRETS.set(el, s1); el.value = "\u2022".repeat(s1.length); try { el.setSelectionRange(at + add.length, at + add.length); } catch (er) {}
+  };
+  el.addEventListener("input", keep); el.addEventListener("compositionend", keep);
+  return el;
+}
+const secretVal = el => !el ? "" : DOTS ? el.value : SECRETS.get(el) || "";
+function secretSet(el, v){ v = v || ""; if (DOTS) el.value = v; else { SECRETS.set(el, v); el.value = "\u2022".repeat(v.length); } }
+/* a PDF locked with an open password: asked for each time it is opened (wrong → asked again) — never kept, in this browser or in an
+   exported project */
+async function openPdfData(lib, data, name, verb){
+  let pw, turn = null;
+  try {
+    for (let tries = 0; ; tries++) {
+      try { return {d: await lib.getDocument({data: new Uint8Array(data.slice(0)), isEvalSupported: false, password: pw}).promise}; }
+      catch (e) {
+        if (!e || e.name !== "PasswordException") throw e;
+        if (!turn) { const prev = openPdfData.q; let go; openPdfData.q = new Promise(r => { go = r; }); turn = go; await prev; }   // one password question at a time
+        busy("");
+        const q = ask("Password — " + name, `<p>${tries ? "<b style='color:var(--red)'>That password is not right.</b> " : ""}This PDF is locked with a password. Enter it to open the drawing.</p>
+          <div class="fg w2" style="margin-top:8px"><label>Password</label><input ${SECRET_IN} id="dlgPw"></div>
+          <p class="small" style="margin-top:6px">Not saved — it is asked each time this PDF is opened.</p>`, "Open", () => ({pw: secretVal($("dlgPw"))}), "dlgPw");
+        secretField($("dlgPw")); const v = await q;
+        if (!v) throw Object.assign(new Error(name + " is locked with a password — not " + (verb || "added")), {pwNo: true});
+        pw = v.pw; busy("Opening " + name + "…");
+      }
     }
-  }
+  } finally { if (turn) turn(); }
 }
 /* a PDF is known by a fingerprint of its content (SHA-256), not by its name and size: the same drawing added again
    (under any name) is re-attached to its measurements; a different drawing under a name already in the project is asked
@@ -419,7 +454,7 @@ async function addFiles(files){
       let data = await f.arrayBuffer(), cad = null; const sha = await sha256(data);
       if (cadF) { const pre = P.proj.files.find(x => x.sha === sha && x.cad); cad = await cadImport(f, data, pre && pre.cad.map); data = cad.pdf; }   // the drawing as a layered vector PDF (+ its scene)
       const lib = await loadPdfjs();
-      const {d, pw} = await openPdfData(lib, data, f.name);
+      const {d} = await openPdfData(lib, data, f.name);
       for (const x of P.proj.files) if (!x.sha) { const h = await pdfSha(x.id); if (h) x.sha = h; }   // PDFs added before fingerprints
       let meta = sha ? P.proj.files.find(x => x.sha === sha) : null, name = f.name, how = meta ? "same" : "new";
       const named = meta ? null : P.proj.files.find(x => x.name === f.name);
@@ -448,7 +483,7 @@ async function addFiles(files){
         }
       }
       const id = meta ? meta.id : uid("F");
-      await dbPut("pdfs", Object.assign({name, size: f.size, data, sha}, pw ? {pw} : {}, cad ? {src: cad.src, scene: cad.scene, pdfSha: await sha256(data)} : {}), id);   // stored first: a PDF listed in the project is always one that can be opened
+      await dbPut("pdfs", Object.assign({name, size: f.size, data, sha}, cad ? {src: cad.src, scene: cad.scene, pdfSha: await sha256(data)} : {}), id);   // stored first: a PDF listed in the project is always one that can be opened
       if (!meta) { meta = {id, name, size: f.size, sha, pages: d.numPages, added: new Date().toISOString()}; if (cad) meta.cad = cad.meta; P.proj.files.push(meta); }
       else { meta.pages = d.numPages; meta.size = f.size; if (sha) meta.sha = sha; if (how === "replace") meta.replaced = new Date().toISOString(); if (cad) meta.cad = cad.meta; else delete meta.cad; }
       if (cad) cadAdopt(meta, cad, how);
@@ -540,7 +575,7 @@ function setLayer(ids, on){
 async function gotoPage(fileId, pageNo){
   const seq = S.navSeq = (S.navSeq || 0) + 1, stale = () => seq !== S.navSeq;
   let d;
-  try { d = await doc(fileId); } catch (e) { if (!stale()) { toast(e.message, 6000); showDrop(true); } return; }
+  try { d = await doc(fileId, true); } catch (e) { if (!stale()) { toast(e.message, 6000); showDrop(true); } return; }
   if (stale()) return;
   pageNo = Math.max(1, Math.min(d.numPages, +pageNo || 1));
   await loadLayers(fileId);
@@ -3831,7 +3866,7 @@ async function exportBundle(){
     const exported = new Date().toISOString(), parts = [], pdfs = [], miss = []; let off = 0;
     for (const f of P.proj.files) {
       const rec = await dbGet("pdfs", f.id); if (!rec) { miss.push(f.name); continue; }
-      const sha = rec.src ? rec.pdfSha || await sha256(rec.data) : rec.sha || await sha256(rec.data), e = Object.assign({id: f.id, name: f.name, size: rec.data.byteLength, sha, off}, rec.pw ? {pw: rec.pw} : {});
+      const sha = rec.src ? rec.pdfSha || await sha256(rec.data) : rec.sha || await sha256(rec.data), e = {id: f.id, name: f.name, size: rec.data.byteLength, sha, off};
       parts.push(rec.data); off += rec.data.byteLength;
       if (rec.src) { e.srcSha = rec.sha || await sha256(rec.src); e.srcOff = off; e.srcSize = rec.src.byteLength; parts.push(rec.src); off += rec.src.byteLength; }   // the DWG / DXF too
       pdfs.push(e);
@@ -3862,7 +3897,7 @@ async function importBundle(buf){
       let id = String(p.id); const have = await pdfSha(id), ident = src ? p.srcSha || sha : sha;
       if (have !== null && have === ident && ident) continue;   // the same drawing is already in this browser
       if (have !== null) { const nid = uid("F"); text = remapFileId(text, id, nid); id = nid; }   // another drawing already uses this id here: this one gets its own
-      await dbPut("pdfs", Object.assign({name: p.name, size: src ? src.byteLength : data.byteLength, data, sha: ident}, p.pw ? {pw: p.pw} : {}, src ? {src, pdfSha: sha} : {}), id);
+      await dbPut("pdfs", Object.assign({name: p.name, size: src ? src.byteLength : data.byteLength, data, sha: ident}, src ? {src, pdfSha: sha} : {}), id);
     }
   } finally { busy(""); }
   if (!pre.length) pre.push({what: "PDFs in the file", a: h.pdfs.length, b: h.pdfs.length, st: "PASS", note: "fingerprints checked"});
@@ -4124,7 +4159,7 @@ async function importDialog(files){
     if (how === "all") { await addFiles(pdfs); if (imgs.length) await importDialog(imgs); return; }
   }
   const lib = await loadPdfjs(), E = [];
-  for (const f of pdfs) { busy("Reading " + f.name + "…"); try { const data = await f.arrayBuffer(), {d, pw} = await openPdfData(lib, data, f.name); E.push({f, data, d, pw, n: d.numPages, on: new Set(Array.from({length: d.numPages}, (_, i) => i + 1))}); } catch (e) { toast(f.name + " could not be opened — " + (e.message || e), 5000); } }
+  for (const f of pdfs) { busy("Reading " + f.name + "…"); try { const data = await f.arrayBuffer(), {d} = await openPdfData(lib, data, f.name); E.push({f, data, d, n: d.numPages, on: new Set(Array.from({length: d.numPages}, (_, i) => i + 1))}); } catch (e) { toast(f.name + " could not be opened — " + (e.message || e), 5000); } }
   busy("");
   if (!E.length && !imgs.length) return;
   const sets = [...new Set(P.proj.files.map(f => f.vset).filter(Boolean))], SHOW = 400;
@@ -5380,7 +5415,8 @@ function wire(){
   $("bClaude").onclick = () => aiToggle(!$("aiPanel").classList.contains("on"));
   $("aiClose").onclick = () => aiToggle(false);
   $("aiKeyBtn").onclick = () => aiShowKey($("aiKeyRow").style.display === "none");
-  $("aiKeySave").onclick = () => { const v = $("aiKey").value.trim(); pref("zdTakeoffApiKey", v); AI.client = null; aiShowKey(!v); aiLog("bot", v ? "Key saved in this browser." : "Key removed."); };
+  secretField($("aiKey"));
+  $("aiKeySave").onclick = () => { const v = secretVal($("aiKey")).trim(); pref("zdTakeoffApiKey", v); AI.client = null; aiShowKey(!v); aiLog("bot", v ? "Key saved in this browser." : "Key removed."); };
   $("aiNew").onclick = () => { if (AI.stop) AI.stop.abort(); AI.plan = []; AI.history = []; AI.view = null; $("aiLog").innerHTML = ""; aiToggle(true); };
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
@@ -5927,7 +5963,7 @@ async function freeImport(){
     aiLog("tool", `${esc(c.name)}: <b>${pts.length} Nos</b> added`); }
   busy(""); refresh();
 }
-function aiShowKey(on){ $("aiKeyRow").style.display = on ? "flex" : "none"; if (on) $("aiKey").value = pref("zdTakeoffApiKey") || ""; }
+function aiShowKey(on){ $("aiKeyRow").style.display = on ? "flex" : "none"; if (on) secretSet($("aiKey"), pref("zdTakeoffApiKey") || ""); }
 function aiToggle(on){
   $("aiPanel").classList.toggle("on", on); $("bClaude").classList.toggle("on", on);
   if (on) { aiShowKey(false); if (!$("aiLog").children.length) aiLog("bot", "I read the drawing and do the takeoff with you.<br><b>Free agents (no API key, no cost):</b> ⚡ <b>Full takeoff</b> does rooms, walls, doors / windows and finishes in one run — this page, the PDF or the project · 🏠 <b>Rooms</b> traces every named room and checks it against its written size · 🧱 <b>Walls</b> finds walls from their face lines · 🚪 <b>Doors / windows</b> counts the tags · 🎨 <b>Finishes</b> gives each room's plaster / paint, skirting and ceiling, openings deducted · ✅ <b>Check</b> audits the takeoff. Or type <i>measure bedroom</i>, <i>walls 9\"</i>, <i>count D1</i>, <i>how many doors</i>, <i>help</i>.<br><b>Claude:</b> with an API key, or opened in claude.ai — type what you want and press <b>Read this view</b>; Claude uses the agents, draws what they cannot, and asks you when something is unclear."); aiSampler().then(smp => { if (smp && !pref("zdTakeoffApiKey")) aiLog("bot", "<b>Connected to Claude through claude.ai — no API key needed.</b> Zoom to an area, type what to measure (e.g. <i>9\" walls on this floor, count doors D1</i>) and press <b>Read this view</b>. It runs on your Claude plan; the first time, press Allow."); }); setTimeout(() => $("aiIn").focus(), 0); }

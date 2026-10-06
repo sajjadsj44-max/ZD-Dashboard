@@ -25,7 +25,7 @@ const VIEWPORTS = [{width: 1366, height: 768}, {width: 390, height: 844}];
   const errors = [];
   for (const vp of VIEWPORTS) {
     console.log("\nViewport " + vp.width + " × " + vp.height);
-    const ctx = await browser.newContext({viewport: vp});
+    const ctx = await browser.newContext({viewport: vp}); await require("./zd_unlock")(ctx);   // the dashboard password, typed in on every page opened (nothing is remembered)
     await ctx.route(/cdn\.jsdelivr\.net/, r => {
       const u = r.request().url(), H = {"Access-Control-Allow-Origin": "*"};
       if (/pdf\.worker\.min\.mjs/.test(u)) return r.fulfill({path: path.join(LIBS, "pdfjs-dist/build/pdf.worker.min.mjs"), contentType: "text/javascript", headers: H});

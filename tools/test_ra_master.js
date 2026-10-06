@@ -19,7 +19,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
 
 (async () => {
   const browser = await pw.chromium.launch();
-  const ctx = await browser.newContext();
+  const ctx = await browser.newContext(); await require("./zd_unlock")(ctx);   // the dashboard password, typed in on every page opened (nothing is remembered)
   await ctx.route(/cdn\.jsdelivr\.net|docs\.google\.com|fonts\.g|cdnjs/, r => r.abort());
   const page = await ctx.newPage();
   const errors = [];

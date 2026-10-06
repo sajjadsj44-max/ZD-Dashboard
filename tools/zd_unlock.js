@@ -1,0 +1,15 @@
+/* The dashboards ask for their password every time a page is opened — nothing is remembered. A test browser types it in on every
+   page it opens, as a person would: into the lock's own field, then its Unlock button (the page still checks it).
+
+     await require("./zd_unlock")(ctx);   // once, right after browser.newContext()
+
+   ZD_PASSWORD overrides the password (default: the dashboards' own). */
+module.exports = async function zdUnlock(ctx, pw){
+  await ctx.addInitScript(p => {
+    const go = () => { const i = document.getElementById("zd-lock-input"), b = i && i.parentNode.querySelector("button"); if (!b) return false;
+      i.value = p; i.dispatchEvent(new Event("input", {bubbles: true})); b.click(); return true; };
+    const watch = () => { if (go()) return; const mo = new MutationObserver(() => { if (go()) mo.disconnect(); }); mo.observe(document.documentElement, {childList: true, subtree: true}); setTimeout(() => mo.disconnect(), 15000); };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", watch); else watch();
+    window.addEventListener("pageshow", e => { if (e.persisted) setTimeout(watch, 0); });
+  }, pw || process.env.ZD_PASSWORD || "123");
+};

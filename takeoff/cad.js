@@ -773,11 +773,14 @@ export function cadCost(pg, v){
   let t = 0; for (let y = cy0; y <= cy1; y++) for (let x = cx0; x <= cx1; x++) t += g.cost[y * g.nx + x];
   return t;
 }
+/* one primitive onto the path. A closed outline ends with a line back to its start, not closePath(): Chrome's closePath slows down
+   with every outline already on the path (a stroke batch of thousands took 40-80 times as long), and with round caps and joins the
+   two look the same */
 function addPath(ctx, pg, i){
-  const O = pg.ops, X = pg.xy; let q = pg.q0[i];
+  const O = pg.ops, X = pg.xy; let q = pg.q0[i], sx = 0, sy = 0;
   for (let j = pg.p0[i], e = pg.p0[i + 1]; j < e; j++) { const op = O[j];
-    if (op === 0) { ctx.moveTo(X[q], X[q + 1]); q += 2; } else if (op === 1) { ctx.lineTo(X[q], X[q + 1]); q += 2; }
-    else if (op === 2) { ctx.bezierCurveTo(X[q], X[q + 1], X[q + 2], X[q + 3], X[q + 4], X[q + 5]); q += 6; } else ctx.closePath(); }
+    if (op === 0) { sx = X[q]; sy = X[q + 1]; ctx.moveTo(sx, sy); q += 2; } else if (op === 1) { ctx.lineTo(X[q], X[q + 1]); q += 2; }
+    else if (op === 2) { ctx.bezierCurveTo(X[q], X[q + 1], X[q + 2], X[q + 3], X[q + 4], X[q + 5]); q += 6; } else ctx.lineTo(sx, sy); }
 }
 /* the drawing in steps: one frame on screen runs it through (cadDraw); a whole-page picture made in the background runs it a slice
    at a time between frames (cadDrawAsync), with its own buckets so a frame drawn meanwhile does not disturb it */
@@ -790,10 +793,11 @@ function* drawSteps(ctx, pg, v, o){
   const fillCss = mono ? (dark ? "#4d4d4d" : "#cfcfcf") : null, lod = (o.fast ? 1.6 : 0.45) / s, bb = pg.bb, K = pg.kind, Ly = pg.lay, St = pg.sty;
   const vis = i => { const b = 4 * i; return !hid[Ly[i]] && !(bb[b + 2] < x0 || bb[b] > x1 || bb[b + 3] < y0 || bb[b + 1] > y1); };
   const page = () => { ctx.setTransform(s, 0, 0, s, v.tx, v.ty); ctx.lineCap = "round"; ctx.lineJoin = "round"; };
+  const P0 = pg.p0, SLICE = 6000;   // path steps between pauses: a slice of a drawing made in the background stays a few ms
   page();
-  for (let j = 0, n = 0; j < cnt; j++) { const i = at(j), kd = K[i]; if (kd !== 1 && kd !== 2) continue; if (!vis(i)) continue; const b = 4 * i; if (bb[b + 2] - bb[b] + bb[b + 3] - bb[b + 1] < lod) continue;
+  for (let j = 0, ops = 0; j < cnt; j++) { const i = at(j), kd = K[i]; if (kd !== 1 && kd !== 2) continue; if (!vis(i)) continue; const b = 4 * i; if (bb[b + 2] - bb[b] + bb[b + 3] - bb[b + 1] < lod) continue;
     const st = pg.styles[St[i]]; ctx.globalAlpha = st.a; ctx.fillStyle = fillCss || css[St[i]]; ctx.beginPath(); addPath(ctx, pg, i); ctx.fill(kd === 2 ? "evenodd" : "nonzero");
-    if (++n % 2500 === 0) { yield; page(); } }
+    if ((ops += P0[i + 1] - P0[i] + 8) > SLICE) { ops = 0; yield; page(); } }
   ctx.globalAlpha = 1;
   const bk = o.own ? pg.styles.map(() => []) : g.bk; if (!o.own) bk.forEach(x => { x.length = 0; });
   for (let j = 0; j < cnt; j++) { const i = at(j); if (K[i] !== 0 || !vis(i)) continue; const b = 4 * i; if (bb[b + 2] - bb[b] + bb[b + 3] - bb[b + 1] < lod) continue; bk[St[i]].push(i); }
@@ -801,10 +805,12 @@ function* drawSteps(ctx, pg, v, o){
   for (let si = 0; si < bk.length; si++) { const L = bk[si]; if (!L.length) continue; const st = pg.styles[si];
     const lwPx = o.thin ? 1 : Math.max(1, Math.round(st.lw / 0.3)), lw = st.wid > 0 ? Math.max(st.wid, lwPx * px * dpr) : lwPx * px * dpr;
     const per = st.dash ? st.dash.reduce((a, b) => a + b, 0) * s : 0;
-    for (let a = 0; a < L.length; a += 4000) { ctx.lineWidth = lw; ctx.setLineDash(per > 4 * dpr ? st.dash : []); ctx.strokeStyle = css[si];
-      ctx.beginPath(); const e = Math.min(L.length, a + 4000); for (let q = a; q < e; q++) addPath(ctx, pg, L[q]); ctx.stroke(); yield; page(); } }
+    const pen = () => { ctx.lineWidth = lw; ctx.setLineDash(per > 4 * dpr ? st.dash : []); ctx.strokeStyle = css[si]; ctx.beginPath(); };
+    pen(); let ops = 0;   // one stroke per style, cut into slices (every object is its own subpath: the cut does not show)
+    for (let q = 0; q < L.length; q++) { const i = L[q]; addPath(ctx, pg, i); if ((ops += P0[i + 1] - P0[i] + 2) > SLICE && q < L.length - 1) { ctx.stroke(); yield; page(); pen(); ops = 0; } }
+    ctx.stroke(); yield; page(); }
   ctx.setLineDash([]);
-  if (!o.fast) { const r = 1.2 * px * dpr; for (let j = 0; j < cnt; j++) { const i = at(j); if (K[i] !== 3 || !vis(i)) continue; ctx.fillStyle = css[St[i]]; const q = pg.q0[i]; ctx.fillRect(pg.xy[q] - r, pg.xy[q + 1] - r, 2 * r, 2 * r); } }
+  if (!o.fast) { const r = 1.2 * px * dpr; for (let j = 0, n = 0; j < cnt; j++) { const i = at(j); if (K[i] !== 3 || !vis(i)) continue; ctx.fillStyle = css[St[i]]; const q = pg.q0[i]; ctx.fillRect(pg.xy[q] - r, pg.xy[q + 1] - r, 2 * r, 2 * r); if (++n % 5000 === 0) { yield; page(); } } }
   if (pg.tn) {
     const tB = pg.tB, tM = pg.tM, minPx = o.fast ? 7 : 3.5; ctx.textBaseline = "alphabetic"; let f0 = "";
     for (let i = 0, n = 0; i < pg.tn; i++) {
@@ -813,7 +819,7 @@ function* drawSteps(ctx, pg, v, o){
       ctx.setTransform(tM[m] * s / em, tM[m + 1] * s / em, -tM[m + 2] * s / em, -tM[m + 3] * s / em, tM[m + 4] * s + v.tx, tM[m + 5] * s + v.ty);
       const f = em.toFixed(1) + "px Arial, Helvetica, sans-serif"; if (f !== f0) { ctx.font = f; f0 = f; }
       ctx.fillStyle = cadCss(pg.tC[i], dark, mono); ctx.fillText(pg.tS[i], 0, 0);
-      if (++n % 600 === 0) { yield; ctx.textBaseline = "alphabetic"; f0 = ""; }
+      if (++n % 300 === 0) { yield; ctx.textBaseline = "alphabetic"; f0 = ""; }
     }
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);

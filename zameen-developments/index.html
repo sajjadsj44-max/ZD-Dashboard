@@ -8080,32 +8080,52 @@ window.zdCalc={open:showCalc,search:searchAll,calcs:function(){ return allCalcs(
 </script>
 
 <script>
+/* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
+   Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password
+   field, so no browser or password manager offers to save or fill it. While locked, the page behind can't be reached by mouse,
+   keyboard or screen reader. */
 (function () {
-  var unlockedKey = 'zd-dashboard-unlocked';
-  if (sessionStorage.getItem(unlockedKey) === '1') return;
+  try { sessionStorage.removeItem('zd-dashboard-unlocked'); } catch (e) {}   // an unlock remembered by an earlier version: forgotten
+  var dots = !!(window.CSS && CSS.supports && CSS.supports('-webkit-text-security', 'disc'));
   var style = document.createElement('style');
-  style.textContent = '.zd-locked > :not(#zd-lock){filter:blur(5px);pointer-events:none;user-select:none}.zd-lock{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:20px;background:rgba(15,41,66,.72)}.zd-lock-card{width:min(100%,360px);padding:28px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.25);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a}.zd-lock-card .mark{width:40px;height:40px;border:2px solid #0f2942;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;margin-bottom:16px;color:#0f2942}.zd-lock-card h2{color:#0f2942;font-size:21px;margin:0 0 6px}.zd-lock-card p{color:#6b7d92;margin:0 0 18px}.zd-lock-card label{display:block;color:#0f2942;font-size:12px;font-weight:600;margin-bottom:6px}.zd-lock-card input{width:100%;padding:11px 12px;border:1px solid #dde5ee;border-radius:7px;font:inherit;margin-bottom:12px;box-sizing:border-box}.zd-lock-card button{width:100%;border:0;border-radius:7px;padding:11px;background:#2b7de9;color:#fff;font:inherit;font-weight:700;cursor:pointer}.zd-lock-error{margin-top:10px;color:#b42318;font-size:12px}';
+  style.textContent = '.zd-locked > :not(#zd-lock){filter:blur(5px);pointer-events:none;user-select:none}.zd-lock{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:20px;background:rgba(15,41,66,.72)}.zd-lock-card{width:min(100%,360px);padding:28px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.25);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a}.zd-lock-card .mark{width:40px;height:40px;border:2px solid #0f2942;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;margin-bottom:16px;color:#0f2942}.zd-lock-card h2{color:#0f2942;font-size:21px;margin:0 0 6px}.zd-lock-card p{color:#6b7d92;margin:0 0 18px}.zd-lock-card label{display:block;color:#0f2942;font-size:12px;font-weight:600;margin-bottom:6px}.zd-lock-card input{width:100%;padding:11px 12px;border:1px solid #dde5ee;border-radius:7px;font:inherit;margin-bottom:12px;box-sizing:border-box;-webkit-text-security:disc}.zd-lock-card button{width:100%;border:0;border-radius:7px;padding:11px;background:#2b7de9;color:#fff;font:inherit;font-weight:700;cursor:pointer}.zd-lock-error{margin-top:10px;color:#b42318;font-size:12px}.zd-lock-note{margin-top:12px;color:#6b7d92;font-size:11.5px}';
   document.head.appendChild(style);
-  document.body.classList.add('zd-locked');
-  var lock = document.createElement('div');
-  lock.id = 'zd-lock';
-  lock.className = 'zd-lock';
-  lock.innerHTML = '<form class="zd-lock-card"><div class="mark">ZD</div><h2>ZD Dashboard</h2><p>Enter the password to continue.</p><label for="zd-password">Password</label><input id="zd-password" type="password" autocomplete="current-password" autofocus required><button type="submit">Unlock</button><div class="zd-lock-error" role="alert" hidden>Incorrect password.</div></form>';
-  document.body.appendChild(lock);
-  var form = lock.querySelector('form');
-  var password = lock.querySelector('input');
-  var error = lock.querySelector('.zd-lock-error');
-  form.addEventListener('submit', function (event) {
-    event.preventDefault();
-    if (password.value === '123') {
-      sessionStorage.setItem(unlockedKey, '1');
-      lock.remove();
-      document.body.classList.remove('zd-locked');
-    } else {
-      error.hidden = false;
-      password.select();
+  function lockNow() {
+    if (document.getElementById('zd-lock')) return;
+    var lock = document.createElement('div'), secret = '', inert = [];
+    lock.id = 'zd-lock';
+    lock.className = 'zd-lock';
+    lock.innerHTML = '<div class="zd-lock-card" role="dialog" aria-modal="true" aria-labelledby="zd-lock-title"><div class="mark">ZD</div><h2 id="zd-lock-title">ZD Dashboard</h2><p>Enter the password to continue.</p><label for="zd-lock-input">Password</label><input id="zd-lock-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"><button type="button">Unlock</button><div class="zd-lock-error" role="alert" hidden>Incorrect password.</div><div class="zd-lock-note">Never saved in this browser &mdash; asked each time a page is opened.</div></div>';
+    Array.prototype.forEach.call(document.body.children, function (el) { if (!el.inert && el.tagName !== 'SCRIPT') { el.inert = true; inert.push(el); } });
+    document.body.appendChild(lock);
+    document.body.classList.add('zd-locked');
+    var input = lock.querySelector('input'), button = lock.querySelector('button'), error = lock.querySelector('.zd-lock-error');
+    ['copy', 'cut', 'dragstart'].forEach(function (t) { input.addEventListener(t, function (e) { e.preventDefault(); }); });
+    function keep(e) {   // a browser that cannot draw the field as dots: dots are typed and the characters kept aside
+      if (dots || (e && e.isComposing)) return;
+      var v = input.value, at = v.search(/[^•]/), add = at < 0 ? '' : v.slice(at).replace(/•[\s\S]*$/, '');
+      if (at < 0) at = input.selectionStart == null ? v.length : input.selectionStart;
+      secret = secret.slice(0, at) + add + secret.slice(Math.max(at, secret.length - (v.length - at - add.length)));
+      input.value = new Array(secret.length + 1).join('•');
+      try { input.setSelectionRange(at + add.length, at + add.length); } catch (er) {}
     }
-  });
+    input.addEventListener('input', keep);
+    input.addEventListener('compositionend', keep);
+    function unlock() {
+      var ok = (dots ? input.value : secret) === '123';
+      input.value = ''; secret = '';
+      if (ok) {
+        lock.remove(); document.body.classList.remove('zd-locked');
+        inert.forEach(function (el) { el.inert = false; }); inert = [];
+      } else { error.hidden = false; input.focus(); }
+    }
+    button.addEventListener('click', unlock);
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); unlock(); } });
+    input.focus();
+  }
+  lockNow();
+  window.addEventListener('load', function () { var i = document.getElementById('zd-lock-input'); if (i) i.focus(); });
+  window.addEventListener('pageshow', function (e) { if (e.persisted) lockNow(); });   // back from the browser's page cache: asked again
 }());
 </script>
 </body>
