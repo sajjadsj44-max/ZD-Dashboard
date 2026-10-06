@@ -13,7 +13,7 @@ import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ra_master_config as C  # noqa: E402
-from ra_master_data import dash_lines  # noqa: E402
+from ra_master_data import dash_lines, seed_history  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 HTML = (ROOT / "zameen-developments" / "index.html").read_text(encoding="utf-8")
@@ -86,8 +86,10 @@ class Workbook(unittest.TestCase):
             w = self.wv[s]
             for r in range(5, w.max_row + 1):
                 rates[w.cell(r, 1).value] = w.cell(r, col).value
+        hist = seed_history(HTML)   # a line updated after the workbook (newer GRN) matches through its history
         for x, d in C.MAP.items():
-            self.assertAlmostEqual(float(rates[x]), float(cur[d]["rate"]), places=6, msg=f"{x} vs {d}")
+            ok = {float(cur[d]["rate"])} | hist.get(d, set())
+            self.assertTrue(any(abs(float(rates[x]) - v) < 1e-6 for v in ok), f"{x} {rates[x]} vs {d} {sorted(ok)}")
 
     def test_reconciliation_sheet_all_ok(self):
         w = self.wv["18 DASHBOARD RECONCILIATION"]

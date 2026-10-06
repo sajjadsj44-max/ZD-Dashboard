@@ -97,11 +97,13 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   const L = await T(() => zdPriceTrends.links().map(o => ({code: o.x.code, why: o.why || "", dev: o.dev, last: o.last ? o.last.rcp : "", how: o.how})));
   const by = c => L.find(o => o.code === c);
   ok(L.length > 150, `${L.length} lines linked to a GRN`);
-  /* DIESEL (392/Ltr, Phoenix RCP-311 of 28-Aug-2026) now has a newer GRN: RCP-326 of 30-Sep-2026 with three
-     receipts that day (371, 379, 383) — compared with the nearest of them, 383 */
-  ok(by("DIESEL") && by("DIESEL").last === "RCP-326" && Math.abs(by("DIESEL").dev - (392 / 383 - 1) * 100) < 0.01,
-     "DIESEL: several receipts on the latest day — compared with the nearest of them (+2.35%)");
-  ok(by("CEM") && /cross-check/.test(by("CEM").how) && by("CEM").dev > 10, "CEM: its 'Last … GRN' cross-check is compared (market rate above the last receipt)");
+  /* DIESEL 380.66/Ltr (06-Oct-2026: weighted average of the 30-Sep-2026 receipts) cites Phoenix RCP-326, which has
+     three receipts that day (371, 379, 383) — compared with the nearest of them, 379 */
+  ok(by("DIESEL") && by("DIESEL").last === "RCP-326" && Math.abs(by("DIESEL").dev - (380.66 / 379 - 1) * 100) < 0.01,
+     "DIESEL: several receipts on the latest day — compared with the nearest of them (+0.44%)");
+  ok(by("CEM") && by("CEM").how === "ARX RCP-322" && by("CEM").dev === 0, "CEM: a GRN of a newer site (ARX) in the remarks is linked (0%)");
+  ok(by("STL60") && by("STL60").dev === 0, "STL60: of the receipts within 2% on its GRN, the closest rate is taken (238, not the #10 bar at 240)");
+  ok(by("BLK-S4") && /cross-check/.test(by("BLK-S4").how) && by("BLK-S4").dev > 10, "BLK-S4: its 'Last … GRN' cross-check is compared (quotation above the last receipt)");
   ok(!by("MAT-WB") && !by("MOULD") && !by("MAT-SND-ZDP"), "composites and assumptions are not linked to the receipts they mention");
   ok(by("GRN-PHO-ENAMEL-L") && /per Gallon/.test(by("GRN-PHO-ENAMEL-L").why), "a receipt in another unit is reported, not compared");
   ok(L.filter(o => !o.why).every(o => o.dev == null || isFinite(o.dev)), "every comparable line has a difference");
@@ -113,11 +115,11 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   await $('[data-pt-f="thr"]').fill("10");
   await $('[data-pt-f="thr"]').dispatchEvent("change");
   await page.waitForTimeout(300);
-  await $('[data-pt-sel="CEM"]').check();
+  await $('[data-pt-sel="BLK-S4"]').check();
   await page.waitForTimeout(150);
   await $('[data-pt-act="rfq"]').click();
   await page.waitForTimeout(400);
-  ok(await page.isVisible("#rav-rfq") && (await T(() => RA.rfq.rfqs[0].lines.map(l => l.code).join(","))) === "CEM", "ticked line opens a new RFQ in the RFQ Tracker");
+  ok(await page.isVisible("#rav-rfq") && (await T(() => RA.rfq.rfqs[0].lines.map(l => l.code).join(","))) === "BLK-S4", "ticked line opens a new RFQ in the RFQ Tracker");
 
   console.log("staleness map");
   await page.click('#raSub button[data-rv="pt"]');

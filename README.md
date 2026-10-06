@@ -120,6 +120,17 @@ pip install openpyxl                      # once
 tools/grn_register.py NEW_RECEIVING.xlsx  # one or more exports
 ```
 
+**Rate Database updated to the September GRNs** (06-Oct-2026): every Rate Database
+line whose latest GRN — on any project — is dated September or October 2026 now
+carries that GRN's rate, date and remarks; lines whose latest GRN is older keep
+their rate. Changed: CEM 1,575 → 1,615 (ARX RCP-322, 27-Sep), STL60 242 → 238
+(Jade RCP-526, 26-Sep), RMC-4000 337.25 → 356.79 (DTR RCP-218, 23-Sep), RMC-4500
+331.31 → 362.46 (GVR RCP-20, 24-Sep), DIESEL 392 → 380.66 (quantity-weighted
+average of the 33 receipts of 30-Sep at five sites). SAND-CH 80, SILICA 130,
+BLK-S8 215, BLK-H4 135 and BLK-H8 210 keep their rates with the newer GRN as
+source and date. A saved library takes the new rates only where a line still
+holds the old published value; a rate typed in by hand is kept.
+
 Every sheet with GRN columns is read (the ERP export's `Site / GRN # / Item Code /
 Item Description / Rec.Qty`, or the compiled workbook's `Location / GRN# / ITEMNO /
 ITEMDESC / Received Qty`); `--dry-run` reports what would be added. Receipts
