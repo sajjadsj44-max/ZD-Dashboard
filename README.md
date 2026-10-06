@@ -92,7 +92,20 @@ the rate of its latest GRN, the vendor, the number of receipts and the low–hig
 range, plus the full receipt history per item. Seeded on 23-Sep-2026 from the ERP
 material receiving exports of **Quadrangle** (3,138 receipts, Mar-2021 to
 Aug-2025) and **Phoenix** (770 receipts, Nov-2022 to 07-Sep-2026): 1,775 items in
-total. Rates billed per cubic metre, metre or square metre are converted to Cft,
+total.
+
+On 06-Oct-2026 the store's compiled workbook **Material Received at Store 21**
+(one sheet per project) added 17,932 receipts: **Opal**, **Mall 35**, **Aurum**,
+**NEO**, **Jade** (Arcs), **DTR**, **ARX**, **Vault**, **GP** (EDZD), **GVR**,
+**EON** and **Hive** in full, plus the newer Quadrangle and Phoenix GRNs. The
+register now holds 21,840 receipts of 14 projects, 11,305 items, Dec-2019 to
+30-Sep-2026. That workbook mixes m/d/yyyy text, dd-mm-yyyy text and Excel dates
+with day and month swapped, so the tool reads each GRN's date from the GRNs
+numbered either side of it (checked against the ERP exports already held: 1,460 of
+1,461 GRNs agree, the one left is entered differently in the workbook). Rows
+repeated cell for cell are read once, rows without a rate are skipped, and a line
+already held under the same site, GRN and item code keeps the ERP export's more
+precise rate. Rates billed per cubic metre, metre or square metre are converted to Cft,
 Rft and Sft; the GRN unit and rate stay in the history. **+ Rate DB** copies an
 item's latest GRN rate into the Rate Database as a verified line, with
 `<Site> GRN RCP-n, DD-Mon-YYYY — <vendor>` in its remarks and the same date as
@@ -107,8 +120,10 @@ pip install openpyxl                      # once
 tools/grn_register.py NEW_RECEIVING.xlsx  # one or more exports
 ```
 
-Receipts already in the register are skipped, so a cumulative export can be
-re-run safely. The raw exports are not committed.
+Every sheet with GRN columns is read (the ERP export's `Site / GRN # / Item Code /
+Item Description / Rec.Qty`, or the compiled workbook's `Location / GRN# / ITEMNO /
+ITEMDESC / Received Qty`); `--dry-run` reports what would be added. Receipts
+already in the register are skipped, so a cumulative export can be re-run safely. The raw exports are not committed.
 
 **Purchase orders** (added 03-Oct-2026): the register also lists the item lines of
 the Sage 300 PO books, printed from Sage as **POPOR01 – PO Purchase Orders**:
