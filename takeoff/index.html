@@ -34,6 +34,10 @@ header .btn{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.25);
 header .btn:hover{background:rgba(255,255,255,.16)}
 header select,header input{background:rgba(255,255,255,.95);color:var(--txt);height:30px}
 #projName{width:180px;font-weight:600}
+.proj-actions{display:inline-flex;gap:4px;align-items:center}
+#projectSearch{min-width:180px;flex:1;max-width:320px}
+.plink{cursor:pointer;color:var(--purple);font-weight:600}
+.plink:hover{text-decoration:underline}
 .savest{font-size:11px;color:#cfe0f5;white-space:nowrap;min-width:64px}.savest.bad{color:#fff;background:var(--red);border-radius:10px;padding:2px 8px;font-weight:700}
 #pageSel{max-width:240px}
 #zoomPct{width:52px;text-align:center;font-variant-numeric:tabular-nums;font-size:12px;color:#cfe0f5}
@@ -345,7 +349,12 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
   <div class="ttl">PDF Takeoff</div>
   <div class="sep"></div>
   <button class="btn sm" id="bProjects" title="All projects">&#9776; Projects</button>
-  <input type="text" id="projName" title="Project name" aria-label="Project name">
+  <div class="proj-actions">
+    <input type="text" id="projName" title="Project name" aria-label="Project name">
+    <button class="btn sm" id="bRename" title="Change / rename the current project">&#9998; Rename</button>
+    <button class="btn sm" id="bSaveProj" title="Save the current project now (Ctrl+S)">&#128190; Save</button>
+    <button class="btn sm pri" id="bNewTop" title="Create a new separate project">+ New</button>
+  </div>
   <span id="saveSt" class="savest" role="status" aria-live="polite"></span>
   <button class="btn sm" id="bAdd" title="Add PDFs or AutoCAD drawings (DWG / DXF) to this project">+ PDF</button><button class="btn sm" id="bAddM" title="Import: choose pages and a version set, a folder of PDFs, photos / scans as pages, sheet info, OCR" aria-haspopup="true">&#9662;</button>
   <input type="file" id="fileIn" accept="application/pdf,.pdf,.dwg,.dxf" multiple hidden>
@@ -481,7 +490,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
   <h2>PDF Takeoff</h2>
   <p class="sub">Measure areas, lengths and counts straight off PDF drawings, with the scale read from the drawing, snapping to the
     drawing's own lines, and a measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as their own rows).</p>
-  <div class="card"><div class="hd"><h3>Projects</h3><button class="btn" id="bImport">Import project</button><input type="file" id="impIn" accept=".json,.zdtakeoff,application/json" hidden>
+  <div class="card"><div class="hd"><h3>Projects</h3><input type="search" id="projectSearch" placeholder="Search projects…" aria-label="Search projects"><button class="btn" id="bImport">Import project</button><input type="file" id="impIn" accept=".json,.zdtakeoff,application/json" hidden>
     <button class="btn pri" id="bNewProj">+ New project</button></div><div id="projList"></div></div>
   <div class="note"><b>Your drawings stay on this computer.</b> PDFs and takeoffs are saved in this browser's storage (IndexedDB) on this device only —
     nothing is uploaded, and another browser or computer will not see them. Use <b>Export → Project + PDFs</b> to move a takeoff with its drawings in one file (<b>Project (.json)</b> carries the measurements only; a PDF added again
