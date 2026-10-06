@@ -570,7 +570,7 @@ async function gotoPage(fileId, pageNo){
 const stage = () => $("stage");
 function fitWidth(){   // the page's width across the window, from its top
   if (!S.base) return;
-  const w = stage().clientWidth, s = Math.max(0.05, Math.min(1000, (w - 24) / S.base.width));
+  const w = stage().clientWidth, s = Math.max(0.05, Math.min(5000, (w - 24) / S.base.width));
   S.view = {s, tx: (w - S.base.width * s) / 2, ty: 12}; applyView(); renderHi();
 }
 function fit(){
@@ -2046,7 +2046,7 @@ function onMove(e){
   if (S.pinch && e.pointerType === "touch") {
     S.touches[e.pointerId] = sp; const ids = Object.keys(S.touches); if (ids.length < 2) return;
     const a = S.touches[ids[0]], b = S.touches[ids[1]], f = dist(a, b) / S.pinch.d, c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], v = S.pinch.v;
-    const ns = Math.max(0.05, Math.min(1000, v.s * f)), k = ns / v.s;
+    const ns = Math.max(0.05, Math.min(5000, v.s * f)), k = ns / v.s;
     S.view = {s: ns, tx: c[0] - (S.pinch.c[0] - v.tx) * k, ty: c[1] - (S.pinch.c[1] - v.ty) * k}; applyView(); renderHi(); return;
   }
   if (S.lp && !S.lp.fired && dist(sp, S.lp.sp) > 8) { clearTimeout(S.lp.t); S.lp = null; }
@@ -2335,14 +2335,14 @@ function zoomBoxEnd(){
   const z = S.zbox; S.zbox = null; const st = stage();
   if (Math.abs(z.b[0] - z.a[0]) < 8 && Math.abs(z.b[1] - z.a[1]) < 8) zoomAt(2, z.a[0], z.a[1]);
   else { const a = toBase(Math.min(z.a[0], z.b[0]), Math.min(z.a[1], z.b[1])), b = toBase(Math.max(z.a[0], z.b[0]), Math.max(z.a[1], z.b[1]));
-    const s2 = Math.max(0.05, Math.min(1000, Math.min(st.clientWidth / (b[0] - a[0]), st.clientHeight / (b[1] - a[1]))));
+    const s2 = Math.max(0.05, Math.min(5000, Math.min(st.clientWidth / (b[0] - a[0]), st.clientHeight / (b[1] - a[1]))));
     S.view = {s: s2, tx: st.clientWidth / 2 - (a[0] + b[0]) / 2 * s2, ty: st.clientHeight / 2 - (a[1] + b[1]) / 2 * s2}; applyView(); renderHi(); }
   setTool(S.prevTool && S.prevTool !== "zoomwin" ? S.prevTool : "select");
 }
 function zoomTo(ids){
   const pts = [...ids].map(objById).filter(onPage).flatMap(o => o.cond ? itemPoly(o) : o.pts); if (!pts.length) return;
   const st = stage(), x0 = Math.min(...pts.map(p => p[0])), x1 = Math.max(...pts.map(p => p[0])), y0 = Math.min(...pts.map(p => p[1])), y1 = Math.max(...pts.map(p => p[1])), m = 40 / S.view.s;
-  const s2 = Math.max(0.05, Math.min(1000, Math.min(st.clientWidth / (x1 - x0 + 2 * m), st.clientHeight / (y1 - y0 + 2 * m))));
+  const s2 = Math.max(0.05, Math.min(5000, Math.min(st.clientWidth / (x1 - x0 + 2 * m), st.clientHeight / (y1 - y0 + 2 * m))));
   S.view = {s: s2, tx: st.clientWidth / 2 - (x0 + x1) / 2 * s2, ty: st.clientHeight / 2 - (y0 + y1) / 2 * s2}; applyView(); renderHi();
 }
 function selectAll(){
