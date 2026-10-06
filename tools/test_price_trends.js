@@ -97,7 +97,10 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   const L = await T(() => zdPriceTrends.links().map(o => ({code: o.x.code, why: o.why || "", dev: o.dev, last: o.last ? o.last.rcp : "", how: o.how})));
   const by = c => L.find(o => o.code === c);
   ok(L.length > 150, `${L.length} lines linked to a GRN`);
-  ok(by("DIESEL") && by("DIESEL").dev === 0, "DIESEL: two receipts that day — compared with the one it was taken from (0%)");
+  /* DIESEL (392/Ltr, Phoenix RCP-311 of 28-Aug-2026) now has a newer GRN: RCP-326 of 30-Sep-2026 with three
+     receipts that day (371, 379, 383) — compared with the nearest of them, 383 */
+  ok(by("DIESEL") && by("DIESEL").last === "RCP-326" && Math.abs(by("DIESEL").dev - (392 / 383 - 1) * 100) < 0.01,
+     "DIESEL: several receipts on the latest day — compared with the nearest of them (+2.35%)");
   ok(by("CEM") && /cross-check/.test(by("CEM").how) && by("CEM").dev > 10, "CEM: its 'Last … GRN' cross-check is compared (market rate above the last receipt)");
   ok(!by("MAT-WB") && !by("MOULD") && !by("MAT-SND-ZDP"), "composites and assumptions are not linked to the receipts they mention");
   ok(by("GRN-PHO-ENAMEL-L") && /per Gallon/.test(by("GRN-PHO-ENAMEL-L").why), "a receipt in another unit is reported, not compared");
