@@ -666,7 +666,7 @@ function applyView(){
   draw(); miniUpdate();
 }
 function zoomAt(f, sx, sy){
-  const v = S.view, ns = Math.max(0.05, Math.min(1000, v.s * f)); f = ns / v.s;
+  const v = S.view, ns = Math.max(0.05, Math.min(5000, v.s * f)); f = ns / v.s;
   S.view = {s: ns, tx: sx - (sx - v.tx) * f, ty: sy - (sy - v.ty) * f};
   applyView(); renderHi();
 }
