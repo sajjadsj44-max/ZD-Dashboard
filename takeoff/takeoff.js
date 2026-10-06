@@ -352,10 +352,12 @@ async function openProject(id){
 async function showStart(){
   await flushSave();
   const all = (await dbAll("projects")).sort((a, b) => b.updated.localeCompare(a.updated));
-  $("projList").innerHTML = all.length ? '<table class="plist"><thead><tr><th>Project</th><th>PDFs</th><th>Measurements</th><th>Last changed</th><th></th></tr></thead><tbody>' +
-    all.map(p => `<tr><td><a data-open="${esc(p.id)}">${esc(p.name)}</a></td><td>${p.files.length}</td><td>${p.items.length}</td><td>${dmy(p.updated)}</td>
-      <td style="text-align:right;white-space:nowrap"><button class="btn sm" data-bak="${esc(p.id)}">Backups</button> <button class="btn sm" data-dup="${esc(p.id)}">Duplicate</button> <button class="btn sm dng" data-del="${esc(p.id)}">Delete</button></td></tr>`).join("") + "</tbody></table>"
-    : '<div class="empty">No projects yet — start one with <b>+ New project</b>, then drop a PDF drawing on it.</div>';
+  const q = String(($("projectSearch") || {}).value || "").trim().toLowerCase();
+  const list = q ? all.filter(p => String(p.name || "").toLowerCase().includes(q)) : all;
+  $("projList").innerHTML = list.length ? '<table class="plist"><thead><tr><th>Project</th><th>PDFs</th><th>Measurements</th><th>Last changed</th><th></th></tr></thead><tbody>' +
+    list.map(p => `<tr><td><a class="plink" data-open="${esc(p.id)}" title="Open project">${esc(p.name)}</a></td><td>${p.files.length}</td><td>${p.items.length}</td><td>${dmy(p.updated)}</td>
+      <td style="text-align:right;white-space:nowrap"><button class="btn sm" data-edit="${esc(p.id)}">Edit</button> <button class="btn sm" data-bak="${esc(p.id)}">Backups</button> <button class="btn sm" data-dup="${esc(p.id)}">Duplicate</button> <button class="btn sm dng" data-del="${esc(p.id)}">Delete</button></td></tr>`).join("") + "</tbody></table>"
+    : (q ? '<div class="empty">No projects match your search.</div>' : '<div class="empty">No projects yet — start one with <b>+ New project</b>, then drop a PDF drawing on it.</div>');
   $("start").classList.add("on");
 }
 
@@ -6309,21 +6311,42 @@ function wire(){
   $("bNewCond").onclick = () => P.proj && editCond(null);
   $("bProjects").onclick = showStart;
   $("projName").onchange = e => { if (P.proj) { P.proj.name = e.target.value.trim() || "Untitled takeoff"; save(); } };
+  $("bSaveProj").onclick = async () => {
+    if (!P.proj) return toast("Open a project first");
+    savePr = P.proj; const ok = await flushSave();
+    toast(ok ? "Project saved successfully" : "Project could not be saved", 2200);
+  };
+  $("bRename").onclick = async () => {
+    if (!P.proj) return toast("Open a project first");
+    const v = await ask("Change Project Name", '<div class="fg w2"><label>Project name</label><input type="text" id="dlgName" value="' + esc(P.proj.name) + '" placeholder="Project name"></div>', "Save Name", () => ({name: $("dlgName").value.trim()}), "dlgName");
+    if (!v || !v.name) return;
+    P.proj.name = v.name; $("projName").value = v.name; save(); await flushSave();
+    toast("Project renamed to " + v.name, 2200);
+  };
+  $("bNewTop").onclick = () => $("bNewProj").click();
   $("bNewProj").onclick = async () => { const v = await ask("New project", '<div class="fg w2"><label>Project name</label><input type="text" id="dlgName" placeholder="e.g. NEO — Block A ground floor"></div>', "Create", () => ({name: $("dlgName").value.trim() || "Untitled takeoff"}), "dlgName");
     if (!v) return; const pr = newProject(v.name); await dbPut("projects", pr); await openProject(pr.id); };
   $("bImport").onclick = () => $("impIn").click();
   $("impIn").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return;
     try { const buf = await f.arrayBuffer(); await (isBundle(buf) ? importBundle(buf) : importProject(new TextDecoder().decode(buf))); } catch (er) { toast("Could not import: " + er.message, 5000); } };
   $("projList").addEventListener("click", async e => {
-    const o = e.target.closest("[data-open],[data-dup],[data-del],[data-bak]"); if (!o) return;
+    const o = e.target.closest("[data-open],[data-edit],[data-dup],[data-del],[data-bak]"); if (!o) return;
     if (o.dataset.open) return openProject(o.dataset.open);
+    if (o.dataset.edit) {
+      const pr = await dbGet("projects", o.dataset.edit); if (!pr) return toast("Project not found");
+      const v = await ask("Edit Project Name", '<div class="fg w2"><label>Project name</label><input type="text" id="dlgName" value="' + esc(pr.name) + '"></div>', "Save Name", () => ({name: $("dlgName").value.trim()}), "dlgName");
+      if (!v || !v.name) return;
+      pr.name = v.name; pr.updated = new Date().toISOString(); await dbPut("projects", pr);
+      if (P.proj && P.proj.id === pr.id) { P.proj.name = pr.name; $("projName").value = pr.name; saveSay("ok", pr.updated); }
+      toast("Project name updated", 1800); return showStart();
+    }
     if (o.dataset.bak) return backupsDialog(o.dataset.bak);
     if (o.dataset.dup) { const pr = await dbGet("projects", o.dataset.dup); const cp = Object.assign(JSON.parse(JSON.stringify(pr)), {id: uid("P"), name: pr.name + " (copy)", updated: new Date().toISOString()}); await dbPut("projects", cp); return showStart(); }
     if (o.dataset.del) { const pr = await dbGet("projects", o.dataset.del); const ok = await ask("Delete project", `<p>Delete <b>${esc(pr.name)}</b> with its ${pr.items.length} measurements and stored PDFs? This cannot be undone.</p>`, "Delete");
       if (!ok) return; const others = (await dbAll("projects")).filter(x => x.id !== pr.id), keep = new Set(others.flatMap(x => x.files.map(f => f.id)));
       for (const f of pr.files) if (!keep.has(f.id)) await dbDel("pdfs", f.id); await dbDel("projects", pr.id); await mkAssetsCleanup((pr.marks || []).flatMap(mkAids)); if (P.proj && P.proj.id === pr.id) P.proj = null; showStart(); }
   });
-  $("condList").addEventListener("click", e => {
+  $("projectSearch").addEventListener("input", () => showStart());  $("condList").addEventListener("click", e => {
     if (e.target.id === "bFirstCond") return editCond(null);
     const ed = e.target.closest("[data-edit]"); if (ed) return editCond(cond(ed.dataset.edit));
     const ck = e.target.closest("[data-ck]"); if (ck) { if (ck.checked) S.condSel.add(ck.dataset.ck); else S.condSel.delete(ck.dataset.ck); renderConds(); return; }
