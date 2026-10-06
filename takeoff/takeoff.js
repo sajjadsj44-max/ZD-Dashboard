@@ -228,8 +228,10 @@ function migrate(p, rep){
   bad = 0;
   p.marks = p.marks.filter(m => { const q = obj(m) && m.id != null && MARK_TOOLS[m.type] && pts(m.pts, MK_MINPTS[m.type] || 2); if (!q) { bad++; return false; } m.pts = q; m.id = String(m.id); m.text = String(m.text == null ? "" : m.text);
     if (MK_TYPES.has(m.type)) mkSanitize(m);
+    mkCommon(m);
     if (m.color != null && !HEXCOL.test(String(m.color))) { note("A markup's colour “" + String(m.color).slice(0, 40) + "” is not a colour — replaced"); m.color = "#d03b3b"; } return true; });
   if (bad) note(bad + " markup" + (bad > 1 ? "s" : "") + " with missing or broken points left out");
+  mkProjCommon(p);
   Object.keys(p.scales).forEach(k => { const sc = p.scales[k]; if (!obj(sc) || !(num(sc.ptPerFt) > 0) || !isFinite(num(sc.ptPerFt))) { note("Page scale " + k + " is not a number — removed (set it again)"); delete p.scales[k]; } else sc.ptPerFt = num(sc.ptPerFt); });
   Object.keys(p.viewports).forEach(k => { if (!arr(p.viewports[k])) { delete p.viewports[k]; return; }
     p.viewports[k] = p.viewports[k].filter(v => { const ok = obj(v) && arr(v.r) && v.r.length === 4 && v.r.every(x => isFinite(num(x))) && isFinite(num(v.ptPerFt || 0)); if (!ok) note("A viewport on " + k + " is broken — removed"); else { v.r = v.r.map(num); v.ptPerFt = Math.max(0, num(v.ptPerFt || 0)); v.name = String(v.name == null ? "Viewport" : v.name); } return ok; }); });
@@ -265,7 +267,7 @@ if (TABCH) TABCH.onmessage = e => { const m = e.data || {}; if (!P.proj || m.tab
   if (m.t === "open") tabSay({t: "here", id: P.proj.id});
   S.otherTab = m.t === "saved" ? "changed in another tab or window at " + String(m.at || "").slice(11, 16) : "also open in another tab or window";
   renderSheet(); };
-const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "openings"];
+const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters"];
 function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 /* every change goes through mutate(): the project before it is kept for Ctrl+Z (200 steps), with a name for the
    undo / redo buttons ("Undo: Move 3 measurements") */
@@ -549,12 +551,12 @@ function renderLayers(){
   const el = $("layerList"); if (!el) return;
   const cfg = S.ocgs && S.ocgs[S.fileId];
   if (!S.page) { el.innerHTML = ""; return; }
-  if (!cfg) { el.innerHTML = '<div class="empty">This PDF has no layers. AutoCAD keeps them when you plot with <b>DWG To PDF.pc3</b> and “Include layer information” ticked (Page Setup → PDF Options) — or add the <b>DWG</b> itself with <b>+ PDF</b>: its AutoCAD layers come with it.</div>'; return; }
+  if (!cfg) { el.innerHTML = mkLayersHtml() + '<div class="empty">This PDF has no layers. AutoCAD keeps them when you plot with <b>DWG To PDF.pc3</b> and “Include layer information” ticked (Page Setup → PDF Options) — or add the <b>DWG</b> itself with <b>+ PDF</b>: its AutoCAD layers come with it.</div>'; return; }
   const cm = cadMeta(S.fileId), CL = cm ? new Map(cm.layers.map(l => [l.name, l])) : null, dark = darkNow();
   const G = Object.entries(cfg.getGroups()).sort((a, b) => a[1].name.localeCompare(b[1].name, undefined, {numeric: true}));
   const RN = {wall: "wall", opening: "door / window", column: "column", railing: "railing", glass: "glass", hatch: "hatch", text: "text / dims", tag: "tags", unit: "unit area", fixture: "fixtures / MEP", other: ""};
   const sw = l => l ? `<span class="lsw" style="background:${l.c === -1 ? (dark ? "#ffffff" : "#000000") : "#" + (l.c & 0xffffff).toString(16).padStart(6, "0")}" title="${l.aci ? "Colour " + l.aci : "True colour"}"></span>` : "";
-  el.innerHTML = (cm ? `<div class="lyrbar"><b style="flex:1;color:var(--navy)">AutoCAD layers · ${G.length}</b><button class="btn sm" data-cadq="1" title="Quantities from the drawing's own objects: lengths and areas by layer, blocks by name">CAD quantities…</button></div>` : "") +
+  el.innerHTML = mkLayersHtml() + (cm ? `<div class="lyrbar"><b style="flex:1;color:var(--navy)">AutoCAD layers · ${G.length}</b><button class="btn sm" data-cadq="1" title="Quantities from the drawing's own objects: lengths and areas by layer, blocks by name">CAD quantities…</button></div>` : "") +
     `<div class="lyrbar"><button class="btn sm" data-lall="1">All on</button><button class="btn sm" data-lall="0">All off</button><input type="search" id="lyrQ" placeholder="Filter layers"></div>
     <div class="lyrbar"><span class="small" style="width:100%">Clean the drawing:</span><button class="btn sm pri" data-lpre="clean" title="Only walls, doors / windows, columns and railings">Walls & openings only</button><button class="btn sm" data-lpre="text" title="Text, dimensions, grid, titles, clouds">Text off</button><button class="btn sm" data-lpre="fixture" title="Furniture, sanitary, kitchen, MEP, electrical">Fixtures off</button><button class="btn sm" data-lpre="hatch">Hatch off</button></div>` +
     G.map(([id, g]) => { const r = layerRole(g.name), l = CL && CL.get(g.name);
@@ -2154,7 +2156,7 @@ function cancelDrag(){   // Esc / Ctrl+Z during a drag: everything back where it
 const objById = id => P.proj.items.find(i => i.id === id) || (P.proj.marks || []).find(m => m.id === id) || null;
 const onPage = o => o && o.file === S.fileId && o.page === S.pageNo;
 const pageItems = () => S.hideMk ? [] : P.proj.items.filter(i => onPage(i) && !hiddenItem(i));
-const pageMarks = () => S.hideMk ? [] : (P.proj.marks || []).filter(onPage);
+const pageMarks = () => S.hideMk ? [] : (P.proj.marks || []).filter(m => onPage(m) && !mkHidden(m));
 function selOne(){ if (S.multi.size || !S.sel) return null; const it = P.proj.items.find(i => i.id === S.sel); return it && onPage(it) && !hiddenItem(it) ? it : null; }
 function setSel(ids, pt){
   S.multi.clear(); S.sel = null; S.selMark = null; S.selPt = -1;
@@ -2530,7 +2532,7 @@ function drawNow(){
   if (!keep) ((P.proj.viewports || {})[S.key] || []).forEach(v => { const a = toScr([v.r[0], v.r[1]]), b = toScr([v.r[2], v.r[3]]);
     h.push(`<rect x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="none" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`);
     h.push(label([a[0] + 6 + (v.name.length + 14) * 3.2, a[1] + 12], v.name + " · " + (v.ptPerFt ? v.text || "own scale" : "scale not set"), "#4b3b8f")); });
-  if (!keep && !S.hideMk) (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo).forEach(m => h.push(markSvg(m, toScr, 1)));
+  if (!keep && !S.hideMk) (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo && !mkHidden(m)).forEach(m => h.push(markSvg(m, toScr, 1)));
   if (!keep && !S.hideMk && S.selMark && !S.multi.size && S.tool === "select") { const m = objById(S.selMark); if (m && onPage(m) && !m.locked) h.push(mkHandlesSvg(m)); }
   if (!keep && S.typ) {   // typical copy: reference points, and the copies placed by them (dashed) before they are confirmed
     const T = S.typ;
@@ -2721,7 +2723,7 @@ function nameAreas(){
   toast(n ? n + " area" + (n > 1 ? "s" : "") + " named from the drawing" : "No room names found inside the unnamed areas");
 }
 /* ------------------------------------------------------------------ panels */
-function refresh(){ S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); draw(); draftBtns(); }
+function refresh(){ mlSoon(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); draw(); draftBtns(); }
 let sheetT = null;
 function refreshSheetSoon(){ clearTimeout(sheetT); sheetT = setTimeout(() => { renderSheet(); renderConds(); }, 120); }
 function renderScaleChip(){
@@ -3955,6 +3957,7 @@ function mkPropsHtml(mk){
   if (t === "image") rows.push(`<div class="row"><span class="small" style="flex:1">${esc((mk.img || {}).name || "picture")}${mk.img && mk.img.w ? " · " + mk.img.w + " × " + mk.img.h + " px" : ""}</span><button class="btn sm" data-mact2="replace">Replace picture…</button>${fg("Border width", num("width", +mk.width || 0, 0, 24, 0.5))}</div>`);
   if (t === "redact") rows.push(`<div class="row">${fg("Fill", colIn("fill", mk.fill || (mk.erase ? "#ffffff" : "#000000"), "#000000"))}<span class="small" style="flex:3">Applied in every export: the page is flattened to a picture so what is under it is gone for good (the PDF in this project is not changed).</span></div>`);
   rows.push(`<div class="row">${fg("Status", sel("status", mk.status || "", Object.fromEntries(mkStatusList().map(s => [s, s || "None"]))))}
+    ${fg("Layer", sel("layer", mk.layer || "", Object.assign({"": "None"}, Object.fromEntries(mkLayers().map(l => [l.id, l.name])))))}
     ${nu || t === "note" || t === "cloud" || t === "arrow" ? `<button class="btn sm" data-mact2="edit">${textT ? "Edit text…" : t === "stamp" ? "Edit stamp…" : t === "link" ? "Edit link…" : "Comment…"}</button>` : ""}
     <button class="btn sm" data-mact2="default" title="Use this style for new ${esc(MARK_TOOLS[t].toLowerCase())}s">Set as default</button>
     <button class="btn sm" data-act="lock">${mk.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn dng" data-act="delMark"${mk.locked ? " disabled" : ""}>Delete</button></div>
@@ -4055,6 +4058,241 @@ function mkCtxItems(m, many){   // right-click on a markup: what its kind can do
   if (t === "stamp") return [{t: "Edit stamp…", k: "Dbl-click", fn: () => mkEditText(m)}];
   if (MK_TYPES.has(t)) return [{t: "Comment…", k: "Dbl-click", fn: () => mkEditText(m)}];
   return t !== "hilite" && t !== "fence" && t !== "dimension" ? [{t: "Edit text…", k: "Dbl-click", fn: () => editMarkText(m)}] : [];
+}
+
+/* ------------------------------------------------------------------ Markups List (Bluebeam Revu): every markup in one table —
+   this page or the whole project — sorted by any column, filtered (and the filter saved), statuses (your own too), replies,
+   markup layers, the room each markup sits in (Spaces); summaries as CSV, XML and a printable PDF with a picture of each */
+const ML_KEY = "zdTakeoffMkList";
+function mlPref(){ let o = null; try { o = JSON.parse(pref(ML_KEY) || "null"); } catch (e) { o = null; } return Object.assign({open: false, h: 300, scope: "page", sort: "page", dir: 1}, o && typeof o === "object" ? o : {}); }
+function mlSet(ch){ pref(ML_KEY, JSON.stringify(Object.assign(mlPref(), ch))); }
+S.ml = {q: "", type: "", status: "", author: "", layer: "", space: "", ticked: new Set(), focus: null};
+const mkLayers = () => (P.proj && P.proj.mkLayers) || [];
+const mkLayerOf = m => m && m.layer ? mkLayers().find(l => l.id === m.layer) || null : null;
+const mkHidden = m => { const l = mkLayerOf(m); return !!(l && l.hidden); };
+function mkCommon(m){   // the fields every markup can carry (any kind, any age), checked when a project is opened
+  ["subject", "author", "status"].forEach(k => { if (m[k] != null) m[k] = String(m[k]).slice(0, 200); });
+  if (m.layer != null) m.layer = String(m.layer).slice(0, 40);
+  if (m.replies != null) m.replies = Array.isArray(m.replies) ? m.replies.filter(r => r && typeof r === "object" && typeof r.text === "string").slice(0, 500).map(r => ({id: String(r.id || uid("R")).slice(0, 40), author: String(r.author || "").slice(0, 100), at: String(r.at || "").slice(0, 40), text: r.text.slice(0, 5000)})) : [];
+}
+function mlFilterClean(f){ f = f && typeof f === "object" ? f : {}; const o = {}; ["q", "type", "status", "author", "layer", "space"].forEach(k => { o[k] = String(f[k] == null ? "" : f[k]).slice(0, 120); }); o.scope = f.scope === "all" ? "all" : "page"; return o; }
+function mkProjCommon(p){   // a project's markup layers, statuses and saved filters, checked
+  const arr = Array.isArray, obj = v => v && typeof v === "object" && !arr(v);
+  if (p.mkLayers != null) p.mkLayers = arr(p.mkLayers) ? p.mkLayers.filter(l => obj(l) && l.id != null).slice(0, 200).map(l => ({id: String(l.id).slice(0, 40), name: String(l.name == null ? "Layer" : l.name).slice(0, 80), hidden: !!l.hidden})) : [];
+  if (p.mkStatuses != null) p.mkStatuses = arr(p.mkStatuses) ? [...new Set(p.mkStatuses.filter(x => typeof x === "string" && x.trim()).map(x => x.trim().slice(0, 40)))].slice(0, 60) : [];
+  if (p.mkFilters != null) p.mkFilters = arr(p.mkFilters) ? p.mkFilters.filter(x => obj(x) && typeof x.name === "string" && x.name.trim()).slice(0, 60).map(x => ({id: String(x.id || uid("F")).slice(0, 40), name: x.name.trim().slice(0, 60), f: mlFilterClean(x.f)})) : [];
+}
+const mkCenter = m => { if (m.type === "note" || m.type === "attach") return m.pts[0]; const P2 = m.type === "callout" ? m.pts.slice(1) : m.pts, xs = P2.map(p => p[0]), ys = P2.map(p => p[1]); return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2]; };
+function mkSpaceOf(m){   // the room a markup sits in: the smallest named area measured under its middle (Bluebeam's Spaces)
+  const c = mkCenter(m); let best = "", ba = Infinity;
+  P.proj.items.forEach(i => { if (i.file !== m.file || i.page !== m.page || !i.label || i.kind === "ded") return; const cd = cond(i.cond); if (!cd || cd.type !== "area") return;
+    const poly = itemPoly(i); if (poly.length > 2 && pointInPoly(c, poly)) { const a = Math.abs(polyArea(poly)); if (a < ba) { ba = a; best = i.label; } } });
+  return best;
+}
+const mkName = m => MK_TOOL_NAMES["mk_" + mkKindOf(m)] || MARK_TOOLS[m.type] || m.type;
+const mkPlain = m => m.type === "stamp" ? ((m.stamp || {}).label || "") + ((m.stamp || {}).sub ? " · " + m.stamp.sub : "") : m.type === "link" ? ((m.text ? m.text + " → " : "") + (m.link && (m.link.url || (m.link.key ? keyName(m.link.key) : "")) || "")) : m.type === "attach" ? (m.att || {}).name || "" : m.type === "image" ? (m.img || {}).name || "" : String(m.text || "");
+function mlRows(){
+  const o = mlPref(), f = S.ml, q = f.q.trim().toLowerCase(), order = new Map(); allPages().forEach((x, i) => order.set(x.key, i));
+  let L = (P.proj.marks || []).filter(m => m.type !== "fence" && (o.scope === "all" || (m.file === S.fileId && m.page === S.pageNo)));
+  if (f.type) L = L.filter(m => mkKindOf(m) === f.type);
+  if (f.status) L = L.filter(m => (m.status || "") === (f.status === "(none)" ? "" : f.status));
+  if (f.author) L = L.filter(m => (m.author || "") === (f.author === "(none)" ? "" : f.author));
+  if (f.layer) L = L.filter(m => (m.layer || "") === (f.layer === "(none)" ? "" : f.layer));
+  let R = L.map(m => ({m, id: m.id, type: mkName(m), subject: m.subject || MARK_TOOLS[m.type], text: mkPlain(m), page: keyName(keyOf(m.file, m.page)), po: order.has(keyOf(m.file, m.page)) ? order.get(keyOf(m.file, m.page)) : 1e9,
+    author: m.author || "", at: m.at || "", status: m.status || "", layer: (mkLayerOf(m) || {}).name || "", space: mkSpaceOf(m), replies: (m.replies || []).length, color: m.color || ""}));
+  if (f.space) R = R.filter(r => r.space === (f.space === "(none)" ? "" : f.space));
+  if (q) R = R.filter(r => [r.type, r.subject, r.text, r.page, r.author, r.status, r.layer, r.space].concat((r.m.replies || []).map(x => x.text)).join(" ").toLowerCase().includes(q));
+  const k = o.sort, d = o.dir === -1 ? -1 : 1;
+  R.sort((a, b) => { const v = k === "page" ? a.po - b.po || mkCenter(a.m)[1] - mkCenter(b.m)[1] : k === "replies" ? a.replies - b.replies : k === "at" ? String(a.at).localeCompare(String(b.at)) : String(a[k] || "").localeCompare(String(b[k] || ""), undefined, {numeric: true, sensitivity: "base"}); return v * d || a.po - b.po; });
+  return R;
+}
+const hhmm = iso => { const d = new Date(iso); return isNaN(d) ? "" : ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2); };   // local time
+const ML_COLS = [["type", "Type"], ["subject", "Subject"], ["text", "Comments"], ["page", "Page"], ["author", "Author"], ["at", "Date"], ["status", "Status"], ["layer", "Layer"], ["space", "Space"], ["replies", "Replies"]];
+function mlToggle(open){ const o = mlPref(); mlSet({open: open == null ? !o.open : !!open}); mlRender(true); setTimeout(() => { if (S.page) { applyView(); renderHi(); } }, 0); }
+let mlT = 0;
+function mlSoon(){ if (!mlPref().open || mlT) return; mlT = requestAnimationFrame(() => { mlT = 0; mlRender(); }); }
+function mlRender(head){
+  const el = $("mkList"); if (!el) return; const o = mlPref(), on = !!(o.open && P.proj);
+  el.style.display = on ? "flex" : "none"; el.style.height = Math.max(120, Math.min(700, +o.h || 300)) + "px";
+  const tb = $("bMkList"); if (tb) tb.classList.toggle("on", on);
+  if (!on) return;
+  if (head || !$("mlHead")) {
+    const all = (P.proj.marks || []).filter(m => m.type !== "fence"), f = S.ml, opt = (v, n, cur) => `<option value="${esc(v)}"${String(cur) === String(v) ? " selected" : ""}>${esc(n)}</option>`;
+    const kinds = [...new Set(all.map(mkKindOf))].sort(), authors = [...new Set(all.map(m => m.author || ""))].sort(), sts = mkStatusList().slice(1), saved = P.proj.mkFilters || [];
+    const spaces = [...new Set(all.map(mkSpaceOf).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+    el.innerHTML = `<div class="mlrz" id="mlRz" title="Drag to resize"></div><div class="mlhead" id="mlHead"><b>Markups list</b>
+      <select id="mlScope" title="Which markups">${opt("page", "This page", o.scope)}${opt("all", "All pages", o.scope)}</select>
+      <input type="search" id="mlQ" placeholder="Search comments, subjects, authors…" value="${esc(f.q)}">
+      <select id="mlType" title="Type"><option value="">All types</option>${kinds.map(k => opt(k, MK_TOOL_NAMES["mk_" + k] || MARK_TOOLS[k] || k, f.type)).join("")}</select>
+      <select id="mlSt" title="Status"><option value="">Any status</option>${opt("(none)", "No status", f.status)}${sts.map(s => opt(s, s, f.status)).join("")}</select>
+      <select id="mlAu" title="Author"><option value="">Any author</option>${authors.map(a => opt(a || "(none)", a || "No author", f.author)).join("")}</select>
+      <select id="mlLy" title="Markup layer"><option value="">Any layer</option>${opt("(none)", "No layer", f.layer)}${mkLayers().map(l => opt(l.id, l.name, f.layer)).join("")}</select>
+      ${spaces.length ? `<select id="mlSp" title="Space (the room it sits in)"><option value="">Any space</option>${opt("(none)", "Not in a room", f.space)}${spaces.map(s => opt(s, s, f.space)).join("")}</select>` : ""}
+      <select id="mlSaved" title="Saved filters"><option value="">Filters…</option>${saved.map(x => opt(x.id, x.name, "")).join("")}<option value="+">Save this filter…</option>${saved.length ? '<option value="-">Delete a filter…</option>' : ""}</select>
+      <span class="sp"></span><button class="btn sm" id="mlExp" title="Summary of the markups listed: CSV, XML or a printable PDF">Summary ▾</button><button class="btn sm" id="mlStat" title="Your own statuses">Statuses…</button><button class="btn sm" id="mlClose" title="Close (Alt+L)">&times;</button></div>
+      <div class="mlbody" id="mlBody"></div>`;
+  }
+  const R = mlRows(), f = S.ml, foc = f.focus && objById(f.focus);
+  [...f.ticked].forEach(id => { if (!objById(id)) f.ticked.delete(id); });
+  const nT = [...f.ticked].length, sts = mkStatusList();
+  const row = r => `<tr data-mlid="${esc(r.id)}" class="${r.id === f.focus || selIds().has(r.id) ? "on" : ""}"><td><input type="checkbox" data-mlt="${esc(r.id)}"${f.ticked.has(r.id) ? " checked" : ""}></td>
+    <td><span class="mlsw" style="background:${esc(r.color || "#9fb0c6")}"></span>${esc(r.type)}</td><td>${esc(r.subject)}</td><td class="mltx" title="${esc(r.text)}">${esc(r.text.length > 90 ? r.text.slice(0, 89) + "…" : r.text)}</td>
+    <td>${esc(r.page)}</td><td>${esc(r.author)}</td><td>${esc(dmy(r.at))}</td>
+    <td><select data-mlst="${esc(r.id)}">${sts.map(s => `<option value="${esc(s)}"${s === r.status ? " selected" : ""}>${esc(s || "—")}</option>`).join("")}</select></td>
+    <td>${esc(r.layer)}</td><td>${esc(r.space)}</td><td class="n">${r.replies || ""}</td></tr>`;
+  const SHOW = 1500;
+  $("mlBody").innerHTML = `<div class="mltab"><div class="mlbar">${R.length} markup${R.length === 1 ? "" : "s"}${R.length > SHOW ? " (the first " + SHOW + " shown — filter to see the rest)" : ""}${nT ? ` · <b>${nT} ticked</b>
+      <select id="mlBSt"><option value="">Set status…</option>${sts.map(s => `<option value="${esc(s) || "(none)"}">${esc(s || "None")}</option>`).join("")}</select>
+      <select id="mlBLy"><option value="">Move to layer…</option><option value="(none)">No layer</option>${mkLayers().map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join("")}<option value="+">New layer…</option></select>
+      <button class="btn sm" id="mlBSel">Select on the drawing</button><button class="btn sm dng" id="mlBDel">Delete</button>` : ""}</div>
+    <div class="mlscroll"><table class="mlt"><thead><tr><th><input type="checkbox" id="mlAll"${R.length && R.every(r => f.ticked.has(r.id)) ? " checked" : ""} title="Tick all listed"></th>${ML_COLS.map(([k, n]) => `<th data-mls="${k}" class="${mlPref().sort === k ? "on" : ""}">${n}${mlPref().sort === k ? (mlPref().dir === -1 ? " ▾" : " ▴") : ""}</th>`).join("")}</tr></thead>
+    <tbody>${R.slice(0, SHOW).map(row).join("") || `<tr><td colspan="${ML_COLS.length + 1}" class="mlempty">No markups${S.ml.q || S.ml.type || S.ml.status || S.ml.author || S.ml.layer || S.ml.space ? " match the filter" : mlPref().scope === "page" ? " on this page — draw one with ✎ Markup ▾, or list All pages" : " yet"}.</td></tr>`}</tbody></table></div></div>
+    ${foc ? mlDetail(foc) : ""}`;
+}
+function mlDetail(m){   // the focused markup: its comment and its replies
+  const R = m.replies || [];
+  return `<div class="mldet"><div class="mldh"><b>${esc(mkName(m))}</b> · ${esc(keyName(keyOf(m.file, m.page)))}<span class="sp"></span><button class="btn sm" data-mlgo="${esc(m.id)}">Show</button><button class="btn sm" id="mlDetX" title="Close">&times;</button></div>
+    <div class="small">${esc(m.author || "—")} · ${esc(dmy(m.at))}${m.status ? " · <b>" + esc(m.status) + "</b>" : ""}</div>
+    <div class="mlc">${esc(mkPlain(m)) || '<span class="small">no comment</span>'}</div>
+    <div class="mlreps">${R.map(r => `<div class="mlrep"><div class="small"><b>${esc(r.author || "—")}</b> · ${esc(dmy(r.at))} ${esc(hhmm(r.at))}<button class="mlrx" data-mlrdel="${esc(r.id)}" title="Delete this reply">&times;</button></div>${esc(r.text)}</div>`).join("") || '<div class="small">No replies yet.</div>'}</div>
+    <textarea id="mlRep" rows="2" placeholder="Reply…"></textarea><button class="btn sm pri" id="mlRepGo">Reply</button></div>`;
+}
+async function mlGo(id){   // a row clicked: the page, the markup selected and in view
+  const m = objById(id); if (!m) return;
+  if (m.file !== S.fileId || m.page !== S.pageNo) await gotoPage(m.file, m.page);
+  if (!onPage(m)) return;
+  setTool("select"); setSel([id]); refresh();
+  const sp = toScr(mkCenter(m)), st = stage(); if (sp[0] < 0 || sp[1] < 0 || sp[0] > st.clientWidth || sp[1] > st.clientHeight) zoomTo(new Set([id]));
+  S.flash = {key: S.key, p: mkCenter(m), until: Date.now() + 1500}; draw(); setTimeout(draw, 1600);
+}
+async function mlReply(m, text){
+  text = String(text || "").trim(); if (!text) return;
+  const who = qaUser() || await askUser();
+  mutate(() => { m.replies = (m.replies || []).concat([{id: uid("R"), author: who || "", at: new Date().toISOString(), text: text.slice(0, 5000)}]); m.mod = new Date().toISOString(); }, "Reply");
+}
+async function mlStatuses(){   // your own statuses, beside Bluebeam's
+  const cur = (P.proj.mkStatuses || []).join("\n");
+  const v = await ask("Markup statuses", `<p class="small">Bluebeam's statuses are always there: ${MK_STATUSES.slice(1).map(esc).join(", ")}. Add your own, one per line (e.g. <i>Back-charge</i>, <i>Site to confirm</i>). They are kept with this project.</p>
+    <textarea id="stList" rows="7" style="width:100%;font:inherit">${esc(cur)}</textarea>`, "Save", () => ({L: [...new Set($("stList").value.split(/\r?\n/).map(x => x.trim()).filter(Boolean))].slice(0, 60).map(x => x.slice(0, 40))}), "stList");
+  if (v) { mutate(() => { P.proj.mkStatuses = v.L.filter(x => MK_STATUSES.indexOf(x) < 0); }, "Markup statuses"); mlRender(true); }
+}
+async function mkLayerNew(){
+  const v = await ask("New markup layer", `<div class="fg w2"><label>Name</label><input type="text" id="mklN" placeholder="e.g. Site comments, QS review, Client"></div>`, "Add", () => { const n = $("mklN").value.trim(); return n ? {n: n.slice(0, 80)} : "Name the layer"; }, "mklN");
+  if (!v) return null; const id = uid("L"); mutate(() => { (P.proj.mkLayers = P.proj.mkLayers || []).push({id, name: v.n, hidden: false}); }, "New markup layer"); return id;
+}
+function mkLayersHtml(){
+  const L = mkLayers(), n = id => (P.proj.marks || []).filter(m => (m.layer || "") === id).length;
+  return `<div class="lyrbar"><b style="flex:1;color:var(--navy)">Markup layers · ${L.length}</b><button class="btn sm" data-mkl="add" title="A layer for markups (yours, the site's, the client's…)">+ Layer</button><button class="btn sm" data-mkl="list" title="Markups list (Alt+L)">☰ List</button></div>`
+    + L.map(l => `<label class="lyr"><input type="checkbox" data-mklv="${esc(l.id)}"${l.hidden ? "" : " checked"}> <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(l.name)} <span class="small">(${n(l.id)})</span></span><button type="button" class="lyiso" data-mklr="${esc(l.id)}" title="Rename">&#9998;</button><button type="button" class="lyiso" data-mkld="${esc(l.id)}" title="Delete the layer (its markups stay, on no layer)">&times;</button></label>`).join("")
+    + `<div class="small" style="padding:4px 12px 10px">${L.length ? "A layer switched off is hidden on the drawing and left out of exports (a redaction still applies). " : ""}Put markups on a layer from their Properties or the Markups list.</div>`;
+}
+async function mkLayerAct(t){
+  const id = t.dataset.mklr || t.dataset.mkld, l = mkLayers().find(x => x.id === id);
+  if (t.dataset.mkl === "add") { await mkLayerNew(); renderLayers(); mlRender(true); return; }
+  if (t.dataset.mkl === "list") return mlToggle(true);
+  if (!l) return;
+  if (t.dataset.mklr) { const v = await ask("Rename layer", `<div class="fg w2"><label>Name</label><input type="text" id="mklN" value="${esc(l.name)}"></div>`, "Save", () => { const n = $("mklN").value.trim(); return n ? {n: n.slice(0, 80)} : "Name the layer"; }, "mklN"); if (v) mutate(() => { l.name = v.n; }, "Rename markup layer"); }
+  if (t.dataset.mkld) { if (!confirm("Delete the layer “" + l.name + "”? Its markups stay, on no layer.")) return; mutate(() => { P.proj.mkLayers = mkLayers().filter(x => x.id !== id); (P.proj.marks || []).forEach(m => { if (m.layer === id) delete m.layer; }); }, "Delete markup layer"); }
+  renderLayers(); mlRender(true);
+}
+/* summaries of the markups listed */
+const mlCols = r => [r.page, ((P.proj.sheets || {})[keyOf(r.m.file, r.m.page)] || {}).no || "", r.type, r.subject, r.text, r.author, r.at ? dmy(r.at) + " " + hhmm(r.at) : "", r.m.mod ? dmy(r.m.mod) : "", r.status, r.layer, r.space, r.color, (r.m.replies || []).map(x => (x.author || "—") + " (" + dmy(x.at) + "): " + x.text).join(" | ")];
+const ML_HEAD = ["Page", "Sheet", "Type", "Subject", "Comments", "Author", "Date", "Modified", "Status", "Layer", "Space", "Colour", "Replies"];
+function mlCsv(R){
+  const t = [ML_HEAD].concat(R.map(mlCols)).map(r => r.map(v => { v = String(v == null ? "" : v); return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
+  saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Markups.csv");
+}
+function mlXml(R){
+  const x = v => String(v == null ? "" : v).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;"}[c])).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "");
+  const out = [`<?xml version="1.0" encoding="UTF-8"?>`, `<Markups project="${x(P.proj.name)}" exported="${x(new Date().toISOString())}" count="${R.length}">`];
+  R.forEach(r => { const m = r.m;
+    out.push(`  <Markup id="${x(m.id)}" type="${x(mkKindOf(m))}">`, `    <Page>${x(r.page)}</Page>`, `    <Sheet>${x(((P.proj.sheets || {})[keyOf(m.file, m.page)] || {}).no || "")}</Sheet>`, `    <Subject>${x(r.subject)}</Subject>`, `    <Comments>${x(r.text)}</Comments>`,
+      `    <Author>${x(r.author)}</Author>`, `    <Date>${x(r.at)}</Date>`, `    <Modified>${x(m.mod || "")}</Modified>`, `    <Status>${x(r.status)}</Status>`, `    <Layer>${x(r.layer)}</Layer>`, `    <Space>${x(r.space)}</Space>`, `    <Color>${x(r.color)}</Color>`,
+      `    <Bounds>${x(mkPolyBounds(m).map(v => v.toFixed(2)).join(","))}</Bounds>`);
+    if ((m.replies || []).length) { out.push("    <Replies>"); m.replies.forEach(p => out.push(`      <Reply author="${x(p.author)}" date="${x(p.at)}">${x(p.text)}</Reply>`)); out.push("    </Replies>"); }
+    out.push("  </Markup>"); });
+  out.push("</Markups>");
+  saveBlob(new Blob([out.join("\n")], {type: "application/xml"}), fileBase() + "_Markups.xml");
+}
+function mkPolyBounds(m){ const xs = m.pts.map(p => p[0]), ys = m.pts.map(p => p[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; }
+async function mlSummary(R, pics){   // a printable summary (print → Save as PDF), a picture of each markup when asked
+  const w = window.open("", "_blank"); if (!w) return toast("The browser blocked the new tab — allow pop-ups for this page, then try again", 5000);
+  w.document.write("<!doctype html><title>Markups summary…</title><p style='font:14px Segoe UI,Arial'>Building the markups summary…</p>");
+  const shots = new Map();
+  if (pics) {
+    const byPage = new Map(); R.slice(0, 300).forEach(r => { const k = keyOf(r.m.file, r.m.page); if (!byPage.has(k)) byPage.set(k, []); byPage.get(k).push(r.m); });
+    for (const [k, L] of byPage) {
+      busy("Pictures of the markups… " + keyName(k));
+      try { const [f, p0] = k.split(":"), p = +p0, pg = await (await doc(f)).getPage(p), base = pg.getViewport({scale: 1}), sc = Math.min(2, 2400 / Math.max(base.width, base.height));
+        const cv = document.createElement("canvas"); cv.width = Math.ceil(base.width * sc); cv.height = Math.ceil(base.height * sc); const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
+        await loadLayers(f); await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})})).promise;
+        await mkAssetsFor(f, p); await svgOnto(ctx, pageOverlaySvg(f, p, sc, cv.width, cv.height, {legend: "none", meas: false}));
+        L.forEach(m => { const b = mkPolyBounds(m), mg = 24, x0 = Math.max(0, (b[0] - mg) * sc), y0 = Math.max(0, (b[1] - mg) * sc), x1 = Math.min(cv.width, (b[2] + mg) * sc), y1 = Math.min(cv.height, (b[3] + mg) * sc);
+          const W = Math.max(1, x1 - x0), H = Math.max(1, y1 - y0), k2 = Math.min(1, 260 / W, 180 / H), t = document.createElement("canvas"); t.width = Math.max(1, Math.round(W * k2)); t.height = Math.max(1, Math.round(H * k2));
+          t.getContext("2d").drawImage(cv, x0, y0, W, H, 0, 0, t.width, t.height); shots.set(m.id, t.toDataURL("image/jpeg", 0.82)); t.width = 0; });
+        cv.width = 0; } catch (e) { /* a page that cannot be drawn: listed without pictures */ }
+    }
+    busy("");
+  }
+  const groups = new Map(); R.forEach(r => { const k = r.page; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); });
+  const css = `body{font:12px "Segoe UI",Arial,sans-serif;color:#1e2b3a;margin:24px}h1{font-size:18px;color:#0f2942;margin:0 0 4px}h2{font-size:14px;color:#0f2942;margin:18px 0 6px;border-bottom:2px solid #0f2942;padding-bottom:3px}
+    table{border-collapse:collapse;width:100%}th,td{border:1px solid #c9d6e4;padding:4px 6px;vertical-align:top;text-align:left}th{background:#eef2f7;font-size:11px}td.p{width:180px}td.p img{max-width:260px;max-height:180px;display:block}.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+    .rep{margin-top:4px;padding:3px 6px;border-left:3px solid #c9d6e4;color:#33475b}.meta{color:#6b7d92}@media print{h2{break-after:avoid}tr{break-inside:avoid}}`;
+  const body = [...groups].map(([pg, rows]) => `<h2>${esc(pg)}</h2><table><tr>${pics ? "<th>Markup</th>" : ""}<th>Type / subject</th><th>Comments</th><th>Author · date</th><th>Status</th><th>Layer · space</th></tr>${rows.map(r => `<tr>${pics ? `<td class="p">${shots.get(r.id) ? `<img src="${shots.get(r.id)}" alt="">` : ""}</td>` : ""}
+    <td><span class="sw" style="background:${esc(r.color || "#9fb0c6")}"></span><b>${esc(r.type)}</b>${r.subject !== r.type ? "<br>" + esc(r.subject) : ""}</td><td>${esc(r.text).replace(/\n/g, "<br>")}${(r.m.replies || []).map(x => `<div class="rep"><b>${esc(x.author || "—")}</b> <span class="meta">${esc(dmy(x.at))}</span><br>${esc(x.text)}</div>`).join("")}</td>
+    <td>${esc(r.author || "—")}<br><span class="meta">${esc(dmy(r.at))}</span></td><td>${esc(r.status || "—")}</td><td>${esc([r.layer, r.space].filter(Boolean).join(" · ") || "—")}</td></tr>`).join("")}</table>`).join("");
+  w.document.open(); w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(P.proj.name)} — markups summary</title><style>${css}</style></head><body><h1>${esc(P.proj.name)} — markups summary</h1>
+    <div class="meta">${R.length} markup${R.length === 1 ? "" : "s"} · ${esc(dmy(today()))}${qaUser() ? " · " + esc(qaUser()) : ""} · Print → Save as PDF</div>${body || "<p>No markups listed.</p>"}</body></html>`); w.document.close();
+}
+async function mlExport(anchor){
+  const R = mlRows(), r = anchor.getBoundingClientRect();
+  ctxShow([{h: "Summary of " + R.length + " markup" + (R.length === 1 ? "" : "s"), s: "the markups listed, as filtered and sorted"}, {t: "PDF summary with pictures (print → Save as PDF)…", fn: () => mlSummary(R, true)}, {t: "PDF summary, text only…", fn: () => mlSummary(R, false)},
+    {sep: 1}, {t: "CSV (Excel)", fn: () => mlCsv(R)}, {t: "XML", fn: () => mlXml(R)}], r.left, r.bottom + 4);
+}
+async function mlSavedAct(v){
+  if (v === "+") { const n = await ask("Save this filter", `<div class="fg w2"><label>Name</label><input type="text" id="mlfN" placeholder="e.g. Open site comments"></div>`, "Save", () => { const x = $("mlfN").value.trim(); return x ? {x: x.slice(0, 60)} : "Name the filter"; }, "mlfN");
+    if (n) mutate(() => { (P.proj.mkFilters = P.proj.mkFilters || []).push({id: uid("F"), name: n.x, f: mlFilterClean(Object.assign({}, S.ml, {scope: mlPref().scope}))}); }, "Save filter"); mlRender(true); return; }
+  if (v === "-") { const L = P.proj.mkFilters || [], d = await ask("Delete a filter", `<div class="fg w2"><label>Filter</label><select id="mlfD">${L.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("")}</select></div>`, "Delete", () => ({id: $("mlfD").value}));
+    if (d) mutate(() => { P.proj.mkFilters = L.filter(x => x.id !== d.id); }, "Delete filter"); mlRender(true); return; }
+  const x = (P.proj.mkFilters || []).find(y => y.id === v); if (!x) return;
+  Object.assign(S.ml, mlFilterClean(x.f), {ticked: new Set(), focus: null}); mlSet({scope: x.f.scope === "all" ? "all" : "page"}); mlRender(true); toast("Filter: " + x.name, 1600);
+}
+function mlWire(){
+  const el = $("mkList"); if (!el) return;
+  el.addEventListener("input", e => { if (e.target.id === "mlQ") { S.ml.q = e.target.value; mlRender(); } });
+  el.addEventListener("change", e => {
+    const t = e.target, id = t.dataset.mlst || t.dataset.mlt;
+    if (t.id === "mlScope") { mlSet({scope: t.value}); S.ml.ticked.clear(); return mlRender(true); }
+    if (t.id === "mlType" || t.id === "mlSt" || t.id === "mlAu" || t.id === "mlLy" || t.id === "mlSp") { S.ml[{mlType: "type", mlSt: "status", mlAu: "author", mlLy: "layer", mlSp: "space"}[t.id]] = t.value; return mlRender(); }
+    if (t.id === "mlSaved") { const v = t.value; t.value = ""; if (v) mlSavedAct(v); return; }
+    if (t.dataset.mlst) { const m = objById(id); if (m) mutate(() => { m.status = t.value; m.mod = new Date().toISOString(); }, "Status " + (t.value || "none")); return; }
+    if (t.dataset.mlt) { if (t.checked) S.ml.ticked.add(id); else S.ml.ticked.delete(id); return mlRender(); }
+    if (t.id === "mlAll") { const R = mlRows(); if (t.checked) R.forEach(r => S.ml.ticked.add(r.id)); else S.ml.ticked.clear(); return mlRender(); }
+    if (t.id === "mlBSt" && t.value) { const v = t.value === "(none)" ? "" : t.value, ids = new Set(S.ml.ticked); mutate(() => (P.proj.marks || []).forEach(m => { if (ids.has(m.id)) { m.status = v; m.mod = new Date().toISOString(); } }), "Status " + (v || "none") + " on " + ids.size); return; }
+    if (t.id === "mlBLy" && t.value) { const ids = new Set(S.ml.ticked), go = async () => { let v = t.value; if (v === "+") { v = await mkLayerNew(); if (!v) return mlRender(); } mutate(() => (P.proj.marks || []).forEach(m => { if (ids.has(m.id)) { if (v === "(none)") delete m.layer; else m.layer = v; } }), "Move " + ids.size + " to a layer"); renderLayers(); mlRender(true); }; go(); return; }
+  });
+  el.addEventListener("click", e => {
+    const t = e.target;
+    if (t.id === "mlClose") return mlToggle(false);
+    if (t.id === "mlExp") return mlExport(t);
+    if (t.id === "mlStat") return mlStatuses();
+    if (t.id === "mlDetX") { S.ml.focus = null; return mlRender(); }
+    if (t.id === "mlRepGo") { const m = objById(S.ml.focus); if (m) mlReply(m, $("mlRep").value).then(() => mlRender()); return; }
+    if (t.dataset.mlrdel) { const m = objById(S.ml.focus); if (m && confirm("Delete this reply?")) mutate(() => { m.replies = (m.replies || []).filter(r => r.id !== t.dataset.mlrdel); }, "Delete reply"); return; }
+    if (t.dataset.mlgo) return mlGo(t.dataset.mlgo);
+    if (t.id === "mlBSel") { const ids = [...S.ml.ticked].filter(id => onPage(objById(id))); if (!ids.length) return toast("None of the ticked markups is on this page", 2500); setTool("select"); setSel(ids); refresh(); return; }
+    if (t.id === "mlBDel") { const ids = new Set(S.ml.ticked); if (ids.size && confirm("Delete " + ids.size + " markup" + (ids.size === 1 ? "" : "s") + "?")) { delObjects(ids); S.ml.ticked.clear(); } return; }
+    const th = t.closest("th[data-mls]"); if (th) { const o = mlPref(); mlSet(o.sort === th.dataset.mls ? {dir: -o.dir || -1} : {sort: th.dataset.mls, dir: 1}); return mlRender(); }
+    const tr = t.closest("tr[data-mlid]"); if (tr && !t.closest("input,select,button")) { S.ml.focus = tr.dataset.mlid; mlGo(tr.dataset.mlid).then(() => mlRender()); }
+  });
+  el.addEventListener("dblclick", e => { const tr = e.target.closest("tr[data-mlid]"); if (tr && !e.target.closest("input,select,button")) { const m = objById(tr.dataset.mlid); if (m) editMarkText(m); } });
+  el.addEventListener("keydown", e => { if (e.target.id === "mlRep" && e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $("mlRepGo").click(); } });
+  el.addEventListener("pointerdown", e => {   // the top edge: drag to make the list taller or shorter
+    if (e.target.id !== "mlRz") return; e.preventDefault(); const y0 = e.clientY, h0 = el.offsetHeight;
+    const mv = ev => { el.style.height = Math.max(120, Math.min(700, h0 + y0 - ev.clientY)) + "px"; };
+    const up = () => { document.removeEventListener("pointermove", mv); document.removeEventListener("pointerup", up); mlSet({h: el.offsetHeight}); if (S.page) { applyView(); renderHi(); } };
+    document.addEventListener("pointermove", mv); document.addEventListener("pointerup", up);
+  });
 }
 
 /* ------------------------------------------------------------------ colour picker (condition swatch) */
@@ -4392,7 +4630,7 @@ function pageOverlaySvg0(file, page, sc, W, H, legend){
       if (k && lblOn) { const scr = poly.map(T), L = capLines(it, c, k), m = lineLabelPt(scr, z); if (L.length) h.push(labelBox(m, L, ded ? "#9b2222" : "#0b0b0b", z)); if (S.lbl.seg && it.shape !== "circle") h.push(segLabels(scr, it.pts, k, false, z)); }
     }
   });
-  if (o.mk !== false) (P.proj.marks || []).filter(m => m.file === file && m.page === page && m.type !== "fence").forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
+  if (o.mk !== false) (P.proj.marks || []).filter(m => m.file === file && m.page === page && m.type !== "fence" && (!mkHidden(m) || m.type === "redact")).forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
   const sh = (P.proj.sheets || {})[keyOf(file, page)] || {}, lz = z * ({s: 0.8, m: 1, l: 1.3}[o.lsz] || 1), pos = o.legend || "none";
   if (pos !== "none") {
     const lines = (pos === "margin" ? [[P.proj.name, "", 700], [[sh.no, sh.title].filter(Boolean).join(" · ") || pageName({file, page}), "", 600], [pageName({file, page}), "", 400]].filter((l, i) => i < 2 || sh.no || sh.title)
@@ -5713,6 +5951,7 @@ function paletteCmds(){
   }
   document.querySelectorAll("#tools [data-tool]").forEach(b => btn(b, "Tool"));
   Object.entries(MK_TOOL_NAMES).forEach(([t, n]) => add("Markup: " + n, () => setTool(t), "Tool"));
+  add("Markups list — filter, statuses, replies, summaries (Alt+L)", () => mlToggle(true), "View");
   add("Next unchecked measurement", nextUnchecked, "Check");
   add("Check before export (errors and warnings)", exportMenu, "Check");
   add("Excel measurement sheet", exportExcel, "Export"); add("CSV", exportCsv, "Export");
@@ -5877,7 +6116,7 @@ function setDefaultsFromSelection(o){
 function ctxMark(m){
   const ids = selIds(), many = ids.size > 1, allLk = [...ids].map(objById).filter(Boolean).every(o => o.locked);
   return [{h: many ? ids.size + " selected" : MARK_TOOLS[m.type], s: many ? "" : (m.text || "markup — not a quantity") + (m.locked ? " · locked" : "")},
-    ...mkCtxItems(m, many),
+    ...mkCtxItems(m, many), !many ? {t: "Comments and replies…", fn: () => { S.ml.focus = m.id; mlSet({scope: "page"}); mlToggle(true); }} : null,
     !many ? {t: "Properties…", fn: focusProps} : null, !many ? {t: "Set as default", fn: () => setDefaultsFromSelection(m)} : null, !many && MARK_PROFILE_TYPES.includes(mkKindOf(m)) ? {t: "Add to Tool Chest…", fn: () => toolChestDialog({object: m, name: MARK_TOOLS[m.type] + " profile"})} : null, {sep: 1}, ...ctxClip(null), {sep: 1}, ctxArrange(), {t: allLk ? "Unlock" : "Lock", k: "Ctrl+Shift+L", fn: lockSel},
     {t: "Select all " + MARK_TOOLS[m.type].toLowerCase() + "s on this page", fn: () => selectSimilar(m)}, {t: "Zoom to", fn: () => zoomTo(ids)}, {sep: 1}, {t: "Delete", k: "Del", fn: delSelected, dng: 1, dis: allLk}];
 }
@@ -5900,7 +6139,7 @@ function keysDialog(){
     ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
     ${G("Find anything", [["Ctrl+K", "command palette: type the name of any tool, export, dialog, page or condition"], ["Ctrl+F", "find text on the drawings"]])}
     ${G("Pages (Forma Takeoff sheets)", [["Tick a thumbnail | Shift+tick", "tick pages to export, read sheet info or OCR together · Shift: the pages in between"], ["Ctrl+click | Shift+click a thumbnail", "tick / untick it without opening it"], ["☆ on a thumbnail", "pin the page to the top"], ["Double-click a sheet no. on the drawing", "open that sheet (right-click lists the sheets referenced)"]])}
-    ${G("Markups (Bluebeam)", [["T | Q | N", "text box · callout · note"], ["Shift+L | Y | G", "line · polyline · polygon"], ["Shift+R | Shift+E | U", "rectangle · ellipse · cloud"], ["P | Shift+H", "pen · highlighter pen"], ["X | I", "stamp · image"], ["Markup ▾", "every markup tool: hyperlink, file attachment, redaction, erase…"], ["Dbl-click a markup", "edit its text · open a link or an attached file"], ["Drag a handle", "resize a box, move a line's end or a point"]])}
+    ${G("Markups (Bluebeam)", [["T | Q | N", "text box · callout · note"], ["Shift+L | Y | G", "line · polyline · polygon"], ["Shift+R | Shift+E | U", "rectangle · ellipse · cloud"], ["P | Shift+H", "pen · highlighter pen"], ["X | I", "stamp · image"], ["Markup ▾", "every markup tool: hyperlink, file attachment, redaction, erase…"], ["Dbl-click a markup", "edit its text · open a link or an attached file"], ["Drag a handle", "resize a box, move a line's end or a point"], ["Alt+L", "Markups list: every markup — filter, sort, status, replies, layers, CSV / XML / PDF summary"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
     ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"]])}
     ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"]])}
@@ -5960,6 +6199,8 @@ function wire(){
   document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.addEventListener("click", () => setTool(b.dataset.tool)));
   $("bAutoSet").onclick = () => P.proj && autoSettings();
   $("bMk").onclick = e => { e.stopPropagation(); if (P.proj && S.page) mkMenu($("bMk")); };
+  $("bMkList").onclick = () => { if (P.proj) mlToggle(); };
+  mlWire();
   $("bAdd").onclick = () => $("fileIn").click();
   $("fileIn").onchange = e => { addFiles([...e.target.files]); e.target.value = ""; };
   $("pageSel").onchange = e => { const [f, p] = e.target.value.split("|"); if (f && p) gotoPage(f, +p); };
@@ -6006,8 +6247,11 @@ function wire(){
     mi.addEventListener("pointermove", e => { e.stopPropagation(); if (S.miniDrag) miniGo(e); });
     mi.addEventListener("pointerup", e => { e.stopPropagation(); S.miniDrag = false; });
     ["dblclick", "contextmenu"].forEach(t => mi.addEventListener(t, e => { e.stopPropagation(); e.preventDefault(); })); }
-  $("layerList").addEventListener("change", e => { if (e.target.dataset.lid) setLayer([e.target.dataset.lid], e.target.checked); });
+  $("layerList").addEventListener("change", e => {
+    if (e.target.dataset.mklv) { const l = mkLayers().find(x => x.id === e.target.dataset.mklv); if (l) { mutate(() => { l.hidden = !e.target.checked; }, (e.target.checked ? "Show" : "Hide") + " layer " + l.name); renderLayers(); } return; }
+    if (e.target.dataset.lid) setLayer([e.target.dataset.lid], e.target.checked); });
   $("layerList").addEventListener("click", e => {
+    const mkl = e.target.closest("[data-mkl],[data-mklr],[data-mkld]"); if (mkl) { e.preventDefault(); e.stopPropagation(); return mkLayerAct(mkl); }
     const iso = e.target.closest("[data-liso]"); if (iso) { e.preventDefault(); e.stopPropagation(); return cadIsolateId(iso.dataset.liso); }
     if (e.target.closest("[data-cadq]")) return cadQtyDialog();
     const pr = e.target.closest("[data-lpre]");
@@ -6154,6 +6398,7 @@ function wire(){
     if (!P.proj) return;
     const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
     if ($("ctx").classList.contains("on")) { if (e.key === "Escape") { ctxClose(); return; } ctxClose(); }
+    if (e.altKey && !mod && k === "l") { e.preventDefault(); return mlToggle(); }   // Bluebeam: Alt+L, the Markups list
     if (mod && k === "z") { e.preventDefault(); return e.shiftKey ? redoAny() : undoAny(); }
     if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); return redoAny(); }
     if (e.altKey && S.cmp && /^Arrow/.test(e.key)) { e.preventDefault(); const st2 = (e.shiftKey ? 10 : 1) / S.view.s; S.cmp.dx += e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0; S.cmp.dy += e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0; clearTimeout(S.cmpT); S.cmpT = setTimeout(() => { renderLow(); renderHi(true); }, 120); return; }
@@ -8291,7 +8536,7 @@ function ocFix(Lb, out, fids){
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
-    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate};   // for tests and the console
+    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();

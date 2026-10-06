@@ -225,6 +225,75 @@ function png(w, h, px){   // a small RGBA PNG, px(x, y) -> [r, g, b, a]
     ok(got, "…and another browser gets them from it");
     await ctx2.close(); }
 
+  console.log("Markups list");
+  const rowsN = () => page.locator("#mkList tbody tr[data-mlid]").count();
+  await page.click("#bMkList"); await wait(300);
+  ok(await page.isVisible("#mkList") && await page.isVisible("#mlHead"), "☰ List opens the Markups list under the drawing");
+  const nPage = await T(() => (zdTakeoff.P.proj.marks || []).filter(m => m.file === zdTakeoff.S.fileId && m.page === zdTakeoff.S.pageNo && m.type !== "fence").length);
+  ok((await rowsN()) === nPage, "every markup on this page is a row (" + nPage + ")");
+  await page.fill("#mlQ", "slab"); await wait(200);
+  ok((await rowsN()) === 1, "search for slab: the text box");
+  await page.fill("#mlQ", ""); await wait(150);
+  await page.selectOption("#mlType", "stamp"); await wait(150);
+  ok((await rowsN()) === 1, "type filter: the stamp");
+  await page.selectOption("#mlType", ""); await wait(150);
+  await page.click('#mkList th[data-mls="subject"]'); await wait(150); await page.click('#mkList th[data-mls="subject"]'); await wait(200);
+  const subs = await T(() => [...document.querySelectorAll("#mkList tbody tr[data-mlid] td:nth-child(3)")].map(td => td.textContent));
+  ok(subs.length > 2 && subs.every((x, i) => !i || subs[i - 1].localeCompare(x, undefined, {numeric: true, sensitivity: "base"}) >= 0), "sorted by subject Z to A (a second click turns the order round)");
+  const stampId = (await marks()).find(x => x.type === "stamp").id;
+  await page.selectOption(`#mkList select[data-mlst="${stampId}"]`, "Completed"); await wait(200);
+  ok((await marks()).find(x => x.id === stampId).status === "Completed", "a status set in the list (Completed)");
+  await page.click("#mlStat"); await page.fill("#stList", "Site to confirm"); await page.click("#dlgOk"); await wait(250);
+  ok((await T(() => zdTakeoff.P.proj.mkStatuses || [])).includes("Site to confirm") && (await page.locator(`#mkList select[data-mlst="${stampId}"] option`, {hasText: "Site to confirm"}).count()) === 1, "your own status Site to confirm is offered");
+  const textId = (await marks()).find(x => x.type === "text").id;
+  await page.click(`#mkList tr[data-mlid="${textId}"] td:nth-child(3)`); await wait(500);
+  ok(await page.isVisible("#mlRep") && (await T(() => zdTakeoff.S.selMark)) === textId, "a row clicked: the markup is selected on the drawing, its replies shown");
+  await page.fill("#mlRep", "Confirmed with the structural engineer"); await page.click("#mlRepGo"); await wait(300);
+  const reps = (await marks()).find(x => x.id === textId).replies || [];
+  ok(reps.length === 1 && reps[0].author === "Test Checker" && /structural/.test(reps[0].text), "a reply, signed with your name");
+  await shot("list");
+  await page.click("#tLay"); await wait(250);
+  await page.click('[data-mkl="add"]'); await page.fill("#mklN", "Site comments"); await page.click("#dlgOk"); await wait(250);
+  const lay = await T(() => zdTakeoff.mkLayers()); ok(lay.length === 1 && lay[0].name === "Site comments", "a markup layer Site comments (Layers tab)");
+  await page.selectOption('#props [data-mprop="layer"]', lay[0].id); await wait(200);
+  ok((await marks()).find(x => x.id === textId).layer === lay[0].id, "the text box put on it from Properties");
+  await page.uncheck(`[data-mklv="${lay[0].id}"]`); await wait(300);
+  ok(!(await ov()).includes("Check slab level"), "the layer switched off: the text box is hidden on the drawing");
+  ok(!(await T(() => zdTakeoff.pageOverlaySvg(zdTakeoff.S.fileId, zdTakeoff.S.pageNo, 2, 1000, 1000, {legend: "none"}))).includes("Check slab level"), "...and left out of exports");
+  await page.check(`[data-mklv="${lay[0].id}"]`); await wait(300);
+  ok((await ov()).includes("Check slab level"), "switched on again: it is back");
+  await page.selectOption("#mlLy", lay[0].id); await wait(200);
+  ok((await rowsN()) === 1, "layer filter: the one markup on Site comments");
+  await page.selectOption("#mlLy", ""); await wait(150);
+  await page.selectOption("#mlSt", "Completed"); await wait(150);
+  await page.selectOption("#mlSaved", "+"); await page.fill("#mlfN", "Completed items"); await page.click("#dlgOk"); await wait(250);
+  ok((await T(() => (zdTakeoff.P.proj.mkFilters || []).map(f => f.name))).includes("Completed items"), "the filter saved with the project");
+  await page.selectOption("#mlSt", ""); await wait(150);
+  const fid = await T(() => zdTakeoff.P.proj.mkFilters[0].id); await page.selectOption("#mlSaved", fid); await wait(250);
+  ok((await rowsN()) === 1 && (await page.inputValue("#mlSt")) === "Completed", "chosen again, it filters again");
+  await page.selectOption("#mlSt", ""); await wait(150);
+  await T(() => zdTakeoff.mlToggle(false)); await wait(250);   // the list takes the bottom of the screen: closed while the room is drawn
+  await page.click("#tCond"); await wait(150); await page.click("#bNewCond"); await page.selectOption("#cPre", {label: "Floor area"}); await page.click("#dlgOk"); await wait(250);
+  await page.keyboard.press("r"); await clickAt(330, 400); await clickAt(470, 520); await wait(200);
+  await tool("select"); await clickAt(330, 460); await wait(200);
+  await page.fill('#props [data-prop="label"]', "LOUNGE"); await page.press('#props [data-prop="label"]', "Tab"); await wait(250);
+  const polyId = (await marks()).find(x => x.type === "polygon").id;
+  ok((await T(id => zdTakeoff.mkSpaceOf(zdTakeoff.P.proj.marks.find(m => m.id === id)), polyId)) === "LOUNGE", "Spaces: the polygon sits in the room measured as LOUNGE");
+  await T(() => zdTakeoff.mlToggle(true)); await wait(250);
+  ok((await T(id => (document.querySelector(`#mkList tr[data-mlid="${id}"] td:nth-child(10)`) || {}).textContent, polyId)) === "LOUNGE", "...its Space column says so");
+  const dlMenu = async item => { const [d] = await Promise.all([page.waitForEvent("download", {timeout: 15000}), (async () => { await page.click("#mlExp"); await wait(120); await page.click("#ctx >> text=" + item); })()]); const f = path.join(os.tmpdir(), "zdml_" + Date.now() + "_" + d.suggestedFilename()); await d.saveAs(f); return fs.readFileSync(f, "utf8"); };
+  const csv = await dlMenu("CSV (Excel)"), lines = csv.replace(/^﻿/, "").split(/\r\n/);
+  ok(lines[0] === "Page,Sheet,Type,Subject,Comments,Author,Date,Modified,Status,Layer,Space,Colour,Replies" && lines.length - 1 === await rowsN(), "CSV summary: one row per markup listed (" + (lines.length - 1) + ")");
+  ok(/Confirmed with the structural engineer/.test(csv) && /LOUNGE/.test(csv) && /Completed/.test(csv), "...with replies, spaces and statuses");
+  const xml = await dlMenu("XML");
+  ok(/^<\?xml/.test(xml) && /<Markups project="Markup test"/.test(xml) && /<Reply author="Test Checker"/.test(xml) && /<Space>LOUNGE<\/Space>/.test(xml), "XML summary");
+  { const [pop] = await Promise.all([page.waitForEvent("popup", {timeout: 20000}), (async () => { await page.click("#mlExp"); await wait(120); await page.click("#ctx >> text=PDF summary with pictures"); })()]);
+    const done = await pop.waitForFunction(() => /markups summary/.test(document.title) && document.querySelectorAll("table").length > 0, null, {timeout: 30000}).then(() => true, () => false);
+    const imgs = done ? await pop.locator("img").count() : 0;
+    ok(done && imgs >= 10, "PDF summary (print, Save as PDF) with a picture of each markup (" + imgs + ")"); await pop.close(); }
+  await page.keyboard.press("Alt+l"); await wait(200);
+  ok(!(await page.isVisible("#mkList")), "Alt+L closes the list");
+
   console.log("a project file's markups checked");
   const bad = await T(() => { const p = {conds: [], items: [], scales: {}, viewports: {}, openings: [], files: [], sheets: {}, marks: [
     {id: "m1", type: "link", file: "f", page: 1, pts: [[0, 0], [10, 10]], link: {url: "javascript:alert(1)"}},

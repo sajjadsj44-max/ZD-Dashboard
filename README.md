@@ -819,6 +819,11 @@ PDF's own lines and text, so vector drawings — a scanned sheet has neither):
   a line's end or a point) and its **Properties**; **Set as default** keeps its style for the next one of its kind and
   **Add to Tool Chest** saves it as a tool. Pictures and files are kept in this browser beside the PDFs (not in the
   project record), and **Project + PDFs** carries them.
+- **Markups list** (`Alt+L`, **☰ List**): every markup of the page or the whole project in a table under the drawing —
+  sort by any column, search, filter by type, status, author, layer or space, and save a filter with the project; set
+  statuses in the list (Bluebeam's, plus your own), reply to a markup (signed with your name); click a row to go to it.
+  **Markup layers** (Layers tab) hide a whole set on the drawing and in exports. **Spaces**: the room each markup sits
+  in, from the named areas measured. Summaries of what is listed: CSV, XML, and a printable PDF with a picture of each.
 
 Phase 2 / 3 status: click-inside room areas, walls by thickness, symbol / tag counting, room sizes and door /
 window marks read from the drawing, the revision overlay and scanned-PDF measuring are in. Still planned: a command
@@ -832,7 +837,7 @@ CDN. Tests use a hand-written 3-page vector PDF with known dimensions (`tools/ta
 python3 -m http.server 8765 &
 TK_LIBS=/path/with/pdfjs-dist+exceljs node tools/test_takeoff.js      # 150 browser checks
 TK_LIBS=/path/with/pdfjs-dist+exceljs+pdf-lib node tools/test_takeoff_qa.js   # full QA audit: 460 checks in 24 sections
-TK_LIBS=/path/with/pdfjs-dist+pdf-lib node tools/test_takeoff_markup.js   # markup tools: 56 checks
+TK_LIBS=/path/with/pdfjs-dist+pdf-lib node tools/test_takeoff_markup.js   # markup tools and the Markups list: 80 checks
 node tools/test_lock.js                                                   # the dashboard password lock: 61 checks
 ```
 

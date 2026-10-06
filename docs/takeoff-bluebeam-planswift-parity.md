@@ -146,16 +146,16 @@ plus the AI features of **Bluebeam Max** (global launch 19-May-2026), **PlanSwif
 
 Checked against Bluebeam's own plan table (bluebeam.com/pricing, *Compare plans*, Basics column). **★** added in the
 markup-tools release (07-Oct-2026) · **✓** already in · **◐** partly · **→ n** coming in part *n* of this work
-(2 Markups List, 3 pages and documents, 4 workspace and import) · **n/a** desktop / cloud only.
+(3 pages and documents, 4 workspace and import) · **n/a** desktop / cloud only.
 
 | Bluebeam Basics | ZD Takeoff |
 |---|---|
 | Mark up PDFs with text, highlighters, shapes, stamps and vector pen annotations | ★ text box, callout, line, polyline, polygon, rectangle, ellipse, pen, highlighter pen, stamps, image · ✓ note, cloud, arrow, highlight, dimension |
-| Track and manage annotations; view, filter and sort markups and comments in the Markups List | ◐ every markup has subject, author, status, dates ★ → 2 the list itself |
+| Track and manage annotations; view, filter and sort markups and comments in the Markups List | ★ Markups list (Alt+L): this page or all pages, sort by any column, search, filter by type / status / author / layer / space; replies signed with your name |
 | Save and reuse tools from the Tool Chest; subject and comment; scale on tool sets | ✓ Tool Chest (Phase 1) · ★ every new markup tool saves to it · ★ sizes in page units, so a tool keeps its printed size |
 | Make markups on captured photos | ✓ photos / scans added as pages |
 | Multiply markups | ✓ array, place copies, copy to pages |
-| Assign markups to layers | → 2 |
+| Assign markups to layers | ★ markup layers (Layers tab): hidden on the drawing and in exports |
 | Flatten PDF markups | ✓ every PDF / PNG / JPEG export |
 | Import PDF markups | → 4 |
 | Redact PDF content permanently | ★ redaction: the exported page is flattened, what is under the box is gone |
@@ -163,12 +163,12 @@ markup-tools release (07-Oct-2026) · **✓** already in · **◐** partly · **
 | Create and add dynamic stamps | ★ 16 standard stamps, your own text and picture stamps, `{name} {date} {time} {project} {sheet} {page}` |
 | 2D photo markups, photos and 360° photos / videos in markups (Capture) | ◐ ★ file attachment pins (any file, opened in the browser or saved) → 4 photos on any markup |
 | Hyperlinks, a hyperlink on an area | ★ to a web page or a page of the project; real links in exported PDFs · ✓ sheet callouts open their sheet |
-| Custom Markups List filters | → 2 |
+| Custom Markups List filters | ★ saved with the project |
 | Calibrate tool sets to resize with the scale / viewport | ◐ markup sizes are in page units; viewports ✓ |
 | Markup legends in the Tool Chest | ✓ export legend · → 3 a legend markup |
 | Custom hatch patterns | ★ 11 patterns + custom angle, spacing, line, crossed, colour |
 | Sketch to Scale: polygons, polylines, rectangles, ellipses | ✓ measurements (typed lengths, L x W) · ★ polyline / polygon markups take typed lengths |
-| Custom statuses | ◐ ★ statuses on every markup → 2 your own list |
+| Custom statuses | ★ Bluebeam's statuses and your own, set in Properties or the list |
 | Measure length and area; viewports of other scales | ✓ |
 | Headers and footers | → 3 |
 | Combine documents into one PDF; split documents; insert pages of another PDF | ✓ Export pages (one PDF / a PDF per page), import with page choice |
@@ -186,7 +186,7 @@ markup-tools release (07-Oct-2026) · **✓** already in · **◐** partly · **
 | Customise keyboard shortcuts and toolbars | ◐ workspace layouts ✓ → 4 |
 | OCR | ✓ Tesseract in the browser |
 | VisualSearch (symbols) | ✓ Find similar |
-| PDF / CSV / XML summary of markups; reports on markups in regions (Spaces) | → 2 |
+| PDF / CSV / XML summary of markups; reports on markups in regions (Spaces) | ★ CSV, XML, printable PDF with a picture of each markup · ★ Spaces: the named room each markup sits in |
 | Digital signatures; track signatures | ◐ ★ picture stamps of a signature (not a certified digital ID) |
 | Password protection and permissions | → 3 password-protected exports (the password asked, never kept) |
 | Multiple windows, recent files, multi-monitor, local drive search | n/a desktop · ✓ projects list, a second browser tab |
