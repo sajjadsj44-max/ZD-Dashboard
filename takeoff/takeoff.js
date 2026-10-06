@@ -2509,15 +2509,15 @@ function drawNow(){
     }
     if (it.kind === "open") {
       const a = toScr(it.pts[0]), b = toScr(it.pts[1]);
-      h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${sel ? 6 : 4}" stroke-linecap="round" opacity=".85"/>`);
+      h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${sel ? 6 : Math.max(1, +c.sw || 4)}" stroke-linecap="round" opacity=".85"/>`);
       if (k) { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], r = rowsOf(it, k)[0]; h.push(label(m, (it.label ? it.label + " " : "") + f3(r.L) + " × " + f3(+it.oh || 0), "#9b2222")); }
     } else if (c.type === "area") {
       const ded = it.kind === "ded";
-      h.push(`<polygon points="${ptsS(it.pts)}" fill="${ded ? "url(#hatch)" : col}" fill-opacity="${ded ? 1 : 0.22}" stroke="${ded ? "#d03b3b" : col}" stroke-width="${sel ? 3 : 1.6}" ${ded ? 'stroke-dasharray="5 3"' : ""}/>`);
+      h.push(`<polygon points="${ptsS(it.pts)}" fill="${ded ? "url(#hatch)" : col}" fill-opacity="${ded ? 1 : 0.22}" stroke="${ded ? "#d03b3b" : col}" stroke-width="${sel ? 3 : Math.max(1, +c.sw || 1.6)}" ${ded ? 'stroke-dasharray="5 3"' : ""}/>`);
       if (k && S.lbl.on) { const scr = it.pts.map(toScr), ar = polyArea(scr); if (ar > 2500 || sel || !S.lbl.small) { const L = capLines(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, k); if (L.length) h.push(labelBox(labelPt(scr), L, ded ? "#9b2222" : "#0b0b0b")); } }
     } else {
       const ded = it.kind === "ded";
-      h.push(`<poly${it._pts ? "gon" : "line"} points="${ptsS(it.pts)}" fill="none" stroke="${ded ? "#d03b3b" : col}" stroke-width="${sel ? 5 : 3}" stroke-linejoin="round" stroke-linecap="round" opacity=".85" ${ded ? 'stroke-dasharray="7 4"' : ""}/>`);
+      h.push(`<poly${it._pts ? "gon" : "line"} points="${ptsS(it.pts)}" fill="none" stroke="${ded ? "#d03b3b" : col}" stroke-width="${sel ? 5 : Math.max(1, +c.sw || 3)}" stroke-linejoin="round" stroke-linecap="round" opacity=".85" ${ded ? 'stroke-dasharray="7 4"' : ""}/>`);
       if (k && S.lbl.on && (sel || polyLen(it.pts) * S.view.s > 60 || !S.lbl.small)) { const L = capLines(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, k); if (L.length) h.push(labelBox(lineLabelPt(it.pts.map(toScr)), L, ded ? "#9b2222" : "#0b0b0b")); }
     }
     if (k && it.kind !== "open" && it.shape !== "circle" && (sel || (S.lbl.on && S.lbl.seg))) h.push(segLabels(it.pts.map(toScr), it.pts, k, c.type === "area", 1));
@@ -2833,8 +2833,11 @@ function renderProps(){
   const el = $("props"), it = S.sel && P.proj ? P.proj.items.find(i => i.id === S.sel) : null;
   const mk = !it && S.selMark && P.proj ? (P.proj.marks || []).find(m => m.id === S.selMark) : null;
   if (mk) { el.innerHTML = `<h4>${esc(MARK_TOOLS[mk.type])} <span style="font-weight:400;color:var(--muted);font-size:11px">markup — not a quantity · drag to move</span></h4>
-      <div class="row"><div class="fg" style="flex:3"><label>Text</label><input type="text" data-mprop="text" value="${esc(mk.text)}"></div>
+      <div class="row"><div class="fg" style="flex:3"><label>Text / label</label><input type="text" data-mprop="text" value="${esc(mk.text)}" placeholder="Dimension override or markup note"></div>
       <div class="fg"><label>Colour</label><input type="color" data-mprop="color" value="${/^#[0-9a-f]{6}$/i.test(mk.color) ? mk.color : "#d03b3b"}" style="height:30px;padding:0"></div>
+      ${mk.type !== "hilite" && mk.type !== "fence" ? `<div class="fg"><label>Line width</label><input type="number" min="1" max="12" step="1" data-mprop="width" value="${+mk.width || 2}"></div>` : ""}
+      ${mk.type === "hilite" ? `<div class="fg"><label>Opacity</label><input type="number" min="0.05" max="1" step="0.05" data-mprop="opacity" value="${+mk.opacity || .38}"></div>` : ""}
+      ${mk.type === "dimension" ? `<div class="fg"><label>Text size</label><input type="number" min="8" max="48" step="1" data-mprop="size" value="${+mk.size || 13}"></div><div class="fg"><label>Arrow size</label><input type="number" min="5" max="40" step="1" data-mprop="arrow" value="${+mk.arrow || 10}"></div><div class="fg"><label>Offset</label><input type="number" min="0" max="500" step="1" data-mprop="offset" value="${+mk.offset || 24}"></div>` : ""}
       <button class="btn sm" data-act="lock">${mk.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn dng" data-act="delMark"${mk.locked ? " disabled" : ""}>Delete</button></div>`; el.classList.add("on"); return; }
   if (!it) { el.classList.remove("on"); el.innerHTML = ""; return; }
   const c = cond(it.cond), k = itemScale(it), poly = itemPoly(it);
@@ -2845,7 +2848,7 @@ function renderProps(){
     <div class="fg"><label>Nos (×)</label><input type="number" min="1" step="1" data-prop="nos" value="${+it.nos || 1}"></div>
     ${it.kind === "open" ? `<div class="fg"><label>Width ft</label><input type="text" data-prop="ow" value="${it.ow ? f3(it.ow) : ""}" placeholder="${k ? f3(dist(it.pts[0], it.pts[1]) / k) : ""}"></div><div class="fg"><label>Height ft</label><input type="text" data-prop="oh" value="${f3(+it.oh || 0)}"></div>` : ""}
     ${c.type !== "count" && it.kind !== "open" ? `<div class="fg"><label>Measured as</label><select data-prop="kind"><option value="shape"${it.kind === "shape" ? " selected" : ""}>Add</option><option value="ded"${it.kind === "ded" ? " selected" : ""}>Deduct</option></select></div>` : ""}
-    <div class="fg"><label>Condition</label><select data-prop="cond">${P.proj.conds.filter(x => x.type === c.type).map(x => `<option value="${esc(x.id)}"${x.id === it.cond ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>
+    <div class="fg"><label>Condition</label><select data-prop="cond">${P.proj.conds.filter(x => x.type === c.type).map(x => `<option value="${esc(x.id)}"${x.id === it.cond ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div><div class="fg"><label>Condition colour</label><input type="color" data-prop="color" value="${/^#[0-9a-f]{6}$/i.test(c.color) ? c.color : "#2a78d6"}" style="height:30px;padding:0"></div><div class="fg"><label>Line weight</label><input type="number" min="1" max="12" step="1" data-prop="sw" value="${+c.sw || 2}"></div>
     <button class="btn dng" data-act="delItem"${it.locked ? " disabled" : ""}>Delete</button></div>
     <div class="row" style="margin-top:6px;gap:4px">${it.locked ? '<span class="tag a">&#128274; locked</span>' : ""}<button class="btn sm" data-act="lock" title="Ctrl+Shift+L">${it.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn sm" data-act="dup" title="Ctrl+D">Duplicate</button>
       ${isRun(it) ? '<button class="btn sm" data-act="brk" title="Break tool (B): click where to cut the run">&#9986; Break…</button>' : ""}${S.selPt >= 0 && (c.type === "count" || editPts(it)) ? '<button class="btn sm dng" data-act="delPoint">Remove point ' + (S.selPt + 1) + "</button>" : ""}
@@ -3382,11 +3385,11 @@ function markSvg0(m, T, z){
     const k = scaleAt(m.file, m.page, p), val = m.text || (k ? f3(dist(p, q) / k) : f3(dist(p, q)) + " pt"), mx = (a[0] + b[0]) / 2 - Math.sin(ang) * (fs * .65), my = (a[1] + b[1]) / 2 + Math.cos(ang) * (fs * .65);
     return `<g><line x1="${e1[0]}" y1="${e1[1]}" x2="${a[0]}" y2="${a[1]}" stroke="${col}" stroke-width="${w}"/><line x1="${e2[0]}" y1="${e2[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="${w}"/><line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="${w}"/>${arrow(a[0], a[1], -1)}${arrow(b[0], b[1], 1)}<text x="${mx}" y="${my}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="${col}" stroke="#fff" stroke-width="${Math.max(2, fs * .22)}" paint-order="stroke">${esc(val)}</text></g>`;
   }
-  if (m.type === "hilite") { const a = T(m.pts[0]), b = T(m.pts[1]); return `<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="#ffe14d" fill-opacity=".38" stroke="${sel ? "#0b0b0b" : "none"}"/>`; }
-  if (m.type === "cloud") { const a = T(m.pts[0]), b = T(m.pts[1]); return `<path d="${cloudPath(a, b, 9 * z)}" fill="none" stroke="${col}" stroke-width="${(sel ? 3 : 2) * z}"/>` + (m.text ? label([Math.max(a[0], b[0]), Math.min(a[1], b[1]) - 12 * z], m.text, col) : ""); }
+  if (m.type === "hilite") { const a = T(m.pts[0]), b = T(m.pts[1]); return `<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="${m.color || "#ffe14d"}" fill-opacity="${Math.max(0.05, Math.min(1, +m.opacity || .38))}" stroke="${sel ? "#0b0b0b" : "none"}"/>`; }
+  if (m.type === "cloud") { const a = T(m.pts[0]), b = T(m.pts[1]); return `<path d="${cloudPath(a, b, 9 * z)}" fill="none" stroke="${col}" stroke-width="${(sel ? 3 : Math.max(1, +m.width || 2)) * z}"/>` + (m.text ? label([Math.max(a[0], b[0]), Math.min(a[1], b[1]) - 12 * z], m.text, col) : ""); }
   if (m.type === "arrow") { const a = T(m.pts[0]), b = T(m.pts[1]), ang = Math.atan2(b[1] - a[1], b[0] - a[0]), hl = 12 * z;
     const h1 = [b[0] - hl * Math.cos(ang - 0.4), b[1] - hl * Math.sin(ang - 0.4)], h2 = [b[0] - hl * Math.cos(ang + 0.4), b[1] - hl * Math.sin(ang + 0.4)];
-    return `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="${(sel ? 3 : 2) * z}"/><path d="M${h1[0]} ${h1[1]}L${b[0]} ${b[1]}L${h2[0]} ${h2[1]}" fill="none" stroke="${col}" stroke-width="${(sel ? 3 : 2) * z}"/>` + (m.text ? label([a[0], a[1] - 12 * z], m.text, col) : ""); }
+    return `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="${(sel ? 3 : Math.max(1, +m.width || 2)) * z}"/><path d="M${h1[0]} ${h1[1]}L${b[0]} ${b[1]}L${h2[0]} ${h2[1]}" fill="none" stroke="${col}" stroke-width="${(sel ? 3 : Math.max(1, +m.width || 2)) * z}"/>` + (m.text ? label([a[0], a[1] - 12 * z], m.text, col) : ""); }
   const q = T(m.pts[0]), t = m.text || "Note", w = Math.min(320, t.length * 6.6 + 14) * z;
   return `<g><rect x="${q[0]}" y="${q[1] - 11 * z}" width="${w}" height="${22 * z}" rx="${3 * z}" fill="#fffbe0" stroke="${sel ? "#0b0b0b" : col}" stroke-width="${1.5 * z}"/><text x="${q[0] + 7 * z}" y="${q[1] + 4 * z}" font-size="${12 * z}" font-weight="600" fill="#5b3b00">${esc(t.length > 48 ? t.slice(0, 47) + "…" : t)}</text></g>`;
 }
@@ -5418,13 +5421,15 @@ function wire(){
   });
   $("props").addEventListener("change", e => {
     const mk = e.target.dataset.mprop && (P.proj.marks || []).find(m => m.id === S.selMark);
-    if (mk) { mutate(() => { mk[e.target.dataset.mprop] = e.target.value; }); return; }
+    if (mk) { mutate(() => { const f = e.target.dataset.mprop, v = e.target.value; if (["width", "size", "arrow", "offset", "opacity"].includes(f)) mk[f] = Math.max(0, +v || 0); else mk[f] = v; }); return; }
     const it = P.proj.items.find(i => i.id === S.sel), f = e.target.dataset.prop; if (!it || !f) return;
     if (f === "qa") return setQa([it], e.target.value);
     mutate(() => {
       if (f === "nos") { const v = Math.round(+e.target.value || 1); it.nos = Math.max(1, Math.min(100000, v)); if (v > 100000) toast("Nos is limited to 100,000 — check the number typed", 3500); }
       else if (f === "ow" || f === "oh") { const v = e.target.value.trim() ? parseFt(e.target.value) : 0; if (!isNaN(v)) it[f] = v; }
       else if (f === "doorW") { const s = e.target.value.trim(); if (!s) delete it.doorW; else { const v = s.split("+").reduce((a, x) => a + parseFt(x), 0); if (!isNaN(v) && v >= 0) it.doorW = r3(v); } }
+      else if (f === "color") { const c = cond(it.cond); if (c && HEXCOL.test(e.target.value)) c.color = e.target.value; }
+      else if (f === "sw") { const c = cond(it.cond); if (c) c.sw = Math.max(1, Math.min(12, +e.target.value || 2)); }
       else if (f === "sch") { const s = schOf(e.target.value); if (s) { it.sch = s.id; it.label = s.mark; } else delete it.sch; }
       else if (LOC_KEYS.includes(f)) { const v = e.target.value.trim(); if (v) it[f] = v; else delete it[f]; }
       else it[f] = e.target.value;
