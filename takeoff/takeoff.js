@@ -149,7 +149,7 @@ const P = {proj: null};               // the open project (saved)
 const S = {                           // session state (not saved)
   docs: {},                           // fileId -> PDFDocumentProxy
   fileId: null, pageNo: 1, page: null, base: null, key: "",
-  view: {s: 1, tx: 0, ty: 0}, rendered: null, renderTask: null, low: null,
+  view: {s: 1, tx: 0, ty: 0}, rendered: null, renderTask: null, low: null, legendOn: true,
   tool: "select", cond: null, draft: [], cursor: null, snap: null, sel: null, selPt: -1,
   geo: {},                            // "fileId:page" -> {segs, grid, cell, n}
   texts: {},                          // "fileId:page" -> [{s, x, y}]
@@ -2709,6 +2709,40 @@ async function labelDialog(){
     if (n && S.lbl.autoName && await ask("Name the areas already drawn?", `<p>${n} area${n > 1 ? "s" : ""} on this page ${n > 1 ? "have" : "has"} no name. Name ${n > 1 ? "them" : "it"} from the room text inside?</p>`, "Name them")) nameAreas(); }
 }
 function setLblOn(on){ S.lbl.on = on; pref("zdTakeoffLbl", JSON.stringify(S.lbl)); $("bLbl").classList.toggle("on", on); $("bLbl").title = on ? "Labels shown — click (or L) to hide" : "Labels hidden — click (or L) to show"; viewMark(); draw(); }
+function loadLegend(){ S.legendOn = pref("zdTakeoffLegend") !== "0"; }
+function setLegendOn(on){
+  S.legendOn = !!on; pref("zdTakeoffLegend", S.legendOn ? "1" : "0");
+  const b = $("bLegend"); if (b) { b.classList.toggle("on", S.legendOn); b.title = S.legendOn ? "Hide the takeoff legend on the drawing" : "Show the takeoff legend on the drawing"; }
+  renderLiveLegend();
+}
+function renderLiveLegend(){
+  const el = $("takeoffLegend"); if (!el) return;
+  if (!S.legendOn || !P.proj || !S.page) { el.classList.remove("on"); el.innerHTML = ""; return; }
+  const totals = new Map();
+  P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).forEach(it => {
+    const c = cond(it.cond); const k = itemScale(it);
+    if (!c) return;
+    let q = 0;
+    if (k) q = rowsOf(it, k).reduce((a, r) => a + (+r.qty || 0), 0);
+    const old = totals.get(c.id); totals.set(c.id, {c, q: (old ? old.q : 0) + q, hasScale: (old ? old.hasScale : false) || !!k});
+  });
+  const rows = [...totals.values()].filter(x => x.hasScale || x.q !== 0);
+  if (!rows.length) { el.classList.remove("on"); el.innerHTML = ""; return; }
+  const fmt = x => {
+    const c = x.c;
+    if (!x.hasScale) return "scale ?";
+    return fq(x.q, c.unit) + (c.unit ? " " + c.unit : "");
+  };
+  el.innerHTML = '<div class="lh"><span>▤</span><span>Takeoff Legend</span><button class="btn sm" id="legendClose" style="margin-left:auto;padding:1px 6px">×</button></div><div class="lb">' +
+    rows.map(x => {
+      const c = x.c, type = c.type === "area" ? "area" : c.type === "count" ? "count" : "";
+      const color = /^#[0-9a-f]{6}$/i.test(c.color || "") ? c.color : "#4b3b8f";
+      const name = (c.boq ? c.boq + " · " : "") + c.name;
+      return '<div class="li"><span class="sw ' + type + '" style="background:' + color + '"></span><span class="ln" title="' + esc(name) + '">' + esc(name) + '</span><span class="q">' + esc(fmt(x)) + '</span></div>';
+    }).join("") + '</div>';
+  el.classList.add("on");
+  const close = $("legendClose"); if (close) close.onclick = () => setLegendOn(false);
+}
 /* the View button shows a dot while something is dimmed, thinned or hidden — so a hidden markup is never a surprise */
 function viewMark(){ const b = $("bView"); if (b) b.classList.toggle("mod", !!(S.dim || S.thin || S.hideMk || (S.lbl && !S.lbl.on))); }
 /* the room name written inside an outline (BEDROOM 2, LOUNGE…), from the PDF's own text; "" if none */
@@ -2725,7 +2759,7 @@ function nameAreas(){
   toast(n ? n + " area" + (n > 1 ? "s" : "") + " named from the drawing" : "No room names found inside the unnamed areas");
 }
 /* ------------------------------------------------------------------ panels */
-function refresh(){ mlSoon(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); draw(); draftBtns(); }
+function refresh(){ mlSoon(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); renderLiveLegend(); draw(); draftBtns(); }
 let sheetT = null;
 function refreshSheetSoon(){ clearTimeout(sheetT); sheetT = setTimeout(() => { renderSheet(); renderConds(); }, 120); }
 function renderScaleChip(){
@@ -6299,7 +6333,7 @@ function wire(){
   document.addEventListener("keydown", e => { if (e.key === "Escape" && vpop.classList.contains("on")) { vOpen(false); e.stopPropagation(); } }, true);
   $("bFitW").onclick = () => { fitWidth(); vOpen(false); };
   { const hd = document.querySelector("header"); new ResizeObserver(() => document.documentElement.style.setProperty("--hh", hd.offsetHeight + "px")).observe(hd); }   // the bar's height (one row, or two on a narrower screen)
-  $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => { vOpen(false); labelDialog(); };
+  $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => { vOpen(false); labelDialog(); }; $("bLegend").onclick = () => setLegendOn(!S.legendOn);
   $("bHideMk").onclick = () => { S.hideMk = !S.hideMk; $("bHideMk").classList.toggle("on", !S.hideMk); $("bHideMk").title = S.hideMk ? "Markups hidden — click to show all" : "Hide all markups (measurements and notes) to see the drawing"; viewMark(); draw(); toast(S.hideMk ? "All markups hidden" : "Markups shown", 1500); };
   $("bLayers").onclick = () => { vOpen(false); S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };
   $("bDel").onclick = () => delSelected();
@@ -8553,7 +8587,7 @@ function ocFix(Lb, out, fids){
 
 /* ------------------------------------------------------------------ start */
 (async function init(){
-  loadLbl(); wire(); wirePanels(); setLblOn(S.lbl.on); iconize(); wsApply();
+  loadLbl(); loadLegend(); wire(); wirePanels(); setLblOn(S.lbl.on); setLegendOn(S.legendOn); iconize(); wsApply();
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
