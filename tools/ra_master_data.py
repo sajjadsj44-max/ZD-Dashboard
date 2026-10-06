@@ -146,6 +146,17 @@ def dash_lines(html):
     return out
 
 
+def seed_history(html):
+    """Earlier published rates of the seed lines (RA_SEED_PREV): code -> {rate, ...}. A shared line that moved on
+    after the workbook was made (e.g. a newer GRN) still matches the workbook's rate through its history; the
+    item itself uses the live line."""
+    m = re.search(r"RA_SEED_PREV=", html)
+    if not m:
+        return {}
+    d = json.JSONDecoder().raw_decode(html, m.end())[0]
+    return {k: {float(x[0]) for x in v} for k, v in d.items()}
+
+
 def prev_rates(html, rates_l):
     """Versions a saved library may still hold, per line: [rate, date] or [rate, date, remark]. raSyncBlk moves
     a saved line to the new version only while it equals one of these (a hand edit is kept). Besides the
@@ -252,7 +263,8 @@ def build(wb_f, wb_v, html, as_of):
             else:
                 d = cur.get(ref)
                 want = C.DASH_RATE_UPDATES.get(ref, {}).get("rate", d and d["rate"])
-                if d is None or abs(num(w04v.cell(r, 7).value) - num(want)) > 1e-6:
+                if d is None or (abs(num(w04v.cell(r, 7).value) - num(want)) > 1e-6 and not any(
+                        abs(num(w04v.cell(r, 7).value) - v) <= 1e-6 for v in seed_history(html).get(ref, ()))):
                     sys.exit(f"{code}: shared line {rc}->{ref} differs: workbook {w04v.cell(r, 7).value}, "
                              f"dashboard {want}")
                 if unit(w04v.cell(r, 5).value) != d["unit"]:
