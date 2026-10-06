@@ -120,7 +120,7 @@ input.gs{background:#fff8d6!important;border-color:#e8c766!important}span.gs{bac
 /* minimap (Forma); icons-only toolbar; the import split button */
 #mini{position:absolute;right:10px;bottom:10px;z-index:4;background:#fff;border:1px solid #9fb0c6;border-radius:6px;box-shadow:0 4px 16px rgba(15,41,66,.25);display:none;overflow:hidden;cursor:pointer;touch-action:none}
 #mini img{display:block}#miniVp{position:absolute;border:2px solid var(--purple);background:rgba(75,59,143,.10);pointer-events:none}
-body.tbicons #tools .tool .tl,body.tbicons header > .btn .tl{display:none}body.tbicons #tools .tool{padding:4px 7px}
+body.tbicons #tools .tool .tl,body.tbicons header > .btn .tl{display:none}body.tbicons #tools .tool{padding:4px 7px}body.tbicons .rgl{display:none}
 #bAdd{border-top-right-radius:0;border-bottom-right-radius:0}#bAddM{border-top-left-radius:0;border-bottom-left-radius:0;margin-left:-8px;padding:3px 6px}
 table.sh.bill td:first-child{width:52%}
 table.sh tr.ch2 td{background:#f7f9fc;font-weight:600;border-top:1px solid var(--line)}
@@ -128,6 +128,7 @@ table.asm{width:100%;border-collapse:collapse;font-size:11.5px}table.asm th{font
 .dlg:has(table.asm){width:min(980px,100%)}
 .dlg:has(.wide){width:min(860px,100%)}
 .pk{display:flex!important;gap:6px;align-items:center;padding:3px 0;text-transform:none!important;letter-spacing:0!important;font-size:12px!important;font-weight:400!important;color:var(--txt)!important}.pk input{width:auto}
+#shBar{display:flex;gap:4px;padding:6px 10px;border-bottom:1px solid var(--line);background:#fbfcfe}#shBar input{flex:1;min-width:0;padding:3px 8px;font-size:12px}#shBar select{padding:2px 4px;font-size:11.5px;max-width:120px}
 #qaBar{display:flex;gap:4px;flex-wrap:wrap;align-items:center;padding:6px 10px;border-bottom:1px solid var(--line);background:#fbfcfe}
 .qa{border:1px solid var(--line);background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;color:#3c4c60;cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums}
 span.qa{cursor:default}.qa.g{color:var(--green)}.qa.a{color:#8a5a00;border-color:#f3d998;background:#fff9ec}.qa.r{color:var(--red);border-color:#f0b4b4;background:#fff5f5}
@@ -193,8 +194,31 @@ table.sh .rn:hover{color:var(--purple)}
 .keys kbd{display:inline-block;border:1px solid #c9d6e4;border-bottom-width:2px;border-radius:4px;padding:0 4px;font-size:10px;color:#3c4c60;background:#fbfcfe;font-family:inherit}
 
 /* stage */
-.stagewrap{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column}
-.tools{display:flex;gap:4px;padding:6px 8px;background:#fff;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center}
+.stagewrap{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column;container-type:inline-size;container-name:stg}
+.tools{position:relative;background:#fff;border-bottom:1px solid var(--line)}
+/* ribbon: tabs on top (right: delete, ortho, polar, snap), the open group's tools below, each group named */
+.rtabs{display:flex;gap:2px;align-items:center;flex-wrap:wrap;padding:4px 8px 0;background:#f4f7fb;border-bottom:1px solid var(--line)}
+.rtab{border:1px solid transparent;border-bottom:0;background:none;border-radius:6px 6px 0 0;padding:4px 12px;font-size:12px;font-weight:600;color:#52627a;cursor:pointer;margin-bottom:-1px}
+.rtab:hover{color:var(--purple)}
+.rtab.on{background:#fff;border-color:var(--line);color:var(--purple);box-shadow:inset 0 2px 0 var(--purple)}
+.rtabs .sp{flex:1}.rtabs .tool{margin-bottom:3px}
+.rrow{display:flex;align-items:stretch;padding:4px 8px 3px;gap:0}
+.rrow .rsel{align-self:flex-start;margin:0 0 0}.rrow .rvs{height:auto;align-self:stretch;margin:0 8px}
+.rpanel{display:flex;flex-wrap:wrap;gap:0;align-items:stretch;flex:1;min-width:0}
+.rpanel[hidden]{display:none}
+.rg{display:flex;flex-direction:column;padding:0 8px;border-right:1px solid var(--line)}
+.rg:first-child{padding-left:0}.rg:last-child{border-right:0}
+.rgb{display:flex;gap:3px;flex-wrap:wrap;align-items:center;flex:1}
+.rgl{font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);text-align:center;padding-top:2px}
+.ic{width:17px;height:17px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tool.tsm{padding:3px 7px;font-size:11.5px}
+.tool.tgl.on{background:var(--purple);border-color:var(--purple);color:#fff}
+.tg .ic{width:15px;height:15px}.ic.ch{width:11px;height:11px}
+.rsel{display:inline-flex;gap:3px;align-items:center}.rvs{width:1px;background:var(--line);flex:none}
+#snapPop{position:absolute;top:100%;right:70px;z-index:16;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 32px rgba(15,41,66,.28);padding:8px 10px;display:none;flex-direction:column;gap:4px;min-width:200px;font-size:12px}
+#snapPop.on{display:flex}#snapPop label{display:flex;gap:6px;align-items:center;cursor:pointer}#snapPop b{font-size:9.5px;letter-spacing:.5px;color:var(--muted);text-transform:uppercase}
+@container stg (max-width:1020px){.rrow .tool kbd,.rrow .tl,.rtabs .tool .tl{display:none}.rrow #bMk.on .tl{display:inline}.rrow .tool,.rtabs .tool{padding:4px 7px}.rg{padding:0 6px}}
+@media (max-width:860px){.rtabs{padding-top:2px}.rg{padding:0 5px}}
 .tool{border:1px solid var(--line);background:#fff;border-radius:6px;padding:4px 9px;cursor:pointer;font-size:12px;color:#3c4c60;display:inline-flex;gap:5px;align-items:center}
 .tool kbd{font-size:9.5px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 3px;font-family:inherit}
 .tool.on{background:var(--purple);border-color:var(--purple);color:#fff}
@@ -437,37 +461,153 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
   <section class="stagewrap">
     <button class="openp" id="openL" style="display:none" title="Show the conditions panel">&#10217;</button>
     <button class="openp" id="openR" style="display:none" title="Show the measurement sheet">&#10216;</button>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+      <symbol id="i-select" viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.8L10.5 19z"/></symbol>
+      <symbol id="i-match" viewBox="0 0 24 24"><path d="M4 7h13M13 3l4 4-4 4M20 17H7M11 13l-4 4 4 4"/></symbol>
+      <symbol id="i-lasso" viewBox="0 0 24 24"><path d="M12 4c5 0 9 2 9 5s-4 5-9 5-9-2-9-5 4-5 9-5z"/><path d="M9 15c0 3 1 4 3 6"/></symbol>
+      <symbol id="i-pan" viewBox="0 0 24 24"><path d="M8 12V6a1.5 1.5 0 013 0v5M11 11V4.5a1.5 1.5 0 013 0V11M14 11V6a1.5 1.5 0 013 0v8c0 4-2.5 7-6.5 7-3 0-4.5-2-6.5-5l-1.8-2.8a1.5 1.5 0 012.4-1.7L8 14"/></symbol>
+      <symbol id="i-draw" viewBox="0 0 24 24"><path d="M3 18l6-9 5 5 7-9"/><circle cx="3" cy="18" r="1.5"/><circle cx="9" cy="9" r="1.5"/><circle cx="14" cy="14" r="1.5"/><circle cx="21" cy="5" r="1.5"/></symbol>
+      <symbol id="i-rect" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/><path d="M4 11l5-5M4 16l10-10M9 18L20 7M15 18l5-5" opacity=".45"/></symbol>
+      <symbol id="i-auto" viewBox="0 0 24 24"><path d="M12 3l2 5.5L19.5 10 14 12l-2 5.5L10 12 4.5 10 10 8.5z"/><path d="M19 16v4M17 18h4"/></symbol>
+      <symbol id="i-fence" viewBox="0 0 24 24"><path d="M5 4v16M12 4v16M19 4v16M3 9h18M3 15h18"/></symbol>
+      <symbol id="i-cog" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></symbol>
+      <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="1" fill="currentColor"/><path d="M12 12l5.6-5.6"/></symbol>
+      <symbol id="i-count" viewBox="0 0 24 24"><path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0113 0c0 5-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.2"/></symbol>
+      <symbol id="i-vsearch" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="M15 15l6 6M8 10h4M10 8v4"/></symbol>
+      <symbol id="i-ded" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12h8"/></symbol>
+      <symbol id="i-open" viewBox="0 0 24 24"><path d="M5 21V4h10v17M3 21h18M12 12.5h.01"/></symbol>
+      <symbol id="i-break" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.5 8l11.5 9M8.5 16L20 7"/></symbol>
+      <symbol id="i-measure" viewBox="0 0 24 24"><path d="M3 12h18M3 8v8M21 8v8M7 12v-2.5M11 12v-2M15 12v-2.5M19 12v-2"/></symbol>
+      <symbol id="i-cal" viewBox="0 0 24 24"><rect x="2" y="8" width="20" height="8" rx="1.5"/><path d="M6 8v4M10 8v3M14 8v4M18 8v3"/></symbol>
+      <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 4h14v12h-9l-5 4z"/><path d="M9 8h6M9 11h4"/></symbol>
+      <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4 4 0 010-8 5 5 0 019.3-1A4 4 0 0117 18z"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 20L20 4M10 4h10v10"/></symbol>
+      <symbol id="i-dim" viewBox="0 0 24 24"><path d="M4 5v14M20 5v14M4 12h16M8 9l-4 3 4 3M16 9l4 3-4 3"/></symbol>
+      <symbol id="i-hilite" viewBox="0 0 24 24"><path d="M14 4l6 6-9 9-5.5 1 1-5.5z"/><path d="M4 21h6"/></symbol>
+      <symbol id="i-markup" viewBox="0 0 24 24"><path d="M4 20l4-1L19.5 7.5l-3-3L5 16z"/><path d="M14.5 6.5l3 3"/></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></symbol>
+      <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+      <symbol id="i-move" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 9V5.5A1.5 1.5 0 0013.5 4h-8A1.5 1.5 0 004 5.5v8A1.5 1.5 0 005.5 15H9"/></symbol>
+      <symbol id="i-dup" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 9V5.5A1.5 1.5 0 0013.5 4h-8A1.5 1.5 0 004 5.5v8A1.5 1.5 0 005.5 15H9M14.5 12.5v6M11.5 15.5h6"/></symbol>
+      <symbol id="i-array" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+      <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2.3 6.3M20 4v7h-7"/></symbol>
+      <symbol id="i-rotatel" viewBox="0 0 24 24"><path d="M4 11a8 8 0 112.3 6.3M4 4v7h7"/></symbol>
+      <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2 2"/><path d="M8 7l-5 5 5 5zM16 7l5 5-5 5z"/></symbol>
+      <symbol id="i-mirrorv" viewBox="0 0 24 24"><path d="M3 12h18" stroke-dasharray="2 2"/><path d="M7 8l5-5 5 5zM7 16l5 5 5-5z"/></symbol>
+      <symbol id="i-offset" viewBox="0 0 24 24"><path d="M3 17L17 3M7 21L21 7"/></symbol>
+      <symbol id="i-join" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></symbol>
+      <symbol id="i-explode" viewBox="0 0 24 24"><path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="M4 17l3-11 12 4-3 10z" stroke-dasharray="0"/><path d="M4 17l3-11" stroke-width="3" opacity=".25"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></symbol>
+      <symbol id="i-front" viewBox="0 0 24 24"><rect x="3" y="9" width="12" height="12" rx="1.5" opacity=".5"/><rect x="9" y="3" width="12" height="12" rx="1.5"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></symbol>
+      <symbol id="i-next" viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6"/></symbol>
+      <symbol id="i-prev" viewBox="0 0 24 24"><path d="M20 12H5M11 6l-6 6 6 6"/></symbol>
+      <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h12l-2 4 2 4H5"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></symbol>
+      <symbol id="i-compare" viewBox="0 0 24 24"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></symbol>
+      <symbol id="i-typical" viewBox="0 0 24 24"><rect x="3" y="3" width="10" height="10" rx="1"/><rect x="11" y="11" width="10" height="10" rx="1"/></symbol>
+      <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+      <symbol id="i-snap" viewBox="0 0 24 24"><path d="M6 3v9a6 6 0 0012 0V3M6 8h4M14 8h4"/></symbol>
+      <symbol id="i-ortho" viewBox="0 0 24 24"><path d="M5 4v15h15M5 14h5v5"/></symbol>
+      <symbol id="i-polar" viewBox="0 0 24 24"><path d="M4 20h16M4 20L17 7M10 20a6 6 0 00-1.8-4.3"/></symbol>
+    </defs></svg>
     <div class="tools" id="tools">
-      <button class="tool" data-tool="select" title="Select / edit (V): click, or drag a box — left→right selects what is wholly inside, right→left what it touches. Drag a selected object to move it, Ctrl+drag to copy. Right-click for more.">&#11016; Select <kbd>V</kbd></button>
-      <button class="tool" data-tool="match" title="Match properties: select an object first, then start Match, or start Match and click a source. Click compatible targets to apply its condition, colour, label and takeoff properties; geometry stays unchanged. Press Esc to finish.">&#8644; Match</button>
-      <button class="tool" data-tool="lasso" title="Lasso select (Shift+O): drag a free shape round the objects">&#10160; Lasso</button>
-      <button class="tool" data-tool="pan" title="Pan (H or hold Space)">&#9995; Pan <kbd>H</kbd></button>
-      <button class="tool" data-tool="draw" title="Draw with the active condition (A)">&#9998; Draw <kbd>A</kbd></button>
-      <button class="tool" data-tool="rect" title="Rectangle area (R)">&#9645; Rect <kbd>R</kbd></button>
-      <button class="tool" data-tool="auto" title="Auto area — click inside a room; its area is traced from the walls (W)">&#10024; Auto area <kbd>W</kbd></button>
-      <button class="tool" data-tool="fence" title="Fence — draw a line across an opening where Auto area leaks; it counts as a wall for Auto area">&#9474;&#9474; Fence</button>
-      <button class="tool" id="bAutoSet" title="Auto area settings: door gap, furniture, wall lines">&#9881;</button>
-      <button class="tool" data-tool="circle" title="Circle — round slab, column, tank: centre then edge (E)">&#9711; Circle <kbd>E</kbd></button>
-      <button class="tool" data-tool="count" title="Count — click each item; numbered markers (C)">&#9737; Count <kbd>C</kbd></button>
-      <button class="tool" data-tool="vsearch" title="Find similar — box one symbol; every matching symbol on the page or PDF is counted">&#128269; Find similar</button>
-      <button class="tool" data-tool="ded" title="Deduction for the active condition (D)">&minus; Deduct <kbd>D</kbd></button>
-      <button class="tool" data-tool="open" title="Door / window opening in a wall (O)">&#9707; Opening <kbd>O</kbd></button>
-      <button class="tool" data-tool="break" title="Break (B): click a length run to cut it in two there · Shift+click deletes one segment">&#9986; Break <kbd>B</kbd></button>
-      <button class="tool" data-tool="measure" title="Quick measure — not saved (M)">&#8596; Measure <kbd>M</kbd></button>
-      <button class="tool" data-tool="cal" title="Set scale from a known length (K)">&#128207; Scale <kbd>K</kbd></button>
-      <span class="tsep"></span>
-      <button class="tool" data-tool="note" title="Note — a text markup on the drawing (N)">&#128221; Note</button>
-      <button class="tool" data-tool="cloud" title="Revision cloud (U)">&#9729; Cloud</button>
-      <button class="tool" data-tool="arrow" title="Arrow with comment">&#10142; Arrow</button>
-      <button class="tool" data-tool="dimension" title="Dimension — Bluebeam-style dimension with extension lines, arrows, text size and colour">&#8646; Dimension</button>
-      <button class="tool" data-tool="hilite" title="Highlight an area">&#9641; Highlight</button>
-      <button class="tool" id="bMk" title="Markup tools (Bluebeam): text box, callout, line, polyline, polygon, rectangle, ellipse, pen, highlighter, stamps, image, hyperlink, file attachment, redaction">&#9998; Markup &#9662;</button>
-      <button class="tool" id="bMkList" title="Markups list (Alt+L): every markup in a table — filter, sort, statuses, replies, layers, CSV / XML / PDF summary">&#9776; List</button>
-      <span class="tsep"></span>
-      <button class="tool" id="bDel" title="Delete the selected measurement, count point or markup (Delete)" disabled>&#128465; Delete</button>
-      <button class="tool" id="bKeys" title="Keyboard &amp; mouse shortcuts (?)">&#9000; Keys</button>
-      <span class="sp"></span>
-      <label class="tg" title="Snap to drawing lines (S)"><input type="checkbox" id="snapOn" checked> Snap</label>
+      <div class="rtabs" role="tablist" aria-label="Tool groups">
+        <button class="rtab on" role="tab" data-rtab="takeoff" title="Measure lengths, areas and counts; Auto area; Find similar; cut-outs and openings">Takeoff</button>
+        <button class="rtab" role="tab" data-rtab="modify" title="Edit what is measured: move, copy, rotate, mirror, offset, break, join, explode, close, array">Modify</button>
+        <button class="rtab" role="tab" data-rtab="markup" title="Notes, clouds, arrows, dimensions, highlights, stamps and the Markups list">Markup</button>
+        <button class="rtab" role="tab" data-rtab="review" title="Check the takeoff: next / previous unchecked, mark checked, check before export, Compare, Typical">Review</button>
+        <span class="sp"></span>
+        <button class="tool tsm" id="bDel" title="Delete the selected measurement, count point or markup (Delete)" disabled><svg class="ic"><use href="#i-trash"/></svg><span class="tl">Delete</span></button>
+        <button class="tool tsm tgl" id="bOrtho" title="Ortho (F8): every point goes straight across or up / down from the last one. Holding Shift does the same for one click."><svg class="ic"><use href="#i-ortho"/></svg><span class="tl">Ortho</span></button>
+        <button class="tool tsm tgl" id="bPolar" title="Polar (F10): a point near a 15° direction from the last one (0°, 15°, 30°…) is pulled onto it. Object snap wins when it is close enough."><svg class="ic"><use href="#i-polar"/></svg><span class="tl">Polar</span></button>
+        <label class="tg" title="Snap to drawing lines (S)"><input type="checkbox" id="snapOn" checked> <svg class="ic"><use href="#i-snap"/></svg> Snap</label>
+        <button class="tool tsm" id="bSnapSet" title="Object snaps: endpoint, midpoint, intersection, perpendicular, nearest" aria-haspopup="true"><svg class="ic ch"><use href="#i-chev"/></svg></button>
+        <button class="tool tsm" id="bKeys" title="Keyboard &amp; mouse shortcuts (?)"><svg class="ic"><use href="#i-keys"/></svg><span class="tl">Keys</span></button>
+        <div id="snapPop" aria-label="Object snaps"></div>
+      </div>
+      <div class="rrow">
+        <span class="rsel"><button class="tool tsm" data-tool="select" title="Select / edit (V): click, or drag a box — left→right selects what is wholly inside, right→left what it touches. Drag a selected object to move it, Ctrl+drag to copy. Right-click for more."><svg class="ic"><use href="#i-select"/></svg><span class="tl">Select</span> <kbd>V</kbd></button><button class="tool tsm" data-tool="match" title="Match properties: select an object first, then start Match, or start Match and click a source. Click compatible targets to apply its condition, colour, label and takeoff properties; geometry stays unchanged. Press Esc to finish."><svg class="ic"><use href="#i-match"/></svg><span class="tl">Match</span></button><button class="tool tsm" data-tool="lasso" title="Lasso select (Shift+O): drag a free shape round the objects"><svg class="ic"><use href="#i-lasso"/></svg><span class="tl">Lasso</span></button><button class="tool tsm" data-tool="pan" title="Pan (H or hold Space)"><svg class="ic"><use href="#i-pan"/></svg><span class="tl">Pan</span> <kbd>H</kbd></button></span><span class="rvs"></span>
+      <div class="rpanel" data-rp="takeoff">
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-tool="draw" title="Length / run — draw along the drawing with the active condition: click each point, Enter to finish (A)"><svg class="ic"><use href="#i-draw"/></svg><span class="tl">Length</span> <kbd>A</kbd></button>
+          <button class="tool" data-tool="rect" title="Rectangle area (R)"><svg class="ic"><use href="#i-rect"/></svg><span class="tl">Rect</span> <kbd>R</kbd></button>
+          <button class="tool" data-tool="circle" title="Circle — round slab, column, tank: centre then edge (E)"><svg class="ic"><use href="#i-circle"/></svg><span class="tl">Circle</span> <kbd>E</kbd></button>
+        </div><div class="rgl">Measure</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-tool="auto" title="Auto area (Dynamic fill) — click inside a room; its area is traced from the walls (W)"><svg class="ic"><use href="#i-auto"/></svg><span class="tl">Auto area</span> <kbd>W</kbd></button>
+          <button class="tool" data-tool="fence" title="Fence — draw a line across an opening where Auto area leaks; it counts as a wall for Auto area"><svg class="ic"><use href="#i-fence"/></svg><span class="tl">Fence</span></button>
+          <button class="tool tsm" id="bAutoSet" title="Auto area settings: door gap, furniture, wall lines"><svg class="ic"><use href="#i-cog"/></svg></button>
+        </div><div class="rgl">Auto</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-tool="count" title="Count — click each item; numbered markers (C)"><svg class="ic"><use href="#i-count"/></svg><span class="tl">Count</span> <kbd>C</kbd></button>
+          <button class="tool" data-tool="vsearch" title="Find similar (Symbol detection) — box one symbol; every matching symbol on the page or PDF is counted"><svg class="ic"><use href="#i-vsearch"/></svg><span class="tl">Find similar</span></button>
+        </div><div class="rgl">Count</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-tool="ded" title="Cut-out / deduction for the active condition (D)"><svg class="ic"><use href="#i-ded"/></svg><span class="tl">Cut-out</span> <kbd>D</kbd></button>
+          <button class="tool" data-tool="open" title="Door / window opening in a wall (O)"><svg class="ic"><use href="#i-open"/></svg><span class="tl">Opening</span> <kbd>O</kbd></button>
+        </div><div class="rgl">Deduct</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-tool="measure" title="Quick measure — not saved: lengths, run total and the angle at each corner (M)"><svg class="ic"><use href="#i-measure"/></svg><span class="tl">Measure</span> <kbd>M</kbd></button>
+          <button class="tool" data-tool="cal" title="Set scale from a known length (K)"><svg class="ic"><use href="#i-cal"/></svg><span class="tl">Scale</span> <kbd>K</kbd></button>
+        </div><div class="rgl">Check</div></div>
+      </div>
+      <div class="rpanel" data-rp="modify" hidden>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-mod="move" title="Move: select, then drag the object (Shift = straight, Alt+drag moves without selecting first, arrow keys nudge)"><svg class="ic"><use href="#i-move"/></svg><span class="tl">Move</span></button>
+          <button class="tool" data-mod="copy" title="Copy (Ctrl+C), then click each place with Place copies"><svg class="ic"><use href="#i-copy"/></svg><span class="tl">Copy</span></button>
+          <button class="tool" data-mod="dup" title="Duplicate the selection beside itself (Ctrl+D)"><svg class="ic"><use href="#i-dup"/></svg><span class="tl">Duplicate</span></button>
+          <button class="tool" data-mod="array" title="Copy at a distance / array: copies across and down by distances in ft (Ctrl+arrow)"><svg class="ic"><use href="#i-array"/></svg><span class="tl">Array…</span></button>
+        </div><div class="rgl">Copy</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-mod="cw" title="Rotate the selection 90° clockwise"><svg class="ic"><use href="#i-rotate"/></svg><span class="tl">Rotate</span></button>
+          <button class="tool" data-mod="ccw" title="Rotate the selection 90° anticlockwise"><svg class="ic"><use href="#i-rotatel"/></svg><span class="tl">Rotate back</span></button>
+          <button class="tool" data-mod="fh" title="Mirror left–right"><svg class="ic"><use href="#i-mirror"/></svg><span class="tl">Mirror H</span></button>
+          <button class="tool" data-mod="fv" title="Mirror up–down"><svg class="ic"><use href="#i-mirrorv"/></svg><span class="tl">Mirror V</span></button>
+          <button class="tool" data-mod="front" title="Bring to front (drawn last, picked first)"><svg class="ic"><use href="#i-front"/></svg><span class="tl">To front</span></button>
+        </div><div class="rgl">Transform</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-mod="offset" title="Offset: a parallel copy, or the outline grown / shrunk by a distance (default: half the condition's thickness)"><svg class="ic"><use href="#i-offset"/></svg><span class="tl">Offset…</span></button>
+          <button class="tool" data-tool="break" title="Break (B): click a length run to cut it in two there · Shift+click deletes one segment"><svg class="ic"><use href="#i-break"/></svg><span class="tl">Break</span> <kbd>B</kbd></button>
+          <button class="tool" data-mod="join" title="Join the selected runs into one (gaps are bridged and reported)"><svg class="ic"><use href="#i-join"/></svg><span class="tl">Join</span></button>
+          <button class="tool" data-mod="explode" title="Explode a run into one row per segment"><svg class="ic"><use href="#i-explode"/></svg><span class="tl">Explode</span></button>
+          <button class="tool" data-mod="close" title="Close a run back to its start"><svg class="ic"><use href="#i-close"/></svg><span class="tl">Close</span></button>
+        </div><div class="rgl">Edit</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-mod="lock" title="Lock / unlock the selection (Ctrl+Shift+L): locked objects are not moved, edited or deleted"><svg class="ic"><use href="#i-lock"/></svg><span class="tl">Lock</span></button>
+        </div><div class="rgl">Protect</div></div>
+      </div>
+      <div class="rpanel" data-rp="markup" hidden>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-tool="note" title="Note — a text markup on the drawing (N)"><svg class="ic"><use href="#i-note"/></svg><span class="tl">Note</span></button>
+          <button class="tool" data-tool="cloud" title="Revision cloud (U)"><svg class="ic"><use href="#i-cloud"/></svg><span class="tl">Cloud</span></button>
+          <button class="tool" data-tool="arrow" title="Arrow with comment"><svg class="ic"><use href="#i-arrow"/></svg><span class="tl">Arrow</span></button>
+          <button class="tool" data-tool="dimension" title="Dimension — Bluebeam-style dimension with extension lines, arrows, text size and colour"><svg class="ic"><use href="#i-dim"/></svg><span class="tl">Dimension</span></button>
+          <button class="tool" data-tool="hilite" title="Highlight an area"><svg class="ic"><use href="#i-hilite"/></svg><span class="tl">Highlight</span></button>
+        </div><div class="rgl">Annotate</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" id="bMk" title="Markup tools (Bluebeam): text box, callout, line, polyline, polygon, rectangle, ellipse, pen, highlighter, stamps, image, hyperlink, file attachment, redaction"><svg class="ic"><use href="#i-markup"/></svg><span class="tl">Markup</span> <svg class="ic ch"><use href="#i-chev"/></svg></button>
+          <button class="tool" id="bMkList" title="Markups list (Alt+L): every markup in a table — filter, sort, statuses, replies, layers, CSV / XML / PDF summary"><svg class="ic"><use href="#i-list"/></svg><span class="tl">List</span></button>
+        </div><div class="rgl">More</div></div>
+      </div>
+      <div class="rpanel" data-rp="review" hidden>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-rv="prev" title="Go to the previous measurement not yet checked — on any page"><svg class="ic"><use href="#i-prev"/></svg><span class="tl">Prev unchecked</span></button>
+          <button class="tool" data-rv="next" title="Go to the next measurement not yet checked — on any page"><svg class="ic"><use href="#i-next"/></svg><span class="tl">Next unchecked</span></button>
+          <button class="tool" data-rv="checksel" title="Mark the selected measurements as checked by you"><svg class="ic"><use href="#i-check"/></svg><span class="tl">Check selected</span></button>
+          <button class="tool" data-rv="checkpage" title="Mark every measurement on this page as checked by you"><svg class="ic"><use href="#i-check"/></svg><span class="tl">Check page</span></button>
+          <button class="tool" data-rv="recheck" title="Mark the selected measurements as needing a recheck"><svg class="ic"><use href="#i-flag"/></svg><span class="tl">Recheck</span></button>
+        </div><div class="rgl">Quality check</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-rv="validate" title="Check before export: errors and warnings (no scale, missing height / thickness / BOQ, zero quantity, crossing outlines)"><svg class="ic"><use href="#i-shield"/></svg><span class="tl">Check before export</span></button>
+          <button class="tool" data-rv="compare" title="Overlay another revision in colour to see what changed"><svg class="ic"><use href="#i-compare"/></svg><span class="tl">Compare</span></button>
+          <button class="tool" data-rv="typical" title="Copy this page's takeoff to other pages (typical floors)"><svg class="ic"><use href="#i-typical"/></svg><span class="tl">Typical</span></button>
+        </div><div class="rgl">Revision</div></div>
+      </div>
+      </div>
     </div>
     <div id="stage">
       <canvas id="low"></canvas>
@@ -489,6 +629,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
     <div class="rz" id="rzR" title="Drag to resize"></div>
     <div class="warnbar" id="warnbar"></div>
     <div class="ph"><h3>Measurement sheet</h3><span class="seg"><button class="btn sm on" id="vSheet">Sheet</button><button class="btn sm" id="vBill">Bill</button></span><span class="ds" id="shInfo" style="font-size:10.5px;color:var(--muted)"></span><button class="hidebtn" id="hideR" title="Hide this panel">&#10217;</button></div>
+    <div id="shBar"><input type="search" id="shQ" placeholder="Search the sheet — room, item, BOQ, page…" aria-label="Search the measurement sheet"><select id="shSort" aria-label="Sort the measurements" title="Order of the measurements inside each condition (the totals do not change)"><option value="order">Drawing order</option><option value="page">By page</option><option value="qty">Largest first</option><option value="name">Name A–Z</option></select></div>
     <div id="qaBar"></div>
     <div class="pb" id="sheet"></div>
     <div class="pb" id="bill" style="display:none"></div>
@@ -525,7 +666,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-07e"></script>
+<script type="module" src="takeoff.js?v=2026-10-07f"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password

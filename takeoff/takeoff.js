@@ -992,6 +992,10 @@ function applyPdfScales(key, V){
   return {main, vps: add ? vps.length : 0};
 }
 
+function cornerDeg(a, b, c){   // the angle at b between a and c, 0–180°
+  const u = [a[0] - b[0], a[1] - b[1]], v = [c[0] - b[0], c[1] - b[1]], m = Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]);
+  return m ? Math.acos(Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1]) / m))) * 180 / Math.PI : 0;
+}
 function snapAt(q, ex){   // ex(item, i): points of the drawing's own takeoff to leave out (what is being dragged)
   const g = S.geo[S.key], r = SNAP_PX / S.view.s;
   let best = null;
@@ -1005,10 +1009,12 @@ function snapAt(q, ex){   // ex(item, i): points of the drawing's own takeoff to
     for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) (g.grid.get(x + "," + y) || []).forEach(i => ids.add(i));
     const near = [];
     ids.forEach(i => { const s = g.segs[i], a = [s[0], s[1]], b = [s[2], s[3]]; if (distSeg(q, a, b) <= r) near.push([a, b]); });
-    near.forEach(([a, b]) => { take(a, "endpoint", 1); take(b, "endpoint", 1); });
-    if (near.length < 80) for (let i = 0; i < near.length; i++) for (let j = i + 1; j < near.length; j++) { const x = segX(near[i][0], near[i][1], near[j][0], near[j][1]); if (x) take(x, "intersection", 1); }
-    near.forEach(([a, b]) => take([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], "midpoint", 2));
-    near.forEach(([a, b]) => take(projSeg(q, a, b), "on line", 3));
+    const K = snapKinds(), from = S.drag ? null : S.draft[S.draft.length - 1];
+    if (K.endpoint) near.forEach(([a, b]) => { take(a, "endpoint", 1); take(b, "endpoint", 1); });
+    if (K.intersection && near.length < 80) for (let i = 0; i < near.length; i++) for (let j = i + 1; j < near.length; j++) { const x = segX(near[i][0], near[i][1], near[j][0], near[j][1]); if (x) take(x, "intersection", 1); }
+    if (K.midpoint) near.forEach(([a, b]) => take([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], "midpoint", 2));
+    if (K.perpendicular && from && near.length < 80) near.forEach(([a, b]) => { const f = projSeg(from, a, b), t = dist(f, a) + dist(f, b); if (Math.abs(t - dist(a, b)) < 1e-6 && dist(f, from) > 1e-6) take(f, "perpendicular", 2.5); });   // the foot of the perpendicular from the last point, on the segment itself
+    if (K.nearest) near.forEach(([a, b]) => take(projSeg(q, a, b), "on line", 3));
   }
   return best;
 }
@@ -1968,8 +1974,9 @@ function setTool(t){
     const it = P.proj.items.find(i => i.id === S.sel);
     if (it && onPage(it) && !hiddenItem(it)) S.matchSource = matchSourceOf(it);
   }
-  document.querySelectorAll("#tools .tool").forEach(b => b.classList.toggle("on", b.dataset.tool === t));
-  { const mb = $("bMk"); if (mb) { mb.classList.toggle("on", mkIsTool(t)); mb.innerHTML = "&#9998; " + esc(mkIsTool(t) ? MK_TOOL_NAMES[t] : "Markup") + " &#9662;"; } }
+  document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === t));
+  { const mb = $("bMk"); if (mb) { mb.classList.toggle("on", mkIsTool(t)); const tl = mb.querySelector(".tl"); if (tl) tl.textContent = mkIsTool(t) ? MK_TOOL_NAMES[t] : "Markup"; } }
+  ribFollow(t);
   if (t === "mk_stamp" && !S.stampNoPick) setTimeout(() => { if (S.tool === "mk_stamp") stampPicker().then(v => { if (!v && S.tool === "mk_stamp") setTool("select"); }); }, 0);
   stage().className = t === "pan" ? "pan" : t === "select" ? "" : t === "lasso" ? "lasso" : t === "zoomwin" ? "zoomwin" : "draw";
   stage().style.cursor = "";
@@ -2004,7 +2011,11 @@ function cursorPoint(e, sp){
   if (!free && (["draw", "rect", "ded", "open", "measure", "cal", "circle", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
   let last = S.drag ? null : S.draft[S.draft.length - 1];
   if (S.drag && S.drag.vertex != null) { const it = P.proj.items.find(i => i.id === S.drag.item); if (it) last = S.drag.orig[S.drag.vertex - 1] || S.drag.orig[S.drag.vertex + 1] || null; }
-  if (e && e.shiftKey && last && !S.arcMid) { const dx = Math.abs(p[0] - last[0]), dy = Math.abs(p[1] - last[1]); p = dx >= dy ? [p[0], last[1]] : [last[0], p[1]]; if (s) s = Object.assign({}, s, {type: s.type + " + straight"}); }
+  if (((e && e.shiftKey) !== !!S.ortho) && last && !S.arcMid) { const dx = Math.abs(p[0] - last[0]), dy = Math.abs(p[1] - last[1]); p = dx >= dy ? [p[0], last[1]] : [last[0], p[1]]; if (s) s = Object.assign({}, s, {type: s.type + " + straight"}); }   // Shift, or Ortho (F8; Shift then frees one click)
+  else if (S.polar && last && !S.arcMid && !free && !s && !(e && e.shiftKey)) {   // Polar (F10): within 4° of a 15° (5° … 90°) direction -> onto it, the length kept
+    const dx = p[0] - last[0], dy = last[1] - p[1], len = Math.hypot(dx, dy), inc = polarDeg() * Math.PI / 180;
+    if (len > 1e-6) { const a = Math.atan2(dy, dx), n = Math.round(a / inc) * inc;
+      if (Math.abs(a - n) <= 4 * Math.PI / 180) { p = [last[0] + len * Math.cos(n), last[1] - len * Math.sin(n)]; s = {p, type: "polar " + (((n * 180 / Math.PI) % 360 + 360) % 360).toFixed(0) + "°", pri: 5, d: 0}; } } }
   if (free) s = {p, type: "free (Ctrl — no snap)", pri: 9, d: 0, free: true};
   return {p, s};
 }
@@ -2609,7 +2620,7 @@ function drawNow(){
       S.draft.forEach(p => { const q = toScr(p); dyn.push(`<circle cx="${q[0]}" cy="${q[1]}" r="3.5" fill="#fff" stroke="${col}" stroke-width="2"/>`); });
       if (k) { const L = polyLen(D) / k, seg = dist(D[D.length - 2], D[D.length - 1]) / k;
         const a1 = D[D.length - 2], a2 = D[D.length - 1], ang = (Math.atan2(a1[1] - a2[1], a2[0] - a1[0]) * 180 / Math.PI + 360) % 360;
-        live = (isAreaDraft() && D.length >= 3 ? fq(polyArea(D) / k / k) + " Sft · perimeter " + f3(polyLen(D, true) / k) + " ft" : (D.length > 2 ? "run " + f3(seg) + " · total " : "") + f3(L) + " ft") + " · ∠ " + ang.toFixed(1) + "°"; }
+        live = (isAreaDraft() && D.length >= 3 ? fq(polyArea(D) / k / k) + " Sft · perimeter " + f3(polyLen(D, true) / k) + " ft" : (D.length > 2 ? "run " + f3(seg) + " · total " : "") + f3(L) + " ft") + " · ∠ " + ang.toFixed(1) + "°" + (D.length > 2 && !isAreaDraft() ? " · corner " + cornerDeg(D[D.length - 3], a1, a2).toFixed(1) + "°" : ""); }
       else if (S.tool === "cal") live = (dist(D[0], D[D.length - 1])).toFixed(2) + " pt";
     }
   }
@@ -2622,6 +2633,8 @@ function drawNow(){
     const q = toScr(S.snap.p), t = S.snap.type;
     if (/endpoint|point/.test(t)) dyn.push(`<rect x="${q[0] - 6}" y="${q[1] - 6}" width="12" height="12" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
     else if (/intersection/.test(t)) dyn.push(`<path d="M${q[0] - 6} ${q[1] - 6}L${q[0] + 6} ${q[1] + 6}M${q[0] + 6} ${q[1] - 6}L${q[0] - 6} ${q[1] + 6}" stroke="#1baf7a" stroke-width="2.2"/>`);
+    else if (/perpendicular/.test(t)) dyn.push(`<path d="M${q[0] - 6} ${q[1] + 6}H${q[0] + 6}M${q[0] - 6} ${q[1] + 6}V${q[1] - 6}M${q[0] - 6} ${q[1] + 1}H${q[0] - 1}V${q[1] + 6}" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
+    else if (/polar/.test(t)) dyn.push(`<path d="M${q[0]} ${q[1] - 7}L${q[0] + 7} ${q[1]}L${q[0]} ${q[1] + 7}L${q[0] - 7} ${q[1]}Z" fill="none" stroke="#2b7de9" stroke-width="2"/>`);
     else if (/midpoint/.test(t)) dyn.push(`<path d="M${q[0]} ${q[1] - 7}L${q[0] + 6} ${q[1] + 5}L${q[0] - 6} ${q[1] + 5}Z" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
     else dyn.push(`<circle cx="${q[0]}" cy="${q[1]}" r="5" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
   }
@@ -2866,6 +2879,18 @@ function renderConds(){
     return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}</span></div>
       <div class="q">${fq(t.net, c.unit)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; }).join("");
 }
+/* search and sort of the measurement sheet: every word typed must appear in the item, its condition, BOQ code, page, room or unit;
+   sorting only reorders the lines inside each condition — the totals are always the whole condition's */
+function shText(it, c){ return [it.label, kindName(it, c), c.name, c.boq, c.unit, pageName(it), locText(locOf(it))].join(" ").toLowerCase(); }
+function shMatch(it, c){ const q = (S.shQ || "").trim().toLowerCase(); return !q || q.split(/\s+/).every(w => shText(it, c).includes(w)); }
+function shSorted(its, c){
+  const m = S.shSort || "order"; if (m === "order") return its;
+  const key = it => { const k = itemScale(it); return k ? rowsOf(it, k).reduce((a, r) => a + Math.abs(r.qty), 0) : 0; }, fi = id => P.proj.files.findIndex(f => f.id === id);
+  const A = its.map((it, n) => ({it, n}));
+  A.sort(m === "qty" ? (a, b) => key(b.it) - key(a.it) || a.n - b.n : m === "name" ? (a, b) => String(a.it.label || kindName(a.it, c)).localeCompare(String(b.it.label || kindName(b.it, c)), undefined, {numeric: true}) || a.n - b.n
+    : (a, b) => fi(a.it.file) - fi(b.it.file) || a.it.page - b.it.page || a.n - b.n);
+  return A.map(o => o.it);
+}
 function renderSheet(){
   const el = $("sheet");
   if (!P.proj) { el.innerHTML = ""; return; }
@@ -2880,7 +2905,7 @@ function renderSheet(){
   if (!P.proj.items.length) { el.innerHTML = '<div class="empty">Measurements appear here as you draw, in the house format: <b>Nos × L × W × H</b> in decimal feet, deductions as their own rows.</div>'; $("shInfo").textContent = ""; return; }
   let h = '<table class="sh"><thead><tr><th>#</th><th>Description</th><th class="n">Nos × L × W × H</th><th class="n">Qty</th></tr></thead><tbody>', n = 0;
   P.proj.conds.forEach(c => {
-    const its = P.proj.items.filter(i => i.cond === c.id && qaFilterOk(i)); if (!its.length) return;
+    const its = shSorted(P.proj.items.filter(i => i.cond === c.id && qaFilterOk(i) && shMatch(i, c)), c); if (!its.length) return;
     const t = condTotals(c);
     h += `<tr class="ch"><td colspan="4"><span class="sw" style="background:${c.color}"></span>${c.boq ? `<span class="boq">${esc(c.boq)}</span> ` : ""}${esc(c.name)} <span style="font-weight:400;color:var(--muted)">(${esc(c.unit)})</span></td></tr>`;
     its.forEach(it => {
@@ -2898,8 +2923,9 @@ function renderSheet(){
     });
     h += `<tr class="tot"><td></td><td>Total ${esc(c.name)}${t.ded ? `<div class="ds">gross ${fq(t.gross, c.unit)} − deductions ${fq(t.ded, c.unit)}</div>` : ""}</td><td></td><td class="n">${fq(t.net, c.unit)} ${esc(c.unit)}</td></tr>`;
   });
-  el.innerHTML = h + "</tbody></table>";
-  $("shInfo").textContent = P.proj.items.length + " measurements";
+  const shown = P.proj.items.filter(i => { const c = cond(i.cond); return c && qaFilterOk(i) && shMatch(i, c); }).length;
+  el.innerHTML = shown ? h + "</tbody></table>" : '<div class="empty">Nothing on the sheet matches' + ((S.shQ || "").trim() ? " “" + esc(S.shQ.trim()) + "”" : "") + (S.qaFilter ? " with this check filter" : "") + '.</div>';
+  $("shInfo").textContent = shown === P.proj.items.length ? P.proj.items.length + " measurements" : shown + " of " + P.proj.items.length + " shown";
 }
 function qaBadges(it){
   const b = [];
@@ -5395,6 +5421,95 @@ function wsMenu(x, y){
     {t: "All commands…", k: "Ctrl+K", fn: openPalette}], x, y);
 }
 function fullScreen(){ const d = document, el = d.documentElement; if (d.fullscreenElement) { d.exitFullscreen().catch(() => {}); return; } if (!el.requestFullscreen) return toast("Full screen is not available here — press F11", 3000); el.requestFullscreen().catch(() => toast("Full screen is not available here — press F11", 3000)); }
+/* ------------------------------------------------------------------ ribbon: tool groups, Modify, Review, Ortho / Polar, object snaps
+   The toolbar is grouped into tabs (Select, Takeoff, Modify, Markup, Review) so the tools a QS uses are all visible and
+   named, not hidden in the right-click menu. The tab follows the active tool (a shortcut such as W opens Takeoff). */
+const SNAP_KEY = "zdTakeoffSnaps", ORTHO_KEY = "zdTakeoffOrtho", POLAR_KEY = "zdTakeoffPolar";
+const SNAP_KINDS = [["endpoint", "Endpoint"], ["midpoint", "Midpoint"], ["intersection", "Intersection"], ["perpendicular", "Perpendicular to the last point"], ["nearest", "Nearest (anywhere on a line)"]];
+function snapKinds(){
+  if (!S.snapK) { let o = null; try { o = JSON.parse(pref(SNAP_KEY) || "null"); } catch (e) { o = null; }
+    S.snapK = Object.assign({endpoint: true, midpoint: true, intersection: true, perpendicular: true, nearest: true}, o && typeof o === "object" ? o : {}); }
+  return S.snapK;
+}
+function ribShow(tab){
+  document.querySelectorAll("#tools [data-rtab]").forEach(b => { const on = b.dataset.rtab === tab; b.classList.toggle("on", on); b.setAttribute("aria-selected", on ? "true" : "false"); });
+  document.querySelectorAll("#tools [data-rp]").forEach(pn => { pn.hidden = pn.dataset.rp !== tab; });
+}
+function ribFollow(t){   // the tab of the tool just picked (Select / Match / Lasso / Pan are always on show and change nothing)
+  const b = document.querySelector(`#tools [data-tool="${t}"]`), pn = b && b.closest("[data-rp]");
+  if (pn) ribShow(pn.dataset.rp); else if (mkIsTool(t)) ribShow("markup");
+}
+function setOrtho(on, quiet){
+  S.ortho = !!on; if (on) S.polar = false;
+  pref(ORTHO_KEY, S.ortho ? "1" : ""); pref(POLAR_KEY, S.polar ? "1" : "");
+  $("bOrtho").classList.toggle("on", S.ortho); $("bPolar").classList.toggle("on", !!S.polar);
+  if (!quiet) toast("Ortho " + (S.ortho ? "on — points go straight across or up / down (Shift: free for one click)" : "off"), 2200);
+}
+function setPolar(on, quiet){
+  S.polar = !!on; if (on) S.ortho = false;
+  pref(POLAR_KEY, S.polar ? "1" : ""); pref(ORTHO_KEY, S.ortho ? "1" : "");
+  $("bPolar").classList.toggle("on", S.polar); $("bOrtho").classList.toggle("on", !!S.ortho);
+  if (!quiet) toast("Polar " + (S.polar ? "on — directions every " + polarDeg() + "° are pulled in" : "off"), 2200);
+}
+const polarDeg = () => { const d = +pref("zdTakeoffPolarDeg"); return d > 0 && d <= 90 ? d : 15; };
+function snapPopToggle(on){
+  const pop = $("snapPop"), show = on == null ? !pop.classList.contains("on") : !!on;
+  if (show) {
+    const K = snapKinds();
+    pop.innerHTML = '<b>Object snap</b>' + SNAP_KINDS.map(([k, n]) => `<label><input type="checkbox" data-sk="${k}"${K[k] ? " checked" : ""}> ${esc(n)}</label>`).join("") +
+      '<b>Tracking</b><label><input type="checkbox" data-sk="_ortho"' + (S.ortho ? " checked" : "") + '> Ortho — 0° / 90° (F8)</label><label><input type="checkbox" data-sk="_polar"' + (S.polar ? " checked" : "") + '> Polar — every <select id="polDeg">' +
+      [5, 10, 15, 30, 45, 90].map(d => `<option${d === polarDeg() ? " selected" : ""}>${d}</option>`).join("") + '</select>° (F10)</label>' +
+      '<span class="small" style="font-size:10.5px;color:var(--muted)">Ctrl+click places a point with no snap at all.</span>';
+  }
+  pop.classList.toggle("on", show);
+}
+function ribbonInit(){
+  document.querySelectorAll("#tools [data-rtab]").forEach(b => b.addEventListener("click", () => ribShow(b.dataset.rtab)));
+  document.querySelectorAll("#tools [data-mod]").forEach(b => b.addEventListener("click", () => modAct(b.dataset.mod)));
+  document.querySelectorAll("#tools [data-rv]").forEach(b => b.addEventListener("click", () => revAct(b.dataset.rv)));
+  $("bOrtho").onclick = () => setOrtho(!S.ortho); $("bPolar").onclick = () => setPolar(!S.polar);
+  S.ortho = pref(ORTHO_KEY) === "1"; S.polar = !S.ortho && pref(POLAR_KEY) === "1"; setOrtho(S.ortho, true); setPolar(S.polar, true);
+  $("bSnapSet").onclick = e => { e.stopPropagation(); snapPopToggle(); };
+  $("snapPop").addEventListener("click", e => e.stopPropagation());
+  $("snapPop").addEventListener("change", e => {
+    const k = e.target.dataset && e.target.dataset.sk;
+    if (e.target.id === "polDeg") { pref("zdTakeoffPolarDeg", e.target.value); return; }
+    if (k === "_ortho") return setOrtho(e.target.checked, true) || snapPopToggle(true);
+    if (k === "_polar") return setPolar(e.target.checked, true) || snapPopToggle(true);
+    if (k) { snapKinds()[k] = e.target.checked; pref(SNAP_KEY, JSON.stringify(snapKinds())); }
+  });
+  document.addEventListener("click", () => $("snapPop").classList.remove("on"));
+  $("shQ").addEventListener("input", () => { S.shQ = $("shQ").value; renderSheet(); });
+  $("shSort").addEventListener("change", () => { S.shSort = $("shSort").value; renderSheet(); });
+}
+function modAct(a){
+  if (!P.proj || !S.page) return;
+  const items = [...selIds()].map(objById).filter(o => o && onPage(o)), meas = items.filter(o => o.cond);
+  const need = () => { setTool("select"); toast("Select what to change first — click it, or drag a box round it", 2800); };
+  if (a === "move") { setTool("select"); return toast(items.length ? "Drag the selection to move it · Shift keeps it straight · arrow keys nudge · Alt+drag moves without selecting" : "Click an object, then drag it to move it", 3600); }
+  if (a === "copy") { if (!items.length) return need(); copySel(); setTool("stamp"); return; }
+  if (a === "dup") return items.length ? duplicateSel() : need();
+  if (a === "array") return items.length ? arrayDialog("right") : need();
+  if (a === "cw" || a === "ccw" || a === "fh" || a === "fv") return items.length ? transformSel(a) : need();
+  if (a === "front") return items.length ? orderSel(1) : need();
+  if (a === "lock") return items.length ? lockSel() : need();
+  if (a === "offset") { if (meas.length !== 1) return toast("Select one measurement to offset", 2600); const c = cond(meas[0].cond); if (meas[0].kind === "open" || (c && c.type === "count")) return toast("A count point or an opening cannot be offset", 2600); return offsetDialog(meas[0]); }
+  const runs = meas.filter(isRun);
+  if (a === "join") return runs.length >= 2 ? joinRuns(new Set(runs.map(r => r.id))) : toast("Select two or more length runs to join", 2600);
+  if (a === "explode") return runs.length === 1 && runs[0].pts.length >= 3 ? explodeRun(runs[0]) : toast("Select one length run with three or more points to explode", 2800);
+  if (a === "close") { const rr = runs.filter(r => r.pts.length >= 3 && !r.locked); return rr.length ? rr.forEach(closeRun) : toast("Select a length run with three or more points to close", 2800); }
+}
+function revAct(a){
+  if (!P.proj) return;
+  const items = [...selIds()].map(objById).filter(o => o && o.cond && onPage(o));
+  if (a === "next") return nextUnchecked(1);
+  if (a === "prev") return nextUnchecked(-1);
+  if (a === "checkpage") return S.page ? setQa(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.qa !== "checked"), "checked") : null;
+  if (a === "checksel" || a === "recheck") return items.length ? setQa(items, a === "recheck" ? "recheck" : "checked") : toast("Select the measurements first", 2400);
+  if (a === "validate") return exportMenu();
+  if (a === "compare") return $("bCompare").click();
+  if (a === "typical") return $("bTypical").click();
+}
 function iconize(){   // each toolbar button's words in their own span, so "icons only" can hide them (the palette still reads them)
   document.querySelectorAll("#tools .tool, header > button.btn").forEach(b => { const n = b.firstChild; if (!n || n.nodeType !== 3 || b.querySelector(".tl")) return;
     const m = /^\s*(\S+)\s+([\s\S]+)$/.exec(n.textContent); if (!m || !/[^\x00-\x7F]/.test(m[1])) return;
@@ -5669,20 +5784,21 @@ async function setQa(items, qa){
 function qaCounts(){
   const its = P.proj.items, used = new Set(its.map(i => i.cond)), rate = P.proj.conds.reduce((a, c) => a + (used.has(c.id) || (c.asm || []).length ? [c].concat(c.asm || []).filter(o => { const r = rateOf(o, o === c ? c.unit : o.unit); return r.na || !(r.rate > 0); }).length : 0), 0);
   return {n: its.length, checked: its.filter(i => i.qa === "checked").length, recheck: its.filter(i => i.qa === "recheck").length, review: its.filter(needsReview).length,
-          ai: its.filter(i => i.ai && i.qa !== "checked").length, copied: its.filter(i => i.copied && i.qa !== "checked").length, rate,
+          boq: P.proj.conds.filter(c => used.has(c.id) && !String(c.boq || "").trim()).length, ai: its.filter(i => i.ai && i.qa !== "checked").length, copied: its.filter(i => i.copied && i.qa !== "checked").length, rate,
           scale: Object.values(P.proj.scales).filter(s => !s.verified).length + new Set(its.filter(i => !itemScale(i)).map(i => keyOf(i.file, i.page))).size};
 }
 function qaFilterOk(it){ const f = S.qaFilter; return !f || (f === "checked" ? it.qa === "checked" : f === "pending" ? it.qa !== "checked" : f === "recheck" ? it.qa === "recheck" : f === "review" ? needsReview(it) : true); }
 /* the next measurement not yet checked, in page order across every PDF (after the selected one); it is opened, selected and zoomed to */
-async function nextUnchecked(){
+async function nextUnchecked(dir){
+  dir = dir === -1 ? -1 : 1;
   if (!P.proj) return;
   const fi = id => P.proj.files.findIndex(f => f.id === id);
   const L = P.proj.items.map((it, n) => ({it, n})).filter(o => o.it.qa !== "checked" && !hiddenItem(o.it) && fi(o.it.file) >= 0)
     .sort((a, b) => fi(a.it.file) - fi(b.it.file) || a.it.page - b.it.page || a.n - b.n).map(o => o.it);
   if (!L.length) return toast("Every measurement is checked ✓", 3000);
   const cur = S.sel && L.findIndex(x => x.id === S.sel);
-  let k = cur != null && cur >= 0 ? (cur + 1) % L.length : L.findIndex(x => fi(x.file) > fi(S.fileId) || (x.file === S.fileId && x.page >= S.pageNo));
-  if (k < 0) k = 0;
+  let k = cur != null && cur >= 0 ? (cur + dir + L.length) % L.length : L.findIndex(x => fi(x.file) > fi(S.fileId) || (x.file === S.fileId && x.page >= S.pageNo));
+  if (cur == null || cur < 0) { if (k < 0) k = dir > 0 ? 0 : L.length - 1; else if (dir < 0) k = (k - 1 + L.length) % L.length; }
   const it = L[k];
   if (it.file !== S.fileId || it.page !== S.pageNo) await gotoPage(it.file, it.page);
   setTool("select"); setSel([it.id]); zoomTo([it.id]); refresh();
@@ -5694,9 +5810,9 @@ function renderQaBar(){
   const q = qaCounts(), ch = (f, n, t, cls) => `<button class="qa${cls ? " " + cls : ""}${S.qaFilter === f ? " on" : ""}" data-qf="${f}" title="Show only these on the sheet">${n} ${t}</button>`;
   el.style.display = "";
   el.innerHTML = ch("", q.n, "measured") + ch("checked", q.checked, "checked", "g") + ch("pending", q.n - q.checked, "pending") + ch("recheck", q.recheck, "recheck", q.recheck ? "r" : "") +
-    ch("review", q.review, "AI / copied to check", q.review ? "a" : "") + `<span class="qa${q.rate ? " a" : ""}" title="Bill lines without a usable rate">${q.rate} missing rate</span><span class="qa${q.scale ? " a" : ""}" title="Page scales not verified, or measurements on a page with no scale">${q.scale} unverified scale</span>` +
+    ch("review", q.review, "AI / copied to check", q.review ? "a" : "") + `<span class="qa${q.rate ? " a" : ""}" title="Bill lines without a usable rate">${q.rate} missing rate</span><span class="qa${q.boq ? " a" : ""}" title="Conditions with measurements but no BOQ code">${q.boq} no BOQ code</span><span class="qa${q.scale ? " a" : ""}" title="Page scales not verified, or measurements on a page with no scale">${q.scale} unverified scale</span>` +
     (S.page ? `<button class="btn sm" data-qact="page" title="Mark every measurement on this page as checked by you">✓ Check this page</button>` : "") +
-    (q.n - q.checked ? `<button class="btn sm" data-qact="next" title="Go to the next measurement not yet checked — on any page">Next unchecked &#8594;</button>` : "");
+    (q.n - q.checked ? `<button class="btn sm" data-qact="prev" title="Go to the previous measurement not yet checked — on any page">&#8592; Prev</button><button class="btn sm" data-qact="next" title="Go to the next measurement not yet checked — on any page">Next unchecked &#8594;</button>` : "");
 }
 
 /* ------------------------------------------------------------------ rates from the ZD Rate Analysis library.
@@ -5983,6 +6099,9 @@ function paletteCmds(){
     return L;
   }
   document.querySelectorAll("#tools [data-tool]").forEach(b => btn(b, "Tool"));
+  document.querySelectorAll("#tools [data-mod]").forEach(b => btn(b, "Modify")); document.querySelectorAll("#tools [data-rv]").forEach(b => btn(b, "Check"));
+  add("Ortho on / off", () => setOrtho(!S.ortho), "Tool", "F8"); add("Polar tracking on / off", () => setPolar(!S.polar), "Tool", "F10"); add("Object snaps…", () => snapPopToggle(true), "Tool");
+  add("Search the measurement sheet", () => { const q = $("shQ"); if (q) { q.focus(); q.select(); } }, "View");
   Object.entries(MK_TOOL_NAMES).forEach(([t, n]) => add("Markup: " + n, () => setTool(t), "Tool"));
   add("Markups list — filter, statuses, replies, summaries (Alt+L)", () => mlToggle(true), "View");
   add("Next unchecked measurement", nextUnchecked, "Check");
@@ -6081,7 +6200,7 @@ function ctxOpen(sp, e){
   if (mk) { if (!selIds().has(mk.id)) setSel([mk.id]); L = ctxMark(mk); }
   else if (hi) { if (!selIds().has(hi.it.id)) setSel([hi.it.id], hi.pt); else if (hi.pt >= 0 && hi.it.id === S.sel) S.selPt = hi.pt; L = ctxItem(hi, sp, q, e); }
   else L = ctxCanvas(q);
-  if (S.tool !== "select" && (mk || hi)) { S.tool = "select"; document.querySelectorAll("#tools .tool").forEach(b => b.classList.toggle("on", b.dataset.tool === "select")); stage().className = ""; hint(); }
+  if (S.tool !== "select" && (mk || hi)) { S.tool = "select"; document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === "select")); stage().className = ""; hint(); }
   refresh();
   ctxShow(L, e.clientX, e.clientY);
 }
@@ -6174,7 +6293,7 @@ function keysDialog(){
     ${G("Pages (Forma Takeoff sheets)", [["Tick a thumbnail | Shift+tick", "tick pages to export, read sheet info or OCR together · Shift: the pages in between"], ["Ctrl+click | Shift+click a thumbnail", "tick / untick it without opening it"], ["☆ on a thumbnail", "pin the page to the top"], ["Double-click a sheet no. on the drawing", "open that sheet (right-click lists the sheets referenced)"]])}
     ${G("Markups (Bluebeam)", [["T | Q | N", "text box · callout · note"], ["Shift+L | Y | G", "line · polyline · polygon"], ["Shift+R | Shift+E | U", "rectangle · ellipse · cloud"], ["P | Shift+H", "pen · highlighter pen"], ["X | I", "stamp · image"], ["Markup ▾", "every markup tool: hyperlink, file attachment, redaction, erase…"], ["Dbl-click a markup", "edit its text · open a link or an attached file"], ["Drag a handle", "resize a box, move a line's end or a point"], ["Alt+L", "Markups list: every markup — filter, sort, status, replies, layers, CSV / XML / PDF summary"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
-    ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"]])}
+    ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["F8 | F10", "Ortho (0° / 90°) · Polar tracking (every 15°…) — Shift frees one click while Ortho is on"], ["Snap ▾ (toolbar)", "choose the object snaps: endpoint, midpoint, intersection, perpendicular, nearest"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"]])}
     ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"]])}
   </table>`, "Close");
 }
@@ -6303,7 +6422,7 @@ function wire(){
   $("bSheet").onclick = () => P.proj && sheetInfoDialog();
   $("qaBar").addEventListener("click", e => {
     const f = e.target.closest("[data-qf]"); if (f) { S.qaFilter = S.qaFilter === f.dataset.qf ? "" : f.dataset.qf; renderSheet(); renderQaBar(); return; }
-    const a = e.target.closest("[data-qact]"); if (a && a.dataset.qact === "next") return nextUnchecked(); if (a) setQa(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.qa !== "checked"), "checked");
+    const a = e.target.closest("[data-qact]"); if (a && a.dataset.qact === "next") return nextUnchecked(1); if (a && a.dataset.qact === "prev") return nextUnchecked(-1); if (a) setQa(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.qa !== "checked"), "checked");
   });
   let findT = null; $("findIn").addEventListener("input", e => { clearTimeout(findT); findT = setTimeout(() => findText(e.target.value), 350); });
   $("findIn").addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(findT); findText(e.target.value); } if (e.key === "Escape") { $("findRes").classList.remove("on"); e.target.blur(); } });
@@ -6335,6 +6454,7 @@ function wire(){
   $("bLayers").onclick = () => { vOpen(false); S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };
   $("bDel").onclick = () => delSelected();
   $("bKeys").onclick = keysDialog;
+  ribbonInit();
   $("bZw").onclick = () => P.proj && S.page && setTool("zoomwin");
   $("bUndo").onclick = undoAny; $("bRedo").onclick = redoAny;
   $("bExport").onclick = exportMenu;
@@ -6472,6 +6592,8 @@ function wire(){
     if (mod || e.altKey) return;
     if (e.key === " ") { S.space = true; stage().classList.add("pan"); e.preventDefault(); return; }
     if (e.key === "?") { keysDialog(); return; }
+    if (e.key === "F8") { e.preventDefault(); return setOrtho(!S.ortho); }
+    if (e.key === "F10") { e.preventDefault(); return setPolar(!S.polar); }
     if (e.key === "Escape" && S.typed) { S.typed = ""; draw(); return; }
     if (e.key === "Escape" && S.mkd) { S.mkd = null; draftClear(); draw(); return; }
     if (e.key === "Escape" && S.drag && (S.drag.vertex != null || S.drag.move || S.drag.mh != null)) { cancelDrag(); return; }
@@ -8588,7 +8710,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
