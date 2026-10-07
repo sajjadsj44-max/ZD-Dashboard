@@ -539,7 +539,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     const nm0 = await T(() => (zdTakeoff.P.proj.marks || []).length), sheet0 = await page.innerText("#sheet"), tot0 = await T(() => zdTakeoff.P.proj.conds.map(c => zdTakeoff.condTotals(c).net).join());
     await page.keyboard.press("n"); await click(hx(40), hy(5)); await page.fill("#mkT", "Check slab level <img src=x onerror=\"window.__mk=1\">"); await page.click("#dlgOk"); await wait(150);
     await page.keyboard.press("u"); await click(hx(40), hy(10)); await click(hx(48), hy(16)); await page.fill("#mkT", "Rev 07"); await page.click("#dlgOk"); await wait(150);
-    await page.click('[data-tool="arrow"]'); await click(hx(40), hy(20)); await click(hx(46), hy(24)); await page.fill("#mkT", "see detail"); await page.click("#dlgOk"); await wait(150);
+    await page.click('[data-rtab="markup"]'); await page.click('[data-tool="arrow"]'); await click(hx(40), hy(20)); await click(hx(46), hy(24)); await page.fill("#mkT", "see detail"); await page.click("#dlgOk"); await wait(150);
     await page.click('[data-tool="hilite"]'); await click(hx(40), hy(28)); await click(hx(50), hy(31)); await wait(150);
     const mk = await T(() => zdTakeoff.P.proj.marks.slice(-4).map(m => m.type + ":" + m.text));
     ok((await T(() => zdTakeoff.P.proj.marks.length)) === nm0 + 4 && mk.join("|").startsWith("note:Check slab level"), "note, cloud, arrow and highlight added: " + mk.join(" · "));

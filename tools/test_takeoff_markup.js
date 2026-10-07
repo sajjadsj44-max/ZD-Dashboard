@@ -65,7 +65,7 @@ function png(w, h, px){   // a small RGBA PNG, px(x, y) -> [r, g, b, a]
   const view = await T(() => zdTakeoff.S.view.s);
 
   console.log("Markup menu");
-  await page.click("#bMk"); await wait(150);
+  await page.click('[data-rtab="markup"]'); await page.click("#bMk"); await wait(150);
   const menu = await T(() => document.getElementById("ctx").innerText);
   ok(["Text box", "Callout", "Line", "Polyline", "Polygon", "Rectangle", "Ellipse", "Pen", "Highlighter pen", "Stamp", "Image", "Hyperlink", "File attachment", "Redaction", "Erase"].every(n => menu.includes(n)), "Markup ▾ lists every markup tool");
   await page.keyboard.press("Escape"); await wait(100);
@@ -227,7 +227,7 @@ function png(w, h, px){   // a small RGBA PNG, px(x, y) -> [r, g, b, a]
 
   console.log("Markups list");
   const rowsN = () => page.locator("#mkList tbody tr[data-mlid]").count();
-  await page.click("#bMkList"); await wait(300);
+  await page.click('[data-rtab="markup"]'); await page.click("#bMkList"); await wait(300);
   ok(await page.isVisible("#mkList") && await page.isVisible("#mlHead"), "☰ List opens the Markups list under the drawing");
   const nPage = await T(() => (zdTakeoff.P.proj.marks || []).filter(m => m.file === zdTakeoff.S.fileId && m.page === zdTakeoff.S.pageNo && m.type !== "fence").length);
   ok((await rowsN()) === nPage, "every markup on this page is a row (" + nPage + ")");

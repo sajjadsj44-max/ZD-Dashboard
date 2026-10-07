@@ -193,6 +193,35 @@ markup-tools release (07-Oct-2026) · **✓** already in · **◐** partly · **
 | Office / SharePoint / ProjectWise plug-ins, PDF printer, scanned PDF to Word / Excel | n/a desktop |
 | Studio Sessions and Projects, Bluebeam Cloud, DMS links | n/a cloud — the takeoff stays in this browser by design; Project + PDFs moves it |
 
+## 6e. Toolbar review — grouped ribbon, Modify tools, Ortho / Polar, sheet search (07-Oct-2026)
+
+A full review of the toolbar and the measurement sheet, prompted by a feature-gap review (Bluebeam Revu, Autodesk Forma Takeoff,
+PlanSwift / ConstructConnect). The vendor behaviour in that review was **not re-checked against vendor pages in this session** —
+what is listed here is what the app now does, each item covered by `tools/test_takeoff_ribbon.js`.
+
+**The mess that was found:** 35 buttons in one wrapping row (Unicode symbols that draw differently on Windows / Android / Mac), the
+editing tools (rotate, mirror, join, explode, close, offset, array) only in the right-click menu, no way to switch Ortho on
+(Shift only), no choice of object snaps, no search or sort on the measurement sheet, "Next unchecked" but no "Previous".
+
+| Change | Where |
+|---|---|
+| Toolbar in **groups (tabs)**: Takeoff · Modify · Markup · Review; Select / Match / Lasso / Pan always on show; the tab follows the tool (press W → Takeoff, N → Markup) | toolbar |
+| **SVG icons** (one stroke style, drawn with the text colour) in place of Unicode symbols; names + shortcuts in the tooltips; names shown beside the icons when the drawing area is wide enough (≥ 1020 px), icons only when it is narrow | toolbar |
+| **Modify tab**: Move · Copy / Place copies · Duplicate · Array… · Rotate (both ways) · Mirror H / V · To front · Offset… · Break · Join · Explode · Close · Lock — each acts on the selection and says what to select when nothing is | toolbar |
+| **Review tab**: Previous / Next unchecked · Check selected · Check page · Recheck · Check before export · Compare · Typical | toolbar |
+| **Ortho (F8)** and **Polar (F10)** switches (as AutoCAD: one turns the other off); Shift frees one click while Ortho is on; Polar pulls a direction within 4° of every 5° / 10° / 15° / 30° / 45° / 90° onto it (object snaps win) | toolbar, status bar |
+| **Object snap list** (Snap ▾): endpoint, midpoint, intersection, **perpendicular to the last point (new)**, nearest; the choice is kept in the browser; Ctrl+click still places a point with no snap | toolbar |
+| Quick measure shows the **corner angle** at the last corner as well as the direction of the leg | status bar |
+| **Measurement sheet: search** (every word must match item, condition, BOQ code, unit, page or room) and **sort** (drawing order · by page · largest first · name); the totals stay the whole condition's; "3 of 12 shown" | right panel |
+| QA bar: **Prev** next to Next unchecked, and a **no BOQ code** count | right panel |
+| Commands (Ctrl+K) find every new button, Ortho, Polar, Object snaps and "Search the measurement sheet" | palette |
+
+**Still not in the app** (from the same review, in the order they would pay back): sheet column chooser / custom and formula columns
+(waste %, gross qty); Quick Line (click a wall → whole connected run) and Quick Box (box → largest room / all walls); a Volume
+measurement; dynamic Auto-area naming rules; Revision Manager (replace a sheet, keep the takeoff, flag changed quantities, cost delta);
+sheet reorder / rotate / delete; legend column width / order; material · labour · equipment split in the bill; Firefox / Safari / touch
+testing. None of these was started — each needs its own design.
+
 ## 7. Not in ZD Takeoff yet (and why)
 
 | Feature | Where | Note |
