@@ -13,7 +13,8 @@
    there (offline / sandboxed runs). Checks: DWG 2018 / 2000 and DXF read; the scale from the drawing's units; AutoCAD's
    layers (colours, off / frozen start off, isolate); the screen on black (colour 7 white, colours as AutoCAD), white and
    monochrome, drawn from the scene on every zoom step; a room measured by snapping to the drawing = 120.00 Sft; CAD
-   quantities by layer and block into the takeoff; right-click on an object; Ctrl+P plot (window, scale, monochrome) as a
+   quantities by layer and block into the takeoff; right-click on an object; selecting objects (click, Shift+click,
+   window / crossing box, Ctrl+A, select similar, quick select, layer off) and taking off / counting the selection; Ctrl+P plot (window, scale, monochrome) as a
    PDF; exports keep layers off; Project + PDFs carries the DWG; the scene read again from the DWG lands on the same page. */
 const path = require("path"), fs = require("fs"), os = require("os");
 let pw;
@@ -124,6 +125,69 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
   ok(ctxL.some(t => /AutoCAD: lwpolyline · A-WALL/.test(t)) && ctxL.some(t => /Take off its area — 120\.00 Sft/.test(t)), "right-click on the room's outline: “Take off its area — 120.00 Sft”");
   const ctxD = await T(() => { const Z = zdTakeoff, m = Z.cadMeta(Z.S.fileId).map, k = 72 * m.uIn / m.den; return Z.cadCtxItems([m.ox + (30 - m.x0) * k, m.oy + (m.y1 - 18) * k]).map(i => i.t || i.h); });
   ok(ctxD.some(t => /block DOOR3/.test(t)) && ctxD.some(t => /Count every DOOR3 \(2\)/.test(t)), "right-click on a door: block DOOR3, count every one (2)");
+  ok(ctxD.some(t => /Select similar/.test(t)) && ctxD.some(t => /Layer A-DOOR off \(LAYOFF\)/.test(t)), "…and offers Select similar and Layer off (LAYOFF)");
+
+  console.log("selecting AutoCAD objects (Shift+V)");
+  await page.click("#bFit"); await wait(300);
+  const sel = () => T(() => { const Z = zdTakeoff, pg = Z.cadPage(); return Z.cadSelIds().map(ei => { const r = pg.ents[ei]; return {t: r.t, n: r.n || "", L: Z.S.cadSc[Z.S.fileId].layers[r.L].name, area: r.area || 0, len: r.len || 0}; }); });
+  const drag = async (A, B) => { const a = await scr(...(await pp(...A))), b = await scr(...(await pp(...B))); await page.mouse.move(a[0], a[1]); await page.mouse.down(); await page.mouse.move((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, {steps: 4}); await page.mouse.move(b[0], b[1], {steps: 4}); await page.mouse.up(); await wait(120); };
+  const clickD = async (X, Y, mods) => { const p = await pp(X, Y), q = await scr(p[0], p[1]); for (const m of mods || []) await page.keyboard.down(m); await page.mouse.move(q[0], q[1]); await wait(40); await page.mouse.down(); await page.mouse.up(); for (const m of mods || []) await page.keyboard.up(m); await wait(100); };
+  const n0 = await T(() => zdTakeoff.P.proj.items.length);
+  await page.keyboard.press("Shift+V"); await wait(100);
+  ok(await T(() => zdTakeoff.S.tool === "cadsel") && await page.isVisible('#tools [data-tool="cadsel"].on'), "Shift+V picks the tool (CAD pick on the toolbar)");
+  await clickD(100, 144);
+  let s1 = await sel();
+  ok(s1.length === 1 && s1[0].t === "LWPOLYLINE" && s1[0].L === "A-WALL" && near(s1[0].area, 120, 1e-6), "a click selects the room's outline (A-WALL, 120 Sft)");
+  ok(/AutoCAD objects — 1 selected/.test(await page.textContent("#props")) && /120\.000 Sft/.test(await page.textContent("#props")), "the bar below shows the selection and its area");
+  ok(await T(() => /<g class="cadsel">/.test(document.getElementById("ov").innerHTML)), "the selection is drawn in blue over the drawing");
+  await clickD(30, 18, ["Shift"]);
+  s1 = await sel();
+  ok(s1.length === 2 && s1.some(x => x.t === "INSERT" && x.n === "DOOR3"), "Shift+click adds a door (block DOOR3)");
+  await clickD(30, 18, ["Shift"]);
+  ok((await sel()).length === 1, "Shift+click on it again takes it out");
+  await clickD(500, 300);
+  ok((await sel()).length === 0, "a click on nothing clears the selection");
+  await drag([-20, 165], [140, -20]);   // left → right: window
+  s1 = await sel();
+  const ty = t => s1.filter(x => x.t === t).length;
+  ok(ty("LWPOLYLINE") === 2 && s1.filter(x => x.n === "DOOR3").length === 2 && !s1.some(x => x.L === "A-GRID") && !s1.some(x => x.L === "A-FURN"),
+    "a window (left→right) takes what is wholly inside: both wall outlines and both doors — not the grid line through it, not A-FURN (off) (" + s1.length + " objects)");
+  await drag([175, 77], [165, 67]);   // right → left: crossing, over the grid line only
+  s1 = await sel();
+  ok(s1.length === 1 && s1[0].t === "LINE" && s1[0].L === "A-GRID", "a crossing (right→left) takes what it touches: the grid line");
+  await drag([165, 67], [175, 77]);
+  ok((await sel()).length === 0, "the same box as a window takes nothing (the line is not inside it)");
+  await clickD(30, 18);
+  await T(() => zdTakeoff.cadSelAct("similar")); s1 = await sel();
+  ok(s1.length === 2 && s1.every(x => x.n === "DOOR3"), "Select similar: both DOOR3 blocks");
+  await clickD(100, 144, ["Shift"]);
+  const gotS = await T(() => { const Z = zdTakeoff; Z.S.cond = null; return Z.cadSelAct("take"); });
+  const tk = await T(n0 => { const Z = zdTakeoff, its = Z.P.proj.items.slice(n0); return its.map(i => ({c: Z.P.proj.conds.find(c => c.id === i.cond).name, type: Z.P.proj.conds.find(c => c.id === i.cond).type, pts: i.pts.length, ai: !!i.ai})); }, n0);
+  ok(gotS && gotS.area === 1 && gotS.count === 2 && tk.some(x => x.c === "A-WALL" && x.type === "area") && tk.some(x => x.c === "DOOR3" && x.type === "count" && x.pts === 2) && tk.every(x => x.ai),
+    "Take off: the outline as an area in A-WALL, the doors as 2 counts in DOOR3 — marked AI");
+  const sq = await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(c => c.name === "A-WALL" && c.type === "area"), k = Z.P.proj.scales[Z.S.key].ptPerFt; return Z.P.proj.items.filter(i => i.cond === c.id).reduce((a, i) => a + Z.rowsOf(i, k).reduce((b, r) => b + r.qty, 0), 0); });
+  ok(near(sq, 120, 0.01), "…and the area measures 120.00 Sft on the sheet (" + sq.toFixed(3) + ")");
+  await page.keyboard.press("Escape"); await wait(80);
+  ok((await sel()).length === 0 && await T(() => zdTakeoff.S.tool === "cadsel"), "Esc clears the selection (the tool stays)");
+  await page.keyboard.press("Control+a"); await wait(80);
+  const nAll = (await sel()).length;
+  ok(nAll > 10 && !(await sel()).some(x => x.L === "A-FURN" || x.L === "A-FROZEN"), "Ctrl+A selects every object on layers that are on (" + nAll + ")");
+  const qs = T(() => zdTakeoff.cadQuickSelect()); await page.waitForSelector("#qsT"); await page.selectOption("#qsT", "LINE"); await page.selectOption("#qsL", "A-WALL"); await page.fill("#qsL0", "19"); await page.click("#dlgOk"); await qs; await wait(80);
+  s1 = await sel();
+  ok(s1.length === 1 && s1[0].t === "LINE" && near(s1[0].len, 20, 1e-6), "Quick select (type LINE, layer A-WALL, length ≥ 19 ft): the 20'-0\" line");
+  await clickD(170, 72);
+  await T(() => zdTakeoff.cadSelAct("layoff")); await wait(200);
+  ok(await T(() => ((zdTakeoff.P.proj.layersOff || {})[zdTakeoff.S.fileId] || []).includes("A-GRID")) && (await sel()).length === 0, "Layer off (LAYOFF) switches the grid line's layer off");
+  await clickD(170, 72);
+  ok((await sel()).length === 0, "an object on a layer that is off cannot be picked");
+  await T(() => zdTakeoff.cadLayersOnOff(["A-GRID"], true)); await wait(200);
+  ok(!(await T(() => ((zdTakeoff.P.proj.layersOff || {})[zdTakeoff.S.fileId] || []).includes("A-GRID"))), "…and back on");
+  await clickD(170, 72);
+  const cAny = await T(() => zdTakeoff.cadSelAct("count"));
+  ok(cAny && cAny.count === 1, "Count them: any object (here a line) counted at its middle");
+  await page.keyboard.press("v"); await wait(80);
+  ok(await T(() => zdTakeoff.S.tool === "select" && !zdTakeoff.S.cadSel), "another tool (V) leaves the selection");
+  await T(n0 => { const Z = zdTakeoff; for (let i = 0; i < 5 && Z.P.proj.items.length > n0 && Z.S.undo.length; i++) Z.undoAny(); }, n0); await wait(200);   // the takeoff as it was for the tests below
 
   console.log("plot (Ctrl+P)");
   await page.keyboard.press("Control+p"); await wait(500);
