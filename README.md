@@ -1,21 +1,18 @@
 # zd-dashboards
 
-Static, self-contained HTML dashboards published live on Netlify and GitHub Pages.
+Static, self-contained HTML dashboards published live on GitHub Pages.
 
 ## Live links
 
-| Page | Netlify (short link to share) | GitHub Pages |
-|---|---|---|
-| Zameen Developments | https://zd-dashboard.netlify.app/ | https://sajjadsj44-max.github.io/ZD-Dashboard/zameen-developments/ |
-| Drawing Tracker | https://zd-dashboard.netlify.app/drawing-tracker/ | https://sajjadsj44-max.github.io/ZD-Dashboard/drawing-tracker/ |
-| PDF Takeoff | https://zd-dashboard.netlify.app/takeoff/ | https://sajjadsj44-max.github.io/ZD-Dashboard/takeoff/ |
-| Dashboard index | https://zd-dashboard.netlify.app/index.html | https://sajjadsj44-max.github.io/ZD-Dashboard/ |
+| Page | Link |
+|---|---|
+| Zameen Developments | https://sajjadsj44-max.github.io/ZD-Dashboard/zameen-developments/ |
+| Drawing Tracker | https://sajjadsj44-max.github.io/ZD-Dashboard/drawing-tracker/ |
+| PDF Takeoff | https://sajjadsj44-max.github.io/ZD-Dashboard/takeoff/ |
+| Dashboard index | https://sajjadsj44-max.github.io/ZD-Dashboard/ |
 
-On Netlify the site root serves the dashboard itself (see the rewrite in
-`netlify.toml`); on GitHub Pages the root serves the index page instead.
-
-Both hosts serve the same repo and update from the same push, so either link
-works. Share the Netlify one — it is shorter and easier to read out.
+GitHub Pages is the only host. Always open the same address: the takeoff keeps
+its projects in that browser, per address.
 
 Read-only — anyone with the URL opens them in any browser, phone or desktop,
 with nothing to install, after entering the dashboard password. The password is
@@ -969,19 +966,6 @@ git clone --depth 1 https://github.com/osdag-admin/Osdag.git /tmp/osdag
 tools/calc_data.py --osdag /tmp/osdag zameen-developments/index.html
 ```
 
-## Netlify
-
-Netlify is connected to this repo and redeploys on every push to `main`, in
-parallel with GitHub Pages. `netlify.toml` holds the whole configuration:
-publish the repo root, no build command, and revalidate HTML on every request
-so an updated dashboard reaches viewers on their next load.
-
-To connect it (once): Netlify → `Add new site` → `Import an existing project` →
-`GitHub` → pick `sajjadsj44-max/zd-dashboards` → branch `main` → `Deploy`.
-Leave build command and publish directory blank; `netlify.toml` supplies them.
-Then `Site configuration` → `Change site name` → `ZD-Dashboard`
-(Netlify lowercases it into the URL, giving `zd-dashboard.netlify.app`).
-
 ## How publishing is wired
 
 Pages `Source` is set to **GitHub Actions**, so
@@ -1032,7 +1016,6 @@ connection.
 
 ```
 index.html                          landing page listing all dashboards
-netlify.toml                        Netlify publish settings and cache headers
 zameen-developments/index.html      Zameen Developments dashboard
 drawing-tracker/index.html          Drawing Tracker dashboard
 takeoff/index.html, takeoff.js      PDF Takeoff (pdf.js viewer, scale, snapping, measurement sheet)

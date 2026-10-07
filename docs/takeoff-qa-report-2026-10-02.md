@@ -351,7 +351,7 @@ Headless Chromium on the build machine (no GPU); times include the test's own ov
 
 ## F. Tomorrow's live-retest checklist
 
-On a real project PDF, in Chrome. Before merging, the PR's deploy preview is https://deploy-preview-68--zd-dashboard.netlify.app/takeoff/ (its own browser storage — projects on the live site are not there; use Export / Import .json to move one). After merging: the live site.
+On a real project PDF, in Chrome. After merging: the live site (https://sajjadsj44-max.github.io/ZD-Dashboard/takeoff/).
 
 1. **Scale.** Open a real sheet with a scale note: the chip reads the note (⚠ From note). Measure a dimension written on the drawing → *Verify* (±1 %). If the sheet has room sizes written, a wrong note is flagged with a suggested scale. Zoom in / out and re-measure the same line — the length must not change.
 1. **Rapid paging.** PgDn / PgUp quickly 10 times, click a sheet row while a page loads — each page keeps its own scale note (the chip matches the page's note).
