@@ -263,6 +263,19 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   ok(pd.d0 === 0, "doors typed as 0 on the measurement override the automatic find");
   ok(await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.name === "Floor area"); c.asm = [{id: "A1", name: "Skirting", unit: "ft", f: "PD"}]; const l = Z.billLines().find(x => x.kind === "asm" && x.name === "Skirting"); return l && Math.abs(l.qty - Z.condVars(c).PD) < 1e-9; }), "assembly formula PD drives the skirting line");
 
+  console.log("assemblies: waste %, other condition's figure, templates");
+  const asmT = await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.name === "Floor area"), A = Z.condVars(c).A;
+    c.asm = [{id: "A1", name: "Tiles", unit: "Sft", f: "A", w: 5}, {id: "A2", name: "Same via ref", unit: "Sft", f: "[floor AREA].A*2"}, {id: "A3", name: "Bad ref", unit: "Sft", f: "[No such].A"}, {id: "A4", name: "Bad var", unit: "Sft", f: "[Floor area].Z"}];
+    const L = Z.billLines().filter(x => x.kind === "asm"), g = n => L.find(x => x.name === n);
+    let alert1 = ""; try { Z.evalFormula("[Floor area].A", {A: 1}); } catch (e) { alert1 = e.message; }
+    return {A, tiles: g("Tiles").qty, wl: g("Tiles").w, ref: g("Same via ref").qty, bad: g("Bad ref").err, badv: g("Bad var").err, alert1}; });
+  ok(near(asmT.tiles, asmT.A * 1.05, 1e-6) && asmT.wl === 5, `waste 5 %: ${asmT.A.toFixed(3)} Sft → ${asmT.tiles.toFixed(3)} Sft`);
+  ok(near(asmT.ref, asmT.A * 2, 1e-6), "[floor AREA].A reads another condition's net area by name (case-free), spaces kept");
+  ok(/Unknown condition/.test(asmT.bad) && /Unknown variable/.test(asmT.badv) && /Unknown name/.test(asmT.alert1), "a missing condition or variable is an error on that line, never a number");
+  ok(await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.name === "Floor area"); c.asm = [{id: "A1", name: "Tiles", unit: "Sft", f: "A", w: 5}]; return Z.validation().L.every(m => !/Tiles: formula error/.test(m.msg)); }), "valid waste line passes the check before export");
+  ok(await T(() => { const Z = zdTakeoff, p = JSON.parse(JSON.stringify(Z.P.proj)); p.conds[0].asm = [{id: "x", name: "W", unit: "Sft", f: "A", w: "250"}, {id: "y", name: "N", unit: "Sft", f: "A", w: "abc"}, 5]; p.asmTpl = [{name: "ok", rows: [{name: "r"}]}, {name: "", rows: []}, {name: "bad", rows: "x"}, 7];
+    Z.migrate(p, []); return p.conds[0].asm.length === 2 && p.conds[0].asm[0].w === 100 && p.conds[0].asm[1].w === 0 && p.asmTpl.length === 1 && p.asmTpl[0].name === "ok"; }), "migrate: waste held to 0–100, junk assembly rows and templates dropped");
+
   console.log("opening schedule");
   const op = await T(() => zdTakeoff.P.proj.openings);
   ok(op.length === 1 && op[0].mark === "D1" && op[0].type === "door" && op[0].w === 3 && op[0].h === 7, "D1 (3.000 × 7.000, door) added to the schedule when it was placed");
@@ -326,6 +339,18 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   const [dcsv] = await Promise.all([page.waitForEvent("download"), page.click("#rcCsv")]); const rcf = path.join(os.tmpdir(), "tk_" + dcsv.suggestedFilename()); await dcsv.saveAs(rcf);
   const rcsv = fs.readFileSync(rcf, "utf8");
   ok(/^﻿?Log ID,Project,Date Raised/.test(rcsv) && /A-101 R1 → A-101 R2/.test(rcsv) && /Floor area,,Sft,[\d.]+,[\d.]+,140\.000/.test(rcsv), "Change Management CSV: log columns, drawing ref R1 → R2, Floor area +140.000");
+  await closeDlg(); await page.click("#vBill"); await wait(); await page.click('[data-asm]'); await wait(200);
+  await page.selectOption("#asmTpl", "b:floor"); await page.click("#asmTplUse"); await wait(100);
+  ok(await page.locator('#asmB tr').count() >= 4 && await page.locator('#asmB [data-k="w"]').first().inputValue() === "5", "assembly dialog: built-in template adds its items (tiles carry 5 % waste)");
+  await page.fill("#asmTplName", "My floor set"); await page.click("#asmTplSave"); await wait(100);
+  ok(await T(() => zdTakeoff.P.proj.asmTpl.some(t => t.name === "My floor set" && t.rows.length >= 4 && !t.rows.some(r => r.id))) && await dlgOpen(), "saved as a template with the project; Enter / buttons did not close the dialog");
+  await page.fill("#asmTplName", "x"); await page.press("#asmTplName", "Enter"); await wait(100);
+  ok(await dlgOpen(), "Enter in the template name does not submit the dialog");
+  await page.selectOption("#asmTpl", await page.locator('#asmTpl option', {hasText: "My floor set"}).getAttribute("value")); await page.click("#asmTplDel"); await wait(100);
+  ok(await T(() => !zdTakeoff.P.proj.asmTpl.some(t => t.name === "My floor set")), "project template deleted");
+  await page.fill('#asmB [data-k="w"]', "150"); await page.click("#dlgOk"); await wait(100);
+  ok(/waste/.test(await page.innerText("#dlgErr")) && await dlgOpen(), "waste over 100 % refused");
+  await closeDlg(); await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.name === "Floor area"); c.asm = []; });
   await closeDlg(); await shot("bill"); await page.click("#vSheet");
 
   console.log("check before export");

@@ -244,7 +244,9 @@ function migrate(p, rep){
     c.faces = Math.max(1, Math.min(2, Math.round(num(c.faces)) || 1)); c.dedMin = Math.max(0, num(c.dedMin) || 0);
     ["rate"].forEach(k => { if (c[k] != null && !isFinite(num(c[k]))) c[k] = 0; });
     if (c.asm != null && !arr(c.asm)) c.asm = [];
+    if (arr(c.asm)) c.asm = c.asm.filter(obj).map(a => { a.w = Math.max(0, Math.min(100, num(a.w) || 0)); return a; });   // waste % of an assembly line
   });
+  p.asmTpl = arr(p.asmTpl) ? p.asmTpl.filter(x => obj(x) && typeof x.name === "string" && x.name.trim() && arr(x.rows)).slice(0, 60).map(x => ({id: String(x.id || uid("T")).slice(0, 40), name: x.name.trim().slice(0, 80), rows: x.rows.filter(obj).slice(0, 60)})) : [];   // assembly templates saved with the project
   let bad = 0;
   p.items = p.items.filter(it => {
     if (!obj(it) || it.id == null) { bad++; return false; }
@@ -1894,9 +1896,9 @@ function condVars(c, only){
   });
   return v;
 }
-function evalFormula(src, vars){   // + - * / ^ ( ) numbers, variables, functions; throws on anything else
-  const t = String(src).replace(/\s+/g, "").match(/\d*\.?\d+(?:e[+-]?\d+)?|[A-Za-z_]+|[-+*/^(),]/g) || [];
-  if (t.join("") !== String(src).replace(/\s+/g, "")) throw new Error("Only numbers, + - * / ^ ( ) and " + Object.keys(vars).join(" ") + " are allowed");
+function evalFormula(src, vars, ref){   // + - * / ^ ( ) numbers, variables, [Condition name].A (another condition's variable), functions; throws on anything else
+  src = String(src); const t = [], re = /\s+|\[[^\]]+\]\.[A-Za-z]+|\d*\.?\d+(?:e[+-]?\d+)?|[A-Za-z_]+|[-+*/^(),]/y;
+  while (re.lastIndex < src.length) { const m = re.exec(src); if (!m) throw new Error("Only numbers, + - * / ^ ( ) and " + Object.keys(vars).join(" ") + " or [Condition name].A are allowed"); if (!/^\s/.test(m[0])) t.push(m[0]); }
   let i = 0;
   const F = {ceil: Math.ceil, floor: Math.floor, round: (x, d) => d ? Math.round(x * 10 ** d) / 10 ** d : Math.round(x), min: Math.min, max: Math.max, abs: Math.abs, sqrt: Math.sqrt};
   const peek = () => t[i], take = x => { if (t[i] !== x) throw new Error("Expected " + x); i++; };
@@ -1907,6 +1909,7 @@ function evalFormula(src, vars){   // + - * / ^ ( ) numbers, variables, function
     if (a === "-") return -pow();
     if (a === "+") return pow();
     if (/^[\d.]/.test(a)) return +a;
+    if (a[0] === "[") { const m = /^\[(.+)\]\.([A-Za-z]+)$/.exec(a); return ref ? ref(m[1].trim(), m[2].toUpperCase()) : (() => { throw new Error("Unknown name: " + a); })(); }
     const u = a.toUpperCase();
     if (vars[u] !== undefined) return vars[u];
     const fn = F[a.toLowerCase()];
@@ -1920,14 +1923,24 @@ function evalFormula(src, vars){   // + - * / ^ ( ) numbers, variables, function
   if (!isFinite(v)) throw new Error("Result is not a number");
   return v;
 }
-function billLines(only){   // [{c, kind:"cond"|"asm", a, name, unit, qty, rate, src, date, ra, na, boq, f, err}]
-  const out = [];
+/* another condition's variable for a formula: [Floor area].A — by condition name, same limit (floor / revision) as the line */
+function refOf(only){
+  const memo = new Map();
+  return (nm, k) => {
+    const c2 = P.proj.conds.find(x => String(x.name).trim().toLowerCase() === nm.toLowerCase()); if (!c2) throw new Error("Unknown condition: [" + nm + "]");
+    if (!memo.has(c2.id)) memo.set(c2.id, condVars(c2, only));
+    const v = memo.get(c2.id)[k]; if (v === undefined) throw new Error("Unknown variable: " + k + " in [" + nm + "]"); return v;
+  };
+}
+const asmLabel = l => l.f + (l.w ? " + " + l.w + " % waste" : "");
+function billLines(only){   // [{c, kind:"cond"|"asm", a, name, unit, qty, rate, src, date, ra, na, boq, f, w, err}]
+  const out = [], ref = refOf(only);
   P.proj.conds.forEach(c => {
     const vars = condVars(c, only);
     if (!P.proj.items.some(i => i.cond === c.id && (!only || only(i))) && (only || !(c.asm || []).length)) return;
     out.push(Object.assign({c, kind: "cond", name: c.name, unit: c.unit, qty: vars.Q, boq: c.boq || ""}, rateOf(c, c.unit)));
-    (c.asm || []).forEach(a => { let qty = 0, err = ""; try { qty = evalFormula(a.f || "0", vars); } catch (e) { err = e.message; }
-      out.push(Object.assign({c, kind: "asm", a, name: a.name, unit: a.unit, qty, f: a.f, err, boq: a.boq || ""}, rateOf(a, a.unit))); });
+    (c.asm || []).forEach(a => { let qty = 0, err = ""; try { qty = evalFormula(a.f || "0", vars, ref) * (1 + (+a.w || 0) / 100); } catch (e) { err = e.message; }
+      out.push(Object.assign({c, kind: "asm", a, name: a.name, unit: a.unit, qty, f: a.f, w: +a.w || 0, err, boq: a.boq || ""}, rateOf(a, a.unit))); });
   });
   return out;
 }
@@ -1948,7 +1961,7 @@ function renderBill(){
     L.forEach(l => {
       const amt = l.qty * l.rate; tot += amt;
       h += `<tr class="${l.kind === "cond" ? "ch2" : "it"}"><td>${l.kind === "asm" ? "↳ " : `${++n}. <span class="sw" style="background:${l.c.color}"></span>`}${l.boq ? `<span class="boq">${esc(l.boq)}</span> ` : ""}${esc(l.name)}${l.kind === "cond" ? ` <button class="rn" data-asm="${esc(l.c.id)}" title="Items this condition drives, and rates">&#9881; Assembly</button>` : ""}
-        <div class="ds">${l.kind === "asm" ? (l.err ? '<span style="color:var(--red)">' + esc(l.err) + "</span>" : "= " + esc(l.f)) : "measured"} · ${rateNote(l)}</div></td>
+        <div class="ds">${l.kind === "asm" ? (l.err ? '<span style="color:var(--red)">' + esc(l.err) + "</span>" : "= " + esc(asmLabel(l))) : "measured"} · ${rateNote(l)}</div></td>
         <td class="n">${fq(l.qty, l.unit)}<div class="ds">${esc(l.unit)}</div></td><td class="n">${l.rate ? f2(l.rate) : "—"}</td><td class="n">${l.rate ? f2(amt) : "—"}</td></tr>`;
     });
     all += tot;
@@ -1962,28 +1975,50 @@ function floorGroups(){   // one group per building / floor found, plus the meas
   const keyL = it => { const L = locOf(it); return [L.bldg, L.floor].filter(Boolean).join(" · "); }, names = [...new Set(P.proj.items.map(keyL))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
   return names.map(n => ({name: n || "No floor given", only: it => keyL(it) === n}));
 }
+/* assembly templates that ship with the tool: formulas only, never a rate — rates come from the bill with source and date */
+const ASM_BUILTIN = [
+  {id: "floor", name: "Floor finishes — tiles, skirting, ceiling (area condition)", rows: [{name: "Floor tiles", unit: "Sft", f: "A", w: 5}, {name: "Skirting (perimeter less doors)", unit: "ft", f: "PD"}, {name: "Ceiling plaster", unit: "Sft", f: "A"}, {name: "Ceiling paint", unit: "Sft", f: "A"}]},
+  {id: "slab", name: "RCC slab — soffit shuttering and plaster (area condition)", rows: [{name: "Shuttering to slab soffit", unit: "Sft", f: "A"}, {name: "Plaster to soffit", unit: "Sft", f: "A"}]},
+  {id: "posts", name: "Posts at a spacing along a length (linear condition) — edit 8 to your spacing in ft", rows: [{name: "Posts", unit: "Nos", f: "ceil(L/8)+1"}]}
+];
 async function asmDialog(c){
   const rows = JSON.parse(JSON.stringify(c.asm || [])), vars = condVars(c);
   const row = (a, n) => `<tr data-r="${n}"><td><input type="text" data-k="name" value="${esc(a.name || "")}" placeholder="e.g. Floor tiles"></td><td><input type="text" data-k="unit" value="${esc(a.unit || "")}" style="width:52px" placeholder="Sft"></td>
-    <td><input type="text" data-k="f" value="${esc(a.f || "")}" placeholder="A*1.05"></td><td><input type="text" data-k="boq" value="${esc(a.boq || "")}" style="width:78px" placeholder="BOQ code"></td><td><input type="text" data-k="ra" value="${esc(a.ra || "")}" style="width:92px" placeholder="RA code" list="dlRa2"></td><td><input type="number" data-k="rate" value="${a.rate || ""}" style="width:80px" placeholder="0"></td>
+    <td><input type="text" data-k="f" value="${esc(a.f || "")}" placeholder="A*1.05"></td><td><input type="number" data-k="w" value="${a.w || ""}" min="0" max="100" step="any" style="width:56px" placeholder="0"></td><td><input type="text" data-k="boq" value="${esc(a.boq || "")}" style="width:78px" placeholder="BOQ code"></td><td><input type="text" data-k="ra" value="${esc(a.ra || "")}" style="width:92px" placeholder="RA code" list="dlRa2"></td><td><input type="number" data-k="rate" value="${a.rate || ""}" style="width:80px" placeholder="0"></td>
     <td><input type="text" data-k="src" value="${esc(a.src || "")}" placeholder="source"></td><td><input type="date" data-k="date" value="${esc(a.date || "")}"></td><td><button class="btn sm dng" data-del="${n}" type="button">&times;</button></td></tr>`;
   const cr = rateOf(c, c.unit);
   const body = () => `<p class="small">Now: Q = ${fq(vars.Q, c.unit)} ${esc(c.unit)}${c.type === "area" ? ` · A = ${fq(vars.A)} Sft · P = ${f3(vars.P)} ft · PD = ${f3(vars.PD)} ft (P less ${f3(vars.D)} ft of doors)` : ""}${c.type === "linear" ? ` · L = ${f3(vars.L)} ft` : ""} · N = ${vars.N}${vars.H ? " · H = " + f3(vars.H) : ""}${vars.T ? " · T = " + f3(vars.T) : ""}.
-    Formulas use Q A P PD D L N H T and ceil floor round min max abs sqrt, e.g. <code>A*1.05</code>, <code>PD</code> (skirting), <code>ceil(A/4)</code>.</p>
+    Formulas use Q A P PD D L N H T and ceil floor round min max abs sqrt, e.g. <code>A*1.05</code>, <code>PD</code> (skirting), <code>ceil(A/4)</code>. <b>Waste %</b> is added on top of the formula. Another condition's figure: <code>[Floor area].A</code> (its name, then .Q .A .P .PD .D .L .N).</p>
     ${c.ra ? `<p class="small" style="margin-top:6px">${esc(c.name)} is linked to Rate Analysis <b>${esc(c.ra)}</b> (condition editor): ${cr.na ? `<span style="color:var(--red)">${esc(cr.na)}</span>` : "PKR " + f2(cr.rate) + " / " + esc(c.unit) + " — the typed rate below is not used"}.</p>` : ""}
     <div class="grid" style="margin:8px 0"><div class="fg"><label>Rate for ${esc(c.name)} (PKR / ${esc(c.unit)})</label><input type="number" id="crRate" value="${c.rate || ""}" placeholder="0"></div>
     <div class="fg"><label>Rate source</label><input type="text" id="crSrc" value="${esc(c.rateSrc || "")}" placeholder="e.g. Phoenix GRN RCP-312"></div><div class="fg"><label>Rate date</label><input type="date" id="crDate" value="${esc(c.rateDate || "")}"></div></div>
     <datalist id="dlRa2">${raLib().o ? [...raLib().items.values()].map(i => `<option value="${esc(i.code || i.id)}">${esc(String(i.desc || "").slice(0, 60) + " (" + i.unit + ")")}</option>`).join("") : ""}</datalist>
-    <table class="asm"><thead><tr><th>Item it drives</th><th>Unit</th><th>Formula</th><th>BOQ code</th><th>RA code</th><th>Rate PKR</th><th>Source</th><th>Date</th><th></th></tr></thead><tbody id="asmB">${rows.map(row).join("")}</tbody></table>
+    <table class="asm"><thead><tr><th>Item it drives</th><th>Unit</th><th>Formula</th><th>Waste %</th><th>BOQ code</th><th>RA code</th><th>Rate PKR</th><th>Source</th><th>Date</th><th></th></tr></thead><tbody id="asmB">${rows.map(row).join("")}</tbody></table>
     <button class="btn sm" id="asmAdd" type="button" style="margin-top:6px">+ Item</button>
+    <div class="grid" style="margin-top:10px;align-items:end"><div class="fg"><label>Template (items for this condition)</label><select id="asmTpl"></select></div>
+    <div class="fg"><label>&nbsp;</label><span><button class="btn sm" id="asmTplUse" type="button">Add its items</button> <button class="btn sm dng" id="asmTplDel" type="button">Delete template</button></span></div>
+    <div class="fg"><label>Save the items above as a template named</label><textarea id="asmTplName" rows="1" style="resize:none" placeholder="e.g. Brick wall finishes"></textarea></div>
+    <div class="fg"><label>&nbsp;</label><button class="btn sm" id="asmTplSave" type="button">Save as template</button></div></div>
     <p class="small" style="margin-top:8px">No rate is assumed: leave it 0 if there is no dated source. A rate without source and date is shown as an assumption. An RA code takes the item's built-up rate from the Rate Analysis library instead of the typed rate; if the code is missing, in another unit or not fully priced the line shows RATE NOT AVAILABLE.</p>`;
-  const read = () => document.querySelectorAll("#asmB tr").forEach(tr => { const a = rows[+tr.dataset.r]; tr.querySelectorAll("[data-k]").forEach(inp => { a[inp.dataset.k] = inp.dataset.k === "rate" ? (+inp.value || 0) : inp.dataset.k === "ra" ? inp.value.trim().toUpperCase() : inp.value.trim(); }); });
+  const read = () => document.querySelectorAll("#asmB tr").forEach(tr => { const a = rows[+tr.dataset.r]; tr.querySelectorAll("[data-k]").forEach(inp => { a[inp.dataset.k] = inp.dataset.k === "rate" ? (+inp.value || 0) : inp.dataset.k === "w" ? Math.max(0, +inp.value || 0) : inp.dataset.k === "ra" ? inp.value.trim().toUpperCase() : inp.value.trim(); }); });
   const p = ask("Assembly — " + c.name, body(), "Save", () => {
-    read(); for (const a of rows) { if (!a.name) return "Every item needs a name"; try { evalFormula(a.f || "0", vars); } catch (e) { return a.name + ": " + e.message; } }
+    read(); const ref = refOf(); for (const a of rows) { if (!a.name) return "Every item needs a name"; if (a.w > 100) return a.name + ": waste % is 0 to 100"; try { evalFormula(a.f || "0", vars, ref); } catch (e) { return a.name + ": " + e.message; } }
     return {rows, rate: +$("crRate").value || 0, src: $("crSrc").value.trim(), date: $("crDate").value};
   });
-  const wire = () => { $("asmAdd").onclick = () => { read(); rows.push({id: uid("A"), name: "", unit: "", f: "Q"}); $("dlgB").querySelector("#asmB").innerHTML = rows.map(row).join(""); wire(); };
-    document.querySelectorAll("#asmB [data-del]").forEach(b => b.onclick = () => { read(); rows.splice(+b.dataset.del, 1); $("dlgB").querySelector("#asmB").innerHTML = rows.map(row).join(""); wire(); }); };
+  const tplList = () => { const own = (P.proj.asmTpl || []), oth = P.proj.conds.filter(x => x.id !== c.id && (x.asm || []).length);
+    return [{g: "Built-in (formulas only — no rates; edit to your spec)", L: ASM_BUILTIN.map(t => ({k: "b:" + t.id, name: t.name, rows: t.rows}))}, {g: "Saved in this project", L: own.map(t => ({k: "p:" + t.id, name: t.name, rows: t.rows}))},
+      {g: "Copy from another condition", L: oth.map(x => ({k: "c:" + x.id, name: x.name, rows: x.asm}))}].filter(g => g.L.length); };
+  const tplFill = sel => { const g = tplList(); $("asmTpl").innerHTML = g.map(o => `<optgroup label="${esc(o.g)}">${o.L.map(t => `<option value="${esc(t.k)}">${esc(t.name)} (${t.rows.length})</option>`).join("")}</optgroup>`).join(""); if (sel) $("asmTpl").value = sel; };
+  const clone = r => { const o = JSON.parse(JSON.stringify(r)); delete o.raCache; o.id = uid("A"); return o; };
+  const redraw = () => { $("dlgB").querySelector("#asmB").innerHTML = rows.map(row).join(""); wire(); };
+  const wire = () => { tplFill($("asmTpl").value);
+    $("asmTplUse").onclick = () => { read(); const k = $("asmTpl").value, f = tplList().flatMap(g => g.L).find(t => t.k === k); if (!f) return; f.rows.forEach(r => rows.push(clone(r))); redraw(); };
+    $("asmTplSave").onclick = () => { read(); const nm = $("asmTplName").value.replace(/\s+/g, " ").trim(); if (!nm) { $("dlgErr").textContent = "Give the template a name"; return; } if (!rows.length) { $("dlgErr").textContent = "Add items first"; return; }
+      $("dlgErr").textContent = ""; const t = {id: uid("T"), name: nm, rows: rows.map(clone)}; t.rows.forEach(r => delete r.id); const L = P.proj.asmTpl = P.proj.asmTpl || [], at = L.findIndex(x => x.name.toLowerCase() === nm.toLowerCase());
+      if (at >= 0) { t.id = L[at].id; L[at] = t; } else L.push(t); save(); tplFill("p:" + t.id); toast("Template “" + nm + "” saved with this project", 2200); };
+    $("asmTplDel").onclick = () => { const k = $("asmTpl").value; if (!/^p:/.test(k)) { $("dlgErr").textContent = "Only templates saved in this project can be deleted"; return; } $("dlgErr").textContent = ""; P.proj.asmTpl = P.proj.asmTpl.filter(x => "p:" + x.id !== k); save(); tplFill(); };
+    $("asmAdd").onclick = () => { read(); rows.push({id: uid("A"), name: "", unit: "", f: "Q"}); redraw(); };
+    document.querySelectorAll("#asmB [data-del]").forEach(b => b.onclick = () => { read(); rows.splice(+b.dataset.del, 1); redraw(); }); };
   wire();
   const v = await p; if (!v) return;
   mutate(() => { c.asm = v.rows; c.rate = v.rate; c.rateSrc = v.src; c.rateDate = v.date; });
@@ -4697,7 +4732,7 @@ async function exportExcel(){
     bl.columns = [{header: "S.No", width: 6}, {header: "BOQ code", width: 13}, {header: "Item", width: 46}, {header: "Formula", width: 18}, {header: "Qty", width: 13}, {header: "Unit", width: 8}, {header: "Rate PKR", width: 13}, {header: "Amount PKR", width: 15}, {header: "RA code", width: 13}, {header: "Rate source / date", width: 60}];
     bl.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; bl.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
     let bn = 0, br = 2; const BL = billLines();
-    BL.forEach(l => { const r = bl.addRow([l.kind === "cond" ? ++bn : "", l.boq || "", (l.kind === "asm" ? "   " : "") + l.name, l.kind === "asm" ? l.f : "measured", +l.qty.toFixed(3), l.unit, l.rate || 0, {formula: `E${br}*G${br}`, result: l.qty * (l.rate || 0)}, l.ra || "",
+    BL.forEach(l => { const r = bl.addRow([l.kind === "cond" ? ++bn : "", l.boq || "", (l.kind === "asm" ? "   " : "") + l.name, l.kind === "asm" ? asmLabel(l) : "measured", +l.qty.toFixed(3), l.unit, l.rate || 0, {formula: `E${br}*G${br}`, result: l.qty * (l.rate || 0)}, l.ra || "",
         l.na ? l.na : l.rate ? (rateOk(l) ? l.src + (l.ra ? "" : ", " + dmy(l.date)) : "ASSUMPTION — no dated source") : "rate not set"]);
       r.getCell(5).numFmt = qFmt(l.unit); r.getCell(7).numFmt = "#,##0.00"; r.getCell(8).numFmt = "#,##0.00"; r.getCell(5).fill = GREEN; r.getCell(7).fill = BLUE; r.getCell(8).fill = GREEN;
       if (l.kind === "cond") r.font = {bold: true}; if (!rateOk(l) || !(l.rate > 0)) r.getCell(10).fill = YELLOW; br++; });
