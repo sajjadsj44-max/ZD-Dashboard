@@ -510,6 +510,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
     <button class="openp" id="openR" style="display:none" title="Show the measurement sheet">&#10216;</button>
     <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
       <symbol id="i-select" viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.8L10.5 19z"/></symbol>
+      <symbol id="i-cadsel" viewBox="0 0 24 24"><path d="M3 3h7M3 3v7M21 21h-7M21 21v-7M10 9l9 5-4 1-2 4z"/></symbol>
       <symbol id="i-match" viewBox="0 0 24 24"><path d="M4 7h13M13 3l4 4-4 4M20 17H7M11 13l-4 4 4 4"/></symbol>
       <symbol id="i-lasso" viewBox="0 0 24 24"><path d="M12 4c5 0 9 2 9 5s-4 5-9 5-9-2-9-5 4-5 9-5z"/><path d="M9 15c0 3 1 4 3 6"/></symbol>
       <symbol id="i-pan" viewBox="0 0 24 24"><path d="M8 12V6a1.5 1.5 0 013 0v5M11 11V4.5a1.5 1.5 0 013 0V11M14 11V6a1.5 1.5 0 013 0v8c0 4-2.5 7-6.5 7-3 0-4.5-2-6.5-5l-1.8-2.8a1.5 1.5 0 012.4-1.7L8 14"/></symbol>
@@ -577,7 +578,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
         <div id="snapPop" aria-label="Object snaps"></div>
       </div>
       <div class="rrow">
-        <span class="rsel"><button class="tool tsm" data-tool="select" title="Select / edit (V): click, or drag a box — left→right selects what is wholly inside, right→left what it touches. Drag a selected object to move it, Ctrl+drag to copy. Right-click for more."><svg class="ic"><use href="#i-select"/></svg><span class="tl">Select</span> <kbd>V</kbd></button><button class="tool tsm" data-tool="match" title="Match properties: select an object first, then start Match, or start Match and click a source. Click compatible targets to apply its condition, colour, label and takeoff properties; geometry stays unchanged. Press Esc to finish."><svg class="ic"><use href="#i-match"/></svg><span class="tl">Match</span></button><button class="tool tsm" data-tool="lasso" title="Lasso select (Shift+O): drag a free shape round the objects"><svg class="ic"><use href="#i-lasso"/></svg><span class="tl">Lasso</span></button><button class="tool tsm" data-tool="pan" title="Pan (H or hold Space)"><svg class="ic"><use href="#i-pan"/></svg><span class="tl">Pan</span> <kbd>H</kbd></button></span><span class="rvs"></span>
+        <span class="rsel"><button class="tool tsm" data-tool="select" title="Select / edit (V): click, or drag a box — left→right selects what is wholly inside, right→left what it touches. Drag a selected object to move it, Ctrl+drag to copy. Right-click for more."><svg class="ic"><use href="#i-select"/></svg><span class="tl">Select</span> <kbd>V</kbd></button><button class="tool tsm" data-tool="cadsel" title="Select AutoCAD objects (Shift+V) — on a DWG / DXF: click an object, Shift+click adds or takes out, drag a box (left→right: wholly inside, right→left: touching), Ctrl+A all. Then take off, count, select similar, quick select, layer off or isolate."><svg class="ic"><use href="#i-cadsel"/></svg><span class="tl">CAD pick</span></button><button class="tool tsm" data-tool="match" title="Match properties: select an object first, then start Match, or start Match and click a source. Click compatible targets to apply its condition, colour, label and takeoff properties; geometry stays unchanged. Press Esc to finish."><svg class="ic"><use href="#i-match"/></svg><span class="tl">Match</span></button><button class="tool tsm" data-tool="lasso" title="Lasso select (Shift+O): drag a free shape round the objects"><svg class="ic"><use href="#i-lasso"/></svg><span class="tl">Lasso</span></button><button class="tool tsm" data-tool="pan" title="Pan (H or hold Space)"><svg class="ic"><use href="#i-pan"/></svg><span class="tl">Pan</span> <kbd>H</kbd></button></span><span class="rvs"></span>
       <div class="rpanel" data-rp="takeoff">
         <div class="rg"><div class="rgb">
           <button class="tool" data-tool="draw" title="Length / run — draw along the drawing with the active condition: click each point, Enter to finish (A)"><svg class="ic"><use href="#i-draw"/></svg><span class="tl">Length</span> <kbd>A</kbd></button>
@@ -715,7 +716,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-07k"></script>
+<script type="module" src="takeoff.js?v=2026-10-07m"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password
