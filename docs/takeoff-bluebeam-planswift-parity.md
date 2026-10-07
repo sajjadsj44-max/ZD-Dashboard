@@ -265,3 +265,19 @@ testing. None of these was started — each needs its own design.
 - PlanSwift Takeoff Boost (Auto Takeoff, Auto Count, Auto Scale, Auto Bookmark), 06-May-2026: https://help.constructconnect.com/latest-product-reveal-release-notes-229/planswift-with-takeoff-boost-ai-powered-tools-release-notes-2026-05-06-2752
 - Kreo — AI construction takeoff (Auto Measure, One-Click Area, Auto Count, Caddie, AI renaming, AI scale, PDF export): https://www.kreo.net/solutions/ai-construction-takeoff-sofware
 - Togal.AI — auto-naming of drawings, text / image / pattern search, Togal.CHAT, compare: https://www.togal.ai/
+
+## Split window (2026-10-07)
+
+Researched against AutoCAD model-space viewports (VPORTS: click a viewport to make it current, view commands apply only to the current one, objects drawn in one show in all, boundaries dragged) and Bluebeam Revu MultiView (vertical / horizontal splits, different files or areas of one file, Synchronize pan and zoom) — [AutoCAD help](https://help.autodesk.com/cloudhelp/2018/ENU/AutoCAD-LT/files/GUID-3E43911D-0A0F-4900-BE32-5EF846AF36D8.htm), [Bluebeam MultiView](https://support.bluebeam.com/user-manual/multiview.html).
+
+| Feature | AutoCAD | Bluebeam | ZD Takeoff |
+|---|---|---|---|
+| One drawing in two windows, separate zoom / pan | ✓ (VPORTS) | ✓ (split) | ★ Split ▾ → Side by side / Stacked, Ctrl+\ |
+| Click a window to work in it; current one highlighted | ✓ | ✓ | ★ purple frame and strip; F6 switches |
+| A shape begun in one window continued in the other | ✓ | — | ★ (draft kept while both windows show the same sheet) |
+| Wheel zooms the window under the cursor | ✓ | ✓ | ★ without changing the current window |
+| Drag the divider | ✓ | ✓ | ★ drag, double-click = middle, arrow keys |
+| Different file / project per window | — (tile windows) | ✓ | ★ own project per window; panels and Export follow the window clicked in |
+| Synchronize zoom & pan | — | ✓ | ★ Sync zoom & pan (keeps the offset the windows had) |
+| Cross-hair of the cursor in the other window | — | — | ★ Link cursor |
+| Match / swap windows | — | — | ★ |

@@ -49,8 +49,8 @@ header select,header input{background:rgba(255,255,255,.95);color:var(--txt);hei
 header > *{flex:none}
 header .sp{flex:1}
 header .btn.tg2.on{background:#fff;color:var(--navy);border-color:#fff}
-#stage canvas{filter:var(--dimf,none)}
-#stage.dark{background:#000}
+.stg canvas{filter:var(--dimf,none)}
+.stg.dark{background:#000}
 .lsw{display:inline-block;flex:none;width:12px;height:12px;border:1px solid #9fb0c6;border-radius:2px;vertical-align:-2px}
 .lyiso{flex:none;border:0;background:none;color:#8a9bb2;cursor:pointer;font-size:14px;line-height:1;padding:0 2px}.lyiso:hover,.lyiso.on{color:var(--purple)}
 .plotw{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}.plprev{display:flex;flex-direction:column;gap:4px;align-items:center;max-width:300px}.plprev canvas{border:1px solid var(--line);border-radius:6px;max-width:100%}
@@ -64,17 +64,17 @@ header .btn.tg2.on{background:#fff;color:var(--navy);border-color:#fff}
 .findw{position:relative}
 .lyrbar{display:flex;gap:4px;padding:8px 10px;border-bottom:1px solid var(--line);flex-wrap:wrap}.lyrbar input{flex:1;min-width:80px}
 .lyr{display:flex;gap:6px;align-items:center;padding:4px 12px;font-size:12px;border-bottom:1px solid #f4f6fa;cursor:pointer;word-break:break-all}.lyr:hover{background:#f8fbff}
-#cmpLegend{position:absolute;top:8px;right:8px;z-index:4;display:none;gap:6px;align-items:center;background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:11.5px;box-shadow:0 2px 8px rgba(15,41,66,.15)}
-#takeoffLegend{position:absolute;top:8px;left:8px;z-index:5;display:none;min-width:190px;max-width:min(330px,42vw);background:rgba(255,255,255,.96);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 18px rgba(15,41,66,.2);overflow:hidden;font-size:11.5px}
-#takeoffLegend.on{display:block}
-#takeoffLegend .lh{display:flex;align-items:center;gap:7px;padding:7px 9px;border-bottom:1px solid var(--line);background:#f6f8fb;color:var(--navy);font-weight:700}
-#takeoffLegend .lb{padding:5px 8px;max-height:32vh;overflow:auto}
-#takeoffLegend .li{display:flex;align-items:center;gap:7px;padding:3px 1px;min-width:0}
-#takeoffLegend .sw{width:18px;height:4px;border-radius:2px;flex:none}
-#takeoffLegend .sw.area{height:11px;border-radius:2px;border:1px solid rgba(0,0,0,.15)}
-#takeoffLegend .sw.count{width:11px;height:11px;border-radius:50%;border:1px solid rgba(0,0,0,.15)}
-#takeoffLegend .ln{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-#takeoffLegend .q{font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--navy)}
+.cmplegend{position:absolute;top:8px;right:8px;z-index:4;display:none;gap:6px;align-items:center;background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:11.5px;box-shadow:0 2px 8px rgba(15,41,66,.15)}
+.tlegend{position:absolute;top:8px;left:8px;z-index:5;display:none;min-width:190px;max-width:min(330px,42vw);background:rgba(255,255,255,.96);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 18px rgba(15,41,66,.2);overflow:hidden;font-size:11.5px}
+.tlegend.on{display:block}
+.tlegend .lh{display:flex;align-items:center;gap:7px;padding:7px 9px;border-bottom:1px solid var(--line);background:#f6f8fb;color:var(--navy);font-weight:700}
+.tlegend .lb{padding:5px 8px;max-height:32vh;overflow:auto}
+.tlegend .li{display:flex;align-items:center;gap:7px;padding:3px 1px;min-width:0}
+.tlegend .sw{width:18px;height:4px;border-radius:2px;flex:none}
+.tlegend .sw.area{height:11px;border-radius:2px;border:1px solid rgba(0,0,0,.15)}
+.tlegend .sw.count{width:11px;height:11px;border-radius:50%;border:1px solid rgba(0,0,0,.15)}
+.tlegend .ln{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.tlegend .q{font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--navy)}
 .seg{display:inline-flex}.seg .btn{border-radius:0}.seg .btn:first-child{border-radius:6px 0 0 6px}.seg .btn:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
 .seg .btn.on{background:var(--purple);border-color:var(--purple);color:#fff}
 .seg .btn+.btn{margin-left:-1px}
@@ -118,8 +118,8 @@ input.gs{background:#fff8d6!important;border-color:#e8c766!important}span.gs{bac
 .tbbox{position:absolute;display:none;border:2px solid var(--purple);background:rgba(75,59,143,.12)}
 .tbtip{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;border-radius:16px;padding:6px 14px;font-size:12px;pointer-events:none;white-space:nowrap;max-width:94%;overflow:hidden;text-overflow:ellipsis}
 /* minimap (Forma); icons-only toolbar; the import split button */
-#mini{position:absolute;right:10px;bottom:10px;z-index:4;background:#fff;border:1px solid #9fb0c6;border-radius:6px;box-shadow:0 4px 16px rgba(15,41,66,.25);display:none;overflow:hidden;cursor:pointer;touch-action:none}
-#mini img{display:block}#miniVp{position:absolute;border:2px solid var(--purple);background:rgba(75,59,143,.10);pointer-events:none}
+.minix{position:absolute;right:10px;bottom:10px;z-index:4;background:#fff;border:1px solid #9fb0c6;border-radius:6px;box-shadow:0 4px 16px rgba(15,41,66,.25);display:none;overflow:hidden;cursor:pointer;touch-action:none}
+.minix img{display:block}.minivp{position:absolute;border:2px solid var(--purple);background:rgba(75,59,143,.10);pointer-events:none}
 body.tbicons #tools .tool .tl,body.tbicons header > .btn .tl{display:none}body.tbicons #tools .tool{padding:4px 7px}body.tbicons .rgl{display:none}
 #bAdd{border-top-right-radius:0;border-bottom-right-radius:0}#bAddM{border-top-left-radius:0;border-bottom-left-radius:0;margin-left:-8px;padding:3px 6px}
 table.sh.bill td:first-child{width:52%}
@@ -226,11 +226,43 @@ table.sh .rn:hover{color:var(--purple)}
 .tool:disabled{opacity:.4;cursor:default}
 .tools .sp{flex:1}
 .tg{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#3c4c60;cursor:pointer;padding:0 4px}
-#stage{position:relative;flex:1;overflow:hidden;background:#d9dee6;touch-action:none;min-height:0}
-#stage canvas{position:absolute;left:0;top:0;transform-origin:0 0}
-#low{image-rendering:auto}
-#ov,#ov2{position:absolute;inset:0;width:100%;height:100%}#ov2{pointer-events:none}
-#stage.pan{cursor:grab}#stage.panning{cursor:grabbing}#stage.draw{cursor:crosshair}#stage.lasso{cursor:crosshair}#stage.zoomwin{cursor:zoom-in}
+.stg{position:relative;flex:1;overflow:hidden;background:#d9dee6;touch-action:none;min-height:0}
+.stg canvas{position:absolute;left:0;top:0;transform-origin:0 0}
+.cvlow{image-rendering:auto}
+.ov1,.ov2{position:absolute;inset:0;width:100%;height:100%}.ov2{pointer-events:none}
+.stg.pan{cursor:grab}.stg.panning{cursor:grabbing}.stg.draw{cursor:crosshair}.stg.lasso{cursor:crosshair}.stg.zoomwin{cursor:zoom-in}
+/* split window: two panes, each with its own page, zoom and (optionally) its own project */
+.panes{flex:1;min-height:0;display:flex;position:relative;background:#c5ccd8}
+.panes.v{flex-direction:row}.panes.h{flex-direction:column}
+.pane{position:relative;flex:1 1 0;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--bg)}
+.pstrip{display:none;align-items:center;gap:5px;padding:3px 6px;background:#f4f7fb;border-bottom:1px solid var(--line);font-size:11.5px;flex:none;min-width:0;overflow:hidden;white-space:nowrap}
+.panes.split .pstrip{display:flex}
+.pstrip select{font-size:11.5px;padding:2px 4px;min-width:0;max-width:210px;flex:0 1 auto;height:24px}
+.pstrip .pdot{width:9px;height:9px;border-radius:50%;background:#c4cedb;flex:none}
+.pstrip .pzoom{font-variant-numeric:tabular-nums;color:var(--muted);min-width:40px;text-align:right;flex:none}
+.pstrip .sp{flex:1;min-width:0}
+.pstrip .btn{flex:none}
+.panes.split .pane.act .pstrip{background:#ece8fb;border-bottom-color:var(--purple)}
+.panes.split .pane.act .pdot{background:var(--purple)}
+.panes.split .pane::after{content:"";position:absolute;inset:0;pointer-events:none;border:2px solid transparent;z-index:7}
+.panes.split .pane.act::after{border-color:var(--purple)}
+.pdiv{flex:none;background:#b7c2d1;position:relative;z-index:8;touch-action:none;display:none}
+.panes.split .pdiv{display:block}
+.panes.v .pdiv{width:7px;cursor:col-resize}.panes.h .pdiv{height:7px;cursor:row-resize}
+.pdiv::before{content:"";position:absolute;inset:0;margin:auto;background:rgba(255,255,255,.75);border-radius:2px}
+.panes.v .pdiv::before{width:2px;height:30px}.panes.h .pdiv::before{height:2px;width:30px}
+.pdiv:hover,.pdiv.drag,.pdiv:focus-visible{background:var(--purple);outline:none}
+.pxh{position:absolute;pointer-events:none;inset:0;width:100%;height:100%}
+.splitw{position:relative}
+#splitPop{position:absolute;top:calc(100% + 8px);left:0;z-index:16;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 32px rgba(15,41,66,.28);padding:8px;display:none;flex-direction:column;gap:6px;min-width:250px;color:var(--txt)}
+#splitPop.on{display:flex}
+#splitPop .btn{background:#fff;color:#3c4c60;border-color:var(--line);text-align:left}
+#splitPop .btn:hover{border-color:var(--blue)}
+#splitPop .btn.tg2.on{background:var(--purple);border-color:var(--purple);color:#fff}
+#splitPop .btn:disabled{opacity:.45}
+#splitPop .vh{font-size:9.5px;letter-spacing:.5px;color:var(--muted);font-weight:700;text-transform:uppercase}
+#splitPop .seg{display:flex}#splitPop .seg .btn{flex:1}
+#bSplit.on{background:#fff;color:var(--navy);border-color:#fff}
 /* right-click menu (Bluebeam / PlanSwift style) */
 #ctx{position:fixed;z-index:30;min-width:230px;max-width:340px;background:#fff;border:1px solid #c9d6e4;border-radius:8px;box-shadow:0 10px 32px rgba(15,41,66,.28);padding:4px 0;display:none;font-size:12.5px;user-select:none}
 #ctx.on{display:block}
@@ -249,11 +281,11 @@ table.keyt td{vertical-align:top;border-bottom:1px solid #f2f5f9}
 .status{display:flex;gap:14px;align-items:center;padding:5px 10px;background:#fff;border-top:1px solid var(--line);font-size:11.5px;color:#3c4c60;min-height:28px;flex-wrap:wrap}
 .status b{font-variant-numeric:tabular-nums}
 .status .hint{color:var(--muted);margin-left:auto}
-#tip{position:absolute;pointer-events:none;background:#fff;border:1px solid rgba(11,11,11,.15);border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600;color:#0b0b0b;box-shadow:0 2px 8px rgba(15,41,66,.15);white-space:nowrap;display:none;z-index:3;font-variant-numeric:tabular-nums}
-#drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#3c4c60;text-align:center;padding:20px}
-#drop .box{border:2px dashed #9fb0c6;border-radius:12px;padding:28px 34px;background:rgba(255,255,255,.75);max-width:520px;line-height:1.6}
-#drop.over .box{border-color:var(--purple);background:#fff}
-#busy{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;border-radius:16px;padding:5px 14px;font-size:11.5px;display:none;z-index:4}
+.tipx{position:absolute;pointer-events:none;background:#fff;border:1px solid rgba(11,11,11,.15);border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600;color:#0b0b0b;box-shadow:0 2px 8px rgba(15,41,66,.15);white-space:nowrap;display:none;z-index:3;font-variant-numeric:tabular-nums}
+.dropx{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#3c4c60;text-align:center;padding:20px}
+.dropx .box{border:2px dashed #9fb0c6;border-radius:12px;padding:28px 34px;background:rgba(255,255,255,.75);max-width:520px;line-height:1.6}
+.dropx.over .box{border-color:var(--purple);background:#fff}
+.busyx{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;border-radius:16px;padding:5px 14px;font-size:11.5px;display:none;z-index:4}
 .tcbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:8px 0}.tcbar input[type=search],.tcbar input[type=text]{flex:1;min-width:150px}.tcgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:9px;max-height:52vh;overflow:auto;padding:2px}.tccard{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:7px;min-width:0}.tccard:hover{border-color:#8b7bd1;box-shadow:0 2px 8px rgba(15,41,66,.08)}.tccard.fav{border-left:3px solid #e0aa32}.tccard .tctop{display:flex;gap:6px;align-items:center}.tccard .tcname{font-weight:700;color:var(--navy);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.tccard .tcmeta{font-size:10px;color:var(--muted);line-height:1.4;min-height:28px}.tccard .tcactions{display:flex;gap:5px;align-items:center}.tccard .tcactions .btn{flex:1}.tcstar{border:0;background:none;color:#b1bac6;font-size:17px;cursor:pointer;padding:0 4px}.tcstar.on{color:#e0aa32}.tcnameedit{width:100%;min-width:0;padding:4px 6px;border:1px solid var(--line);border-radius:5px}.tcfoot{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:6px}
 
 /* sheet */
@@ -423,6 +455,21 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
       <span class="vh">Navigation</span>
       <button class="btn sm tg2" id="bLegend" title="Add an embedded editable takeoff legend to the drawing">&#9641; Legend</button><button class="btn sm tg2" id="bMini" title="Minimap — the whole page small, the part on screen framed; shows when you zoom in; click or drag it to move">&#9635; Minimap</button>
       <button class="btn sm tg2" id="bFull" title="Full screen — Esc to leave">&#9974; Full screen</button>
+    </div></div>
+  <div class="splitw"><button class="btn sm" id="bSplit" title="Split window (Ctrl+\): the drawing in two windows with their own zoom, or two projects side by side · F6 switches window" aria-haspopup="true" aria-expanded="false" aria-label="Split window">&#9707;&#9662;</button>
+    <div id="splitPop" aria-label="Split window">
+      <span class="vh">Windows</span>
+      <span class="seg"><button class="btn sm tg2" id="spV" title="Two windows side by side">&#9707; Side by side</button><button class="btn sm tg2" id="spH" title="Two windows one above the other">&#9708; Stacked</button></span>
+      <button class="btn sm" id="spSame" title="Show this drawing again in a second window — separate zoom and pan, the same measurements; work in either window">Same drawing, second window</button>
+      <button class="btn sm" id="spProj" title="Show another project in the second window (its own drawings, measurements and sheet); click in a window to work in it">Open another project…</button>
+      <span class="vh">Windows linked</span>
+      <button class="btn sm tg2" id="spSync" title="Zoom and pan together: what you do in one window the other follows, keeping its offset (compare two revisions or floors)">Sync zoom &amp; pan</button>
+      <button class="btn sm tg2" id="spLink" title="Show the cursor's matching position in the other window (a cross-hair)">Link cursor</button>
+      <span class="vh">Actions</span>
+      <button class="btn sm" id="spMatch" title="Give the other window this window's zoom and position">Match other window to this</button>
+      <button class="btn sm" id="spSwap" title="Swap the two windows">Swap windows</button>
+      <button class="btn sm" id="spReset" title="Divider back to the middle (or double-click it)">Divider to the middle</button>
+      <button class="btn sm dng" id="spClose" title="Back to one window — the one you are working in stays">Close split</button>
     </div></div>
   <div class="sep"></div>
   <div class="findw"><input type="search" id="findIn" placeholder="Find text (Ctrl+F)" aria-label="Find text on the drawings"><div id="findRes"></div></div>
@@ -609,18 +656,20 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
       </div>
       </div>
     </div>
-    <div id="stage">
-      <canvas id="low"></canvas>
-      <canvas id="hi"></canvas>
-      <svg id="ov" xmlns="http://www.w3.org/2000/svg"></svg>
-      <svg id="ov2" xmlns="http://www.w3.org/2000/svg"></svg>
-      <div id="tip"></div>
-      <div id="busy"></div>
-      <div id="takeoffLegend" aria-label="Takeoff legend"></div><div id="cmpLegend"></div>
-      <div id="mini" title="Minimap — click or drag to move round the page"><img id="miniImg" alt=""><div id="miniVp"></div></div>
-      <div id="drop"><div class="box"><b style="font-size:15px;color:var(--navy)">Drop PDF or AutoCAD drawings (DWG / DXF) here</b><br>or use <b>+ PDF</b> above — <b>&#9662;</b> next to it chooses pages, a whole folder, or photos / scans (JPG, PNG) as pages.<br>
+    <div id="panes" class="panes v"><div class="pane" id="pane0">
+    <div id="stage" class="stg">
+      <canvas id="low" class="cvlow"></canvas>
+      <canvas id="hi" class="cvhi"></canvas>
+      <svg id="ov" class="ov1" xmlns="http://www.w3.org/2000/svg"></svg>
+      <svg id="ov2" class="ov2" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="tip" class="tipx"></div>
+      <div id="busy" class="busyx"></div>
+      <div id="takeoffLegend" class="tlegend" aria-label="Takeoff legend"></div><div id="cmpLegend" class="cmplegend"></div>
+      <div id="mini" class="minix" title="Minimap — click or drag to move round the page"><img id="miniImg" alt=""><div id="miniVp" class="minivp"></div></div>
+      <div id="drop" class="dropx"><div class="box"><b style="font-size:15px;color:var(--navy)">Drop PDF or AutoCAD drawings (DWG / DXF) here</b><br>or use <b>+ PDF</b> above — <b>&#9662;</b> next to it chooses pages, a whole folder, or photos / scans (JPG, PNG) as pages.<br>
         <span style="font-size:11.5px">The PDF opens in this browser only — it is not uploaded anywhere.</span></div></div>
     </div>
+    </div></div>
     <div id="mkList" class="mkl" style="display:none" aria-label="Markups list"></div>
     <div class="status" id="status"><span id="stPos">—</span><span id="stSnap"></span><span id="stMeas"></span><span class="hint" id="stHint"></span></div>
   </section>
@@ -666,7 +715,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-07j"></script>
+<script type="module" src="takeoff.js?v=2026-10-07k"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password
