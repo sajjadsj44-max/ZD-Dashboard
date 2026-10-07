@@ -1970,6 +1970,8 @@ function setTool(t){
   if (t !== "typref" && S.typ) { S.typ = null; $("cmpLegend").style.display = "none"; toast("Typical copy stopped — nothing copied"); }
   S.mkd = null;
   if (t !== "stamp" || S.tool !== "stamp") { S.stampBase = null; S.stampN = 0; }
+  if (t !== "cadsel" && t !== "pan" && t !== "zoomwin") S.cadSel = null;
+  S.cbox = null; S.cadHov = -1;
   S.tool = t; draftClear(); S.draftRedo = []; S.measure = t === "measure" ? S.measure : null; S.press = null; S.lasso = null; S.zbox = null; S.hover = null;
   if (t === "match" && S.sel) {
     const it = P.proj.items.find(i => i.id === S.sel);
@@ -1979,7 +1981,7 @@ function setTool(t){
   { const mb = $("bMk"); if (mb) { mb.classList.toggle("on", mkIsTool(t)); const tl = mb.querySelector(".tl"); if (tl) tl.textContent = mkIsTool(t) ? MK_TOOL_NAMES[t] : "Markup"; } }
   ribFollow(t);
   if (t === "mk_stamp" && !S.stampNoPick) setTimeout(() => { if (S.tool === "mk_stamp") stampPicker().then(v => { if (!v && S.tool === "mk_stamp") setTool("select"); }); }, 0);
-  stage().className = t === "pan" ? "pan" : t === "select" ? "" : t === "lasso" ? "lasso" : t === "zoomwin" ? "zoomwin" : "draw";
+  stage().className = t === "pan" ? "pan" : t === "select" || t === "cadsel" ? "" : t === "lasso" ? "lasso" : t === "zoomwin" ? "zoomwin" : "draw";
   stage().style.cursor = "";
   hint(); draw(); renderProps(); draftBtns();
 }
@@ -1987,6 +1989,7 @@ function hint(){
   const c = S.cond ? cond(S.cond) : null, t = S.tool;
   const drawing = " · type a length + Enter (12'-6\") · A: arc · Ctrl+click: no snap · Ctrl+Z / Backspace: last point back · Ctrl+Y: again";
   const H = {select: "Click to select · drag a box left→right (wholly inside) or right→left (touching) · drag a selected object to move it, Ctrl+drag to copy · double-click an edge to add a point, a point to remove it · right-click for more.",
+    cadsel: "AutoCAD objects: click one to select it · Shift / Ctrl+click adds or takes out · drag a box left→right (wholly inside) or right→left (touching) · Ctrl+A: all · then Take off, Count, Select similar, Layer off… below · Esc clears.",
     lasso: "Lasso: drag round the objects to select (touching counts) · Shift adds to the selection.", pan: "Drag to pan; scroll to zoom.",
     draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." + drawing : c.type === "linear" ? (S.resume ? "Continuing the run — click on; Enter, double-click or right-click to finish." : "Click along the run; Enter, double-click or right-click to finish.") + drawing : "Click each item to count it; Esc when done.",
     fence: "Draw a line across the opening where Auto area leaks (click points; double-click, right-click or Enter to finish). It counts as a wall for Auto area only.", vsearch: "Box one symbol (two corners) — every matching symbol is counted.", note: "Click where the note goes, then type it.", cloud: "Click two opposite corners of the area to cloud.", arrow: "Click the tail, then the head of the arrow.", hilite: "Click two opposite corners to highlight.",
@@ -2040,6 +2043,7 @@ function onDown(e){
   if (S.tool === "auto") return autoAt(toBase(sp[0], sp[1]));
   if (S.tool === "lasso") { S.lasso = {pts: [sp], add: e.shiftKey}; return; }
   if (S.tool === "zoomwin") { S.zbox = {a: sp, b: sp}; return; }
+  if (S.tool === "cadsel") return cadSelDown(sp, e);
   if (S.tool === "select") return selectDown(sp, e);
   if (S.tool === "match") return matchClick(sp);
   const {p} = cursorPoint(e, sp);
@@ -2111,6 +2115,7 @@ function onMove(e){
   if (S.drag && S.drag.pan) { if (S.drag.rc && dist(sp, S.drag.sp) > 4) S.drag.rcMoved = true; S.view = {s: S.drag.v.s, tx: S.drag.v.tx + sp[0] - S.drag.sp[0], ty: S.drag.v.ty + sp[1] - S.drag.sp[1]}; applyView(); renderHi(); return; }
   if (S.lasso) { const L = S.lasso.pts; if (dist(L[L.length - 1], sp) > 3) L.push(sp); draw(); return; }
   if (S.zbox) { S.zbox.b = sp; draw(); return; }
+  if (S.cbox) { S.cbox.b = sp; S.cursorScr = sp; draw(); return; }
   if (S.mkd) { mkMoveDrag(sp, e); S.cursorScr = sp; draw(); return; }
   if (S.press && !S.drag && dist(sp, S.press.sp) > 4) startMove(S.press, e);
   if (S.drag && S.drag.move) { moveDrag(sp, e); return; }
@@ -2124,6 +2129,7 @@ function onMove(e){
     if (!D.live && (!D.sp0 || dist(sp, D.sp0) > 3)) D.live = true;
     if (it && D.live) { it.pts[D.vertex] = p; D.moved = true; refreshSheetSoon(); } }
   if (S.tool === "select" && !S.drag) hoverAt(sp, e);
+  if (S.tool === "cadsel" && !S.drag) cadHoverAt(sp);
   const k = hereScale(p), vp = viewportAt(S.fileId, S.pageNo, p);
   $("stPos").innerHTML = k ? `x <b>${f3(p[0] / k)}</b> ft · y <b>${f3(p[1] / k)}</b> ft${vp ? " · <b>" + esc(vp.name) + "</b>" : ""}` : "Scale not set";
   $("stSnap").textContent = s ? "Snap: " + s.type : "";
@@ -2145,6 +2151,7 @@ function onUp(e){
   if (S.drag && S.drag.pan && S.drag.rc && !S.drag.rcMoved) { S.drag = null; stage().classList.remove("panning"); ctxOpen(evPos(e), e); return; }
   if (S.lasso) { lassoEnd(); return; }
   if (S.zbox) { zoomBoxEnd(); return; }
+  if (S.cbox) { cadSelUp(); return; }
   if (S.press) { const pr = S.press; S.press = null; pressClick(pr); }
   if (S.box) boxSelect();
   if (S.touches) { delete S.touches[e.pointerId]; if (Object.keys(S.touches).length < 2) S.pinch = null; }
@@ -2540,7 +2547,7 @@ function drawNow(){
      what follows the cursor (the shape being drawn, snap marker, selection box). A mouse move over a page with a
      thousand measurements then redraws only the cursor layer. */
   let k = curScale(); const h = [], dyn = [];
-  const sig = [P.proj.id, S.ver, S.key, S.view.s, S.view.tx, S.view.ty, S.sel, S.selMark, [...S.multi].join(","), S.hover, S.selPt, S.tool, S.hideMk, JSON.stringify(S.lbl), S.drag || S.typ ? Math.random() : 0, S.autoShow ? S.autoShow.key + S.autoShow.url.length : ""].join("|");
+  const sig = [P.proj.id, S.ver, S.key, S.view.s, S.view.tx, S.view.ty, S.sel, S.selMark, [...S.multi].join(","), S.hover, S.selPt, S.tool, S.hideMk, JSON.stringify(S.lbl), S.drag || S.typ ? Math.random() : 0, S.autoShow ? S.autoShow.key + S.autoShow.url.length : "", S.cadSel ? S.cadSelV + "|" + cadKey() : ""].join("|");
   const keep = sig === S.ovSig;
   if (!keep) h.push('<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="rgba(208,59,59,.08)"/><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(208,59,59,.55)" stroke-width="1.5"/></pattern></defs>');
   const ptsS = P => P.map(p => toScr(p).map(v => v.toFixed(1)).join(",")).join(" ");
@@ -2549,6 +2556,10 @@ function drawNow(){
     h.push(`<rect x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="none" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`);
     h.push(label([a[0] + 6 + (v.name.length + 14) * 3.2, a[1] + 12], v.name + " · " + (v.ptPerFt ? v.text || "own scale" : "scale not set"), "#4b3b8f")); });
   if (!keep && !S.hideMk) (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo && !mkHidden(m)).forEach(m => h.push(markSvg(m, toScr, 1)));
+  if (!keep && S.cadSel) h.push(cadSelSvg(cadSelIds()));   // AutoCAD objects selected (Shift+V)
+  if (S.tool === "cadsel" && S.cadHov >= 0 && !S.cbox && !(S.cadSel && S.cadSel.f === S.fileId && S.cadSel.ids.has(S.cadHov))) dyn.push(cadSelSvg([S.cadHov], true));
+  if (S.cbox && dist(S.cbox.a, S.cbox.b) >= 4) { const a = S.cbox.a, b = S.cbox.b, cr = b[0] < a[0];   // AutoCAD: window blue and solid, crossing green and dashed
+    dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="${cr ? "rgba(27,175,122,.12)" : "rgba(42,120,214,.12)"}" stroke="${cr ? "#1baf7a" : "#2a78d6"}" stroke-width="1.5"${cr ? ' stroke-dasharray="6 4"' : ""}/>`); }
   if (!keep && !S.hideMk && S.selMark && !S.multi.size && S.tool === "select") { const m = objById(S.selMark); if (m && onPage(m) && !m.locked) h.push(mkHandlesSvg(m)); }
   if (!keep && S.typ) {   // typical copy: reference points, and the copies placed by them (dashed) before they are confirmed
     const T = S.typ;
@@ -2647,6 +2658,7 @@ function drawNow(){
   $("stMeas").innerHTML = live ? "<b>" + esc(live) + "</b>" : "";
   if (S.typed && S.draft.length) live = (S.tool === "rect" ? "L x W: " : "Length: ") + S.typed + " ▏ Enter to place · Esc clears";
   if (!live && S.tool === "select" && S.hover && !S.drag && !S.box && S.cursorScr) live = hoverText(S.hover);   // what is under the cursor, as Bluebeam's tooltip
+  if (!live && S.tool === "cadsel" && S.cadHov >= 0 && !S.cbox && S.cursorScr) live = cadHoverText();   // the AutoCAD object under it
   if (live && S.cursorScr) { tip.textContent = live; tip.style.display = "block"; tip.style.left = Math.min(S.cursorScr[0] + 16, stage().clientWidth - 220) + "px"; tip.style.top = (S.cursorScr[1] + 18) + "px"; }
   else tip.style.display = "none";
 }
@@ -2957,6 +2969,7 @@ function renderProps(){
   const el = $("props"), it = S.sel && P.proj ? P.proj.items.find(i => i.id === S.sel) : null;
   const mk = !it && S.selMark && P.proj ? (P.proj.marks || []).find(m => m.id === S.selMark) : null;
   if (mk) { el.innerHTML = mkPropsHtml(mk); el.classList.add("on"); return; }
+  if (!it && S.cadSel) { const ci = cadSelIds(); if (ci.length) { el.innerHTML = cadSelHtml(ci); el.classList.add("on"); return; } }
   if (!it) { el.classList.remove("on"); el.innerHTML = ""; return; }
   const c = cond(it.cond), k = itemScale(it), poly = itemPoly(it);
   const meas = !k ? "scale not set" : it.shape === "circle" ? "dia " + f3(2 * dist(it.pts[0], it.pts[1]) / k) + " ft · " + (c.type === "area" ? fq(polyArea(poly) / k / k) + " Sft" : f3(polyLen(poly, true) / k) + " ft round")
@@ -6306,11 +6319,11 @@ function ctxMark(m){
 }
 function ctxCanvas(q){
   const u = S.undo.length ? undoEntry(S.undo[S.undo.length - 1]).label : "", r = S.redo.length ? undoEntry(S.redo[S.redo.length - 1]).label : "", T = (t, n, key) => ({t: n, k: key, fn: () => setTool(t), on: S.tool === t});
-  return [{h: pageName({file: S.fileId, page: S.pageNo}), s: S.clip ? "clipboard: " + S.clip.n + " object" + (S.clip.n > 1 ? "s" : "") : ""}, ...cadCtxItems(q), ...sheetLinkItems(q),
+  return [{h: pageName({file: S.fileId, page: S.pageNo}), s: S.clip ? "clipboard: " + S.clip.n + " object" + (S.clip.n > 1 ? "s" : "") : ""}, ...cadSelCtx(), ...cadCtxItems(q), ...sheetLinkItems(q),
     {t: "Paste here", k: "Ctrl+V", fn: () => pasteClip("cursor", q), dis: !S.clip}, {t: "Paste in place", k: "Ctrl+Shift+V", fn: () => pasteClip("inplace"), dis: !S.clip},
     {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {sep: 1},
     {t: "Undo" + (u ? ": " + u : ""), k: "Ctrl+Z", fn: undoAny, dis: !S.undo.length}, {t: "Redo" + (r ? ": " + r : ""), k: "Ctrl+Y", fn: redoAny, dis: !S.redo.length}, {sep: 1},
-    {t: "Tools", sub: [T("select", "Select", "V"), T("lasso", "Lasso select", "Shift+O"), T("pan", "Pan", "H"), {sep: 1}, T("draw", "Draw", "A"), T("rect", "Rectangle", "R"), T("auto", "Auto area", "W"), T("circle", "Circle", "E"), T("count", "Count", "C"), T("ded", "Deduct", "D"), T("open", "Opening", "O"), {sep: 1}, T("break", "Break a run", "B"), T("measure", "Measure", "M"), T("cal", "Set scale", "K")]},
+    {t: "Tools", sub: [T("select", "Select", "V"), T("cadsel", "Select AutoCAD objects", "Shift+V"), T("lasso", "Lasso select", "Shift+O"), T("pan", "Pan", "H"), {sep: 1}, T("draw", "Draw", "A"), T("rect", "Rectangle", "R"), T("auto", "Auto area", "W"), T("circle", "Circle", "E"), T("count", "Count", "C"), T("ded", "Deduct", "D"), T("open", "Opening", "O"), {sep: 1}, T("break", "Break a run", "B"), T("measure", "Measure", "M"), T("cal", "Set scale", "K")]},
     {t: "View", sub: [{t: "Fit page", k: "F", fn: () => { fit(); renderHi(); }}, {t: "Fit width", k: "Shift+F", fn: fitWidth}, {t: "Zoom window", k: "Z", fn: () => setTool("zoomwin")}, {t: "Zoom in", k: "+", fn: () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2)}, {t: "Zoom out", k: "−", fn: () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2)}, {sep: 1},
       {t: "Labels", k: "L", fn: () => setLblOn(!S.lbl.on), on: S.lbl.on}, {t: "Snap to drawing lines", k: "S", fn: () => { $("snapOn").checked = !$("snapOn").checked; }, on: $("snapOn").checked}, {t: "Markups", fn: () => $("bHideMk").click(), on: !S.hideMk}]},
     {sep: 1}, {t: "Keyboard & mouse shortcuts…", k: "?", fn: keysDialog}];
@@ -6320,7 +6333,7 @@ function keysDialog(){
   const R = (k, t) => `<tr><td style="white-space:nowrap;padding:2px 10px 2px 0">${k.split(" | ").map(x => `<kbd>${esc(x)}</kbd>`).join(" ")}</td><td style="padding:2px 0">${esc(t)}</td></tr>`;
   const G = (t, rows) => `<tr><td colspan="2" style="padding:8px 0 2px;font-weight:700;color:var(--navy)">${esc(t)}</td></tr>` + rows.map(x => R(x[0], x[1])).join("");
   ask("Keyboard & mouse", `<table class="keyt" style="font-size:12px;border-collapse:collapse;width:100%">
-    ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
+    ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift+V", "select AutoCAD objects (DWG / DXF): click, box, Ctrl+A — then take off, count, select similar, quick select, layer off"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
     ${G("Find anything", [["Ctrl+K", "command palette: type the name of any tool, export, dialog, page or condition"], ["Ctrl+F", "find text on the drawings"]])}
     ${G("Pages (Forma Takeoff sheets)", [["Tick a thumbnail | Shift+tick", "tick pages to export, read sheet info or OCR together · Shift: the pages in between"], ["Ctrl+click | Shift+click a thumbnail", "tick / untick it without opening it"], ["☆ on a thumbnail", "pin the page to the top"], ["Double-click a sheet no. on the drawing", "open that sheet (right-click lists the sheets referenced)"]])}
     ${G("Markups (Bluebeam)", [["T | Q | N", "text box · callout · note"], ["Shift+L | Y | G", "line · polyline · polygon"], ["Shift+R | Shift+E | U", "rectangle · ellipse · cloud"], ["P | Shift+H", "pen · highlighter pen"], ["X | I", "stamp · image"], ["Markup ▾", "every markup tool: hyperlink, file attachment, redaction, erase…"], ["Dbl-click a markup", "edit its text · open a link or an attached file"], ["Drag a handle", "resize a box, move a line's end or a point"], ["Alt+L", "Markups list: every markup — filter, sort, status, replies, layers, CSV / XML / PDF summary"]])}
@@ -6583,6 +6596,7 @@ function wire(){
     mutate(() => P.proj.items.forEach(i => { if (ids.has(i.id) && (cond(i.cond) || {}).type === c.type) i.cond = c.id; }));
     toast("Moved to " + c.name + (bad ? " — " + bad + " of another kind (area / length / count) left as they were" : ""), 3500); });
   $("props").addEventListener("click", e => {
+    const ca = e.target.closest("[data-cact]"); if (ca) return cadSelAct(ca.dataset.cact);
     const m2 = e.target.closest("[data-mact2]"); if (m2) { const mk = S.selMark && objById(S.selMark); if (mk) mkPropAct(mk, m2.dataset.mact2); return; }
     const ma = e.target.closest("[data-mact]");
     if (ma && ma.dataset.mact === "del") return delSelected();
@@ -6610,7 +6624,7 @@ function wire(){
     if (mod && k === "z") { e.preventDefault(); return e.shiftKey ? redoAny() : undoAny(); }
     if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); return redoAny(); }
     if (e.altKey && S.cmp && /^Arrow/.test(e.key)) { e.preventDefault(); const st2 = (e.shiftKey ? 10 : 1) / S.view.s; S.cmp.dx += e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0; S.cmp.dy += e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0; clearTimeout(S.cmpT); S.cmpT = setTimeout(() => { renderLow(); renderHi(true); }, 120); return; }
-    if (mod && k === "a") { e.preventDefault(); return selectAll(); }
+    if (mod && k === "a") { e.preventDefault(); return S.tool === "cadsel" ? cadSelAct("all") : selectAll(); }
     if (mod && /^Arrow/.test(e.key) && selIds().size) { e.preventDefault(); return arrayDialog({ArrowRight: "right", ArrowLeft: "left", ArrowUp: "up", ArrowDown: "down"}[e.key]); }   // PlanSwift: Ctrl + arrow copies at a distance
     if (!e.altKey && !mod && /^Arrow/.test(e.key) && selIds().size) { e.preventDefault(); const st2 = e.shiftKey ? 10 : 1; nudgeSel(e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0, e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0); return; }
     if (mod && k === "c") { e.preventDefault(); return copySel(); }
@@ -6630,6 +6644,7 @@ function wire(){
     if (e.key === "Escape" && S.mkd) { S.mkd = null; draftClear(); draw(); return; }
     if (e.key === "Escape" && S.drag && (S.drag.vertex != null || S.drag.move || S.drag.mh != null)) { cancelDrag(); return; }
     if (e.key === "Escape" && S.tool === "match") { setTool("select"); return; }
+    if (e.key === "Escape" && S.tool === "cadsel") { if (S.cbox) { S.cbox = null; draw(); } else if (cadSelIds().length) cadSelSet([]); else setTool("select"); return; }
     if (e.key === "Escape" && S.tool === "stamp" && S.stampBase) { S.stampBase = null; $("stMeas").innerHTML = ""; hint(); draw(); return; }
     if (e.key === "Enter" && S.tool === "stamp" && S.clip && !S.stampBase) { e.preventDefault(); S.stampBase = S.clip.anchor.slice(); hint(); draw(); return; }
     if (e.key === "Escape" && S.draft.length === 0 && (S.multi.size || S.box || S.lasso)) { S.multi.clear(); S.box = null; S.lasso = null; refresh(); return; }
@@ -6661,7 +6676,7 @@ function wire(){
     }
     if (k === "a" && S.draft.length && ["draw", "ded", "measure", "fence"].indexOf(S.tool) >= 0) { S.arcMode = S.arcMode ? 0 : 1; S.arcMid = null; hint(); draw(); return; }   // PlanSwift: A while drawing = arc
     if (k === "o" && e.shiftKey) { setTool("lasso"); return; }   // Bluebeam: Shift+O lasso
-    if (e.shiftKey) { const ST = {l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen"}; if (ST[k]) { setTool(ST[k]); return; } }
+    if (e.shiftKey) { const ST = {l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen", v: "cadsel"}; if (ST[k]) { setTool(ST[k]); return; } }
     const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", c: "count", e: "circle", n: "note", u: "cloud", d: "ded", o: "open", m: "measure", k: "cal", b: "break", z: "zoomwin",
       t: "mk_text", q: "mk_callout", p: "mk_pen", g: "mk_polygon", y: "mk_polyline", x: "mk_stamp", i: "mk_image"};
     if (T[k]) { setTool(T[k]); return; }
@@ -8510,13 +8525,14 @@ function cadIsolate(name){ const cfg = S.ocgs && S.ocgs[S.fileId], e = cfg && Ob
 
 /* the drawing's own objects into the takeoff: lines and polylines (lengths), closed outlines (areas), blocks (counts) */
 const cadPts = P => P.filter((p, i) => !i || dist(p, P[i - 1]) > 1e-4).map(p => [+p[0].toFixed(3), +p[1].toFixed(3)]);
-function cadAddGeom(sc, pg, ei, how, cnd, counts){   // one object -> measurements; inside mutate. how: area | line | count
-  const r = pg.ents[ei], g = CAD.cadGeom(pg, ei); if (!r || !g) return 0;
+function cadAddGeom(sc, pg, ei, how, cnd, counts){   // one object -> measurements; inside mutate. how: area | line | count | countAny (any object, at its middle)
+  const r = pg.ents[ei], g = how === "countAny" ? true : CAD.cadGeom(pg, ei); if (!r || !g) return 0;
   const lname = (sc.layers[r.L] || {}).name || "0", fid = S.fileId; let n = 0;
-  if (how === "count") { if (!r.at) return 0; const c = cnd && cnd.type === "count" ? cnd : condByName(r.n || lname, "count");
+  if (how === "count" || how === "countAny") { const at = r.at || (how === "countAny" ? cadMid(pg, ei) : null); if (!at) return 0;
+    const c = cnd && cnd.type === "count" ? cnd : condByName(r.n || lname, "count");
     let it = counts && counts.get(c.id) || P.proj.items.find(i => i.cond === c.id && i.file === fid && i.page === 1 && i.kind === "shape");
     if (!it) { it = {id: uid("I"), cond: c.id, file: fid, page: 1, kind: "shape", pts: [], nos: 1, label: "", ai: true}; P.proj.items.push(it); }
-    if (counts) counts.set(c.id, it); if (!it.pts.some(q => dist(q, r.at) < 0.5)) { it.pts.push(r.at.slice()); n++; } return n; }
+    if (counts) counts.set(c.id, it); if (!it.pts.some(q => dist(q, at) < 0.5)) { it.pts.push(at.slice()); n++; } return n; }
   if (how === "area") { if (g.kind !== "area") return 0; const c = cnd && cnd.type === "area" ? cnd : condByName(lname, "area");
     const L = g.loops.map(cadPts).filter(l => l.length >= 3 && polyArea(l) > 1e-6);
     L.forEach((l, i) => { const hole = L.some((o, j) => j !== i && polyArea(o) > polyArea(l) && pointInPoly(l[0], o));
@@ -8538,8 +8554,171 @@ function cadCtxItems(q){   // right-click: the AutoCAD object under the cursor
   const lname = (sc.layers[r.L] || {}).name || "0", L = [{h: "AutoCAD: " + (r.t === "INSERT" ? "block " + (r.n || "") : r.t.toLowerCase()) + " · " + lname, s: [r.area ? f2(r.area) + " Sft" : "", r.len ? f2(r.len) + " ft" : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ")}];
   if (r.t === "INSERT") { const same = pg.ents.filter(x => x.t === "INSERT" && x.n === r.n).length; L.push({t: "Count this " + (r.n || "block"), fn: () => cadPick(h.e, "count")}, {t: "Count every " + (r.n || "block") + " (" + same + ")…", fn: () => cadQtyDialog({B: r.n})}); }
   else { if (r.cl && r.area > 0) L.push({t: "Take off its area — " + f2(r.area) + " Sft", fn: () => cadPick(h.e, "area")}); if (r.len > 0) L.push({t: "Take off its length — " + f2(r.len) + " ft", fn: () => cadPick(h.e, "line")}); }
-  L.push({t: "Quantities on layer " + lname + "…", fn: () => cadQtyDialog({L: r.L})}, {t: "Isolate layer " + lname + " (LAYISO)", fn: () => cadIsolate(lname)}, {sep: 1});
+  L.push({t: "Quantities on layer " + lname + "…", fn: () => cadQtyDialog({L: r.L})}, {t: "Isolate layer " + lname + " (LAYISO)", fn: () => cadIsolate(lname)}, {t: "Layer " + lname + " off (LAYOFF)", fn: () => cadLayersOnOff([lname], false)}, {sep: 1},
+    {t: "Select this object", k: "Shift+V", fn: () => { setTool("cadsel"); cadSelSet([h.e]); }}, {t: "Select similar (same type and layer" + (r.t === "INSERT" ? ", same block" : "") + ")", fn: () => { setTool("cadsel"); cadSelSet([h.e]); cadSelAct("similar"); }}, {sep: 1});
   return L;
+}
+
+/* ------------------------------------------------------------------ AutoCAD object selection (Shift+V), as in AutoCAD
+   Click an object to select it; Shift / Ctrl+click adds it or takes it out. A box dragged left → right selects what is
+   wholly inside it (window, blue), right → left what it touches (crossing, green); Shift adds the box to the selection.
+   Objects on layers switched off cannot be picked. The selection is drawn in blue, its totals (lengths, areas, blocks) and
+   what to do with it — take it off, count it, select similar, quick select, layer off, isolate — are in the bar below the
+   drawing and on the right-click menu. The drawing itself is never changed. */
+function cadSelIds(){   // the selected objects that can still be seen (their layer on), on this drawing
+  const pg = cadPage(); if (!pg || !S.cadSel || S.cadSel.f !== S.fileId || !S.cadSel.ids.size) return [];
+  const hid = cadHidden(S.fileId, S.cadSc[S.fileId]);
+  return [...S.cadSel.ids].filter(ei => { const r = pg.ents[ei]; return r && r.L >= 0 && !hid[r.L]; });
+}
+function cadSelSet(ids, how){   // how: "" replaces, "add", "toggle", "remove"
+  if (!cadPage()) return;
+  const cur = S.cadSel && S.cadSel.f === S.fileId ? S.cadSel.ids : new Set(), next = how ? new Set(cur) : new Set();
+  ids.forEach(ei => { if (how === "remove" || (how === "toggle" && next.has(ei))) next.delete(ei); else next.add(ei); });
+  S.cadSel = {f: S.fileId, ids: next}; S.cadSelV = (S.cadSelV || 0) + 1; S.cadHov = -1;
+  renderProps(); draw();
+}
+function cadMid(pg, ei){ const E = CAD.cadEnts(pg), k = 4 * ei; return E.eb[k] <= E.eb[k + 2] ? [(E.eb[k] + E.eb[k + 2]) / 2, (E.eb[k + 1] + E.eb[k + 3]) / 2] : null; }
+function cadPickAt(sp){   // the object under a screen point (on a layer that is on) -> its index, or -1
+  const pg = cadPage(); if (!pg) return -1;
+  const q = toBase(sp[0], sp[1]), hid = cadHidden(S.fileId, S.cadSc[S.fileId]), h = CAD.cadHit(pg, q[0], q[1], 7 / S.view.s, hid), r = h && pg.ents[h.e];
+  return r && r.L >= 0 && !hid[r.L] ? h.e : -1;
+}
+function cadSelDown(sp, e){
+  if (!cadOn()) { toast("Select objects works on an AutoCAD drawing (DWG / DXF added with + PDF), on its page", 4000); return; }
+  S.cbox = {a: sp, b: sp, add: e.shiftKey || e.ctrlKey || e.metaKey};
+}
+function cadSelUp(){
+  const B = S.cbox; S.cbox = null; const pg = cadPage(); if (!pg) { draw(); return; }
+  if (dist(B.a, B.b) < 4) { const ei = cadPickAt(B.b);
+    if (ei < 0) { if (!B.add) cadSelSet([]); else draw(); return; }
+    cadSelSet([ei], B.add ? "toggle" : ""); return; }
+  const a = toBase(B.a[0], B.a[1]), b = toBase(B.b[0], B.b[1]);
+  const ids = CAD.cadBox(pg, Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1]), B.b[0] < B.a[0], cadHidden(S.fileId, S.cadSc[S.fileId]));
+  cadSelSet(ids, B.add ? "add" : "");
+}
+function cadHoverAt(sp){ const ei = S.cbox ? -1 : cadPickAt(sp); if (ei !== S.cadHov) S.cadHov = ei; stage().style.cursor = ei >= 0 ? "pointer" : ""; }
+function cadDesc(sc, r){ return (r.t === "INSERT" ? "Block " + (r.n || "") : r.t.charAt(0) + r.t.slice(1).toLowerCase()) + " · " + ((sc.layers[r.L] || {}).name || "0"); }
+function cadHoverText(){
+  const pg = cadPage(), r = pg && S.cadHov >= 0 && pg.ents[S.cadHov]; if (!r) return "";
+  return [cadDesc(S.cadSc[S.fileId], r), r.cl && r.area > 0 ? fq(r.area) + " Sft" : "", !r.cl && r.len > 0 ? f3(r.len) + " ft" : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ");
+}
+/* the selected objects drawn over the drawing: their own lines, in blue (a text as its box); a very big selection as the
+   objects' boxes. Only what is in view. */
+function cadSelSvg(ids, hover){
+  const pg = cadPage(); if (!pg || !ids.length) return "";
+  const E = CAD.cadEnts(pg), st = stage(), a = toBase(0, 0), b = toBase(st.clientWidth, st.clientHeight), d = [];
+  const inView = k => !(E.eb[k + 2] < a[0] || E.eb[k] > b[0] || E.eb[k + 3] < a[1] || E.eb[k + 1] > b[1]);
+  let pts = 0; const vis = ids.filter(ei => inView(4 * ei)), boxes = vis.length > 4000;
+  const R = (x0, y0, x1, y1) => { const p = toScr([x0, y0]), q = toScr([x1, y1]); d.push(`M${p[0].toFixed(1)} ${p[1].toFixed(1)}H${q[0].toFixed(1)}V${q[1].toFixed(1)}H${p[0].toFixed(1)}Z`); };
+  for (const ei of vis) {
+    const k = 4 * ei; if (boxes || pts > 200000) { R(E.eb[k], E.eb[k + 1], E.eb[k + 2], E.eb[k + 3]); continue; }
+    for (let j = E.ps[ei]; j < E.ps[ei + 1]; j++) { const i = E.pl[j]; if (pg.pf[i] === 1) continue;   // a hatch's pattern lines: its outline shows it
+      CAD.primPaths(pg, i).forEach(P => { if (!P.length) return; pts += P.length;
+        d.push(P.map((p, n) => { const q = toScr(p); return (n ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1); }).join("") + (P.closed ? "Z" : "") + (P.length === 1 ? "h0.1" : "")); }); }
+    for (let j = E.ts[ei]; j < E.ts[ei + 1]; j++) { const t = 4 * E.tl[j]; R(pg.tB[t], pg.tB[t + 1], pg.tB[t + 2], pg.tB[t + 3]); }
+  }
+  if (!d.length) return "";
+  const path = d.join("");
+  return hover ? `<path d="${path}" fill="none" stroke="rgba(255,196,0,.85)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`
+    : `<g class="cadsel"><path d="${path}" fill="none" stroke="rgba(47,139,255,.38)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><path d="${path}" fill="none" stroke="#2f8bff" stroke-width="1.8" stroke-dasharray="7 4"/></g>`;
+}
+function cadSelSum(ids){   // the selection's totals: by type, lengths, areas, blocks, texts, layers
+  const pg = cadPage(), sc = S.cadSc[S.fileId], o = {n: ids.length, runs: 0, len: 0, areas: 0, area: 0, blocks: new Map(), txt: 0, other: 0, types: new Map(), layers: new Map()};
+  ids.forEach(ei => { const r = pg.ents[ei]; if (!r) return; const ln = (sc.layers[r.L] || {}).name || "0";
+    o.types.set(r.t, (o.types.get(r.t) || 0) + 1); o.layers.set(ln, (o.layers.get(ln) || 0) + 1);
+    if (r.t === "INSERT") o.blocks.set(r.n || "?", (o.blocks.get(r.n || "?") || 0) + 1);
+    else if (r.cl && r.area > 0) { o.areas++; o.area += r.area; }
+    else if (r.len > 0) { o.runs++; o.len += r.len; }
+    else if (/TEXT|ATTRIB|ATTDEF/.test(r.t)) o.txt++; else o.other++; });
+  return o;
+}
+function cadSelHtml(ids){
+  const o = cadSelSum(ids), c = S.cond ? cond(S.cond) : null, top = (m, n) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => esc(k) + (v > 1 ? " ×" + v : "")).join(", ") + (m.size > n ? ", …" : "");
+  const B = [...o.blocks.values()].reduce((a, v) => a + v, 0);
+  const into = c ? "into <b>" + esc(c.name) + "</b> when its type fits, else a condition named after the layer / block" : "into conditions named after each layer / block";
+  return `<h4>AutoCAD objects — ${o.n} selected <span style="font-weight:400;color:var(--muted);font-size:11px">Shift / Ctrl+click adds or takes out · box: left→right window, right→left crossing · Ctrl+A all · Esc clears</span></h4>
+    <div class="row"><span class="small" style="flex:1;min-width:220px">${[o.runs && "<b>Lines</b> " + o.runs + " · " + f3(o.len) + " ft", o.areas && "<b>Closed</b> " + o.areas + " · " + fq(o.area) + " Sft", B && "<b>Blocks</b> " + B + " (" + top(o.blocks, 4) + ")", o.txt && "<b>Text</b> " + o.txt, o.other && "other " + o.other].filter(Boolean).join(" &nbsp;|&nbsp; ") || "nothing to measure"}<br>
+      <b>Types:</b> ${top(o.types, 6)} &nbsp;·&nbsp; <b>Layers:</b> ${top(o.layers, 6)}</span></div>
+    <div class="row" style="margin-top:6px;gap:4px;flex-wrap:wrap">
+      <button class="btn pri sm" data-cact="take" title="Lines → length, closed outlines → area, blocks → count, ${into}"${o.runs || o.areas || B ? "" : " disabled"}>Take off</button>
+      <button class="btn sm" data-cact="len" title="Every line, and each closed outline's perimeter, as length"${o.runs || o.areas ? "" : " disabled"}>All as length</button>
+      <button class="btn sm" data-cact="count" title="Count every selected object at its middle (e.g. columns drawn as rectangles) — blocks at their insertion point">Count them</button>
+      <button class="btn sm" data-cact="similar" title="AutoCAD's SELECTSIMILAR: every object of the same type on the same layer (a block: the same block)">Select similar</button>
+      <button class="btn sm" data-cact="layer" title="Every object on the selected objects' layers">Select layer</button>
+      <button class="btn sm" data-cact="qsel" title="AutoCAD's QSELECT: select by layer, type, block, length or area">Quick select…</button>
+      <button class="btn sm" data-cact="layoff" title="AutoCAD's LAYOFF: switch the selected objects' layers off">Layer off</button>
+      <button class="btn sm" data-cact="iso" title="AutoCAD's LAYISO: only the selected objects' layers stay on">Isolate layers</button>
+      <button class="btn sm" data-cact="zoom">Zoom to</button>
+      <button class="btn sm" data-cact="clear">Clear</button></div>`;
+}
+function cadLayersOnOff(names, on){   // AutoCAD layers by name, on or off (the rest as they are)
+  const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return;
+  const want = new Set(names), ids = Object.entries(cfg.getGroups()).filter(([, g]) => want.has(g.name)).map(([id]) => id); if (!ids.length) return;
+  S.iso = null; setLayer(ids, on); renderLayers(); renderProps(); draw();
+  toast("Layer" + (names.length > 1 ? "s " : " ") + names.slice(0, 4).join(", ") + (names.length > 4 ? ", …" : "") + (on ? " on" : " off — Layers panel or View → PDF layers to switch back on"), 3500);
+}
+function cadSelAct(act){
+  const pg = cadPage(); if (!pg) return; const sc = S.cadSc[S.fileId], ids = cadSelIds(), hid = cadHidden(S.fileId, sc), lname = r => (sc.layers[r.L] || {}).name || "0";
+  const all = () => { const eb = CAD.cadEnts(pg).eb; return pg.ents.map((r, ei) => r && r.L >= 0 && !hid[r.L] && eb[4 * ei] <= eb[4 * ei + 2] ? ei : -1).filter(ei => ei >= 0); };
+  if (act === "clear") return cadSelSet([]);
+  if (act === "all") { const A = all(); cadSelSet(A); return toast(A.length + " AutoCAD objects selected (layers that are on)", 2200); }
+  if (act === "qsel") return cadQuickSelect();
+  if (!ids.length) return toast("Select AutoCAD objects first (Shift+V, then click or drag a box)", 3000);
+  if (act === "similar") { const key = r => r.t + "|" + r.L + "|" + (r.t === "INSERT" ? r.n || "" : ""), K = new Set(ids.map(ei => key(pg.ents[ei]))), A = all().filter(ei => K.has(key(pg.ents[ei]))); cadSelSet(A); return toast("Similar: " + A.length + " objects", 2000); }
+  if (act === "layer") { const L = new Set(ids.map(ei => pg.ents[ei].L)), A = all().filter(ei => L.has(pg.ents[ei].L)); cadSelSet(A); return toast(A.length + " objects on " + [...L].map(l => (sc.layers[l] || {}).name).join(", "), 2500); }
+  if (act === "layoff" || act === "iso") { const N = [...new Set(ids.map(ei => lname(pg.ents[ei])))];
+    if (act === "layoff") { cadSelSet([]); return cadLayersOnOff(N, false); }
+    const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; const G = Object.entries(cfg.getGroups()), want = new Set(N);
+    S.iso = null; setLayer(G.filter(([, g]) => !want.has(g.name)).map(([id]) => id), false); setLayer(G.filter(([, g]) => want.has(g.name)).map(([id]) => id), true); renderLayers(); renderProps(); draw();
+    return toast("Only " + N.join(", ") + " on — Layers → All on to bring the rest back", 3500); }
+  if (act === "zoom") { const E = CAD.cadEnts(pg); let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    ids.forEach(ei => { const k = 4 * ei; if (!(E.eb[k] <= E.eb[k + 2])) return; x0 = Math.min(x0, E.eb[k]); y0 = Math.min(y0, E.eb[k + 1]); x1 = Math.max(x1, E.eb[k + 2]); y1 = Math.max(y1, E.eb[k + 3]); });
+    if (!(x0 <= x1)) return; const st = stage(), m = 40 / S.view.s, s2 = Math.max(0.05, Math.min(5000, Math.min(st.clientWidth / (x1 - x0 + 2 * m), st.clientHeight / (y1 - y0 + 2 * m))));
+    S.view = {s: s2, tx: st.clientWidth / 2 - (x0 + x1) / 2 * s2, ty: st.clientHeight / 2 - (y0 + y1) / 2 * s2}; applyView(); renderHi(); return; }
+  if (act === "take" || act === "len" || act === "count") {
+    const cnd = S.cond ? cond(S.cond) : null, got = {area: 0, line: 0, count: 0}, counts = new Map();
+    mutate(() => ids.forEach(ei => { const r = pg.ents[ei];
+      if (act === "count") { got.count += cadAddGeom(sc, pg, ei, "countAny", cnd, counts); return; }
+      if (r.t === "INSERT") { if (act === "take") got.count += cadAddGeom(sc, pg, ei, "count", cnd, counts); return; }
+      if (act === "take" && r.cl && r.area > 0) got.area += cadAddGeom(sc, pg, ei, "area", cnd, null);
+      else if (r.len > 0 || (act === "len" && r.cl && r.area > 0)) got.line += cadAddGeom(sc, pg, ei, "line", cnd, null); }), "AutoCAD selection into the takeoff");
+    refresh();
+    const t = [got.area && got.area + " area" + (got.area > 1 ? "s" : ""), got.line && got.line + " run" + (got.line > 1 ? "s" : ""), got.count && got.count + " count marker" + (got.count > 1 ? "s" : "")].filter(Boolean).join(", ");
+    toast(t ? "From the selection: " + t + " — marked AI, check them" : "Nothing in the selection to take off that way", 4000);
+    return got;
+  }
+}
+function cadSelCtx(){   // right-click with AutoCAD objects selected
+  const ids = cadSelIds(); if (!ids.length) return [];
+  const o = cadSelSum(ids), A = a => () => cadSelAct(a);
+  return [{h: ids.length + " AutoCAD object" + (ids.length > 1 ? "s" : "") + " selected", s: [o.runs && f3(o.len) + " ft", o.areas && fq(o.area) + " Sft", o.blocks.size && [...o.blocks.values()].reduce((a, v) => a + v, 0) + " blocks"].filter(Boolean).join(" · ")},
+    {t: "Take off the selection", fn: A("take")}, {t: "All as length", fn: A("len")}, {t: "Count them", fn: A("count")}, {t: "Select similar", fn: A("similar")}, {t: "Quick select…", fn: A("qsel")},
+    {t: "Layer off (LAYOFF)", fn: A("layoff")}, {t: "Isolate their layers (LAYISO)", fn: A("iso")}, {t: "Zoom to the selection", fn: A("zoom")}, {t: "Clear the selection", k: "Esc", fn: A("clear")}, {sep: 1}];
+}
+async function cadQuickSelect(){   // AutoCAD's QSELECT: by layer, type, block name, length and area
+  const pg = cadPage(); if (!pg) return toast("Open an AutoCAD drawing first — + PDF adds a DWG or DXF", 4000);
+  const sc = S.cadSc[S.fileId], hid = cadHidden(S.fileId, sc), E = CAD.cadEnts(pg), Q = pg.ents.map((r, ei) => r && r.L >= 0 && !hid[r.L] && E.eb[4 * ei] <= E.eb[4 * ei + 2] ? ei : -1).filter(ei => ei >= 0);
+  const cnt = f => { const m = new Map(); Q.forEach(ei => { const k = f(pg.ents[ei]); if (k != null) m.set(k, (m.get(k) || 0) + 1); }); return [...m].sort((a, b) => String(a[0]).localeCompare(String(b[0]), undefined, {numeric: true})); };
+  const Ls = cnt(r => (sc.layers[r.L] || {}).name || "0"), Ts = cnt(r => r.t), Bs = cnt(r => r.t === "INSERT" ? r.n || "?" : null), have = cadSelIds().length;
+  const opts = (L, id) => `<select id="${id}" multiple size="${Math.min(8, Math.max(3, L.length))}" style="width:100%">${L.map(([k, n]) => `<option value="${esc(k)}">${esc(k)} (${n})</option>`).join("")}</select>`;
+  const body = `<div class="wide"></div><p class="small">Objects on layers that are switched on. Leave a list with nothing picked for “any”; Ctrl+click picks several.</p>
+    <div class="row" style="gap:10px;align-items:flex-start"><div class="fg" style="flex:1"><label>Layer</label>${opts(Ls, "qsL")}</div><div class="fg" style="flex:1"><label>Object type</label>${opts(Ts, "qsT")}</div>${Bs.length ? `<div class="fg" style="flex:1"><label>Block name</label>${opts(Bs, "qsB")}</div>` : ""}</div>
+    <div class="row" style="gap:10px"><div class="fg"><label>Length ≥ ft</label><input type="number" id="qsL0" min="0" step="any"></div><div class="fg"><label>Length ≤ ft</label><input type="number" id="qsL1" min="0" step="any"></div>
+      <div class="fg"><label>Area ≥ Sft</label><input type="number" id="qsA0" min="0" step="any"></div><div class="fg"><label>Area ≤ Sft</label><input type="number" id="qsA1" min="0" step="any"></div></div>
+    <div class="row"><label class="pk"><input type="radio" name="qsHow" value="" checked style="width:auto"> New selection</label>${have ? `<label class="pk"><input type="radio" name="qsHow" value="add" style="width:auto"> Add to the ${have} selected</label><label class="pk"><input type="radio" name="qsHow" value="in" style="width:auto"> Only within the ${have} selected</label>` : ""}</div>`;
+  const v = await ask("Quick select — AutoCAD objects", body, "Select", () => {
+    const pick = id => { const el = $(id); return el ? new Set([...el.selectedOptions].map(o => o.value)) : new Set(); }, num = id => { const x = $(id).value.trim(); return x === "" ? null : +x; };
+    return {L: pick("qsL"), T: pick("qsT"), B: pick("qsB"), l0: num("qsL0"), l1: num("qsL1"), a0: num("qsA0"), a1: num("qsA1"), how: (document.querySelector("input[name=qsHow]:checked") || {}).value || ""};
+  });
+  if (!v) return;
+  const inSel = new Set(cadSelIds()), hit = Q.filter(ei => { const r = pg.ents[ei];
+    if (v.L.size && !v.L.has((sc.layers[r.L] || {}).name || "0")) return false; if (v.T.size && !v.T.has(r.t)) return false; if (v.B.size && !(r.t === "INSERT" && v.B.has(r.n || "?"))) return false;
+    if ((v.l0 != null || v.l1 != null) && !(r.len > 0 && !(r.cl && r.area > 0) && (v.l0 == null || r.len >= v.l0 - 1e-9) && (v.l1 == null || r.len <= v.l1 + 1e-9))) return false;
+    if ((v.a0 != null || v.a1 != null) && !(r.cl && r.area > 0 && (v.a0 == null || r.area >= v.a0 - 1e-9) && (v.a1 == null || r.area <= v.a1 + 1e-9))) return false;
+    return v.how !== "in" || inSel.has(ei); });
+  if (S.tool !== "cadsel") setTool("cadsel");
+  cadSelSet(hit, v.how === "add" ? "add" : "");
+  toast("Quick select: " + hit.length + " object" + (hit.length === 1 ? "" : "s"), 2500);
 }
 async function cadQtyDialog(pre){
   if (!S.page || !cadMeta(S.fileId)) return toast("Open an AutoCAD drawing first — + PDF adds a DWG or DXF", 4000);
@@ -8747,7 +8926,7 @@ function ocFix(Lb, out, fids){
   window.zdTakeoff = {snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
-    cadLoad, cadMod, cadPage, cadOn, cadHidden, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
+    cadLoad, cadMod, cadPage, cadOn, cadHidden, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
     mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");

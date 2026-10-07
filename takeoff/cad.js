@@ -879,7 +879,57 @@ export function cadHit(pg, x, y, tol, hidden){
     if (fill && d > tol) { let inside = false; S.forEach(P => { if (P.length > 2 && inPoly(p, P)) inside = !inside; }); if (inside) d = tol * 0.95; }
     if (d <= tol && (!best || d < best.d)) best = {e: pg.ent[i], i, d};
   }
+  if (!best && pg.tE) for (let t = 0; t < pg.tn; t++) {   // no line here: a text whose box holds the point
+    const b = 4 * t; if (hidden && hidden[pg.tL[t]]) continue;
+    if (pg.tB[b] - tol <= x && pg.tB[b + 2] + tol >= x && pg.tB[b + 1] - tol <= y && pg.tB[b + 3] + tol >= y && pg.tE[t] >= 0) return {e: pg.tE[t], i: -1, t, d: tol};
+  }
   return best;
+}
+/* the objects' own index: each object's box (page points, over its primitives and texts) and its primitives and texts,
+   as lists cut by start offsets — made once per page */
+export function cadEnts(pg){
+  const g = cadPrep(pg); if (g.en) return g.en;
+  const N = pg.ents.length, eb = new Float64Array(4 * N), ps = new Uint32Array(N + 1), ts = new Uint32Array(N + 1), tn = pg.tE ? pg.tn : 0;
+  for (let e = 0; e < N; e++) { eb[4 * e] = eb[4 * e + 1] = Infinity; eb[4 * e + 2] = eb[4 * e + 3] = -Infinity; }
+  const grow = (e, B, b) => { const k = 4 * e; if (B[b] < eb[k]) eb[k] = B[b]; if (B[b + 1] < eb[k + 1]) eb[k + 1] = B[b + 1]; if (B[b + 2] > eb[k + 2]) eb[k + 2] = B[b + 2]; if (B[b + 3] > eb[k + 3]) eb[k + 3] = B[b + 3]; };
+  for (let i = 0; i < pg.n; i++) { const e = pg.ent[i]; if (e >= 0 && e < N) { ps[e + 1]++; grow(e, pg.bb, 4 * i); } }
+  for (let t = 0; t < tn; t++) { const e = pg.tE[t]; if (e >= 0 && e < N) { ts[e + 1]++; grow(e, pg.tB, 4 * t); } }
+  for (let e = 0; e < N; e++) { ps[e + 1] += ps[e]; ts[e + 1] += ts[e]; }
+  const pl = new Uint32Array(ps[N]), tl = new Uint32Array(ts[N]), pf = ps.slice(0, N), tf = ts.slice(0, N);
+  for (let i = 0; i < pg.n; i++) { const e = pg.ent[i]; if (e >= 0 && e < N) pl[pf[e]++] = i; }
+  for (let t = 0; t < tn; t++) { const e = pg.tE[t]; if (e >= 0 && e < N) tl[tf[e]++] = t; }
+  return g.en = {N, eb, ps, pl, ts, tl};
+}
+const segBox = (a, b, x0, y0, x1, y1) => {   // does the segment a-b meet the box (Liang–Barsky)
+  const dx = b[0] - a[0], dy = b[1] - a[1]; let t0 = 0, t1 = 1;
+  for (const [p, q] of [[-dx, a[0] - x0], [dx, x1 - a[0]], [-dy, a[1] - y0], [dy, y1 - a[1]]]) {
+    if (p === 0) { if (q < 0) return false; continue; } const r = q / p;
+    if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; } else { if (r < t0) return false; if (r < t1) t1 = r; } }
+  return true;
+};
+/* the objects a box selects, as AutoCAD's window (wholly inside: every primitive and text of the object) or crossing
+   (touching: a line of it crosses the box or lies in it, a text's box meets it, or the box is inside a solid fill or hatch).
+   Objects on hidden layers are left out. -> [object index] */
+export function cadBox(pg, x0, y0, x1, y1, crossing, hidden){
+  const E = cadEnts(pg), eb = E.eb, out = [], ents = pg.ents, bb = pg.bb, c = [(x0 + x1) / 2, (y0 + y1) / 2];
+  for (let e = 0; e < E.N; e++) {
+    const r = ents[e], k = 4 * e; if (!r || r.L < 0 || (hidden && hidden[r.L]) || !(eb[k] <= eb[k + 2])) continue;
+    if (eb[k + 2] < x0 || eb[k] > x1 || eb[k + 3] < y0 || eb[k + 1] > y1) continue;
+    if (eb[k] >= x0 && eb[k + 2] <= x1 && eb[k + 1] >= y0 && eb[k + 3] <= y1) { out.push(e); continue; }
+    if (!crossing) continue;
+    let hit = false;
+    for (let j = E.ts[e]; j < E.ts[e + 1] && !hit; j++) { const b = 4 * E.tl[j]; hit = !(pg.tB[b + 2] < x0 || pg.tB[b] > x1 || pg.tB[b + 3] < y0 || pg.tB[b + 1] > y1); }
+    for (let j = E.ps[e]; j < E.ps[e + 1] && !hit; j++) { const i = E.pl[j], b = 4 * i;
+      if (bb[b + 2] < x0 || bb[b] > x1 || bb[b + 3] < y0 || bb[b + 1] > y1) continue;
+      const S = primPaths(pg, i), fill = pg.kind[i] === 1 || pg.kind[i] === 2;
+      for (const P of S) { if (P.length === 1) { hit = P[0][0] >= x0 && P[0][0] <= x1 && P[0][1] >= y0 && P[0][1] <= y1; if (hit) break; }
+        for (let q = 1; q < P.length && !hit; q++) hit = segBox(P[q - 1], P[q], x0, y0, x1, y1);
+        if (!hit && (P.closed || fill) && P.length > 2) hit = segBox(P[P.length - 1], P[0], x0, y0, x1, y1);
+        if (hit) break; }
+      if (!hit && fill) { let inside = false; S.forEach(P => { if (P.length > 2 && inPoly(c, P)) inside = !inside; }); hit = inside; } }
+    if (hit) out.push(e);
+  }
+  return out;
 }
 /* an object's geometry for the takeoff: an area's outlines, a run's points, or a block's insertion point */
 export function cadGeom(pg, ei){
