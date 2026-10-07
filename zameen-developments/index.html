@@ -8146,5 +8146,280 @@ window.zdCalc={open:showCalc,search:searchAll,calcs:function(){ return allCalcs(
   window.addEventListener('pageshow', function (e) { if (e.persisted) lockNow(); });   // back from the browser's page cache: asked again
 }());
 </script>
+<style id="zrSheetCss">
+/* ===== One-page rate analysis sheet (infographic layout) — overrides the older raSheetHtml look ===== */
+.zr-page{position:relative;margin:0 auto 22px;background:#f4f7fb;box-shadow:0 8px 28px rgba(0,0,0,.35);overflow:hidden}
+.zr-fit{transform-origin:top left;width:1080px}
+.zr{width:1080px;font-family:Arial,Helvetica,"Segoe UI",sans-serif;color:#1b2b44;background:#f4f7fb;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.zr *{box-sizing:border-box}
+.zr-hd{position:relative;height:218px;padding:26px 30px 0 34px;color:#fff;background:linear-gradient(120deg,#0b1f3f 0%,#12305c 55%,#1a3f73 100%);overflow:hidden}
+.zr-hd:before{content:"";position:absolute;left:0;right:0;bottom:0;height:90px;background:
+ linear-gradient(#ffffff10,#ffffff10) 40px 100%/60px 48px no-repeat,linear-gradient(#ffffff0d,#ffffff0d) 120px 100%/48px 70px no-repeat,
+ linear-gradient(#ffffff10,#ffffff10) 210px 100%/70px 40px no-repeat,linear-gradient(#ffffff0c,#ffffff0c) 330px 100%/56px 62px no-repeat,
+ linear-gradient(#ffffff10,#ffffff10) 450px 100%/64px 78px no-repeat,linear-gradient(#ffffff0c,#ffffff0c) 560px 100%/50px 52px no-repeat,
+ linear-gradient(#ffffff10,#ffffff10) 640px 100%/76px 66px no-repeat}
+.zr-hd>*{position:relative}
+.zr-bar{position:absolute;left:0;right:0;bottom:0;height:6px;background:linear-gradient(90deg,#1b8a8f 0 20%,#2b6fd6 20% 40%,#2e9a52 40% 60%,#e3a21a 60% 80%,#e0541e 80% 100%)}
+.zr-top{display:flex;align-items:center;gap:18px;min-height:34px}
+.zr-pill{background:#f08a1c;color:#fff;font-weight:800;font-size:17px;letter-spacing:.5px;padding:6px 15px;border-radius:20px;white-space:nowrap}
+.zr-kick{font-size:19px;letter-spacing:5px;font-weight:600;color:#e9c46a;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.zr-ti{margin:14px 0 0;max-width:760px;font-weight:800;color:#f2b630;line-height:1.08;letter-spacing:.3px;text-transform:uppercase;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+.zr-pills{position:absolute;left:34px;bottom:22px;display:flex;gap:12px;flex-wrap:nowrap}
+.zr-chip{display:flex;align-items:center;gap:8px;border:1.5px solid #ffffff55;background:#ffffff14;border-radius:22px;padding:5px 14px;font-size:15px;color:#fff;white-space:nowrap;max-width:330px;overflow:hidden;text-overflow:ellipsis}
+.zr-chip i{font-style:normal;font-size:14px;opacity:.9}
+.zr-logo{position:absolute;right:28px;top:18px;width:184px;height:184px;border-radius:50%;background:#0a1b36;border:3px solid #b8943c;box-shadow:0 0 0 5px #ffffff12;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.zr-logo img{width:150px;height:auto;max-height:150px;object-fit:contain;display:block}
+.zr-bd{padding:26px 24px 12px}
+.zr-card{position:relative;background:#fff;border-radius:11px;box-shadow:0 1px 4px rgba(20,40,80,.12);padding:14px 20px 12px 22px;margin-bottom:16px;border-left:5px solid var(--ac,#1b8a8f)}
+.zr-h{display:flex;align-items:center;gap:12px;margin:0 0 8px}
+.zr-n{background:#f08a1c;color:#fff;font-weight:800;font-size:15px;border-radius:15px;padding:3px 11px;min-width:34px;text-align:center;white-space:nowrap}
+.zr-h b{font-size:19px;letter-spacing:2.2px;font-weight:800;color:var(--ac,#1b8a8f);text-transform:uppercase}
+.zr-h .zr-sp{flex:1}
+.zr-wnote{font-size:13px;color:#566;display:flex;align-items:center;gap:6px}
+.zr-w{display:inline-block;background:#f0a21a;color:#fff;font-size:10px;font-weight:800;border-radius:9px;padding:1px 6px;margin-left:6px;vertical-align:2px}
+.zr-2c{display:grid;grid-template-columns:1fr 1fr;column-gap:34px;font-size:16px;line-height:1.35}
+.zr-2c p{margin:0 0 5px}.zr-2c p b{color:#1b8a8f;font-weight:700}
+table.zr-t{width:100%;border-collapse:collapse;font-size:16px}
+table.zr-t th{font-size:13.5px;letter-spacing:1px;color:var(--ac);font-weight:600;text-align:right;padding:5px 6px;border-bottom:2px solid #dfe6ee;text-transform:uppercase}
+table.zr-t th:first-child{text-align:left}table.zr-t th.c{text-align:center}
+table.zr-t td{padding:7px 6px;border-bottom:1px solid #e9eef4;text-align:right;vertical-align:middle;font-variant-numeric:tabular-nums}
+table.zr-t td:first-child{text-align:left;width:41%}
+table.zr-t td.u{text-align:left}table.zr-t td.c{text-align:center}
+table.zr-t td .nm{font-weight:700;color:#14243d;font-size:17px;line-height:1.15}
+table.zr-t td .sb{font-size:12.5px;color:#718096;line-height:1.2;margin-top:2px;font-weight:400}
+table.zr-t td.am{font-weight:800;color:#14243d}
+table.zr-t td.ra.asm{background:#fdecb0}
+table.zr-t tr.sub td{border-bottom:0;padding-top:6px;font-weight:800;color:var(--ac);font-size:17px}
+table.zr-t tr.sub td.am{color:var(--ac)}
+.zr-src{display:inline-block;min-width:44px;text-align:center;font-size:11.5px;font-weight:800;border-radius:11px;padding:3px 8px;letter-spacing:.3px}
+.zr-src.db{background:#e3ecfa;color:#2c58a8}.zr-src.grn{background:#dcf2e3;color:#1f7a45}.zr-src.asm{background:#fdecb0;color:#a56a00}.zr-src.mkt{background:#efe5fa;color:#6a3db0}.zr-src.nil{background:#fadcdc;color:#b02c2c}
+.zr-flow{display:flex;gap:0;margin-top:2px}
+.zr-st{position:relative;flex:1;color:#fff;padding:12px 12px 10px 28px;min-height:96px;clip-path:polygon(0 0,calc(100% - 26px) 0,100% 50%,calc(100% - 26px) 100%,0 100%)}
+.zr-st:first-child{padding-left:16px}.zr-st+.zr-st{margin-left:-10px;padding-left:34px}
+.zr-st small{display:block;font-size:12.5px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase}
+.zr-st strong{display:block;font-size:30px;line-height:1.1;margin:5px 0 3px;font-weight:800}
+.zr-st em{display:block;font-style:normal;font-size:12.5px;opacity:.92}
+.zr-flown{font-size:12.5px;color:#718096;margin-top:6px}
+.zr-mid{display:grid;grid-template-columns:1.52fr 1fr;gap:16px;margin-bottom:16px}
+.zr-mid .zr-card{margin-bottom:0}
+.zr-fm{display:grid;grid-template-columns:78px 1fr;gap:9px 12px;align-items:start;font-size:15.5px;line-height:1.38}
+.zr-tag{display:block;text-align:center;color:#fff;font-weight:800;font-size:12px;letter-spacing:1.4px;border-radius:4px;padding:3px 0;margin-top:2px}
+.zr-fin{background:linear-gradient(160deg,#0c2142,#14305d);border:3px solid #d9a52c;border-radius:12px;color:#fff;padding:14px 22px 12px}
+.zr-fin .k{font-size:13px;letter-spacing:3.5px;color:#e9c46a;font-weight:700;margin-bottom:2px}
+.zr-fin .v{font-size:46px;font-weight:800;color:#f2b630;line-height:1.1}
+.zr-fin .pu{font-size:22px;margin:2px 0 8px}
+.zr-fin .ln{display:flex;justify-content:space-between;font-size:16px;line-height:1.5}
+.zr-fin .tt{display:flex;justify-content:space-between;font-size:17px;font-weight:800;margin-top:7px;padding-top:6px;border-top:1px solid #ffffff44}
+.zr-fin .tt span:last-child{color:#f2b630}
+.zr-fin .rb{margin-top:8px;padding-top:6px;border-top:1px solid #ffffff22;font-size:12.5px;color:#cdd8ea}
+.zr-ae{display:grid;grid-template-columns:1fr 1fr;column-gap:30px;font-size:15px;line-height:1.4}
+.zr-ae h5{margin:0 0 4px;font-size:13px;letter-spacing:2.2px;color:#b3262d;font-weight:800}
+.zr-ae ul{margin:0;padding-left:20px}.zr-ae li{margin:0 0 3px}
+.zr-vf{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:9px}
+.zr-vf>div{background:#f2f5f9;border-radius:6px;padding:5px 11px;min-width:0}
+.zr-vf>div.ad{background:#fff1c8;border:1.5px solid #e8b53a}
+.zr-vf small{display:block;font-size:11px;letter-spacing:1.4px;color:#6b7a90;font-weight:700;text-transform:uppercase}
+.zr-vf span{display:block;font-size:14.5px;color:#14243d;line-height:1.3;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.zr-vt{font-size:12.8px;line-height:1.42;color:#34455e}.zr-vt b{color:#14243d}
+.zr-vt .yl{color:#b8860b;font-style:italic;margin-top:3px}
+.zr-ft{display:flex;align-items:center;justify-content:space-between;background:#0b1f3f;color:#fff;padding:0 30px;height:42px;font-size:15px;margin-top:6px}
+.zr-ft b{color:#f2b630;font-weight:700}
+.zr-qa{background:#1f9d55;color:#fff;border-radius:16px;padding:4px 18px;font-weight:800;font-size:14px}.zr-qa.warn{background:#e08a1a}
+.zr-ft span.r{color:#b8c6dc;font-size:14px}
+@media print{
+ body.rs-on .zr-page{margin:0 auto;box-shadow:none;page-break-after:always;break-after:page;width:var(--zrw)!important;height:var(--zrh)!important}
+ body.rs-on .zr-page:last-child{page-break-after:auto;break-after:auto}
+ body.rs-on .zr-fit{transform:scale(var(--zrs))!important}
+ @page{size:A4 portrait;margin:6mm}
+}
+</style>
+<script id="zrSheetJs">
+(function(){
+  "use strict";
+  var W = 1080;
+  var esc = function(x){ return raEsc(x == null ? "" : String(x)); };
+  var MON = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  var MON3 = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  function dateOf(it){ var d = it.rdate || (RA.proj && RA.proj.date) || raToday(); var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d); return m ? {y: +m[1], m: +m[2] - 1, d: +m[3]} : {y: new Date().getFullYear(), m: new Date().getMonth(), d: 1}; }
+  function fq(v){
+    v = Number(v) || 0; var a = Math.abs(v);
+    if (a >= 100) return v.toFixed(2);
+    if (a >= 1) return v.toFixed(3);
+    if (a === 0) return "0.000";
+    var s = v.toPrecision(3); if (s.indexOf("e") >= 0) s = v.toFixed(6);
+    var dp = (s.split(".")[1] || "").length; if (dp < 3) s = v.toFixed(3);
+    return s.replace(/(\.\d{3,}?)0+$/, "$1");
+  }
+  function srcKind(r){
+    var rec = r.ref ? raRec(r.ref) : null, vs = raRowVs(r);
+    if (vs === "A") return ["asm", "ASM"];
+    var src = rec ? String(rec.src || "") : "";
+    if (rec && !src && !rec.date) return ["nil", "NIL"];
+    if (/\bGRN\b|\bPO\b/i.test(src)) return ["grn", "GRN"];
+    if (vs === "I") return ["mkt", "MKT"];
+    return ["db", "DB"];
+  }
+  function rowsOf(it, key){ return (it[key] || []).filter(function(r){ return raNum(r.qty) || r.mode === "lump"; }); }
+  function secRows(it, key, ac, waste){
+    var h = "";
+    rowsOf(it, key).forEach(function(r){
+      var k = srcKind(r), lump = r.mode === "lump", rate = raRowRate(r);
+      var sb = r.note ? esc(r.note) : (r.ref ? esc(r.ref) : "");
+      h += '<tr><td><div class="nm">' + esc(raRowName(r)) + (waste && raNum(it.wast) && !r.opt ? '<span class="zr-w">W</span>' : "") + (r.opt ? ' <span class="zr-src nil" style="min-width:0;background:#e9eef4;color:#566">OPT</span>' : "") + "</div>" + (sb ? '<div class="sb">' + sb + "</div>" : "") + "</td>" +
+        '<td class="u">' + esc(lump ? "LS" : raRowUnit(r)) + '</td><td>' + (lump ? "1.000" : fq(r.qty)) + '</td><td class="ra' + (k[0] === "asm" ? " asm" : "") + '">' + raN(lump ? raNum(r.rate) : rate) + '</td><td class="am">' + raN(raRowAmt(r)) + '</td><td class="c"><span class="zr-src ' + k[0] + '" title="' + esc(srcTitle(r)) + '">' + k[1] + "</span></td></tr>";
+    });
+    return h;
+  }
+  function srcTitle(r){ var rec = r.ref ? raRec(r.ref) : null; return rec ? (rec.src || "No source recorded") : "Rate typed on this item — no database line"; }
+  function tbl(rows, extra, subLbl, subAmt, ac){
+    return '<table class="zr-t" style="--ac:' + ac + '"><thead><tr><th>' + extra + '</th><th class="c" style="text-align:left">Unit</th><th>Cons.</th><th>Rate</th><th>Amount</th><th class="c">Src</th></tr></thead><tbody>' + rows +
+      '<tr class="sub"><td colspan="4">' + subLbl + '</td><td class="am">' + raN(subAmt) + "</td><td></td></tr></tbody></table>";
+  }
+  function accessText(it){
+    var hits = []; [].concat(it.P || [], it.M || []).forEach(function(r){ if (raNum(r.qty) && /scaffold|cradle|hoist|crane|ladder|lift|staging/i.test(raRowName(r))) hits.push(raRowName(r) + " (" + fq(r.qty) + " " + raRowUnit(r) + ")"); });
+    if (raNum(it.acc)) hits.push("access premium PKR " + raN(it.acc) + " / " + it.unit);
+    return hits.length ? hits.join("; ") + " — included" : "None priced in this item";
+  }
+  function givenText(it){
+    var g = it.gen || {}, a = [], S = RA.set;
+    if (g.thIn) a.push("Thickness " + (Number(g.thIn) / 12).toFixed(4) + " ft (" + g.thIn + '")');
+    if (g.mix) a.push("mix " + g.mix);
+    if (g.thIn) a.push("dry factor " + (g.k === "plaster" ? S.dryM : S.dryC));
+    var lab = rowsOf(it, "L").filter(function(r){ return raNum(r.qty) > 0 && r.mode !== "lump"; });
+    if (lab.length && raNum(lab[0].qty)) a.push("output " + (1 / raNum(lab[0].qty)).toFixed(0).replace(/\B(?=(\d{3})+$)/g, ",") + " " + it.unit + "/day (" + raRowName(lab[0]).split(/[—–-]/)[0].trim() + ")");
+    a.push("wastage " + raNum(it.wast) + "% · overhead " + raNum(it.oh) + "%" + (raNum(it.prof) ? " · profit " + raNum(it.prof) + "%" : ""));
+    return a.join(" · ");
+  }
+  function lists(it){
+    var b = (window.qeEngine && it.gen && qeEngine.builders && qeEngine.builders[it.gen.k]) || null, c = raCalc(it);
+    var as = [], ex = [];
+    if (b) { (b.asm || []).forEach(function(x){ as.push(x); }); String(b.exc || "").split(/[;]\s*|\.\s+(?=[A-Z])/).forEach(function(x){ x = x.replace(/\.$/, "").trim(); if (x) ex.push(x); }); }
+    var assumed = [].concat(it.M || [], it.L || [], it.P || []).filter(function(r){ return raNum(r.qty) && raRowVs(r) === "A"; }).map(function(r){ return raRowName(r).split(/[—–]/)[0].trim(); });
+    if (assumed.length) as.push("ASSUMPTION — no dated source: " + assumed.slice(0, 4).join(", ") + (assumed.length > 4 ? " +" + (assumed.length - 4) + " more" : ""));
+    as.push("Wastage " + raNum(it.wast) + "% on materials only");
+    if (it.note) as.unshift(it.note);
+    if (!ex.length) ex.push("Anything not listed in sections 02–04", "Taxes not shown in the cost build-up");
+    return {as: as.slice(0, 6), ex: ex.slice(0, 6)};
+  }
+  function dateTxt(rec){ var m = rec && /(\d{2})-([A-Z][a-z]{2})-(\d{4})/.exec(rec.src || ""); return m ? m[0] : (rec && rec.date ? rec.date : ""); }
+  function html(it, idx, total){
+    var c = raCalc(it), S = RA.set, P = RA.proj || {}, d = dateOf(it), u = String(it.unit || "").toUpperCase(), fin = c.rate;
+    var logo = raSheetLogo();
+    var rows = {M: rowsOf(it, "M"), L: rowsOf(it, "L"), P: rowsOf(it, "P")};
+    var eqExtra = (raNum(it.acc) ? 1 : 0) + (raNum(it.trans) ? 1 : 0);
+    var direct = c.A + c.C + c.D + c.E + c.F, tax = Math.max(0, fin - c.sub - c.G - c.H);
+    var tlen = String(it.desc || it.code).length, tfs = tlen > 90 ? 25 : tlen > 60 ? 29 : tlen > 36 ? 36 : 44;
+    var cat = [it.cat, it.sub].filter(Boolean).join(" › ") || "Rate analysis";
+    var loc = it.loc || P.loc || "Lahore";
+    // 01 basis
+    var basis = raSheetSources(it, c)[0] || "";
+    var basisL = [["Specification", esc(it.spec || it.desc)], ["Access", esc(accessText(it))]];
+    var basisR = [["Basis", basis], ["Method", esc(it.note || "As per specification; rate built from the component quantities below.")]];
+    var pf = function(a){ return a.map(function(x){ return "<p><b>" + x[0] + ":</b> " + x[1] + "</p>"; }).join(""); };
+    var h = '<div class="zr-page"><div class="zr-fit"><div class="zr">';
+    h += '<div class="zr-hd"><div class="zr-top"><span class="zr-pill">ITEM ' + idx + " / " + total + '</span><span class="zr-kick">' + esc(cat) + ' — Rate Analysis</span></div>' +
+      '<div class="zr-ti" style="font-size:' + tfs + 'px">' + esc(it.desc || it.code) + '</div>' +
+      '<div class="zr-pills"><span class="zr-chip"><i>&#9679;</i>' + esc(loc) + '</span><span class="zr-chip"><i>&#9632;</i>' + MON[d.m] + " " + d.y + '</span><span class="zr-chip"><i>&#9644;</i>Unit: ' + esc(u) + '</span><span class="zr-chip"><i>&#9670;</i>' + esc(it.code) + '</span></div>' +
+      (logo ? '<div class="zr-logo"><img src="' + logo + '" alt=""></div>' : "") + '<div class="zr-bar"></div></div><div class="zr-bd">';
+    h += '<div class="zr-card" style="--ac:#1b8a8f"><div class="zr-h"><span class="zr-n">01</span><b>Project / Technical Basis</b></div><div class="zr-2c"><div>' + pf(basisL) + "</div><div>" + pf(basisR) + "</div></div></div>";
+    h += '<div class="zr-card" style="--ac:#2b6fd6"><div class="zr-h"><span class="zr-n">02</span><b>Material Analysis</b><span class="zr-sp"></span>' + (raNum(it.wast) ? '<span class="zr-wnote"><span class="zr-w" style="margin:0">W</span> = ' + raNum(it.wast) + "% waste applies</span>" : "") + "</div>" +
+      (rows.M.length ? tbl(secRows(it, "M", "", true), "Material", "Sub-total", c.A, "#2b6fd6") : '<div class="zr-flown">No material components in this item.</div>') + "</div>";
+    h += '<div class="zr-card" style="--ac:#2e9a52"><div class="zr-h"><span class="zr-n">03</span><b>Labour Analysis</b></div>' +
+      (rows.L.length ? tbl(secRows(it, "L", "", false), "Labour (productivity)", "Sub-total", c.C, "#2e9a52") : '<div class="zr-flown">No labour components in this item.</div>') + "</div>";
+    if (rows.P.length || eqExtra) {
+      var ex = secRows(it, "P", "", false);
+      if (raNum(it.acc)) ex += '<tr><td><div class="nm">Access / hoist / cradle</div><div class="sb">lump per ' + esc(it.unit) + '</div></td><td class="u">LS</td><td>1.000</td><td class="ra">' + raN(c.E) + '</td><td class="am">' + raN(c.E) + '</td><td class="c"><span class="zr-src db">DB</span></td></tr>';
+      if (raNum(it.trans)) ex += '<tr><td><div class="nm">Transport / lead</div><div class="sb">lump per ' + esc(it.unit) + '</div></td><td class="u">LS</td><td>1.000</td><td class="ra">' + raN(c.F) + '</td><td class="am">' + raN(c.F) + '</td><td class="c"><span class="zr-src db">DB</span></td></tr>';
+      h += '<div class="zr-card" style="--ac:#6b4bb0"><div class="zr-h"><span class="zr-n">04</span><b>Equipment / Machinery</b></div>' + tbl(ex, "Equipment", "Sub-total", c.D + c.E + c.F, "#6b4bb0") + "</div>";
+    }
+    // 05+ flow
+    var eq = c.D + c.E + c.F, st = [];
+    st.push(["Direct cost", "PKR " + raN(direct), "M " + raN(c.A) + " + L " + raN(c.C) + (eq ? " + E " + raN(eq) : ""), "linear-gradient(90deg,#173a72,#1d4a8c)"]);
+    st.push([raNum(it.wast) + "% Waste", "+" + raN(c.B), raN(c.A) + " × " + raNum(it.wast) + "%", "linear-gradient(90deg,#e2a11b,#d99211)"]);
+    st.push([raNum(it.oh) + "% Overhead", "+" + raN(c.G), "(" + raN(c.sub) + ") × " + raNum(it.oh) + "%", "linear-gradient(90deg,#e0561f,#d4470f)"]);
+    if (raNum(it.prof)) st.push([raNum(it.prof) + "% Profit", "+" + raN(c.H), "(" + raN(S.profOnOh ? c.sub + c.G : c.sub) + ") × " + raNum(it.prof) + "%", "linear-gradient(90deg,#c24a2a,#b13a1c)"]);
+    if (tax > 0.004) st.push(["Tax", "+" + raN(tax), "on direct + overhead + profit", "linear-gradient(90deg,#7a4aa8,#6a3d98)"]);
+    st.push(["Final rate", raN(fin), "PKR / " + esc(it.unit), "linear-gradient(90deg,#b8891a,#9a7210)"]);
+    var n0 = 5; if (!rows.P.length && !eqExtra) n0 = 4;
+    h += '<div class="zr-card" style="--ac:#12305c;border-left-color:#12305c"><div class="zr-h"><span class="zr-n">' + ("0" + n0).slice(-2) + "–" + ("0" + (n0 + st.length - 1)).slice(-2) + '</span><b style="color:#12305c;letter-spacing:2px">Cost Build-up Flow</b></div><div class="zr-flow">' +
+      st.map(function(s, i){ return '<div class="zr-st" style="background:' + s[3] + '"><small>' + ("0" + (n0 + i)).slice(-2) + " · " + esc(s[0]) + "</small><strong>" + esc(s[1]) + "</strong><em>" + s[2] + "</em></div>"; }).join("") + '</div><div class="zr-flown">Waste basis: wasteable materials only · Overhead basis: direct cost + waste' + (raNum(it.prof) ? " · Profit basis: " + (S.profOnOh ? "direct + waste + overhead" : "direct + waste") : "") + "</div></div>";
+    // 09 formula + final
+    var wk = "M " + raN(c.A) + " + L " + raN(c.C) + (eq ? " + E " + raN(eq) : "") + " = DC " + raN(direct) + " · Waste = " + raN(c.A) + " × " + raNum(it.wast) + "% = " + raN(c.B) + " · OH = (" + raN(c.sub) + ") × " + raNum(it.oh) + "% = " + raN(c.G) + (raNum(it.prof) ? " · Profit = " + raN(c.H) : "") + (tax > 0.004 ? " · Tax = " + raN(tax) : "");
+    var fnum = n0 + st.length;
+    h += '<div class="zr-mid"><div class="zr-card" style="--ac:#e0541e"><div class="zr-h"><span class="zr-n">' + ("0" + fnum).slice(-2) + '</span><b style="color:#e0541e">Calculation / Formula</b></div><div class="zr-fm">' +
+      '<span class="zr-tag" style="background:#1b8a8f">GIVEN</span><div>' + esc(givenText(it)) + "</div>" +
+      '<span class="zr-tag" style="background:#2b6fd6">FORMULA</span><div>Rate = (Material × (1 + waste%) + Labour + Equipment) × (1 + overhead%)' + (raNum(it.prof) ? " × (1 + profit%)" : "") + " — each line = consumption × rate</div>" +
+      '<span class="zr-tag" style="background:#6b4bb0">WORKING</span><div>' + esc(wk) + "</div>" +
+      '<span class="zr-tag" style="background:#e0541e">RESULT</span><div>Final = ' + raN(direct) + " + " + raN(c.B) + " + " + raN(c.G) + (raNum(it.prof) ? " + " + raN(c.H) : "") + (tax > 0.004 ? " + " + raN(tax) : "") + " = <b>PKR " + raN(fin) + " / " + esc(it.unit) + "</b></div></div></div>" +
+      '<div class="zr-fin"><div class="k">FINAL ANALYZED RATE</div><div class="v">PKR ' + raN(fin) + '</div><div class="pu">per ' + esc(it.unit) + '</div>' +
+      '<div class="ln"><span>Direct Cost</span><span>PKR ' + raN(direct) + '</span></div><div class="ln"><span>Waste ' + raNum(it.wast) + '%</span><span>PKR ' + raN(c.B) + '</span></div><div class="ln"><span>Overhead ' + raNum(it.oh) + '%</span><span>PKR ' + raN(c.G) + "</span></div>" +
+      (raNum(it.prof) ? '<div class="ln"><span>Profit ' + raNum(it.prof) + '%</span><span>PKR ' + raN(c.H) + "</span></div>" : "") + (tax > 0.004 ? '<div class="ln"><span>Tax</span><span>PKR ' + raN(tax) + "</span></div>" : "") +
+      '<div class="tt"><span>TOTAL</span><span>PKR ' + raN(fin) + " / " + esc(it.unit) + '</span></div><div class="rb">Rate Basis: ' + esc(loc) + " Market — " + MON[d.m] + " " + d.y + "</div></div></div>";
+    // 10 assumptions
+    var L = lists(it);
+    h += '<div class="zr-card" style="--ac:#b3262d"><div class="zr-h"><span class="zr-n">' + ("0" + (fnum + 1)).slice(-2) + '</span><b>Assumptions &amp; Exclusions</b></div><div class="zr-ae"><div><h5>ASSUMPTIONS</h5><ul>' +
+      L.as.map(function(x){ return "<li>" + esc(x) + "</li>"; }).join("") + '</ul></div><div><h5>EXCLUSIONS</h5><ul>' + L.ex.map(function(x){ return "<li>" + esc(x) + "</li>"; }).join("") + "</ul></div></div></div>";
+    // verification
+    var all = [].concat(rows.M, rows.L, rows.P).filter(function(r){ return !r.opt; });
+    var key = all.slice().sort(function(a, b){ return raRowAmt(b) - raRowAmt(a); })[0], krec = key && key.ref ? raRec(key.ref) : null;
+    var mk = krec && raRowVs(key) !== "A" ? ((krec.src || "").split(/\s+—\s+/)[0] || "dated source") : "No dated market quote";
+    var srcs = []; var seen = {};
+    all.forEach(function(r){ var rec = r.ref ? raRec(r.ref) : null; if (!rec || seen[rec.code]) return; seen[rec.code] = 1; var s = String(rec.src || "").split(/\s+—\s+/)[0]; srcs.push(esc(raRowName(r).split(/\s+[—–]\s+/)[0]) + " — " + esc(s || "no source")); });
+    var vs = c.gaps ? c.gaps + " component(s) have no rate — rate understated" : c.assumed ? c.assumed + " component(s) carry an assumption flag (yellow cells / ASM)" : "All components carry a dated source";
+    h += '<div class="zr-card" style="--ac:#2f8f83;border-left-color:#4a5d7a"><div class="zr-h"><span class="zr-n" style="background:#f08a1c">&#10003;</span><b style="color:#4a5d7a;letter-spacing:2px">Rate Basis / Verification</b></div><div class="zr-vf">' +
+      '<div><small>Key input</small><span>' + esc(key ? raRowName(key).split(/\s+[—–]\s+/)[0] : "—") + "</span></div>" +
+      '<div><small>Rate database</small><span>' + (krec ? esc(krec.code) + " = PKR " + raN(krec.rate) + " / " + esc(krec.unit) : (key ? "typed on item: PKR " + raN(raRowRate(key)) : "—")) + "</span></div>" +
+      '<div><small>Current market</small><span>' + esc(mk) + (krec && dateTxt(krec) && mk.indexOf(dateTxt(krec)) < 0 ? ", " + esc(dateTxt(krec)) : "") + "</span></div>" +
+      '<div class="ad"><small>Adopted</small><span>' + (key ? (key.mode === "lump" ? "LS " : fq(key.qty) + " × ") + raN(raRowRate(key)) + " = " + raN(raRowAmt(key)) : "—") + "</span></div></div>" +
+      '<div class="zr-vt"><b>Sources:</b> ' + (srcs.length ? srcs.slice(0, 9).join(" · ") + (srcs.length > 9 ? " · +" + (srcs.length - 9) + " more" : "") : "no database lines used") + '<div class="yl">' + esc(vs) + ". Yellow rate cells / ASM = estimated from current market inputs; verify with live supplier quotation before tender.</div></div></div>";
+    // QA checks (real, computed)
+    var chk = [!c.gaps, !c.assumed, all.every(function(r){ var rec = r.ref ? raRec(r.ref) : null; return rec ? !!(rec.src && rec.date) : true; }), Math.abs((direct + c.B + c.G + c.H + tax) - fin) < 0.005, rows.M.length + rows.L.length > 0, fin > 0];
+    var pass = chk.filter(Boolean).length;
+    h += "</div>" + '<div class="zr-ft"><span><b>' + esc(S.company || "Zameen Developments") + "</b> · " + esc(P.by || S.prepared || "") + " — QS &amp; Estimation</span>" +
+      '<span class="zr-qa' + (pass === chk.length ? "" : " warn") + '" title="Checks: all components rated · no assumption flags · every rate dated · build-up reconciles · quantities entered · final rate above zero">QA ' + pass + "/" + chk.length + (pass === chk.length ? " ✓" : " !") + "</span>" +
+      '<span class="r">' + esc(it.cat || "") + " Rate Series · " + MON3[d.m] + "-" + d.y + " · " + idx + "/" + total + "</span></div>";
+    return h + "</div></div></div>";
+  }
+  raSheetHtml = function(it){
+    var g = raSortedItems().filter(function(x){ return x.cat === it.cat && x.sub === it.sub; });
+    var i = g.findIndex(function(x){ return x.id === it.id; });
+    return html(it, i + 1, g.length || 1);
+  };
+
+  function fit(){
+    var s0 = Math.min(1, (window.innerWidth - 24) / W);
+    document.querySelectorAll("#raSheetWrap .zr-page").forEach(function(pg){
+      var f = pg.querySelector(".zr-fit"); if (!f) return;
+      var h = f.scrollHeight || f.offsetHeight;
+      var sc = Math.min(748 / W, 1077 / h);
+      pg.style.setProperty("--zrs", sc.toFixed(4)); pg.style.setProperty("--zrw", Math.floor(W * sc) + "px"); pg.style.setProperty("--zrh", Math.floor(h * sc) + "px");
+      f.style.transform = "scale(" + s0.toFixed(4) + ")";
+      pg.style.width = Math.floor(W * s0) + "px"; pg.style.height = Math.floor(h * s0) + "px";
+    });
+  }
+  raSheetFit = fit;
+  window.addEventListener("beforeprint", function(){ if (document.body.classList.contains("rs-on")) document.querySelectorAll("#raSheetWrap .zr-page").forEach(function(p){ p.style.width = ""; p.style.height = ""; p.querySelector(".zr-fit").style.transform = ""; }); });
+  window.addEventListener("afterprint", function(){ if (document.body.classList.contains("rs-on")) fit(); });
+
+  /* a click on an item (library, search, links) opens its one-page sheet straight away */
+  var _open = raSheetOpen;
+  raSheetOpen = function(mode, force){
+    _open(mode, force);
+    var w = document.getElementById("raSheetWrap"), cl = document.getElementById("rsClose");
+    if (cl) cl.innerHTML = "&#9998; Back to editor (edit this item)";
+  };
+  function showOne(){ if (typeof RA_CUR !== "undefined" && raItemById(RA_CUR)) setTimeout(function(){ raSheetOpen("one"); }, 30); }
+  document.addEventListener("click", function(e){
+    var t = e.target.closest && e.target.closest("[data-ra-open]");
+    if (t && t.closest("#appRA")) showOne();
+  });
+  document.addEventListener("mousedown", function(e){ var r = e.target.closest && e.target.closest("[data-rasq]"); if (r) showOne(); });
+  document.addEventListener("keydown", function(e){
+    if (e.target && e.target.id === "raAnQ" && e.key === "Enter") showOne();
+    else if (e.key === "Escape" && document.body.classList.contains("rs-on")) { var c = document.getElementById("rsClose"); if (c) c.click(); }
+  });
+  window.zrSheet = {html: html};
+})();
+</script>
 </body>
 </html>
