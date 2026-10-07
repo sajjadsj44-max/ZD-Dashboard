@@ -1969,6 +1969,7 @@ function setTool(t){
   if (t !== "gap") S.gap = null;
   if (t !== "typref" && S.typ) { S.typ = null; $("cmpLegend").style.display = "none"; toast("Typical copy stopped — nothing copied"); }
   S.mkd = null;
+  if (t !== "stamp" || S.tool !== "stamp") { S.stampBase = null; S.stampN = 0; }
   S.tool = t; draftClear(); S.draftRedo = []; S.measure = t === "measure" ? S.measure : null; S.press = null; S.lasso = null; S.zbox = null; S.hover = null;
   if (t === "match" && S.sel) {
     const it = P.proj.items.find(i => i.id === S.sel);
@@ -1995,7 +1996,8 @@ function hint(){
     cal: "Click both ends of a known dimension, then enter its length.",
     break: "Break: click a length run where it should be cut in two · Shift+click a segment to delete just that segment · Esc when done.",
     gap: "Cut a gap: click the other end of the gap on the same run (e.g. the far side of a door) · Esc cancels.",
-    stamp: "Place copies: click each place for a copy of what you copied (" + (S.clip ? S.clip.n : 0) + " object" + (S.clip && S.clip.n === 1 ? "" : "s") + ") · Esc when done.",
+    stamp: S.stampBase ? "Place copies: click the second point — a copy lands there, displaced from the base point · click again for more copies · Shift / F8: straight · Esc: new base point, Esc again: done."
+      : "Place copies (" + (S.clip ? S.clip.n : 0) + " object" + (S.clip && S.clip.n === 1 ? "" : "s") + "): click a base point (a corner or point on the copied object) — or Enter to use its centre · then click each destination · Esc when done.",
     zoomwin: "Zoom window: drag a box round the part to see (a click zooms in 2×).",
     match: S.matchSource ? `Matching ${S.matchSource.name} — click compatible area, linear or count objects to apply its properties; Esc finishes.` : "Click a source area, linear or count object (or select one before starting Match), then click compatible targets; Esc finishes."};
   let h = H[t] || MK_HINTS[t] || "";
@@ -2009,7 +2011,7 @@ function cursorPoint(e, sp){
   const free = e && (e.ctrlKey || e.metaKey) && S.tool !== "select";   // Ctrl: the point goes exactly where clicked, no snap (Bluebeam)
   const ex = S.drag && S.drag.vertex != null ? ((it, i) => it.id === S.drag.item && i === S.drag.vertex) : null;   // a dragged point never snaps onto itself
   if (!free && (["draw", "rect", "ded", "open", "measure", "cal", "circle", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
-  let last = S.drag ? null : S.draft[S.draft.length - 1];
+  let last = S.drag ? null : S.tool === "stamp" ? S.stampBase : S.draft[S.draft.length - 1];
   if (S.drag && S.drag.vertex != null) { const it = P.proj.items.find(i => i.id === S.drag.item); if (it) last = S.drag.orig[S.drag.vertex - 1] || S.drag.orig[S.drag.vertex + 1] || null; }
   if (((e && e.shiftKey) !== !!S.ortho) && last && !S.arcMid) { const dx = Math.abs(p[0] - last[0]), dy = Math.abs(p[1] - last[1]); p = dx >= dy ? [p[0], last[1]] : [last[0], p[1]]; if (s) s = Object.assign({}, s, {type: s.type + " + straight"}); }   // Shift, or Ortho (F8; Shift then frees one click)
   else if (S.polar && last && !S.arcMid && !free && !s && !(e && e.shiftKey)) {   // Polar (F10): within 4° of a 15° (5° … 90°) direction -> onto it, the length kept
@@ -2125,6 +2127,7 @@ function onMove(e){
   const k = hereScale(p), vp = viewportAt(S.fileId, S.pageNo, p);
   $("stPos").innerHTML = k ? `x <b>${f3(p[0] / k)}</b> ft · y <b>${f3(p[1] / k)}</b> ft${vp ? " · <b>" + esc(vp.name) + "</b>" : ""}` : "Scale not set";
   $("stSnap").textContent = s ? "Snap: " + s.type : "";
+  if (S.tool === "stamp" && S.stampBase) { const dx = p[0] - S.stampBase[0], dy = p[1] - S.stampBase[1]; $("stMeas").innerHTML = k ? "<b>Copy " + f3(dx / k) + " ft, " + f3(dy / k) + " ft (" + f3(Math.hypot(dx, dy) / k) + " ft)</b>" : ""; }
   draw();
 }
 function cancelDrag0(){   // a long press became the menu: drop what the press had started, without a toast
@@ -2556,6 +2559,7 @@ function drawNow(){
   }
   if (S.tool === "vsearch" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(42,120,214,.08)" stroke="#2a78d6" stroke-width="1.5" stroke-dasharray="4 3"/>`); }
   if (mkIsTool(S.tool)) dyn.push(mkDraftSvg());
+  if (S.tool === "stamp" && S.clip) dyn.push(stampGhostSvg());
   if (["cloud", "arrow", "dimension", "hilite"].indexOf(S.tool) >= 0 && S.draft.length && S.cursor) dyn.push(markSvg({type: S.tool, pts: [S.draft[0], S.cursor], color: S.tool === "dimension" ? "#2b7de9" : "#d03b3b", size: 13, width: 2, arrow: 10}, toScr, 1));
   if (S.flash && S.flash.key === S.key && Date.now() < S.flash.until) { const q = toScr(S.flash.p); dyn.push(`<circle cx="${q[0]}" cy="${q[1] - 5}" r="26" fill="none" stroke="#ff2d55" stroke-width="3"><animate attributeName="r" values="18;30;18" dur="1s" repeatCount="indefinite"/></circle>`); }
   if (S.tool === "vp" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(123,92,224,.06)" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`); }
@@ -3219,10 +3223,13 @@ function clipOf(ids, onePt){
   const xs = all.map(p => p[0]), ys = all.map(p => p[1]), anchor = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
   return {items, marks, key: S.key, k: hereScale(anchor), anchor, w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys), n: items.length + marks.length};
 }
+function clipXf(cl, at, o){   // -> {T, f}: how a point of the clipboard maps onto this page (at = where its centre goes; o.off = a plain shift)
+  const kd = hereScale(at || cl.anchor), f = at && cl.k && kd && Math.abs(kd / cl.k - 1) > 0.005 ? kd / cl.k : 1, A = cl.anchor;
+  return {f, T: o && o.off ? (p => [p[0] + o.off[0], p[1] + o.off[1]]) : at ? (p => [at[0] + (p[0] - A[0]) * f, at[1] + (p[1] - A[1]) * f]) : (p => p.slice())};
+}
 function placeClip(cl, at, o){   // -> {ids, f}: the clipboard placed on this page (inside mutate, or raw while a Ctrl+drag is live)
   o = o || {};
-  const kd = hereScale(at || cl.anchor), f = at && cl.k && kd && Math.abs(kd / cl.k - 1) > 0.005 ? kd / cl.k : 1, A = cl.anchor;
-  const T = o.off ? (p => [p[0] + o.off[0], p[1] + o.off[1]]) : at ? (p => [at[0] + (p[0] - A[0]) * f, at[1] + (p[1] - A[1]) * f]) : (p => p.slice());
+  const {T, f} = clipXf(cl, at, o);
   const ids = [];
   cl.items.forEach(src => {
     const c = cond(src.cond); if (!c) return;
@@ -3254,7 +3261,28 @@ function pasteClip(mode, at){
   if (r.f !== 1) toast("Pasted at the same real size — this page's scale is × " + r.f.toFixed(3) + " of the copied page's", 3600);
   else if (inplace && cl.key !== S.key) toast("Pasted in the same place as on " + keyName(cl.key), 2200);
 }
-function stampAt(p){ if (!S.clip) return setTool("select"); let r; mutate(() => { r = placeClip(S.clip, p); }, "Place copy"); setSel(r.ids); refresh(); }
+/* Place copies (AutoCAD COPY): pick a base point, then click each destination — a copy lands displaced by destination − base.
+   Enter instead of a base point uses the centre of what was copied; Esc steps back to the base point, then ends. */
+function stampAt(p){
+  const cl = S.clip; if (!cl) return setTool("select");
+  if (!S.stampBase) { S.stampBase = p.slice(); hint(); draw(); return; }
+  const B = S.stampBase; let r;
+  mutate(() => { r = placeClip(cl, [cl.anchor[0] + p[0] - B[0], cl.anchor[1] + p[1] - B[1]]); }, "Place copy");
+  setSel(r.ids); S.stampN = (S.stampN || 0) + 1; refresh(); toast("Copy " + S.stampN + " placed — click the next place, Esc when done", 1600);
+}
+function stampGhostSvg(){   // the copy that follows the cursor (dashed), and the base-point rubber band
+  const cl = S.clip, B = S.stampBase, c = S.cursor; if (!cl || !c) return "";
+  if (!B) { const q = toScr(c); return `<g stroke="#e2231a" stroke-width="2" fill="none"><circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="8"/><line x1="${(q[0] - 14).toFixed(1)}" y1="${q[1].toFixed(1)}" x2="${(q[0] + 14).toFixed(1)}" y2="${q[1].toFixed(1)}"/><line x1="${q[0].toFixed(1)}" y1="${(q[1] - 14).toFixed(1)}" x2="${q[0].toFixed(1)}" y2="${(q[1] + 14).toFixed(1)}"/></g>`; }
+  const {T} = clipXf(cl, [cl.anchor[0] + c[0] - B[0], cl.anchor[1] + c[1] - B[1]]), h = [], pts = P => P.map(T).map(q => toScr(q).map(v => v.toFixed(1)).join(",")).join(" ");
+  cl.items.forEach(it => { const co = cond(it.cond); if (!co) return;
+    if (co.type === "count") { it.pts.forEach(p => { const q = toScr(T(p)); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="7" fill="${co.color}" fill-opacity=".35" stroke="${co.color}" stroke-width="2"/>`); }); return; }
+    const poly = it.shape === "circle" ? itemPoly(it) : it.pts, area = co.type === "area" || it.shape === "circle";
+    h.push(`<${area ? "polygon" : "polyline"} points="${pts(poly)}" fill="${area ? co.color : "none"}" fill-opacity=".18" stroke="${co.color}" stroke-width="2" stroke-dasharray="7 4" stroke-linejoin="round"/>`); });
+  cl.marks.forEach(m => h.push(`<g opacity=".6">${markSvg(Object.assign({}, m, {pts: m.pts.map(T)}), toScr, 1)}</g>`));
+  const a = toScr(B), b = toScr(c);
+  h.push(`<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="#e2231a" stroke-width="1.2" stroke-dasharray="5 4"/><circle cx="${a[0].toFixed(1)}" cy="${a[1].toFixed(1)}" r="5" fill="#e2231a"/>`);
+  return h.join("");
+}
 function duplicateSel(){
   const ids = selIds(); if (!ids.size) return toast("Select something first, then Ctrl+D", 2000);
   const cl = clipOf(ids); if (!cl) return; let r;
@@ -6602,6 +6630,8 @@ function wire(){
     if (e.key === "Escape" && S.mkd) { S.mkd = null; draftClear(); draw(); return; }
     if (e.key === "Escape" && S.drag && (S.drag.vertex != null || S.drag.move || S.drag.mh != null)) { cancelDrag(); return; }
     if (e.key === "Escape" && S.tool === "match") { setTool("select"); return; }
+    if (e.key === "Escape" && S.tool === "stamp" && S.stampBase) { S.stampBase = null; $("stMeas").innerHTML = ""; hint(); draw(); return; }
+    if (e.key === "Enter" && S.tool === "stamp" && S.clip && !S.stampBase) { e.preventDefault(); S.stampBase = S.clip.anchor.slice(); hint(); draw(); return; }
     if (e.key === "Escape" && S.draft.length === 0 && (S.multi.size || S.box || S.lasso)) { S.multi.clear(); S.box = null; S.lasso = null; refresh(); return; }
     if (e.key === "Escape") { if (S.autoShow) { S.autoShow = null; }
       if (S.pickWall) { S.pickWall = false; hint(); }
