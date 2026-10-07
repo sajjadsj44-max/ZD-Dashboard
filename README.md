@@ -133,6 +133,20 @@ holds the old published value; a rate typed in by hand is kept.
 BLK-S4 140 (Zarea quotation, 05-Sep) → 120 (NEO GRN RCP-3541, 15-Sep-2026 —
 Azmat Sons), updated the same day on request.
 
+**All Rate Database lines refreshed from the latest GRN** (07-Oct-2026,
+`node tools/grn_rates.js`, block `raGrnLatest`): for every line the Rate DB vs GRN
+tab links to a GRN item, the same description is looked for on every project and
+the receipts of the latest day are taken (quantity-weighted average when there
+are several that day, converted to the line's unit). Only when that day is later
+than the line's own date does the line take the rate, date and a
+`<site> GRN RCP-n, DD-Mon-YYYY — …` remark; every other line keeps its rate. A
+newer GRN at the same rate refreshes the date and source only. A change of more
+than 3× either way is held for a decision, not applied (one: the Phoenix
+self-tapping screw, 2.5 per piece against 250 on Vault RCP-128). Saved libraries
+take a new rate only while the line still holds a value published earlier; a rate
+typed in by hand is kept. Re-run the tool after each new GRN export
+(`tools/grn_register.py`, then `node tools/grn_rates.js`).
+
 Every sheet with GRN columns is read (the ERP export's `Site / GRN # / Item Code /
 Item Description / Rec.Qty`, or the compiled workbook's `Location / GRN# / ITEMNO /
 ITEMDESC / Received Qty`); `--dry-run` reports what would be added. Receipts
