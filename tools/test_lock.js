@@ -26,7 +26,7 @@ const LOCKISH = /lock|pass|pw|unlock|secret/i;
       const i = document.getElementById("zd-lock-input"); if (!i) return null;
       return {type: i.type, ac: i.getAttribute("autocomplete"), inForm: !!i.closest("form"), pw: document.querySelectorAll("input[type=password]").length,
         focused: document.activeElement === i, dots: getComputedStyle(i).webkitTextSecurity || "", locked: document.body.classList.contains("zd-locked"),
-        inert: [...document.body.children].filter(e => e.id !== "zd-lock" && e.tagName !== "SCRIPT").every(e => e.inert)};
+        inert: [...document.body.children].filter(e => e.id !== "zd-lock" && e.tagName !== "SCRIPT" && e.tagName !== "STYLE").every(e => e.inert)};
     });
     ok(f && f.locked, "asks for the password when the page opens");
     ok(f && f.type === "text" && !f.inForm && f.pw === 0 && f.ac === "off", "no browser password field and no form — nothing for a browser to offer to save or fill");
