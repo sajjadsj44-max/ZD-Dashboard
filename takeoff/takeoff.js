@@ -156,6 +156,39 @@ const S = {                           // session state (not saved)
   undo: [], redo: [], drag: null, space: false, measure: null, measures: [], pinch: null,
   multi: new Set(), box: null, condSel: new Set(), matchSource: null   // multi-selection (shift-click, box, Ctrl+A); conditions ticked in the list
 };
+/* ------------------------------------------------------------------ panes (split window)
+   The screen is one or two panes. A pane is a window onto one page: its file, page, zoom / pan, canvases and overlay. A session is one
+   open project: the project, its undo history, selection and the condition being drawn with. Two panes of the same project share one
+   session (the same drawing in two windows: both show the same measurements, an undo takes back the last change whichever window made
+   it); two panes of different projects have a session each. The pane being worked in is the active one: S.view, S.page, S.key … and
+   P.proj, S.undo, S.sel … are the active pane's / session's, so everything written for a single window works in either window as it
+   is clicked on. Only what must run in both windows at once (drawing the page, the overlay) is handed a pane. */
+const PANE_KEYS = ["fileId", "pageNo", "page", "base", "key", "view", "rendered", "renderTask", "low", "cmp", "iso", "autoShow", "ovSig", "ovHtml",
+  "cadBmp", "cadGen", "cadBmpBusy", "cadEx", "cadExOk", "cadExBusy", "cadFull"];
+const SESS_KEYS = ["undo", "redo", "cond", "sel", "selPt", "selMark", "multi", "condSel", "pgSel", "pgLast", "pgQ", "pgF", "otherTab"];
+const PANE_IDS = ["stage", "low", "hi", "ov", "ov2", "tip", "busy", "drop", "takeoffLegend", "cmpLegend", "mini", "miniImg", "miniVp"];
+const mkSess = proj => ({proj: proj || null, undo: [], redo: [], cond: null, sel: null, selPt: -1, selMark: null, multi: new Set(), condSel: new Set(),
+  pgSel: new Set(), pgLast: null, pgQ: "", pgF: "", otherTab: ""});
+function mkPane(n, sess, host){
+  const q = id => { const e = host.querySelector("[data-pid=\"" + id + "\"]") || document.getElementById(id); return e; };
+  const el = {}; PANE_IDS.forEach(id => { el[id] = q(id); });
+  const pn = {n, sess, host, el, strip: host.querySelector(".pstrip"), fileId: null, pageNo: 1, page: null, base: null, key: "", view: {s: 1, tx: 0, ty: 0}, rendered: null, renderTask: null,
+    low: null, cmp: null, iso: null, autoShow: null, ovSig: null, ovHtml: "", cadBmp: null, cadGen: 0, cadBmpBusy: 0, cadEx: 0, cadExOk: false, cadExBusy: 0, cadFull: false, navSeq: 0, hiT: null, cadRaf: 0, cadIdleT: null};
+  return pn;
+}
+const PANES = [];
+const SPLIT = {on: false, dir: "v", ratio: 0.5, sync: false, link: false, rel: null, syncing: false};   // the split window: layout and how the two windows are linked
+let ACT = null;                       // the active pane
+{
+  const host = document.getElementById("pane0"), pn = mkPane(0, mkSess(null), host);
+  PANE_KEYS.forEach(k => { if (k in S) { pn[k] = S[k]; delete S[k]; } });
+  SESS_KEYS.forEach(k => { if (k in S) { pn.sess[k] = S[k]; delete S[k]; } });
+  PANE_IDS.forEach(id => { if (pn.el[id]) pn.el[id].setAttribute("data-pid", id); });
+  PANES.push(pn); ACT = pn;
+  PANE_KEYS.forEach(k => Object.defineProperty(S, k, {get: () => ACT[k], set: v => { ACT[k] = v; }, enumerable: true, configurable: true}));
+  SESS_KEYS.forEach(k => Object.defineProperty(S, k, {get: () => ACT.sess[k], set: v => { ACT.sess[k] = v; }, enumerable: true, configurable: true}));
+  delete P.proj; Object.defineProperty(P, "proj", {get: () => ACT.sess.proj, set: v => { ACT.sess.proj = v; }, enumerable: true, configurable: true});
+}
 const keyOf = (f, p) => f + ":" + p;
 const curScale = () => P.proj && P.proj.scales[S.key] ? P.proj.scales[S.key].ptPerFt : 0;
 /* scale at a point: a viewport (a part of the sheet drawn at another scale, e.g. an enlarged detail) wins over the page */
@@ -327,18 +360,34 @@ function restore(js){ const o = JSON.parse(js); UNDO_KEYS.forEach(k => { if (o[k
   if (S.selMark && !live.has(S.selMark)) S.selMark = null;
   save(); refresh(); }
 
+/* what is kept per drawing (its PDF document, lines, text, layers, thumbnails) is kept for the files of every project open in a window,
+   and let go for the rest — a project left behind frees its memory as before */
+function pruneCaches(){
+  const keep = new Set(); PANES.forEach(pn => pn.sess.proj && pn.sess.proj.files.forEach(f => keep.add(f.id)));
+  const fid = k => String(k).split(":")[0];
+  Object.keys(S.docs || {}).forEach(id => { if (!keep.has(id)) { const d = S.docs[id]; if (d && d.destroy) d.destroy(); delete S.docs[id]; } });
+  ["geo", "texts", "sizes", "thumbs", "ocgs", "ocBound", "cadSc", "cadP"].forEach(n => { const o = S[n]; if (o) Object.keys(o).forEach(k => { if (!keep.has(fid(k))) delete o[k]; }); });
+  S.thumbQ = [];
+}
 async function openProject(id){
   await flushSave();   // the project being left keeps its last change
-  const pr = await dbGet("projects", id);
-  if (!pr) return toast("Project not found");
-  const rep = [];
-  if ((+pr.v || 1) < SCHEMA) { const from = migrate(pr, rep); await dbPut("projects", pr); toast("Project upgraded from file version " + from + " to " + SCHEMA, 3000); } else migrate(pr, rep);
-  if (rep.length) setTimeout(() => toast("The stored project had damaged entries, repaired: " + rep.slice(0, 2).join(" · ") + (rep.length > 2 ? " · …" : ""), 8000), 400);
-  Object.values(S.docs).forEach(d => d.destroy && d.destroy());
-  P.proj = pr; S.docs = {}; S.geo = {}; S.texts = {}; S.sizes = {}; S.thumbs = {}; S.thumbQ = []; S.ocgs = {}; S.ocBound = {}; S.undo = []; S.redo = []; S.sel = null; S.multi.clear(); S.selMark = null; draftClear(); S.page = null; S.fileId = null; S.otherTab = "";
-  S.pgSel = new Set(); S.pgLast = null; S.pgQ = ""; S.pgF = ""; S.cadSc = {}; S.cadP = {}; S.iso = null; freeCadBitmap();
+  const twin = PANES.find(p => p !== ACT && p.sess.proj && p.sess.proj.id === id);   // already open in the other window: that one, not a second copy of it
+  let pr;
+  if (twin) { ACT.sess = twin.sess; pr = twin.sess.proj; }
+  else {
+    pr = await dbGet("projects", id);
+    if (!pr) return toast("Project not found");
+    const rep = [];
+    if ((+pr.v || 1) < SCHEMA) { const from = migrate(pr, rep); await dbPut("projects", pr); toast("Project upgraded from file version " + from + " to " + SCHEMA, 3000); } else migrate(pr, rep);
+    if (rep.length) setTimeout(() => toast("The stored project had damaged entries, repaired: " + rep.slice(0, 2).join(" · ") + (rep.length > 2 ? " · …" : ""), 8000), 400);
+    if (PANES.some(p => p !== ACT && p.sess === ACT.sess)) ACT.sess = mkSess(null);   // this window leaves the project it shared with the other one
+    P.proj = pr; S.undo = []; S.redo = []; S.sel = null; S.multi.clear(); S.selMark = null; S.otherTab = "";
+    S.pgSel = new Set(); S.pgLast = null; S.pgQ = ""; S.pgF = ""; S.condSel = new Set();
+  }
+  draftClear(); S.page = null; S.fileId = null; S.iso = null; S.docs = S.docs || {}; freeCadBitmap();
+  pruneCaches();
   tabSay({t: "open", id: pr.id});
-  S.cond = (pr.conds[0] || {}).id || null;
+  S.cond = twin ? S.cond : (pr.conds[0] || {}).id || null;
   localStorage.setItem("zdTakeoffLast", pr.id);
   $("start").classList.remove("on");
   $("projName").value = pr.name; saveSay("ok", pr.updated);
@@ -445,6 +494,7 @@ function choose(title, body, btns){
 /* the project's references to one PDF moved to a new id (its measurements, markups, scales, viewports, sheet info, layers) */
 function remapFileId(text, from, to){ return text.split('"' + from + '"').join('"' + to + '"').split('"' + from + ':').join('"' + to + ':'); }
 function dropFileCache(fid){
+  PANES.forEach(pn => { if (pn !== ACT && pn.fileId === fid) paneBlank(pn); });   // another window showing it is emptied (its pages belong to the document being let go)
   if (S.docs[fid]) { try { S.docs[fid].destroy(); } catch (e) {} delete S.docs[fid]; }
   const mine = k => String(k).split(":")[0] === fid;
   [S.geo, S.texts, S.sizes, S.thumbs].forEach(o => o && Object.keys(o).forEach(k => { if (mine(k)) delete o[k]; }));
@@ -541,12 +591,12 @@ async function boundCfg(fileId){   // an optional-content config with only the r
 }
 const ocOn = (cfg, id) => { const g = cfg && cfg.getGroup && cfg.getGroup(id); return !g || g.visible !== false; };   // (isVisible() wants a group object, not an id)
 const lay = fileId => S.ocgs && S.ocgs[fileId] ? {optionalContentConfigPromise: Promise.resolve(S.ocgs[fileId])} : {};
-async function loadLayers(fileId){
+async function loadLayers(fileId, proj = P.proj){
   S.ocgs = S.ocgs || {};
   if (S.ocgs[fileId] !== undefined) return S.ocgs[fileId];
   let cfg = null;
   try { cfg = await (await doc(fileId)).getOptionalContentConfig(); if (!cfg || !cfg.getGroups()) cfg = null; } catch (e) { cfg = null; }
-  if (cfg) { const off = new Set(((P.proj.layersOff || {})[fileId]) || []); Object.entries(cfg.getGroups()).forEach(([id, g]) => { if (off.has(g.name)) cfg.setVisibility(id, false); }); }
+  if (cfg) { const off = new Set(((proj.layersOff || {})[fileId]) || []); Object.entries(cfg.getGroups()).forEach(([id, g]) => { if (off.has(g.name)) cfg.setVisibility(id, false); }); }
   S.ocgs[fileId] = cfg; return cfg;
 }
 function renderLayers(){
@@ -572,53 +622,55 @@ function setLayer(ids, on){
   P.proj.layersOff = P.proj.layersOff || {};
   P.proj.layersOff[S.fileId] = Object.entries(cfg.getGroups()).filter(([id]) => !ocOn(cfg, id)).map(([, g]) => g.name);
   if (S.ocBound) delete S.ocBound[S.fileId];
-  save(); clearTimeout(layT); layT = setTimeout(() => { renderLow(); renderHi(true); }, 60);
+  save(); clearTimeout(layT); layT = setTimeout(() => { PANES.forEach(pn => { if (pn.page && pn.fileId === S.fileId) { renderLow(pn); renderHi(true, pn); } }); }, 60);
 }
 
 /* page changes can overlap (PgDn pressed twice, a sheet row clicked while a page is loading): only the latest one is
    applied, and the page shown, its key, scale and indexed lines are always set together — never page 2's key with page
    3's drawing */
-async function gotoPage(fileId, pageNo){
-  const seq = S.navSeq = (S.navSeq || 0) + 1, stale = () => seq !== S.navSeq;
+async function gotoPage(fileId, pageNo, pn = ACT){
+  const seq = pn.navSeq = (pn.navSeq || 0) + 1, stale = () => seq !== pn.navSeq || !PANES.includes(pn), proj = pn.sess.proj, here = () => pn === ACT;
   let d;
-  try { d = await doc(fileId, true); } catch (e) { if (!stale()) { toast(e.message, 6000); showDrop(true); } return; }
+  try { d = await doc(fileId, true); } catch (e) { if (!stale()) { toast(e.message, 6000); pn.el.drop.style.display = "flex"; } return; }
   if (stale()) return;
   pageNo = Math.max(1, Math.min(d.numPages, +pageNo || 1));
-  await loadLayers(fileId);
+  await loadLayers(fileId, proj);
   if (stale()) return;
-  if (cadMeta(fileId)) { await cadLoad(fileId); if (stale()) return; }   // an AutoCAD drawing: its scene draws the screen
+  if (cadMeta(fileId, proj)) { await cadLoad(fileId, proj); if (stale()) return; }   // an AutoCAD drawing: its scene draws the screen
   let pg; try { pg = await d.getPage(pageNo); } catch (e) { if (!stale()) toast("Page " + pageNo + " could not be read: " + (e.message || e), 6000); return; }
   if (stale()) return;
-  if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) {} S.renderTask = null; }
-  S.fileId = fileId; S.pageNo = pageNo; S.key = keyOf(fileId, pageNo);
-  S.page = pg;
-  if (S.cadBmp && S.cadBmp.page !== pg) freeCadBitmap();
-  S.base = S.page.getViewport({scale: 1});
-  S.rendered = null; $("hi").style.display = "none"; { const lc = $("low"); lc.width = lc.width; }   // the last page's picture goes at once
-  draftClear(); S.resume = null; S.gap = null; S.multi.clear(); S.hover = null; S.measure = null; S.measures = []; S.snap = null; S.autoShow = null; S.cmp = null; $("cmpLegend").style.display = "none";
-  P.proj.last = {file: fileId, page: pageNo}; save();
-  $("pageSel").value = fileId + "|" + pageNo; pgMark();
-  showDrop(false); S.iso = null; bgMark();
-  fit(); renderLayers();
-  await renderLow();
+  if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; }
+  pn.fileId = fileId; pn.pageNo = pageNo; pn.key = keyOf(fileId, pageNo);
+  pn.page = pg;
+  if (pn.cadBmp && pn.cadBmp.page !== pg) freeCadBitmap(pn);
+  pn.base = pn.page.getViewport({scale: 1});
+  pn.rendered = null; pn.el.hi.style.display = "none"; { const lc = pn.el.low; lc.width = lc.width; }   // the last page's picture goes at once
+  pn.autoShow = null; pn.cmp = null; pn.el.cmpLegend.style.display = "none"; pn.iso = null;
+  if (here()) { draftClear(); S.resume = null; S.gap = null; S.multi.clear(); S.hover = null; S.measure = null; S.measures = []; S.snap = null; }
+  proj.last = {file: fileId, page: pageNo}; if (proj === P.proj) save(); else dbPut("projects", proj).catch(() => {});
+  if (here()) { $("pageSel").value = fileId + "|" + pageNo; pgMark(); }
+  pn.el.drop.style.display = "none"; if (here()) bgMark();
+  fit(pn); if (here()) renderLayers();
+  await renderLow(pn);
   if (stale()) return;
-  renderHi(true);
-  indexPage();   // vector lines + scale note, in the background
-  refresh();
+  renderHi(true, pn);
+  if (here()) indexPage();   // vector lines + scale note, in the background
+  if (here()) refresh(); else { draw(); paneStrip(pn); }
+  if (SPLIT.on) { paneStrip(pn); if (SPLIT.sync) syncRel(); }
 }
 
 /* ------------------------------------------------------------------ rendering */
 const stage = () => $("stage");
-function fitWidth(){   // the page's width across the window, from its top
-  if (!S.base) return;
-  const w = stage().clientWidth, s = Math.max(0.05, Math.min(5000, (w - 24) / S.base.width));
-  S.view = {s, tx: (w - S.base.width * s) / 2, ty: 12}; applyView(); renderHi();
+function fitWidth(pn = ACT){   // the page's width across the window, from its top
+  if (!pn.base) return;
+  const w = pn.el.stage.clientWidth, s = Math.max(0.05, Math.min(5000, (w - 24) / pn.base.width));
+  pn.view = {s, tx: (w - pn.base.width * s) / 2, ty: 12}; applyView(pn); renderHi(false, pn);
 }
-function fit(){
-  if (!S.base) return;
-  const st = stage(), w = st.clientWidth, h = st.clientHeight, s = Math.min((w - 24) / S.base.width, (h - 24) / S.base.height);
-  S.view = {s: s > 0 ? s : 1, tx: (w - S.base.width * s) / 2, ty: (h - S.base.height * s) / 2};
-  applyView();
+function fit(pn = ACT){
+  if (!pn.base) return;
+  const st = pn.el.stage, w = st.clientWidth, h = st.clientHeight, s = Math.min((w - 24) / pn.base.width, (h - 24) / pn.base.height);
+  pn.view = {s: s > 0 ? s : 1, tx: (w - pn.base.width * s) / 2, ty: (h - pn.base.height * s) / 2};
+  applyView(pn);
 }
 /* line weights off: every stroke drawn 1 device pixel wide, whatever the PDF says (as Bluebeam's toggle) */
 const LW = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "lineWidth");
@@ -635,12 +687,12 @@ function tint(ctx, w, h, blue){
   for (let i = 0; i < d.length; i += 4) { const k = Math.min(d[i], d[i + 1], d[i + 2]); if (blue) { d[i] = k; d[i + 1] = k; d[i + 2] = 255; } else { d[i] = 255; d[i + 1] = k; d[i + 2] = k; } d[i + 3] = 255; }
   ctx.putImageData(im, 0, 0);
 }
-async function overlayCmp(ctx, w, h, scale, tx, ty){
-  if (!S.cmp || !S.cmp.pg) return;
+async function overlayCmp(ctx, w, h, scale, tx, ty, pn = ACT){
+  const cmp = pn.cmp; if (!cmp || !cmp.pg) return;
   tint(ctx, w, h, true);
   const o = document.createElement("canvas"); o.width = w; o.height = h;
   const c2 = o.getContext("2d", {willReadFrequently: true}); c2.fillStyle = "#fff"; c2.fillRect(0, 0, w, h);
-  try { await sliced(S.cmp.pg.render({...lay(S.cmp.file), canvasContext: thinLines(c2), viewport: S.cmp.pg.getViewport({scale}), transform: [1, 0, 0, 1, tx + S.cmp.dx * scale, ty + S.cmp.dy * scale]})).promise; } catch (e) { return; }
+  try { await sliced(cmp.pg.render({...lay(cmp.file), canvasContext: thinLines(c2), viewport: cmp.pg.getViewport({scale}), transform: [1, 0, 0, 1, tx + cmp.dx * scale, ty + cmp.dy * scale]})).promise; } catch (e) { return; }
   tint(c2, w, h, false);
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "multiply"; ctx.drawImage(o, 0, 0); ctx.restore();
 }
@@ -659,57 +711,56 @@ async function compareDialog(){
   $("cmpOff").onclick = () => { S.cmp = null; $("cmpLegend").style.display = "none"; renderLow(); renderHi(true); };
   renderLow(); renderHi(true);
 }
-async function renderLow(){   // drawn off screen, then shown only if the page is still the one on screen
-  if (cadOn()) return cadLow();   // an AutoCAD drawing: from its scene
-  const page = S.page, fileId = S.fileId, longSide = Math.max(S.base.width, S.base.height), sc = Math.min(3, 3000 / longSide);
+async function renderLow(pn = ACT){   // drawn off screen, then shown only if the page is still the one on screen
+  if (cadOn(pn)) return cadLow(pn);   // an AutoCAD drawing: from its scene
+  const page = pn.page, fileId = pn.fileId, longSide = Math.max(pn.base.width, pn.base.height), sc = Math.min(3, 3000 / longSide);
   const vp = page.getViewport({scale: sc}), off = document.createElement("canvas");
   off.width = Math.ceil(vp.width); off.height = Math.ceil(vp.height);
-  const ctx = inkCtx(thinLines(off.getContext("2d")), !S.cmp && darkNow(), !S.cmp && !!S.mono);
+  const ctx = inkCtx(thinLines(off.getContext("2d")), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, off.width, off.height); try { await sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vp})).promise; } catch (e) {}
-  if (S.page !== page) return;
-  await overlayCmp(ctx, off.width, off.height, sc, 0, 0);
-  if (S.page !== page) return;
-  const c = $("low"); c.width = off.width; c.height = off.height; c.getContext("2d").drawImage(off, 0, 0);
-  S.low = {s: sc};
-  applyView();
+  if (pn.page !== page) return;
+  await overlayCmp(ctx, off.width, off.height, sc, 0, 0, pn);
+  if (pn.page !== page) return;
+  const c = pn.el.low; c.width = off.width; c.height = off.height; c.getContext("2d").drawImage(off, 0, 0);
+  pn.low = {s: sc};
+  applyView(pn);
 }
-let hiT = null;
-function renderHi(now){
-  clearTimeout(hiT);
-  if (cadOn()) { if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) {} S.renderTask = null; } return cadHi(!!now); }   // a CAD drawing: drawn from its scene, at once
-  hiT = setTimeout(async () => {
-    if (!S.page) return;
-    if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) {} }
-    const st = stage(), dpr = Math.min(window.devicePixelRatio || 1, 2), c = $("hi"), v = Object.assign({}, S.view);
+function renderHi(now, pn = ACT){
+  clearTimeout(pn.hiT);
+  if (cadOn(pn)) { if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; } return cadHi(!!now, pn); }   // a CAD drawing: drawn from its scene, at once
+  pn.hiT = setTimeout(async () => {
+    const page = pn.page; if (!page) return;
+    if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} }
+    const st = pn.el.stage, dpr = Math.min(window.devicePixelRatio || 1, 2), c = pn.el.hi, v = Object.assign({}, pn.view), fileId = pn.fileId;
     const w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
     const off = document.createElement("canvas"); off.width = w; off.height = h;
-    const ctx = inkCtx(thinLines(off.getContext("2d")), !S.cmp && darkNow(), !S.cmp && !!S.mono);
-    const task = sliced(S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}));
-    S.renderTask = task;
+    const ctx = inkCtx(thinLines(off.getContext("2d")), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
+    const task = sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: page.getViewport({scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}));
+    pn.renderTask = task;
     try { await task.promise; } catch (e) { return; }
-    if (S.renderTask !== task) return;
-    await overlayCmp(ctx, w, h, v.s * dpr, v.tx * dpr, v.ty * dpr);
-    if (S.renderTask !== task) return;
-    S.renderTask = null;
+    if (pn.renderTask !== task) return;
+    await overlayCmp(ctx, w, h, v.s * dpr, v.tx * dpr, v.ty * dpr, pn);
+    if (pn.renderTask !== task) return;
+    pn.renderTask = null;
     c.width = w; c.height = h; c.style.width = st.clientWidth + "px"; c.style.height = st.clientHeight + "px";
     c.getContext("2d").drawImage(off, 0, 0);
-    S.rendered = Object.assign({dpr}, v);
-    applyView();
+    pn.rendered = Object.assign({dpr}, v);
+    applyView(pn);
   }, now ? 0 : 140);
 }
-function applyView(){
-  const v = S.view;
-  if (S.low) { const k = v.s / S.low.s; $("low").style.transform = `translate(${v.tx}px,${v.ty}px) scale(${k})`; }
-  const r = S.rendered, hi = $("hi");
+function applyView(pn = ACT){
+  const v = pn.view, E = pn.el;
+  if (pn.low) { const k = v.s / pn.low.s; E.low.style.transform = `translate(${v.tx}px,${v.ty}px) scale(${k})`; }
+  const r = pn.rendered, hi = E.hi;
   if (r) { const k = v.s / r.s; hi.style.transform = `translate(${v.tx - r.tx * k}px,${v.ty - r.ty * k}px) scale(${k})`; hi.style.display = Math.abs(k - 1) < 1e-9 || k > 0.25 ? "block" : "none"; }
-  $("zoomPct").textContent = S.base ? Math.round(v.s * 100) + "%" : "—";
-  if (cadOn()) cadHi(false);   // a CAD drawing follows every zoom / pan step at once
-  draw(); miniUpdate();
+  if (pn === ACT) $("zoomPct").textContent = pn.base ? Math.round(v.s * 100) + "%" : "—";
+  if (cadOn(pn)) cadHi(false, pn);   // a CAD drawing follows every zoom / pan step at once
+  draw(); miniUpdate(pn); paneStrip(pn); if (SPLIT.sync && !SPLIT.syncing) syncFrom(pn);
 }
-function zoomAt(f, sx, sy){
-  const v = S.view, ns = Math.max(0.05, Math.min(5000, v.s * f)); f = ns / v.s;
-  S.view = {s: ns, tx: sx - (sx - v.tx) * f, ty: sy - (sy - v.ty) * f};
-  applyView(); renderHi();
+function zoomAt(f, sx, sy, pn = ACT){
+  const v = pn.view, ns = Math.max(0.05, Math.min(5000, v.s * f)); f = ns / v.s;
+  pn.view = {s: ns, tx: sx - (sx - v.tx) * f, ty: sy - (sy - v.ty) * f};
+  applyView(pn); renderHi(false, pn);
 }
 const toScr = p => [p[0] * S.view.s + S.view.tx, p[1] * S.view.s + S.view.ty];
 const toBase = (x, y) => [(x - S.view.tx) / S.view.s, (y - S.view.ty) / S.view.s];
@@ -1944,6 +1995,9 @@ function dimText(r){
 }
 
 /* ------------------------------------------------------------------ tools and pointer */
+/* the cursor each window shows follows the tool (hand, cross-hair, zoom) — in both windows, so a click in either finds the same tool */
+function stageCls(){ const t = S.tool, c = t === "pan" ? "pan" : t === "select" || t === "cadsel" ? "" : t === "lasso" ? "lasso" : t === "zoomwin" ? "zoomwin" : "draw";
+  PANES.forEach(pn => { const dark = pn.el.stage.classList.contains("dark"); pn.el.stage.className = "stg" + (c ? " " + c : "") + (dark ? " dark" : ""); }); }
 function setTool(t){
   const keepSel = t === "select" || t === "lasso" || t === "zoomwin" || t === "stamp" || t === "match";
   if (!keepSel) { S.sel = null; S.selPt = -1; S.selMark = null; S.multi.clear(); }
@@ -1981,7 +2035,7 @@ function setTool(t){
   { const mb = $("bMk"); if (mb) { mb.classList.toggle("on", mkIsTool(t)); const tl = mb.querySelector(".tl"); if (tl) tl.textContent = mkIsTool(t) ? MK_TOOL_NAMES[t] : "Markup"; } }
   ribFollow(t);
   if (t === "mk_stamp" && !S.stampNoPick) setTimeout(() => { if (S.tool === "mk_stamp") stampPicker().then(v => { if (!v && S.tool === "mk_stamp") setTool("select"); }); }, 0);
-  stage().className = t === "pan" ? "pan" : t === "select" || t === "cadsel" ? "" : t === "lasso" ? "lasso" : t === "zoomwin" ? "zoomwin" : "draw";
+  stageCls();
   stage().style.cursor = "";
   hint(); draw(); renderProps(); draftBtns();
 }
@@ -2025,7 +2079,7 @@ function cursorPoint(e, sp){
   return {p, s};
 }
 function onDown(e){
-  if (!S.page || (e.target.closest && e.target.closest("#cmpLegend"))) return;   // the floating bar's own buttons
+  if (!S.page || (e.target.closest && e.target.closest(".cmplegend"))) return;   // the floating bar's own buttons
   ctxClose();
   const sp = evPos(e);
   stage().setPointerCapture(e.pointerId);
@@ -2539,15 +2593,15 @@ async function finish(pts){
 
 /* ------------------------------------------------------------------ overlay */
 let raf = 0;
-function draw(){ if (!raf) raf = requestAnimationFrame(() => { raf = 0; drawNow(); }); }
+function draw(){ if (!raf) raf = requestAnimationFrame(() => { raf = 0; drawNow(); if (SPLIT.on) { linkMark(ACT); PANES.forEach(pn => { if (pn !== ACT) drawPane(pn); }); } }); }
 function drawNow(){
-  const svg = $("ov"), svg2 = $("ov2"), tip = $("tip");
+  const E = ACT.el, svg = E.ov, svg2 = E.ov2, tip = E.tip;
   if (!S.page || !P.proj) { svg.innerHTML = ""; svg2.innerHTML = ""; S.ovSig = null; S.ovHtml = ""; tip.style.display = "none"; return; }
   /* two layers: the takeoff (measurements, markups, labels — rebuilt only when it or the view changes) and, above it,
      what follows the cursor (the shape being drawn, snap marker, selection box). A mouse move over a page with a
      thousand measurements then redraws only the cursor layer. */
   let k = curScale(); const h = [], dyn = [];
-  const sig = [P.proj.id, S.ver, S.key, S.view.s, S.view.tx, S.view.ty, S.sel, S.selMark, [...S.multi].join(","), S.hover, S.selPt, S.tool, S.hideMk, JSON.stringify(S.lbl), S.drag || S.typ ? Math.random() : 0, S.autoShow ? S.autoShow.key + S.autoShow.url.length : "", S.cadSel ? S.cadSelV + "|" + cadKey() : ""].join("|");
+  const sig = [P.proj.id, S.ver, S.key, S.view.s, S.view.tx, S.view.ty, S.sel, S.selMark, [...S.multi].join(","), S.hover, S.selPt, S.tool, S.hideMk, JSON.stringify(S.lbl), S.drag || S.typ ? Math.random() : 0, S.autoShow ? S.autoShow.key + S.autoShow.url.length : "", S.cadSel ? S.cadSelV + "|" + cadKey(ACT) : ""].join("|");
   const keep = sig === S.ovSig;
   if (!keep) h.push('<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="rgba(208,59,59,.08)"/><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(208,59,59,.55)" stroke-width="1.5"/></pattern></defs>');
   const ptsS = P => P.map(p => toScr(p).map(v => v.toFixed(1)).join(",")).join(" ");
@@ -2655,11 +2709,11 @@ function drawNow(){
   }
   if (!keep) { S.ovSig = sig; const html = h.join(""); if (html !== S.ovHtml) { svg.innerHTML = html; S.ovHtml = html; } }
   svg2.innerHTML = dyn.join("");
-  $("stMeas").innerHTML = live ? "<b>" + esc(live) + "</b>" : "";
+  if (!S.passive) $("stMeas").innerHTML = live ? "<b>" + esc(live) + "</b>" : "";
   if (S.typed && S.draft.length) live = (S.tool === "rect" ? "L x W: " : "Length: ") + S.typed + " ▏ Enter to place · Esc clears";
   if (!live && S.tool === "select" && S.hover && !S.drag && !S.box && S.cursorScr) live = hoverText(S.hover);   // what is under the cursor, as Bluebeam's tooltip
   if (!live && S.tool === "cadsel" && S.cadHov >= 0 && !S.cbox && S.cursorScr) live = cadHoverText();   // the AutoCAD object under it
-  if (live && S.cursorScr) { tip.textContent = live; tip.style.display = "block"; tip.style.left = Math.min(S.cursorScr[0] + 16, stage().clientWidth - 220) + "px"; tip.style.top = (S.cursorScr[1] + 18) + "px"; }
+  if (live && S.cursorScr) { tip.textContent = live; tip.style.display = "block"; tip.style.left = Math.min(S.cursorScr[0] + 16, E.stage.clientWidth - 220) + "px"; tip.style.top = (S.cursorScr[1] + 18) + "px"; }
   else tip.style.display = "none";
 }
 function lockBadge(p){ return `<g><rect x="${(p[0] - 7).toFixed(1)}" y="${(p[1] - 7).toFixed(1)}" width="14" height="14" rx="3" fill="#0f2942"/><text x="${p[0].toFixed(1)}" y="${(p[1] + 4).toFixed(1)}" text-anchor="middle" font-size="9" fill="#fff">&#128274;</text></g>`; }
@@ -2788,7 +2842,7 @@ function nameAreas(){
   toast(n ? n + " area" + (n > 1 ? "s" : "") + " named from the drawing" : "No room names found inside the unnamed areas");
 }
 /* ------------------------------------------------------------------ panels */
-function refresh(){ mlSoon(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); renderLiveLegend(); draw(); draftBtns(); }
+function refresh(){ mlSoon(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); renderLiveLegend(); if (SPLIT.on) paneStrips(); draw(); draftBtns(); }
 let sheetT = null;
 function refreshSheetSoon(){ clearTimeout(sheetT); sheetT = setTimeout(() => { renderSheet(); renderConds(); }, 120); }
 function renderScaleChip(){
@@ -2862,7 +2916,7 @@ async function thumbRun(){
       await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp})).promise; S.thumbs[k] = cv.toDataURL("image/png"); } }
     catch (e) { S.thumbs[k] = "x"; }   // PDF not attached in this browser: left blank
     const im = [...document.querySelectorAll("#pageList img[data-th]")].find(x => x.dataset.th === k); if (im && S.thumbs[k] !== "x") im.src = S.thumbs[k];
-    if (k === S.key) miniUpdate();
+    PANES.forEach(pn => { if (pn.key === k) miniUpdate(pn); });
   }
   S.thumbBusy = false;
 }
@@ -2882,7 +2936,8 @@ async function removePdf(fid){
   if (S.docs[fid]) { try { S.docs[fid].destroy(); } catch (e) {} delete S.docs[fid]; }
   const others = (await dbAll("projects")).filter(x => x.id !== pr.id); if (!others.some(x => (x.files || []).some(y => y.id === fid))) await dbDel("pdfs", fid).catch(() => {});   // (a duplicated project keeps its copy)
   save(); buildPageSel();
-  if (S.fileId === fid) { S.navSeq = (S.navSeq || 0) + 1; S.page = null; S.base = null; S.fileId = null; S.key = ""; S.rendered = null; $("hi").style.display = "none"; { const lc = $("low"); lc.width = lc.width; }
+  PANES.forEach(pn => { if (pn !== ACT && pn.sess === ACT.sess && pn.fileId === fid) paneBlank(pn); });   // the other window was showing it
+  if (S.fileId === fid) { ACT.navSeq = (ACT.navSeq || 0) + 1; S.page = null; S.base = null; S.fileId = null; S.key = ""; S.rendered = null; $("hi").style.display = "none"; { const lc = $("low"); lc.width = lc.width; }
     if (pr.files[0]) await gotoPage(pr.files[0].id, 1); else showDrop(true); }
   refresh(); toast(f.name + " removed" + (its ? " with " + its + " measurement" + (its > 1 ? "s" : "") : "") + " — a backup was taken first", 4000);
 }
@@ -5445,7 +5500,7 @@ function cutOutOf(it, T){
 /* workspace: layouts, icon-only toolbar, minimap, full screen (kept per browser) */
 function wsPref(){ let o = null; try { o = JSON.parse(pref("zdTakeoffWs") || "null"); } catch (e) { o = null; } return Object.assign({tb: "full", mini: false}, o && typeof o === "object" ? o : {}); }
 function wsSet(ch){ const o = Object.assign(wsPref(), ch); pref("zdTakeoffWs", JSON.stringify(o)); wsApply(o); }
-function wsApply(o){ o = o || wsPref(); document.body.classList.toggle("tbicons", o.tb === "icons"); const b = $("bMini"); if (b) b.classList.toggle("on", !!o.mini); miniUpdate(); }
+function wsApply(o){ o = o || wsPref(); document.body.classList.toggle("tbicons", o.tb === "icons"); const b = $("bMini"); if (b) b.classList.toggle("on", !!o.mini); PANES.forEach(pn => miniUpdate(pn)); }
 function wsLayout(l){
   if (l === "focus") { S.lHide = true; S.rHide = true; } else { S.lHide = false; S.rHide = l === "pages"; }
   setPanels();
@@ -5561,18 +5616,18 @@ function iconize(){   // each toolbar button's words in their own span, so "icon
     const sp = document.createElement("span"); sp.className = "tl"; n.textContent = m[1] + " "; sp.textContent = m[2]; b.insertBefore(sp, n.nextSibling); while (sp.nextSibling) sp.appendChild(sp.nextSibling); });
 }
 /* minimap (Forma): the page small, the part on screen framed; click or drag it to move there */
-function miniUpdate(){
-  const m = $("mini"); if (!m) return;
-  if (!(wsPref().mini && S.page && S.base)) { m.style.display = "none"; return; }
-  const th = (S.thumbs || {})[S.key], im = $("miniImg");
-  if (!th) { thumbWant(S.key); m.style.display = "none"; return; }
+function miniUpdate(pn = ACT){
+  const m = pn.el.mini; if (!m) return;
+  if (!(wsPref().mini && pn.page && pn.base)) { m.style.display = "none"; return; }
+  const th = (S.thumbs || {})[pn.key], im = pn.el.miniImg;
+  if (!th) { thumbWant(pn.key); m.style.display = "none"; return; }
   if (th === "x") { m.style.display = "none"; return; }
   if (im.getAttribute("src") !== th) im.src = th;
-  const st = stage(), a = toBase(0, 0), b = toBase(st.clientWidth, st.clientHeight), W = S.base.width, H = S.base.height;
+  const st = pn.el.stage, v = pn.view, a = [-v.tx / v.s, -v.ty / v.s], b = [(st.clientWidth - v.tx) / v.s, (st.clientHeight - v.ty) / v.s], W = pn.base.width, H = pn.base.height;
   if (a[0] <= 1 && a[1] <= 1 && b[0] >= W - 1 && b[1] >= H - 1) { m.style.display = "none"; return; }   // the whole page is on screen
   const mw = W >= H ? 190 : 130, k = mw / W; im.style.width = mw + "px"; im.style.height = Math.round(H * k) + "px"; m.style.display = "block";
   const x0 = Math.max(0, a[0]) * k, y0 = Math.max(0, a[1]) * k, x1 = Math.min(W, b[0]) * k, y1 = Math.min(H, b[1]) * k;
-  Object.assign($("miniVp").style, {left: x0 + "px", top: y0 + "px", width: Math.max(3, x1 - x0) + "px", height: Math.max(3, y1 - y0) + "px"});
+  Object.assign(pn.el.miniVp.style, {left: x0 + "px", top: y0 + "px", width: Math.max(3, x1 - x0) + "px", height: Math.max(3, y1 - y0) + "px"});
 }
 function miniGo(e){ const r = $("miniImg").getBoundingClientRect(), k = S.base.width / r.width, x = (e.clientX - r.left) * k, y = (e.clientY - r.top) * k, st = stage();
   S.view.tx = st.clientWidth / 2 - x * S.view.s; S.view.ty = st.clientHeight / 2 - y * S.view.s; applyView(); renderHi(); }
@@ -6159,6 +6214,10 @@ function paletteCmds(){
   if (S.page && cadMeta(S.fileId)) add("AutoCAD quantities — lengths, areas and blocks from the drawing", () => cadQtyDialog(), "Page");
   add("Background: black, as AutoCAD's model space", () => setBg("black"), "View"); add("Background: white", () => setBg("white"), "View"); add("Background: auto — black for AutoCAD drawings, white for PDFs", () => setBg("auto"), "View");
   add("Monochrome view on / off", () => setMono(!S.mono), "View");
+  if (S.page) { add("Split window: this drawing in two windows (side by side)", () => splitOpen("same", "v"), "View", "Ctrl+\\"); add("Split window: stacked, one above the other", () => splitOpen("same", "h"), "View"); }
+  if (P.proj) add("Split window: open another project in a second window…", splitPickProject, "View");
+  if (SPLIT.on) { add("Split window: close (back to one window)", () => splitClose(), "View", "Ctrl+\\"); add("Split window: work in the other window", splitFocusNext, "View", "F6"); add("Split window: sync zoom & pan " + (SPLIT.sync ? "off" : "on"), () => splitSetSync(!SPLIT.sync), "View");
+    add("Split window: link cursor " + (SPLIT.link ? "off" : "on"), () => splitSetLink(!SPLIT.link), "View"); add("Split window: give the other window this zoom and position", () => splitMatch(), "View"); add("Split window: swap the windows", splitSwap, "View"); }
   add("Export pages… — PDF, PDF per page, PNG or JPEG; pages, resolution, legend", () => exportPagesDialog(), "Export");
   add("Export the pages with takeoff as one PDF…", () => exportPagesDialog({scope: "tk", fmt: "pdf"}), "Export"); add("Export pages as PNG images (high resolution)…", () => exportPagesDialog({fmt: "png"}), "Export");
   add("Takeoff report — print or save as PDF", reportPrint, "Export");
@@ -6245,7 +6304,7 @@ function ctxOpen(sp, e){
   if (mk) { if (!selIds().has(mk.id)) setSel([mk.id]); L = ctxMark(mk); }
   else if (hi) { if (!selIds().has(hi.it.id)) setSel([hi.it.id], hi.pt); else if (hi.pt >= 0 && hi.it.id === S.sel) S.selPt = hi.pt; L = ctxItem(hi, sp, q, e); }
   else L = ctxCanvas(q);
-  if (S.tool !== "select" && (mk || hi)) { S.tool = "select"; document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === "select")); stage().className = ""; hint(); }
+  if (S.tool !== "select" && (mk || hi)) { S.tool = "select"; document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === "select")); stageCls(); hint(); }
   refresh();
   ctxShow(L, e.clientX, e.clientY);
 }
@@ -6339,33 +6398,284 @@ function keysDialog(){
     ${G("Markups (Bluebeam)", [["T | Q | N", "text box · callout · note"], ["Shift+L | Y | G", "line · polyline · polygon"], ["Shift+R | Shift+E | U", "rectangle · ellipse · cloud"], ["P | Shift+H", "pen · highlighter pen"], ["X | I", "stamp · image"], ["Markup ▾", "every markup tool: hyperlink, file attachment, redaction, erase…"], ["Dbl-click a markup", "edit its text · open a link or an attached file"], ["Drag a handle", "resize a box, move a line's end or a point"], ["Alt+L", "Markups list: every markup — filter, sort, status, replies, layers, CSV / XML / PDF summary"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
     ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["F8 | F10", "Ortho (0° / 90°) · Polar tracking (every 15°…) — Shift frees one click while Ortho is on"], ["Snap ▾ (toolbar)", "choose the object snaps: endpoint, midpoint, intersection, perpendicular, nearest"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"]])}
-    ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"]])}
+    ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"], ["Ctrl+\\", "split window: this drawing in two windows (own zoom each) — again to close"], ["F6", "split window: work in the other window"], ["Split ▾ (toolbar)", "stacked, another project in the second window, sync zoom & pan, link cursor, match, swap"]])}
   </table>`, "Close");
 }
 /* ------------------------------------------------------------------ events */
-function wire(){
-  const st = stage();
-  document.addEventListener("keydown", e => {   // Ctrl+K: command palette (not the browser's search box)
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") { e.preventDefault(); e.stopPropagation(); if ($("pal") && $("pal").classList.contains("on")) return; openPalette(); }
+/* ------------------------------------------------------------------ split window
+   Two windows onto the drawings, as AutoCAD's tiled viewports and Bluebeam's / Acrobat's split view: each has its own zoom and pan
+   (wheel zooms the window under the cursor, a click works in it), and a strip with its project, page, zoom, Fit and close.
+   · Same drawing, second window: both windows show the same project and the same measurements; work in either — a point
+     picked in one continues the shape begun in the other (zoom out in one to see the whole, zoom in on the other to pick exactly).
+   · Another project: the second window opens a different stored project with its own drawings, conditions and sheet; clicking in
+     it makes it the one the panels on both sides follow (conditions, measurement sheet, Export all follow the window clicked in).
+   · Sync zoom & pan: the windows move together, keeping their offset (compare two floors, or two revisions).
+   · Link cursor: a cross-hair in the other window where the cursor is on this one. */
+const inPane = (pn, fn) => { const prev = ACT; ACT = pn; try { return fn(); } finally { ACT = prev; } };
+const otherPane = pn => PANES.find(p => p !== pn) || null;
+const paneAt = el => PANES.find(p => p.host.contains(el)) || null;
+const centerOf = pn => { const st = pn.el.stage, v = pn.view; return [(st.clientWidth / 2 - v.tx) / v.s, (st.clientHeight / 2 - v.ty) / v.s]; };
+const clampZ = z => Math.max(0.05, Math.min(5000, z));
+const splitPref = () => { let o = null; try { o = JSON.parse(pref("zdTakeoffSplit") || "null"); } catch (e) { o = null; } return o && typeof o === "object" ? o : {}; };
+function splitSave(){ pref("zdTakeoffSplit", JSON.stringify({dir: SPLIT.dir, ratio: +SPLIT.ratio.toFixed(3), sync: SPLIT.sync, link: SPLIT.link})); }
+
+/* what a window that is not being worked in shows over its drawing: the takeoff as it stands (the selection and a shape being drawn
+   too, where it is the same drawing), never the cursor of this window */
+const PASSIVE_RESET = {cursorScr: null, hover: null, box: null, lasso: null, zbox: null, flash: null, typ: null, mkd: null};
+function drawPane(pn){
+  const real = ACT; if (pn === real || !pn.page) { if (pn !== real && pn.el) { pn.el.ov.innerHTML = ""; pn.el.ov2.innerHTML = ""; pn.ovSig = null; pn.ovHtml = ""; } return; }
+  const sameKey = pn.sess === real.sess && pn.key === real.key, reset = Object.assign({}, PASSIVE_RESET);
+  if (!sameKey) Object.assign(reset, {tool: "pan", drag: null, draft: [], cursor: null, snap: null, measures: [], measure: null, arcMid: null, arcMode: 0, typed: ""});
+  const saved = {}; Object.keys(reset).forEach(k => { saved[k] = S[k]; S[k] = reset[k]; });
+  S.passive = true;
+  try { inPane(pn, drawNow); } finally { S.passive = false; Object.keys(saved).forEach(k => { S[k] = saved[k]; }); }
+  linkMark(pn);
+}
+/* Link cursor: where the cursor is on the window it is over (worked in or not), marked in the other window — the same place on the sheet */
+function linkMark(pn){
+  const h = SPLIT.hot; if (!SPLIT.on || !SPLIT.link || !h || h.pn === pn || !h.pn.base || !pn.page || !pn.base) return;
+  const same = Math.abs(h.pn.base.width - pn.base.width) < 1 && Math.abs(h.pn.base.height - pn.base.height) < 1, c = h.p;
+  const p = same ? c : [c[0] / h.pn.base.width * pn.base.width, c[1] / h.pn.base.height * pn.base.height], v = pn.view, x = p[0] * v.s + v.tx, y = p[1] * v.s + v.ty, st = pn.el.stage;
+  if (x < -20 || y < -20 || x > st.clientWidth + 20 || y > st.clientHeight + 20) return;
+  pn.el.ov2.insertAdjacentHTML("beforeend", `<g class="plink-x" pointer-events="none"><path d="M${x.toFixed(1)} 0V${st.clientHeight}M0 ${y.toFixed(1)}H${st.clientWidth}" stroke="#ff2d55" stroke-width="1" stroke-dasharray="5 4" opacity=".55"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6" fill="none" stroke="#ff2d55" stroke-width="2"/></g>`);
+}
+function hotMove(pn, e){
+  if (!SPLIT.on || !SPLIT.link || !pn.base) return;
+  const r = pn.el.stage.getBoundingClientRect(), v = pn.view, x = e.clientX - r.left, y = e.clientY - r.top;
+  if (x < 0 || y < 0 || x > r.width || y > r.height) { if (SPLIT.hot && SPLIT.hot.pn === pn) { SPLIT.hot = null; draw(); } return; }
+  SPLIT.hot = {pn, p: [(x - v.tx) / v.s, (y - v.ty) / v.s]}; draw();
+}
+
+/* the windows move together: B's view follows A's by the offset they had when Sync was switched on (and back) */
+function syncRel(){
+  const [a, b] = PANES; if (!SPLIT.on || !a || !b || !a.base || !b.base) { SPLIT.rel = null; return; }
+  const ca = centerOf(a), cb = centerOf(b); SPLIT.rel = {k: b.view.s / a.view.s, d: [cb[0] - ca[0], cb[1] - ca[1]]};
+  a.syncSig = b.syncSig = null;
+}
+const viewSig = pn => { const v = pn.view, st = pn.el.stage; return [v.s, v.tx, v.ty, st.clientWidth, st.clientHeight].join(","); };
+function syncFrom(pn){
+  const [a, b] = PANES; if (!SPLIT.on || !SPLIT.sync || !a || !b || !SPLIT.rel || !a.base || !b.base || (pn !== a && pn !== b)) return;
+  const sig = viewSig(pn); if (pn.syncSig === sig) return; pn.syncSig = sig;   // only a view that has really moved is carried over (not a redraw of the same view)
+  const R = SPLIT.rel, tgt = pn === a ? b : a, src = centerOf(pn), s = clampZ(pn === a ? pn.view.s * R.k : pn.view.s / R.k), c = pn === a ? [src[0] + R.d[0], src[1] + R.d[1]] : [src[0] - R.d[0], src[1] - R.d[1]], st = tgt.el.stage;
+  SPLIT.syncing = true;
+  try { tgt.view = {s, tx: st.clientWidth / 2 - c[0] * s, ty: st.clientHeight / 2 - c[1] * s}; tgt.syncSig = viewSig(tgt); applyView(tgt); renderHi(false, tgt); } finally { SPLIT.syncing = false; }
+}
+
+/* the window being worked in */
+function activate(pn, quiet){
+  if (!pn || pn === ACT || !PANES.includes(pn)) return;
+  const old = ACT;
+  if (old.sess !== pn.sess || old.key !== pn.key) { draftClear(); S.measure = null; S.measures = []; S.resume = null; S.gap = null; S.typ = null; }   // a shape begun on another sheet is not carried over
+  S.drag = null; S.lasso = null; S.box = null; S.zbox = null; S.press = null; S.mkd = null; S.hover = null; S.snap = null; S.cursor = null; S.cursorScr = null; S.pinch = null;
+  if (old.sess !== pn.sess) flushSave();   // the project being left keeps its last change
+  PANE_IDS.forEach(id => { if (old.el[id]) old.el[id].id = id + "__" + old.n; });
+  ACT = pn; PANE_IDS.forEach(id => { if (pn.el[id]) pn.el[id].id = id; });
+  PANES.forEach(p => p.host.classList.toggle("act", p === pn));
+  if (!quiet) paneUi(old);
+}
+function paneUi(old){   // the panels and the bar follow the window worked in
+  const pr = P.proj;
+  $("projName").value = pr ? pr.name : "";
+  if (pr) {
+    saveSay("ok", pr.updated); buildPageSel(); localStorage.setItem("zdTakeoffLast", pr.id);
+    if (!S.cond || !cond(S.cond)) S.cond = (pr.conds[0] || {}).id || null;
+    if (!S.cond && ["draw", "rect", "ded", "open", "auto", "circle"].indexOf(S.tool) >= 0) { S.tool = "select"; document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === "select")); }
+    stageCls(); hint();
+    if (S.page) { pgMark(); renderLayers(); if (!S.geo[S.key]) indexPage(); }
+    $("zoomPct").textContent = S.base ? Math.round(S.view.s * 100) + "%" : "—";
+    refresh();
+  }
+  miniUpdate(ACT); paneStrips(true);
+}
+
+/* strips: [● project ▾] [page ▾]  ···  zoom · Fit · ⇆ · ✕ */
+function stripSig(pn){ const pr = pn.sess.proj; return [pr ? pr.id : "", pr ? pr.name : "", pr ? pr.files.map(f => f.id + f.pages + f.name).join("|") : "", pn.key, (SPLIT.projs || []).map(x => x[0] + x[1]).join("|")].join("~"); }
+function paneStrip(pn, full){
+  const bar = pn.strip; if (!bar || !SPLIT.on) return;
+  const z = bar.querySelector(".pzoom"), t = pn.base ? Math.round(pn.view.s * 100) + "%" : "—"; if (z.textContent !== t) z.textContent = t;
+  if (!full && pn.stripSig === stripSig(pn)) return;
+  pn.stripSig = stripSig(pn);
+  const pr = pn.sess.proj, ps = bar.querySelector(".pproj"), pg = bar.querySelector(".ppage");
+  const lst = (SPLIT.projs || []).slice(); if (pr && !lst.some(x => x[0] === pr.id)) lst.unshift([pr.id, pr.name]);
+  ps.innerHTML = lst.map(x => `<option value="${esc(x[0])}">${esc(pr && x[0] === pr.id ? pr.name : x[1])}</option>`).join("") || "<option value=''>No project</option>"; if (pr) ps.value = pr.id;
+  const o = []; if (pr) pr.files.forEach(f => { for (let i = 1; i <= f.pages; i++) o.push(`<option value="${esc(f.id)}|${i}">${esc(f.name.replace(/\.pdf$/i, ""))} — p.${i}</option>`); });
+  pg.innerHTML = o.join("") || "<option value=''>No PDF yet</option>"; if (pn.fileId) pg.value = pn.fileId + "|" + pn.pageNo;
+}
+function paneStrips(full){ PANES.forEach(pn => paneStrip(pn, full)); }
+async function splitProjects(){   // the stored projects, for the strips' project lists
+  try { SPLIT.projs = (await dbAll("projects")).sort((a, b) => String(b.updated).localeCompare(String(a.updated))).map(p => [p.id, p.name]); } catch (e) { SPLIT.projs = SPLIT.projs || []; }
+  paneStrips(true);
+}
+function buildStrip(pn){
+  const bar = document.createElement("div"); bar.className = "pstrip";
+  bar.innerHTML = `<span class="pdot"></span><select class="pproj" aria-label="Project in this window" title="The project shown in this window — pick another to open it here"></select>
+    <select class="ppage" aria-label="Page in this window" title="The drawing page shown in this window"></select><span class="sp"></span><span class="pzoom" title="Zoom of this window">—</span>
+    <button class="btn sm pfit" type="button" title="Fit the page in this window">Fit</button>
+    <button class="btn sm pmatch" type="button" title="Give the other window this window's zoom and position">&#8644;</button>
+    <button class="btn sm pclose" type="button" title="Close this window (the other one stays)">&#10005;</button>`;
+  pn.host.insertBefore(bar, pn.host.firstChild); pn.strip = bar;
+  bar.querySelector(".pproj").addEventListener("focus", () => splitProjects());
+  bar.querySelector(".pproj").addEventListener("change", e => { const id = e.target.value; if (id) paneOpenProject(pn, id); });
+  bar.querySelector(".ppage").addEventListener("change", e => { const [f, p] = e.target.value.split("|"); if (f && p) { activate(pn); gotoPage(f, +p); } });
+  bar.querySelector(".pfit").onclick = () => { fit(pn); renderHi(false, pn); };
+  bar.querySelector(".pmatch").onclick = () => splitMatch(pn);
+  bar.querySelector(".pclose").onclick = () => splitClose(pn);
+}
+async function paneOpenProject(pn, id){
+  activate(pn);
+  if (P.proj && P.proj.id === id) return;
+  await openProject(id);
+  if (SPLIT.on) { paneStrips(true); if (SPLIT.sync) syncRel(); }
+}
+
+/* layout */
+function splitLayout(){
+  const el = $("panes"), r = Math.max(0.15, Math.min(0.85, SPLIT.ratio));
+  el.classList.toggle("split", SPLIT.on); el.classList.toggle("v", SPLIT.dir === "v"); el.classList.toggle("h", SPLIT.dir === "h");
+  PANES.forEach((pn, i) => { pn.host.style.flex = SPLIT.on && PANES.length > 1 ? (i ? 1 - r : r) + " 1 0px" : "1 1 0px"; });
+  const dv = el.querySelector(".pdiv"); if (dv) dv.setAttribute("aria-orientation", SPLIT.dir === "v" ? "vertical" : "horizontal");
+  const set = (id, on) => { const b = $(id); if (b) b.classList.toggle("on", on); };
+  set("bSplit", SPLIT.on); set("spV", SPLIT.on && SPLIT.dir === "v"); set("spH", SPLIT.on && SPLIT.dir === "h"); set("spSync", SPLIT.sync); set("spLink", SPLIT.link);
+  ["spMatch", "spSwap", "spReset", "spClose"].forEach(id => { if ($(id)) $(id).disabled = !SPLIT.on; });
+}
+function splitDivider(){
+  const el = $("panes"); let dv = el.querySelector(".pdiv"); if (dv) return dv;
+  dv = document.createElement("div"); dv.className = "pdiv"; dv.tabIndex = 0; dv.setAttribute("role", "separator"); dv.title = "Drag to resize the windows · double-click for the middle · arrow keys move it";
+  const at = e => { const r = el.getBoundingClientRect(); return SPLIT.dir === "v" ? (e.clientX - r.left) / r.width : (e.clientY - r.top) / r.height; };
+  dv.addEventListener("pointerdown", e => { e.preventDefault(); dv.setPointerCapture(e.pointerId); dv.classList.add("drag"); S.divDrag = true; });
+  dv.addEventListener("pointermove", e => { if (!S.divDrag) return; SPLIT.ratio = Math.max(0.15, Math.min(0.85, at(e))); splitLayout(); });
+  const end = () => { if (!S.divDrag) return; S.divDrag = false; dv.classList.remove("drag"); splitSave(); };
+  dv.addEventListener("pointerup", end); dv.addEventListener("pointercancel", end);
+  dv.addEventListener("dblclick", () => { SPLIT.ratio = 0.5; splitLayout(); splitSave(); });
+  dv.addEventListener("keydown", e => {
+    const k = e.key, d = SPLIT.dir === "v" ? (k === "ArrowLeft" ? -1 : k === "ArrowRight" ? 1 : 0) : (k === "ArrowUp" ? -1 : k === "ArrowDown" ? 1 : 0);
+    if (d) { e.preventDefault(); SPLIT.ratio = Math.max(0.15, Math.min(0.85, SPLIT.ratio + d * 0.02)); splitLayout(); splitSave(); } else if (k === "Home") { e.preventDefault(); SPLIT.ratio = 0.5; splitLayout(); splitSave(); }
+  });
+  el.insertBefore(dv, PANES[1] ? PANES[1].host : null); return dv;
+}
+function paneNew(sess){
+  const n = (SPLIT.seq = (SPLIT.seq || 0) + 1), src = ACT.el.stage, host = document.createElement("div"); host.className = "pane";
+  const st = src.cloneNode(true);
+  PANE_IDS.forEach(id => { const e = id === "stage" ? st : st.querySelector("[data-pid=\"" + id + "\"]"); if (e) { e.id = id + "__" + n; e.setAttribute("data-pid", id); } });
+  st.className = "stg"; st.style.cursor = ""; st.querySelectorAll("svg").forEach(v => { v.innerHTML = ""; }); st.querySelectorAll("canvas").forEach(c => { c.width = 1; c.height = 1; c.style.cssText = ""; });
+  const get = id => id === "stage" ? st : st.querySelector("[data-pid=\"" + id + "\"]");
+  get("tip").style.display = "none"; get("busy").style.display = "none"; get("busy").textContent = ""; get("takeoffLegend").innerHTML = ""; get("takeoffLegend").classList.remove("on"); get("cmpLegend").innerHTML = ""; get("cmpLegend").style.display = "none"; get("mini").style.display = "none";
+  host.appendChild(st);
+  const pn = mkPane(n, sess, host); wireStage(pn); buildStrip(pn);
+  return pn;
+}
+function splitOpen(mode, dir){
+  if (!P.proj) return toast("Open a project first");
+  if (dir) SPLIT.dir = dir;
+  if (SPLIT.on) { splitLayout(); splitSave(); return; }
+  const A = ACT, st = A.el.stage, c0 = A.base ? centerOf(A) : null;
+  SPLIT.on = true; const B = paneNew(A.sess); PANES.push(B);
+  $("panes").appendChild(B.host); splitDivider(); splitLayout();
+  if (A.page) {   // the second window starts as the first is: the same page, the same zoom and centre
+    Object.assign(B, {fileId: A.fileId, pageNo: A.pageNo, page: A.page, base: A.base, key: A.key});
+    [A, B].forEach(pn => { if (c0) { const w = pn.el.stage.clientWidth, h = pn.el.stage.clientHeight, s = A.view.s; pn.view = {s, tx: w / 2 - c0[0] * s, ty: h / 2 - c0[1] * s}; } });
+    B.el.drop.style.display = "none"; renderLow(B).then(() => { renderHi(true, B); }); renderHi(true, A);
+  } else B.el.drop.style.display = "flex";
+  PANES.forEach(pn => pn.host.classList.toggle("act", pn === ACT));
+  splitSave(); splitProjects(); paneStrips(true); if (SPLIT.sync) syncRel(); draw();
+  toast("Split window — click a window to work in it · wheel zooms the window under the cursor · F6 switches window", 3600);
+}
+function splitClose(which){
+  if (!SPLIT.on) return;
+  const gone = which && PANES.includes(which) ? which : otherPane(ACT);
+  if (gone === ACT) activate(otherPane(gone));   // the window worked in is closed: the other one takes over
+  flushSave();
+  PANES.splice(PANES.indexOf(gone), 1);
+  if (gone.renderTask) { try { gone.renderTask.cancel(); } catch (e) {} }
+  clearTimeout(gone.hiT); clearTimeout(gone.cadIdleT); freeCadBitmap(gone); gone.page = null;
+  gone.host.remove(); SPLIT.on = false; SPLIT.rel = null;
+  const dv = $("panes").querySelector(".pdiv"); if (dv) dv.remove();
+  ACT.host.style.flex = "1 1 0px"; splitLayout(); applyView(ACT); renderHi(true);
+  pruneCaches(); splitSave(); refresh();
+}
+function splitMatch(from){   // the other window gets this window's zoom and position
+  const a = from || ACT, b = otherPane(a); if (!b || !a.base || !b.base) return;
+  const c = centerOf(a), s = a.view.s, st = b.el.stage;
+  SPLIT.syncing = true; try { b.view = {s, tx: st.clientWidth / 2 - c[0] * s, ty: st.clientHeight / 2 - c[1] * s}; applyView(b); renderHi(true, b); } finally { SPLIT.syncing = false; }
+  if (SPLIT.sync) syncRel();
+}
+function splitSwap(){
+  if (!SPLIT.on || PANES.length < 2) return;
+  PANES.reverse(); const el = $("panes"), dv = el.querySelector(".pdiv");
+  el.insertBefore(PANES[0].host, el.firstChild); el.insertBefore(dv, PANES[1].host); SPLIT.ratio = 1 - SPLIT.ratio;
+  if (SPLIT.rel) syncRel();
+  splitLayout(); splitSave();
+}
+function splitFocusNext(){ if (SPLIT.on && PANES.length > 1) { activate(otherPane(ACT)); toast("Working in the " + (PANES.indexOf(ACT) === 0 ? (SPLIT.dir === "v" ? "left" : "top") : (SPLIT.dir === "v" ? "right" : "bottom")) + " window", 1200); } }
+function splitSetSync(on){ SPLIT.sync = on; if (on) syncRel(); splitLayout(); splitSave(); toast(on ? "Zoom and pan now move together" : "Zoom and pan are separate again", 1800); }
+function splitSetLink(on){ SPLIT.link = on; splitLayout(); splitSave(); draw(); }
+async function splitPickProject(){
+  if (!P.proj) return toast("Open a project first");
+  await flushSave();
+  let all = []; try { all = await dbAll("projects"); } catch (e) {}
+  const here = P.proj.id, opts = all.filter(p => p.id !== here).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+  if (!opts.length) return toast("There is no other project yet — start one with Projects → + New project, then open it here", 4200);
+  const v = await ask("Open another project in a second window", `<p class="small">The second window shows another stored project — its own drawings, conditions and measurement sheet. Click in either window to work in it; the panels on both sides follow the window you click in.</p>
+    <div class="fg w2" style="margin-top:8px"><label>Project</label><select id="spPick">${opts.map(p => `<option value="${esc(p.id)}">${esc(p.name)} — ${p.files.length} PDF${p.files.length === 1 ? "" : "s"}, ${p.items.length} measurements</option>`).join("")}</select></div>`, "Open", () => ({id: $("spPick").value}));
+  if (!v) return;
+  const A = ACT; if (!SPLIT.on) splitOpen("same");   // the second window first as a copy of this one, then switched to the project
+  const B = otherPane(A); if (!B) return;
+  B.sess = mkSess(null); B.fileId = null; B.page = null; B.base = null; B.key = ""; B.el.drop.style.display = "none"; B.el.ov.innerHTML = ""; B.el.ov2.innerHTML = ""; { const c = B.el.low; c.width = 1; c.height = 1; const h = B.el.hi; h.width = 1; h.height = 1; }
+  B.low = null; B.rendered = null;
+  activate(B, true);
+  await openProject(v.id);
+  if (!B.sess.proj) { splitClose(B); return; }
+  paneStrips(true); if (SPLIT.sync) syncRel();
+}
+function splitMenu(on){
+  const pop = $("splitPop"), show = on == null ? !pop.classList.contains("on") : !!on;
+  pop.classList.toggle("on", show); $("bSplit").setAttribute("aria-expanded", show ? "true" : "false");
+  if (show) splitLayout();
+}
+function splitWire(){
+  const pf = splitPref(); if (pf.dir === "v" || pf.dir === "h") SPLIT.dir = pf.dir; if (pf.ratio > 0.14 && pf.ratio < 0.86) SPLIT.ratio = pf.ratio; SPLIT.sync = !!pf.sync; SPLIT.link = !!pf.link;
+  $("bSplit").onclick = e => { e.stopPropagation(); splitMenu(); };
+  document.addEventListener("pointerdown", e => { if ($("splitPop").classList.contains("on") && !e.target.closest("#splitPop,#bSplit")) splitMenu(false); }, true);
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && $("splitPop").classList.contains("on")) { splitMenu(false); e.stopPropagation(); } }, true);
+  const need = fn => () => { splitMenu(false); fn(); };
+  $("spV").onclick = need(() => { SPLIT.dir = "v"; SPLIT.on ? (splitLayout(), splitSave()) : splitOpen("same", "v"); });
+  $("spH").onclick = need(() => { SPLIT.dir = "h"; SPLIT.on ? (splitLayout(), splitSave()) : splitOpen("same", "h"); });
+  $("spSame").onclick = need(() => { if (!SPLIT.on) splitOpen("same"); else { const A = ACT, B = otherPane(A); if (B && A.page) { flushSave(); paneShow(B, A); } } });
+  $("spProj").onclick = need(() => splitPickProject());
+  $("spSync").onclick = () => { if (!SPLIT.on) splitOpen("same"); splitSetSync(!SPLIT.sync); };
+  $("spLink").onclick = () => { if (!SPLIT.on) splitOpen("same"); splitSetLink(!SPLIT.link); };
+  $("spMatch").onclick = need(() => splitMatch());
+  $("spSwap").onclick = need(() => splitSwap());
+  $("spReset").onclick = need(() => { SPLIT.ratio = 0.5; splitLayout(); splitSave(); });
+  $("spClose").onclick = need(() => splitClose());
+  document.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "\\" || e.code === "Backslash")) { e.preventDefault(); e.stopPropagation(); if (!P.proj) return; SPLIT.on ? splitClose() : splitOpen("same"); }
+    else if (e.key === "F6" && !e.ctrlKey && !e.altKey) { if (SPLIT.on) { e.preventDefault(); splitFocusNext(); } }
   }, true);
-  document.addEventListener("keydown", e => {   // Ctrl+S: save now (not the browser's "Save page as")
-    if (!((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s")) return;
-    e.preventDefault(); if (!P.proj) return;
-    const a = document.activeElement; if (a && a.closest && a.closest("#props,header") && /^(INPUT|SELECT)$/.test(a.tagName)) a.blur();   // a field being typed in is taken first
-    savePr = P.proj; flushSave().then(ok => toast(ok ? "Saved in this browser — " + P.proj.items.length + " measurement" + (P.proj.items.length === 1 ? "" : "s") + " · Export → Project + PDFs to keep a copy elsewhere" : "Not saved — see the message above", 2600));
-  }, true);
-  document.addEventListener("keydown", e => {   // Ctrl+P: plot (a window, the view, the page) — not the browser's print of this screen
-    if (!((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "p")) return;
-    e.preventDefault(); e.stopPropagation(); if (P.proj && S.page && !$("dlgBack").classList.contains("on")) plotDialog();
-  }, true);
-  $("warnbar").addEventListener("click", e => { if (e.target.closest("[data-reload]")) { clearTimeout(saveT); savePr = null; location.reload(); } });   // this tab's pending change is dropped, not written over the other's
+  splitLayout();
+}
+/* the second window shows this window's page again (same project, same measurements) */
+function paneShow(B, A){
+  Object.assign(B, {sess: A.sess, fileId: A.fileId, pageNo: A.pageNo, page: A.page, base: A.base, key: A.key, cmp: null, iso: null, autoShow: null});
+  B.view = Object.assign({}, A.view); B.el.drop.style.display = "none"; renderLow(B).then(() => renderHi(true, B)); applyView(B); paneStrips(true); pruneCaches(); draw();
+}
+function paneBlank(pn){   // a window left without a drawing (its PDF was removed): empty, with the drop box
+  pn.navSeq = (pn.navSeq || 0) + 1; if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; }
+  clearTimeout(pn.hiT); freeCadBitmap(pn); Object.assign(pn, {fileId: null, page: null, base: null, key: "", low: null, rendered: null, cmp: null, autoShow: null});
+  pn.el.hi.style.display = "none"; { const lc = pn.el.low; lc.width = lc.width; } pn.el.ov.innerHTML = ""; pn.el.ov2.innerHTML = ""; pn.el.drop.style.display = "flex"; paneStrip(pn, true);
+}
+/* the handlers of one window's stage */
+function wireStage(pn){
+  const st = pn.el.stage, here = e => { const r = st.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  pn.host.addEventListener("pointerdown", () => activate(pn), true);   // a click in a window makes it the one worked in — before anything else sees the click
   st.addEventListener("pointerdown", onDown);
-  st.addEventListener("pointermove", onMove);
+  st.addEventListener("pointermove", e => { if (pn === ACT) onMove(e); });   // (a window that is not the one worked in only shows the cursor link)
+  pn.host.addEventListener("pointermove", e => hotMove(pn, e));
+  pn.host.addEventListener("pointerleave", () => { if (SPLIT.hot && SPLIT.hot.pn === pn) { SPLIT.hot = null; if (SPLIT.link) draw(); } });
   st.addEventListener("pointerup", onUp); st.addEventListener("pointercancel", onUp);
   st.addEventListener("contextmenu", e => e.preventDefault());
   st.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });
   { let mid = 0; st.addEventListener("pointerdown", e => { if (e.button !== 1) return; const t = Date.now(); if (t - mid < 380) { mid = 0; if (S.page) { fit(); renderHi(); } } else mid = t; }); }   // a middle double-click: zoom extents, as AutoCAD   // middle button pans — not the browser's autoscroll
-  window.addEventListener("blur", () => { if (S.space) { S.space = false; stage().classList.toggle("pan", S.tool === "pan"); } });   // Space released in another window must not leave pan on
   st.addEventListener("dblclick", e => {
     if (["draw", "ded", "measure", "fence", "mk_polyline", "mk_polygon"].indexOf(S.tool) >= 0 && S.draft.length) return endDraft();
     if (S.tool !== "select" || !P.proj || !S.page) return;
@@ -6382,17 +6692,40 @@ function wire(){
     } else if (vertexAt(one, sp) >= 0 && (cond(one.cond) || {}).type !== "count") return toast(one.kind === "open" ? "An opening has two ends — drag them to change it" : "A circle is its centre and edge point — drag them to change it", 2600);
     if (hitItem(sp) === one) focusProps();
   });
+  st.addEventListener("wheel", e => { if (!pn.page) return; e.preventDefault(); ctxClose(); const sp = here(e); zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018)), sp[0], sp[1], pn); }, {passive: false});   // zooms the window under the cursor, worked in or not
+  st.addEventListener("pointerleave", () => { if (pn !== ACT) return; S.cursor = null; S.snap = null; S.hover = null; draw(); });
+  st.addEventListener("dragover", e => { e.preventDefault(); pn.el.drop.classList.add("over"); });
+  st.addEventListener("dragleave", () => pn.el.drop.classList.remove("over"));
+  st.addEventListener("drop", e => { e.preventDefault(); pn.el.drop.classList.remove("over"); const L = [...e.dataTransfer.files]; if (!L.length) return; activate(pn);
+    if (L.some(f => !isPdfFile(f) && isImgFile(f))) importDialog(L); else addFiles(L); });   // photos / scans among them: the import dialog (images as pages)
+  new ResizeObserver(() => { if (pn.page) { SPLIT.syncing = true; try { applyView(pn); } finally { SPLIT.syncing = false; } renderHi(false, pn); } }).observe(st);
+  const mi = pn.el.mini;
+  mi.addEventListener("pointerdown", e => { e.stopPropagation(); e.preventDefault(); if (!S.base) return; mi.setPointerCapture(e.pointerId); S.miniDrag = true; miniGo(e); });
+  mi.addEventListener("pointermove", e => { e.stopPropagation(); if (S.miniDrag) miniGo(e); });
+  mi.addEventListener("pointerup", e => { e.stopPropagation(); S.miniDrag = false; });
+  ["dblclick", "contextmenu"].forEach(t => mi.addEventListener(t, e => { e.stopPropagation(); e.preventDefault(); }));
+}
+function wire(){
+  document.addEventListener("keydown", e => {   // Ctrl+K: command palette (not the browser's search box)
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") { e.preventDefault(); e.stopPropagation(); if ($("pal") && $("pal").classList.contains("on")) return; openPalette(); }
+  }, true);
+  document.addEventListener("keydown", e => {   // Ctrl+S: save now (not the browser's "Save page as")
+    if (!((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s")) return;
+    e.preventDefault(); if (!P.proj) return;
+    const a = document.activeElement; if (a && a.closest && a.closest("#props,header") && /^(INPUT|SELECT)$/.test(a.tagName)) a.blur();   // a field being typed in is taken first
+    savePr = P.proj; flushSave().then(ok => toast(ok ? "Saved in this browser — " + P.proj.items.length + " measurement" + (P.proj.items.length === 1 ? "" : "s") + " · Export → Project + PDFs to keep a copy elsewhere" : "Not saved — see the message above", 2600));
+  }, true);
+  document.addEventListener("keydown", e => {   // Ctrl+P: plot (a window, the view, the page) — not the browser's print of this screen
+    if (!((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "p")) return;
+    e.preventDefault(); e.stopPropagation(); if (P.proj && S.page && !$("dlgBack").classList.contains("on")) plotDialog();
+  }, true);
+  $("warnbar").addEventListener("click", e => { if (e.target.closest("[data-reload]")) { clearTimeout(saveT); savePr = null; location.reload(); } });   // this tab's pending change is dropped, not written over the other's
+  window.addEventListener("blur", () => { if (S.space) { S.space = false; stage().classList.toggle("pan", S.tool === "pan"); } });   // Space released in another window must not leave pan on
   $("ctx").addEventListener("click", e => { const it = e.target.closest("[data-ci]"); if (!it || it.classList.contains("dis")) return; const fn = CTX_FN[+it.dataset.ci]; if (!(S.ctxPinned && it.dataset.ci === "0")) ctxClose(); if (fn) fn(); });
   $("ctx").addEventListener("contextmenu", e => e.preventDefault());
   document.addEventListener("pointerdown", e => { if (!S.ctxPinned && !e.target.closest("#ctx")) ctxClose(); }, true);
   window.addEventListener("blur", () => { if (!S.ctxPinned) ctxClose(); });
-  st.addEventListener("wheel", e => { if (!S.page) return; e.preventDefault(); ctxClose(); const sp = evPos(e); zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018)), sp[0], sp[1]); }, {passive: false});
-  st.addEventListener("pointerleave", () => { S.cursor = null; S.snap = null; S.hover = null; draw(); });
-  st.addEventListener("dragover", e => { e.preventDefault(); $("drop").classList.add("over"); });
-  st.addEventListener("dragleave", () => $("drop").classList.remove("over"));
-  st.addEventListener("drop", e => { e.preventDefault(); $("drop").classList.remove("over"); const L = [...e.dataTransfer.files]; if (!L.length) return;
-    if (L.some(f => !isPdfFile(f) && isImgFile(f))) importDialog(L); else addFiles(L); });   // photos / scans among them: the import dialog (images as pages)
-  new ResizeObserver(() => { if (S.page) { applyView(); renderHi(); } }).observe(st);
+  PANES.forEach(wireStage); buildStrip(PANES[0]); splitWire();
   document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.addEventListener("click", () => setTool(b.dataset.tool)));
   $("bAutoSet").onclick = () => P.proj && autoSettings();
   $("bMk").onclick = e => { e.stopPropagation(); if (P.proj && S.page) mkMenu($("bMk")); };
@@ -6439,11 +6772,6 @@ function wire(){
   $("bMini").onclick = () => { wsSet({mini: !wsPref().mini}); toast(wsPref().mini ? "Minimap on — it shows when you zoom in" : "Minimap off", 1800); };
   $("bFull").onclick = () => fullScreen();
   document.addEventListener("fullscreenchange", () => { if ($("bFull")) $("bFull").classList.toggle("on", !!document.fullscreenElement); });
-  { const mi = $("mini");
-    mi.addEventListener("pointerdown", e => { e.stopPropagation(); e.preventDefault(); if (!S.base) return; mi.setPointerCapture(e.pointerId); S.miniDrag = true; miniGo(e); });
-    mi.addEventListener("pointermove", e => { e.stopPropagation(); if (S.miniDrag) miniGo(e); });
-    mi.addEventListener("pointerup", e => { e.stopPropagation(); S.miniDrag = false; });
-    ["dblclick", "contextmenu"].forEach(t => mi.addEventListener(t, e => { e.stopPropagation(); e.preventDefault(); })); }
   $("layerList").addEventListener("change", e => {
     if (e.target.dataset.mklv) { const l = mkLayers().find(x => x.id === e.target.dataset.mklv); if (l) { mutate(() => { l.hidden = !e.target.checked; }, (e.target.checked ? "Show" : "Hide") + " layer " + l.name); renderLayers(); } return; }
     if (e.target.dataset.lid) setLayer([e.target.dataset.lid], e.target.checked); });
@@ -6542,7 +6870,7 @@ function wire(){
     if (o.dataset.dup) { const pr = await dbGet("projects", o.dataset.dup); const cp = Object.assign(JSON.parse(JSON.stringify(pr)), {id: uid("P"), name: pr.name + " (copy)", updated: new Date().toISOString()}); await dbPut("projects", cp); return showStart(); }
     if (o.dataset.del) { const pr = await dbGet("projects", o.dataset.del); const ok = await ask("Delete project", `<p>Delete <b>${esc(pr.name)}</b> with its ${pr.items.length} measurements and stored PDFs? This cannot be undone.</p>`, "Delete");
       if (!ok) return; const others = (await dbAll("projects")).filter(x => x.id !== pr.id), keep = new Set(others.flatMap(x => x.files.map(f => f.id)));
-      for (const f of pr.files) if (!keep.has(f.id)) await dbDel("pdfs", f.id); await dbDel("projects", pr.id); await mkAssetsCleanup((pr.marks || []).flatMap(mkAids)); if (P.proj && P.proj.id === pr.id) P.proj = null; showStart(); }
+      for (const f of pr.files) if (!keep.has(f.id)) await dbDel("pdfs", f.id); await dbDel("projects", pr.id); await mkAssetsCleanup((pr.marks || []).flatMap(mkAids)); { const g = SPLIT.on && PANES.find(p => p.sess.proj && p.sess.proj.id === pr.id); if (g) splitClose(g); else if (P.proj && P.proj.id === pr.id) P.proj = null; } showStart(); }
   });
   $("projectSearch").addEventListener("input", () => showStart());  $("condList").addEventListener("click", e => {
     if (e.target.id === "bFirstCond") return editCond(null);
@@ -8311,11 +8639,11 @@ function setDim(on){   // on = true/false, or a dimming level 0-90 %
   if (typeof on === "number") S.dimPct = Math.max(0, Math.min(90, on)); else if (on && !S.dimPct) S.dimPct = 50;
   S.dim = typeof on === "number" ? on > 0 : on;
   const d = S.dim ? S.dimPct / 100 : 0, c = 1 - d, b = 1 / (0.5 + 0.5 * c);
-  stage().style.setProperty("--dimf", d ? `contrast(${c.toFixed(3)}) brightness(${b.toFixed(3)})` : "none");
+  PANES.forEach(pn => pn.el.stage.style.setProperty("--dimf", d ? `contrast(${c.toFixed(3)}) brightness(${b.toFixed(3)})` : "none"));
   $("bDim").classList.toggle("on", S.dim); $("dimPct").value = S.dimPct || 50; $("dimLbl").textContent = (S.dim ? S.dimPct : 0) + "%";
   pref("zdTakeoffDim", S.dim ? String(S.dimPct) : "0"); viewMark();
 }
-function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); viewMark(); if (S.page) { renderLow(); renderHi(true); } }
+function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); viewMark(); renderAll(); }
 
 /* ------------------------------------------------------------------ AutoCAD drawings (DWG / DXF) — cad.js
    A drawing added with + PDF is read in this browser and kept as a layered vector PDF — so snapping, auto area, find, the
@@ -8327,16 +8655,16 @@ async function cadMod(){
   if (!CAD) { try { CAD = await import("./cad.js" + CADV); } catch (e) { throw new Error("the AutoCAD reader (cad.js) could not be loaded — " + (e.message || e)); } }
   return CAD;
 }
-const cadMeta = fid => { const f = P.proj && P.proj.files.find(x => x.id === fid); return f && f.cad || null; };
-const cadPage = () => { const sc = CAD && S.cadSc && S.cadSc[S.fileId]; return sc && S.pageNo === 1 ? sc.pages[0] : null; };
-const cadOn = () => !!(cadPage() && !S.cmp);
+const cadMeta = (fid, proj = P.proj) => { const f = proj && proj.files.find(x => x.id === fid); return f && f.cad || null; };
+const cadPage = (pn = ACT) => { const sc = CAD && S.cadSc && S.cadSc[pn.fileId]; return sc && pn.pageNo === 1 ? sc.pages[0] : null; };
+const cadOn = (pn = ACT) => !!(cadPage(pn) && !pn.cmp);
 /* a CAD file's scene: kept in this browser with the drawing; read again from the DWG when the reader has moved on — onto
    exactly the page it was given the first time, so the measurements stay where they are */
-function cadLoad(fid){
+function cadLoad(fid, proj = P.proj){
   S.cadSc = S.cadSc || {}; S.cadP = S.cadP || {};
   if (S.cadSc[fid] !== undefined) return Promise.resolve(S.cadSc[fid]);
   if (S.cadP[fid]) return S.cadP[fid];
-  const meta = cadMeta(fid); if (!meta) return Promise.resolve(null);
+  const meta = cadMeta(fid, proj); if (!meta) return Promise.resolve(null);
   return S.cadP[fid] = (async () => {
     const C = await cadMod(), rec = await dbGet("pdfs", fid); let sc = null;
     if (rec && rec.scene && rec.scene.ver === C.CAD_VER) sc = rec.scene;
@@ -8406,20 +8734,21 @@ async function cadUnitsCheck(key){   // the drawing's units against the room siz
   sc.doubt = {label: "1 ft = " + ev.ptPerFt.toFixed(3) + " pt", ptPerFt: ev.ptPerFt, ratio: +r.toFixed(3), rooms: ev.rooms, agree: ev.agree}; sc.verified = false; save(); refresh();
   toast("⚠ " + keyName(key) + ": the drawing's units say " + sc.text + ", but " + ev.agree + " room sizes written on it measure × " + r.toFixed(2) + " — check the scale (chip → Verify)", 9000);
 }
-function cadHidden(fid, sc){ const off = new Set(((P.proj && P.proj.layersOff) || {})[fid] || []), h = new Uint8Array(sc.layers.length); sc.layers.forEach((l, i) => { if (off.has(l.name)) h[i] = 1; }); return h; }
+function cadHidden(fid, sc, proj = P.proj){ const off = new Set(((proj && proj.layersOff) || {})[fid] || []), h = new Uint8Array(sc.layers.length); sc.layers.forEach((l, i) => { if (off.has(l.name)) h[i] = 1; }); return h; }
 
 /* the background (black as AutoCAD's model space, white, or black for CAD drawings only) and monochrome */
-const darkNow = () => S.bg === "black" || (S.bg !== "white" && !!cadMeta(S.fileId));
-function viewOpts(dpr, fast){ const sc = S.cadSc && S.cadSc[S.fileId]; return {dark: darkNow(), mono: !!S.mono, thin: !!S.thin, hidden: sc ? cadHidden(S.fileId, sc) : null, dpr, fast}; }
+const darkNow = (fid = S.fileId, proj = P.proj) => S.bg === "black" || (S.bg !== "white" && !!cadMeta(fid, proj));
+function viewOpts(dpr, fast, pn = ACT){ const fid = pn.fileId, proj = pn.sess.proj, sc = S.cadSc && S.cadSc[fid]; return {dark: darkNow(fid, proj), mono: !!S.mono, thin: !!S.thin, hidden: sc ? cadHidden(fid, sc, proj) : null, dpr, fast}; }
 function bgMark(){
   ["auto", "black", "white"].forEach(v => { const b = $("bBg_" + v); if (b) b.classList.toggle("on", (S.bg || "auto") === v); });
   const m = $("bMono"); if (m) m.classList.toggle("on", !!S.mono);
   const bw = $("bPdfBw"); if (bw) bw.classList.toggle("on", S.bg === "white" && !!S.mono);
-  stage().classList.toggle("dark", darkNow());
+  PANES.forEach(pn => pn.el.stage.classList.toggle("dark", darkNow(pn.fileId, pn.sess.proj)));
 }
-function setBg(v){ S.bg = v; pref("zdTakeoffBg", v); bgMark(); if (S.page) { renderLow(); renderHi(true); } renderLayers(); }
-function setMono(on){ S.mono = !!on; pref("zdTakeoffMono", on ? "1" : ""); bgMark(); if (S.page) { renderLow(); renderHi(true); } }
-function setPdfBw(on){ S.bg = on ? "white" : (pref("zdTakeoffBg") || "auto"); S.mono = !!on; pref("zdTakeoffBg", S.bg); pref("zdTakeoffMono", on ? "1" : ""); bgMark(); if (S.page) { renderLow(); renderHi(true); } renderLayers(); }
+function renderAll(){ PANES.forEach(pn => { if (pn.page) { renderLow(pn); renderHi(true, pn); } }); }   // every window, after a change of how drawings are drawn
+function setBg(v){ S.bg = v; pref("zdTakeoffBg", v); bgMark(); renderAll(); renderLayers(); }
+function setMono(on){ S.mono = !!on; pref("zdTakeoffMono", on ? "1" : ""); bgMark(); renderAll(); }
+function setPdfBw(on){ S.bg = on ? "white" : (pref("zdTakeoffBg") || "auto"); S.mono = !!on; pref("zdTakeoffBg", S.bg); pref("zdTakeoffMono", on ? "1" : ""); bgMark(); renderAll(); renderLayers(); }
 /* a PDF drawn dark (white paper black, black ink white, colours kept — a dark one lifted) or in one ink: the colours pdf.js sets on
    this canvas are changed as it sets them */
 const FS = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "fillStyle"), SS = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "strokeStyle");
@@ -8448,72 +8777,71 @@ function inkCtx(ctx, dark, mono){
 /* the screen of a CAD drawing, drawn for the view of the moment. A light view (one that draws within a frame) is drawn whole on every
    zoom / pan step. A heavy one — a big drawing seen whole — shows the whole-page picture while it moves, and once it settles its own
    lines, drawn a slice at a time in the background and put on screen when done, as AutoCAD regenerates */
-let cadRaf = 0, cadIdleT = null;
-function freeCadBitmap(){
-  S.cadGen = (S.cadGen || 0) + 1;
-  S.cadBmpBusy = 0;
-  if (S.cadBmp && S.cadBmp.cv) S.cadBmp.cv.width = 0;
-  S.cadBmp = null;
+function freeCadBitmap(pn = ACT){
+  pn.cadGen = (pn.cadGen || 0) + 1;
+  pn.cadBmpBusy = 0;
+  if (pn.cadBmp && pn.cadBmp.cv) pn.cadBmp.cv.width = 0;
+  pn.cadBmp = null;
 }
 const CAD_FRAME = 24;   // ms
 const cadMs = cost => cost * (S.cadRate || 1.5e-4);   // ms per path step, measured on this machine as light views are drawn
-const cadLook = () => [darkNow(), !!S.mono, !!S.thin].join("|");
-const cadKey = () => cadLook() + "|" + JSON.stringify(((P.proj && P.proj.layersOff) || {})[S.fileId] || []);   // what the whole-page picture was drawn with
-function cadLowPaint(src, pg){   // the picture under the screen (shown for a moment when a big zoom step outruns the screen)
-  const lc = $("low"), sc = Math.min(3, 3000 / Math.max(S.base.width, S.base.height)); lc.width = Math.ceil(S.base.width * sc); lc.height = Math.ceil(S.base.height * sc);
-  const x = lc.getContext("2d"); if (src) x.drawImage(src, 0, 0, lc.width, lc.height); else CAD.cadDraw(x, pg, {s: sc, tx: 0, ty: 0, W: lc.width, H: lc.height}, viewOpts(1, false));
-  S.low = {s: sc}; const v = S.view; lc.style.transform = `translate(${v.tx}px,${v.ty}px) scale(${v.s / sc})`;
+const cadLook = pn => [darkNow(pn.fileId, pn.sess.proj), !!S.mono, !!S.thin].join("|");
+const cadKey = pn => cadLook(pn) + "|" + JSON.stringify(((pn.sess.proj && pn.sess.proj.layersOff) || {})[pn.fileId] || []);   // what the whole-page picture was drawn with
+function cadLowPaint(src, pg, pn){   // the picture under the screen (shown for a moment when a big zoom step outruns the screen)
+  const lc = pn.el.low, sc = Math.min(3, 3000 / Math.max(pn.base.width, pn.base.height)); lc.width = Math.ceil(pn.base.width * sc); lc.height = Math.ceil(pn.base.height * sc);
+  const x = lc.getContext("2d"); if (src) x.drawImage(src, 0, 0, lc.width, lc.height); else CAD.cadDraw(x, pg, {s: sc, tx: 0, ty: 0, W: lc.width, H: lc.height}, viewOpts(1, false, pn));
+  pn.low = {s: sc}; const v = pn.view; lc.style.transform = `translate(${v.tx}px,${v.ty}px) scale(${v.s / sc})`;
 }
-function cadLow(){
-  const pg = cadPage(); if (!pg) return;
-  const sc = Math.min(3, 3000 / Math.max(S.base.width, S.base.height));
-  if (cadMs(CAD.cadCost(pg, {s: sc, tx: 0, ty: 0, W: Math.ceil(S.base.width * sc), H: Math.ceil(S.base.height * sc)})) > CAD_FRAME) return void cadBitmap();
-  S.cadGen = (S.cadGen || 0) + 1; S.cadBmpBusy = 0; cadLowPaint(null, pg);   // light: drawn at once
+function cadLow(pn = ACT){
+  const pg = cadPage(pn); if (!pg) return;
+  const sc = Math.min(3, 3000 / Math.max(pn.base.width, pn.base.height));
+  if (cadMs(CAD.cadCost(pg, {s: sc, tx: 0, ty: 0, W: Math.ceil(pn.base.width * sc), H: Math.ceil(pn.base.height * sc)})) > CAD_FRAME) return void cadBitmap(pn);
+  pn.cadGen = (pn.cadGen || 0) + 1; pn.cadBmpBusy = 0; cadLowPaint(null, pg, pn);   // light: drawn at once
 }
 /* a heavy drawing's whole page, drawn once a slice at a time between frames, as a picture sharp enough for every view up to ~4096 px across */
-async function cadBitmap(){
-  const pg = cadPage(), page = S.page; if (!pg) return;
-  const key = cadKey(), look = cadLook(), gen = S.cadGen = (S.cadGen || 0) + 1, lim = (navigator.deviceMemory || 8) >= 4 ? 4096 : 2560, s2 = Math.min(8, lim / Math.max(S.base.width, S.base.height));
-  const bm = document.createElement("canvas"); bm.width = Math.max(1, Math.ceil(S.base.width * s2)); bm.height = Math.max(1, Math.ceil(S.base.height * s2));
-  S.cadBmpBusy = gen; let done = false;
-  try { done = await CAD.cadDrawAsync(bm.getContext("2d"), pg, {s: s2, tx: 0, ty: 0, W: bm.width, H: bm.height}, viewOpts(1, false), () => gen !== S.cadGen || S.page !== page); } catch (e) { console.warn(e); }
-  if (S.cadBmpBusy === gen) S.cadBmpBusy = 0;
-  if (!done || gen !== S.cadGen || S.page !== page) { bm.width = 0; return; }
-  if (S.cadBmp && S.cadBmp.cv !== bm) S.cadBmp.cv.width = 0;
-  S.cadBmp = {cv: bm, s: s2, page, key, look}; cadLowPaint(bm, pg);
-  if (!S.cadExOk && S.cadExBusy !== S.cadEx) cadHi(true);   // the screen still shows a quick sketch: the picture now, the lines when it settles
+async function cadBitmap(pn = ACT){
+  const pg = cadPage(pn), page = pn.page; if (!pg) return;
+  const key = cadKey(pn), look = cadLook(pn), gen = pn.cadGen = (pn.cadGen || 0) + 1, lim = (navigator.deviceMemory || 8) >= 4 ? 4096 : 2560, s2 = Math.min(8, lim / Math.max(pn.base.width, pn.base.height));
+  const bm = document.createElement("canvas"); bm.width = Math.max(1, Math.ceil(pn.base.width * s2)); bm.height = Math.max(1, Math.ceil(pn.base.height * s2));
+  pn.cadBmpBusy = gen; let done = false;
+  try { done = await CAD.cadDrawAsync(bm.getContext("2d"), pg, {s: s2, tx: 0, ty: 0, W: bm.width, H: bm.height}, viewOpts(1, false, pn), () => gen !== pn.cadGen || pn.page !== page); } catch (e) { console.warn(e); }
+  if (pn.cadBmpBusy === gen) pn.cadBmpBusy = 0;
+  if (!done || gen !== pn.cadGen || pn.page !== page) { bm.width = 0; return; }
+  if (pn.cadBmp && pn.cadBmp.cv !== bm) pn.cadBmp.cv.width = 0;
+  pn.cadBmp = {cv: bm, s: s2, page, key, look}; cadLowPaint(bm, pg, pn);
+  if (!pn.cadExOk && pn.cadExBusy !== pn.cadEx) cadHi(true, pn);   // the screen still shows a quick sketch: the picture now, the lines when it settles
 }
-function cadHi(full){
-  if (full) { clearTimeout(cadIdleT); S.cadFull = true; }
-  if (cadRaf) return;
-  cadRaf = requestAnimationFrame(() => {
-    cadRaf = 0; const pg = cadPage(); if (!pg || !S.page || S.cmp) return;
-    const st = stage(), dpr = Math.min(window.devicePixelRatio || 1, 2), c = $("hi"), v = Object.assign({}, S.view), w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
+function cadHi(full, pn = ACT){
+  if (full) { clearTimeout(pn.cadIdleT); pn.cadFull = true; }
+  if (pn.cadRaf) return;
+  pn.cadRaf = requestAnimationFrame(() => {
+    pn.cadRaf = 0; const pg = cadPage(pn); if (!pg || !pn.page || pn.cmp) return;
+    const st = pn.el.stage, dpr = Math.min(window.devicePixelRatio || 1, 2), c = pn.el.hi, v = Object.assign({}, pn.view), w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; } c.style.width = st.clientWidth + "px"; c.style.height = st.clientHeight + "px";
-    const full2 = !!S.cadFull; S.cadFull = false; const ex = S.cadEx = (S.cadEx || 0) + 1;   // a new frame: lines still being drawn for the last view are not wanted
+    const full2 = !!pn.cadFull; pn.cadFull = false; const ex = pn.cadEx = (pn.cadEx || 0) + 1;   // a new frame: lines still being drawn for the last view are not wanted
     const x = c.getContext("2d"), dv = {s: v.s * dpr, tx: v.tx * dpr, ty: v.ty * dpr, W: w, H: h}, cost = CAD.cadCost(pg, dv), heavy = cadMs(cost) > CAD_FRAME;
-    const bm = S.cadBmp, key = cadKey(), mine = !!bm && bm.page === S.page;
-    if (mine && bm.key !== key && !S.cadBmpBusy) cadBitmap();   // the picture is out of date (a layer switched off…): made again
-    const pic = heavy && mine && dv.s <= bm.s * 1.02 && (bm.key === key || (!!S.cadBmpBusy && bm.look === cadLook()));   // (while it is made again, the last one)
-    S.cadExOk = !heavy; S.cadExBusy = 0;
+    const bm = pn.cadBmp, key = cadKey(pn), mine = !!bm && bm.page === pn.page;
+    if (mine && bm.key !== key && !pn.cadBmpBusy) cadBitmap(pn);   // the picture is out of date (a layer switched off…): made again
+    const pic = heavy && mine && dv.s <= bm.s * 1.02 && (bm.key === key || (!!pn.cadBmpBusy && bm.look === cadLook(pn)));   // (while it is made again, the last one)
+    pn.cadExOk = !heavy; pn.cadExBusy = 0;
     if (pic) {   // as sharp as the screen here: the picture, at once
-      x.setTransform(1, 0, 0, 1, 0, 0); x.fillStyle = darkNow() ? "#000000" : "#ffffff"; x.fillRect(0, 0, w, h); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high";
+      x.setTransform(1, 0, 0, 1, 0, 0); x.fillStyle = darkNow(pn.fileId, pn.sess.proj) ? "#000000" : "#ffffff"; x.fillRect(0, 0, w, h); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high";
       const k = dv.s / bm.s; x.drawImage(bm.cv, dv.tx, dv.ty, bm.cv.width * k, bm.cv.height * k);
     } else {   // the lines (a heavy view without a picture yet: fewer small things)
       const t0 = performance.now();
-      try { CAD.cadDraw(x, pg, dv, viewOpts(dpr, heavy)); } catch (e) { console.warn(e); }
+      try { CAD.cadDraw(x, pg, dv, viewOpts(dpr, heavy, pn)); } catch (e) { console.warn(e); }
       if (!heavy && cost > 20000) { const r = (performance.now() - t0) / cost; S.cadRate = S.cadRate ? 0.7 * S.cadRate + 0.3 * r : r; }
     }
-    if (heavy && full2) cadExact(pg, dv, dpr, ex);
-    S.rendered = Object.assign({dpr}, v); c.style.transform = "none"; c.style.display = "block";
-    if (!full2) { clearTimeout(cadIdleT); cadIdleT = setTimeout(() => cadHi(true), 180); }
+    if (heavy && full2) cadExact(pg, dv, dpr, ex, pn);
+    pn.rendered = Object.assign({dpr}, v); c.style.transform = "none"; c.style.display = "block";
+    if (!full2) { clearTimeout(pn.cadIdleT); pn.cadIdleT = setTimeout(() => cadHi(true, pn), 180); }
   });
 }
-async function cadExact(pg, dv, dpr, ex){   // a settled heavy view's own lines, a slice at a time; on screen if the view is still this one
-  const cv = document.createElement("canvas"), key = cadKey(), stale = () => ex !== S.cadEx || cadPage() !== pg || cadKey() !== key; cv.width = dv.W; cv.height = dv.H; S.cadExBusy = ex;
-  let ok = false; try { ok = await CAD.cadDrawAsync(cv.getContext("2d"), pg, dv, viewOpts(dpr, false), stale); } catch (e) { console.warn(e); }
-  if (S.cadExBusy === ex) S.cadExBusy = 0;
-  const c = $("hi"); if (ok && !stale() && c.width === dv.W && c.height === dv.H) { c.getContext("2d").drawImage(cv, 0, 0); S.cadExOk = true; }
+async function cadExact(pg, dv, dpr, ex, pn = ACT){   // a settled heavy view's own lines, a slice at a time; on screen if the view is still this one
+  const cv = document.createElement("canvas"), key = cadKey(pn), stale = () => ex !== pn.cadEx || cadPage(pn) !== pg || cadKey(pn) !== key; cv.width = dv.W; cv.height = dv.H; pn.cadExBusy = ex;
+  let ok = false; try { ok = await CAD.cadDrawAsync(cv.getContext("2d"), pg, dv, viewOpts(dpr, false, pn), stale); } catch (e) { console.warn(e); }
+  if (pn.cadExBusy === ex) pn.cadExBusy = 0;
+  const c = pn.el.hi; if (ok && !stale() && c.width === dv.W && c.height === dv.H) { c.getContext("2d").drawImage(cv, 0, 0); pn.cadExOk = true; }
   cv.width = 0;
 }
 function cadIsolateId(id){   // AutoCAD's LAYISO: only this layer on — again: every layer back on
@@ -8923,7 +9251,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
