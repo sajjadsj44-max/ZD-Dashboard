@@ -60,7 +60,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   const vis = sel => page.isVisible(sel);
   const tab = () => T(() => (document.querySelector("#tools .rtab.on") || {dataset: {}}).dataset.rtab);
   ok(await tab() === "takeoff" && await vis('[data-tool="draw"]') && !(await vis('[data-mod="cw"]')), "the Takeoff tab is open first: its tools show, Modify's do not");
-  ok((await page.locator("#tools .rtab").count()) === 7 && await vis('[data-tool="select"]') && await vis('[data-tool="pan"]'), "seven tabs (Takeoff, Modify, Markup, Review, Costing, Export, View); Select, Match, Lasso and Pan are always on show");
+  ok((await page.locator("#tools .rtab").count()) === 8 && await vis('[data-tool="select"]') && await vis('[data-tool="pan"]'), "eight tabs (Takeoff, Modify, Markup, Review, Costing, Export, My tools, View); Select, Match, Lasso and Pan are always on show");
   ok((await page.locator("#tools svg.ic").count()) > 40 && !(await T(() => [...document.querySelectorAll("#tools .tool")].some(b => /[\u2190-\u2BFF\u{1F300}-\u{1FAFF}]/u.test(b.textContent)))), "tool icons are SVG (no Unicode symbols on the toolbar)");
   await page.click('[data-rtab="modify"]');
   ok(await tab() === "modify" && await vis('[data-mod="cw"]') && !(await vis('[data-tool="draw"]')), "Modify tab shows rotate / mirror / join… and hides the Takeoff tools");

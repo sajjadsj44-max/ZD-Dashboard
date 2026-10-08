@@ -3118,7 +3118,7 @@ function itemDetailHtml(it, c, k){
       c.h ? ["Height H", f3(+c.h) + " ft"] : null, c.t ? ["Thickness T", f3(+c.t) + " ft"] : null, ["BOQ code", c.boq || "not set", c.boq ? "" : "warn"], rateLine(c),
       ["Scale", sc ? (sc.verified ? "verified" : sc.how === "inherited" ? "inherited — not checked" : "not verified") : "not set", sc && sc.verified ? "ok" : "warn"],
       it.locked ? ["Locked", "yes"] : null, it.ai ? ["Made by", "AI assistant"] : null, it.copied ? ["Copied from", keyName(it.copied.from)] : null, it.qa === "checked" ? ["Checked", (it.qaBy || "") + (it.qaAt ? ", " + dmy(it.qaAt) : "")] : null])}
-    <div class="psec">Edit</div>`;
+    `;
 }
 function renderProps(){
   $("bDel").disabled = !(S.sel || S.selMark || S.multi.size);
@@ -3139,7 +3139,7 @@ function renderProps(){
   const c = cond(it.cond), k = itemScale(it), poly = itemPoly(it);
   const meas = !k ? "scale not set" : it.shape === "circle" ? "dia " + f3(2 * dist(it.pts[0], it.pts[1]) / k) + " ft · " + (c.type === "area" ? fq(polyArea(poly) / k / k) + " Sft" : f3(polyLen(poly, true) / k) + " ft round")
     : c.type === "area" ? fq(polyArea(it.pts) / k / k) + " Sft measured · perimeter " + f3(polyLen(it.pts, true) / k) + " ft" : c.type === "linear" ? f3(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k) + " ft measured" : it.pts.length + " points";
-  el.innerHTML = itemDetailHtml(it, c, k) + `<h4>${esc(c.name)} — ${esc(kindName(it, c))} <span style="font-weight:400;color:var(--muted);font-size:11px">${esc(meas)}</span></h4>
+  el.innerHTML = '<div class="pdet">' + itemDetailHtml(it, c, k) + '</div><div class="pedit">' + `<h4>${esc(c.name)} — ${esc(kindName(it, c))} <span style="font-weight:400;color:var(--muted);font-size:11px">${esc(meas)}</span></h4>
     <div class="row"><div class="fg" style="flex:2"><label>Label</label><input type="text" data-prop="label" value="${esc(it.label)}" placeholder="e.g. Bed room 1"></div>
     <div class="fg"><label>Nos (×)</label><input type="number" min="1" step="1" data-prop="nos" value="${+it.nos || 1}"></div>
     ${it.kind === "open" ? `<div class="fg"><label>Width ft</label><input type="text" data-prop="ow" value="${it.ow ? f3(it.ow) : ""}" placeholder="${k ? f3(dist(it.pts[0], it.pts[1]) / k) : ""}"></div><div class="fg"><label>Height ft</label><input type="text" data-prop="oh" value="${f3(+it.oh || 0)}"></div>` : ""}
@@ -3155,7 +3155,7 @@ function renderProps(){
     <div class="row" style="margin-top:6px">${LOC_KEYS.map(lk => { const sh = (P.proj.sheets || {})[keyOf(it.file, it.page)] || {}; return `<div class="fg"><label>${LOC_NAMES[lk]}</label><input type="text" data-prop="${lk}" list="dlp_${lk}" value="${esc(it[lk] || "")}" placeholder="${esc(sh[lk] || (lk === "room" ? it.label || "" : ""))}"><datalist id="dlp_${lk}">${locValues(lk).map(x => `<option value="${esc(x)}">`).join("")}</datalist></div>`; }).join("")}</div>
     <div class="row" style="margin-top:6px"><div class="fg"><label>QA status</label><select data-prop="qa">${Object.entries(QA_NAMES).map(([q, n]) => `<option value="${q}"${(it.qa || "") === q ? " selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="fg" style="flex:2"><label>QA note</label><input type="text" data-prop="qaNote" value="${esc(it.qaNote || "")}" placeholder="e.g. confirm against section B-B"></div></div>
-    <div class="small" style="margin-top:4px">${it.qa === "checked" ? "Checked by " + esc(it.qaBy) + ", " + esc(dmy(it.qaAt)) : "Not checked"}${it.ai ? " · AI-generated" : ""}${it.copied ? " · copied from " + esc(keyName(it.copied.from)) + " (" + esc(it.copied.how) + ")" : ""}</div>`;
+    <div class="small" style="margin-top:4px">${it.qa === "checked" ? "Checked by " + esc(it.qaBy) + ", " + esc(dmy(it.qaAt)) : "Not checked"}${it.ai ? " · AI-generated" : ""}${it.copied ? " · copied from " + esc(keyName(it.copied.from)) + " (" + esc(it.copied.how) + ")" : ""}</div></div>`;
   el.classList.add("on");
 }
 
@@ -5629,7 +5629,7 @@ function wsMenu(x, y){
     {t: "Minimap", on: !!W.mini, fn: () => wsSet({mini: !W.mini})},
     {t: "Full screen", on: !!document.fullscreenElement, fn: fullScreen},
     {t: "Page thumbnails", sub: [["s", "Small"], ["m", "Medium"], ["l", "Large"]].map(([z, t]) => ({t, on: sz === z, fn: () => { S.pgSz = z; pref("zdTakeoffPgSz", z); renderPages(); }}))}, {sep: 1},
-    {t: "Reset panel sizes", fn: () => { S.lw = 300; S.rw = 460; S.lHide = false; S.rHide = false; setPanels(); }},
+    {t: "Reset panel sizes", fn: () => { S.lw = 260; S.rw = 360; S.lHide = false; S.rHide = false; setPanels(); }},
     {t: "All commands…", k: "Ctrl+K", fn: openPalette}], x, y);
 }
 function fullScreen(){ const d = document, el = d.documentElement; if (d.fullscreenElement) { d.exitFullscreen().catch(() => {}); return; } if (!el.requestFullscreen) return toast("Full screen is not available here — press F11", 3000); el.requestFullscreen().catch(() => toast("Full screen is not available here — press F11", 3000)); }
@@ -5675,12 +5675,61 @@ function snapPopToggle(on){
   }
   pop.classList.toggle("on", show);
 }
+/* ------------------------------------------------------------------ panel and layout settings
+   What each panel shows, the ribbon and the bars around the drawing: all switchable, with ready-made layouts (Wide drawing, Balanced,
+   Review, Drawing only). Kept in this browser; nothing is deleted — a hidden part comes back with Reset or a tick. */
+const PC_KEY = "zdTakeoffPc";
+const PC_ITEMS = {
+  l: [["l-tab-pages", "Pages tab"], ["l-tab-lay", "Layers tab"], ["l-filter", "Search and Length / Area / Count tabs"], ["l-strip", "Page thumbnail strip"], ["l-props", "Properties box"], ["l-pdet", "— details card in Properties"], ["l-pedit", "— edit fields in Properties"], ["l-keys", "Keyboard shortcuts list"]],
+  r: [["r-tab-bill", "Bill tab"], ["r-search", "Search and sort bar"], ["r-chips", "Summary chips (measured / checked / pending …)"], ["r-info", "Measurement count"], ["r-foot", "Prev / Next / Check this page footer"]],
+  u: [["ui-tabs", "Ribbon tabs row"], ["ui-ribbon", "Ribbon tools (collapsed = more drawing room)"], ["ui-cbar", "Drawing bar (page, zoom, View, Split, scale)"], ["ui-agent", "Takeoff-agent bar at the bottom"], ["ui-status", "Status bar"]]
+};
+const PC_PRESETS = {
+  wide: {n: "Wide drawing", d: "slim panels, compact ribbon, no agent bar", off: ["l-strip", "l-keys", "r-info", "ui-agent"], compact: true, lw: 250, rw: 340, lHide: false, rHide: false},
+  balanced: {n: "Balanced", d: "everything on show", off: [], compact: true, lw: 290, rw: 400, lHide: false, rHide: false},
+  review: {n: "Review", d: "wide sheet to check measurements", off: ["l-strip", "l-keys", "ui-agent"], compact: true, lw: 250, rw: 540, lHide: false, rHide: false},
+  focus: {n: "Drawing only", d: "both panels hidden", off: ["ui-agent", "ui-status"], compact: true, lw: 280, rw: 390, lHide: true, rHide: true}
+};
+function pcPref(){ let o = null; try { o = JSON.parse(pref(PC_KEY) || "null"); } catch (e) { o = null; } return Object.assign({off: ["l-keys", "r-info", "l-strip"], compact: true}, o && typeof o === "object" ? o : {}); }
+function pcApply(){
+  const o = pcPref(), off = new Set(o.off || []), B = document.body;
+  Object.values(PC_ITEMS).flat().forEach(([k]) => B.classList.toggle("pc-" + k + "-off", off.has(k)));
+  B.classList.toggle("pc-compact", !!o.compact);
+  const hid = id => !!$(id) && getComputedStyle($(id)).display === "none";
+  if ((S.leftTab === "pages" && hid("tPages")) || (S.leftTab === "lay" && hid("tLay"))) $("tCond").click();
+  if (S.billView && hid("vBill")) $("vSheet").click();
+}
+function pcSave(o){ pref(PC_KEY, JSON.stringify(o)); pcApply(); if (S.page) setTimeout(() => { applyView(); renderHi(); }, 60); }
+async function panelDialog(side){
+  const o = pcPref(), off = new Set(o.off || []);
+  const cb = ([k, t]) => `<label class="pk"><input type="checkbox" data-pc="${k}"${off.has(k) ? "" : " checked"}> ${esc(t)}</label>`;
+  const body = `<div class="pset"><div class="presets">${Object.entries(PC_PRESETS).map(([k, p]) => `<button class="btn" data-pcp="${k}"><b>${esc(p.n)}</b><small>${esc(p.d)}</small></button>`).join("")}</div>
+    <div class="pcols"><div><h4>Left panel${side === "l" ? " ◂" : ""}</h4><label class="pk"><input type="checkbox" id="pcLhide"${S.lHide ? "" : " checked"}> Show the left panel</label>${PC_ITEMS.l.map(cb).join("")}<div class="xrow"><label>Width</label><input type="number" id="pcLw" min="160" max="520" step="10" value="${S.lw}"> px</div></div>
+    <div><h4>Right panel${side === "r" ? " ◂" : ""}</h4><label class="pk"><input type="checkbox" id="pcRhide"${S.rHide ? "" : " checked"}> Show the right panel</label>${PC_ITEMS.r.map(cb).join("")}<div class="xrow"><label>Width</label><input type="number" id="pcRw" min="260" max="820" step="10" value="${S.rw}"> px</div></div></div>
+    <h4>Workspace</h4><div class="pcols"><div>${PC_ITEMS.u.map(cb).join("")}</div><div><label class="pk"><input type="checkbox" id="pcCompact"${o.compact ? " checked" : ""}> Compact ribbon (half the height)</label><label class="pk"><input type="checkbox" id="pcIcons"${wsPref().tb === "icons" ? " checked" : ""}> Icons only (no labels)</label><span class="small">Drag the edge of a panel to resize it. Ribbon tools: use <b>Customize</b> in the ribbon.</span></div></div></div>`;
+  const pr = ask("Panel & layout settings", body, "Apply", () => ({off: [...document.querySelectorAll("#dlgB [data-pc]")].filter(i => !i.checked).map(i => i.dataset.pc), compact: $("pcCompact").checked, icons: $("pcIcons").checked,
+    lw: Math.max(160, Math.min(520, +$("pcLw").value || 280)), rw: Math.max(260, Math.min(820, +$("pcRw").value || 390)), lHide: !$("pcLhide").checked, rHide: !$("pcRhide").checked}));
+  document.querySelectorAll("#dlgB [data-pcp]").forEach(b => b.addEventListener("click", () => { const p = PC_PRESETS[b.dataset.pcp];
+    document.querySelectorAll("#dlgB [data-pc]").forEach(i => { i.checked = !p.off.includes(i.dataset.pc); }); $("pcCompact").checked = p.compact; $("pcLw").value = p.lw; $("pcRw").value = p.rw; $("pcLhide").checked = !p.lHide; $("pcRhide").checked = !p.rHide; }));
+  const r = await pr; if (!r) return;
+  S.lw = r.lw; S.rw = r.rw; S.lHide = r.lHide; S.rHide = r.rHide; wsSet({tb: r.icons ? "icons" : "full"}); pcSave({off: r.off, compact: r.compact}); setPanels();
+  toast("Layout updated — ⚙ in either panel opens these settings again", 2600);
+}
+
 /* Customize toolbar: which ribbon tabs and tools are shown (kept in this browser); nothing is deleted — Reset brings everything back */
 const TB_KEY = "zdTakeoffTb";
 const tbKey = b => b.dataset.tool || b.dataset.mod || b.dataset.rv || b.dataset.px || b.dataset.fn || b.id || "";
 const tbName = b => ((b.querySelector(".tl") || {}).textContent || b.title || tbKey(b)).trim().split(" — ")[0].split("(")[0].trim();
 function tbPref(){ let o = null; try { o = JSON.parse(pref(TB_KEY) || "null"); } catch (e) { o = null; } return o && typeof o === "object" ? o : {}; }
-const tbGroups = () => [...document.querySelectorAll("#tools .rpanel[data-rp]")].flatMap(pn => [...pn.querySelectorAll(".rg")].map((g, i) => ({id: pn.dataset.rp + "/" + i, panel: pn.dataset.rp, g, box: g.querySelector(".rgb"), label: (g.querySelector(".rgl") || {}).textContent || ""})));
+const tbAll = () => [...document.querySelectorAll('#tools .rpanel[data-rp]:not([data-rp="mine"]) .tool')].map(b => ({k: b.closest("[data-rp]").dataset.rp + "/" + tbKey(b), b}));
+function mineBuild(){
+  const box = $("mineBox"), L = tbPref().mine || [], all = tbAll(); box.innerHTML = "";
+  L.forEach(k => { const src = all.find(x => x.k === k); if (!src) return; const c = document.createElement("button"); c.className = "tool"; c.dataset.mine = k; c.title = src.b.title; c.innerHTML = src.b.innerHTML; c.__src = src.b;
+    c.addEventListener("click", () => { src.b.click(); setTimeout(syncMine, 60); }); box.appendChild(c); });
+  $("mineHint").style.display = box.children.length ? "none" : "";
+}
+function syncMine(){ document.querySelectorAll("#mineBox [data-mine]").forEach(c => { c.classList.toggle("on", !!c.__src && c.__src.classList.contains("on")); }); }
+const tbGroups = () => [...document.querySelectorAll('#tools .rpanel[data-rp]:not([data-rp="mine"])')].flatMap(pn => [...pn.querySelectorAll(".rg")].map((g, i) => ({id: pn.dataset.rp + "/" + i, panel: pn.dataset.rp, g, box: g.querySelector(".rgb"), label: (g.querySelector(".rgl") || {}).textContent || ""})));
 function tbApply(){
   const o = tbPref(), off = new Set(o.off || []), tabsOff = new Set(o.tabs || []), ord = o.order || {};
   tbGroups().forEach(G => {   // original order remembered once, so Reset can put it back; then the saved order is applied inside each group
@@ -5690,39 +5739,48 @@ function tbApply(){
   });
   document.querySelectorAll("#tools .rrow .tool").forEach(b => { const pn = b.closest("[data-rp]"); b.style.display = pn && off.has(pn.dataset.rp + "/" + tbKey(b)) ? "none" : ""; });
   document.querySelectorAll("#tools .rtab").forEach(b => { b.style.display = tabsOff.has(b.dataset.rtab) ? "none" : ""; });
-  document.querySelectorAll("#tools .rg").forEach(g => { const vis = [...g.querySelectorAll(".tool")].some(b => b.style.display !== "none"); g.style.display = vis ? "" : "none"; });
+  mineBuild();
+  document.querySelectorAll("#tools .rg:not(#mineHint)").forEach(g => { const vis = [...g.querySelectorAll(".tool")].some(b => b.style.display !== "none"); g.style.display = vis ? "" : "none"; });
   const cur = document.querySelector("#tools .rtab.on"); if (cur && cur.style.display === "none") { const f = [...document.querySelectorAll("#tools .rtab")].find(b => b.style.display !== "none"); if (f) ribShow(f.dataset.rtab); }
 }
 async function tbDialog(){
   const o = tbPref(), off = new Set(o.off || []), tabsOff = new Set(o.tabs || []), W = wsPref();
   const tabs = [...document.querySelectorAll("#tools .rtab")], GR = tbGroups();
+  const mineRow = k => { const x = tbAll().find(y => y.k === k); return x ? `<div class="tbrow" data-mk="${esc(k)}"><span style="flex:1;padding-left:2px">${esc(tbName(x.b))} <span class="small">(${esc(k.split("/")[0])})</span></span><button class="btn sm" data-tbmv="-1">&#9650;</button><button class="btn sm" data-tbmv="1">&#9660;</button><button class="btn sm dng" data-tbrm="1" title="Take out of My tools">&#10005;</button></div>` : ""; };
   const row = (G, b) => { const k = G.panel + "/" + tbKey(b); return `<div class="tbrow" data-tbrow="${esc(k)}"><label class="pk"><input type="checkbox" data-tbk="${esc(k)}"${off.has(k) ? "" : " checked"}> ${esc(tbName(b))}</label><button class="btn sm" data-tbmv="-1" title="Move earlier">&#9650;</button><button class="btn sm" data-tbmv="1" title="Move later">&#9660;</button></div>`; };
   const body = `<p class="small">Tick what you want on the toolbar and use ▲ ▼ to change the order inside a group. Nothing is deleted — the shortcuts and Ctrl+K still reach every tool.</p>
     <label class="pk"><input type="checkbox" id="tbIcons"${W.tb === "icons" ? " checked" : ""}> Icons only (no labels)</label>
-    <div id="tbList" style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin-top:6px">` +
+    <div id="tbList" style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin-top:6px"><div class="tbmine"><b style="color:var(--navy)">&#9733; My tools</b> <span class="small">— add any tool from any tab to your own tab; ✕ takes it out again</span><div id="tbMine">${(o.mine || []).map(k => mineRow(k)).join("")}</div>
+      <select id="tbAdd" style="margin:6px 0 2px 22px"><option value="">+ Add a tool…</option>${tbAll().map(x => `<option value="${esc(x.k)}">${esc(x.k.split("/")[0])} › ${esc(tbName(x.b))}</option>`).join("")}</select></div>` +
     tabs.map(t => `<div style="margin:8px 0"><label class="pk" style="font-weight:700!important;color:var(--navy)!important"><input type="checkbox" data-tbtab="${t.dataset.rtab}"${tabsOff.has(t.dataset.rtab) ? "" : " checked"}> ${esc(t.textContent)} tab</label>` +
       GR.filter(G => G.panel === t.dataset.rtab).map(G => `<div class="tbgrp" data-tbg="${G.id}"><div class="small" style="margin:4px 0 0 22px">${esc(G.label)}</div>${[...G.box.children].map(b => row(G, b)).join("")}</div>`).join("") + "</div>").join("") + `</div>
-    <div class="xrow"><button class="btn sm" id="tbReset">Reset — show everything, original order</button></div>`;
+    <div class="xrow"><button class="btn sm" id="tbReset">Reset — show everything, original order, no My tools</button></div>`;
   const pr = ask("Customize toolbar", body, "Apply", () => {
-    const n = {off: [...document.querySelectorAll("#dlgB [data-tbk]")].filter(i => !i.checked).map(i => i.dataset.tbk), tabs: [...document.querySelectorAll("#dlgB [data-tbtab]")].filter(i => !i.checked).map(i => i.dataset.tbtab), order: {}};
+    const n = {off: [...document.querySelectorAll("#dlgB [data-tbk]")].filter(i => !i.checked).map(i => i.dataset.tbk), tabs: [...document.querySelectorAll("#dlgB [data-tbtab]")].filter(i => !i.checked).map(i => i.dataset.tbtab), order: {}, mine: [...document.querySelectorAll("#dlgB [data-mk]")].map(r => r.dataset.mk)};
     document.querySelectorAll("#dlgB [data-tbg]").forEach(g => { n.order[g.dataset.tbg] = [...g.querySelectorAll("[data-tbrow]")].map(r => r.dataset.tbrow); });
     if (n.tabs.length >= tabs.length) return "Keep at least one tab";
     return {n, icons: $("tbIcons").checked}; });
-  $("tbList").addEventListener("click", e => { const m = e.target.closest("[data-tbmv]"); if (!m) return; const r = m.closest(".tbrow"), d = +m.dataset.tbmv, sib = d < 0 ? r.previousElementSibling : r.nextElementSibling;
+  $("tbAdd").addEventListener("change", e => { const k = e.target.value; if (!k || document.querySelector(`#dlgB [data-mk="${k}"]`)) { e.target.value = ""; return; } $("tbMine").insertAdjacentHTML("beforeend", mineRow(k)); e.target.value = ""; });
+  $("tbList").addEventListener("click", e => { const x = e.target.closest("[data-tbrm]"); if (x) { x.closest(".tbrow").remove(); return; } const m = e.target.closest("[data-tbmv]"); if (!m) return; const r = m.closest(".tbrow"), d = +m.dataset.tbmv, sib = d < 0 ? r.previousElementSibling : r.nextElementSibling;
     if (sib && sib.classList.contains("tbrow")) { if (d < 0) r.parentNode.insertBefore(r, sib); else r.parentNode.insertBefore(sib, r); } });
-  $("tbReset").onclick = () => { document.querySelectorAll("#dlgB input[type=checkbox]").forEach(i => { i.checked = i.id === "tbIcons" ? false : true; });
+  $("tbReset").onclick = () => { $("tbMine").innerHTML = ""; document.querySelectorAll("#dlgB input[type=checkbox]").forEach(i => { i.checked = i.id === "tbIcons" ? false : true; });
     GR.forEach(G => { const g = document.querySelector(`#dlgB [data-tbg="${G.id}"]`); if (!g) return; const rows = [...g.querySelectorAll(".tbrow")], by = new Map(rows.map(r => [r.dataset.tbrow, r])); G.box.__orig.forEach(b => { const r = by.get(G.panel + "/" + tbKey(b)); if (r) g.appendChild(r); }); }); };
   const r = await pr; if (!r) return;
   pref(TB_KEY, JSON.stringify(r.n)); wsSet({tb: r.icons ? "icons" : "full"}); tbApply(); toast("Toolbar updated — Customize → Reset brings everything back", 2600);
 }
 function ribbonInit(){
+  $("bPanL").onclick = () => panelDialog("l"); $("bPanR").onclick = () => panelDialog("r");
+  const ribTog = () => { const o = pcPref(), n = new Set(o.off || []); if (n.has("ui-ribbon")) n.delete("ui-ribbon"); else n.add("ui-ribbon"); pcSave({off: [...n], compact: o.compact}); };
+  $("bRibbon").onclick = ribTog;
+  document.querySelectorAll("#tools .rtab").forEach(t => { t.addEventListener("dblclick", ribTog); t.addEventListener("click", () => { const o = pcPref(); if ((o.off || []).includes("ui-ribbon")) pcSave({off: o.off.filter(k => k !== "ui-ribbon"), compact: o.compact}); }); });
+  pcApply();
   $("bCustTb").onclick = () => tbDialog(); tbApply();
   /* ribbon tabs added for Costing / Export / View: each button runs an existing control or dialog */
   const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog()};
   document.querySelectorAll("#tools [data-px]").forEach(b => b.addEventListener("click", () => { const t = $(b.dataset.px); if (t && !t.disabled) t.click(); setTimeout(syncPx, 60); }));
   document.querySelectorAll("#tools [data-fn]").forEach(b => b.addEventListener("click", () => { if (P.proj && FN[b.dataset.fn]) FN[b.dataset.fn](); else toast("Open a project first", 2000); }));
   const syncPx = () => document.querySelectorAll("#tools [data-px]").forEach(b => { const t = $(b.dataset.px); b.classList.toggle("on", !!t && t.classList.contains("tg2") && t.classList.contains("on")); });
-  setInterval(syncPx, 800);
+  setInterval(() => { syncPx(); syncMine(); }, 800);
   $("propsHead").addEventListener("click", () => $("propsBox").classList.toggle("min"));
   /* left panel: filter and type tabs of the condition list */
   $("pageStrip").addEventListener("click", e => { const t = e.target.closest("[data-pg]"); if (!t) return; const [f, p2] = t.dataset.pg.split("|"); gotoPage(f, +p2); });
@@ -9014,11 +9072,11 @@ function setPanels(){
   $("openL").style.display = S.lHide ? "" : "none"; $("openR").style.display = S.rHide ? "" : "none";
   const lw = S.lHide ? 0 : S.lw, rw = S.rHide ? 0 : S.rw;
   app.style.gridTemplateColumns = wide ? `${lw}px minmax(0,1fr) ${rw}px` : "";
-  pref("zdTakeoffPanels2", JSON.stringify({lw: S.lw, rw: S.rw, lHide: !!S.lHide, rHide: !!S.rHide}));
+  pref("zdTakeoffPanels3", JSON.stringify({lw: S.lw, rw: S.rw, lHide: !!S.lHide, rHide: !!S.rHide}));
   if (S.page) { applyView(); renderHi(); }
 }
 function wirePanels(){
-  try { Object.assign(S, {lw: 300, rw: 460}, JSON.parse(pref("zdTakeoffPanels2") || "{}")); } catch (e) { S.lw = 300; S.rw = 460; }
+  try { Object.assign(S, {lw: 260, rw: 360}, JSON.parse(pref("zdTakeoffPanels3") || "{}")); } catch (e) { S.lw = 260; S.rw = 360; }
   const drag = (el, side) => el.addEventListener("pointerdown", e => {
     e.preventDefault(); el.setPointerCapture(e.pointerId); const x0 = e.clientX, w0 = side === "l" ? S.lw : S.rw;
     const mv = ev => { const d = ev.clientX - x0; if (side === "l") S.lw = Math.max(160, Math.min(520, w0 + d)); else S.rw = Math.max(260, Math.min(820, w0 - d)); setPanels(); };
