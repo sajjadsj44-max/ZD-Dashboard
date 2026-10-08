@@ -205,7 +205,7 @@ editing tools (rotate, mirror, join, explode, close, offset, array) only in the 
 
 | Change | Where |
 |---|---|
-| Toolbar in **groups (tabs)**: Takeoff · Modify · Markup · Review; Select / Match / Lasso / Pan always on show; the tab follows the tool (press W → Takeoff, N → Markup) | toolbar |
+| Toolbar in **groups (tabs)**: Takeoff · Modify · Markup · Review; the always-on **Select / CAD pick / Match / Lasso / Pan** sit in the top bar just after Delete; the tab follows the tool (press W → Takeoff, N → Markup) | toolbar |
 | **SVG icons** (one stroke style, drawn with the text colour) in place of Unicode symbols; names + shortcuts in the tooltips; names shown beside the icons when the drawing area is wide enough (≥ 1020 px), icons only when it is narrow | toolbar |
 | **Modify tab**: Move · Copy / Place copies · Duplicate · Array… · Rotate (both ways) · Mirror H / V · To front · Offset… · Break · Join · Explode · Close · Lock — each acts on the selection and says what to select when nothing is | toolbar |
 | **Review tab**: Previous / Next unchecked · Check selected · Check page · Recheck · Check before export · Compare · Typical | toolbar |
