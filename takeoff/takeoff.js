@@ -5659,7 +5659,38 @@ function snapPopToggle(on){
   }
   pop.classList.toggle("on", show);
 }
+/* Customize toolbar: which ribbon tabs and tools are shown (kept in this browser); nothing is deleted — Reset brings everything back */
+const TB_KEY = "zdTakeoffTb";
+const tbKey = b => b.dataset.tool || b.dataset.mod || b.dataset.rv || b.dataset.px || b.dataset.fn || b.id || "";
+const tbName = b => ((b.querySelector(".tl") || {}).textContent || b.title || tbKey(b)).trim().split(" — ")[0].split("(")[0].trim();
+function tbPref(){ let o = null; try { o = JSON.parse(pref(TB_KEY) || "null"); } catch (e) { o = null; } return o && typeof o === "object" ? o : {}; }
+function tbApply(){
+  const o = tbPref(), off = new Set(o.off || []), tabsOff = new Set(o.tabs || []);
+  document.querySelectorAll("#tools .rrow .tool").forEach(b => { const k = tbKey(b); b.style.display = k && off.has(b.closest("[data-rp]") ? b.closest("[data-rp]").dataset.rp + "/" + k : "x/" + k) ? "none" : ""; });
+  document.querySelectorAll("#tools .rtab").forEach(b => { b.style.display = tabsOff.has(b.dataset.rtab) ? "none" : ""; });
+  document.querySelectorAll("#tools .rg").forEach(g => { const vis = [...g.querySelectorAll(".tool")].some(b => b.style.display !== "none"); g.style.display = vis ? "" : "none"; });
+  const cur = document.querySelector("#tools .rtab.on"); if (cur && cur.style.display === "none") { const f = [...document.querySelectorAll("#tools .rtab")].find(b => b.style.display !== "none"); if (f) ribShow(f.dataset.rtab); }
+}
+async function tbDialog(){
+  const o = tbPref(), off = new Set(o.off || []), tabsOff = new Set(o.tabs || []), W = wsPref();
+  const tabs = [...document.querySelectorAll("#tools .rtab")];
+  const body = `<p class="small">Tick what you want on the toolbar. Nothing is deleted — the shortcuts and Ctrl+K still reach every tool.</p>
+    <label class="pk"><input type="checkbox" id="tbIcons"${W.tb === "icons" ? " checked" : ""}> Icons only (no labels)</label>
+    <div style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin-top:6px">` +
+    tabs.map(t => { const pn = document.querySelector(`#tools [data-rp="${t.dataset.rtab}"]`);
+      return `<div style="margin:6px 0"><label class="pk" style="font-weight:700!important;color:var(--navy)!important"><input type="checkbox" data-tbtab="${t.dataset.rtab}"${tabsOff.has(t.dataset.rtab) ? "" : " checked"}> ${esc(t.textContent)} tab</label>
+        <div style="display:flex;flex-wrap:wrap;gap:0 16px;padding-left:22px">${pn ? [...pn.querySelectorAll(".tool")].map(b => { const k = t.dataset.rtab + "/" + tbKey(b); return `<label class="pk" style="min-width:150px"><input type="checkbox" data-tbk="${esc(k)}"${off.has(k) ? "" : " checked"}> ${esc(tbName(b))}</label>`; }).join("") : ""}</div></div>`; }).join("") + `</div>
+    <div class="xrow"><button class="btn sm" id="tbReset">Reset — show everything</button></div>`;
+  const pr = ask("Customize toolbar", body, "Apply", () => {
+    const n = {off: [...document.querySelectorAll("#dlgB [data-tbk]")].filter(i => !i.checked).map(i => i.dataset.tbk), tabs: [...document.querySelectorAll("#dlgB [data-tbtab]")].filter(i => !i.checked).map(i => i.dataset.tbtab)};
+    if (n.tabs.length >= tabs.length) return "Keep at least one tab";
+    return {n, icons: $("tbIcons").checked}; });
+  $("tbReset").onclick = () => document.querySelectorAll("#dlgB input[type=checkbox]").forEach(i => { i.checked = i.id === "tbIcons" ? false : true; });
+  const r = await pr; if (!r) return;
+  pref(TB_KEY, JSON.stringify(r.n)); wsSet({tb: r.icons ? "icons" : "full"}); tbApply(); toast("Toolbar updated — Customize → Reset brings everything back", 2600);
+}
 function ribbonInit(){
+  $("bCustTb").onclick = () => tbDialog(); tbApply();
   /* ribbon tabs added for Costing / Export / View: each button runs an existing control or dialog */
   const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog()};
   document.querySelectorAll("#tools [data-px]").forEach(b => b.addEventListener("click", () => { const t = $(b.dataset.px); if (t && !t.disabled) t.click(); setTimeout(syncPx, 60); }));

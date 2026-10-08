@@ -624,6 +624,7 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
         <button class="tool tsm tgl" id="bXh" title="Cross-hair (Shift+C): hair-lines right across the whole window through the pointer (or the snap point), as AutoCAD with the cursor at 100%"><svg class="ic"><use href="#i-xh"/></svg><span class="tl">Cross-hair</span></button>
         <label class="tg" title="Snap to drawing lines (S)"><input type="checkbox" id="snapOn" checked> <svg class="ic"><use href="#i-snap"/></svg> Snap</label>
         <button class="tool tsm" id="bSnapSet" title="Object snaps: endpoint, midpoint, intersection, perpendicular, nearest" aria-haspopup="true"><svg class="ic ch"><use href="#i-chev"/></svg></button>
+        <button class="tool tsm" id="bCustTb" title="Customize toolbar: choose which tabs and tools are shown, icons only, reset"><svg class="ic"><use href="#i-cog"/></svg><span class="tl">Customize</span></button>
         <button class="tool tsm" id="bKeys" title="Keyboard &amp; mouse shortcuts (?)"><svg class="ic"><use href="#i-keys"/></svg><span class="tl">Keys</span></button>
         <div id="snapPop" aria-label="Object snaps"></div>
       </div>
@@ -960,7 +961,7 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-08c"></script>
+<script type="module" src="takeoff.js?v=2026-10-08d"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password
