@@ -3000,14 +3000,17 @@ async function removePdf(fid){
 function scaleLabel(sc){ const c = (S.texts[S.key] ? scaleCandidates(S.key) : []).find(x => Math.abs(x.ptPerFt - sc.ptPerFt) < 1e-6); return c ? c.label : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt"; }
 function renderConds(){
   const L = $("condList");
-  if (!P.proj) { L.innerHTML = ""; return; }
-  if (!P.proj.conds.length) { L.innerHTML = '<div class="empty">A <b>condition</b> is what you are measuring — e.g. <i>9" brick wall</i>, <i>floor tiles</i>, <i>doors</i>. Create one, then draw on the drawing.<br><br><button class="btn pri" id="bFirstCond">+ New condition</button></div>'; return; }
+  if (!P.proj) { L.innerHTML = ""; $("condTypes").innerHTML = ""; return; }
+  if (!P.proj.conds.length) { $("condTypes").innerHTML = ""; L.innerHTML = '<div class="empty">A <b>condition</b> is what you are measuring — e.g. <i>9" brick wall</i>, <i>floor tiles</i>, <i>doors</i>. Create one, then draw on the drawing.<br><br><button class="btn pri" id="bFirstCond">+ New condition</button></div>'; return; }
   S.condSel.forEach(id => { if (!cond(id)) S.condSel.delete(id); });
+  const TY = [["all", "All"], ["linear", "Length"], ["area", "Area"], ["count", "Count"]], ty = S.condTy || "all", q = (S.condQ || "").trim().toLowerCase();
+  $("condTypes").innerHTML = TY.map(([k, n]) => `<button data-cty="${k}" class="${ty === k ? "on" : ""}">${n}<b>${k === "all" ? P.proj.conds.length : P.proj.conds.filter(c => c.type === k).length}</b></button>`).join("");
+  const shown = P.proj.conds.filter(c => (ty === "all" || c.type === ty) && (!q || q.split(/\s+/).every(w => [c.name, c.boq, c.ra, c.unit].join(" ").toLowerCase().includes(w))));
   const ns = S.condSel.size, bar = `<div class="lyrbar"><label class="pk" style="flex:none" title="Tick all / none"><input type="checkbox" data-cka="1"${ns && ns === P.proj.conds.length ? " checked" : ""}></label>
     ${ns ? `<b style="font-size:11.5px">${ns} ticked:</b><button class="btn sm" data-cact="show">Show</button><button class="btn sm" data-cact="hide">Hide</button><button class="btn sm" data-cact="only">Only these</button><button class="btn sm dng" data-cact="del">Delete</button>`
       : `<button class="btn sm" data-cact="allon" title="Show every condition">All on</button><button class="btn sm" data-cact="alloff" title="Hide every condition">All off</button><span class="small">tick conditions to show / hide several</span>`}</div>`;
-  L.innerHTML = bar + P.proj.conds.map((c, i) => { const t = condTotals(c);
-    return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}</span></div>
+  L.innerHTML = bar + (shown.length ? "" : '<div class="empty">No condition matches this filter.</div>') + shown.map(c => { const i = P.proj.conds.indexOf(c), t = condTotals(c), its = P.proj.items.filter(x => x.cond === c.id), ck = its.filter(x => x.qa === "checked").length;
+    return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}${its.length ? ` · ${ck}/${its.length} checked<i class="pbar" title="${ck} of ${its.length} checked"><i style="width:${Math.round(100 * ck / its.length)}%"></i></i>` : " · no measurements yet"}</span></div>
       <div class="q">${fq(t.net, c.unit)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; }).join("");
 }
 /* search and sort of the measurement sheet: every word typed must appear in the item, its condition, BOQ code, page, room or unit;
@@ -3068,6 +3071,40 @@ function qaBadges(it){
 }
 function pageName(it){ const f = P.proj.files.find(x => x.id === it.file); return (f ? f.name.replace(/\.pdf$/i, "") : "?") + " p." + it.page; }
 function kindName(it, c){ return it.kind === "open" ? "Opening" : c.type === "count" ? c.name : c.type === "area" ? (it.kind === "ded" ? "void" : "area") : (it.kind === "ded" ? "length" : "run"); }
+/* details shown at the top of the Properties box (left panel): the selected measurement's quantity, dimension string, geometry,
+   condition settings, rate and check status — read-only facts; the fields below them edit it */
+const dl = rows => '<dl>' + rows.filter(r => r && r[1] !== "" && r[1] != null).map(r => `<dt>${esc(r[0])}</dt><dd${r[2] ? ' class="' + r[2] + '"' : ""} title="${esc(String(r[1]).replace(/<[^>]+>/g, ""))}">${r[3] ? r[1] : esc(r[1])}</dd>`).join("") + '</dl>';
+function rateLine(c){ const r = rateOf(c, c.unit); return r.na ? ["Rate", "not available", "warn"] : +r.rate > 0 ? ["Rate", "PKR " + f2(+r.rate) + " / " + c.unit] : ["Rate", "not set", "warn"]; }
+function condDetailHtml(c){
+  const t = condTotals(c), its = P.proj.items.filter(i => i.cond === c.id), ck = its.filter(i => i.qa === "checked").length, pages = new Set(its.map(i => keyOf(i.file, i.page))), r = rateOf(c, c.unit);
+  const tp = c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count";
+  return `<div class="pcard"><div style="display:flex;gap:8px;align-items:center"><span class="lsw" style="background:${esc(c.color)};width:14px;height:14px"></span><b style="color:var(--navy);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}</b><button class="btn sm" data-act="editCond" title="Edit this condition: name, unit, H, T, faces, BOQ and Rate Analysis codes, colour">&#9998; Edit</button></div>
+    <div class="big" style="margin-top:6px">${fq(t.net, c.unit)}<small>${esc(c.unit)}</small></div>
+    <div class="dimstr">${t.ded ? "gross " + fq(t.gross, c.unit) + " − deductions " + fq(t.ded, c.unit) : its.length + " measurement" + (its.length === 1 ? "" : "s")}</div></div>
+    <div class="psec">Condition</div>
+    ${dl([["Measured as", tp], ["Unit", c.unit], c.h ? ["Height H", f3(+c.h) + " ft"] : null, c.t ? ["Thickness T", f3(+c.t) + " ft"] : null, c.faces > 1 ? ["Faces", String(c.faces)] : null,
+      +c.dedMin ? ["Deduct over", f2(+c.dedMin)] : null, ["BOQ code", c.boq || "not set", c.boq ? "" : "warn"], c.ra ? ["Rate Analysis", c.ra] : null, rateLine(c), r.src ? ["Rate source", r.src + (r.date ? ", " + r.date : "")] : null,
+      c.asm && c.asm.length ? ["Assembly lines", String(c.asm.length)] : null])}
+    <div class="psec">Takeoff</div>
+    ${dl([["Measurements", String(its.length)], ["Pages used", String(pages.size)], ["Checked", ck + " of " + its.length, its.length && ck === its.length ? "ok" : ""], t.noScale ? ["No scale", t.noScale + " measurement" + (t.noScale > 1 ? "s" : ""), "warn"] : null])}
+    <div class="small" style="margin-top:6px">Click a measurement to see its own details. Press <kbd>A</kbd> / <kbd>R</kbd> / <kbd>C</kbd> to measure with this condition.</div>`;
+}
+function itemDetailHtml(it, c, k){
+  const poly = itemPoly(it), rows = k ? rowsOf(it, k) : [], net = rows.reduce((a, r) => a + (r.below ? 0 : r.qty), 0), r0 = rows[0], pg = pageName(it), loc = locText(locOf(it)), pc = it.pts.length;
+  const geom = !k ? [] : it.shape === "circle" ? [["Diameter", f3(2 * dist(it.pts[0], it.pts[1]) / k) + " ft"], ["Circumference", f3(polyLen(poly, true) / k) + " ft"], ["Area", f2(polyArea(poly) / k / k) + " Sft"]]
+    : c.type === "area" ? [["Area", f3(polyArea(it.pts) / k / k) + " Sft"], ["Perimeter", f3(polyLen(it.pts, true) / k) + " ft"], ["Points", String(pc)]]
+    : c.type === "linear" ? [["Length", f3(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k) + " ft"], it.kind === "open" ? null : ["Segments", String(Math.max(1, pc - 1))], it.kind === "open" ? null : ["Points", String(pc)]] : [["Count points", String(pc)]];
+  const sc = (P.proj.scales || {})[keyOf(it.file, it.page)], st = it.qa === "checked" ? ["Checked", "ok"] : it.qa === "recheck" ? ["Recheck", "bad"] : ["Pending", ""];
+  return `<div class="pcard"><div style="display:flex;gap:8px;align-items:center"><span class="lsw" style="background:${esc(c.color)};width:14px;height:14px"></span><b style="color:var(--navy);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.label || kindName(it, c))}</b><span class="pstat ${st[1]}">${st[0]}</span></div>
+    <div class="big" style="margin-top:6px">${k ? (it.kind === "ded" || it.kind === "open" ? "−" : "") + fq(Math.abs(net), c.unit) : "—"}<small>${esc(c.unit)}</small></div>
+    <div class="dimstr">${r0 ? esc(dimText(r0)) : "scale not set on this page"}${rows.length > 1 ? " · +" + (rows.length - 1) + " more row" + (rows.length > 2 ? "s" : "") : ""}</div></div>
+    <div class="psec">Details</div>
+    ${dl([["Condition", c.name], ["Type", it.kind === "open" ? "Opening" : it.kind === "ded" ? "Deduction" : c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"], ["Page", pg], loc ? ["Location", loc] : null, ...geom,
+      c.h ? ["Height H", f3(+c.h) + " ft"] : null, c.t ? ["Thickness T", f3(+c.t) + " ft"] : null, ["BOQ code", c.boq || "not set", c.boq ? "" : "warn"], rateLine(c),
+      ["Scale", sc ? (sc.verified ? "verified" : sc.how === "inherited" ? "inherited — not checked" : "not verified") : "not set", sc && sc.verified ? "ok" : "warn"],
+      it.locked ? ["Locked", "yes"] : null, it.ai ? ["Made by", "AI assistant"] : null, it.copied ? ["Copied from", keyName(it.copied.from)] : null, it.qa === "checked" ? ["Checked", (it.qaBy || "") + (it.qaAt ? ", " + dmy(it.qaAt) : "")] : null])}
+    <div class="psec">Edit</div>`;
+}
 function renderProps(){
   $("bDel").disabled = !(S.sel || S.selMark || S.multi.size);
   if (S.multi.size && P.proj) { const its = P.proj.items.filter(i => S.multi.has(i.id)), nm = S.multi.size - its.length;
@@ -3076,16 +3113,18 @@ function renderProps(){
       <button class="btn" data-mact="check">✓ Mark checked</button><button class="btn" data-mact="hide">Hide their conditions</button><button class="btn dng" data-mact="del">Delete ${S.multi.size}</button></div>
       <div class="row" style="margin-top:6px">${(() => { const t = selTotals(S.multi); return t ? `<span class="small" style="flex:1"><b>Selected:</b> ${esc(t)}</span>` : ""; })()}
       ${its.filter(isRun).length >= 2 ? '<button class="btn sm" data-mact="join" title="Make the selected runs one run">Join runs</button>' : ""}<button class="btn sm" data-mact="dup" title="Duplicate (Ctrl+D)">Duplicate</button><button class="btn sm" data-mact="lock" title="Lock / unlock (Ctrl+Shift+L)">${[...S.multi].map(objById).every(o => o && o.locked) ? "Unlock" : "Lock"}</button><button class="btn sm" data-mact="rot" title="Rotate 90° clockwise">&#8635; 90°</button></div>`;
-    $("props").classList.add("on"); return; }
+    $("props").classList.add("on"); $("propsTag").textContent = S.multi.size + " selected"; return; }
+  $("propsTag").textContent = "";
   const el = $("props"), it = S.sel && P.proj ? P.proj.items.find(i => i.id === S.sel) : null;
   const mk = !it && S.selMark && P.proj ? (P.proj.marks || []).find(m => m.id === S.selMark) : null;
-  if (mk) { el.innerHTML = mkPropsHtml(mk); el.classList.add("on"); return; }
-  if (!it && S.cadSel) { const ci = cadSelIds(); if (ci.length) { el.innerHTML = cadSelHtml(ci); el.classList.add("on"); return; } }
-  if (!it) { el.classList.remove("on"); el.innerHTML = ""; return; }
+  if (mk) { el.innerHTML = mkPropsHtml(mk); el.classList.add("on"); $("propsTag").textContent = "markup"; return; }
+  if (!it && S.cadSel) { const ci = cadSelIds(); if (ci.length) { el.innerHTML = cadSelHtml(ci); el.classList.add("on"); $("propsTag").textContent = "AutoCAD selection"; return; } }
+  if (!it) { const c0 = P.proj && S.cond ? cond(S.cond) : null; if (c0) { el.innerHTML = condDetailHtml(c0); el.classList.add("on"); $("propsTag").textContent = "condition"; } else { el.classList.remove("on"); el.innerHTML = ""; } return; }
+  $("propsTag").textContent = "measurement";
   const c = cond(it.cond), k = itemScale(it), poly = itemPoly(it);
   const meas = !k ? "scale not set" : it.shape === "circle" ? "dia " + f3(2 * dist(it.pts[0], it.pts[1]) / k) + " ft · " + (c.type === "area" ? fq(polyArea(poly) / k / k) + " Sft" : f3(polyLen(poly, true) / k) + " ft round")
     : c.type === "area" ? fq(polyArea(it.pts) / k / k) + " Sft measured · perimeter " + f3(polyLen(it.pts, true) / k) + " ft" : c.type === "linear" ? f3(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k) + " ft measured" : it.pts.length + " points";
-  el.innerHTML = `<h4>${esc(c.name)} — ${esc(kindName(it, c))} <span style="font-weight:400;color:var(--muted);font-size:11px">${esc(meas)}</span></h4>
+  el.innerHTML = itemDetailHtml(it, c, k) + `<h4>${esc(c.name)} — ${esc(kindName(it, c))} <span style="font-weight:400;color:var(--muted);font-size:11px">${esc(meas)}</span></h4>
     <div class="row"><div class="fg" style="flex:2"><label>Label</label><input type="text" data-prop="label" value="${esc(it.label)}" placeholder="e.g. Bed room 1"></div>
     <div class="fg"><label>Nos (×)</label><input type="number" min="1" step="1" data-prop="nos" value="${+it.nos || 1}"></div>
     ${it.kind === "open" ? `<div class="fg"><label>Width ft</label><input type="text" data-prop="ow" value="${it.ow ? f3(it.ow) : ""}" placeholder="${k ? f3(dist(it.pts[0], it.pts[1]) / k) : ""}"></div><div class="fg"><label>Height ft</label><input type="text" data-prop="oh" value="${f3(+it.oh || 0)}"></div>` : ""}
@@ -3453,7 +3492,7 @@ async function editMarkText(m){
   const v = await ask(MARK_TOOLS[m.type], `<div class="fg w2"><label>Text</label><input type="text" id="mkT" value="${esc(m.text || "")}"></div>`, "Save", () => ({t: $("mkT").value.trim()}), "mkT");
   if (v) mutate(() => { m.text = v.t; }, "Edit text");
 }
-function focusProps(){ if (S.rHide) { S.rHide = false; setPanels(); } renderProps(); const f = document.querySelector('#props [data-prop="label"],#props [data-mprop="text"]'); if (f) { f.focus(); f.select(); } }
+function focusProps(){ if (S.lHide) { S.lHide = false; setPanels(); } renderProps(); const f = document.querySelector('#props [data-prop="label"],#props [data-mprop="text"]'); if (f) { f.focus(); f.select(); } }
 /* ------------------------------------------------------------------ find similar symbols (auto count)
    The symbol boxed by the user is cut from the rendered page as an ink mask; every window of the page (and of the
    other pages, if asked) whose ink matches it — template ink found in the window, window ink explained by the
@@ -5574,7 +5613,7 @@ function wsMenu(x, y){
     {t: "Minimap", on: !!W.mini, fn: () => wsSet({mini: !W.mini})},
     {t: "Full screen", on: !!document.fullscreenElement, fn: fullScreen},
     {t: "Page thumbnails", sub: [["s", "Small"], ["m", "Medium"], ["l", "Large"]].map(([z, t]) => ({t, on: sz === z, fn: () => { S.pgSz = z; pref("zdTakeoffPgSz", z); renderPages(); }}))}, {sep: 1},
-    {t: "Reset panel sizes", fn: () => { S.lw = 250; S.rw = 420; S.lHide = false; S.rHide = false; setPanels(); }},
+    {t: "Reset panel sizes", fn: () => { S.lw = 300; S.rw = 460; S.lHide = false; S.rHide = false; setPanels(); }},
     {t: "All commands…", k: "Ctrl+K", fn: openPalette}], x, y);
 }
 function fullScreen(){ const d = document, el = d.documentElement; if (d.fullscreenElement) { d.exitFullscreen().catch(() => {}); return; } if (!el.requestFullscreen) return toast("Full screen is not available here — press F11", 3000); el.requestFullscreen().catch(() => toast("Full screen is not available here — press F11", 3000)); }
@@ -5621,6 +5660,21 @@ function snapPopToggle(on){
   pop.classList.toggle("on", show);
 }
 function ribbonInit(){
+  /* ribbon tabs added for Costing / Export / View: each button runs an existing control or dialog */
+  const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog()};
+  document.querySelectorAll("#tools [data-px]").forEach(b => b.addEventListener("click", () => { const t = $(b.dataset.px); if (t && !t.disabled) t.click(); setTimeout(syncPx, 60); }));
+  document.querySelectorAll("#tools [data-fn]").forEach(b => b.addEventListener("click", () => { if (P.proj && FN[b.dataset.fn]) FN[b.dataset.fn](); else toast("Open a project first", 2000); }));
+  const syncPx = () => document.querySelectorAll("#tools [data-px]").forEach(b => { const t = $(b.dataset.px); b.classList.toggle("on", !!t && t.classList.contains("tg2") && t.classList.contains("on")); });
+  setInterval(syncPx, 800);
+  $("propsHead").addEventListener("click", () => $("propsBox").classList.toggle("min"));
+  /* left panel: filter and type tabs of the condition list */
+  $("condQ").addEventListener("input", e => { S.condQ = e.target.value; renderConds(); });
+  $("condTypes").addEventListener("click", e => { const b = e.target.closest("[data-cty]"); if (!b) return; S.condTy = b.dataset.cty; renderConds(); });
+  /* right panel footer and the takeoff-agent bar at the bottom */
+  document.querySelectorAll("#rFoot [data-rvf]").forEach(b => b.addEventListener("click", () => revAct(b.dataset.rvf)));
+  document.querySelectorAll("#agentBar [data-agx]").forEach(b => b.addEventListener("click", () => { const t = $(b.dataset.agx); if (t) t.click(); }));
+  const agSend = () => { const v = $("agIn").value.trim(); if (!v) return; $("aiPanel").classList.add("on"); $("bClaude").classList.add("on"); $("aiIn").value = v; $("agIn").value = ""; $("aiSend").click(); };
+  $("agGo").addEventListener("click", agSend); $("agIn").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); agSend(); } e.stopPropagation(); });
   document.querySelectorAll("#tools [data-rtab]").forEach(b => b.addEventListener("click", () => ribShow(b.dataset.rtab)));
   document.querySelectorAll("#tools [data-mod]").forEach(b => b.addEventListener("click", () => modAct(b.dataset.mod)));
   document.querySelectorAll("#tools [data-rv]").forEach(b => b.addEventListener("click", () => revAct(b.dataset.rv)));
@@ -5672,7 +5726,7 @@ function revAct(a){
   if (a === "typical") return $("bTypical").click();
 }
 function iconize(){   // each toolbar button's words in their own span, so "icons only" can hide them (the palette still reads them)
-  document.querySelectorAll("#tools .tool, header > button.btn").forEach(b => { const n = b.firstChild; if (!n || n.nodeType !== 3 || b.querySelector(".tl")) return;
+  document.querySelectorAll("#tools .tool, header > button.btn, .projpill > .btn, .cbar > .btn, .cbar .cgrp > .btn").forEach(b => { const n = b.firstChild; if (!n || n.nodeType !== 3 || b.querySelector(".tl")) return;
     const m = /^\s*(\S+)\s+([\s\S]+)$/.exec(n.textContent); if (!m || !/[^\x00-\x7F]/.test(m[1])) return;
     const sp = document.createElement("span"); sp.className = "tl"; n.textContent = m[1] + " "; sp.textContent = m[2]; b.insertBefore(sp, n.nextSibling); while (sp.nextSibling) sp.appendChild(sp.nextSibling); });
 }
@@ -7136,7 +7190,7 @@ function wire(){
   document.addEventListener("keydown", e => {   // Ctrl+S: save now (not the browser's "Save page as")
     if (!((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s")) return;
     e.preventDefault(); if (!P.proj) return;
-    const a = document.activeElement; if (a && a.closest && a.closest("#props,header") && /^(INPUT|SELECT)$/.test(a.tagName)) a.blur();   // a field being typed in is taken first
+    const a = document.activeElement; if (a && a.closest && a.closest("#props,header,.cbar,.agentbar") && /^(INPUT|SELECT)$/.test(a.tagName)) a.blur();   // a field being typed in is taken first
     savePr = P.proj; flushSave().then(ok => toast(ok ? "Saved in this browser — " + P.proj.items.length + " measurement" + (P.proj.items.length === 1 ? "" : "s") + " · Export → Project + PDFs to keep a copy elsewhere" : "Not saved — see the message above", 2600));
   }, true);
   document.addEventListener("keydown", e => {   // Ctrl+P: plot (a window, the view, the page) — not the browser's print of this screen
@@ -7166,7 +7220,7 @@ function wire(){
   $("dimPct").oninput = e => setDim(+e.target.value);
   $("bTypical").onclick = () => P.proj && copyPageDialog();
   const leftTab = t => { t = t === true ? "lay" : t || "cond"; S.leftTab = t;   // conditions · pages · the PDF's layers
-    $("condList").style.display = t === "cond" ? "" : "none"; $("layerList").style.display = t === "lay" ? "" : "none"; $("pageList").style.display = t === "pages" ? "" : "none";
+    $("condList").style.display = t === "cond" ? "" : "none"; $("condFilter").style.display = t === "cond" ? "" : "none"; $("layerList").style.display = t === "lay" ? "" : "none"; $("pageList").style.display = t === "pages" ? "" : "none";
     $("tCond").classList.toggle("on", t === "cond"); $("tLay").classList.toggle("on", t === "lay"); $("tPages").classList.toggle("on", t === "pages"); $("bNewCond").style.display = t === "cond" ? "" : "none";
     if (t === "lay") renderLayers(); if (t === "pages") renderPages(); };
   $("tCond").onclick = () => leftTab("cond"); $("tLay").onclick = () => leftTab("lay"); $("tPages").onclick = () => leftTab("pages");
@@ -7359,6 +7413,7 @@ function wire(){
     if (ma && ma.dataset.mact === "check") return setQa(P.proj.items.filter(i => S.multi.has(i.id)), "checked");
     if (ma && ma.dataset.mact === "hide") { const cs = new Set(P.proj.items.filter(i => S.multi.has(i.id)).map(i => i.cond)); P.proj.conds.forEach(c => { if (cs.has(c.id)) c.hidden = true; }); S.multi.clear(); save(); refresh(); return; }
     const a = e.target.closest("[data-act]"); if (!a) return;
+    if (a.dataset.act === "editCond") return editCond(cond(S.sel && P.proj.items.find(i => i.id === S.sel) ? P.proj.items.find(i => i.id === S.sel).cond : S.cond));
     if (a.dataset.act === "lock") return lockSel();
     if (a.dataset.act === "dup") return duplicateSel();
     if (a.dataset.act === "brk") return setTool("break");
@@ -8900,11 +8955,11 @@ function setPanels(){
   $("openL").style.display = S.lHide ? "" : "none"; $("openR").style.display = S.rHide ? "" : "none";
   const lw = S.lHide ? 0 : S.lw, rw = S.rHide ? 0 : S.rw;
   app.style.gridTemplateColumns = wide ? `${lw}px minmax(0,1fr) ${rw}px` : "";
-  pref("zdTakeoffPanels", JSON.stringify({lw: S.lw, rw: S.rw, lHide: !!S.lHide, rHide: !!S.rHide}));
+  pref("zdTakeoffPanels2", JSON.stringify({lw: S.lw, rw: S.rw, lHide: !!S.lHide, rHide: !!S.rHide}));
   if (S.page) { applyView(); renderHi(); }
 }
 function wirePanels(){
-  try { Object.assign(S, {lw: 250, rw: 420}, JSON.parse(pref("zdTakeoffPanels") || "{}")); } catch (e) { S.lw = 250; S.rw = 420; }
+  try { Object.assign(S, {lw: 300, rw: 460}, JSON.parse(pref("zdTakeoffPanels2") || "{}")); } catch (e) { S.lw = 300; S.rw = 460; }
   const drag = (el, side) => el.addEventListener("pointerdown", e => {
     e.preventDefault(); el.setPointerCapture(e.pointerId); const x0 = e.clientX, w0 = side === "l" ? S.lw : S.rw;
     const mv = ev => { const d = ev.clientX - x0; if (side === "l") S.lw = Math.max(160, Math.min(520, w0 + d)); else S.rw = Math.max(260, Math.min(820, w0 - d)); setPanels(); };

@@ -410,175 +410,213 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
 .mldh{display:flex;gap:6px;align-items:center}.mlc{white-space:pre-wrap;background:#f6f8fb;padding:6px;border-radius:6px}.mlreps{display:flex;flex-direction:column;gap:5px}
 .mlrep{border-left:3px solid #c9d6e4;padding:3px 7px;white-space:pre-wrap}.mlrx{border:0;background:none;color:#8a97a6;cursor:pointer;float:right;font-size:14px}.mldet textarea{width:100%;font:inherit;resize:vertical}
 @media (max-width:900px){.mldet{display:none}}
+
+/* ================= v4 layout: light top bar, full-width ribbon, canvas bar, left properties, right sheet =================
+   Everything below overrides the older dark-header look; element ids and behaviour are unchanged. */
+:root{--blue:#2563eb;--bg:#f3f6fb;--line:#e1e8f1;--r:10px}
+html,body{height:100%}
+body{display:flex;flex-direction:column;background:var(--bg)}
+header{flex:none;background:#fff;color:var(--txt);border-bottom:1px solid var(--line);min-height:54px;padding:7px 14px;gap:8px;box-shadow:0 1px 0 rgba(15,41,66,.03)}
+header .mark{background:var(--blue);border:0;color:#fff;border-radius:9px;width:32px;height:32px;font-size:12.5px}
+header .ttl{color:var(--navy);font-size:15px;font-weight:700;margin-right:4px}
+header .btn{background:#fff;border-color:var(--line);color:#3c4c60}
+header .btn:hover{background:#f1f5fd;border-color:#b9c9e6}
+header .btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+header .btn.pri:hover{background:#1d54c9}
+header .btn.tg2.on{background:#eaf0ff;color:var(--blue);border-color:#b9c9e6}
+#bClaude{background:linear-gradient(135deg,#2f6bf0,#7a4be0)!important;border-color:transparent!important;color:#fff!important;font-weight:600}
+#bClaude.on{box-shadow:0 0 0 2px #cdbdf7}
+header select,header input{height:30px}
+.projpill{display:flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:9px;padding:2px 4px;background:#f8fafd;flex:none}
+.projpill .psl{color:#a8b5c7}
+header .projpill .btn{border-color:transparent;background:transparent}
+header .projpill .btn:hover{background:#eaf0ff}
+.projpill #projName{width:190px;border-color:transparent;background:transparent;font-weight:600;color:var(--navy)}
+.projpill #projName:focus{background:#fff}
+header .savest{color:var(--green);font-size:11.5px}
+header .savest.bad{color:#fff}
+header #findIn{width:280px;max-width:26vw;border-radius:18px;padding-left:12px;background:#f3f6fb;border-color:var(--line)}
+header a.back{color:var(--muted)}
+header .btn.sm{border-radius:8px}
+
+/* ribbon: full width under the top bar */
+.tools{flex:none;position:relative;z-index:4;background:#fff;border-bottom:1px solid var(--line);container-type:inline-size;container-name:stg}
+.rtabs{background:#fff;padding:0 14px;gap:2px;border-bottom:1px solid var(--line);align-items:center}
+.rtab{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:9px 14px;margin:0 0 -1px;font-size:13px;font-weight:600;color:#51607a}
+.rtab:hover{color:var(--blue);background:#f6f9ff}
+.rtab.on{background:none;border-color:transparent;border-bottom-color:var(--blue);color:var(--blue);box-shadow:none}
+.rrow{padding:8px 14px 4px;background:#fff}
+.rg{padding:0 12px}
+.rgl{font-size:10.5px;letter-spacing:.3px;text-transform:none;color:#8a98ac;padding-top:3px}
+.rgb{align-items:stretch;gap:2px;flex-wrap:nowrap}
+.rrow .tool{position:relative;flex-direction:column;justify-content:flex-start;gap:3px;min-width:56px;max-width:84px;padding:6px 6px 4px;border-color:transparent;background:transparent;border-radius:9px;font-size:11.5px;line-height:1.15;text-align:center;color:#3c4c60}
+.rrow .tool .tl{white-space:normal}
+.rrow .tool .ic{width:23px;height:23px;stroke-width:1.6}
+.rrow .tool kbd{position:absolute;top:1px;right:3px;border:0;background:none;padding:0;font-size:9.5px;color:#9aa7ba}
+.rrow .tool:hover{background:#eef3fd;color:var(--blue)}
+.rrow .tool.on{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 2px 8px rgba(37,99,235,.3)}
+.rrow .tool.on kbd{color:#cfe0ff}
+.rrow .tool.tsm{min-width:34px;padding:6px 6px}
+.rrow .tool:disabled{opacity:.4}
+.rrow .rsel{align-items:stretch;gap:2px}
+.rrow .rvs{margin:0 10px}
+.rtabs .tool{border-color:var(--line);border-radius:8px}
+.tool.tgl.on,.rtabs .tool.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.rtabs .tg{color:#3c4c60}
+@container stg (max-width:1000px){.rrow .tool .tl,.rrow .tool kbd,.rtabs .tool .tl{display:none}.rrow .tool{min-width:36px;padding:7px}.rrow #bMk.on .tl{display:inline}.rg{padding:0 6px}}
+
+/* grid: the app fills what is left under the ribbon; the agent bar sits at the very bottom */
+.app{flex:1 1 0;height:auto;min-height:0;grid-template-columns:300px minmax(0,1fr) 460px;gap:0}
+.panel .ph{padding:10px 12px;border-bottom:1px solid var(--line)}
+.panel .ph h3{font-size:14px}
+.stagewrap{container-type:normal;background:var(--bg)}
+.hidebtn{font-size:15px;color:#8a98ac;border-radius:6px;padding:2px 6px}.hidebtn:hover{background:#eef3fd;color:var(--blue)}
+
+/* canvas bar */
+.cbar{flex:none;display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;padding:7px 12px;background:#fff;border-bottom:1px solid var(--line);position:relative;z-index:5}
+.cbar .cgrp{display:flex;align-items:center;gap:4px;flex:none}
+.cbar .sp{flex:1}
+.cbar #zoomPct{color:var(--muted);width:50px;text-align:center;font-variant-numeric:tabular-nums;font-size:12px}
+.cbar #dimLbl{color:var(--muted)}
+.cbar #pageSel{max-width:260px;height:28px}
+.cbar .btn{border-radius:8px}
+.cbar .btn.tg2.on{background:#eaf0ff;color:var(--blue);border-color:#b9c9e6}
+.cbar #scaleChip{border:1px solid var(--line)}
+
+/* left panel: tabs stay as they were (Conditions | Pages | Layers), filter, richer rows, properties below */
+.cfil{display:flex;flex-direction:column;gap:7px;padding:9px 12px 7px;border-bottom:1px solid var(--line);flex:none}
+.cfil input[type=search]{width:100%;border-radius:8px;background:#f6f8fc;padding:6px 10px;border:1px solid #c9d6e4}
+.ctypes{display:flex;gap:2px;background:#eef2f8;border-radius:8px;padding:3px}
+.ctypes button{flex:1;border:0;background:none;border-radius:6px;padding:4px 2px;font-size:11.5px;font-weight:600;color:#5b6b82;cursor:pointer;white-space:nowrap}
+.ctypes button:hover{color:var(--blue)}
+.ctypes button.on{background:#fff;color:var(--navy);box-shadow:0 1px 3px rgba(15,41,66,.15)}
+.ctypes button b{font-weight:600;color:#8a98ac;margin-left:3px}
+#condList{padding:6px 8px}
+.lyrbar{padding:4px 4px 8px;border:0}
+.cond{display:flex;align-items:center;gap:9px;padding:9px 10px;margin:0 0 6px;border:1px solid var(--line);border-radius:var(--r);background:#fff}
+.cond:hover{background:#f8fbff;border-color:#c5d4ee}
+.cond.on{background:#f4f7ff;border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
+.cond .sw{width:14px;height:14px;border-radius:4px}
+.cond .nm b{font-size:13px;color:var(--navy)}
+.cond .nm span{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-top:2px;flex-wrap:wrap}
+.cond .nm .pbar{flex:0 0 46px;height:4px;border-radius:2px;background:#e6ecf5;overflow:hidden;display:block}
+.cond .nm .pbar i{display:block;height:100%;background:var(--green)}
+.cond .q{font-size:13px;color:var(--navy)}
+.cond .ed{font-size:13px;color:#8a98ac;border-radius:5px}.cond .ed:hover{background:#eef3fd;color:var(--blue)}
+
+/* properties box in the left panel */
+.propsbox{flex:0 1 auto;max-height:54%;min-height:0;display:flex;flex-direction:column;border-top:1px solid var(--line);background:#fbfcfe}
+.pbh{display:flex;align-items:center;gap:8px;padding:8px 12px 6px;color:var(--navy);font-size:12.5px;flex:none}
+.pbh .small{flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px}
+.propsbox .props{display:none;border-top:0;overflow:auto;min-height:0;padding:2px 12px 12px;background:transparent}
+.propsbox .props.on{display:block}
+.propsEmpty{display:none;padding:2px 14px 14px;color:var(--muted);font-size:12px;line-height:1.5}
+.props.on+.propsEmpty{display:none}.props:not(.on)+.propsEmpty{display:block}
+.props h4{font-size:13px;line-height:1.35}
+.props .row{gap:7px}
+.props .fg{min-width:78px;flex:1 1 78px}
+.props .fg input,.props .fg select{width:100%}
+.props .pcard{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:9px 10px;margin:6px 0 8px}
+.props .pcard .big{font-size:22px;font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums;line-height:1.1}
+.props .pcard .big small{font-size:12px;font-weight:500;color:var(--muted);margin-left:3px}
+.props .pcard .dimstr{font-size:11.5px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
+.props dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:6px 0 4px;font-size:11.5px}
+.props dt{color:var(--muted)}.props dd{margin:0;text-align:right;color:var(--txt);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.props dd.warn{color:var(--red);font-weight:600}.props dd.ok{color:var(--green);font-weight:600}
+.props .psec{font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#8a98ac;margin:10px 0 4px;display:flex;align-items:center;gap:8px}
+.props .psec::after{content:"";flex:1;height:1px;background:var(--line)}
+.props .pstat{display:inline-block;font-size:10.5px;font-weight:700;border-radius:10px;padding:1px 8px;background:#fff5e2;color:#8a5a00;margin-left:6px;vertical-align:2px}
+.props .pstat.ok{background:#e5f5ec;color:#16723f}.props .pstat.bad{background:#fdecec;color:#9b2222}
+.keys{display:block;padding:0;border-top:1px solid var(--line);max-height:none;overflow:visible;flex:none}
+.keys summary{cursor:pointer;padding:8px 12px;font-size:11.5px;font-weight:600;color:#5b6b82;user-select:none}
+.keys .kg{display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;padding:2px 12px 10px;max-height:170px;overflow:auto;font-size:10.5px;color:var(--muted)}
+
+/* right panel */
+.panel.right .ph{padding:12px 14px 6px;border-bottom:0}
+.panel.right .ph h3{font-size:15px}
+#shBar{background:#fff;border-bottom:0;padding:4px 14px 8px}
+#shBar input{border-radius:8px;background:#f6f8fc;padding:6px 10px}
+#qaBar{background:#fff;padding:2px 14px 9px;border-bottom:1px solid var(--line)}
+.qa{border-radius:14px;padding:3px 10px;font-size:11.5px;background:#eef3ff;border-color:#d5e0fb;color:#2748a8}
+.qa.g{background:#e8f6ee;border-color:#c3e7d1;color:#16723f}.qa.a{background:#fff5e2;border-color:#f3d998;color:#8a5a00}.qa.r{background:#fdecec;border-color:#f0b4b4;color:#9b2222}
+span.qa:not(.a){background:#f3f5f9;border-color:#e3e8f0;color:#5b6b82}
+.qa.on{outline-color:var(--blue)}
+table.sh{font-size:12px}
+table.sh th{background:#fff;border-bottom:1px solid var(--line);padding:8px 8px;text-transform:uppercase}
+table.sh td{padding:7px 8px}
+table.sh tr.ch td{background:#fff;font-size:12.5px;border-top:1px solid var(--line);padding-top:10px}
+table.sh tr.tot td{background:#f8fafd}
+table.sh tr.sel td{background:#eaf1ff}
+table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
+.rfoot{display:flex;gap:8px;align-items:center;padding:10px 14px;border-top:1px solid var(--line);background:#fff;flex:none}
+.rfoot .sp{flex:1}
+.rfoot .btn{border-radius:8px}
+.rfoot .btn.pri{background:var(--blue);border-color:var(--blue)}
+
+/* bottom: takeoff-agent bar */
+.agentbar{flex:none;display:flex;align-items:center;gap:8px;padding:8px 14px;background:#fff;border-top:1px solid var(--line);flex-wrap:wrap}
+.agentbar .abi{color:#7a4be0;font-size:15px}
+.agentbar input{flex:1 1 320px;min-width:200px;border-radius:20px;background:#f6f8fc;padding:7px 14px;border:1px solid var(--line)}
+.agentbar .agch{display:flex;gap:6px;flex-wrap:wrap}
+.agentbar .agch .btn{border-radius:16px;background:#fff}
+.agentbar .btn.pri{background:var(--blue);border-color:var(--blue);border-radius:50%;width:30px;height:30px;padding:0}
+@media (max-width:1280px){.app{grid-template-columns:270px minmax(0,1fr) 380px}}
+@media (max-width:1100px){.app{grid-template-columns:230px minmax(0,1fr) 330px}header #findIn{width:160px}}
+@media (max-width:860px){body{display:block;overflow:auto}.app{flex:none;display:flex}.cbar{padding:6px}.propsbox{max-height:none}}
+
+#condList{min-height:150px}
+.propsbox{max-height:46%}
+.lyrbar .small{display:none}
+@media (max-width:1750px){header #bToolChest .tl,header #bDefaults .tl,header #bWs .tl,header .projpill .tl{display:none}.projpill #projName{width:150px}header #findIn{width:220px}}
+@media (max-width:1500px){header #bCmd .tl,header #bClaude .tl{display:none}header .ttl{display:none}}
+@media (max-width:860px){.rgb{flex-wrap:wrap}.rrow{overflow-x:auto}.rpanel{flex-wrap:wrap}header #findIn{max-width:none;width:100%;flex:1 1 100%}.projpill{flex:1 1 100%;max-width:100%;min-width:0}.projpill #projName{flex:1;width:auto;min-width:60px}.cbar #pageSel{max-width:150px}.agentbar .agch{display:none}.app .panel{min-width:0}.rtabs{overflow-x:auto;flex-wrap:nowrap}.rtab{white-space:nowrap}}
+
+.panel:not(.right) .ph{flex-wrap:nowrap}
+.pbh{cursor:pointer;user-select:none}.pbh::after{content:"\25BE";color:#8a98ac;font-size:12px}
+.propsbox.min .props,.propsbox.min .propsEmpty{display:none!important}.propsbox.min .pbh::after{content:"\25B4"}
+.propsbox{max-height:44%}
 </style>
 </head>
 <body>
 <header>
   <div class="mark">ZD</div>
-  <div class="ttl">PDF Takeoff</div>
-  <div class="sep"></div>
-  <button class="btn sm" id="bProjects" title="All projects">&#9776; Projects</button>
-  <div class="proj-actions">
+  <div class="ttl">ZD Takeoff</div>
+  <div class="projpill">
+    <button class="btn sm" id="bProjects" title="All projects">&#9776; Projects</button>
+    <span class="psl">/</span>
     <input type="text" id="projName" title="Project name" aria-label="Project name">
     <button class="btn sm" id="bRename" title="Change / rename the current project">&#9998; Rename</button>
     <button class="btn sm" id="bSaveProj" title="Save the current project now (Ctrl+S)">&#128190; Save</button>
-    <button class="btn sm pri" id="bNewTop" title="Create a new separate project">+ New</button>
   </div>
-  <span id="saveSt" class="savest" role="status" aria-live="polite"></span>
+  <button class="btn sm" id="bNewTop" title="Create a new separate project">+ New</button>
   <button class="btn sm" id="bAdd" title="Add PDFs or AutoCAD drawings (DWG / DXF) to this project">+ PDF</button><button class="btn sm" id="bAddM" title="Import: choose pages and a version set, a folder of PDFs, photos / scans as pages, sheet info, OCR" aria-haspopup="true">&#9662;</button>
+  <span id="saveSt" class="savest" role="status" aria-live="polite"></span>
   <input type="file" id="fileIn" accept="application/pdf,.pdf,.dwg,.dxf" multiple hidden>
   <input type="file" id="impPdfIn" accept="application/pdf,.pdf,.dwg,.dxf,image/jpeg,image/png,image/webp" multiple hidden>
   <input type="file" id="dirIn" webkitdirectory multiple hidden>
   <input type="file" id="imgIn" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,.jpg,.jpeg,.png" multiple hidden>
-  <div class="sep"></div>
-  <button class="btn sm" id="bPrev" title="Previous page (PgUp)">&lsaquo;</button>
-  <select id="pageSel" aria-label="Page"></select>
-  <button class="btn sm" id="bNext" title="Next page (PgDn)">&rsaquo;</button>
-  <button class="btn sm" id="bSheet" title="Sheet info: sheet no., title, revision, building and floor of this page">&#9432; Sheet</button>
-  <div class="sep"></div>
-  <button class="btn sm" id="bZo" title="Zoom out (-)">&minus;</button>
-  <span id="zoomPct">—</span>
-  <button class="btn sm" id="bZi" title="Zoom in (+)">+</button>
-  <button class="btn sm" id="bFit" title="Fit page (F)">Fit</button>
-  <button class="btn sm" id="bZw" title="Zoom window (Z) — drag a box round the part to see">&#11034;</button>
-  <div class="vieww"><button class="btn sm" id="bView" title="View: fit width, dimmer, line weights, markups on / off, the PDF's layers, labels" aria-haspopup="true" aria-expanded="false">&#128065; View<span class="vdot" title="Something is switched off or dimmed"></span> &#9662;</button>
-    <div id="viewPop" aria-label="View">
-      <button class="btn sm" id="bFitW" title="Fit the page width to the window (Shift+F)">&#8596; Fit width <kbd>Shift</kbd>+<kbd>F</kbd></button>
-      <span class="vh">Drawing</span>
-      <span class="dimw"><button class="btn sm tg2" id="bDim" title="Dimmer — fade the drawing so the takeoff stands out">&#9728; Dimmer</button><input type="range" id="dimPct" min="0" max="90" step="5" value="50" title="Dimming %"><span id="dimLbl">0%</span></span>
-      <button class="btn sm tg2" id="bLw" title="Line weights are on — click to draw every line thin">&#9472; Line weights</button>
-      <span class="vh">Background</span>
-      <span class="seg"><button class="btn sm tg2" id="bBg_auto" title="Black for AutoCAD drawings, as AutoCAD's model space; white for PDFs">Auto</button><button class="btn sm tg2" id="bBg_black" title="Black, as AutoCAD's model space — colour 7 white, colours as AutoCAD shows them">&#9632; Black</button><button class="btn sm tg2" id="bBg_white" title="White paper">&#9633; White</button></span>
-      <button class="btn sm tg2" id="bMono" title="Monochrome — every line in one ink">&#9680; Monochrome</button>
-      <button class="btn sm tg2" id="bPdfBw" title="PDF-style black and white — white working area with all CAD lines black">&#9633; PDF B/W</button>
-      <button class="btn sm" id="bLayers" title="The PDF's own CAD layers: switch them on / off to clean the drawing">&#128450; PDF layers…</button>
-      <span class="vh">Takeoff</span>
-      <button class="btn sm tg2 on" id="bHideMk" title="Hide all markups (measurements and notes) to see the drawing">&#128065; Markups</button>
-      <span class="seg"><button class="btn sm tg2" id="bLbl" title="Show / hide measurement labels (L)">&#127991; Labels <kbd>L</kbd></button><button class="btn sm" id="bLblSet" title="What the labels show: name, quantity, area, perimeter, length, L × W, segment lengths…">&#9662;</button></span>
-      <span class="vh">Navigation</span>
-      <button class="btn sm tg2" id="bLegend" title="Add an embedded editable takeoff legend to the drawing">&#9641; Legend</button><button class="btn sm tg2" id="bMini" title="Minimap — the whole page small, the part on screen framed; shows when you zoom in; click or drag it to move">&#9635; Minimap</button>
-      <button class="btn sm tg2" id="bFull" title="Full screen — Esc to leave">&#9974; Full screen</button>
-    </div></div>
-  <div class="splitw"><button class="btn sm" id="bSplit" title="Split window (Ctrl+\): the drawing in two windows with their own zoom, or two projects side by side · F6 switches window" aria-haspopup="true" aria-expanded="false" aria-label="Split window">&#9707;&#9662;</button>
-    <div id="splitPop" aria-label="Split window">
-      <span class="vh">Windows</span>
-      <span class="seg"><button class="btn sm tg2" id="spV" title="Two windows side by side">&#9707; Side by side</button><button class="btn sm tg2" id="spH" title="Two windows one above the other">&#9708; Stacked</button></span>
-      <button class="btn sm" id="spSame" title="Show this drawing again in a second window — separate zoom and pan, the same measurements; work in either window">Same drawing, second window</button>
-      <button class="btn sm" id="spProj" title="Show another project in the second window (its own drawings, measurements and sheet); click in a window to work in it">Open another project…</button>
-      <span class="vh">Windows linked</span>
-      <button class="btn sm tg2" id="spSync" title="Zoom and pan together: what you do in one window the other follows, keeping its offset (compare two revisions or floors)">Sync zoom &amp; pan</button>
-      <button class="btn sm tg2" id="spLink" title="Show the cursor's matching position in the other window (a cross-hair)">Link cursor</button>
-      <span class="vh">Actions</span>
-      <button class="btn sm" id="spMatch" title="Give the other window this window's zoom and position">Match other window to this</button>
-      <button class="btn sm" id="spSwap" title="Swap the two windows">Swap windows</button>
-      <button class="btn sm" id="spReset" title="Divider back to the middle (or double-click it)">Divider to the middle</button>
-      <button class="btn sm dng" id="spClose" title="Back to one window — the one you are working in stays">Close split</button>
-    </div></div>
-  <div class="sep"></div>
-  <div class="findw"><input type="search" id="findIn" placeholder="Find text (Ctrl+F)" aria-label="Find text on the drawings"><div id="findRes"></div></div>
-  <button class="btn sm" id="bCompare" title="Overlay another revision in colour to see what changed">&#9681; Compare</button>
-  <button class="btn sm" id="bTypical" title="Copy this page's takeoff to other pages (typical floors)">&#10697; Typical</button>
-  <span class="chip bad" id="scaleChip" title="Page scale — click to set or check"><i></i><span>Scale not set</span></span>
+  <div class="findw"><input type="search" id="findIn" placeholder="Search text on the drawings (Ctrl+F)" aria-label="Find text on the drawings"><div id="findRes"></div></div>
   <div class="sp"></div>
+  <button class="btn sm" id="bUndo" title="Undo (Ctrl+Z)">&#8630;</button>
+  <button class="btn sm" id="bRedo" title="Redo (Ctrl+Y)">&#8631;</button>
   <button class="btn sm" id="bCmd" title="Every command by name — tools, exports, pages, AI agents (Ctrl+K)">&#8984; Commands</button>
   <button class="btn sm" id="bToolChest" title="Tool Chest — reusable, favorited tool profiles; click a profile to activate its saved appearance">&#129520; Tool Chest</button>
   <button class="btn sm" id="bDefaults" title="Professional defaults for new measurements, markups, dimensions and highlights">&#9881; Defaults</button>
   <button class="btn sm" id="bWs" title="Workspace: layouts (takeoff, drawing only, pages), icons-only toolbar, minimap, full screen, thumbnail size" aria-haspopup="true">&#9638; Workspace</button>
-  <button class="btn sm" id="bUndo" title="Undo (Ctrl+Z)">&#8630;</button>
-  <button class="btn sm" id="bRedo" title="Redo (Ctrl+Y)">&#8631;</button>
-  <button class="btn sm tg2" id="bClaude" title="Ask Claude to read the drawing and measure the rooms">&#10022; Claude</button>
-  <button class="btn sm" id="bExport" title="Export: Excel, CSV, marked-up pages as PDF / PNG / JPEG (choose pages, resolution, legend), report, project">&#8681; Export</button>
+  <button class="btn sm tg2" id="bClaude" title="Ask Claude to read the drawing and measure the rooms">&#10022; Takeoff agent</button>
+  <button class="btn sm pri" id="bExport" title="Export: Excel, CSV, marked-up pages as PDF / PNG / JPEG (choose pages, resolution, legend), report, project">&#8681; Export</button>
   <a class="back" href="../zameen-developments/">SAJ QSCOST &rarr;</a>
 </header>
 
-<div class="app" id="app">
-  <aside class="panel">
-    <div class="rz" id="rzL" title="Drag to resize"></div>
-    <div class="ph"><span class="seg"><button class="btn sm on" id="tCond">Conditions</button><button class="btn sm" id="tPages" title="Every sheet in the project: search by number or title, filter, tick, edit sheet info, run OCR, and open a page">Pages</button><button class="btn sm" id="tLay">Layers</button></span><span style="flex:1"></span><button class="btn sm pri" id="bNewCond">+ New</button><button class="hidebtn" id="hideL" title="Hide this panel">&#10216;</button></div>
-    <div class="pb" id="condList"></div>
-    <div class="pb" id="layerList" style="display:none"></div>
-    <div class="pb" id="pageList" style="display:none"></div>
-    <div class="keys">
-      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>C</kbd> count</span><span><kbd>E</kbd> circle</span><span><kbd>N</kbd> note</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
-      <span><kbd>M</kbd> measure</span><span><kbd>K</kbd> set scale</span><span><kbd>V</kbd> select</span><span><kbd>B</kbd> break</span><span><kbd>Shift</kbd>+<kbd>O</kbd> lasso</span><span><kbd>Z</kbd> zoom box</span>
-      <span><kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo point</span><span><kbd>A</kbd> arc (drawing)</span><span><kbd>Ctrl</kbd>+click no snap</span><span><kbd>Shift</kbd> 0° / 90°</span>
-      <span><kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>X</kbd>/<kbd>V</kbd></span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> in place</span><span><kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate</span><span><kbd>Ctrl</kbd>+drag copy</span>
-      <span>dbl-click side +point</span><span>dbl-click point −point</span><span>right-click menu</span><span><kbd>Tab</kbd> next under cursor</span>
-      <span><kbd>Enter</kbd> finish</span><span><kbd>Esc</kbd> cancel</span><span><kbd>Space</kbd> pan</span><span><kbd>?</kbd> all keys</span>
-    </div>
-  </aside>
-
-  <section class="stagewrap">
-    <button class="openp" id="openL" style="display:none" title="Show the conditions panel">&#10217;</button>
-    <button class="openp" id="openR" style="display:none" title="Show the measurement sheet">&#10216;</button>
-    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
-      <symbol id="i-select" viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.8L10.5 19z"/></symbol>
-      <symbol id="i-cadsel" viewBox="0 0 24 24"><path d="M3 3h7M3 3v7M21 21h-7M21 21v-7M10 9l9 5-4 1-2 4z"/></symbol>
-      <symbol id="i-match" viewBox="0 0 24 24"><path d="M4 7h13M13 3l4 4-4 4M20 17H7M11 13l-4 4 4 4"/></symbol>
-      <symbol id="i-lasso" viewBox="0 0 24 24"><path d="M12 4c5 0 9 2 9 5s-4 5-9 5-9-2-9-5 4-5 9-5z"/><path d="M9 15c0 3 1 4 3 6"/></symbol>
-      <symbol id="i-pan" viewBox="0 0 24 24"><path d="M8 12V6a1.5 1.5 0 013 0v5M11 11V4.5a1.5 1.5 0 013 0V11M14 11V6a1.5 1.5 0 013 0v8c0 4-2.5 7-6.5 7-3 0-4.5-2-6.5-5l-1.8-2.8a1.5 1.5 0 012.4-1.7L8 14"/></symbol>
-      <symbol id="i-draw" viewBox="0 0 24 24"><path d="M3 18l6-9 5 5 7-9"/><circle cx="3" cy="18" r="1.5"/><circle cx="9" cy="9" r="1.5"/><circle cx="14" cy="14" r="1.5"/><circle cx="21" cy="5" r="1.5"/></symbol>
-      <symbol id="i-rect" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/><path d="M4 11l5-5M4 16l10-10M9 18L20 7M15 18l5-5" opacity=".45"/></symbol>
-      <symbol id="i-auto" viewBox="0 0 24 24"><path d="M12 3l2 5.5L19.5 10 14 12l-2 5.5L10 12 4.5 10 10 8.5z"/><path d="M19 16v4M17 18h4"/></symbol>
-      <symbol id="i-fence" viewBox="0 0 24 24"><path d="M5 4v16M12 4v16M19 4v16M3 9h18M3 15h18"/></symbol>
-      <symbol id="i-cog" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></symbol>
-      <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="1" fill="currentColor"/><path d="M12 12l5.6-5.6"/></symbol>
-      <symbol id="i-count" viewBox="0 0 24 24"><path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0113 0c0 5-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.2"/></symbol>
-      <symbol id="i-vsearch" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="M15 15l6 6M8 10h4M10 8v4"/></symbol>
-      <symbol id="i-ded" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12h8"/></symbol>
-      <symbol id="i-open" viewBox="0 0 24 24"><path d="M5 21V4h10v17M3 21h18M12 12.5h.01"/></symbol>
-      <symbol id="i-break" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.5 8l11.5 9M8.5 16L20 7"/></symbol>
-      <symbol id="i-measure" viewBox="0 0 24 24"><path d="M3 12h18M3 8v8M21 8v8M7 12v-2.5M11 12v-2M15 12v-2.5M19 12v-2"/></symbol>
-      <symbol id="i-cal" viewBox="0 0 24 24"><rect x="2" y="8" width="20" height="8" rx="1.5"/><path d="M6 8v4M10 8v3M14 8v4M18 8v3"/></symbol>
-      <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 4h14v12h-9l-5 4z"/><path d="M9 8h6M9 11h4"/></symbol>
-      <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4 4 0 010-8 5 5 0 019.3-1A4 4 0 0117 18z"/></symbol>
-      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 20L20 4M10 4h10v10"/></symbol>
-      <symbol id="i-dim" viewBox="0 0 24 24"><path d="M4 5v14M20 5v14M4 12h16M8 9l-4 3 4 3M16 9l4 3-4 3"/></symbol>
-      <symbol id="i-hilite" viewBox="0 0 24 24"><path d="M14 4l6 6-9 9-5.5 1 1-5.5z"/><path d="M4 21h6"/></symbol>
-      <symbol id="i-markup" viewBox="0 0 24 24"><path d="M4 20l4-1L19.5 7.5l-3-3L5 16z"/><path d="M14.5 6.5l3 3"/></symbol>
-      <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
-      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></symbol>
-      <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
-      <symbol id="i-move" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></symbol>
-      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 9V5.5A1.5 1.5 0 0013.5 4h-8A1.5 1.5 0 004 5.5v8A1.5 1.5 0 005.5 15H9"/></symbol>
-      <symbol id="i-dup" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 9V5.5A1.5 1.5 0 0013.5 4h-8A1.5 1.5 0 004 5.5v8A1.5 1.5 0 005.5 15H9M14.5 12.5v6M11.5 15.5h6"/></symbol>
-      <symbol id="i-array" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
-      <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2.3 6.3M20 4v7h-7"/></symbol>
-      <symbol id="i-rotatel" viewBox="0 0 24 24"><path d="M4 11a8 8 0 112.3 6.3M4 4v7h7"/></symbol>
-      <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2 2"/><path d="M8 7l-5 5 5 5zM16 7l5 5-5 5z"/></symbol>
-      <symbol id="i-mirrorv" viewBox="0 0 24 24"><path d="M3 12h18" stroke-dasharray="2 2"/><path d="M7 8l5-5 5 5zM7 16l5 5 5-5z"/></symbol>
-      <symbol id="i-trim" viewBox="0 0 24 24"><path d="M3 21L21 3M3 3l8 8"/><circle cx="14" cy="14" r="1.2"/></symbol>
-      <symbol id="i-extend" viewBox="0 0 24 24"><path d="M3 12h11M18 12h3M16 5v14"/></symbol>
-      <symbol id="i-fillet" viewBox="0 0 24 24"><path d="M5 4v8a6 6 0 006 6h8"/></symbol>
-      <symbol id="i-chamfer" viewBox="0 0 24 24"><path d="M5 4v7l7 7h7"/></symbol>
-      <symbol id="i-stretch" viewBox="0 0 24 24"><path d="M3 6h8v12H3zM11 12h10M17 8l4 4-4 4"/></symbol>
-      <symbol id="i-scale" viewBox="0 0 24 24"><path d="M3 21V11h10v10zM13 11l8-8M15 3h6v6"/></symbol>
-      <symbol id="i-rotany" viewBox="0 0 24 24"><path d="M20 12a8 8 0 11-2.6-5.9M20 3v6h-6"/><path d="M12 12l5-3"/></symbol>
-      <symbol id="i-xh" viewBox="0 0 24 24"><path d="M12 2v20M2 12h20"/></symbol>
-      <symbol id="i-offset" viewBox="0 0 24 24"><path d="M3 17L17 3M7 21L21 7"/></symbol>
-      <symbol id="i-join" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></symbol>
-      <symbol id="i-explode" viewBox="0 0 24 24"><path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/></symbol>
-      <symbol id="i-close" viewBox="0 0 24 24"><path d="M4 17l3-11 12 4-3 10z" stroke-dasharray="0"/><path d="M4 17l3-11" stroke-width="3" opacity=".25"/></symbol>
-      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></symbol>
-      <symbol id="i-front" viewBox="0 0 24 24"><rect x="3" y="9" width="12" height="12" rx="1.5" opacity=".5"/><rect x="9" y="3" width="12" height="12" rx="1.5"/></symbol>
-      <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></symbol>
-      <symbol id="i-next" viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6"/></symbol>
-      <symbol id="i-prev" viewBox="0 0 24 24"><path d="M20 12H5M11 6l-6 6 6 6"/></symbol>
-      <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h12l-2 4 2 4H5"/></symbol>
-      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></symbol>
-      <symbol id="i-compare" viewBox="0 0 24 24"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></symbol>
-      <symbol id="i-typical" viewBox="0 0 24 24"><rect x="3" y="3" width="10" height="10" rx="1"/><rect x="11" y="11" width="10" height="10" rx="1"/></symbol>
-      <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
-      <symbol id="i-snap" viewBox="0 0 24 24"><path d="M6 3v9a6 6 0 0012 0V3M6 8h4M14 8h4"/></symbol>
-      <symbol id="i-ortho" viewBox="0 0 24 24"><path d="M5 4v15h15M5 14h5v5"/></symbol>
-      <symbol id="i-polar" viewBox="0 0 24 24"><path d="M4 20h16M4 20L17 7M10 20a6 6 0 00-1.8-4.3"/></symbol>
-    </defs></svg>
-    <div class="tools" id="tools">
+<div class="tools" id="tools">
       <div class="rtabs" role="tablist" aria-label="Tool groups">
         <button class="rtab on" role="tab" data-rtab="takeoff" title="Measure lengths, areas and counts; Auto area; Find similar; cut-outs and openings">Takeoff</button>
         <button class="rtab" role="tab" data-rtab="modify" title="Edit what is measured: move, copy, rotate, mirror, offset, break, join, explode, close, array">Modify</button>
         <button class="rtab" role="tab" data-rtab="markup" title="Notes, clouds, arrows, dimensions, highlights, stamps and the Markups list">Markup</button>
         <button class="rtab" role="tab" data-rtab="review" title="Check the takeoff: next / previous unchecked, mark checked, check before export, Compare, Typical">Review</button>
+        <button class="rtab" role="tab" data-rtab="costing" title="Costing: measurement sheet, bill with rates, opening schedule, revision cost variance, check before export">Costing</button>
+        <button class="rtab" role="tab" data-rtab="export" title="Export Excel / CSV / marked-up PDF, save the project, import pages">Export</button>
+        <button class="rtab" role="tab" data-rtab="view" title="View: fit, zoom, split window, dimmer, background, layers, labels, legend, minimap, full screen">View</button>
         <span class="sp"></span>
         <button class="tool tsm" id="bDel" title="Delete the selected measurement, count point or markup (Delete)" disabled><svg class="ic"><use href="#i-trash"/></svg><span class="tl">Delete</span></button>
         <button class="tool tsm tgl" id="bOrtho" title="Ortho (F8): every point goes straight across or up / down from the last one. Holding Shift does the same for one click."><svg class="ic"><use href="#i-ortho"/></svg><span class="tl">Ortho</span></button>
@@ -674,7 +712,192 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
           <button class="tool" data-rv="typical" title="Copy this page's takeoff to other pages (typical floors)"><svg class="ic"><use href="#i-typical"/></svg><span class="tl">Typical</span></button>
         </div><div class="rgl">Revision</div></div>
       </div>
+      <div class="rpanel" data-rp="costing" hidden>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-px="vSheet" title="Measurement sheet: Nos × L × W × H, decimal feet"><svg class="ic"><use href="#i-list"/></svg><span class="tl">Sheet</span></button>
+          <button class="tool" data-px="vBill" title="Bill: quantities with rates, assemblies and totals"><svg class="ic"><use href="#i-cal"/></svg><span class="tl">Bill</span></button>
+          <button class="tool" data-fn="openings" title="Door and window marks with their sizes"><svg class="ic"><use href="#i-open"/></svg><span class="tl">Opening schedule</span></button>
+        </div><div class="rgl">Quantities</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-fn="revcost" title="Old revision against new: quantity and cost variance"><svg class="ic"><use href="#i-compare"/></svg><span class="tl">Revision variance</span></button>
+          <button class="tool" data-rv="validate" title="Check before export: errors and warnings"><svg class="ic"><use href="#i-shield"/></svg><span class="tl">Check before export</span></button>
+        </div><div class="rgl">Check</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-px="bNewCond" title="New condition — then set its BOQ code, Rate Analysis code and assemblies in Edit"><svg class="ic"><use href="#i-draw"/></svg><span class="tl">New condition</span></button>
+          <button class="tool" data-px="bDefaults" title="Professional defaults for new measurements"><svg class="ic"><use href="#i-cog"/></svg><span class="tl">Defaults</span></button>
+        </div><div class="rgl">Conditions</div></div>
       </div>
+      <div class="rpanel" data-rp="export" hidden>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-px="bExport" title="Export: Excel, CSV, marked-up pages as PDF / PNG / JPEG, report, project"><svg class="ic"><use href="#i-next"/></svg><span class="tl">Export…</span></button>
+          <button class="tool" data-px="bSaveProj" title="Save the current project now (Ctrl+S)"><svg class="ic"><use href="#i-check"/></svg><span class="tl">Save</span></button>
+        </div><div class="rgl">Output</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-px="bAdd" title="Add PDFs or AutoCAD drawings"><svg class="ic"><use href="#i-front"/></svg><span class="tl">Add PDF / DWG</span></button>
+          <button class="tool" data-px="bAddM" title="Import: choose pages, a folder of PDFs, photos / scans, sheet info, OCR"><svg class="ic"><use href="#i-array"/></svg><span class="tl">Import…</span></button>
+          <button class="tool" data-px="bProjects" title="All projects"><svg class="ic"><use href="#i-list"/></svg><span class="tl">Projects</span></button>
+        </div><div class="rgl">Project</div></div>
+      </div>
+      <div class="rpanel" data-rp="view" hidden>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-px="bFit" title="Fit page (F)"><svg class="ic"><use href="#i-rect"/></svg><span class="tl">Fit page</span></button>
+          <button class="tool" data-px="bFitW" title="Fit the page width (Shift+F)"><svg class="ic"><use href="#i-measure"/></svg><span class="tl">Fit width</span></button>
+          <button class="tool" data-px="bZw" title="Zoom window (Z)"><svg class="ic"><use href="#i-vsearch"/></svg><span class="tl">Zoom box</span></button>
+          <button class="tool" data-px="bFull" title="Full screen — Esc to leave"><svg class="ic"><use href="#i-move"/></svg><span class="tl">Full screen</span></button>
+        </div><div class="rgl">Zoom</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-px="bHideMk" title="Show / hide all markups and measurements"><svg class="ic"><use href="#i-hilite"/></svg><span class="tl">Markups</span></button>
+          <button class="tool" data-px="bLbl" title="Show / hide measurement labels (L)"><svg class="ic"><use href="#i-note"/></svg><span class="tl">Labels</span></button>
+          <button class="tool" data-px="bLegend" title="Embedded editable takeoff legend"><svg class="ic"><use href="#i-list"/></svg><span class="tl">Legend</span></button>
+          <button class="tool" data-px="bMini" title="Minimap"><svg class="ic"><use href="#i-array"/></svg><span class="tl">Minimap</span></button>
+        </div><div class="rgl">Takeoff display</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-px="bDim" title="Dimmer — fade the drawing so the takeoff stands out"><svg class="ic"><use href="#i-compare"/></svg><span class="tl">Dimmer</span></button>
+          <button class="tool" data-px="bMono" title="Monochrome — every line in one ink"><svg class="ic"><use href="#i-explode"/></svg><span class="tl">Monochrome</span></button>
+          <button class="tool" data-px="bLayers" title="The PDF's own CAD layers"><svg class="ic"><use href="#i-front"/></svg><span class="tl">PDF layers</span></button>
+        </div><div class="rgl">Drawing</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-px="spV" title="Two windows side by side"><svg class="ic"><use href="#i-typical"/></svg><span class="tl">Split side by side</span></button>
+          <button class="tool" data-px="spH" title="Two windows one above the other"><svg class="ic"><use href="#i-typical"/></svg><span class="tl">Split stacked</span></button>
+          <button class="tool" data-px="spClose" title="Back to one window"><svg class="ic"><use href="#i-close"/></svg><span class="tl">Close split</span></button>
+        </div><div class="rgl">Windows</div></div>
+      </div>
+      </div>
+    </div>
+
+<div class="app" id="app">
+  <aside class="panel">
+    <div class="rz" id="rzL" title="Drag to resize"></div>
+    <div class="ph"><span class="seg"><button class="btn sm on" id="tCond">Conditions</button><button class="btn sm" id="tPages" title="Every sheet in the project: search by number or title, filter, tick, edit sheet info, run OCR, and open a page">Pages</button><button class="btn sm" id="tLay">Layers</button></span><span style="flex:1"></span><button class="btn sm pri" id="bNewCond">+ New</button><button class="hidebtn" id="hideL" title="Hide this panel">&#10216;</button></div>
+    <div class="cfil" id="condFilter"><input type="search" id="condQ" placeholder="Filter conditions" aria-label="Filter conditions"><div class="ctypes" id="condTypes"></div></div>
+    <div class="pb" id="condList"></div>
+    <div class="pb" id="layerList" style="display:none"></div>
+    <div class="pb" id="pageList" style="display:none"></div>
+    <div class="propsbox" id="propsBox"><div class="pbh" id="propsHead" title="Click to fold / unfold"><b>Properties</b><span id="propsTag" class="small"></span></div>
+      <div class="props" id="props"></div><div class="propsEmpty">Click a measurement on the drawing or on the sheet to see and edit its details here. Select a condition to see its settings.</div></div>
+    <details class="keys"><summary>Keyboard shortcuts</summary><div class="kg">
+      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>C</kbd> count</span><span><kbd>E</kbd> circle</span><span><kbd>N</kbd> note</span><span><kbd>D</kbd> deduct</span><span><kbd>O</kbd> opening</span>
+      <span><kbd>M</kbd> measure</span><span><kbd>K</kbd> set scale</span><span><kbd>V</kbd> select</span><span><kbd>B</kbd> break</span><span><kbd>Shift</kbd>+<kbd>O</kbd> lasso</span><span><kbd>Z</kbd> zoom box</span>
+      <span><kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo point</span><span><kbd>A</kbd> arc (drawing)</span><span><kbd>Ctrl</kbd>+click no snap</span><span><kbd>Shift</kbd> 0° / 90°</span>
+      <span><kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>X</kbd>/<kbd>V</kbd></span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> in place</span><span><kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate</span><span><kbd>Ctrl</kbd>+drag copy</span>
+      <span>dbl-click side +point</span><span>dbl-click point −point</span><span>right-click menu</span><span><kbd>Tab</kbd> next under cursor</span>
+      <span><kbd>Enter</kbd> finish</span><span><kbd>Esc</kbd> cancel</span><span><kbd>Space</kbd> pan</span><span><kbd>?</kbd> all keys</span>
+    </div></details>
+  </aside>
+
+  <section class="stagewrap">
+    <button class="openp" id="openL" style="display:none" title="Show the conditions panel">&#10217;</button>
+    <button class="openp" id="openR" style="display:none" title="Show the measurement sheet">&#10216;</button>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+      <symbol id="i-select" viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.8L10.5 19z"/></symbol>
+      <symbol id="i-cadsel" viewBox="0 0 24 24"><path d="M3 3h7M3 3v7M21 21h-7M21 21v-7M10 9l9 5-4 1-2 4z"/></symbol>
+      <symbol id="i-match" viewBox="0 0 24 24"><path d="M4 7h13M13 3l4 4-4 4M20 17H7M11 13l-4 4 4 4"/></symbol>
+      <symbol id="i-lasso" viewBox="0 0 24 24"><path d="M12 4c5 0 9 2 9 5s-4 5-9 5-9-2-9-5 4-5 9-5z"/><path d="M9 15c0 3 1 4 3 6"/></symbol>
+      <symbol id="i-pan" viewBox="0 0 24 24"><path d="M8 12V6a1.5 1.5 0 013 0v5M11 11V4.5a1.5 1.5 0 013 0V11M14 11V6a1.5 1.5 0 013 0v8c0 4-2.5 7-6.5 7-3 0-4.5-2-6.5-5l-1.8-2.8a1.5 1.5 0 012.4-1.7L8 14"/></symbol>
+      <symbol id="i-draw" viewBox="0 0 24 24"><path d="M3 18l6-9 5 5 7-9"/><circle cx="3" cy="18" r="1.5"/><circle cx="9" cy="9" r="1.5"/><circle cx="14" cy="14" r="1.5"/><circle cx="21" cy="5" r="1.5"/></symbol>
+      <symbol id="i-rect" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/><path d="M4 11l5-5M4 16l10-10M9 18L20 7M15 18l5-5" opacity=".45"/></symbol>
+      <symbol id="i-auto" viewBox="0 0 24 24"><path d="M12 3l2 5.5L19.5 10 14 12l-2 5.5L10 12 4.5 10 10 8.5z"/><path d="M19 16v4M17 18h4"/></symbol>
+      <symbol id="i-fence" viewBox="0 0 24 24"><path d="M5 4v16M12 4v16M19 4v16M3 9h18M3 15h18"/></symbol>
+      <symbol id="i-cog" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></symbol>
+      <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="1" fill="currentColor"/><path d="M12 12l5.6-5.6"/></symbol>
+      <symbol id="i-count" viewBox="0 0 24 24"><path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0113 0c0 5-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.2"/></symbol>
+      <symbol id="i-vsearch" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="M15 15l6 6M8 10h4M10 8v4"/></symbol>
+      <symbol id="i-ded" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12h8"/></symbol>
+      <symbol id="i-open" viewBox="0 0 24 24"><path d="M5 21V4h10v17M3 21h18M12 12.5h.01"/></symbol>
+      <symbol id="i-break" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.5 8l11.5 9M8.5 16L20 7"/></symbol>
+      <symbol id="i-measure" viewBox="0 0 24 24"><path d="M3 12h18M3 8v8M21 8v8M7 12v-2.5M11 12v-2M15 12v-2.5M19 12v-2"/></symbol>
+      <symbol id="i-cal" viewBox="0 0 24 24"><rect x="2" y="8" width="20" height="8" rx="1.5"/><path d="M6 8v4M10 8v3M14 8v4M18 8v3"/></symbol>
+      <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 4h14v12h-9l-5 4z"/><path d="M9 8h6M9 11h4"/></symbol>
+      <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4 4 0 010-8 5 5 0 019.3-1A4 4 0 0117 18z"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 20L20 4M10 4h10v10"/></symbol>
+      <symbol id="i-dim" viewBox="0 0 24 24"><path d="M4 5v14M20 5v14M4 12h16M8 9l-4 3 4 3M16 9l4 3-4 3"/></symbol>
+      <symbol id="i-hilite" viewBox="0 0 24 24"><path d="M14 4l6 6-9 9-5.5 1 1-5.5z"/><path d="M4 21h6"/></symbol>
+      <symbol id="i-markup" viewBox="0 0 24 24"><path d="M4 20l4-1L19.5 7.5l-3-3L5 16z"/><path d="M14.5 6.5l3 3"/></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></symbol>
+      <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+      <symbol id="i-move" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 9V5.5A1.5 1.5 0 0013.5 4h-8A1.5 1.5 0 004 5.5v8A1.5 1.5 0 005.5 15H9"/></symbol>
+      <symbol id="i-dup" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 9V5.5A1.5 1.5 0 0013.5 4h-8A1.5 1.5 0 004 5.5v8A1.5 1.5 0 005.5 15H9M14.5 12.5v6M11.5 15.5h6"/></symbol>
+      <symbol id="i-array" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+      <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2.3 6.3M20 4v7h-7"/></symbol>
+      <symbol id="i-rotatel" viewBox="0 0 24 24"><path d="M4 11a8 8 0 112.3 6.3M4 4v7h7"/></symbol>
+      <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2 2"/><path d="M8 7l-5 5 5 5zM16 7l5 5-5 5z"/></symbol>
+      <symbol id="i-mirrorv" viewBox="0 0 24 24"><path d="M3 12h18" stroke-dasharray="2 2"/><path d="M7 8l5-5 5 5zM7 16l5 5 5-5z"/></symbol>
+      <symbol id="i-trim" viewBox="0 0 24 24"><path d="M3 21L21 3M3 3l8 8"/><circle cx="14" cy="14" r="1.2"/></symbol>
+      <symbol id="i-extend" viewBox="0 0 24 24"><path d="M3 12h11M18 12h3M16 5v14"/></symbol>
+      <symbol id="i-fillet" viewBox="0 0 24 24"><path d="M5 4v8a6 6 0 006 6h8"/></symbol>
+      <symbol id="i-chamfer" viewBox="0 0 24 24"><path d="M5 4v7l7 7h7"/></symbol>
+      <symbol id="i-stretch" viewBox="0 0 24 24"><path d="M3 6h8v12H3zM11 12h10M17 8l4 4-4 4"/></symbol>
+      <symbol id="i-scale" viewBox="0 0 24 24"><path d="M3 21V11h10v10zM13 11l8-8M15 3h6v6"/></symbol>
+      <symbol id="i-rotany" viewBox="0 0 24 24"><path d="M20 12a8 8 0 11-2.6-5.9M20 3v6h-6"/><path d="M12 12l5-3"/></symbol>
+      <symbol id="i-xh" viewBox="0 0 24 24"><path d="M12 2v20M2 12h20"/></symbol>
+      <symbol id="i-offset" viewBox="0 0 24 24"><path d="M3 17L17 3M7 21L21 7"/></symbol>
+      <symbol id="i-join" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></symbol>
+      <symbol id="i-explode" viewBox="0 0 24 24"><path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="M4 17l3-11 12 4-3 10z" stroke-dasharray="0"/><path d="M4 17l3-11" stroke-width="3" opacity=".25"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></symbol>
+      <symbol id="i-front" viewBox="0 0 24 24"><rect x="3" y="9" width="12" height="12" rx="1.5" opacity=".5"/><rect x="9" y="3" width="12" height="12" rx="1.5"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></symbol>
+      <symbol id="i-next" viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6"/></symbol>
+      <symbol id="i-prev" viewBox="0 0 24 24"><path d="M20 12H5M11 6l-6 6 6 6"/></symbol>
+      <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h12l-2 4 2 4H5"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></symbol>
+      <symbol id="i-compare" viewBox="0 0 24 24"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></symbol>
+      <symbol id="i-typical" viewBox="0 0 24 24"><rect x="3" y="3" width="10" height="10" rx="1"/><rect x="11" y="11" width="10" height="10" rx="1"/></symbol>
+      <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+      <symbol id="i-snap" viewBox="0 0 24 24"><path d="M6 3v9a6 6 0 0012 0V3M6 8h4M14 8h4"/></symbol>
+      <symbol id="i-ortho" viewBox="0 0 24 24"><path d="M5 4v15h15M5 14h5v5"/></symbol>
+      <symbol id="i-polar" viewBox="0 0 24 24"><path d="M4 20h16M4 20L17 7M10 20a6 6 0 00-1.8-4.3"/></symbol>
+    </defs></svg>
+    <div class="cbar" id="cbar">
+      <div class="cgrp"><button class="btn sm" id="bPrev" title="Previous page (PgUp)">&lsaquo;</button>
+        <select id="pageSel" aria-label="Page"></select>
+        <button class="btn sm" id="bNext" title="Next page (PgDn)">&rsaquo;</button>
+        <button class="btn sm" id="bSheet" title="Sheet info: sheet no., title, revision, building and floor of this page">&#9432; Sheet</button></div>
+      <div class="cgrp"><button class="btn sm" id="bZo" title="Zoom out (-)">&minus;</button>
+        <span id="zoomPct">—</span>
+        <button class="btn sm" id="bZi" title="Zoom in (+)">+</button>
+        <button class="btn sm" id="bFit" title="Fit page (F)">Fit</button>
+        <button class="btn sm" id="bZw" title="Zoom window (Z) — drag a box round the part to see">&#11034;</button></div>
+      <div class="cgrp">
+  <div class="vieww"><button class="btn sm" id="bView" title="View: fit width, dimmer, line weights, markups on / off, the PDF's layers, labels" aria-haspopup="true" aria-expanded="false">&#128065; View<span class="vdot" title="Something is switched off or dimmed"></span> &#9662;</button>
+    <div id="viewPop" aria-label="View">
+      <button class="btn sm" id="bFitW" title="Fit the page width to the window (Shift+F)">&#8596; Fit width <kbd>Shift</kbd>+<kbd>F</kbd></button>
+      <span class="vh">Drawing</span>
+      <span class="dimw"><button class="btn sm tg2" id="bDim" title="Dimmer — fade the drawing so the takeoff stands out">&#9728; Dimmer</button><input type="range" id="dimPct" min="0" max="90" step="5" value="50" title="Dimming %"><span id="dimLbl">0%</span></span>
+      <button class="btn sm tg2" id="bLw" title="Line weights are on — click to draw every line thin">&#9472; Line weights</button>
+      <span class="vh">Background</span>
+      <span class="seg"><button class="btn sm tg2" id="bBg_auto" title="Black for AutoCAD drawings, as AutoCAD's model space; white for PDFs">Auto</button><button class="btn sm tg2" id="bBg_black" title="Black, as AutoCAD's model space — colour 7 white, colours as AutoCAD shows them">&#9632; Black</button><button class="btn sm tg2" id="bBg_white" title="White paper">&#9633; White</button></span>
+      <button class="btn sm tg2" id="bMono" title="Monochrome — every line in one ink">&#9680; Monochrome</button>
+      <button class="btn sm tg2" id="bPdfBw" title="PDF-style black and white — white working area with all CAD lines black">&#9633; PDF B/W</button>
+      <button class="btn sm" id="bLayers" title="The PDF's own CAD layers: switch them on / off to clean the drawing">&#128450; PDF layers…</button>
+      <span class="vh">Takeoff</span>
+      <button class="btn sm tg2 on" id="bHideMk" title="Hide all markups (measurements and notes) to see the drawing">&#128065; Markups</button>
+      <span class="seg"><button class="btn sm tg2" id="bLbl" title="Show / hide measurement labels (L)">&#127991; Labels <kbd>L</kbd></button><button class="btn sm" id="bLblSet" title="What the labels show: name, quantity, area, perimeter, length, L × W, segment lengths…">&#9662;</button></span>
+      <span class="vh">Navigation</span>
+      <button class="btn sm tg2" id="bLegend" title="Add an embedded editable takeoff legend to the drawing">&#9641; Legend</button><button class="btn sm tg2" id="bMini" title="Minimap — the whole page small, the part on screen framed; shows when you zoom in; click or drag it to move">&#9635; Minimap</button>
+      <button class="btn sm tg2" id="bFull" title="Full screen — Esc to leave">&#9974; Full screen</button>
+    </div></div>
+  <div class="splitw"><button class="btn sm" id="bSplit" title="Split window (Ctrl+\): the drawing in two windows with their own zoom, or two projects side by side · F6 switches window" aria-haspopup="true" aria-expanded="false" aria-label="Split window">&#9707;&#9662;</button>
+    <div id="splitPop" aria-label="Split window">
+      <span class="vh">Windows</span>
+      <span class="seg"><button class="btn sm tg2" id="spV" title="Two windows side by side">&#9707; Side by side</button><button class="btn sm tg2" id="spH" title="Two windows one above the other">&#9708; Stacked</button></span>
+      <button class="btn sm" id="spSame" title="Show this drawing again in a second window — separate zoom and pan, the same measurements; work in either window">Same drawing, second window</button>
+      <button class="btn sm" id="spProj" title="Show another project in the second window (its own drawings, measurements and sheet); click in a window to work in it">Open another project…</button>
+      <span class="vh">Windows linked</span>
+      <button class="btn sm tg2" id="spSync" title="Zoom and pan together: what you do in one window the other follows, keeping its offset (compare two revisions or floors)">Sync zoom &amp; pan</button>
+      <button class="btn sm tg2" id="spLink" title="Show the cursor's matching position in the other window (a cross-hair)">Link cursor</button>
+      <span class="vh">Actions</span>
+      <button class="btn sm" id="spMatch" title="Give the other window this window's zoom and position">Match other window to this</button>
+      <button class="btn sm" id="spSwap" title="Swap the two windows">Swap windows</button>
+      <button class="btn sm" id="spReset" title="Divider back to the middle (or double-click it)">Divider to the middle</button>
+      <button class="btn sm dng" id="spClose" title="Back to one window — the one you are working in stays">Close split</button>
+    </div></div></div>
+      <div class="sp"></div>
+      <button class="btn sm" id="bCompare" title="Overlay another revision in colour to see what changed">&#9681; Compare</button>
+      <button class="btn sm" id="bTypical" title="Copy this page's takeoff to other pages (typical floors)">&#10697; Typical</button>
+      <span class="chip bad" id="scaleChip" title="Page scale — click to set or check"><i></i><span>Scale not set</span></span>
     </div>
     <div id="panes" class="panes v"><div class="pane" id="pane0">
     <div id="stage" class="stg">
@@ -702,7 +925,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
     <div id="qaBar"></div>
     <div class="pb" id="sheet"></div>
     <div class="pb" id="bill" style="display:none"></div>
-    <div class="props" id="props"></div>
+    <div class="rfoot" id="rFoot"><button class="btn" data-rvf="prev">&larr; Prev</button><button class="btn" data-rvf="next">Next unchecked &rarr;</button><span class="sp"></span><button class="btn pri" data-rvf="checkpage">&#10003; Check this page</button></div>
   </aside>
 </div>
 
@@ -731,11 +954,13 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
     <div class="aib"><span class="small">Free agents — no API key, no cost:</span><button class="btn sm pri" id="agFull" title="Full takeoff (free, no API key): rooms, walls, doors / windows and finishes in one run — this page, every page of the PDF or the whole project; one Ctrl+Z takes it back">&#9889; Full takeoff</button><button class="btn sm pri" id="agRooms" title="Rooms agent (free, instant): auto-trace every room named on this page and check it against its written size">&#127968; Rooms</button><button class="btn sm pri" id="agUnit" title="Apartment agent (free): every room of one apartment by its number, e.g. 107, with the apartment total">&#127970; Apartment</button><button class="btn sm pri" id="agWalls" title="Walls agent (free, instant): find walls from their two parallel face lines and mark them on the centre line">&#129521; Walls</button><button class="btn sm pri" id="agTags" title="Doors / windows agent (free): every door, window and ventilator tag (D1, D-1, DR-01, DOOR 1, SD2, W1, WN-2, KW1, V1 …) on this page, this PDF or the whole project — schedule tables read for sizes and checked against the count; optional door-swing count">&#128682; Doors / windows</button><button class="btn sm pri" id="agFin" title="Finishes agent (free): each room's wall plaster / paint as Nos × L × H with every door and window its own deduction row, skirting less doors, ceiling">&#127912; Finishes</button><button class="btn sm pri" id="agCheck" title="Checker (free): rooms not measured, areas measured twice, double counts, tags not counted, counts against the schedule — each with Show / Fix">&#9989; Check</button><button class="btn sm" id="aiDetails" title="Read this page's text — rooms, sizes, tags, levels — and list tasks">&#128203; Details</button></div>
     <div class="aib"><span class="small">Claude.ai chat:</span><button class="btn sm" id="aiCopy" title="Copy the view and instructions for your own Claude.ai chat — no API key">Copy for Claude</button><button class="btn sm" id="aiImport" title="Paste Claude.ai's reply to draw the measurements">&#8615; Import from Claude</button></div></div>
 </aside>
+<div id="agentBar" class="agentbar"><span class="abi">&#10022;</span><input type="text" id="agIn" placeholder="Ask the takeoff agent — e.g. measure every bedroom, or: the lounge outline is wrong, redo it" autocomplete="off" aria-label="Ask the takeoff agent"><button class="btn sm pri" id="agGo" title="Send to the takeoff agent (needs the Claude API key; the free agents on the right need none)">&#10148;</button>
+  <span class="agch"><button class="btn sm" data-agx="agFull" title="Full takeoff — free, no API key">&#9889; Full takeoff</button><button class="btn sm" data-agx="agRooms" title="Rooms — auto-trace every named room">&#127968; Rooms</button><button class="btn sm" data-agx="agTags" title="Doors / windows — every tag on the page">&#128682; Doors / windows</button><button class="btn sm" data-agx="agFin" title="Finishes — plaster, paint, skirting, ceiling">&#127912; Finishes</button><button class="btn sm" data-agx="agCheck" title="Check — rooms not measured, double counts, tags not counted">&#9989; Check</button></span></div>
 <div id="toast"></div>
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-08b"></script>
+<script type="module" src="takeoff.js?v=2026-10-08c"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password
