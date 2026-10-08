@@ -179,7 +179,7 @@ function png(w, h, px){   // a small RGBA PNG, px(x, y) -> [r, g, b, a]
   m = await last(); ok(m && m.type === "link" && m.link.url === "https://example.com/spec", "hyperlink to a web address (https:// added)");
   const linkId = m.id;
   await tool("mk_attach");
-  { await page.click("#bFit"); await wait(250); const [fc] = await Promise.all([page.waitForEvent("filechooser"), clickAt(300, 680)]); await fc.setFiles({name: "site-notes.txt", mimeType: "text/plain", buffer: Buffer.from("Pour on Monday.\n")}); }
+  { await page.click("#bFit"); await wait(250); const [fc] = await Promise.all([page.waitForEvent("filechooser"), clickAt(300, 560)]); await fc.setFiles({name: "site-notes.txt", mimeType: "text/plain", buffer: Buffer.from("Pour on Monday.\n")}); }
   await page.waitForFunction(() => (zdTakeoff.P.proj.marks || []).some(m => m.type === "attach"), null, {timeout: 5000}); await wait(150);
   m = (await marks()).find(x => x.type === "attach");
   ok(m && m.att.name === "site-notes.txt" && m.att.size === 16, "a file attached (site-notes.txt, 16 B)");
@@ -306,7 +306,7 @@ function png(w, h, px){   // a small RGBA PNG, px(x, y) -> [r, g, b, a]
   const t2 = bad.find(m => m.id === "m2"); ok(t2.color === "#d03b3b" && t2.fill == null && t2.fs === 500 && t2.hatch == null, "a bad colour, fill, size and hatch are cleaned");
 
   console.log("undo");
-  { await page.click("#bFit"); await wait(250); const n0 = (await marks()).length; await page.keyboard.press("Shift+R"); await dragAt(700, 650, 760, 700); const n1 = (await marks()).length; await page.keyboard.press("Escape"); await page.keyboard.press("Control+z"); await wait(150);
+  { await page.click("#bFit"); await wait(250); const n0 = (await marks()).length; await page.keyboard.press("Shift+R"); await dragAt(700, 480, 760, 530); const n1 = (await marks()).length; await page.keyboard.press("Escape"); await page.keyboard.press("Control+z"); await wait(150);
     ok(n1 === n0 + 1 && (await marks()).length === n0, "Ctrl+Z takes a markup back"); }
 
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
