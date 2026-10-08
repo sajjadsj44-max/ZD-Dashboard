@@ -306,7 +306,7 @@ function png(w, h, px){   // a small RGBA PNG, px(x, y) -> [r, g, b, a]
   const t2 = bad.find(m => m.id === "m2"); ok(t2.color === "#d03b3b" && t2.fill == null && t2.fs === 500 && t2.hatch == null, "a bad colour, fill, size and hatch are cleaned");
 
   console.log("undo");
-  { const n0 = (await marks()).length; await page.keyboard.press("Shift+R"); await dragAt(700, 650, 760, 700); const n1 = (await marks()).length; await page.keyboard.press("Escape"); await page.keyboard.press("Control+z"); await wait(150);
+  { await page.click("#bFit"); await wait(250); const n0 = (await marks()).length; await page.keyboard.press("Shift+R"); await dragAt(700, 650, 760, 700); const n1 = (await marks()).length; await page.keyboard.press("Escape"); await page.keyboard.press("Control+z"); await wait(150);
     ok(n1 === n0 + 1 && (await marks()).length === n0, "Ctrl+Z takes a markup back"); }
 
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
