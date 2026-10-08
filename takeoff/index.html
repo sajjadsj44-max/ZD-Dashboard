@@ -204,6 +204,7 @@ table.sh .rn:hover{color:var(--purple)}
 .rtab.on{background:#fff;border-color:var(--line);color:var(--purple);box-shadow:inset 0 2px 0 var(--purple)}
 .rtabs .sp{flex:1}.rtabs .tool{margin-bottom:3px}
 .rtabs .rsel{margin:0 4px 3px;padding-left:6px;border-left:1px solid var(--line)}
+.rtop{display:contents}#topTools .tool[draggable=true]{cursor:grab}
 .rrow{display:flex;align-items:stretch;padding:4px 8px 3px;gap:0}
 .rrow .rsel{align-self:flex-start;margin:0 0 0}.rrow .rvs{height:auto;align-self:stretch;margin:0 8px}
 .rpanel{display:flex;flex-wrap:wrap;gap:0;align-items:stretch;flex:1;min-width:0}
@@ -714,16 +715,18 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
         <button class="rtab on" role="tab" data-rtab="mine" title="My tools — the tools you picked in Customize toolbar">&#9733; My tools</button>
         <button class="rtab" role="tab" data-rtab="view" title="View: fit, zoom, split window, dimmer, background, layers, labels, legend, minimap, full screen">View</button>
         <span class="sp"></span>
+        <span class="rtop" id="topTools">
         <button class="tool tsm" id="bDel" title="Delete the selected measurement, count point or markup (Delete)" disabled><svg class="ic"><use href="#i-trash"/></svg><span class="tl">Delete</span></button>
         <span class="rsel"><button class="tool tsm" data-tool="select" title="Select / edit (V): click, or drag a box — left→right selects what is wholly inside, right→left what it touches. Drag a selected object to move it, Ctrl+drag to copy. Right-click for more."><svg class="ic"><use href="#i-select"/></svg><span class="tl">Select</span> <kbd>V</kbd></button><button class="tool tsm" data-tool="cadsel" title="Select AutoCAD objects (Shift+V) — on a DWG / DXF: click an object, Shift+click adds or takes out, drag a box (left→right: wholly inside, right→left: touching), Ctrl+A all. Then take off, count, select similar, quick select, layer off or isolate."><svg class="ic"><use href="#i-cadsel"/></svg><span class="tl">CAD pick</span></button><button class="tool tsm" data-tool="match" title="Match properties: select an object first, then start Match, or start Match and click a source. Click compatible targets to apply its condition, colour, label and takeoff properties; geometry stays unchanged. Press Esc to finish."><svg class="ic"><use href="#i-match"/></svg><span class="tl">Match</span></button><button class="tool tsm" data-tool="lasso" title="Lasso select (Shift+O): drag a free shape round the objects"><svg class="ic"><use href="#i-lasso"/></svg><span class="tl">Lasso</span></button><button class="tool tsm" data-tool="pan" title="Pan (H or hold Space)"><svg class="ic"><use href="#i-pan"/></svg><span class="tl">Pan</span> <kbd>H</kbd></button></span>
         <button class="tool tsm tgl" id="bOrtho" title="Ortho (F8): every point goes straight across or up / down from the last one. Holding Shift does the same for one click."><svg class="ic"><use href="#i-ortho"/></svg><span class="tl">Ortho</span></button>
         <button class="tool tsm tgl" id="bPolar" title="Polar (F10): a point near a 15° direction from the last one (0°, 15°, 30°…) is pulled onto it. Object snap wins when it is close enough."><svg class="ic"><use href="#i-polar"/></svg><span class="tl">Polar</span></button>
         <button class="tool tsm tgl" id="bXh" title="Cross-hair (Shift+C): hair-lines right across the whole window through the pointer (or the snap point), as AutoCAD with the cursor at 100%"><svg class="ic"><use href="#i-xh"/></svg><span class="tl">Cross-hair</span></button>
-        <label class="tg" title="Snap to drawing lines (S)"><input type="checkbox" id="snapOn" checked> <svg class="ic"><use href="#i-snap"/></svg> Snap</label>
+        <label class="tg" id="snapLbl" title="Snap to drawing lines (S)"><input type="checkbox" id="snapOn" checked> <svg class="ic"><use href="#i-snap"/></svg> Snap</label>
         <button class="tool tsm" id="bSnapSet" title="Object snaps: endpoint, midpoint, intersection, perpendicular, nearest" aria-haspopup="true"><svg class="ic ch"><use href="#i-chev"/></svg></button>
         <button class="tool tsm" id="bRibbon" title="Collapse / expand the ribbon for a bigger drawing area (double-click a tab does the same)"><svg class="ic ch"><use href="#i-chev"/></svg><span class="tl">Ribbon</span></button>
         <button class="tool tsm" id="bCustTb" title="Customize toolbar: choose which tabs and tools are shown, icons only, reset"><svg class="ic"><use href="#i-cog"/></svg><span class="tl">Customize</span></button>
         <button class="tool tsm" id="bKeys" title="Keyboard &amp; mouse shortcuts (?)"><svg class="ic"><use href="#i-keys"/></svg><span class="tl">Keys</span></button>
+        </span>
         <div id="snapPop" aria-label="Object snaps"></div>
       </div>
       <div class="rrow">
@@ -1071,7 +1074,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-08k"></script>
+<script type="module" src="takeoff.js?v=2026-10-08l"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password

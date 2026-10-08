@@ -75,6 +75,17 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   ok(await T(n => { const m = (JSON.parse(localStorage.getItem("zdTakeoffTb") || "{}").mine || []); return m.includes("takeoff/draw") && m.length === n + 1; }, mine0), "the dragged tool is kept in My tools");
   ok((await page.locator("#mineBox [data-mine]").count()) >= 1, "My tools shows the kept tool as an icon button");
   await T(() => { const o = JSON.parse(localStorage.getItem("zdTakeoffTb") || "{}"); o.mine = (o.mine || []).filter(x => x !== "takeoff/draw"); localStorage.setItem("zdTakeoffTb", JSON.stringify(o)); });
+
+  console.log("top bar — add / delete icons");
+  await page.click("#bCustTb"); await wait(300);
+  ok((await page.locator("#dlgB [data-tbtop]").count()) >= 10, "Customize lists the top-bar buttons");
+  await T(() => { const c = document.querySelector('#dlgB [data-tbtop="match"]'); if (c) c.checked = false; });
+  await page.click("#dlgOk"); await wait(350);
+  ok(!(await vis('[data-tool="match"]')) && await vis('[data-tool="select"]'), "unticking Match takes it off the top bar, Select stays");
+  await page.click("#bCustTb"); await wait(300);
+  await T(() => { const c = document.querySelector('#dlgB [data-tbtop="match"]'); if (c) c.checked = true; });
+  await page.click("#dlgOk"); await wait(350);
+  ok(await vis('[data-tool="match"]'), "ticking it again puts it back on the top bar");
   await page.click("#bNewCond"); await page.selectOption("#cPre", {label: "Floor area"}); await page.click("#dlgOk"); await wait(250);
   await page.keyboard.press("r"); await wait();
   ok(await tab() === "takeoff", "pressing R (a Takeoff tool) brings the Takeoff tab back");

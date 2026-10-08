@@ -5721,7 +5721,7 @@ const TB_KEY = "zdTakeoffTb";
 const tbKey = b => b.dataset.tool || b.dataset.mod || b.dataset.rv || b.dataset.px || b.dataset.fn || b.id || "";
 const tbName = b => ((b.querySelector(".tl") || {}).textContent || b.title || tbKey(b)).trim().split(" — ")[0].split("(")[0].trim();
 function tbPref(){ let o = null; try { o = JSON.parse(pref(TB_KEY) || "null"); } catch (e) { o = null; } return o && typeof o === "object" ? o : {}; }
-const tbAll = () => [...document.querySelectorAll('#tools .rpanel[data-rp]:not([data-rp="mine"]) .tool')].map(b => ({k: b.closest("[data-rp]").dataset.rp + "/" + tbKey(b), b}));
+const tbAll = () => [...document.querySelectorAll('#tools .rpanel[data-rp]:not([data-rp="mine"]) .tool, #topTools .tool')].map(b => ({k: (b.closest("[data-rp]") ? b.closest("[data-rp]").dataset.rp : "top") + "/" + tbKey(b), b}));
 function mineSet(list){ const o = tbPref(); o.mine = list; pref(TB_KEY, JSON.stringify(o)); tbApply(); }
 function mineAdd(k){ if (!k) return false; const o = tbPref(), L = o.mine || []; if (L.includes(k)) { toast("Already in My tools", 1800); return false; } L.push(k); mineSet(L); toast("Added to My tools", 1800); return true; }
 function mineRemove(k){ const o = tbPref(), L = (o.mine || []).filter(x => x !== k); mineSet(L); toast("Taken out of My tools", 1800); }
@@ -5746,24 +5746,31 @@ function tbApply(){
   });
   document.querySelectorAll("#tools .rrow .tool").forEach(b => { const pn = b.closest("[data-rp]"); b.style.display = pn && off.has(pn.dataset.rp + "/" + tbKey(b)) ? "none" : ""; });
   document.querySelectorAll("#tools .rtab").forEach(b => { b.style.display = tabsOff.has(b.dataset.rtab) ? "none" : ""; });
+  const topOff = new Set(o.topOff || []);
+  document.querySelectorAll("#topTools .tool, #topTools .tg").forEach(b => { b.style.display = topOff.has(tbKey(b)) ? "none" : ""; });
+  const rs = document.querySelector("#topTools .rsel"); if (rs) rs.style.display = [...rs.querySelectorAll(".tool")].some(b => b.style.display !== "none") ? "" : "none";
   mineBuild();
   document.querySelectorAll("#tools .rg:not(#mineHint)").forEach(g => { const vis = [...g.querySelectorAll(".tool")].some(b => b.style.display !== "none"); g.style.display = vis ? "" : "none"; });
   const cur = document.querySelector("#tools .rtab.on"); if (cur && cur.style.display === "none") { const f = [...document.querySelectorAll("#tools .rtab")].find(b => b.style.display !== "none"); if (f) ribShow(f.dataset.rtab); }
 }
 async function tbDialog(){
   const o = tbPref(), off = new Set(o.off || []), tabsOff = new Set(o.tabs || []), W = wsPref();
+  const topOff = new Set(o.topOff || []);
+  const topEls = [...document.querySelectorAll("#topTools .tool, #topTools .tg")].filter(b => b.id !== "bCustTb");
+  const topRow = b => { const k = tbKey(b); return `<div class="tbrow" data-tbtop-row="${esc(k)}"><label class="pk"><input type="checkbox" data-tbtop="${esc(k)}"${topOff.has(k) ? "" : " checked"}> ${esc(tbName(b))}</label></div>`; };
   const tabs = [...document.querySelectorAll("#tools .rtab")], GR = tbGroups();
   const mineRow = k => { const x = tbAll().find(y => y.k === k); return x ? `<div class="tbrow" data-mk="${esc(k)}"><span style="flex:1;padding-left:2px">${esc(tbName(x.b))} <span class="small">(${esc(k.split("/")[0])})</span></span><button class="btn sm" data-tbmv="-1">&#9650;</button><button class="btn sm" data-tbmv="1">&#9660;</button><button class="btn sm dng" data-tbrm="1" title="Take out of My tools">&#10005;</button></div>` : ""; };
   const row = (G, b) => { const k = G.panel + "/" + tbKey(b); return `<div class="tbrow" data-tbrow="${esc(k)}"><label class="pk"><input type="checkbox" data-tbk="${esc(k)}"${off.has(k) ? "" : " checked"}> ${esc(tbName(b))}</label><button class="btn sm" data-tbmv="-1" title="Move earlier">&#9650;</button><button class="btn sm" data-tbmv="1" title="Move later">&#9660;</button></div>`; };
   const body = `<p class="small">Tick what you want on the toolbar and use ▲ ▼ to change the order inside a group. Nothing is deleted — the shortcuts and Ctrl+K still reach every tool.</p>
     <label class="pk"><input type="checkbox" id="tbIcons"${W.tb === "icons" ? " checked" : ""}> Icons only (no labels)</label>
     <div id="tbList" style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin-top:6px"><div class="tbmine"><b style="color:var(--navy)">&#9733; My tools</b> <span class="small">— add any tool from any tab to your own tab; ✕ takes it out again. You can also drag a tool straight onto the My tools tab.</span><div id="tbMine">${(o.mine || []).map(k => mineRow(k)).join("")}</div>
-      <select id="tbAdd" style="margin:6px 0 2px 22px"><option value="">+ Add a tool…</option>${tbAll().map(x => `<option value="${esc(x.k)}">${esc(x.k.split("/")[0])} › ${esc(tbName(x.b))}</option>`).join("")}</select></div>` +
+      <select id="tbAdd" style="margin:6px 0 2px 22px"><option value="">+ Add a tool…</option>${tbAll().map(x => `<option value="${esc(x.k)}">${esc(x.k.split("/")[0])} › ${esc(tbName(x.b))}</option>`).join("")}</select></div>
+      <div class="tbmine" style="border-style:solid;margin-top:8px"><b style="color:var(--navy)">Top bar</b> <span class="small">— tick the buttons shown on the top bar (Delete, Select, Ortho …); untick to take one off. Customize itself always stays.</span><div>${topEls.map(topRow).join("")}</div></div>` +
     tabs.map(t => `<div style="margin:8px 0"><label class="pk" style="font-weight:700!important;color:var(--navy)!important"><input type="checkbox" data-tbtab="${t.dataset.rtab}"${tabsOff.has(t.dataset.rtab) ? "" : " checked"}> ${esc(t.textContent)} tab</label>` +
       GR.filter(G => G.panel === t.dataset.rtab).map(G => `<div class="tbgrp" data-tbg="${G.id}"><div class="small" style="margin:4px 0 0 22px">${esc(G.label)}</div>${[...G.box.children].map(b => row(G, b)).join("")}</div>`).join("") + "</div>").join("") + `</div>
     <div class="xrow"><button class="btn sm" id="tbReset">Reset — show everything, original order, no My tools</button></div>`;
   const pr = ask("Customize toolbar", body, "Apply", () => {
-    const n = {off: [...document.querySelectorAll("#dlgB [data-tbk]")].filter(i => !i.checked).map(i => i.dataset.tbk), tabs: [...document.querySelectorAll("#dlgB [data-tbtab]")].filter(i => !i.checked).map(i => i.dataset.tbtab), order: {}, mine: [...document.querySelectorAll("#dlgB [data-mk]")].map(r => r.dataset.mk)};
+    const n = {off: [...document.querySelectorAll("#dlgB [data-tbk]")].filter(i => !i.checked).map(i => i.dataset.tbk), tabs: [...document.querySelectorAll("#dlgB [data-tbtab]")].filter(i => !i.checked).map(i => i.dataset.tbtab), order: {}, mine: [...document.querySelectorAll("#dlgB [data-mk]")].map(r => r.dataset.mk), topOff: [...document.querySelectorAll("#dlgB [data-tbtop]")].filter(i => !i.checked).map(i => i.dataset.tbtop)};
     document.querySelectorAll("#dlgB [data-tbg]").forEach(g => { n.order[g.dataset.tbg] = [...g.querySelectorAll("[data-tbrow]")].map(r => r.dataset.tbrow); });
     if (n.tabs.length >= tabs.length) return "Keep at least one tab";
     return {n, icons: $("tbIcons").checked}; });
@@ -5789,9 +5796,9 @@ function ribbonInit(){
   const mineTab = document.querySelector('#tools .rtab[data-rtab="mine"]');
   const dropTargets = [mineTab, $("mineBox"), $("mineHint")].filter(Boolean);
   const dropClear = () => dropTargets.forEach(el => el.classList.remove("dropok"));
-  document.querySelectorAll('#tools .rpanel:not([data-rp="mine"]) .tool').forEach(b => {
+  document.querySelectorAll('#tools .rpanel:not([data-rp="mine"]) .tool, #topTools .tool').forEach(b => {
     b.draggable = true;
-    b.addEventListener("dragstart", e => { const pn = b.closest("[data-rp]"); e.dataTransfer.setData("text/plain", (pn ? pn.dataset.rp : "") + "/" + tbKey(b)); e.dataTransfer.effectAllowed = "copy"; b.classList.add("dragging"); });
+    b.addEventListener("dragstart", e => { const pn = b.closest("[data-rp]"); e.dataTransfer.setData("text/plain", (pn ? pn.dataset.rp : "top") + "/" + tbKey(b)); e.dataTransfer.effectAllowed = "copy"; b.classList.add("dragging"); });
     b.addEventListener("dragend", () => { b.classList.remove("dragging"); dropClear(); });
   });
   const dropHere = e => { e.preventDefault(); dropClear(); const k = (e.dataTransfer.getData("text/plain") || "").trim(); if (k) { ribShow("mine"); mineAdd(k); } };
