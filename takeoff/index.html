@@ -635,6 +635,31 @@ header #findIn{background:rgba(255,255,255,.8);border-color:#b7d1ea}
 .panel:not(.right) .ph #bNewCond{padding:3px 6px;font-size:11px}
 .panel:not(.right) .ph>span[style*="flex:1"]{flex:1 1 0;min-width:0}
 .rfoot{flex-wrap:wrap;gap:6px;padding:8px 10px}.rfoot .btn{padding:4px 9px;font-size:12px}
+
+/* light-grey side panels (cards and inputs stay white) */
+:root{--pg:#eceff3;--pg2:#e3e7ed}
+.panel,.panel .pb,.panel .ph,.cfil,#shBar,#qaBar,.rfoot,.propsbox,.pstrip2,.keys,.panel.right{background:var(--pg)}
+.panel{border-color:#d3d9e2}
+.panel .ph,.cfil,#qaBar,.rfoot,.propsbox,.pstrip2,.keys{border-color:#d3d9e2}
+.panel .pghd{background:var(--pg)}
+table.sh th,table.sh tr.ch td{background:var(--pg)}
+table.sh tr.tot td{background:var(--pg2)}
+table.sh td{border-bottom-color:#dde2ea}
+table.sh tr.sel td{background:#dde8fb}
+table.sh tr.it:hover td{background:#e4e9f1}
+.cfil input[type=search],#shBar input,#shBar select,.pgbar input,.pgbar select{background:#fff}
+.ctypes{background:var(--pg2)}
+.cond{background:#fff}
+.cond.on{background:#f4f7ff}
+.propsbox .props .pcard{background:#fff}
+.empty,.propsEmpty{color:#6b7a8f}
+.pgt{background:#fff}
+.lyr:hover{background:#e4e9f1}
+table.sh td.n:not(:last-child),table.sh th.n:not(:last-child){white-space:normal;word-break:break-word;min-width:70px}
+table.sh td,table.sh th{padding-left:5px;padding-right:5px}
+#sheet,#bill{overflow-x:hidden}
+.cond .q{font-size:12px}.cond .nm b{font-size:12.5px}
+.propsbox{max-height:40%}
 </style>
 </head>
 <body>
@@ -1028,7 +1053,7 @@ header #findIn{background:rgba(255,255,255,.8);border-color:#b7d1ea}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-08g"></script>
+<script type="module" src="takeoff.js?v=2026-10-08h"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password

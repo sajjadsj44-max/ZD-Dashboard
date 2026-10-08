@@ -5690,7 +5690,7 @@ const PC_PRESETS = {
   review: {n: "Review", d: "wide sheet to check measurements", off: ["l-strip", "l-keys", "ui-agent"], compact: true, lw: 250, rw: 540, lHide: false, rHide: false},
   focus: {n: "Drawing only", d: "both panels hidden", off: ["ui-agent", "ui-status"], compact: true, lw: 280, rw: 390, lHide: true, rHide: true}
 };
-function pcPref(){ let o = null; try { o = JSON.parse(pref(PC_KEY) || "null"); } catch (e) { o = null; } return Object.assign({off: ["l-keys", "r-info"], compact: true}, o && typeof o === "object" ? o : {}); }
+function pcPref(){ let o = null; try { o = JSON.parse(pref(PC_KEY) || "null"); } catch (e) { o = null; } return Object.assign({off: ["l-keys", "r-info", "l-strip"], compact: true}, o && typeof o === "object" ? o : {}); }
 function pcApply(){
   const o = pcPref(), off = new Set(o.off || []), B = document.body;
   Object.values(PC_ITEMS).flat().forEach(([k]) => B.classList.toggle("pc-" + k + "-off", off.has(k)));
