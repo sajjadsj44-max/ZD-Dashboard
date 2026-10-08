@@ -179,7 +179,7 @@ function png(w, h, px){   // a small RGBA PNG, px(x, y) -> [r, g, b, a]
   m = await last(); ok(m && m.type === "link" && m.link.url === "https://example.com/spec", "hyperlink to a web address (https:// added)");
   const linkId = m.id;
   await tool("mk_attach");
-  { const [fc] = await Promise.all([page.waitForEvent("filechooser"), clickAt(300, 680)]); await fc.setFiles({name: "site-notes.txt", mimeType: "text/plain", buffer: Buffer.from("Pour on Monday.\n")}); }
+  { await page.click("#bFit"); await wait(250); const [fc] = await Promise.all([page.waitForEvent("filechooser"), clickAt(300, 680)]); await fc.setFiles({name: "site-notes.txt", mimeType: "text/plain", buffer: Buffer.from("Pour on Monday.\n")}); }
   await page.waitForFunction(() => (zdTakeoff.P.proj.marks || []).some(m => m.type === "attach"), null, {timeout: 5000}); await wait(150);
   m = (await marks()).find(x => x.type === "attach");
   ok(m && m.att.name === "site-notes.txt" && m.att.size === 16, "a file attached (site-notes.txt, 16 B)");
