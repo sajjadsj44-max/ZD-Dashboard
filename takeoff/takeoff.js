@@ -6353,6 +6353,7 @@ function fcClick(sp){
   if (r.it.locked) return lockedMsg();
   const k = itemScale(r.it); if (!k) return toast("Set the page scale first (K)", 2600);
   const pk = {it: r.it, i: r.i, c: r.p};
+  if (F.first && (!P.proj.items.includes(F.first.it) || F.first.it.pts.length < F.first.i + 2 || !onPage(F.first.it))) F.first = null;   // the first pick undone, changed or on another page: pick again
   if (!F.first) { F.first = pk; hint(); draw(); return toast("Now click the second run (or the next leg of this run)", 2200); }
   const A = F.first, B = pk; F.first = null;
   const done = res => { if (res && res.err) toast(res.err, 4200); hint(); draw(); };
@@ -6396,7 +6397,8 @@ function stretchOf(o, box, d){   // the new points of o (or null when none of it
 function stretchObjs(){ return pageItems().concat((P.proj.marks || []).filter(m => onPage(m) && m.pts && m.type !== "fence")); }
 function stretchBox(){ const s = S.str; return s && s.a && s.b ? [Math.min(s.a[0], s.b[0]), Math.min(s.a[1], s.b[1]), Math.max(s.a[0], s.b[0]), Math.max(s.a[1], s.b[1])] : null; }
 function stretchClick(p){
-  const s = S.str || (S.str = {stage: 0});
+  if (S.str && S.str.key !== S.key) S.str = null;   // a window started on another page
+  const s = S.str || (S.str = {stage: 0, key: S.key});
   if (s.stage === 0) { s.a = p; s.b = p; s.stage = 1; }
   else if (s.stage === 1) {
     s.b = p; const box = stretchBox();
