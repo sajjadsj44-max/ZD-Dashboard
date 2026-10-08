@@ -215,6 +215,7 @@ editing tools (rotate, mirror, join, explode, close, offset, array) only in the 
 | **Measurement sheet: search** (every word must match item, condition, BOQ code, unit, page or room) and **sort** (drawing order · by page · largest first · name); the totals stay the whole condition's; "3 of 12 shown" | right panel |
 | QA bar: **Prev** next to Next unchecked, and a **no BOQ code** count | right panel |
 | Commands (Ctrl+K) find every new button, Ortho, Polar, Object snaps and "Search the measurement sheet" | palette |
+| **My tools**: drag any tool from any tab onto the **★ My tools** tab (or its panel) to keep it there as your own icon button; a hover ✕ or right-click takes it out again; **Customize toolbar** lists every tool and its tab and also adds to My tools | toolbar |
 
 **Still not in the app** (from the same review, in the order they would pay back): sheet column chooser / custom and formula columns
 (waste %, gross qty); Quick Line (click a wall → whole connected run) and Quick Box (box → largest room / all walls); a Volume

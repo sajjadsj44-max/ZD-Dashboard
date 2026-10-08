@@ -64,6 +64,15 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   ok((await page.locator("#tools svg.ic").count()) > 40 && !(await T(() => [...document.querySelectorAll("#tools .tool")].some(b => /[\u2190-\u2BFF\u{1F300}-\u{1FAFF}]/u.test(b.textContent)))), "tool icons are SVG (no Unicode symbols on the toolbar)");
   await page.click('[data-rtab="modify"]');
   ok(await tab() === "modify" && await vis('[data-mod="cw"]') && !(await vis('[data-tool="draw"]')), "Modify tab shows rotate / mirror / join… and hides the Takeoff tools");
+
+  console.log("my tools — drag a tool from the ribbon");
+  await page.click('[data-rtab="takeoff"]');
+  const mine0 = await T(() => (JSON.parse(localStorage.getItem("zdTakeoffTb") || "{}").mine || []).length);
+  await page.dragAndDrop('[data-tool="draw"]', '[data-rtab="mine"]'); await wait(350);
+  ok(await tab() === "mine", "dropping a tool on the My tools tab opens that tab");
+  ok(await T(n => { const m = (JSON.parse(localStorage.getItem("zdTakeoffTb") || "{}").mine || []); return m.includes("takeoff/draw") && m.length === n + 1; }, mine0), "the dragged tool is kept in My tools");
+  ok((await page.locator("#mineBox [data-mine]").count()) >= 1, "My tools shows the kept tool as an icon button");
+  await T(() => { const o = JSON.parse(localStorage.getItem("zdTakeoffTb") || "{}"); o.mine = (o.mine || []).filter(x => x !== "takeoff/draw"); localStorage.setItem("zdTakeoffTb", JSON.stringify(o)); });
   await page.click("#bNewCond"); await page.selectOption("#cPre", {label: "Floor area"}); await page.click("#dlgOk"); await wait(250);
   await page.keyboard.press("r"); await wait();
   ok(await tab() === "takeoff", "pressing R (a Takeoff tool) brings the Takeoff tab back");

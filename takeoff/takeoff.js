@@ -5722,10 +5722,17 @@ const tbKey = b => b.dataset.tool || b.dataset.mod || b.dataset.rv || b.dataset.
 const tbName = b => ((b.querySelector(".tl") || {}).textContent || b.title || tbKey(b)).trim().split(" — ")[0].split("(")[0].trim();
 function tbPref(){ let o = null; try { o = JSON.parse(pref(TB_KEY) || "null"); } catch (e) { o = null; } return o && typeof o === "object" ? o : {}; }
 const tbAll = () => [...document.querySelectorAll('#tools .rpanel[data-rp]:not([data-rp="mine"]) .tool')].map(b => ({k: b.closest("[data-rp]").dataset.rp + "/" + tbKey(b), b}));
+function mineSet(list){ const o = tbPref(); o.mine = list; pref(TB_KEY, JSON.stringify(o)); tbApply(); }
+function mineAdd(k){ if (!k) return false; const o = tbPref(), L = o.mine || []; if (L.includes(k)) { toast("Already in My tools", 1800); return false; } L.push(k); mineSet(L); toast("Added to My tools", 1800); return true; }
+function mineRemove(k){ const o = tbPref(), L = (o.mine || []).filter(x => x !== k); mineSet(L); toast("Taken out of My tools", 1800); }
 function mineBuild(){
   const box = $("mineBox"), L = tbPref().mine || [], all = tbAll(); box.innerHTML = "";
-  L.forEach(k => { const src = all.find(x => x.k === k); if (!src) return; const c = document.createElement("button"); c.className = "tool"; c.dataset.mine = k; c.title = src.b.title; c.innerHTML = src.b.innerHTML; c.__src = src.b;
-    c.addEventListener("click", () => { src.b.click(); setTimeout(syncMine, 60); }); box.appendChild(c); });
+  L.forEach(k => { const src = all.find(x => x.k === k); if (!src) return; const c = document.createElement("button"); c.className = "tool"; c.dataset.mine = k; c.title = src.b.title + " — right-click or the × to take it out of My tools"; c.innerHTML = src.b.innerHTML; c.__src = src.b;
+    c.addEventListener("click", () => { src.b.click(); setTimeout(syncMine, 60); });
+    c.addEventListener("contextmenu", e => { e.preventDefault(); mineRemove(k); });
+    const x = document.createElement("span"); x.className = "mx"; x.title = "Take out of My tools"; x.textContent = "×";
+    x.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); mineRemove(k); });
+    c.appendChild(x); box.appendChild(c); });
   $("mineHint").style.display = box.children.length ? "none" : "";
 }
 function syncMine(){ document.querySelectorAll("#mineBox [data-mine]").forEach(c => { c.classList.toggle("on", !!c.__src && c.__src.classList.contains("on")); }); }
@@ -5750,7 +5757,7 @@ async function tbDialog(){
   const row = (G, b) => { const k = G.panel + "/" + tbKey(b); return `<div class="tbrow" data-tbrow="${esc(k)}"><label class="pk"><input type="checkbox" data-tbk="${esc(k)}"${off.has(k) ? "" : " checked"}> ${esc(tbName(b))}</label><button class="btn sm" data-tbmv="-1" title="Move earlier">&#9650;</button><button class="btn sm" data-tbmv="1" title="Move later">&#9660;</button></div>`; };
   const body = `<p class="small">Tick what you want on the toolbar and use ▲ ▼ to change the order inside a group. Nothing is deleted — the shortcuts and Ctrl+K still reach every tool.</p>
     <label class="pk"><input type="checkbox" id="tbIcons"${W.tb === "icons" ? " checked" : ""}> Icons only (no labels)</label>
-    <div id="tbList" style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin-top:6px"><div class="tbmine"><b style="color:var(--navy)">&#9733; My tools</b> <span class="small">— add any tool from any tab to your own tab; ✕ takes it out again</span><div id="tbMine">${(o.mine || []).map(k => mineRow(k)).join("")}</div>
+    <div id="tbList" style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin-top:6px"><div class="tbmine"><b style="color:var(--navy)">&#9733; My tools</b> <span class="small">— add any tool from any tab to your own tab; ✕ takes it out again. You can also drag a tool straight onto the My tools tab.</span><div id="tbMine">${(o.mine || []).map(k => mineRow(k)).join("")}</div>
       <select id="tbAdd" style="margin:6px 0 2px 22px"><option value="">+ Add a tool…</option>${tbAll().map(x => `<option value="${esc(x.k)}">${esc(x.k.split("/")[0])} › ${esc(tbName(x.b))}</option>`).join("")}</select></div>` +
     tabs.map(t => `<div style="margin:8px 0"><label class="pk" style="font-weight:700!important;color:var(--navy)!important"><input type="checkbox" data-tbtab="${t.dataset.rtab}"${tabsOff.has(t.dataset.rtab) ? "" : " checked"}> ${esc(t.textContent)} tab</label>` +
       GR.filter(G => G.panel === t.dataset.rtab).map(G => `<div class="tbgrp" data-tbg="${G.id}"><div class="small" style="margin:4px 0 0 22px">${esc(G.label)}</div>${[...G.box.children].map(b => row(G, b)).join("")}</div>`).join("") + "</div>").join("") + `</div>
@@ -5775,6 +5782,19 @@ function ribbonInit(){
   document.querySelectorAll("#tools .rtab").forEach(t => { t.addEventListener("dblclick", ribTog); t.addEventListener("click", () => { const o = pcPref(); if ((o.off || []).includes("ui-ribbon")) pcSave({off: o.off.filter(k => k !== "ui-ribbon"), compact: o.compact}); }); });
   pcApply();
   $("bCustTb").onclick = () => tbDialog(); tbApply();
+  /* drag a tool from any tab onto the My tools tab or panel to keep it there as a favourite */
+  const mineTab = document.querySelector('#tools .rtab[data-rtab="mine"]');
+  const dropTargets = [mineTab, $("mineBox"), $("mineHint")].filter(Boolean);
+  const dropClear = () => dropTargets.forEach(el => el.classList.remove("dropok"));
+  document.querySelectorAll('#tools .rpanel:not([data-rp="mine"]) .tool').forEach(b => {
+    b.draggable = true;
+    b.addEventListener("dragstart", e => { const pn = b.closest("[data-rp]"); e.dataTransfer.setData("text/plain", (pn ? pn.dataset.rp : "") + "/" + tbKey(b)); e.dataTransfer.effectAllowed = "copy"; b.classList.add("dragging"); });
+    b.addEventListener("dragend", () => { b.classList.remove("dragging"); dropClear(); });
+  });
+  const dropHere = e => { e.preventDefault(); dropClear(); const k = (e.dataTransfer.getData("text/plain") || "").trim(); if (k) { ribShow("mine"); mineAdd(k); } };
+  dropTargets.forEach(el => { el.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; el.classList.add("dropok"); });
+    el.addEventListener("dragleave", e => { if (!el.contains(e.relatedTarget)) el.classList.remove("dropok"); });
+    el.addEventListener("drop", dropHere); });
   /* ribbon tabs added for Costing / Export / View: each button runs an existing control or dialog */
   const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog()};
   document.querySelectorAll("#tools [data-px]").forEach(b => b.addEventListener("click", () => { const t = $(b.dataset.px); if (t && !t.disabled) t.click(); setTimeout(syncPx, 60); }));

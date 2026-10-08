@@ -224,6 +224,14 @@ table.sh .rn:hover{color:var(--purple)}
 .tool.on{background:var(--purple);border-color:var(--purple);color:#fff}
 .tool.on kbd{color:#d9d2ff;border-color:rgba(255,255,255,.4)}
 .tool:disabled{opacity:.4;cursor:default}
+#tools .rpanel .tool[draggable=true]{cursor:grab}
+#tools .rpanel .tool.dragging{opacity:.45}
+.rtab.dropok{outline:2px dashed var(--purple);outline-offset:2px;background:#f3f0fd;border-radius:6px}
+#mineBox.dropok,#mineHint.dropok{outline:2px dashed var(--purple);outline-offset:-2px;background:#f7f5ff;border-radius:6px}
+#mineBox{display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start;min-height:34px}
+#mineBox .tool{position:relative;overflow:visible}
+#mineBox .tool .mx{position:absolute;top:-7px;right:-7px;width:16px;height:16px;border-radius:50%;background:var(--red);color:#fff;font-size:12px;line-height:15px;text-align:center;display:none;cursor:pointer;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+#mineBox .tool:hover .mx{display:block}
 .tools .sp{flex:1}
 .tg{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#3c4c60;cursor:pointer;padding:0 4px}
 .stg{position:relative;flex:1;overflow:hidden;background:#d9dee6;touch-action:none;min-height:0}
@@ -828,7 +836,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
       </div>
       <div class="rpanel" data-rp="mine" hidden>
         <div class="rg"><div class="rgb" id="mineBox"></div><div class="rgl">My tools</div></div>
-        <div class="rg" id="mineHint"><span class="small" style="padding:14px 6px;color:var(--muted)">Nothing here yet — <b>Customize</b> (top right of the ribbon) &rarr; <b>My tools</b> to add any tool.</span></div>
+        <div class="rg" id="mineHint"><span class="small" style="padding:14px 6px;color:var(--muted)">Nothing here yet — <b>drag any tool from the ribbon onto this tab</b>, or <b>Customize</b> (top right of the ribbon) &rarr; <b>My tools</b> to add any tool.</span></div>
       </div>
       <div class="rpanel" data-rp="view" hidden>
         <div class="rg"><div class="rgb">
