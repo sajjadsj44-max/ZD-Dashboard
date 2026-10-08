@@ -7355,6 +7355,7 @@ function wire(){
   $("bFit").onclick = () => { fit(); renderHi(); };
   $("bDim").onclick = () => setDim(!S.dim);
   $("dimPct").oninput = e => setDim(+e.target.value);
+  const ribDim = $("ribDimPct"); if (ribDim) ribDim.oninput = e => setDim(+e.target.value);
   $("bTypical").onclick = () => P.proj && copyPageDialog();
   const leftTab = t => { t = t === true ? "lay" : t || "cond"; S.leftTab = t;   // conditions · pages · the PDF's layers
     $("condList").style.display = t === "cond" ? "" : "none"; $("condFilter").style.display = t === "cond" ? "" : "none"; renderPageStrip(); $("layerList").style.display = t === "lay" ? "" : "none"; $("pageList").style.display = t === "pages" ? "" : "none";
@@ -9260,7 +9261,7 @@ function setDim(on){   // on = true/false, or a dimming level 0-90 %
   S.dim = typeof on === "number" ? on > 0 : on;
   const d = S.dim ? S.dimPct / 100 : 0, c = 1 - d, b = 1 / (0.5 + 0.5 * c);
   PANES.forEach(pn => pn.el.stage.style.setProperty("--dimf", d ? `contrast(${c.toFixed(3)}) brightness(${b.toFixed(3)})` : "none"));
-  $("bDim").classList.toggle("on", S.dim); $("dimPct").value = S.dimPct || 50; $("dimLbl").textContent = (S.dim ? S.dimPct : 0) + "%";
+  $("bDim").classList.toggle("on", S.dim); $("dimPct").value = S.dimPct || 50; $("dimLbl").textContent = (S.dim ? S.dimPct : 0) + "%"; const _rp = $("ribDimPct"); if (_rp) _rp.value = S.dimPct || 50; const _rl = $("ribDimLbl"); if (_rl) _rl.textContent = (S.dim ? S.dimPct : 0) + "%";
   pref("zdTakeoffDim", S.dim ? String(S.dimPct) : "0"); viewMark();
 }
 function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); viewMark(); renderAll(); }

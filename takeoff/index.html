@@ -56,6 +56,7 @@ header .btn.tg2.on{background:#fff;color:var(--navy);border-color:#fff}
 .plotw{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}.plprev{display:flex;flex-direction:column;gap:4px;align-items:center;max-width:300px}.plprev canvas{border:1px solid var(--line);border-radius:6px;max-width:100%}
 .cq{max-height:32vh;overflow:auto;border:1px solid var(--line);border-radius:6px;margin:8px 0}table.cqt{width:100%}table.cqt td.n,table.cqt th.n{text-align:right;white-space:nowrap}table.cqt tr.dim td{color:var(--muted)}
 .dimw{display:inline-flex;align-items:center;gap:4px}.dimw input{width:70px;height:16px;padding:0}#dimLbl{font-size:11px;color:#cfe0f5;width:28px}
+.rtdim{display:inline-flex;align-items:center;gap:4px;padding:0 3px}.rtdim input[type=range]{width:84px;height:16px;padding:0}#ribDimLbl{font-size:11px;color:var(--muted);min-width:26px;text-align:right}
 .panel{position:relative}.rz{position:absolute;top:0;bottom:0;width:6px;cursor:col-resize;z-index:6}.rz:hover{background:rgba(75,59,143,.18)}
 .panel:not(.right) .rz{right:-3px}.panel.right .rz{left:-3px}
 .hidebtn{border:0;background:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px}
@@ -635,7 +636,7 @@ header #findIn{background:rgba(255,255,255,.8);border-color:#b7d1ea}
 .rtab:hover{background:rgba(255,255,255,.55)}
 .rtab.on{background:rgba(255,255,255,.75);border-radius:8px 8px 0 0}
 .rrow{background:transparent}
-.rrow .tool:hover{background:rgba(255,255,255,.8)}
+.rrow .tool:hover:not(.on){background:rgba(255,255,255,.8)}
 .rtabs .tool{background:rgba(255,255,255,.7);border-color:#b7d1ea}
 .rg{border-right-color:#b7d1ea}
 .rgl{color:#5f7a96}
@@ -853,8 +854,13 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
           <button class="tool" data-px="bMini" title="Minimap"><svg class="ic"><use href="#i-array"/></svg><span class="tl">Minimap</span></button>
         </div><div class="rgl">Takeoff display</div></div>
         <div class="rg"><div class="rgb">
-          <button class="tool" data-px="bDim" title="Dimmer — fade the drawing so the takeoff stands out"><svg class="ic"><use href="#i-compare"/></svg><span class="tl">Dimmer</span></button>
+          <button class="tool" data-px="bDim" title="Dimmer — fade the drawing so the takeoff stands out"><svg class="ic"><use href="#i-dim"/></svg><span class="tl">Dimmer</span></button>
+          <span class="rtdim" title="Dimming %"><input type="range" id="ribDimPct" min="0" max="90" step="5" value="50" aria-label="Dimming %"><span id="ribDimLbl">0%</span></span>
+          <button class="tool" data-px="bBg_auto" title="Background: Auto — black for AutoCAD drawings, white for PDFs"><svg class="ic"><use href="#i-bgauto"/></svg><span class="tl">BG auto</span></button>
+          <button class="tool" data-px="bBg_black" title="Background: Black, as AutoCAD's model space"><svg class="ic"><use href="#i-bgblack"/></svg><span class="tl">BG black</span></button>
+          <button class="tool" data-px="bBg_white" title="Background: White paper"><svg class="ic"><use href="#i-bgwhite"/></svg><span class="tl">BG white</span></button>
           <button class="tool" data-px="bMono" title="Monochrome — every line in one ink"><svg class="ic"><use href="#i-explode"/></svg><span class="tl">Monochrome</span></button>
+          <button class="tool" data-px="bPdfBw" title="PDF-style black and white — white working area with all CAD lines black"><svg class="ic"><use href="#i-circle"/></svg><span class="tl">PDF B/W</span></button>
           <button class="tool" data-px="bLayers" title="The PDF's own CAD layers"><svg class="ic"><use href="#i-front"/></svg><span class="tl">PDF layers</span></button>
         </div><div class="rgl">Drawing</div></div>
         <div class="rg"><div class="rgb">
@@ -913,6 +919,9 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
       <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4 4 0 010-8 5 5 0 019.3-1A4 4 0 0117 18z"/></symbol>
       <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 20L20 4M10 4h10v10"/></symbol>
       <symbol id="i-dim" viewBox="0 0 24 24"><path d="M4 5v14M20 5v14M4 12h16M8 9l-4 3 4 3M16 9l4 3-4 3"/></symbol>
+      <symbol id="i-bgauto" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1.5"/><path d="M12 5v14" opacity=".5"/></symbol>
+      <symbol id="i-bgblack" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1.5" style="fill:currentColor"/></symbol>
+      <symbol id="i-bgwhite" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1.5"/></symbol>
       <symbol id="i-hilite" viewBox="0 0 24 24"><path d="M14 4l6 6-9 9-5.5 1 1-5.5z"/><path d="M4 21h6"/></symbol>
       <symbol id="i-markup" viewBox="0 0 24 24"><path d="M4 20l4-1L19.5 7.5l-3-3L5 16z"/><path d="M14.5 6.5l3 3"/></symbol>
       <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
@@ -1062,7 +1071,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-08i"></script>
+<script type="module" src="takeoff.js?v=2026-10-08j"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password
