@@ -8524,16 +8524,26 @@ async function unitDialog(){
     <p class="small" style="margin-top:8px">${U.length ? U.length + " apartments found on this page." : "No apartment numbers found automatically — type one, or zoom to the apartment and use 🏠 Rooms."} A room name works too: type <i>measure bedroom</i> in the chat.</p>`, "Measure", () => $("unSel").value.trim() ? {no: $("unSel").value.trim()} : "Choose an apartment");
   if (v) agentUnit(v.no);
 }
+/* a door written on the plan (D1, D2…) whose swing was not recognised (a broken arc, a leaf drawn as lines only): each swing takes the
+   nearest unused door tag within 7 ft; a tag left over is a door the swings missed and is counted at the tag */
+function tagsMissedBySwings(sw, plan, k){
+  const tags = []; Object.entries(plan || {}).forEach(([key, pts]) => { if (tagKind(key) === "Doors") pts.forEach(p => tags.push({key, p})); });
+  const free = new Set(tags.map((_, j) => j)), pairs = [], taken = new Set();
+  sw.forEach((d, i) => tags.forEach((t, j) => { const D = dist(d.p, t.p); if (D < 7 * k) pairs.push([D, i, j]); }));
+  pairs.sort((a, b) => a[0] - b[0]).forEach(([, i, j]) => { if (taken.has(i) || !free.has(j)) return; taken.add(i); free.delete(j); });
+  return [...free].map(j => ({p: tags[j].p, leaves: 1, w: 0, tag: tags[j].key}));
+}
 async function agentSwings(){
   if (!curScale()) { aiLog("err", "Set the page scale first (K) — door swings are found by their size."); return {error: "scale not set"}; }
-  await indexPage(); const sw = doorSwings();
+  await indexPage(); let sw = doorSwings(); const k0 = curScale(), extra = tagsMissedBySwings(sw || [], tagsOf(await pageTexts(S.fileId, S.pageNo)).plan, k0);
+  if (extra.length) sw = (sw || []).concat(extra);
   if (!sw || !sw.length) { aiLog("err", "No door swing symbols found on this page (vector PDFs only; a swing is an arc of 1.2–6 ft radius)."); return {error: "no door swings"}; }
   mutate(() => { const c = condByName("Doors (swings)", "count"); if (!c.sym) { c.sym = "square"; c.cap = "seq"; }
     let it = P.proj.items.find(i => i.cond === c.id && onPage(i) && i.kind === "shape"); if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
     it.ai = true; it.qa = ""; sw.forEach(d => { if (!it.pts.some(q => dist(q, d.p) < 2)) it.pts.push(d.p); }); }, "Count door swings");
   refresh();
   const dbl = sw.filter(x => x.leaves === 2).length;
-  aiLog("tool", `Door swings: <b>${sw.length} doors</b> (${sw.length - dbl} single, ${dbl} double — ${sw.length + dbl} leaves) · leaf widths ${[...new Set(sw.map(x => f3(x.w)))].slice(0, 8).join(", ")} ft <span class="small">— check them: an arc of that size that is not a door is counted too</span>`);
+  aiLog("tool", `Door swings: <b>${sw.length} doors</b> (${sw.length - dbl} single, ${dbl} double — ${sw.length + dbl} leaves)${extra.length ? ` · <b>${extra.length}</b> with no swing found, counted at their tag (${[...new Set(extra.map(x => x.tag))].map(esc).join(", ")})` : ""} · leaf widths ${[...new Set(sw.filter(x => x.w).map(x => f3(x.w)))].slice(0, 8).join(", ")} ft <span class="small">— check them: an arc of that size that is not a door is counted too</span>`);
   return {doors: sw.length, double: dbl};
 }
 async function agentSchedule(){

@@ -488,7 +488,8 @@ export function cadScene(md, opt){
     mtextLines(e.s).forEach(p => { p = acadStr(p); if (wMax > 0) wrap(p, wMax).forEach(l => L.push(l)); else L.push(p); });
     const pitch = h * 5 / 3 * (e.ls || 1), n = L.length, col = (e.att - 1) % 3, row = Math.floor((e.att - 1) / 3), cr = Math.cos(e.rot), sr = Math.sin(e.rot);
     const y0 = row <= 0 ? -h : row === 1 ? ((n - 1) * pitch + h) / 2 - h : (n - 1) * pitch;
-    L.forEach((l, i) => { if (!l.trim()) return; const lw = emW(l) * em, dx = col === 0 ? 0 : col === 1 ? -lw / 2 : -lw, dy = y0 - i * pitch;
+    const pa = e.w > 0 ? /\\pxq([lcr])/.exec(String(e.s))?.[1] : null, bx = col === 0 ? 0 : col === 1 ? -e.w / 2 : -e.w;   // \pxqc; centres the paragraph in the box, whose edge the attachment point sets
+    L.forEach((l, i) => { if (!l.trim()) return; const lw = emW(l) * em, dx = pa ? bx + (pa === "c" ? (e.w - lw) / 2 : pa === "r" ? e.w - lw : 0) : col === 0 ? 0 : col === 1 ? -lw / 2 : -lw, dy = y0 - i * pitch;
       text(l, e.p[0] + cr * dx - sr * dy, e.p[1] + sr * dx + cr * dy, em, e.rot, 1, 0, r.li, r.c); });
   };
   const arrow = (tip, from, sz, li, c) => {   // a closed filled arrowhead at tip, pointing away from `from`
