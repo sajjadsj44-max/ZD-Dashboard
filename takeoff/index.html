@@ -705,13 +705,13 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 
 <div class="tools" id="tools">
       <div class="rtabs" role="tablist" aria-label="Tool groups">
-        <button class="rtab on" role="tab" data-rtab="takeoff" title="Measure lengths, areas and counts; Auto area; Find similar; cut-outs and openings">Takeoff</button>
+        <button class="rtab" role="tab" data-rtab="takeoff" title="Measure lengths, areas and counts; Auto area; Find similar; cut-outs and openings">Takeoff</button>
         <button class="rtab" role="tab" data-rtab="modify" title="Edit what is measured: move, copy, rotate, mirror, offset, break, join, explode, close, array">Modify</button>
         <button class="rtab" role="tab" data-rtab="markup" title="Notes, clouds, arrows, dimensions, highlights, stamps and the Markups list">Markup</button>
         <button class="rtab" role="tab" data-rtab="review" title="Check the takeoff: next / previous unchecked, mark checked, check before export, Compare, Typical">Review</button>
         <button class="rtab" role="tab" data-rtab="costing" title="Costing: measurement sheet, bill with rates, opening schedule, revision cost variance, check before export">Costing</button>
         <button class="rtab" role="tab" data-rtab="export" title="Export Excel / CSV / marked-up PDF, save the project, import pages">Export</button>
-        <button class="rtab" role="tab" data-rtab="mine" title="My tools — the tools you picked in Customize toolbar">&#9733; My tools</button>
+        <button class="rtab on" role="tab" data-rtab="mine" title="My tools — the tools you picked in Customize toolbar">&#9733; My tools</button>
         <button class="rtab" role="tab" data-rtab="view" title="View: fit, zoom, split window, dimmer, background, layers, labels, legend, minimap, full screen">View</button>
         <span class="sp"></span>
         <button class="tool tsm" id="bDel" title="Delete the selected measurement, count point or markup (Delete)" disabled><svg class="ic"><use href="#i-trash"/></svg><span class="tl">Delete</span></button>
@@ -727,7 +727,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
         <div id="snapPop" aria-label="Object snaps"></div>
       </div>
       <div class="rrow">
-      <div class="rpanel" data-rp="takeoff">
+      <div class="rpanel" data-rp="takeoff" hidden>
         <div class="rg"><div class="rgb">
           <button class="tool" data-tool="draw" title="Length / run — draw along the drawing with the active condition: click each point, Enter to finish (A)"><svg class="ic"><use href="#i-draw"/></svg><span class="tl">Length</span> <kbd>A</kbd></button>
           <button class="tool" data-tool="rect" title="Rectangle area (R)"><svg class="ic"><use href="#i-rect"/></svg><span class="tl">Rect</span> <kbd>R</kbd></button>
@@ -836,7 +836,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
           <button class="tool" data-px="bProjects" title="All projects"><svg class="ic"><use href="#i-list"/></svg><span class="tl">Projects</span></button>
         </div><div class="rgl">Project</div></div>
       </div>
-      <div class="rpanel" data-rp="mine" hidden>
+      <div class="rpanel" data-rp="mine">
         <div class="rg"><div class="rgb" id="mineBox"></div><div class="rgl">My tools</div></div>
         <div class="rg" id="mineHint"><span class="small" style="padding:14px 6px;color:var(--muted)">Nothing here yet — <b>drag any tool from the ribbon onto this tab</b>, or <b>Customize</b> (top right of the ribbon) &rarr; <b>My tools</b> to add any tool.</span></div>
       </div>
@@ -1071,7 +1071,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-08j"></script>
+<script type="module" src="takeoff.js?v=2026-10-08k"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password

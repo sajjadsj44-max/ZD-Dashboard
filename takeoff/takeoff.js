@@ -5782,6 +5782,9 @@ function ribbonInit(){
   document.querySelectorAll("#tools .rtab").forEach(t => { t.addEventListener("dblclick", ribTog); t.addEventListener("click", () => { const o = pcPref(); if ((o.off || []).includes("ui-ribbon")) pcSave({off: o.off.filter(k => k !== "ui-ribbon"), compact: o.compact}); }); });
   pcApply();
   $("bCustTb").onclick = () => tbDialog(); tbApply();
+  /* open on the My tools tab every time the page is loaded / refreshed (unless that tab is hidden in Customize) */
+  const mineHome = document.querySelector('#tools .rtab[data-rtab="mine"]');
+  if (mineHome && mineHome.style.display !== "none") ribShow("mine");
   /* drag a tool from any tab onto the My tools tab or panel to keep it there as a favourite */
   const mineTab = document.querySelector('#tools .rtab[data-rtab="mine"]');
   const dropTargets = [mineTab, $("mineBox"), $("mineHint")].filter(Boolean);
