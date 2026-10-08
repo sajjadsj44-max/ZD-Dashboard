@@ -205,7 +205,7 @@ editing tools (rotate, mirror, join, explode, close, offset, array) only in the 
 
 | Change | Where |
 |---|---|
-| Toolbar in **groups (tabs)**: Takeoff · Modify · Markup · Review; Select / Match / Lasso / Pan always on show; the tab follows the tool (press W → Takeoff, N → Markup) | toolbar |
+| Toolbar in **groups (tabs)**: Takeoff · Modify · Markup · Review; the always-on **Select / CAD pick / Match / Lasso / Pan** sit in the top bar just after Delete; the tab follows the tool (press W → Takeoff, N → Markup) | toolbar |
 | **SVG icons** (one stroke style, drawn with the text colour) in place of Unicode symbols; names + shortcuts in the tooltips; names shown beside the icons when the drawing area is wide enough (≥ 1020 px), icons only when it is narrow | toolbar |
 | **Modify tab**: Move · Copy / Place copies · Duplicate · Array… · Rotate (both ways) · Mirror H / V · To front · Offset… · Break · Join · Explode · Close · Lock — each acts on the selection and says what to select when nothing is | toolbar |
 | **Review tab**: Previous / Next unchecked · Check selected · Check page · Recheck · Check before export · Compare · Typical | toolbar |
@@ -215,6 +215,7 @@ editing tools (rotate, mirror, join, explode, close, offset, array) only in the 
 | **Measurement sheet: search** (every word must match item, condition, BOQ code, unit, page or room) and **sort** (drawing order · by page · largest first · name); the totals stay the whole condition's; "3 of 12 shown" | right panel |
 | QA bar: **Prev** next to Next unchecked, and a **no BOQ code** count | right panel |
 | Commands (Ctrl+K) find every new button, Ortho, Polar, Object snaps and "Search the measurement sheet" | palette |
+| **My tools**: drag any tool from any tab onto the **★ My tools** tab (or its panel) to keep it there as your own icon button; a hover ✕ or right-click takes it out again; **Customize toolbar** lists every tool and its tab and also adds to My tools | toolbar |
 
 **Still not in the app** (from the same review, in the order they would pay back): sheet column chooser / custom and formula columns
 (waste %, gross qty); Quick Line (click a wall → whole connected run) and Quick Box (box → largest room / all walls); a Volume

@@ -202,6 +202,7 @@ table.sh .rn:hover{color:var(--purple)}
 .rtab:hover{color:var(--purple)}
 .rtab.on{background:#fff;border-color:var(--line);color:var(--purple);box-shadow:inset 0 2px 0 var(--purple)}
 .rtabs .sp{flex:1}.rtabs .tool{margin-bottom:3px}
+.rtabs .rsel{margin:0 4px 3px;padding-left:6px;border-left:1px solid var(--line)}
 .rrow{display:flex;align-items:stretch;padding:4px 8px 3px;gap:0}
 .rrow .rsel{align-self:flex-start;margin:0 0 0}.rrow .rvs{height:auto;align-self:stretch;margin:0 8px}
 .rpanel{display:flex;flex-wrap:wrap;gap:0;align-items:stretch;flex:1;min-width:0}
@@ -224,6 +225,14 @@ table.sh .rn:hover{color:var(--purple)}
 .tool.on{background:var(--purple);border-color:var(--purple);color:#fff}
 .tool.on kbd{color:#d9d2ff;border-color:rgba(255,255,255,.4)}
 .tool:disabled{opacity:.4;cursor:default}
+#tools .rpanel .tool[draggable=true]{cursor:grab}
+#tools .rpanel .tool.dragging{opacity:.45}
+.rtab.dropok{outline:2px dashed var(--purple);outline-offset:2px;background:#f3f0fd;border-radius:6px}
+#mineBox.dropok,#mineHint.dropok{outline:2px dashed var(--purple);outline-offset:-2px;background:#f7f5ff;border-radius:6px}
+#mineBox{display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start;min-height:34px}
+#mineBox .tool{position:relative;overflow:visible}
+#mineBox .tool .mx{position:absolute;top:-7px;right:-7px;width:16px;height:16px;border-radius:50%;background:var(--red);color:#fff;font-size:12px;line-height:15px;text-align:center;display:none;cursor:pointer;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+#mineBox .tool:hover .mx{display:block}
 .tools .sp{flex:1}
 .tg{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#3c4c60;cursor:pointer;padding:0 4px}
 .stg{position:relative;flex:1;overflow:hidden;background:#d9dee6;touch-action:none;min-height:0}
@@ -705,6 +714,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
         <button class="rtab" role="tab" data-rtab="view" title="View: fit, zoom, split window, dimmer, background, layers, labels, legend, minimap, full screen">View</button>
         <span class="sp"></span>
         <button class="tool tsm" id="bDel" title="Delete the selected measurement, count point or markup (Delete)" disabled><svg class="ic"><use href="#i-trash"/></svg><span class="tl">Delete</span></button>
+        <span class="rsel"><button class="tool tsm" data-tool="select" title="Select / edit (V): click, or drag a box — left→right selects what is wholly inside, right→left what it touches. Drag a selected object to move it, Ctrl+drag to copy. Right-click for more."><svg class="ic"><use href="#i-select"/></svg><span class="tl">Select</span> <kbd>V</kbd></button><button class="tool tsm" data-tool="cadsel" title="Select AutoCAD objects (Shift+V) — on a DWG / DXF: click an object, Shift+click adds or takes out, drag a box (left→right: wholly inside, right→left: touching), Ctrl+A all. Then take off, count, select similar, quick select, layer off or isolate."><svg class="ic"><use href="#i-cadsel"/></svg><span class="tl">CAD pick</span></button><button class="tool tsm" data-tool="match" title="Match properties: select an object first, then start Match, or start Match and click a source. Click compatible targets to apply its condition, colour, label and takeoff properties; geometry stays unchanged. Press Esc to finish."><svg class="ic"><use href="#i-match"/></svg><span class="tl">Match</span></button><button class="tool tsm" data-tool="lasso" title="Lasso select (Shift+O): drag a free shape round the objects"><svg class="ic"><use href="#i-lasso"/></svg><span class="tl">Lasso</span></button><button class="tool tsm" data-tool="pan" title="Pan (H or hold Space)"><svg class="ic"><use href="#i-pan"/></svg><span class="tl">Pan</span> <kbd>H</kbd></button></span>
         <button class="tool tsm tgl" id="bOrtho" title="Ortho (F8): every point goes straight across or up / down from the last one. Holding Shift does the same for one click."><svg class="ic"><use href="#i-ortho"/></svg><span class="tl">Ortho</span></button>
         <button class="tool tsm tgl" id="bPolar" title="Polar (F10): a point near a 15° direction from the last one (0°, 15°, 30°…) is pulled onto it. Object snap wins when it is close enough."><svg class="ic"><use href="#i-polar"/></svg><span class="tl">Polar</span></button>
         <button class="tool tsm tgl" id="bXh" title="Cross-hair (Shift+C): hair-lines right across the whole window through the pointer (or the snap point), as AutoCAD with the cursor at 100%"><svg class="ic"><use href="#i-xh"/></svg><span class="tl">Cross-hair</span></button>
@@ -716,7 +726,6 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
         <div id="snapPop" aria-label="Object snaps"></div>
       </div>
       <div class="rrow">
-        <span class="rsel"><button class="tool tsm" data-tool="select" title="Select / edit (V): click, or drag a box — left→right selects what is wholly inside, right→left what it touches. Drag a selected object to move it, Ctrl+drag to copy. Right-click for more."><svg class="ic"><use href="#i-select"/></svg><span class="tl">Select</span> <kbd>V</kbd></button><button class="tool tsm" data-tool="cadsel" title="Select AutoCAD objects (Shift+V) — on a DWG / DXF: click an object, Shift+click adds or takes out, drag a box (left→right: wholly inside, right→left: touching), Ctrl+A all. Then take off, count, select similar, quick select, layer off or isolate."><svg class="ic"><use href="#i-cadsel"/></svg><span class="tl">CAD pick</span></button><button class="tool tsm" data-tool="match" title="Match properties: select an object first, then start Match, or start Match and click a source. Click compatible targets to apply its condition, colour, label and takeoff properties; geometry stays unchanged. Press Esc to finish."><svg class="ic"><use href="#i-match"/></svg><span class="tl">Match</span></button><button class="tool tsm" data-tool="lasso" title="Lasso select (Shift+O): drag a free shape round the objects"><svg class="ic"><use href="#i-lasso"/></svg><span class="tl">Lasso</span></button><button class="tool tsm" data-tool="pan" title="Pan (H or hold Space)"><svg class="ic"><use href="#i-pan"/></svg><span class="tl">Pan</span> <kbd>H</kbd></button></span><span class="rvs"></span>
       <div class="rpanel" data-rp="takeoff">
         <div class="rg"><div class="rgb">
           <button class="tool" data-tool="draw" title="Length / run — draw along the drawing with the active condition: click each point, Enter to finish (A)"><svg class="ic"><use href="#i-draw"/></svg><span class="tl">Length</span> <kbd>A</kbd></button>
@@ -828,7 +837,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
       </div>
       <div class="rpanel" data-rp="mine" hidden>
         <div class="rg"><div class="rgb" id="mineBox"></div><div class="rgl">My tools</div></div>
-        <div class="rg" id="mineHint"><span class="small" style="padding:14px 6px;color:var(--muted)">Nothing here yet — <b>Customize</b> (top right of the ribbon) &rarr; <b>My tools</b> to add any tool.</span></div>
+        <div class="rg" id="mineHint"><span class="small" style="padding:14px 6px;color:var(--muted)">Nothing here yet — <b>drag any tool from the ribbon onto this tab</b>, or <b>Customize</b> (top right of the ribbon) &rarr; <b>My tools</b> to add any tool.</span></div>
       </div>
       <div class="rpanel" data-rp="view" hidden>
         <div class="rg"><div class="rgb">
