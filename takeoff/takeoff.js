@@ -241,6 +241,7 @@ function migrate(p, rep){
     if (!UNITS[c.type].includes(c.unit)) { note(c.name + ": unit “" + c.unit + "” does not fit " + c.type + " — set to " + UNITS[c.type][0]); c.unit = UNITS[c.type][0]; }
     if (!HEXCOL.test(String(c.color || ""))) { if (c.color != null && c.color !== "") note(c.name + ": colour “" + String(c.color).slice(0, 40) + "” is not a colour — replaced"); c.color = COLORS[i % COLORS.length]; }
     ["h", "t"].forEach(k => { if (c[k] !== "" && c[k] != null && !(num(c[k]) > 0)) { note(c.name + ": " + (k === "h" ? "height" : "thickness") + " “" + c[k] + "” is not a length — cleared"); c[k] = ""; } else if (c[k] !== "" && c[k] != null) c[k] = num(c[k]); });
+    c.group = typeof c.group === "string" ? c.group.trim().slice(0, 60) : "";
     c.faces = Math.max(1, Math.min(2, Math.round(num(c.faces)) || 1)); c.dedMin = Math.max(0, num(c.dedMin) || 0);
     ["rate"].forEach(k => { if (c[k] != null && !isFinite(num(c[k]))) c[k] = 0; });
     if (c.asm != null && !arr(c.asm)) c.asm = [];
@@ -2898,7 +2899,16 @@ function nameAreas(){
   toast(n ? n + " area" + (n > 1 ? "s" : "") + " named from the drawing" : "No room names found inside the unnamed areas");
 }
 /* ------------------------------------------------------------------ panels */
-function refresh(){ mlSoon(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); renderLiveLegend(); if (SPLIT.on) paneStrips(); draw(); draftBtns(); }
+function renderPageStrip(){
+  const el = $("pageStrip"); if (!el) return; if (!P.proj || !P.proj.files.length) { el.style.display = "none"; return; }
+  const all = allPages(), cur = Math.max(0, all.findIndex(o => o.key === S.key)), win = all.slice(Math.max(0, cur - 8), cur + 40); S.thumbs = S.thumbs || {};
+  el.style.display = S.leftTab === "pages" ? "none" : "";
+  el.innerHTML = `<div class="pbh2"><b>Pages</b><span class="small">${cur + 1} of ${all.length}</span></div><div class="pstripin">` + win.map(o => { const th = S.thumbs[o.key], sh = (P.proj.sheets || {})[o.key] || {};
+    if (!th) thumbWant(o.key);
+    return `<div class="pgt${o.key === S.key ? " on" : ""}" data-pg="${esc(o.f.id)}|${o.i}" title="${esc(o.f.name)} p.${o.i}${sh.title ? " — " + esc(sh.title) : ""}"><img data-th="${esc(o.key)}" alt=""${th && th !== "x" ? ` src="${th}"` : ""}><div class="pgl">p.${o.i}</div></div>`; }).join("") + "</div>";
+  const on = el.querySelector(".pgt.on"); if (on && on.scrollIntoView) on.scrollIntoView({block: "nearest", inline: "center"});
+}
+function refresh(){ mlSoon(); renderPageStrip(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); renderLiveLegend(); if (SPLIT.on) paneStrips(); draw(); draftBtns(); }
 let sheetT = null;
 function refreshSheetSoon(){ clearTimeout(sheetT); sheetT = setTimeout(() => { renderSheet(); renderConds(); }, 120); }
 function renderScaleChip(){
@@ -2971,7 +2981,7 @@ async function thumbRun(){
       cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height); const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
       await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp})).promise; S.thumbs[k] = cv.toDataURL("image/png"); } }
     catch (e) { S.thumbs[k] = "x"; }   // PDF not attached in this browser: left blank
-    const im = [...document.querySelectorAll("#pageList img[data-th]")].find(x => x.dataset.th === k); if (im && S.thumbs[k] !== "x") im.src = S.thumbs[k];
+    const im = [...document.querySelectorAll("#pageList img[data-th], #pageStrip img[data-th]")].find(x => x.dataset.th === k); if (im && S.thumbs[k] !== "x") im.src = S.thumbs[k];
     PANES.forEach(pn => { if (pn.key === k) miniUpdate(pn); });
   }
   S.thumbBusy = false;
@@ -3009,9 +3019,14 @@ function renderConds(){
   const ns = S.condSel.size, bar = `<div class="lyrbar"><label class="pk" style="flex:none" title="Tick all / none"><input type="checkbox" data-cka="1"${ns && ns === P.proj.conds.length ? " checked" : ""}></label>
     ${ns ? `<b style="font-size:11.5px">${ns} ticked:</b><button class="btn sm" data-cact="show">Show</button><button class="btn sm" data-cact="hide">Hide</button><button class="btn sm" data-cact="only">Only these</button><button class="btn sm dng" data-cact="del">Delete</button>`
       : `<button class="btn sm" data-cact="allon" title="Show every condition">All on</button><button class="btn sm" data-cact="alloff" title="Hide every condition">All off</button><span class="small">tick conditions to show / hide several</span>`}</div>`;
-  L.innerHTML = bar + (shown.length ? "" : '<div class="empty">No condition matches this filter.</div>') + shown.map(c => { const i = P.proj.conds.indexOf(c), t = condTotals(c), its = P.proj.items.filter(x => x.cond === c.id), ck = its.filter(x => x.qa === "checked").length;
+  const grpOff = S.condGrpOff = S.condGrpOff || new Set(), hasG = shown.some(c => c.group), gnames = [...new Set(shown.filter(c => c.group).map(c => c.group))];
+  const order = hasG ? [""].concat(gnames).flatMap(g => { const m = shown.filter(c => (c.group || "") === g); return m.length ? [{g, m}] : []; }) : [{g: "", m: shown}];
+  const gHead = o => { const t = o.m.reduce((a, c) => a + P.proj.items.filter(x => x.cond === c.id).length, 0), ck = o.m.reduce((a, c) => a + P.proj.items.filter(x => x.cond === c.id && x.qa === "checked").length, 0);
+    return `<div class="cgrp2" data-cgrp="${esc(o.g)}" title="Click to fold / unfold this group"><span class="car">${grpOff.has(o.g) ? "&#9656;" : "&#9662;"}</span><b>${o.g ? esc(o.g) : "Ungrouped"}</b><span class="small">${o.m.length} condition${o.m.length === 1 ? "" : "s"} · ${ck}/${t} checked</span></div>`; };
+  const cardOf = c => { const i = P.proj.conds.indexOf(c), t = condTotals(c), its = P.proj.items.filter(x => x.cond === c.id), ck = its.filter(x => x.qa === "checked").length;
     return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}${its.length ? ` · ${ck}/${its.length} checked<i class="pbar" title="${ck} of ${its.length} checked"><i style="width:${Math.round(100 * ck / its.length)}%"></i></i>` : " · no measurements yet"}</span></div>
-      <div class="q">${fq(t.net, c.unit)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; }).join("");
+      <div class="q">${fq(t.net, c.unit)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; };
+  L.innerHTML = bar + (shown.length ? "" : '<div class="empty">No condition matches this filter.</div>') + order.map(o => (hasG ? gHead(o) : "") + (hasG && grpOff.has(o.g) ? "" : o.m.map(cardOf).join(""))).join("");
 }
 /* search and sort of the measurement sheet: every word typed must appear in the item, its condition, BOQ code, page, room or unit;
    sorting only reorders the lines inside each condition — the totals are always the whole condition's */
@@ -4624,6 +4639,7 @@ async function editCond(c){
      <div class="fg"><label>Thickness T (ft)</label><input type="text" id="cT" value="${d.t ? f3(+d.t) : ""}" placeholder="9&quot; = 0.75"></div>
      <div class="fg"><label>Faces</label><input type="number" id="cF" min="1" max="2" step="1" value="${+d.faces || 1}"></div>
      <div class="fg"><label>Deduct openings / voids over</label><input type="text" id="cD" value="${f2(+d.dedMin || 0)}"></div>
+     <div class="fg w2"><label>Group (folder in the conditions list, e.g. Exterior working)</label><input type="text" id="cGrp" list="dlGrp" value="${esc(d.group || "")}" placeholder="none" autocomplete="off"><datalist id="dlGrp">${[...new Set(P.proj.conds.map(x => x.group).filter(Boolean))].map(g => `<option value="${esc(g)}">`).join("")}</datalist></div>
      <div class="fg"><label>BOQ / WBS code</label><input type="text" id="cBoq" value="${esc(d.boq || "")}" placeholder="e.g. CW-01-009"></div>
      <div class="fg"><label>Rate Analysis code</label><input type="text" id="cRa" value="${esc(d.ra || "")}" list="dlRa" placeholder="e.g. CIV-MAS-001" autocomplete="off"><datalist id="dlRa">${raLib().o ? [...raLib().items.values()].map(i => `<option value="${esc(i.code || i.id)}">${esc((i.qs || i.sub || "") + " — " + String(i.desc || "").slice(0, 60) + " (" + i.unit + ")")}</option>`).join("") : ""}</datalist></div>
      <div class="fg w2 small" id="cRaInfo"></div>
@@ -4641,7 +4657,7 @@ async function editCond(c){
     if (type === "linear" && unit !== "ft" && !(H > 0)) return "A wall measured in " + unit + " needs its height H";
     if (unit === "cft" && !(T > 0)) return "A quantity in cft needs the thickness T";
     return {name, type, unit, h: H || "", t: T || "", faces: Math.max(1, Math.min(2, +$("cF").value || 1)), dedMin: Math.max(0, parseFloat($("cD").value) || 0), color: $("cC").value,
-      sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value, boq: $("cBoq").value.trim(), ra: $("cRa").value.trim().toUpperCase()};
+      sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value, group: $("cGrp").value.trim().slice(0, 60), boq: $("cBoq").value.trim(), ra: $("cRa").value.trim().toUpperCase()};
   }, "cName");
   const raInfo = () => { const code = $("cRa").value.trim(); if (!code) { $("cRaInfo").innerHTML = raLib().o ? "Link a Rate Analysis item to take its built-up rate (or type the rate in the bill’s Assembly)." : "Rate Analysis library not found in this browser — open SAJ QSCOST → Rate Analysis on this site once to link codes."; return; }
     const r = rateOf({ra: code.toUpperCase()}, $("cUnit").value), p = raPrice(code);
@@ -5664,28 +5680,38 @@ const TB_KEY = "zdTakeoffTb";
 const tbKey = b => b.dataset.tool || b.dataset.mod || b.dataset.rv || b.dataset.px || b.dataset.fn || b.id || "";
 const tbName = b => ((b.querySelector(".tl") || {}).textContent || b.title || tbKey(b)).trim().split(" — ")[0].split("(")[0].trim();
 function tbPref(){ let o = null; try { o = JSON.parse(pref(TB_KEY) || "null"); } catch (e) { o = null; } return o && typeof o === "object" ? o : {}; }
+const tbGroups = () => [...document.querySelectorAll("#tools .rpanel[data-rp]")].flatMap(pn => [...pn.querySelectorAll(".rg")].map((g, i) => ({id: pn.dataset.rp + "/" + i, panel: pn.dataset.rp, g, box: g.querySelector(".rgb"), label: (g.querySelector(".rgl") || {}).textContent || ""})));
 function tbApply(){
-  const o = tbPref(), off = new Set(o.off || []), tabsOff = new Set(o.tabs || []);
-  document.querySelectorAll("#tools .rrow .tool").forEach(b => { const k = tbKey(b); b.style.display = k && off.has(b.closest("[data-rp]") ? b.closest("[data-rp]").dataset.rp + "/" + k : "x/" + k) ? "none" : ""; });
+  const o = tbPref(), off = new Set(o.off || []), tabsOff = new Set(o.tabs || []), ord = o.order || {};
+  tbGroups().forEach(G => {   // original order remembered once, so Reset can put it back; then the saved order is applied inside each group
+    if (!G.box.__orig) G.box.__orig = [...G.box.children];
+    const want = ord[G.id] || [], by = new Map(G.box.__orig.map(b => [G.panel + "/" + tbKey(b), b])), seq = want.map(k => by.get(k)).filter(Boolean).concat(G.box.__orig.filter(b => !want.includes(G.panel + "/" + tbKey(b))));
+    seq.forEach(b => G.box.appendChild(b));
+  });
+  document.querySelectorAll("#tools .rrow .tool").forEach(b => { const pn = b.closest("[data-rp]"); b.style.display = pn && off.has(pn.dataset.rp + "/" + tbKey(b)) ? "none" : ""; });
   document.querySelectorAll("#tools .rtab").forEach(b => { b.style.display = tabsOff.has(b.dataset.rtab) ? "none" : ""; });
   document.querySelectorAll("#tools .rg").forEach(g => { const vis = [...g.querySelectorAll(".tool")].some(b => b.style.display !== "none"); g.style.display = vis ? "" : "none"; });
   const cur = document.querySelector("#tools .rtab.on"); if (cur && cur.style.display === "none") { const f = [...document.querySelectorAll("#tools .rtab")].find(b => b.style.display !== "none"); if (f) ribShow(f.dataset.rtab); }
 }
 async function tbDialog(){
   const o = tbPref(), off = new Set(o.off || []), tabsOff = new Set(o.tabs || []), W = wsPref();
-  const tabs = [...document.querySelectorAll("#tools .rtab")];
-  const body = `<p class="small">Tick what you want on the toolbar. Nothing is deleted — the shortcuts and Ctrl+K still reach every tool.</p>
+  const tabs = [...document.querySelectorAll("#tools .rtab")], GR = tbGroups();
+  const row = (G, b) => { const k = G.panel + "/" + tbKey(b); return `<div class="tbrow" data-tbrow="${esc(k)}"><label class="pk"><input type="checkbox" data-tbk="${esc(k)}"${off.has(k) ? "" : " checked"}> ${esc(tbName(b))}</label><button class="btn sm" data-tbmv="-1" title="Move earlier">&#9650;</button><button class="btn sm" data-tbmv="1" title="Move later">&#9660;</button></div>`; };
+  const body = `<p class="small">Tick what you want on the toolbar and use ▲ ▼ to change the order inside a group. Nothing is deleted — the shortcuts and Ctrl+K still reach every tool.</p>
     <label class="pk"><input type="checkbox" id="tbIcons"${W.tb === "icons" ? " checked" : ""}> Icons only (no labels)</label>
-    <div style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin-top:6px">` +
-    tabs.map(t => { const pn = document.querySelector(`#tools [data-rp="${t.dataset.rtab}"]`);
-      return `<div style="margin:6px 0"><label class="pk" style="font-weight:700!important;color:var(--navy)!important"><input type="checkbox" data-tbtab="${t.dataset.rtab}"${tabsOff.has(t.dataset.rtab) ? "" : " checked"}> ${esc(t.textContent)} tab</label>
-        <div style="display:flex;flex-wrap:wrap;gap:0 16px;padding-left:22px">${pn ? [...pn.querySelectorAll(".tool")].map(b => { const k = t.dataset.rtab + "/" + tbKey(b); return `<label class="pk" style="min-width:150px"><input type="checkbox" data-tbk="${esc(k)}"${off.has(k) ? "" : " checked"}> ${esc(tbName(b))}</label>`; }).join("") : ""}</div></div>`; }).join("") + `</div>
-    <div class="xrow"><button class="btn sm" id="tbReset">Reset — show everything</button></div>`;
+    <div id="tbList" style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin-top:6px">` +
+    tabs.map(t => `<div style="margin:8px 0"><label class="pk" style="font-weight:700!important;color:var(--navy)!important"><input type="checkbox" data-tbtab="${t.dataset.rtab}"${tabsOff.has(t.dataset.rtab) ? "" : " checked"}> ${esc(t.textContent)} tab</label>` +
+      GR.filter(G => G.panel === t.dataset.rtab).map(G => `<div class="tbgrp" data-tbg="${G.id}"><div class="small" style="margin:4px 0 0 22px">${esc(G.label)}</div>${[...G.box.children].map(b => row(G, b)).join("")}</div>`).join("") + "</div>").join("") + `</div>
+    <div class="xrow"><button class="btn sm" id="tbReset">Reset — show everything, original order</button></div>`;
   const pr = ask("Customize toolbar", body, "Apply", () => {
-    const n = {off: [...document.querySelectorAll("#dlgB [data-tbk]")].filter(i => !i.checked).map(i => i.dataset.tbk), tabs: [...document.querySelectorAll("#dlgB [data-tbtab]")].filter(i => !i.checked).map(i => i.dataset.tbtab)};
+    const n = {off: [...document.querySelectorAll("#dlgB [data-tbk]")].filter(i => !i.checked).map(i => i.dataset.tbk), tabs: [...document.querySelectorAll("#dlgB [data-tbtab]")].filter(i => !i.checked).map(i => i.dataset.tbtab), order: {}};
+    document.querySelectorAll("#dlgB [data-tbg]").forEach(g => { n.order[g.dataset.tbg] = [...g.querySelectorAll("[data-tbrow]")].map(r => r.dataset.tbrow); });
     if (n.tabs.length >= tabs.length) return "Keep at least one tab";
     return {n, icons: $("tbIcons").checked}; });
-  $("tbReset").onclick = () => document.querySelectorAll("#dlgB input[type=checkbox]").forEach(i => { i.checked = i.id === "tbIcons" ? false : true; });
+  $("tbList").addEventListener("click", e => { const m = e.target.closest("[data-tbmv]"); if (!m) return; const r = m.closest(".tbrow"), d = +m.dataset.tbmv, sib = d < 0 ? r.previousElementSibling : r.nextElementSibling;
+    if (sib && sib.classList.contains("tbrow")) { if (d < 0) r.parentNode.insertBefore(r, sib); else r.parentNode.insertBefore(sib, r); } });
+  $("tbReset").onclick = () => { document.querySelectorAll("#dlgB input[type=checkbox]").forEach(i => { i.checked = i.id === "tbIcons" ? false : true; });
+    GR.forEach(G => { const g = document.querySelector(`#dlgB [data-tbg="${G.id}"]`); if (!g) return; const rows = [...g.querySelectorAll(".tbrow")], by = new Map(rows.map(r => [r.dataset.tbrow, r])); G.box.__orig.forEach(b => { const r = by.get(G.panel + "/" + tbKey(b)); if (r) g.appendChild(r); }); }); };
   const r = await pr; if (!r) return;
   pref(TB_KEY, JSON.stringify(r.n)); wsSet({tb: r.icons ? "icons" : "full"}); tbApply(); toast("Toolbar updated — Customize → Reset brings everything back", 2600);
 }
@@ -5699,6 +5725,8 @@ function ribbonInit(){
   setInterval(syncPx, 800);
   $("propsHead").addEventListener("click", () => $("propsBox").classList.toggle("min"));
   /* left panel: filter and type tabs of the condition list */
+  $("pageStrip").addEventListener("click", e => { const t = e.target.closest("[data-pg]"); if (!t) return; const [f, p2] = t.dataset.pg.split("|"); gotoPage(f, +p2); });
+  $("condList").addEventListener("click", e => { const g = e.target.closest("[data-cgrp]"); if (!g) return; const k = g.dataset.cgrp; if (S.condGrpOff.has(k)) S.condGrpOff.delete(k); else S.condGrpOff.add(k); renderConds(); });
   $("condQ").addEventListener("input", e => { S.condQ = e.target.value; renderConds(); });
   $("condTypes").addEventListener("click", e => { const b = e.target.closest("[data-cty]"); if (!b) return; S.condTy = b.dataset.cty; renderConds(); });
   /* right panel footer and the takeoff-agent bar at the bottom */
@@ -7251,7 +7279,7 @@ function wire(){
   $("dimPct").oninput = e => setDim(+e.target.value);
   $("bTypical").onclick = () => P.proj && copyPageDialog();
   const leftTab = t => { t = t === true ? "lay" : t || "cond"; S.leftTab = t;   // conditions · pages · the PDF's layers
-    $("condList").style.display = t === "cond" ? "" : "none"; $("condFilter").style.display = t === "cond" ? "" : "none"; $("layerList").style.display = t === "lay" ? "" : "none"; $("pageList").style.display = t === "pages" ? "" : "none";
+    $("condList").style.display = t === "cond" ? "" : "none"; $("condFilter").style.display = t === "cond" ? "" : "none"; renderPageStrip(); $("layerList").style.display = t === "lay" ? "" : "none"; $("pageList").style.display = t === "pages" ? "" : "none";
     $("tCond").classList.toggle("on", t === "cond"); $("tLay").classList.toggle("on", t === "lay"); $("tPages").classList.toggle("on", t === "pages"); $("bNewCond").style.display = t === "cond" ? "" : "none";
     if (t === "lay") renderLayers(); if (t === "pages") renderPages(); };
   $("tCond").onclick = () => leftTab("cond"); $("tLay").onclick = () => leftTab("lay"); $("tPages").onclick = () => leftTab("pages");

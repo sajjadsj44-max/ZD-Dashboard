@@ -575,6 +575,11 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
 .pbh{cursor:pointer;user-select:none}.pbh::after{content:"\25BE";color:#8a98ac;font-size:12px}
 .propsbox.min .props,.propsbox.min .propsEmpty{display:none!important}.propsbox.min .pbh::after{content:"\25B4"}
 .propsbox{max-height:44%}
+
+.cgrp2{display:flex;align-items:center;gap:7px;padding:7px 4px 4px;cursor:pointer;color:var(--navy);font-size:12px;user-select:none}.cgrp2 .small{margin-left:auto;font-size:10.5px;color:var(--muted)}.cgrp2 .car{color:#8a98ac;width:10px}
+.pstrip2{flex:none;border-top:1px solid var(--line);background:#fff}.pbh2{display:flex;align-items:center;padding:6px 12px 2px;font-size:12px;color:var(--navy)}.pbh2 .small{margin-left:auto;font-size:10.5px;color:var(--muted)}
+.pstripin{display:flex;gap:6px;overflow-x:auto;padding:4px 10px 8px}.pstripin .pgt{flex:0 0 64px}.pstripin .pgt img{height:52px}
+.tbrow{display:flex;align-items:center;gap:4px;padding:1px 0 1px 22px}.tbrow .pk{flex:1}.tbrow .btn{padding:0 6px;font-size:9px}
 </style>
 </head>
 <body>
@@ -774,6 +779,7 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
     <div class="pb" id="condList"></div>
     <div class="pb" id="layerList" style="display:none"></div>
     <div class="pb" id="pageList" style="display:none"></div>
+    <div class="pstrip2" id="pageStrip"></div>
     <div class="propsbox" id="propsBox"><div class="pbh" id="propsHead" title="Click to fold / unfold"><b>Properties</b><span id="propsTag" class="small"></span></div>
       <div class="props" id="props"></div><div class="propsEmpty">Click a measurement on the drawing or on the sheet to see and edit its details here. Select a condition to see its settings.</div></div>
     <details class="keys"><summary>Keyboard shortcuts</summary><div class="kg">
@@ -961,7 +967,7 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-08d"></script>
+<script type="module" src="takeoff.js?v=2026-10-08e"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password
