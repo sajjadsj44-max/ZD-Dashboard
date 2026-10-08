@@ -329,6 +329,9 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 .note b{color:var(--txt)}
 
 /* dialog */
+.xhl{position:absolute;pointer-events:none;z-index:7;background:#fff;mix-blend-mode:difference;display:none}
+.xhl.h{left:0;right:0;height:1px}.xhl.v{top:0;bottom:0;width:1px}
+#pal .pm{color:#1f4fd8;font-weight:700}#pal .pal-al{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:6px;text-transform:uppercase}
 #pal{position:fixed;inset:0;background:rgba(15,41,66,.28);display:none;align-items:flex-start;justify-content:center;z-index:40;padding:10vh 16px 16px}
 #pal.on{display:flex}
 #pal .pbx{width:min(620px,100%);background:#fff;border-radius:10px;box-shadow:0 18px 48px rgba(15,41,66,.35);overflow:hidden;display:flex;flex-direction:column;max-height:70vh}
@@ -544,6 +547,14 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
       <symbol id="i-rotatel" viewBox="0 0 24 24"><path d="M4 11a8 8 0 112.3 6.3M4 4v7h7"/></symbol>
       <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2 2"/><path d="M8 7l-5 5 5 5zM16 7l5 5-5 5z"/></symbol>
       <symbol id="i-mirrorv" viewBox="0 0 24 24"><path d="M3 12h18" stroke-dasharray="2 2"/><path d="M7 8l5-5 5 5zM7 16l5 5 5-5z"/></symbol>
+      <symbol id="i-trim" viewBox="0 0 24 24"><path d="M3 21L21 3M3 3l8 8"/><circle cx="14" cy="14" r="1.2"/></symbol>
+      <symbol id="i-extend" viewBox="0 0 24 24"><path d="M3 12h11M18 12h3M16 5v14"/></symbol>
+      <symbol id="i-fillet" viewBox="0 0 24 24"><path d="M5 4v8a6 6 0 006 6h8"/></symbol>
+      <symbol id="i-chamfer" viewBox="0 0 24 24"><path d="M5 4v7l7 7h7"/></symbol>
+      <symbol id="i-stretch" viewBox="0 0 24 24"><path d="M3 6h8v12H3zM11 12h10M17 8l4 4-4 4"/></symbol>
+      <symbol id="i-scale" viewBox="0 0 24 24"><path d="M3 21V11h10v10zM13 11l8-8M15 3h6v6"/></symbol>
+      <symbol id="i-rotany" viewBox="0 0 24 24"><path d="M20 12a8 8 0 11-2.6-5.9M20 3v6h-6"/><path d="M12 12l5-3"/></symbol>
+      <symbol id="i-xh" viewBox="0 0 24 24"><path d="M12 2v20M2 12h20"/></symbol>
       <symbol id="i-offset" viewBox="0 0 24 24"><path d="M3 17L17 3M7 21L21 7"/></symbol>
       <symbol id="i-join" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></symbol>
       <symbol id="i-explode" viewBox="0 0 24 24"><path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/></symbol>
@@ -572,6 +583,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
         <button class="tool tsm" id="bDel" title="Delete the selected measurement, count point or markup (Delete)" disabled><svg class="ic"><use href="#i-trash"/></svg><span class="tl">Delete</span></button>
         <button class="tool tsm tgl" id="bOrtho" title="Ortho (F8): every point goes straight across or up / down from the last one. Holding Shift does the same for one click."><svg class="ic"><use href="#i-ortho"/></svg><span class="tl">Ortho</span></button>
         <button class="tool tsm tgl" id="bPolar" title="Polar (F10): a point near a 15° direction from the last one (0°, 15°, 30°…) is pulled onto it. Object snap wins when it is close enough."><svg class="ic"><use href="#i-polar"/></svg><span class="tl">Polar</span></button>
+        <button class="tool tsm tgl" id="bXh" title="Cross-hair (Shift+C): hair-lines right across the whole window through the pointer (or the snap point), as AutoCAD with the cursor at 100%"><svg class="ic"><use href="#i-xh"/></svg><span class="tl">Cross-hair</span></button>
         <label class="tg" title="Snap to drawing lines (S)"><input type="checkbox" id="snapOn" checked> <svg class="ic"><use href="#i-snap"/></svg> Snap</label>
         <button class="tool tsm" id="bSnapSet" title="Object snaps: endpoint, midpoint, intersection, perpendicular, nearest" aria-haspopup="true"><svg class="ic ch"><use href="#i-chev"/></svg></button>
         <button class="tool tsm" id="bKeys" title="Keyboard &amp; mouse shortcuts (?)"><svg class="ic"><use href="#i-keys"/></svg><span class="tl">Keys</span></button>
@@ -611,14 +623,21 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
           <button class="tool" data-mod="array" title="Copy at a distance / array: copies across and down by distances in ft (Ctrl+arrow)"><svg class="ic"><use href="#i-array"/></svg><span class="tl">Array…</span></button>
         </div><div class="rgl">Copy</div></div>
         <div class="rg"><div class="rgb">
-          <button class="tool" data-mod="cw" title="Rotate the selection 90° clockwise"><svg class="ic"><use href="#i-rotate"/></svg><span class="tl">Rotate</span></button>
-          <button class="tool" data-mod="ccw" title="Rotate the selection 90° anticlockwise"><svg class="ic"><use href="#i-rotatel"/></svg><span class="tl">Rotate back</span></button>
+          <button class="tool" data-mod="cw" title="Rotate the selection 90° clockwise"><svg class="ic"><use href="#i-rotate"/></svg><span class="tl">Rotate 90°</span></button>
+          <button class="tool" data-mod="ccw" title="Rotate the selection 90° anticlockwise"><svg class="ic"><use href="#i-rotatel"/></svg><span class="tl">Rotate back 90°</span></button>
+          <button class="tool" data-mod="rot" title="Rotate (RO): turn the selection by any angle about its middle, in place or as a copy — or type ‘ro 37’ in Ctrl+K"><svg class="ic"><use href="#i-rotany"/></svg><span class="tl">Rotate…</span></button>
+          <button class="tool" data-mod="scalesel" title="Scale selection (SC): enlarge or shrink the selection by a factor or from a reference length — or type ‘sc 1.5’ in Ctrl+K"><svg class="ic"><use href="#i-scale"/></svg><span class="tl">Scale selection…</span></button>
+          <button class="tool" data-tool="stretch" title="Stretch (Shift+S): a crossing window, a base point and a destination — the points inside move, runs and outlines stretch"><svg class="ic"><use href="#i-stretch"/></svg><span class="tl">Stretch</span></button>
           <button class="tool" data-mod="fh" title="Mirror left–right"><svg class="ic"><use href="#i-mirror"/></svg><span class="tl">Mirror H</span></button>
           <button class="tool" data-mod="fv" title="Mirror up–down"><svg class="ic"><use href="#i-mirrorv"/></svg><span class="tl">Mirror V</span></button>
           <button class="tool" data-mod="front" title="Bring to front (drawn last, picked first)"><svg class="ic"><use href="#i-front"/></svg><span class="tl">To front</span></button>
         </div><div class="rgl">Transform</div></div>
         <div class="rg"><div class="rgb">
           <button class="tool" data-mod="offset" title="Offset: a parallel copy, or the outline grown / shrunk by a distance (default: half the condition's thickness)"><svg class="ic"><use href="#i-offset"/></svg><span class="tl">Offset…</span></button>
+          <button class="tool" data-tool="trim" title="Trim (Shift+T): click the part of a run to cut away — it is cut back to the nearest line, run or outline that crosses it, including the drawing's own lines · Shift+click extends"><svg class="ic"><use href="#i-trim"/></svg><span class="tl">Trim</span></button>
+          <button class="tool" data-tool="extend" title="Extend (Shift+X): click a run near its end — it grows to the first line, run or outline in its way · Shift+click trims"><svg class="ic"><use href="#i-extend"/></svg><span class="tl">Extend</span></button>
+          <button class="tool" data-tool="fillet" title="Fillet (F in Ctrl+K): round the corner between two runs, or two legs of one run, with an arc of a set radius (0 = a sharp corner)"><svg class="ic"><use href="#i-fillet"/></svg><span class="tl">Fillet…</span></button>
+          <button class="tool" data-tool="chamfer" title="Chamfer (CHA in Ctrl+K): bevel the corner between two runs, or two legs of one run, by two distances"><svg class="ic"><use href="#i-chamfer"/></svg><span class="tl">Chamfer…</span></button>
           <button class="tool" data-tool="break" title="Break (B): click a length run to cut it in two there · Shift+click deletes one segment"><svg class="ic"><use href="#i-break"/></svg><span class="tl">Break</span> <kbd>B</kbd></button>
           <button class="tool" data-mod="join" title="Join the selected runs into one (gaps are bridged and reported)"><svg class="ic"><use href="#i-join"/></svg><span class="tl">Join</span></button>
           <button class="tool" data-mod="explode" title="Explode a run into one row per segment"><svg class="ic"><use href="#i-explode"/></svg><span class="tl">Explode</span></button>
@@ -716,7 +735,7 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-07n"></script>
+<script type="module" src="takeoff.js?v=2026-10-08a"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password

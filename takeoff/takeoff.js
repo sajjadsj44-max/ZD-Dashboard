@@ -1771,6 +1771,14 @@ async function autoRoomGuarded(p){
       const r2 = await autoRoom(p, {gap: g2}); if (!r2.err && !r2.partial) { r2.note = "passage narrower than the door gap: openings closed up to " + f3(g2) + " ft"; first = r2; break; } }
     if (!first.err && first.partial) first.short = "only part of a passage narrower than the door gap was found — Ctrl+Z, set ‘Close gaps’ (⚙) below the passage's width and click again";
   }
+  if (first.err && !first.passage) {   // no closed room found (a door a little wider than the setting): try again closing just a little wider — never a big hole, which is a real opening
+    const o0 = autoOpt();
+    for (const f of [1.25, 1.5]) {
+      const g2 = Math.min(29, o0.gap * f); busy("No closed room — closing openings up to " + f3(g2) + " ft…"); await new Promise(r => setTimeout(r, 10));
+      const r2 = await autoRoom(p, {gap: g2});
+      if (!r2.err) { r2.note = "a door wider than the setting: openings up to " + f3(g2) + " ft closed — check the outline"; first = r2; break; }
+    }
+  }
   if (first.err) return first;
   let F = null; try { F = await drawingFacts(S.fileId, S.pageNo); } catch (e) {}
   if (!F || !F.rooms.length) return first;
@@ -2056,6 +2064,8 @@ function setTool(t){
   if (t !== "open") S.openMark = null;
   if (t !== "draw") S.resume = null;
   if (t !== "gap") S.gap = null;
+  if (t !== "fillet" && t !== "chamfer") S.fc.first = null;
+  if (t !== "stretch") S.str = null;
   if (t !== "typref" && S.typ) { S.typ = null; $("cmpLegend").style.display = "none"; toast("Typical copy stopped — nothing copied"); }
   S.mkd = null;
   if (t !== "stamp" || S.tool !== "stamp") { S.stampBase = null; S.stampN = 0; }
@@ -2073,6 +2083,7 @@ function setTool(t){
   stageCls();
   stage().style.cursor = "";
   hint(); draw(); renderProps(); draftBtns();
+  if (t === "fillet" || t === "chamfer") { if (S.fcSkip) S.fcSkip = false; else fcSetup(t); }
 }
 function hint(){
   const c = S.cond ? cond(S.cond) : null, t = S.tool;
@@ -2087,6 +2098,11 @@ function hint(){
     typref: S.typ ? (S.key === S.typ.src ? "Typical copy: click reference point " + (S.typ.a.length + 1) + " of 2 on this (source) sheet." : "Typical copy: click the same reference point " + (S.typ.b.length + 1) + " of 2 on this sheet.") : "", measure: "Click points; double-click, right-click or Enter ends a measurement (it stays on screen). Esc clears. Nothing is saved." + drawing,
     cal: "Click both ends of a known dimension, then enter its length.",
     break: "Break: click a length run where it should be cut in two · Shift+click a segment to delete just that segment · Esc when done.",
+    trim: "Trim: click the part of a run to cut away — it is cut back to the nearest line, run or outline that crosses it (also the drawing's own lines) · Shift+click: Extend · Esc when done.",
+    extend: "Extend: click a run near its end — it grows to the first line, run or outline in its way · Shift+click: Trim · Esc when done.",
+    fillet: S.fc.first ? "Fillet: click the second run (or the next leg of the same run) · Esc: pick the first again." : "Fillet (radius " + f3(S.fc.r) + " ft): click the first run near its corner, then the second · Enter: change the radius · Esc when done.",
+    chamfer: S.fc.first ? "Chamfer: click the second run (or the next leg of the same run) · Esc: pick the first again." : "Chamfer (" + f3(S.fc.d1) + " × " + f3(S.fc.d2) + " ft): click the first run near its corner, then the second · Enter: change the distances · Esc when done.",
+    stretch: !S.str || !S.str.stage ? "Stretch: click one corner of a crossing window round the points to move (runs and outlines stretch; whole objects move)." : S.str.stage === 1 ? "Stretch: click the opposite corner of the window." : S.str.stage === 2 ? "Stretch: click a base point (Ortho / Polar / snap work)." : "Stretch: click where the base point goes · Esc starts again.",
     gap: "Cut a gap: click the other end of the gap on the same run (e.g. the far side of a door) · Esc cancels.",
     stamp: S.stampBase ? "Place copies: click the second point — a copy lands there, displaced from the base point · click again for more copies · Shift / F8: straight · Esc: new base point, Esc again: done."
       : "Place copies (" + (S.clip ? S.clip.n : 0) + " object" + (S.clip && S.clip.n === 1 ? "" : "s") + "): click a base point (a corner or point on the copied object) — or Enter to use its centre · then click each destination · Esc when done.",
@@ -2102,8 +2118,8 @@ function cursorPoint(e, sp){
   let p = raw, s = null;
   const free = e && (e.ctrlKey || e.metaKey) && S.tool !== "select";   // Ctrl: the point goes exactly where clicked, no snap (Bluebeam)
   const ex = S.drag && S.drag.vertex != null ? ((it, i) => it.id === S.drag.item && i === S.drag.vertex) : null;   // a dragged point never snaps onto itself
-  if (!free && (["draw", "rect", "ded", "open", "measure", "cal", "circle", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
-  let last = S.drag ? null : S.tool === "stamp" ? S.stampBase : S.draft[S.draft.length - 1];
+  if (!free && (["draw", "rect", "ded", "open", "measure", "cal", "circle", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp", "stretch"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
+  let last = S.drag ? null : S.tool === "stamp" ? S.stampBase : S.tool === "stretch" ? (S.str && S.str.stage === 3 ? S.str.base : null) : S.draft[S.draft.length - 1];
   if (S.drag && S.drag.vertex != null) { const it = P.proj.items.find(i => i.id === S.drag.item); if (it) last = S.drag.orig[S.drag.vertex - 1] || S.drag.orig[S.drag.vertex + 1] || null; }
   if (((e && e.shiftKey) !== !!S.ortho) && last && !S.arcMid) { const dx = Math.abs(p[0] - last[0]), dy = Math.abs(p[1] - last[1]); p = dx >= dy ? [p[0], last[1]] : [last[0], p[1]]; if (s) s = Object.assign({}, s, {type: s.type + " + straight"}); }   // Shift, or Ortho (F8; Shift then frees one click)
   else if (S.polar && last && !S.arcMid && !free && !s && !(e && e.shiftKey)) {   // Polar (F10): within 4° of a 15° (5° … 90°) direction -> onto it, the length kept
@@ -2138,6 +2154,9 @@ function onDown(e){
   const {p} = cursorPoint(e, sp);
   if (mkIsTool(S.tool)) return mkDown(p, sp, e);
   if (S.tool === "break") return breakClick(sp, e);
+  if (S.tool === "trim" || S.tool === "extend") return trimExtendClick(sp, e);
+  if (S.tool === "fillet" || S.tool === "chamfer") return fcClick(sp);
+  if (S.tool === "stretch") return stretchClick(p);
   if (S.tool === "gap") return gapClick(sp);
   if (S.tool === "stamp") { stampAt(p); return; }
   if (S.tool === "typref") { if (!(S.typ && S.typ.T)) typClick(p).then(hint); return; }
@@ -2706,6 +2725,8 @@ function drawNow(){
   });
   const c = S.cond ? cond(S.cond) : null, cur = S.cursor;
   let live = "";
+  if (S.tool === "stretch" && S.str && cur) dyn.push(...stretchPreview(cur));
+  if ((S.tool === "fillet" || S.tool === "chamfer") && S.fc.first) { const f = S.fc.first, a = toScr(f.it.pts[f.i]), b = toScr(f.it.pts[f.i + 1]); dyn.push(`<path d="M${a[0].toFixed(1)} ${a[1].toFixed(1)}L${b[0].toFixed(1)} ${b[1].toFixed(1)}" stroke="#ff2d55" stroke-width="4" opacity=".7" stroke-linecap="round"/>`); }
   { const kk = hereScale(S.draft[0] || cur); if (kk) k = kk; }
   if (S.draft.length && cur && S.tool === "circle") {
     const a = S.draft[0], r = dist(a, cur), q = toScr(a), col = c ? c.color : "#0b0b0b";
@@ -3171,18 +3192,19 @@ function gapClick(sp){
   const r = runAt(sp); if (!r || r.it.id !== it.id) return toast("Click on the same run", 2000);
   cutGap(it, g.i, g.p, r.i, r.p); setTool("select");
 }
-function cutGap(it, i1, p1, i2, p2){
+function cutGap(it, i1, p1, i2, p2, label){
   const t = (i, p) => i + dist(it.pts[i], p) / Math.max(1e-9, dist(it.pts[i], it.pts[i + 1]));
   if (t(i2, p2) < t(i1, p1)) [i1, p1, i2, p2] = [i2, p2, i1, p1];
   const A = it.pts.slice(0, i1 + 1).concat([p1]).map(q => q.slice()), B = [p2].concat(it.pts.slice(i2 + 1)).map(q => q.slice());
-  const keep = [A, B].filter(x => x.length >= 2 && polyLen(x) > 1e-6), k = itemScale(it), before = polyLen(it.pts);
+  const dd = Q => Q.filter((q, ix) => !ix || dist(q, Q[ix - 1]) > 1e-9);
+  const keep = [A, B].map(dd).filter(x => x.length >= 2 && polyLen(x) > 1e-6), k = itemScale(it), before = polyLen(it.pts);
   mutate(() => {
     if (!keep.length) { P.proj.items = P.proj.items.filter(x => x !== it); return; }
     it.pts = keep[0]; delete it.arcs; qaMoved(it);
     if (keep[1]) P.proj.items.splice(P.proj.items.indexOf(it) + 1, 0, cloneItem(it, keep[1]));
-  }, "Cut gap");
+  }, label || "Cut gap");
   refresh(); const after = keep.reduce((a, x) => a + polyLen(x), 0);
-  toast("Gap cut out" + (k ? ": " + f3((before - after) / k) + " ft" : ""), 2400);
+  toast((label === "Trim" ? "Trimmed" : "Gap cut out") + (k ? ": " + f3((before - after) / k) + " ft removed" : ""), 2400);
 }
 function joinRuns(ids){
   const runs = P.proj.items.filter(i => ids.has(i.id) && isRun(i));
@@ -4953,11 +4975,11 @@ async function exportMenu(){
     ${V.L.length ? `<div style="max-height:240px;overflow:auto;margin:6px 0;border:1px solid var(--line);border-radius:6px">${V.L.map(x => `<div style="padding:4px 8px;border-bottom:1px solid #f0f4f8;font-size:12px"><b style="color:${lvlCol(x.lvl)};display:inline-block;width:70px">${x.lvl}</b>${esc(x.msg)}</div>`).join("")}</div>` : ""}
     <p class="small">${V.lvl === "PASS" ? "" : "You can still export; the Excel file carries this list on its Validation sheet. "}Measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as rows).</p>`;
   $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button><button class="btn" id="exBak">Backups…</button><button class="btn" id="exJson" title="Measurements only — the PDFs are not inside">Project (.json)</button><button class="btn" id="exBnd" title="The project and all its PDFs in one file, to move it to another browser or computer">Project + PDFs</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA" title="Every sheet of the project in one PDF, with or without markups">All project sheets (.pdf)</button>
-    <button class="btn pri" id="exPages" title="Choose the pages (this page, pages with takeoff, ticked pages, or any), the format (PDF, a PDF per page, PNG, JPEG), the resolution up to 600 DPI and the legend">&#8681; Pages — PDF / PNG / JPEG…</button><button class="btn" id="exPlot" title="A window, the view or the page on a paper size, at a scale, colour / monochrome — print it or save it as PDF (Ctrl+P)">&#128424; Plot / print…</button><button class="btn" id="exRep" title="A printable takeoff report with a summary, quantities by condition and floor, the bill, the drawings measured and the check — print it or save it as PDF">&#128438; Report (print / PDF)</button><button class="btn" id="exCsv">CSV</button><button class="btn pri" id="exXls">Excel</button>`;
+    <button class="btn pri" id="exPages" title="Choose the pages (this page, pages with takeoff, ticked pages, or any), the format (PDF, a PDF per page, PNG, JPEG), the resolution up to 600 DPI and the legend">&#8681; Pages — PDF / PNG / JPEG…</button><button class="btn" id="exPlot" title="A window, the view or the page on a paper size, at a scale, colour / monochrome — print it or save it as PDF (Ctrl+P)">&#128424; Plot / print…</button><button class="btn" id="exRep" title="A printable takeoff report with a summary, quantities by condition and floor, the bill, the drawings measured and the check — print it or save it as PDF">&#128438; Report (print / PDF)</button><button class="btn" id="exCsv">CSV</button><button class="btn" id="exDxf" title="This page's takeoff as an AutoCAD DXF: a layer per condition">DXF (AutoCAD)</button><button class="btn pri" id="exXls">Excel</button>`;
   $("dlgBack").classList.add("on");
   const close = () => $("dlgBack").classList.remove("on");
   $("dlgCancel").onclick = close;
-  $("exXls").onclick = () => { close(); exportExcel(); }; $("exCsv").onclick = () => { close(); exportCsv(); };
+  $("exXls").onclick = () => { close(); exportExcel(); }; $("exCsv").onclick = () => { close(); exportCsv(); }; $("exDxf").onclick = () => { close(); exportDxf(); };
   $("exPng").onclick = () => { close(); exportPng(); }; $("exPdf1").onclick = () => { close(); exportPdf(false); }; $("exPdfA").onclick = () => { close(); exportPdf(true); }; $("exJson").onclick = () => { close(); exportJson(); }; $("exBnd").onclick = () => { close(); exportBundle(); }; $("exBak").onclick = () => backupsDialog();
   $("exPages").onclick = () => { close(); exportPagesDialog(); }; $("exPlot").onclick = () => { close(); plotDialog(); }; $("exRep").onclick = () => { close(); reportPrint(); };
 }
@@ -5604,6 +5626,8 @@ function ribbonInit(){
   document.querySelectorAll("#tools [data-rv]").forEach(b => b.addEventListener("click", () => revAct(b.dataset.rv)));
   $("bOrtho").onclick = () => setOrtho(!S.ortho); $("bPolar").onclick = () => setPolar(!S.polar);
   S.ortho = pref(ORTHO_KEY) === "1"; S.polar = !S.ortho && pref(POLAR_KEY) === "1"; setOrtho(S.ortho, true); setPolar(S.polar, true);
+  $("bXh").onclick = () => setXh(!S.xh); setXh(pref("zdTakeoffXh") === "1", true);
+  document.addEventListener("pointermove", xhMove, true); document.documentElement.addEventListener("mouseleave", xhHide);
   $("bSnapSet").onclick = e => { e.stopPropagation(); snapPopToggle(); };
   $("snapPop").addEventListener("click", e => e.stopPropagation());
   $("snapPop").addEventListener("change", e => {
@@ -5626,6 +5650,8 @@ function modAct(a){
   if (a === "dup") return items.length ? duplicateSel() : need();
   if (a === "array") return items.length ? arrayDialog("right") : need();
   if (a === "cw" || a === "ccw" || a === "fh" || a === "fv") return items.length ? transformSel(a) : need();
+  if (a === "rot") return items.length ? rotateDialog() : need();
+  if (a === "scalesel") return items.length ? scaleSelDialog() : need();
   if (a === "front") return items.length ? orderSel(1) : need();
   if (a === "lock") return items.length ? lockSel() : need();
   if (a === "offset") { if (meas.length !== 1) return toast("Select one measurement to offset", 2600); const c = cond(meas[0].cond); if (meas[0].kind === "open" || (c && c.type === "count")) return toast("A count point or an opening cannot be offset", 2600); return offsetDialog(meas[0]); }
@@ -6214,6 +6240,329 @@ async function importProject(text, pre){
   return S.lastImport;
 }
 
+/* ------------------------------------------------------------------ AutoCAD-style editing
+   TRIM / EXTEND (Shift flips one into the other), FILLET, CHAMFER, STRETCH, SCALE and ROTATE by any angle on the takeoff's
+   runs and outlines; a full-screen cross-hair (AutoCAD CURSORSIZE 100); and the page's takeoff saved as a DXF (AutoCAD R12,
+   one layer per condition, in feet — or in the drawing's own units and place when the page is an AutoCAD drawing).
+   Cutting edges are every other run and outline on the page, Fences, and the drawing's own lines (PDF / DWG / DXF). */
+const lenOf = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+const unitV = (a, b) => { const l = lenOf(a, b) || 1; return [(b[0] - a[0]) / l, (b[1] - a[1]) / l]; };
+function segInter(a, b, c, d){   // segments ab and cd -> {t, u, p}: t along ab, u along cd (both 0..1), or null
+  const r = [b[0] - a[0], b[1] - a[1]], s = [d[0] - c[0], d[1] - c[1]], den = r[0] * s[1] - r[1] * s[0];
+  if (Math.abs(den) < 1e-12) return null;
+  const qx = c[0] - a[0], qy = c[1] - a[1], t = (qx * s[1] - qy * s[0]) / den, u = (qx * r[1] - qy * r[0]) / den;
+  if (t < -1e-9 || t > 1 + 1e-9 || u < -1e-9 || u > 1 + 1e-9) return null;
+  return {t, u, p: [a[0] + t * r[0], a[1] + t * r[1]]};
+}
+function lineInter(a, b, c, d){   // the lines through ab and cd -> {t, u, p} (no limits), or null when parallel
+  const r = [b[0] - a[0], b[1] - a[1]], s = [d[0] - c[0], d[1] - c[1]], den = r[0] * s[1] - r[1] * s[0];
+  if (Math.abs(den) < 1e-12) return null;
+  const qx = c[0] - a[0], qy = c[1] - a[1], t = (qx * s[1] - qy * s[0]) / den, u = (qx * r[1] - qy * r[0]) / den;
+  return {t, u, p: [a[0] + t * r[0], a[1] + t * r[1]]};
+}
+function cutEdges(skip, box){   // the edges a run is trimmed / extended to: [{a, b, it, i}] (box: page rectangle to look in, or null = the whole page)
+  const E = [];
+  pageItems().forEach(it => {
+    const c = cond(it.cond); if (!c || c.type === "count" || it.kind === "open") return;
+    const Q = it.shape === "circle" ? itemPoly(it) : it.pts, closed = closedOf(it), n = closed ? Q.length : Q.length - 1;
+    for (let i = 0; i < n; i++) E.push({a: Q[i], b: Q[(i + 1) % Q.length], it, i});
+  });
+  (P.proj.marks || []).forEach(m => { if (m.type === "fence" && onPage(m) && m.pts) for (let i = 0; i + 1 < m.pts.length; i++) E.push({a: m.pts[i], b: m.pts[i + 1], it: m, i}); });
+  const g = S.geo && S.geo[S.key], B = ACT.base;
+  if (g && B) {
+    const b = box || [0, 0, B.width, B.height];
+    try { const ix = segsIn(g, b[0], b[1], b[2], b[3]); for (let n = 0; n < ix.length && n < 6000; n++) { const s = g.segs[ix[n]]; if (s[6] >= 0 && !(s[4] & 8)) E.push({a: [s[0], s[1]], b: [s[2], s[3]], it: null, i: -1}); } } catch (e) {}
+  }
+  return E;
+}
+function trimExtendClick(sp, e){
+  const ext = S.tool === "extend" ? !e.shiftKey : !!e.shiftKey;   // Shift flips Trim <-> Extend, as in AutoCAD
+  const r = runAt(sp);
+  if (!r) return toast("Click on a length run — " + (ext ? "near the end to extend" : "on the part to cut away"), 2600);
+  if (r.it.locked) return lockedMsg();
+  if (!itemScale(r.it)) return toast("Set the page scale first (K)", 2600);
+  return ext ? extendRun(r) : trimRun(r);
+}
+function trimRun(r){
+  const it = r.it, Q = it.pts, n = Q.length;
+  if (n < 2) return;
+  const xs = Q.map(p => p[0]), ys = Q.map(p => p[1]), pad = 2;
+  const E = cutEdges(it, [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad]), hits = [];
+  for (let j = 0; j < n - 1; j++) E.forEach(ed => {
+    if (ed.it === it && Math.abs(ed.i - j) <= 1) return;   // a run is not cut by itself at its own corners
+    const h = segInter(Q[j], Q[j + 1], ed.a, ed.b); if (h) { const T = j + h.t; if (T > 1e-6 && T < n - 1 - 1e-6) hits.push(T); }
+  });
+  const tc = r.i + Math.min(1, dist(Q[r.i], r.p) / Math.max(1e-9, lenOf(Q[r.i], Q[r.i + 1])));
+  const lo = Math.max(-1, ...hits.filter(T => T < tc - 1e-7)), hi = Math.min(1e9, ...hits.filter(T => T > tc + 1e-7));
+  const hasLo = lo > -1, hasHi = hi < 1e9;
+  if (!hasLo && !hasHi) return toast("Nothing crosses this run — Trim cuts a run back to the lines, runs and outlines that cross it", 3200);
+  const at = T => { const j = Math.min(n - 2, Math.floor(T + 1e-9)); return [Q[j][0] + (T - j) * (Q[j + 1][0] - Q[j][0]), Q[j][1] + (T - j) * (Q[j + 1][1] - Q[j][1])]; };
+  cutGap(it, hasLo ? Math.min(n - 2, Math.floor(lo + 1e-9)) : 0, hasLo ? at(lo) : Q[0], hasHi ? Math.min(n - 2, Math.floor(hi + 1e-9)) : n - 2, hasHi ? at(hi) : Q[n - 1], "Trim");
+}
+function extendRun(r){
+  const it = r.it, Q = it.pts, n = Q.length, k = itemScale(it);
+  const tc = r.i + Math.min(1, dist(Q[r.i], r.p) / Math.max(1e-9, lenOf(Q[r.i], Q[r.i + 1]))), atStart = tc < (n - 1) / 2;
+  const e0 = atStart ? Q[0] : Q[n - 1], q0 = atStart ? Q[1] : Q[n - 2], v = unitV(q0, e0);
+  if (lenOf(q0, e0) < 1e-9) return;
+  let best = null;
+  cutEdges(it, null).forEach(ed => {
+    if (ed.it === it && ed.i === (atStart ? 0 : n - 2)) return;   // its own last leg
+    const sx = ed.b[0] - ed.a[0], sy = ed.b[1] - ed.a[1], den = v[0] * sy - v[1] * sx; if (Math.abs(den) < 1e-12) return;
+    const wx = ed.a[0] - e0[0], wy = ed.a[1] - e0[1], s = (wx * sy - wy * sx) / den, u = (wx * v[1] - wy * v[0]) / den;
+    if (s > 1e-6 && u >= -1e-9 && u <= 1 + 1e-9 && (!best || s < best.s)) best = {s, p: [e0[0] + v[0] * s, e0[1] + v[1] * s]};
+  });
+  if (!best) return toast("Nothing in line with that end of the run to extend to", 3000);
+  mutate(() => { Q[atStart ? 0 : n - 1] = best.p; delete it.arcs; qaMoved(it); }, "Extend");
+  toast("Extended by " + f3(best.s / k) + " ft", 2200);
+}
+
+/* FILLET / CHAMFER: pick two runs (or two legs of one run, at their corner) — they are cut or extended to meet, the corner rounded / bevelled */
+S.fc = S.fc || {r: 0, d1: 0, d2: 0, first: null};
+function cornerPts(X, u1, u2, len1, len2, kind, k){   // the points that replace the corner X: {pts, arc} or {err}
+  const F = S.fc, th = Math.acos(Math.max(-1, Math.min(1, u1[0] * u2[0] + u1[1] * u2[1])));
+  if (th < 1e-3 || th > Math.PI - 1e-3) return {err: "The two lines are parallel — they have no corner"};
+  let d1, d2;
+  if (kind === "fillet") { const R = F.r * k; if (!(R > 0)) return {pts: [X.slice()]}; d1 = d2 = R / Math.tan(th / 2); }
+  else { d1 = F.d1 * k; d2 = F.d2 * k; if (!(d1 > 0) && !(d2 > 0)) return {pts: [X.slice()]}; }
+  if (d1 > len1 - 1e-6 || d2 > len2 - 1e-6) return {err: (kind === "fillet" ? "The radius" : "The distance") + " is too big for these lines — use a smaller value (Enter changes it)"};
+  const T1 = [X[0] + u1[0] * d1, X[1] + u1[1] * d1], T2 = [X[0] + u2[0] * d2, X[1] + u2[1] * d2];
+  if (kind === "chamfer") return {pts: [T1, T2]};
+  const bx = u1[0] + u2[0], by = u1[1] + u2[1], bl = Math.hypot(bx, by) || 1, cd = F.r * k / Math.sin(th / 2), C = [X[0] + bx / bl * cd, X[1] + by / bl * cd];
+  const a1 = Math.atan2(T1[1] - C[1], T1[0] - C[0]); let sw = Math.atan2(T2[1] - C[1], T2[0] - C[0]) - a1; while (sw > Math.PI) sw -= 2 * Math.PI; while (sw < -Math.PI) sw += 2 * Math.PI;
+  const m = Math.max(3, Math.ceil(Math.abs(sw) / (Math.PI / 36))), out = [];
+  for (let i = 0; i <= m; i++) { const a = a1 + sw * i / m; out.push([C[0] + F.r * k * Math.cos(a), C[1] + F.r * k * Math.sin(a)]); }
+  out[0] = T1; out[m] = T2;
+  return {pts: out, arc: true};
+}
+async function fcSetup(kind){
+  const F = S.fc, fil = kind === "fillet";
+  const v = await ask(fil ? "Fillet" : "Chamfer", fil
+    ? `<p class="small">Round the corner between two runs with an arc of this radius. 0 = a sharp corner (the runs are just cut or extended to meet).</p><div class="grid" style="margin-top:8px"><div class="fg"><label>Radius (ft, or ft-in)</label><input type="text" id="fcR" value="${f3(F.r)}"></div></div>`
+    : `<p class="small">Bevel the corner between two runs: the distance cut back along each. 0 and 0 = a sharp corner.</p><div class="grid" style="margin-top:8px"><div class="fg"><label>Distance 1 (ft)</label><input type="text" id="fcA" value="${f3(F.d1)}"></div><div class="fg"><label>Distance 2 (ft)</label><input type="text" id="fcB" value="${f3(F.d2)}"></div></div>`,
+    fil ? "Fillet" : "Chamfer", () => {
+      const num = id => { const raw = $(id).value.trim(); if (raw === "") return 0; let d = parseFt(raw); if (isNaN(d) && /^\d+(\.\d+)?\s*"$/.test(raw)) d = parseFloat(raw) / 12; return d; };
+      if (fil) { const r = num("fcR"); return r >= 0 && isFinite(r) ? {r} : "Enter a radius, e.g. 1.5 or 6\""; }
+      const d1 = num("fcA"), d2 = num("fcB"); return d1 >= 0 && d2 >= 0 && isFinite(d1 + d2) ? {d1, d2} : "Enter distances in feet, e.g. 0.5";
+    }, fil ? "fcR" : "fcA");
+  if (!v) { if (S.tool === kind) setTool("select"); return; }
+  Object.assign(S.fc, v); hint();
+}
+function fcClick(sp){
+  const kind = S.tool, F = S.fc, r = runAt(sp);
+  if (!r) return toast("Click on a length run, near the corner", 2600);
+  if (r.it.locked) return lockedMsg();
+  const k = itemScale(r.it); if (!k) return toast("Set the page scale first (K)", 2600);
+  const pk = {it: r.it, i: r.i, c: r.p};
+  if (!F.first) { F.first = pk; hint(); draw(); return toast("Now click the second run (or the next leg of this run)", 2200); }
+  const A = F.first, B = pk; F.first = null;
+  const done = res => { if (res && res.err) toast(res.err, 4200); hint(); draw(); };
+  if (A.it === B.it) {   // two legs of one run: its corner
+    const Q = A.it.pts, i = Math.min(A.i, B.i);
+    if (Math.abs(A.i - B.i) !== 1) return done({err: "Pick two legs that meet at a corner of the run"});
+    const V = Q[i + 1], c = cornerPts(V, unitV(V, Q[i]), unitV(V, Q[i + 2]), lenOf(V, Q[i]), lenOf(V, Q[i + 2]), kind, k);
+    if (c.err) return done(c);
+    mutate(() => { const it = A.it; it.pts = Q.slice(0, i + 1).concat(c.pts, Q.slice(i + 2)); delete it.arcs; if (c.arc) it.arcs = [[i + 1, i + c.pts.length]]; qaMoved(it); }, kind === "fillet" ? "Fillet" : "Chamfer");
+    setSel([A.it.id]); refresh(); return done(null);
+  }
+  // two runs: the lines through the picked legs meet at X; each keeps its side (the picked one) and ends at X
+  const a1 = A.it.pts[A.i], b1 = A.it.pts[A.i + 1], a2 = B.it.pts[B.i], b2 = B.it.pts[B.i + 1], I = lineInter(a1, b1, a2, b2);
+  if (!I) return done({err: "The two legs are parallel — they have no corner"});
+  const side = (pkd, t) => {
+    const Q = pkd.it.pts, i = pkd.i, tc = Math.min(1, dist(Q[i], pkd.c) / Math.max(1e-9, lenOf(Q[i], Q[i + 1])));
+    return tc < t ? Q.slice(0, i + 1).map(p => p.slice()) : Q.slice(i + 1).reverse().map(p => p.slice());   // the picked side, ending towards X (the leg's far end is replaced by X)
+  };
+  const L1 = side(A, I.t), L2 = side(B, I.u), X = I.p;
+  L1.push(X.slice()); L2.push(X.slice());
+  const e1 = L1[L1.length - 2], e2 = L2[L2.length - 2];
+  const c = cornerPts(X, unitV(X, e1), unitV(X, e2), lenOf(X, e1), lenOf(X, e2), kind, k);
+  if (c.err) return done(c);
+  const out = L1.slice(0, -1).concat(c.pts, L2.slice(0, -1).reverse()), i1 = L1.length - 1;
+  mutate(() => { const it = A.it; it.pts = out; delete it.arcs; if (c.arc) it.arcs = [[i1, i1 + c.pts.length - 1]]; qaMoved(it); P.proj.items = P.proj.items.filter(x => x !== B.it); }, kind === "fillet" ? "Fillet" : "Chamfer");
+  setSel([A.it.id]); refresh();
+  toast((kind === "fillet" ? "Filleted" : "Chamfered") + " — the two runs are now one: " + f3(polyLen(out) / k) + " ft in " + (cond(A.it.cond) || {name: "its condition"}).name, 3200);
+  done(null);
+}
+
+/* STRETCH: a crossing window (two corners), a base point, a destination — every point inside the window moves by that displacement
+   (an object wholly inside moves whole); the points outside stay, so the runs and outlines stretch. */
+function stretchOf(o, box, d){   // the new points of o (or null when none of it is in the box)
+  if (!o.pts || o.locked) return null;
+  const inb = p => p[0] >= box[0] && p[0] <= box[2] && p[1] >= box[1] && p[1] <= box[3], mv = p => [p[0] + d[0], p[1] + d[1]];
+  if (o.shape === "circle") return inb(o.pts[0]) ? o.pts.map(mv) : null;
+  let any = false, all = true;
+  const out = o.pts.map(p => { if (inb(p)) { any = true; return mv(p); } all = false; return p.slice(); });
+  return any ? {pts: out, all} : null;
+}
+function stretchObjs(){ return pageItems().concat((P.proj.marks || []).filter(m => onPage(m) && m.pts && m.type !== "fence")); }
+function stretchBox(){ const s = S.str; return s && s.a && s.b ? [Math.min(s.a[0], s.b[0]), Math.min(s.a[1], s.b[1]), Math.max(s.a[0], s.b[0]), Math.max(s.a[1], s.b[1])] : null; }
+function stretchClick(p){
+  const s = S.str || (S.str = {stage: 0});
+  if (s.stage === 0) { s.a = p; s.b = p; s.stage = 1; }
+  else if (s.stage === 1) {
+    s.b = p; const box = stretchBox();
+    if (!stretchObjs().some(o => stretchOf(o, box, [0, 0]))) { S.str = null; hint(); draw(); return toast("Nothing is inside that window — drag across the corners, runs and outlines to stretch", 3200); }
+    s.stage = 2;
+  } else if (s.stage === 2) { s.base = p; s.stage = 3; }
+  else { const d = [p[0] - s.base[0], p[1] - s.base[1]], box = stretchBox(); let n = 0;
+    if (Math.abs(d[0]) + Math.abs(d[1]) < 1e-9) { S.str = null; hint(); draw(); return; }
+    mutate(() => stretchObjs().forEach(o => { const r = stretchOf(o, box, d); if (!r) return; o.pts = r.pts; if (!r.all) delete o.arcs; if (o.cond) qaMoved(o); n++; }), "Stretch");
+    S.str = null; toast("Stretched " + n + " object" + (n === 1 ? "" : "s"), 2000);
+  }
+  hint(); draw();
+}
+function stretchPreview(cur){   // overlay: the window, the displacement and the stretched shapes
+  const s = S.str; if (!s) return [];
+  const o = [], box = stretchBox(), B = s.stage === 1 ? [Math.min(s.a[0], cur[0]), Math.min(s.a[1], cur[1]), Math.max(s.a[0], cur[0]), Math.max(s.a[1], cur[1])] : box;
+  if (B) { const a = toScr([B[0], B[1]]), b = toScr([B[2], B[3]]); o.push(`<rect x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="#1baf7a" fill-opacity=".10" stroke="#1baf7a" stroke-width="1.5" stroke-dasharray="6 4"/>`); }
+  if (s.stage === 3 && box) {
+    const d = [cur[0] - s.base[0], cur[1] - s.base[1]], a = toScr(s.base), b = toScr(cur);
+    o.push(`<path d="M${a[0].toFixed(1)} ${a[1].toFixed(1)}L${b[0].toFixed(1)} ${b[1].toFixed(1)}" stroke="#1baf7a" stroke-width="1.5" stroke-dasharray="3 3"/>`);
+    stretchObjs().forEach(x => { const r = stretchOf(x, box, d); if (!r) return; const Q = (x.shape === "circle" ? itemPoly(Object.assign({}, x, {pts: r.pts})) : r.pts).map(toScr), c = x.cond && cond(x.cond);
+      o.push(`<path d="M${Q.map(q => q[0].toFixed(1) + " " + q[1].toFixed(1)).join("L")}${x.cond && closedOf(x) ? "Z" : ""}" fill="none" stroke="${c ? c.color : "#0b0b0b"}" stroke-width="2.2" stroke-dasharray="7 4" opacity=".9"/>`); });
+  }
+  return o;
+}
+
+/* ROTATE by any angle / SCALE: about the middle (or lower-left corner) of the selection, in place or as a copy */
+function editSel(){   // the selected objects on this page that can change -> [] with a message when none
+  const objs = [...selIds()].map(objById).filter(o => o && onPage(o) && o.pts);
+  if (!objs.length) { toast("Select what to change first — click it, or drag a box round it", 2800); return []; }
+  const free = objs.filter(o => !o.locked); if (!free.length) { lockedMsg(); return []; }
+  return free;
+}
+function xformApply(objs, F, copy, label){
+  let ids = [];
+  mutate(() => {
+    if (copy) { objs.filter(o => o.cond).forEach(o => { const nb = cloneItem(o, o.pts.map(F)); if (o.shape) nb.shape = o.shape; P.proj.items.push(nb); ids.push(nb.id); }); }
+    else objs.forEach(o => { o.pts = o.pts.map(F); if (o.cond) qaMoved(o); });
+  }, label);
+  if (copy) { if (ids.length) setSel(ids); else toast("Only measurements can be copied — markups were left as they were", 2600); }
+  refresh();
+}
+function selAnchor(objs, how){
+  const P0 = objs.flatMap(o => o.pts), x0 = Math.min(...P0.map(p => p[0])), x1 = Math.max(...P0.map(p => p[0])), y0 = Math.min(...P0.map(p => p[1])), y1 = Math.max(...P0.map(p => p[1]));
+  return how === "ll" ? [x0, y1] : [(x0 + x1) / 2, (y0 + y1) / 2];
+}
+function rotateBy(deg, o){   // anticlockwise on screen, as AutoCAD
+  const objs = editSel(); if (!objs.length) return;
+  o = o || {}; const c = selAnchor(objs, o.base), a = deg * Math.PI / 180, co = Math.cos(a), si = Math.sin(a);
+  xformApply(objs, p => [c[0] + (p[0] - c[0]) * co + (p[1] - c[1]) * si, c[1] - (p[0] - c[0]) * si + (p[1] - c[1]) * co], !!o.copy, "Rotate " + r3(deg) + "°");
+  toast("Rotated " + r3(deg) + "° " + (deg >= 0 ? "anticlockwise" : "clockwise"), 2000);
+}
+function scaleBy(f, o){
+  const objs = editSel(); if (!objs.length) return;
+  if (!(f > 0) || !isFinite(f)) return toast("The scale factor must be more than 0", 2400);
+  o = o || {}; const c = selAnchor(objs, o.base);
+  xformApply(objs, p => [c[0] + (p[0] - c[0]) * f, c[1] + (p[1] - c[1]) * f], !!o.copy, "Scale ×" + r3(f));
+  toast("Scaled × " + r3(f) + " — the quantities change with the size", 2600);
+}
+async function rotateDialog(){
+  if (!editSel().length) return;
+  const v = await ask("Rotate", `<p class="small">Turn the selection about its middle by any angle.</p><div class="grid" style="margin-top:8px">
+    <div class="fg"><label>Angle (degrees)</label><input type="text" id="roA" placeholder="e.g. 37 or 22.5"></div>
+    <div class="fg"><label>Direction</label><select id="roD"><option value="1">Anticlockwise (AutoCAD)</option><option value="-1">Clockwise</option></select></div>
+    <div class="fg"><label>About</label><select id="roB"><option value="c">The middle of the selection</option><option value="ll">The lower-left corner of the selection</option></select></div>
+    <div class="fg w2"><label class="pk"><input type="checkbox" id="roK"> Keep the original — rotate a copy</label></div></div>`, "Rotate", () => {
+      const a = parseFloat($("roA").value.replace(/°/g, "")); if (!isFinite(a) || a === 0) return "Enter an angle in degrees, e.g. 37";
+      return {a: a * +$("roD").value, base: $("roB").value, copy: $("roK").checked}; }, "roA");
+  if (v) rotateBy(v.a, v);
+}
+async function scaleSelDialog(){
+  if (!editSel().length) return;
+  const v = await ask("Scale", `<p class="small">Enlarge or shrink the selection about its middle. A measurement's quantity follows its new size.</p><div class="grid" style="margin-top:8px">
+    <div class="fg"><label>Scale factor</label><input type="text" id="scF" placeholder="e.g. 1.5 or 0.5"></div>
+    <div class="fg"><label>or Reference: from (ft)</label><input type="text" id="scA" placeholder="current length"></div>
+    <div class="fg"><label>… to (ft)</label><input type="text" id="scB" placeholder="new length"></div>
+    <div class="fg"><label>About</label><select id="scO"><option value="c">The middle of the selection</option><option value="ll">The lower-left corner of the selection</option></select></div>
+    <div class="fg w2"><label class="pk"><input type="checkbox" id="scK"> Keep the original — scale a copy</label></div></div>`, "Scale", () => {
+      let f = parseFloat($("scF").value); const a = parseFt($("scA").value || ""), b = parseFt($("scB").value || "");
+      if (!(f > 0)) { if (a > 0 && b > 0) f = b / a; else return "Enter a factor (1.5) — or a reference length and the length it should become"; }
+      return {f, base: $("scO").value, copy: $("scK").checked}; }, "scF");
+  if (v) scaleBy(v.f, v);
+}
+
+/* DXF out (AutoCAD R12 ASCII — opens in AutoCAD, BricsCAD, LibreCAD…): the page's takeoff, a layer per condition */
+const DXF_ACI = [[1, 0xff0000], [2, 0xffff00], [3, 0x00ff00], [4, 0x00ffff], [5, 0x0000ff], [6, 0xff00ff], [7, 0xffffff], [8, 0x808080], [30, 0xff7f00], [40, 0xffbf00], [92, 0x00cc66], [150, 0x0066cc], [200, 0x9933cc]];
+function dxfAci(hex){
+  const n = parseInt(String(hex || "").replace("#", ""), 16); if (!isFinite(n)) return 7;
+  let best = 7, bd = 1e12; DXF_ACI.forEach(([i, c]) => { const d = (((n >> 16) & 255) - ((c >> 16) & 255)) ** 2 + (((n >> 8) & 255) - ((c >> 8) & 255)) ** 2 + ((n & 255) - (c & 255)) ** 2; if (d < bd) { bd = d; best = i; } });
+  return best;
+}
+const dxfTxt = s => String(s == null ? "" : s).replace(/×/g, "x").replace(/°/g, "deg").replace(/[–—]/g, "-").replace(/[^\x20-\x7e]/g, "?").slice(0, 200);
+function dxfBuild(opts){
+  const cp = opts.cad ? cadPage() : null, B = ACT.base, H = B ? B.height : 0, W = [];
+  const g = (c, v) => { W.push(String(c), String(v)); }, n4 = v => (Math.round(v * 1e4) / 1e4).toFixed(4);
+  const ftU = cp ? cp.ptPerFt / cp.k : 1;   // drawing units in a foot
+  const xy = (p, k) => cp ? [cp.x0 + (p[0] - cp.ox) / cp.k, cp.y1 - (p[1] - cp.oy) / cp.k] : [p[0] / k, (H - p[1]) / k];
+  const layers = new Map(), lname = c => { if (layers.has(c.id)) return layers.get(c.id).name; let nm = String(c.name || "TAKEOFF").replace(/[<>\/\\":;?*|=`',]/g, "_").trim().slice(0, 28) || "TAKEOFF"; const used = new Set([...layers.values()].map(l => l.name.toLowerCase())); let u = nm, i = 2; while (used.has(u.toLowerCase()) || u === "0") u = nm + "_" + i++; layers.set(c.id, {name: u, aci: dxfAci(c.color)}); return u; };
+  const E = [], put = (...pairs) => E.push(pairs), txt = (L, p, h, s) => put([0, "TEXT"], [8, L], [10, n4(p[0])], [20, n4(p[1])], [30, 0], [40, n4(h)], [1, dxfTxt(s)]);
+  let skipped = 0, count = 0;
+  P.proj.items.filter(it => it.file === S.fileId && it.page === S.pageNo).forEach(it => {
+    const c = cond(it.cond), k = itemScale(it); if (!c || !it.pts || !it.pts.length || it.kind === "open") return;
+    if (!k) { skipped++; return; }
+    const L = lname(c), q = rowsOf(it, k).reduce((a, r) => a + r.qty, 0), lab = (it.label ? it.label + " " : "") + c.name + " " + fq(q, c.unit) + " " + c.unit;
+    count++;
+    if (c.type === "count") {
+      it.pts.forEach(p => { const a = xy(p, k); put([0, "POINT"], [8, L], [10, n4(a[0])], [20, n4(a[1])], [30, 0]); put([0, "CIRCLE"], [8, L], [10, n4(a[0])], [20, n4(a[1])], [30, 0], [40, n4(0.5 * ftU)]); });
+      if (opts.labels) { const a = xy(it.pts[0], k); txt(L, [a[0] + 0.8 * ftU, a[1]], 0.8 * ftU, c.name + ": " + it.pts.length + " " + c.unit); }
+      return;
+    }
+    if (it.shape === "circle") { const a = xy(it.pts[0], k); put([0, "CIRCLE"], [8, L], [10, n4(a[0])], [20, n4(a[1])], [30, 0], [40, n4(dist(it.pts[0], it.pts[1]) / (cp ? cp.k : k))]); if (opts.labels) txt(L, [a[0], a[1]], 0.8 * ftU, lab); return; }
+    const closed = closedOf(it), pts = it.pts.map(p => xy(p, k));
+    put([0, "POLYLINE"], [8, L], [66, 1], [10, 0], [20, 0], [30, 0], [70, closed ? 1 : 0]);
+    pts.forEach(a => put([0, "VERTEX"], [8, L], [10, n4(a[0])], [20, n4(a[1])], [30, 0]));
+    put([0, "SEQEND"], [8, L]);
+    if (opts.labels) { const m = closed ? [pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length] : pts[Math.floor(pts.length / 2)]; txt(L, m, 0.8 * ftU, lab); }
+  });
+  (P.proj.marks || []).filter(m => onPage(m) && m.type === "note" && m.text && m.pts && m.pts[0]).forEach(m => { const k = hereScale(m.pts[0]), a = xy(m.pts[0], k || 1); layers.set("_notes", layers.get("_notes") || {name: "NOTES", aci: 7}); txt("NOTES", a, 0.8 * ftU, m.text); });
+  g(0, "SECTION"); g(2, "HEADER"); g(9, "$ACADVER"); g(1, "AC1009"); if (!cp) { g(9, "$INSUNITS"); g(70, 2); } g(0, "ENDSEC");
+  g(0, "SECTION"); g(2, "TABLES");
+  g(0, "TABLE"); g(2, "LTYPE"); g(70, 1); g(0, "LTYPE"); g(2, "CONTINUOUS"); g(70, 0); g(3, "Solid line"); g(72, 65); g(73, 0); g(40, 0.0); g(0, "ENDTAB");
+  g(0, "TABLE"); g(2, "LAYER"); g(70, layers.size + 1); g(0, "LAYER"); g(2, "0"); g(70, 0); g(62, 7); g(6, "CONTINUOUS");
+  layers.forEach(l => { g(0, "LAYER"); g(2, l.name); g(70, 0); g(62, l.aci); g(6, "CONTINUOUS"); }); g(0, "ENDTAB");
+  g(0, "TABLE"); g(2, "STYLE"); g(70, 1); g(0, "STYLE"); g(2, "STANDARD"); g(70, 0); g(40, 0.0); g(41, 1.0); g(50, 0.0); g(71, 0); g(42, 0.2); g(3, "txt"); g(4, ""); g(0, "ENDTAB");
+  g(0, "ENDSEC"); g(0, "SECTION"); g(2, "ENTITIES");
+  E.forEach(ps => ps.forEach(([c, v]) => g(c, v)));
+  g(0, "ENDSEC"); g(0, "EOF");
+  return {text: W.join("\r\n") + "\r\n", count, skipped};
+}
+async function exportDxf(){
+  if (!P.proj || !S.page) return toast("Open a page first", 2200);
+  const cad = !!cadPage();
+  const v = await ask("Save as DXF (AutoCAD)", `<p class="small">This page's takeoff as an AutoCAD drawing: a <b>layer per condition</b> (runs and outlines as polylines, circles, counts as points), in decimal feet${cad ? " — or, for this AutoCAD drawing, in its own units and place, so it lands exactly on the original" : ""}. Open it in AutoCAD, BricsCAD or LibreCAD; for a .dwg use <b>SAVEAS</b> there. (A browser cannot write the DWG format itself.)</p>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label class="pk"><input type="checkbox" id="dxL" checked> Quantity labels as text on each layer</label></div>
+    ${cad ? '<div class="fg w2"><label class="pk"><input type="checkbox" id="dxC" checked> Use the drawing\'s own coordinates (so it overlays the original drawing)</label></div>' : ""}</div>`,
+    "Save DXF", () => ({labels: $("dxL").checked, cad: cad && $("dxC").checked}));
+  if (!v) return;
+  const r = dxfBuild(v);
+  if (!r.count) return toast("Nothing to save on this page — measure something first" + (r.skipped ? " (and set the page scale, K)" : ""), 3600);
+  saveBlob(new Blob([r.text], {type: "application/dxf"}), fileBase() + "_p" + S.pageNo + "_Takeoff.dxf");
+  toast("DXF saved: " + r.count + " measurement" + (r.count === 1 ? "" : "s") + (r.skipped ? " — " + r.skipped + " skipped (no page scale)" : ""), 3600);
+}
+
+/* full-screen cross-hair (AutoCAD CURSORSIZE 100): two hair-lines right across the window, through the pointer or the snap point */
+function xhLines(pn){
+  const st = pn.el.stage; if (!pn.xh || pn.xh.h.parentNode !== st) { const mk = c => { const d = document.createElement("div"); d.className = "xhl " + c; st.appendChild(d); return d; }; pn.xh = {h: mk("h"), v: mk("v")}; }
+  return pn.xh;
+}
+function xhHide(){ PANES.forEach(pn => { if (pn.xh) pn.xh.h.style.display = pn.xh.v.style.display = "none"; }); }
+function xhMove(e){
+  if (!S.xh) return;
+  PANES.forEach(pn => {
+    const r = pn.el.stage.getBoundingClientRect(), inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom, L = xhLines(pn);
+    if (!inside || !pn.page) { L.h.style.display = L.v.style.display = "none"; return; }
+    let x = e.clientX - r.left, y = e.clientY - r.top;
+    if (pn === ACT && S.snap && S.snap.p && !(S.drag && S.drag.pan)) { const q = toScr(S.snap.p); x = q[0]; y = q[1]; }   // on the snap point when one is found
+    L.h.style.display = L.v.style.display = "block"; L.h.style.top = y.toFixed(1) + "px"; L.v.style.left = x.toFixed(1) + "px";
+  });
+}
+function setXh(on, quiet){
+  S.xh = !!on; pref("zdTakeoffXh", S.xh ? "1" : "");
+  const b = $("bXh"); if (b) b.classList.toggle("on", S.xh);
+  if (!S.xh) xhHide();
+  if (!quiet) toast("Cross-hair " + (S.xh ? "on — hair-lines across the whole window (Shift+C)" : "off"), 2000);
+}
+
 /* ------------------------------------------------------------------ command palette (Ctrl+K)
    Every tool, button, export, dialog, page and condition by name: type a few letters, arrows to choose, Enter to run.
    The buttons on screen are read as they are, so a tool added later is listed without being added here. */
@@ -6242,6 +6591,8 @@ function paletteCmds(){
   add("Next unchecked measurement", nextUnchecked, "Check");
   add("Check before export (errors and warnings)", exportMenu, "Check");
   add("Excel measurement sheet", exportExcel, "Export"); add("CSV", exportCsv, "Export");
+  if (S.page) add("DXF (AutoCAD) — this page's takeoff as drawing layers", exportDxf, "Export");
+  add("Cross-hair on / off — hair-lines across the whole window", () => setXh(!S.xh), "View", "Shift+C");
   if (S.page) { add("Marked-up page (.png)", exportPng, "Export"); add("Marked-up page (.pdf)", () => exportPdf(false), "Export"); }
   add("All project sheets (.pdf)", () => exportPdf(true), "Export"); add("Project (.json) — measurements only", exportJson, "Export");
   add("Project + PDFs (.zdtakeoff) — to move to another computer", exportBundle, "Export"); add("Backups of this project", () => backupsDialog(), "Project");
@@ -6268,31 +6619,66 @@ function paletteCmds(){
   add("New condition", () => editCond(null), "Condition"); add("All projects", showStart, "Project");
   document.querySelectorAll("header button[id], #viewPop button[id], #qaBar button, aside button[id], .panel button[id]").forEach(b => btn(b, b.closest("#viewPop") ? "View" : b.closest("#qaBar") ? "Check" : "Button"));
   P.proj.conds.forEach(c => add("Use condition: " + c.name + " (" + (c.type === "count" ? "count" : c.unit || c.type) + ")", () => { S.cond = c.id; setTool(c.type === "count" ? "count" : "draw"); refresh(); toast("Condition: " + c.name, 1800); }, "Condition"));
+  palAlias(L);
   let n = 0; P.proj.files.forEach(f => { for (let i = 1; i <= f.pages && n < 600; i++, n++) { const sh = (P.proj.sheets || {})[keyOf(f.id, i)] || {}; add("Go to: " + f.name.replace(/\.pdf$/i, "") + " p." + i + (sh.no ? " · " + sh.no : "") + (sh.title ? " " + sh.title : ""), () => gotoPage(f.id, i), "Page"); } });
   return L;
 }
+/* AutoCAD command aliases: type tr + Enter for Trim, f for Fillet, sc for Scale… (the command whose name starts so; a "…" one — the dialog — first) */
+const PAL_ALIAS = [["tr", "trim"], ["ex", "extend"], ["f", "fillet"], ["fil", "fillet"], ["cha", "chamfer"], ["s", "stretch"], ["str", "stretch"], ["sc", "scale selection"], ["scale", "scale selection"],
+  ["ro", "rotate…"], ["rotate", "rotate…"], ["o", "offset"], ["off", "offset"], ["m", "move"], ["mo", "move"], ["co", "copy"], ["cp", "copy"], ["mi", "mirror"], ["br", "break"], ["j", "join"], ["x", "explode"],
+  ["ar", "array"], ["l", "length"], ["rec", "rectangle"], ["ci", "circle"], ["di", "measure"], ["dist", "measure"], ["z", "zoom window"], ["pl", "plot"], ["xh", "cross-hair"], ["cross", "cross-hair"],
+  ["dxf", "dxf"], ["dxfout", "dxf"], ["u", "undo"], ["re", "redo"], ["or", "ortho"], ["po", "polar"], ["os", "object snaps"], ["lock", "lock"], ["w", "auto area"], ["aa", "auto area"]];
+function palAlias(L){
+  PAL_ALIAS.forEach(([a, pre]) => {
+    const m = L.filter(c => c.t.toLowerCase().startsWith(pre)), c = m.find(x => x.t.includes("…")) || m[0];
+    if (c) (c.al = c.al || []).push(a);
+  });
+  return L;
+}
+function palTyped(q){   // a command typed with its number: "ro 37", "sc 1.5", "f 0.5", "cha 0.5 0.75", "o 0.375"
+  const out = [], num = "(-?\\d*\\.?\\d+)"; let m;
+  const add = (t, run) => out.push({t, run, g: "Command", k: "", al: []});
+  if (P.proj && S.page) {
+    if ((m = new RegExp("^(?:ro|rot|rotate)\\s+" + num + "\\s*°?\\s*(cw)?$", "i").exec(q))) { const a = (m[2] ? -1 : 1) * +m[1]; add("Rotate the selection " + Math.abs(a) + "° " + (a < 0 ? "clockwise" : "anticlockwise"), () => rotateBy(a)); add("Rotate a copy of the selection " + Math.abs(a) + "° " + (a < 0 ? "clockwise" : "anticlockwise"), () => rotateBy(a, {copy: true})); }
+    if ((m = new RegExp("^(?:sc|scale)\\s+" + num + "$", "i").exec(q)) && +m[1] > 0) { const f = +m[1]; add("Scale the selection × " + f, () => scaleBy(f)); add("Scale a copy of the selection × " + f, () => scaleBy(f, {copy: true})); }
+    if ((m = new RegExp("^(?:f|fil|fillet)\\s+" + num + "$", "i").exec(q)) && +m[1] >= 0) add("Fillet with radius " + m[1] + " ft", () => { S.fc.r = +m[1]; S.fcSkip = true; setTool("fillet"); });
+    if ((m = new RegExp("^(?:cha|chamfer)\\s+" + num + "(?:\\s+" + num + ")?$", "i").exec(q)) && +m[1] >= 0) add("Chamfer " + m[1] + " × " + (m[2] || m[1]) + " ft", () => { S.fc.d1 = +m[1]; S.fc.d2 = +(m[2] || m[1]); S.fcSkip = true; setTool("chamfer"); });
+    if ((m = new RegExp("^(?:o|off|offset)\\s+" + num + "$", "i").exec(q)) && +m[1] > 0) { const it = [...selIds()].map(objById).filter(o => o && o.cond && onPage(o))[0]; if (it) add("Offset the selected measurement " + m[1] + " ft (keeping the original)", () => offsetItem(it, +m[1], true)); }
+  }
+  return out;
+}
+function palHi(t, q){   // the typed words marked in a command's name
+  const w = q.toLowerCase().split(/\s+/).filter(x => x && !/^[a-z]+:$/.test(x)).map(x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return w.length ? esc(t).replace(new RegExp("(" + w.map(x => esc(x)).join("|") + ")", "ig"), '<span class="pm">$1</span>') : esc(t);
+}
 function palScore(c, q){
   if (!q) return 1;
-  const t = (c.t + " " + c.g).toLowerCase(), w = q.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!w.every(x => t.includes(x))) return 0;
-  const tl = c.t.toLowerCase();
-  return 10 + (tl.startsWith(w[0]) ? 6 : new RegExp("(^|[\\s:(—-])" + w[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(tl) ? 3 : 0) + (c.g === "Page" ? -2 : 0) - tl.length / 200;
+  const ql = q.toLowerCase().trim();
+  if (c.al && c.al.indexOf(ql) >= 0) return 100;   // an exact alias is the first answer
+  const t = (c.t + " " + c.g).toLowerCase(), w = ql.split(/\s+/).filter(Boolean), tl = c.t.toLowerCase();
+  if (w.every(x => t.includes(x))) return 10 + (tl.startsWith(w[0]) ? 6 : new RegExp("(^|[\\s:(—-])" + w[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(tl) ? 3 : 0) + (c.g === "Page" ? -2 : 0) + palUse(c) - tl.length / 200;
+  const q2 = ql.replace(/\s+/g, "");   // letters in order ("shtr" -> "Shutter…"): a looser match, listed after the exact ones
+  if (q2.length >= 3) { let j = 0; for (let i = 0; i < tl.length && j < q2.length; i++) if (tl[i] === q2[j]) j++; if (j === q2.length) return 4 + palUse(c) - tl.length / 200; }
+  return 0;
 }
+let PAL_USE = null;
+function palUse(c){ if (!PAL_USE) { try { PAL_USE = JSON.parse(pref("zdTakeoffPalUse") || "{}"); } catch (e) { PAL_USE = {}; } } return Math.min(2, (PAL_USE[c.t] || 0) * 0.25); }
 function openPalette(){
   if ($("dlgBack").classList.contains("on")) return;
   let el = $("pal");
-  if (!el) { el = document.createElement("div"); el.id = "pal"; el.innerHTML = '<div class="pbx" role="dialog" aria-label="Command palette"><input id="palIn" type="text" placeholder="Type a command, tool, page or condition…" autocomplete="off" spellcheck="false"><div id="palL" role="listbox"></div><div class="pf small">&#8593;&#8595; choose · Enter run · Esc close</div></div>'; document.body.appendChild(el); }
+  if (!el) { el = document.createElement("div"); el.id = "pal"; el.innerHTML = '<div class="pbx" role="dialog" aria-label="Command palette"><input id="palIn" type="text" placeholder="Type a command, tool, page or condition…" autocomplete="off" spellcheck="false"><div id="palL" role="listbox"></div><div class="pf small">&#8593;&#8595; choose · Enter run · Esc close · aliases: <b>tr</b> <b>ex</b> <b>f</b> <b>cha</b> <b>s</b> <b>sc</b> <b>ro</b> <b>o</b> · with a number: <b>ro 37</b> <b>sc 1.5</b> <b>f 0.5</b> · <b>export:</b> limits to a group</div></div>'; document.body.appendChild(el); }
   const cmds = paletteCmds(), inp = $("palIn"), list = $("palL");
   let recent = []; try { recent = JSON.parse(pref(PAL_KEY) || "[]"); } catch (e) { recent = []; }
   let shown = [], at = 0;
   const close = () => { el.classList.remove("on"); document.removeEventListener("keydown", key, true); };
-  const run = c => { close(); if (!c) return; try { pref(PAL_KEY, JSON.stringify([c.t].concat(recent.filter(x => x !== c.t)).slice(0, 8))); } catch (e) {} Promise.resolve().then(c.run).catch(e => toast(String(e && e.message || e), 5000)); };
+  const run = c => { close(); if (!c) return; try { pref(PAL_KEY, JSON.stringify([c.t].concat(recent.filter(x => x !== c.t)).slice(0, 8))); palUse(c); if (c.g !== "Command") { PAL_USE[c.t] = (PAL_USE[c.t] || 0) + 1; pref("zdTakeoffPalUse", JSON.stringify(PAL_USE)); } } catch (e) {} Promise.resolve().then(c.run).catch(e => toast(String(e && e.message || e), 5000)); };
   const draw = () => {
     const q = inp.value.trim();
-    shown = q ? cmds.map(c => ({c, s: palScore(c, q)})).filter(o => o.s > 0).sort((a, b) => b.s - a.s).slice(0, 60).map(o => o.c)
+    let qq = q, gf = null; { const m = /^([a-z]+):\s*(.*)$/i.exec(q); if (m && cmds.some(c => c.g.toLowerCase().startsWith(m[1].toLowerCase()))) { gf = m[1].toLowerCase(); qq = m[2]; } }   // "export: excel" — only that group
+    shown = q ? palTyped(q).concat(cmds.filter(c => !gf || c.g.toLowerCase().startsWith(gf)).map(c => ({c, s: palScore(c, qq)})).filter(o => o.s > 0).sort((a, b) => b.s - a.s).slice(0, 60).map(o => o.c))
       : recent.map(t => cmds.find(c => c.t === t)).filter(Boolean).concat(cmds.filter(c => !recent.includes(c.t) && c.g !== "Page")).slice(0, 60);
     at = Math.min(at, Math.max(0, shown.length - 1));
-    list.innerHTML = shown.length ? shown.map((c, i) => `<div class="pi${i === at ? " on" : ""}" data-pi="${i}" role="option"><span class="pt">${!q && recent.includes(c.t) ? '<span class="pr">recent</span>' : ""}${esc(c.t)}</span><span class="pg">${esc(c.g)}</span>${c.k ? `<kbd>${esc(c.k)}</kbd>` : ""}</div>`).join("") : '<div class="pi small">Nothing matches — try fewer letters</div>';
+    list.innerHTML = shown.length ? shown.map((c, i) => `<div class="pi${i === at ? " on" : ""}" data-pi="${i}" role="option"><span class="pt">${!q && recent.includes(c.t) ? '<span class="pr">recent</span>' : ""}${q ? palHi(c.t, q) : esc(c.t)}${q && c.al && c.al.indexOf(q.toLowerCase().trim()) >= 0 ? '<span class="pal-al">alias ' + esc(q.toLowerCase().trim()) + "</span>" : ""}</span><span class="pg">${esc(c.g)}</span>${c.k ? `<kbd>${esc(c.k)}</kbd>` : ""}</div>`).join("") : '<div class="pi small">Nothing matches — try fewer letters</div>';
     const on = list.querySelector(".pi.on"); if (on) on.scrollIntoView({block: "nearest"});
   };
   const key = e => {
@@ -6428,7 +6814,8 @@ function keysDialog(){
   const G = (t, rows) => `<tr><td colspan="2" style="padding:8px 0 2px;font-weight:700;color:var(--navy)">${esc(t)}</td></tr>` + rows.map(x => R(x[0], x[1])).join("");
   ask("Keyboard & mouse", `<table class="keyt" style="font-size:12px;border-collapse:collapse;width:100%">
     ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift+V", "select AutoCAD objects (DWG / DXF): click, box, Ctrl+A — then take off, count, select similar, quick select, layer off"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
-    ${G("Find anything", [["Ctrl+K", "command palette: type the name of any tool, export, dialog, page or condition"], ["Ctrl+F", "find text on the drawings"]])}
+    ${G("Find anything", [["Ctrl+K", "command palette: type the name of any tool, export, dialog, page or condition — or an AutoCAD alias (tr, ex, f, cha, s, sc, ro, o, co, m…) or ‘ro 37’, ‘sc 1.5’, ‘f 0.5’"], ["Ctrl+F", "find text on the drawings"]])}
+    ${G("AutoCAD-style editing (Modify tab)", [["Shift+T | Shift+X", "Trim · Extend (Shift+click flips one into the other)"], ["Fillet | Chamfer", "pick two runs, or two legs of one run · Enter changes the radius / distances"], ["Shift+S", "Stretch: crossing window, base point, destination"], ["Rotate… | Scale…", "any angle · any factor (or reference), about the selection's middle, in place or as a copy"], ["Shift+C", "full-screen cross-hair"]])}
     ${G("Pages (Forma Takeoff sheets)", [["Tick a thumbnail | Shift+tick", "tick pages to export, read sheet info or OCR together · Shift: the pages in between"], ["Ctrl+click | Shift+click a thumbnail", "tick / untick it without opening it"], ["☆ on a thumbnail", "pin the page to the top"], ["Double-click a sheet no. on the drawing", "open that sheet (right-click lists the sheets referenced)"]])}
     ${G("Markups (Bluebeam)", [["T | Q | N", "text box · callout · note"], ["Shift+L | Y | G", "line · polyline · polygon"], ["Shift+R | Shift+E | U", "rectangle · ellipse · cloud"], ["P | Shift+H", "pen · highlighter pen"], ["X | I", "stamp · image"], ["Markup ▾", "every markup tool: hyperlink, file attachment, redaction, erase…"], ["Dbl-click a markup", "edit its text · open a link or an attached file"], ["Drag a handle", "resize a box, move a line's end or a point"], ["Alt+L", "Markups list: every markup — filter, sort, status, replies, layers, CSV / XML / PDF summary"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
@@ -7007,6 +7394,9 @@ function wire(){
     if (e.key === "Escape" && S.mkd) { S.mkd = null; draftClear(); draw(); return; }
     if (e.key === "Escape" && S.drag && (S.drag.vertex != null || S.drag.move || S.drag.mh != null)) { cancelDrag(); return; }
     if (e.key === "Escape" && S.tool === "match") { setTool("select"); return; }
+    if (e.key === "Escape" && S.tool === "stretch" && S.str && S.str.stage) { S.str = null; hint(); draw(); return; }
+    if (e.key === "Escape" && (S.tool === "fillet" || S.tool === "chamfer") && S.fc.first) { S.fc.first = null; hint(); draw(); return; }
+    if (e.key === "Enter" && (S.tool === "fillet" || S.tool === "chamfer") && !S.fc.first) { e.preventDefault(); fcSetup(S.tool); return; }
     if (e.key === "Escape" && S.tool === "cadsel") { if (S.cbox) { S.cbox = null; draw(); } else if (cadSelIds().length) cadSelSet([]); else setTool("select"); return; }
     if (e.key === "Escape" && S.tool === "stamp" && S.stampBase) { S.stampBase = null; $("stMeas").innerHTML = ""; hint(); draw(); return; }
     if (e.key === "Enter" && S.tool === "stamp" && S.clip && !S.stampBase) { e.preventDefault(); S.stampBase = S.clip.anchor.slice(); hint(); draw(); return; }
@@ -7015,7 +7405,7 @@ function wire(){
       if (S.pickWall) { S.pickWall = false; hint(); }
       else if (S.arcMode) { S.arcMode = 0; S.arcMid = null; hint(); }
       else if (S.draft.length) { if (S.resume) toast("Run left as it was", 1500); S.resume = null; draftClear(); hint(); }
-      else if (["gap", "stamp", "break", "zoomwin", "lasso", "match"].indexOf(S.tool) >= 0) setTool("select");
+      else if (["gap", "stamp", "break", "zoomwin", "lasso", "match", "trim", "extend", "fillet", "chamfer", "stretch"].indexOf(S.tool) >= 0) setTool("select");
       else if (S.measures.length || S.measure) { S.measures = []; S.measure = null; }
       else if (S.sel || S.selMark) { setSel([]); }
       else setTool("select");
@@ -7039,7 +7429,8 @@ function wire(){
     }
     if (k === "a" && S.draft.length && ["draw", "ded", "measure", "fence"].indexOf(S.tool) >= 0) { S.arcMode = S.arcMode ? 0 : 1; S.arcMid = null; hint(); draw(); return; }   // PlanSwift: A while drawing = arc
     if (k === "o" && e.shiftKey) { setTool("lasso"); return; }   // Bluebeam: Shift+O lasso
-    if (e.shiftKey) { const ST = {l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen", v: "cadsel"}; if (ST[k]) { setTool(ST[k]); return; } }
+    if (e.shiftKey && k === "c") { setXh(!S.xh); return; }   // full-screen cross-hair
+    if (e.shiftKey) { const ST = {l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen", v: "cadsel", t: "trim", x: "extend", s: "stretch"}; if (ST[k]) { setTool(ST[k]); return; } }
     const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", c: "count", e: "circle", n: "note", u: "cloud", d: "ded", o: "open", m: "measure", k: "cal", b: "break", z: "zoomwin",
       t: "mk_text", q: "mk_callout", p: "mk_pen", g: "mk_polygon", y: "mk_polyline", x: "mk_stamp", i: "mk_image"};
     if (T[k]) { setTool(T[k]); return; }
@@ -9286,7 +9677,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
