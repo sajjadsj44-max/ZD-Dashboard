@@ -713,6 +713,23 @@ dashboard sidebar (QS Cost Control → PDF Takeoff) and the landing page.
 **Bluebeam / PlanSwift editing** (added 02-Oct-2026 — compared against Bluebeam Revu 21 / Bluebeam Max and PlanSwift 11
 v11.0.0.191 with Takeoff Boost; the full table is `docs/takeoff-bluebeam-planswift-parity.md`):
 
+- **Smart helpers** (all suggestions — nothing is changed or added until you confirm; `tools/test_takeoff_smart.js`):
+  - **Scale from the dimension strings** — a sheet with no scale note and no scale saved in the PDF: every length written as `12'-6"`
+    that has a dimension line (line along the text, a tick / arrow / extension line each side) gives pt per ft; three or more that
+    agree within 2 % (and at least half of those read) set the scale. It is marked **not verified** until one dimension is measured.
+  - **Sheet type** — architectural, structural, electrical, plumbing, mechanical, civil, fire or landscape, scored from the sheet no.
+    letters, the title, keywords on the sheet and the PDF's layer names. Shown in the status bar ("Looks like Structural — click to
+    set it up"); clicking offers the usual items to measure for that type (heights and thicknesses are left blank).
+  - **Tangent and centre snaps** (Snap ▾) — the point where a line from the last point just touches an arc / circle / curved wall,
+    and the centre of an arc or circle.
+  - **Revision diff** — with *Compare* on, **Diff → quantities** draws both sheets at one size, lists the measurements that sit on
+    changed drawing and the changed places with no measurement near them, and puts the flagged measurements in the review queue
+    (`REV` tag) until they are ✓ checked. Nothing is re-measured.
+  - **Checker** (✅) now also reports a wall run measured twice (runs of one condition on top of each other), an opening taken off
+    twice, an opening on no run of its condition, and a void taken off twice or outside its area.
+  - **Offline / install** — `takeoff/` is an installable PWA (manifest + service worker): the app files are fetched fresh when online
+    (so the `?v=` release rule holds) and kept for work with no signal; the pinned CDN libraries are cached after first use.
+    Projects and PDFs were already in the browser's IndexedDB. The dashboard password is still asked every time.
 - **Selecting**: click; a box dragged **left → right selects what is wholly inside** (blue), **right → left what it
   touches** (green); **Lasso** (`Shift+O`); Shift / Ctrl+click add or take out; **Tab** steps through objects lying on
   top of each other; hover highlights the object and shows its quantity; a multiple selection shows its totals.

@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ZD PDF Takeoff</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0f2942">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
 :root{
   --navy:#0f2942; --navy2:#16375a; --blue:#2b7de9; --purple:#4b3b8f;
@@ -1028,7 +1032,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
     </div>
     </div></div>
     <div id="mkList" class="mkl" style="display:none" aria-label="Markups list"></div>
-    <div class="status" id="status"><span id="stPos">—</span><span id="stSnap"></span><span id="stMeas"></span><span class="hint" id="stHint"></span></div>
+    <div class="status" id="status"><span id="stPos">—</span><span id="stSnap"></span><span id="stType" style="cursor:pointer;color:var(--navy);font-weight:600" role="button" tabindex="0"></span><span id="stMeas"></span><span class="hint" id="stHint"></span></div>
   </section>
 
   <aside class="panel right">
@@ -1074,7 +1078,8 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-08n"></script>
+<script type="module" src="takeoff.js?v=2026-10-08o"></script>
+<script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password
