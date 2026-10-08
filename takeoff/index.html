@@ -580,6 +580,39 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
 .pstrip2{flex:none;border-top:1px solid var(--line);background:#fff}.pbh2{display:flex;align-items:center;padding:6px 12px 2px;font-size:12px;color:var(--navy)}.pbh2 .small{margin-left:auto;font-size:10.5px;color:var(--muted)}
 .pstripin{display:flex;gap:6px;overflow-x:auto;padding:4px 10px 8px}.pstripin .pgt{flex:0 0 64px}.pstripin .pgt img{height:52px}
 .tbrow{display:flex;align-items:center;gap:4px;padding:1px 0 1px 22px}.tbrow .pk{flex:1}.tbrow .btn{padding:0 6px;font-size:9px}
+
+/* ===== panel / layout settings (body classes set from the Panel settings dialog) ===== */
+body.pc-l-filter-off #condFilter,body.pc-l-strip-off #pageStrip,body.pc-l-props-off #propsBox,body.pc-l-keys-off .keys,body.pc-l-tab-pages-off #tPages,body.pc-l-tab-lay-off #tLay,
+body.pc-l-pdet-off .props .pdet,body.pc-l-pedit-off .props .pedit,
+body.pc-r-search-off #shBar,body.pc-r-chips-off #qaBar,body.pc-r-foot-off #rFoot,body.pc-r-tab-bill-off #vBill,body.pc-r-info-off #shInfo,
+body.pc-ui-agent-off #agentBar,body.pc-ui-cbar-off #cbar,body.pc-ui-status-off #status,body.pc-ui-ribbon-off .rrow,body.pc-ui-tabs-off .rtabs{display:none!important}
+body.pc-ui-agent-off .agentbar{display:none!important}
+/* compact ribbon: the same tools, about half the height */
+body.pc-compact .rtab{padding:5px 12px;font-size:12.5px}
+body.pc-compact .rrow{padding:3px 12px 2px}
+body.pc-compact .rgl{display:none}
+body.pc-compact .rrow .tool{min-width:44px;padding:4px 5px;gap:1px;font-size:10.5px}
+body.pc-compact .rrow .tool .ic{width:18px;height:18px}
+body.pc-compact .rrow .tool kbd{display:none}
+body.pc-compact .rg{padding:0 8px}
+body.pc-compact header{min-height:46px;padding:4px 12px}
+body.pc-compact .cbar{padding:4px 10px}
+body.pc-compact .agentbar{padding:4px 12px}
+body.pc-compact .status{min-height:22px;padding:2px 10px}
+#bRibbon .ic{transition:transform .15s}body.pc-ui-ribbon-off #bRibbon .ic{transform:rotate(180deg)}
+.agentbar{padding:6px 12px}
+@media (max-width:1650px){.agentbar .agch .btn{font-size:11px;padding:2px 8px}}
+@media (max-width:1500px){.agentbar .agch{display:none}}
+.pset h4{font-size:12px;color:var(--navy);margin:12px 0 4px;display:flex;gap:8px;align-items:center}.pset h4::after{content:"";flex:1;height:1px;background:var(--line)}
+.pset .pcols{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}.pset .xrow input[type=number]{width:70px}
+.pset .presets{display:flex;gap:6px;flex-wrap:wrap}.pset .presets .btn{flex:1;min-width:130px;text-align:left;line-height:1.35}.pset .presets .btn small{display:block;color:var(--muted);font-weight:400}
+.tbmine{border:1px dashed #b9c9e6;border-radius:6px;padding:6px 10px;margin-top:10px;background:#f8fbff}
+.panel:not(.right) .ph{gap:4px;padding:8px 8px;overflow:hidden}
+.panel:not(.right) .ph .seg .btn{padding:3px 7px;font-size:11.5px}
+.panel:not(.right) .ph #bNewCond{padding:3px 8px;font-size:11.5px;flex:none}
+.panel .ph .hidebtn{padding:0 3px;flex:none}
+.panel.right .ph{gap:6px;overflow:hidden}.panel.right .ph .ds{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+#start{z-index:7}
 </style>
 </head>
 <body>
@@ -621,6 +654,7 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
         <button class="rtab" role="tab" data-rtab="review" title="Check the takeoff: next / previous unchecked, mark checked, check before export, Compare, Typical">Review</button>
         <button class="rtab" role="tab" data-rtab="costing" title="Costing: measurement sheet, bill with rates, opening schedule, revision cost variance, check before export">Costing</button>
         <button class="rtab" role="tab" data-rtab="export" title="Export Excel / CSV / marked-up PDF, save the project, import pages">Export</button>
+        <button class="rtab" role="tab" data-rtab="mine" title="My tools — the tools you picked in Customize toolbar">&#9733; My tools</button>
         <button class="rtab" role="tab" data-rtab="view" title="View: fit, zoom, split window, dimmer, background, layers, labels, legend, minimap, full screen">View</button>
         <span class="sp"></span>
         <button class="tool tsm" id="bDel" title="Delete the selected measurement, count point or markup (Delete)" disabled><svg class="ic"><use href="#i-trash"/></svg><span class="tl">Delete</span></button>
@@ -629,6 +663,7 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
         <button class="tool tsm tgl" id="bXh" title="Cross-hair (Shift+C): hair-lines right across the whole window through the pointer (or the snap point), as AutoCAD with the cursor at 100%"><svg class="ic"><use href="#i-xh"/></svg><span class="tl">Cross-hair</span></button>
         <label class="tg" title="Snap to drawing lines (S)"><input type="checkbox" id="snapOn" checked> <svg class="ic"><use href="#i-snap"/></svg> Snap</label>
         <button class="tool tsm" id="bSnapSet" title="Object snaps: endpoint, midpoint, intersection, perpendicular, nearest" aria-haspopup="true"><svg class="ic ch"><use href="#i-chev"/></svg></button>
+        <button class="tool tsm" id="bRibbon" title="Collapse / expand the ribbon for a bigger drawing area (double-click a tab does the same)"><svg class="ic ch"><use href="#i-chev"/></svg><span class="tl">Ribbon</span></button>
         <button class="tool tsm" id="bCustTb" title="Customize toolbar: choose which tabs and tools are shown, icons only, reset"><svg class="ic"><use href="#i-cog"/></svg><span class="tl">Customize</span></button>
         <button class="tool tsm" id="bKeys" title="Keyboard &amp; mouse shortcuts (?)"><svg class="ic"><use href="#i-keys"/></svg><span class="tl">Keys</span></button>
         <div id="snapPop" aria-label="Object snaps"></div>
@@ -744,6 +779,10 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
           <button class="tool" data-px="bProjects" title="All projects"><svg class="ic"><use href="#i-list"/></svg><span class="tl">Projects</span></button>
         </div><div class="rgl">Project</div></div>
       </div>
+      <div class="rpanel" data-rp="mine" hidden>
+        <div class="rg"><div class="rgb" id="mineBox"></div><div class="rgl">My tools</div></div>
+        <div class="rg" id="mineHint"><span class="small" style="padding:14px 6px;color:var(--muted)">Nothing here yet — <b>Customize</b> (top right of the ribbon) &rarr; <b>My tools</b> to add any tool.</span></div>
+      </div>
       <div class="rpanel" data-rp="view" hidden>
         <div class="rg"><div class="rgb">
           <button class="tool" data-px="bFit" title="Fit page (F)"><svg class="ic"><use href="#i-rect"/></svg><span class="tl">Fit page</span></button>
@@ -774,7 +813,7 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
 <div class="app" id="app">
   <aside class="panel">
     <div class="rz" id="rzL" title="Drag to resize"></div>
-    <div class="ph"><span class="seg"><button class="btn sm on" id="tCond">Conditions</button><button class="btn sm" id="tPages" title="Every sheet in the project: search by number or title, filter, tick, edit sheet info, run OCR, and open a page">Pages</button><button class="btn sm" id="tLay">Layers</button></span><span style="flex:1"></span><button class="btn sm pri" id="bNewCond">+ New</button><button class="hidebtn" id="hideL" title="Hide this panel">&#10216;</button></div>
+    <div class="ph"><span class="seg"><button class="btn sm on" id="tCond">Conditions</button><button class="btn sm" id="tPages" title="Every sheet in the project: search by number or title, filter, tick, edit sheet info, run OCR, and open a page">Pages</button><button class="btn sm" id="tLay">Layers</button></span><span style="flex:1"></span><button class="btn sm pri" id="bNewCond">+ New</button><button class="hidebtn" id="bPanL" title="Left panel settings: tabs, sections, width, layouts">&#9881;</button><button class="hidebtn" id="hideL" title="Hide this panel">&#10216;</button></div>
     <div class="cfil" id="condFilter"><input type="search" id="condQ" placeholder="Filter conditions" aria-label="Filter conditions"><div class="ctypes" id="condTypes"></div></div>
     <div class="pb" id="condList"></div>
     <div class="pb" id="layerList" style="display:none"></div>
@@ -927,7 +966,7 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
   <aside class="panel right">
     <div class="rz" id="rzR" title="Drag to resize"></div>
     <div class="warnbar" id="warnbar"></div>
-    <div class="ph"><h3>Measurement sheet</h3><span class="seg"><button class="btn sm on" id="vSheet">Sheet</button><button class="btn sm" id="vBill">Bill</button></span><span class="ds" id="shInfo" style="font-size:10.5px;color:var(--muted)"></span><button class="hidebtn" id="hideR" title="Hide this panel">&#10217;</button></div>
+    <div class="ph"><h3>Measurement sheet</h3><span class="seg"><button class="btn sm on" id="vSheet">Sheet</button><button class="btn sm" id="vBill">Bill</button></span><span class="ds" id="shInfo" style="font-size:10.5px;color:var(--muted)"></span><button class="hidebtn" id="bPanR" title="Right panel settings: tabs, sections, width, layouts">&#9881;</button><button class="hidebtn" id="hideR" title="Hide this panel">&#10217;</button></div>
     <div id="shBar"><input type="search" id="shQ" placeholder="Search the sheet — room, item, BOQ, page…" aria-label="Search the measurement sheet"><select id="shSort" aria-label="Sort the measurements" title="Order of the measurements inside each condition (the totals do not change)"><option value="order">Drawing order</option><option value="page">By page</option><option value="qty">Largest first</option><option value="name">Name A–Z</option></select></div>
     <div id="qaBar"></div>
     <div class="pb" id="sheet"></div>
@@ -967,7 +1006,7 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-08e"></script>
+<script type="module" src="takeoff.js?v=2026-10-08f"></script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
    Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password
