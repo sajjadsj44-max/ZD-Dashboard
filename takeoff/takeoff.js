@@ -2384,6 +2384,7 @@ function cursorPoint(e, sp){
 function onDown(e){
   if (!S.page || (e.target.closest && e.target.closest(".cmplegend"))) return;   // the floating bar's own buttons
   ctxClose();
+  { const sel = window.getSelection && window.getSelection(); if (sel && sel.rangeCount && !sel.isCollapsed) sel.removeAllRanges(); }   // text selected elsewhere goes, and the browser's bar with it
   const sp = evPos(e);
   stage().setPointerCapture(e.pointerId);
   if (e.pointerType === "touch") {
@@ -7558,6 +7559,9 @@ function wireStage(pn){
   pn.host.addEventListener("pointerleave", () => { if (SPLIT.hot && SPLIT.hot.pn === pn) { SPLIT.hot = null; if (SPLIT.link) draw(); } });
   st.addEventListener("pointerup", onUp); st.addEventListener("pointercancel", onUp);
   st.addEventListener("contextmenu", e => e.preventDefault());
+  /* no text is selected on the drawing (a click or drag over a label, a marker's number or the legend): a selection brings up the
+     browser's own copy / search bar (Edge's mini menu) over the takeoff */
+  st.addEventListener("selectstart", e => { const t = e.target && e.target.nodeType === 1 ? e.target : e.target && e.target.parentElement; if (!(t && t.closest("input,textarea,[contenteditable]"))) e.preventDefault(); });
   st.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });
   { let mid = 0; st.addEventListener("pointerdown", e => { if (e.button !== 1) return; const t = Date.now(); if (t - mid < 380) { mid = 0; if (S.page) { fit(); renderHi(); } } else mid = t; }); }   // a middle double-click: zoom extents, as AutoCAD   // middle button pans — not the browser's autoscroll
   st.addEventListener("dblclick", e => {
