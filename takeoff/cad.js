@@ -11,9 +11,11 @@
    exact and needs no calibration. */
 const LDWG = "https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/dist/libredwg-web.js";
 const LDXF = "https://cdn.jsdelivr.net/npm/@mlightcad/dxf-json@1.2.8/dist/esm/bundle.mjs";
-export const CAD_VER = 1;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF
+export const CAD_VER = 2;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
 export const INK = -1;             // colour 7 (and true black or white): white on a black background, black on white
 export const isCadName = n => /\.(dwg|dxf)$/i.test(String(n || ""));
+const CAPS_FONT = /^(technic_|techb___|techl___|coprgt[bl]?|copperplate[\w ]*|stencil|engr|castelar|felixti|alger)\.(ttf|otf)$/i;   // fonts with capitals only (their small letters are small capitals)
+const SMALL_CAP = 0.76;   // a small capital's height in those fonts, of a capital's (Technic, as AutoCAD draws it)
 const PI2 = Math.PI * 2, CAP = 0.718, DESC = 0.207;   // Helvetica's cap height and descent, in em: AutoCAD's text height is a capital's
 
 /* ------------------------------------------------------------------ colours, units, lineweights */
@@ -156,18 +158,20 @@ function model(fmt, hv){
   const u = Math.round(n("INSUNITS")) || 0;
   return {fmt, ver: "", units: u >= 0 && u <= 24 ? u : 0, badHeader: !(u >= 0 && u <= 24), metric: n("MEASUREMENT") === 1, ltscale: n("LTSCALE") > 0 ? n("LTSCALE") : 1,
     dimasz: (n("DIMASZ") > 0 ? n("DIMASZ") : 0.18) * (n("DIMSCALE") > 0 ? n("DIMSCALE") : 1), textsize: n("TEXTSIZE") > 0 ? n("TEXTSIZE") : 2.5, lunits: Math.round(n("LUNITS")) || 0,
-    layers: new Map(), lorder: [], ltypes: new Map(), blocks: new Map(), bh: new Map(), ents: [], unk: 0, warn: 0};
+    layers: new Map(), lorder: [], ltypes: new Map(), styles: new Map(), blocks: new Map(), bh: new Map(), ents: [], unk: 0, warn: 0};
 }
 function addLayer(md, name, c, aci, off, frozen, plot, lw, lt){
   name = String(name == null || name === "" ? "0" : name); const k = name.toUpperCase(); if (md.layers.has(k)) return;
   md.layers.set(k, {name, c, aci, off: !!off, frozen: !!frozen, plot: plot !== false, lw: lw == null ? -3 : lw, lt: String(lt || "CONTINUOUS").toUpperCase()}); md.lorder.push(k);
 }
+function addStyle(md, t){ const k = String(t && t.name || "").toUpperCase(); if (k) md.styles.set(k, String(t.font || "")); }   // a text style -> its font file
 function addLtype(md, t){ const k = String(t && t.name || "").toUpperCase(); if (k) md.ltypes.set(k, (t.pattern || []).map(p => +p.elementLength || 0)); }
 function normDwg(db){
   const H = db.header || {}, md = model("DWG", k => H[k]), T = db.tables || {};
   ((T.LAYER || {}).entries || []).forEach(l => { const ci = Math.abs(+l.colorIndex || 0), aci = ci >= 1 && ci <= 255;
     addLayer(md, l.name, aci ? aciRgb(ci) : typeof l.color === "number" ? tcol(l.color) : INK, aci ? ci : 0, l.off || +l.colorIndex < 0, l.frozen, l.plotFlag !== 0, lwDwg(l.lineweight), l.lineType); });
   ((T.LTYPE || {}).entries || []).forEach(t => addLtype(md, t));
+  ((T.STYLE || {}).entries || []).forEach(t => addStyle(md, t));
   const st = {bogus: 0, real: 0}, paper = new Set();
   ((T.BLOCK_RECORD || {}).entries || []).forEach(b => { const k = String(b.name || "").toUpperCase(); if (b.handle) { md.bh.set(String(b.handle), k); if (/^\*PAPER_SPACE/.test(k)) paper.add(String(b.handle)); }
     if (k && !/^\*(MODEL|PAPER)_SPACE/.test(k)) md.blocks.set(k, {name: b.name, base: P2(b.basePoint), ents: normList(b.entities, true, {bogus: 0, real: 0})}); });
@@ -182,6 +186,7 @@ function normDxf(dx){
   ((T.LAYER || {}).entries || []).forEach(l => { const ci = +l.colorIndex || 7, tc = typeof l.color === "number" ? l.color : null;
     addLayer(md, l.name, tc != null ? tcol(tc) : aciRgb(ci), Math.abs(ci), ci < 0, (+l.standardFlag || 0) & 1, l.isPlotting !== false, lwDxf(l.lineweight, -3), l.lineType); });
   ((T.LTYPE || {}).entries || []).forEach(t => addLtype(md, t));
+  ((T.STYLE || {}).entries || []).forEach(t => addStyle(md, t));
   const paper = new Set();
   ((T.BLOCK_RECORD || {}).entries || []).forEach(r => { const k = String(r.name || "").toUpperCase(); if (r.handle) { md.bh.set(String(r.handle), k); if (/^\*PAPER_SPACE/.test(k)) paper.add(String(r.handle)); } });
   Object.values(dx.blocks || {}).forEach(b => { const k = String(b && b.name || "").toUpperCase(); if (k && !/^\*(MODEL|PAPER)_SPACE/.test(k)) md.blocks.set(k, {name: b.name, base: P2(b.position), ents: normList(b.entities, false)}); });
@@ -227,10 +232,11 @@ function norm(e, dwg){
       o.s = acadStr(b.text); o.p = P2(b.startPoint); o.p2 = P2n(t === "TEXT" ? b.endPoint : b.endPoint || e.alignmentPoint); o.h = +b.textHeight || 0; o.rot = A(b.rotation);
       o.wf = +(b.xScale ?? b.scale) || 1; o.obl = A(b.obliqueAngle); o.ha = +(b.halign ?? b.horizontalJustification ?? b.horizontalAlignment) || 0;
       o.va = +(b.valign ?? b.verticalJustification ?? b.verticalAlignment) || 0; o.gen = +(b.generationFlag ?? b.textGenerationFlag) || 0;
+      o.st = String(b.styleName || e.styleName || "");
       if (t !== "TEXT") { o.tag = String(e.tag || ""); o.inv = !!(fl & 1); o.cst = !!(fl & 2); if (t === "ATTDEF" && !o.cst) o.s = o.tag; }
       break; }
     case "MTEXT": { const d = P2n(e.direction); o.p = P2(e.insertionPoint); o.h = +(e.textHeight ?? e.height) || 0; o.w = +(e.rectWidth ?? e.width) || 0; o.att = +e.attachmentPoint || 1;
-      o.rot = d ? Math.atan2(d[1], d[0]) : +e.rotation || 0; o.s = String(e.text || ""); o.ls = +e.lineSpacing > 0 ? +e.lineSpacing : 1; o.ex = null; break; }
+      o.rot = d ? Math.atan2(d[1], d[0]) : +e.rotation || 0; o.s = String(e.text || ""); o.ls = +e.lineSpacing > 0 ? +e.lineSpacing : 1; o.st = String(e.styleName || ""); o.ex = null; break; }
     case "INSERT": o.n = String(e.name || ""); o.p = P2(e.insertionPoint); o.sx = +e.xScale || 1; o.sy = +e.yScale || 1; o.rot = A(e.rotation);
       o.nc = Math.max(1, +e.columnCount || 1); o.nr = Math.max(1, +e.rowCount || 1); o.cs = +e.columnSpacing || 0; o.rs = +e.rowSpacing || 0;
       o.att = dwg ? arr(e.attribs).map(a => safeNorm(a, true)).filter(a => a.t === "ATTRIB") : []; break;
@@ -470,9 +476,11 @@ export function cadScene(md, opt){
     const t = {s, li, c, e: cur, o: [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]], ax: [m[0] * axx + m[2] * axy, m[1] * axx + m[3] * axy], ay: [m[0] * ayx + m[2] * ayy, m[1] * ayx + m[3] * ayy]};
     if (![...t.o, ...t.ax, ...t.ay].every(v => Math.abs(v) < 1e12)) { junk++; return; } TX.push(t);
   };
+  /* a style whose font has no small letters (Technic, Copperplate Gothic, Stencil…): AutoCAD draws its text in capitals */
+  const caps = e => CAPS_FONT.test(String((md.styles && md.styles.get(String(e.st || "").toUpperCase())) || "").split(/[\\/]/).pop());
   const textEnt = (e, r) => {
-    const h = e.h > 0 ? e.h : md.textsize; let em = h / CAP, wf = e.wf || 1, rot = e.rot, ox = e.p[0], oy = e.p[1];
-    const W = emW(e.s) * em * wf, q = e.p2 || e.p;   // (AutoCAD's alignment point: centre, right, middle…)
+    const h = e.h > 0 ? e.h : md.textsize, up = caps(e), s = up ? String(e.s).toUpperCase() : e.s; let em = h / CAP * (up && /[a-z]/.test(e.s) && !/[A-Z]/.test(e.s) ? SMALL_CAP : 1), wf = e.wf || 1, rot = e.rot, ox = e.p[0], oy = e.p[1];   // small letters: small capitals
+    const W = emW(s) * em * wf, q = e.p2 || e.p;   // (AutoCAD's alignment point: centre, right, middle…)
     if ((e.ha === 3 || e.ha === 5) && e.p2) {   // aligned / fit: between the two points
       const dx = q[0] - e.p[0], dy = q[1] - e.p[1], L = Math.hypot(dx, dy);
       if (L > 1e-9 && W > 0) { rot = Math.atan2(dy, dx); if (e.ha === 5) wf *= L / W; else em *= L / W; }
@@ -481,16 +489,17 @@ export function cadScene(md, opt){
       const dx = e.ha === 1 || e.ha === 4 ? -W / 2 : e.ha === 2 ? -W : 0, dy = e.ha === 4 ? -h / 2 : e.va === 3 ? -h : e.va === 2 ? -h / 2 : e.va === 1 ? DESC * em : 0;
       ox = q[0] + cr * dx - sr * dy; oy = q[1] + sr * dx + cr * dy;
     }
-    text(e.s, ox, oy, em, rot, wf, e.obl, r.li, r.c, e.gen & 2, e.gen & 4);
+    text(s, ox, oy, em, rot, wf, e.obl, r.li, r.c, e.gen & 2, e.gen & 4);
   };
   const mtextEnt = (e, r) => {
-    const h = e.h > 0 ? e.h : md.textsize, em = h / CAP, L = [], wMax = e.w > 0 ? e.w / em : 0;
-    mtextLines(e.s).forEach(p => { p = acadStr(p); if (wMax > 0) wrap(p, wMax).forEach(l => L.push(l)); else L.push(p); });
+    const h = e.h > 0 ? e.h : md.textsize, em = h / CAP, L = [], SM = [], wMax = e.w > 0 ? e.w / em : 0, up = caps(e);
+    mtextLines(e.s).forEach(p => { p = acadStr(p); const k = up && /[a-z]/.test(p) && !/[A-Z]/.test(p) ? SMALL_CAP : 1; if (up) p = p.toUpperCase();   // small letters in a capitals-only font: small capitals
+      (wMax > 0 ? wrap(p, wMax / k) : [p]).forEach(l => { L.push(l); SM.push(k); }); });
     const pitch = h * 5 / 3 * (e.ls || 1), n = L.length, col = (e.att - 1) % 3, row = Math.floor((e.att - 1) / 3), cr = Math.cos(e.rot), sr = Math.sin(e.rot);
     const y0 = row <= 0 ? -h : row === 1 ? ((n - 1) * pitch + h) / 2 - h : (n - 1) * pitch;
     const pa = e.w > 0 ? /\\pxq([lcr])/.exec(String(e.s))?.[1] : null, bx = col === 0 ? 0 : col === 1 ? -e.w / 2 : -e.w;   // \pxqc; centres the paragraph in the box, whose edge the attachment point sets
-    L.forEach((l, i) => { if (!l.trim()) return; const lw = emW(l) * em, dx = pa ? bx + (pa === "c" ? (e.w - lw) / 2 : pa === "r" ? e.w - lw : 0) : col === 0 ? 0 : col === 1 ? -lw / 2 : -lw, dy = y0 - i * pitch;
-      text(l, e.p[0] + cr * dx - sr * dy, e.p[1] + sr * dx + cr * dy, em, e.rot, 1, 0, r.li, r.c); });
+    L.forEach((l, i) => { if (!l.trim()) return; const lw = emW(l) * em * SM[i], dx = pa ? bx + (pa === "c" ? (e.w - lw) / 2 : pa === "r" ? e.w - lw : 0) : col === 0 ? 0 : col === 1 ? -lw / 2 : -lw, dy = y0 - i * pitch;
+      text(l, e.p[0] + cr * dx - sr * dy, e.p[1] + sr * dx + cr * dy, em * SM[i], e.rot, 1, 0, r.li, r.c); });
   };
   const arrow = (tip, from, sz, li, c) => {   // a closed filled arrowhead at tip, pointing away from `from`
     const dx = tip[0] - from[0], dy = tip[1] - from[1], l = Math.hypot(dx, dy); if (!(l > 0) || !(sz > 0)) return;
@@ -836,7 +845,7 @@ export async function cadDrawAsync(ctx, pg, v, o, stale){
 /* ------------------------------------------------------------------ the takeoff's index of the page, straight from the scene
    (no PDF parsed): its lines as indexPage makes them from a PDF — [x0, y0, x1, y1, flags (1 on a curve, 2 dashed, 4 a fill's
    outline), subpath, style, layer] with styles "#rrggbb|width" — hatch pattern lines left out (they are noise to snap to); its text
-   as [{s, x, y, w, h}] (x, y the baseline's start) */
+   as [{s, x, y, w, h, r}] (x, y the baseline's start, r its turn) */
 export function cadIndex(pg, max){
   const segs = [], styles = [], six = new Map(), O = pg.ops, X = pg.xy; let sp = 0; max = max || 600000;
   for (let i = 0; i < pg.n && segs.length < max; i++) {
@@ -853,7 +862,7 @@ export function cadIndex(pg, max){
       else { push(cx, cy, sx, sy, f0); cx = sx; cy = sy; } }
   }
   const texts = [];
-  for (let i = 0; i < pg.tn; i++) { const m = 6 * i, M = pg.tM, em = Math.hypot(M[m + 2], M[m + 3]); texts.push({s: pg.tS[i], x: M[m + 4], y: M[m + 5], w: Math.hypot(M[m], M[m + 1]) * pg.tW[i], h: em || 6, li: pg.tL[i]}); }
+  for (let i = 0; i < pg.tn; i++) { const m = 6 * i, M = pg.tM, em = Math.hypot(M[m + 2], M[m + 3]); texts.push({s: pg.tS[i], x: M[m + 4], y: M[m + 5], w: Math.hypot(M[m], M[m + 1]) * pg.tW[i], h: em || 6, r: Math.atan2(M[m + 1], M[m]), li: pg.tL[i]}); }   // r: the baseline's turn on the page, as a PDF's text has it
   return {segs, styles, texts};
 }
 

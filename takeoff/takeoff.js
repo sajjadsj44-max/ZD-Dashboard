@@ -854,7 +854,7 @@ async function indexPage(){
     ix.segs.forEach((s2, i) => { const x0 = Math.floor(Math.min(s2[0], s2[2]) / cell), x1 = Math.floor(Math.max(s2[0], s2[2]) / cell), y0 = Math.floor(Math.min(s2[1], s2[3]) / cell), y1 = Math.floor(Math.max(s2[1], s2[3]) / cell);
       if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4000) return; for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) { const k = x + "," + y; let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(i); } });
     S.geo[key] = {segs: ix.segs, grid, cell, images: 0, styles: ix.styles, layerIds: sc.layers.map(l => byName.get(l.name) || null), file, cad: true};
-    if (!S.texts[key]) S.texts[key] = withOcr(key, ix.texts.map(t => ({s: normQ(t.s), x: t.x, y: t.y, w: t.w, h: t.h})));
+    if (!S.texts[key]) S.texts[key] = withOcr(key, ix.texts.map(t => ({s: normQ(t.s), x: t.x, y: t.y, w: t.w, h: t.h, r: t.r || 0})));
   }
   if (!S.geo[key]) {
     busy("Reading drawing lines…");
@@ -7970,7 +7970,7 @@ const AI_TOOLS = [
    input_schema: {type: "object", required: ["thickness_ft"], properties: {thickness_ft: {type: "number", description: "Wall thickness in ft: 0.75 for 9 inch, 1.125 for 13.5 inch, 0.375 for 4.5 inch"},
      condition: {type: "string", description: "Existing length condition name to add to (optional)"}, height_ft: {type: "number", description: "Wall height for a new condition, only if the user gave it or the drawing states it"},
      whole_page: {type: "boolean", description: "Search the whole page, not only the view"}, bridge_ft: {type: "number", description: "Bridge gaps (openings) up to this length; default 6"}}}},
-  {name: "count_tags", description: "Specialist: count door / window / ventilator tags (every spelling: D1, D-1, DR-01, DOOR 1, SD2, FD1, W1, WN-2, KW1, V1, VENT 1, primed W1', tags in two pieces) or any exact word written on the drawing (e.g. \"doors\", \"windows\", \"D1\", \"all\"), with one marker on each. Tags in a schedule table are not counted; the table's sizes / quantities are reported for checking. Returns the count per tag.",
+  {name: "count_tags", description: "Specialist: count door / window / ventilator tags (every spelling: D1, D-1, DR-01, DOOR 1, SD2, FD1, W1, WN-2, KW1, V1, VENT 1, primed W1', tags in two pieces) or any exact word written on the drawing (e.g. \"doors\", \"windows\", \"D1\", \"D2, D2'\" for several marks, \"all\"), with one marker on each. Tags in a schedule table are not counted; the table's sizes / quantities are reported for checking. Primed marks (D2', D2'') are other types with their own schedule size: not counted with D2, returned under others. Returns the count per tag.",
    input_schema: {type: "object", required: ["what"], properties: {what: {type: "string"}, scope: {type: "string", enum: ["page", "pdf", "all"], description: "page (default), every page of this PDF, or every PDF in the project"}}}},
   {name: "find_text", description: "Find a word or tag in the page text: how many times it is on the page and where it is in the image (px).",
    input_schema: {type: "object", required: ["text"], properties: {text: {type: "string"}}}},
@@ -8295,13 +8295,13 @@ const SIZE_RX = /(\d+(?:\.\d+)?\s*'\s*-?\s*(?:\d+(?:\.\d+)?)?(?:\s*\d\/\d)?\s*(?
 const TAG_PFX = {Doors: ["DOOR", "DR", "D", "SD", "SLD", "FD", "FRD", "MD", "GD", "AD", "DD", "RS", "RSD", "DW"], Windows: ["WINDOW", "WIN", "WN", "W", "WD", "KW", "TW", "BW", "CW", "SW", "FW", "AW", "GW", "SKY", "SKL"], Ventilators: ["VENT", "VT", "V", "LV"]};
 const TAG_CANON = {DOOR: "D", DR: "D", WINDOW: "W", WIN: "W", WN: "W", VENT: "V", VT: "V", SKL: "SKY"};
 const TAG_ALL = Object.values(TAG_PFX).flat().sort((a, b) => b.length - a.length);
-const TAG_RX = new RegExp("^(" + TAG_ALL.join("|") + ")\\s*[-./]?\\s*(\\d{1,3})\\s*([A-Z]?)\\s*(['’′]{0,2})$", "i");   // W37 and W37' (primed: another size of the type) are different tags
-const TAG_LETTERS = new RegExp("^(" + TAG_ALL.join("|") + ")\\s*[-./]?$", "i"), TAG_NUM = /^\d{1,3}[A-Z]?\s*['’′]{0,2}$/i;
+const TAG_RX = new RegExp("^(" + TAG_ALL.join("|") + ")\\s*[-./]?\\s*(\\d{1,3})\\s*([A-Z]?)\\s*(['’′]{0,2}|[\"”″])$", "i");   // W37 and W37' (primed: another size of the type) are different tags; D2" is D2''
+const TAG_LETTERS = new RegExp("^(" + TAG_ALL.join("|") + ")\\s*[-./]?$", "i"), TAG_NUM = /^\d{1,3}[A-Z]?\s*(['’′]{0,2}|["”″])$/i;
 const tagFam = pfx => Object.keys(TAG_PFX).find(f => TAG_PFX[f].includes(pfx)) || "Tags";
 function tagParse(s){   // "Dr-01a'" -> {k: "D1A'", pfx: "D", fam: "Doors"} or null
   const m = TAG_RX.exec(String(s || "").trim().replace(/\s+/g, " ")); if (!m) return null;
   const p0 = m[1].toUpperCase(), pfx = TAG_CANON[p0] || p0;
-  return {k: pfx + String(+m[2]) + (m[3] || "").toUpperCase() + (m[4] ? "'".repeat(m[4].length) : ""), pfx, fam: tagFam(pfx)};   // D-01 and D1 are one mark
+  return {k: pfx + String(+m[2]) + (m[3] || "").toUpperCase() + (m[4] ? "'".repeat(/["”″]/.test(m[4]) ? 2 : m[4].length) : ""), pfx, fam: tagFam(pfx)};   // D-01 and D1 are one mark
 }
 const tagKind = k => tagFam((/^[A-Z]+/.exec(k) || [""])[0]);
 /* a size written in a schedule: 3'-0" x 7'-0" · 3'0"X7'0" · 36" x 84" · 3.000 x 7.000 (ft) · 900 x 2100 (mm, converted) */
@@ -8315,36 +8315,57 @@ function sizePair(t){
   if (m) return {w: r3(+m[1]), h: r3(+m[2]), how: "ft"};
   return null;
 }
+/* tags on a sheet are found with their text's own turn (r, radians on the page): a tag along a skewed wall is read, joined and
+   marked in its own frame; a schedule is written level */
+const tagLevel = p => Math.abs(Math.sin(p.r || 0)) < 0.05 && Math.cos(p.r || 0) > 0;
+const tagAt = (p, u, v) => { const r = p.r || 0; return [p.x + u * Math.cos(r) + v * Math.sin(r), p.y + u * Math.sin(r) - v * Math.cos(r)]; };   // the page point u along p's baseline, v up from it
+const TAG_HEAD = /\b(SCHEDULES?|SIZES?|MARKS?|QTY|QUANTITY)\b/i;
 function tagsOf(T){   // pdf text pieces of one page -> {plan: {k: [[x, y]…]}, sched: {k: {w, h, qty, how}}, inSched: n}
-  const P2 = T.map(p => Object.assign({}, p, {w: p.w || p.s.length * p.h * 0.55}));
+  const P2 = T.map(p => Object.assign({}, p, {w: p.w || p.s.length * p.h * 0.55, r: p.r || 0}));
   const used = new Set(), extra = [];
   P2.forEach((a, i) => {   // a tag in two pieces: letters, with the number beside them or under them (circled / hexagon tags)
     if (used.has(i) || !TAG_LETTERS.test(a.s.trim())) return;
     let best = null;
-    P2.forEach((b, j) => { if (j === i || used.has(j) || !TAG_NUM.test(b.s.trim()) || b.h < 0.6 * a.h || b.h > 1.6 * a.h) return;
-      const right = Math.abs(b.y - a.y) < 0.45 * a.h && b.x - (a.x + a.w) > -0.3 * a.h && b.x - (a.x + a.w) < 0.8 * a.h;
-      const under = Math.abs((b.x + b.w / 2) - (a.x + a.w / 2)) < 1.2 * a.h && b.y - a.y > 0.6 * a.h && b.y - a.y < 1.8 * a.h;
-      if (right || under) { const d = Math.hypot(b.x - a.x, b.y - a.y); if (!best || d < best.d) best = {j, d, under}; } });
-    if (best) { const b = P2[best.j]; used.add(i); used.add(best.j);
-      extra.push({s: a.s.trim() + b.s.trim(), x: Math.min(a.x, b.x), y: best.under ? (a.y + b.y) / 2 : a.y, w: best.under ? Math.max(a.w, b.w) : b.x + b.w - a.x, h: a.h, joined: true}); }
+    const ca = Math.cos(a.r), sa = Math.sin(a.r);
+    P2.forEach((b, j) => { if (j === i || used.has(j) || !TAG_NUM.test(b.s.trim()) || b.h < 0.6 * a.h || b.h > 1.6 * a.h || Math.abs(Math.sin(b.r - a.r)) > 0.1 || Math.cos(b.r - a.r) < 0) return;
+      const u = (b.x - a.x) * ca + (b.y - a.y) * sa, v = (b.x - a.x) * sa - (b.y - a.y) * ca;   // b's start in a's frame: along a's baseline, up from it
+      const right = Math.abs(v) < 0.45 * a.h && u - a.w > -0.3 * a.h && u - a.w < 0.8 * a.h;
+      const under = Math.abs(u + b.w / 2 - a.w / 2) < 1.2 * a.h && -v > 0.6 * a.h && -v < 1.8 * a.h;
+      if (right || under) { const d = Math.hypot(u, v); if (!best || d < best.d) best = {j, d, under, u, v}; } });
+    if (best) { const b = P2[best.j], u0 = Math.min(0, best.u), o = tagAt(a, u0, best.under ? best.v / 2 : 0); used.add(i); used.add(best.j);
+      extra.push({s: a.s.trim() + b.s.trim(), x: o[0], y: o[1], w: best.under ? Math.max(a.w, b.w) : best.u + b.w - u0, h: a.h, r: a.r, joined: true}); }
   });
   let pieces = P2.filter((_, i) => !used.has(i)).concat(extra);
   pieces = pieces.flatMap(p => { const tk = p.s.trim().split(/\s+/); if (tk.length < 2 || tk.length > 8 || !tk.every(x => tagParse(x))) return [p];   // "D1 D2 W1" in one piece: each its own tag
-    const n = tk.length; return tk.map((x, i) => Object.assign({}, p, {s: x, x: p.x + p.w * i / n, w: p.w / n})); });
+    const n = tk.length; return tk.map((x, i) => { const o = tagAt(p, p.w * i / n, 0); return Object.assign({}, p, {s: x, x: o[0], y: o[1], w: p.w / n}); }); });
   const lines = textLines(pieces), occ = [];
-  lines.forEach(l => { const g = tagParse(l.s); if (g) occ.push({k: g.k, l, x: l.x + l.w / 2, y: l.y - l.h / 2}); });
-  const sched = {}, inSch = new Set();
+  lines.forEach(l => { const g = tagParse(l.s); if (!g) return;
+    const p = l.parts[0], c = l.parts.length === 1 ? tagAt(p, p.w / 2, p.h / 2) : [l.x + l.w / 2, l.y - l.h / 2];   // the middle of the tag, turned with it
+    if (occ.some(o => o.k === g.k && Math.hypot(o.x - c[0], o.y - c[1]) < 0.5 * Math.max(o.l.h, l.h))) return;   // the same tag written twice over itself (overprinted, or a block and its copy): one door
+    occ.push({k: g.k, l, x: c[0], y: c[1], lev: l.parts.every(tagLevel)}); });
+  const sched = {}, inSch = new Set(), rows = [];
   occ.forEach(o => {   // a schedule row: the tag with a size on the same line to its right
-    const l = o.l, cand = lines.filter(r => r !== l && Math.abs(r.y - l.y) < 0.6 * Math.max(r.h, l.h) && r.x > l.x + l.w - l.h && r.x < l.x + 80 * l.h).sort((a, b) => a.x - b.x), row = [];
+    if (!o.lev) return;
+    const l = o.l, cand = lines.filter(r => r !== l && r.parts.every(tagLevel) && Math.abs(r.y - l.y) < 0.6 * Math.max(r.h, l.h) && r.x > l.x + l.w - l.h && r.x < l.x + 80 * l.h).sort((a, b) => a.x - b.x), row = [];
     let edge = l.x + l.w; for (const r of cand) { if (r.x - edge > 12 * l.h || tagParse(r.s)) break; row.push(r); edge = Math.max(edge, r.x + r.w); }   // the cells of its table row: each close after the last
     let sz = sizePair(row.map(r => r.s).join("  "));
     if (!sz) { const L = (row.map(r => r.s).join("  ").replace(/[’′]/g, "'").replace(/[”″]/g, '"').match(/\d+(?:\.\d+)?\s*'\s*-?\s*(?:\d+(?:\.\d+)?)?(?:\s*\d\/\d)?\s*"?/g) || []).map(parseFt).filter(v => v > 0);   // width and height in their own columns
       if (L.length >= 2) sz = {w: r3(L[0]), h: r3(L[1]), how: "ft-in"}; }
     if (!sz) return;
     const q = row.map(r => /^\s*(\d{1,3})\s*(?:NOS?\.?|PCS|NUMBERS?)?\s*$/i.exec(r.s)).filter(Boolean).pop();
-    inSch.add(o); sched[o.k] = Object.assign(sched[o.k] || {}, sz, q ? {qty: +q[1]} : {}, {page: true});
+    const c = row.find(r => sizePair(r.s)) || row.find(r => /\d\s*['’′]/.test(r.s)) || row[0];   // its size cell
+    rows.push({o, sz, q, c, end: edge});
   });
-  const byX = occ.filter(o => !inSch.has(o)).sort((a, b) => a.x - b.x || a.y - b.y);   // a column of marks close under each other: a schedule
+  /* only a table is a schedule: a row with another row under or over it (marks in one column, sizes in one column), or with a
+     schedule's heading over it. A plan tag beside a room's label ("D2  KITCHEN 6'-0"X9'-7"") is a door on the plan, and the
+     room's size is not the door's */
+  const aligned = (a, b, t) => Math.min(Math.abs(a.x - b.x), Math.abs(a.x + a.w - b.x - b.w), Math.abs(a.x + a.w / 2 - b.x - b.w / 2)) < t;   // left, right or centre aligned
+  const mates = (a, b) => { const h = Math.max(a.o.l.h, b.o.l.h), dy = Math.abs(a.o.l.y - b.o.l.y); return dy > 0.6 * h && dy < 6 * h && aligned(a.o.l, b.o.l, 1.2 * h) && aligned(a.c, b.c, 3 * h); };
+  const headed = a => { const l = a.o.l; return lines.some(t => TAG_HEAD.test(t.s) && t.parts.every(tagLevel) && t.y < l.y - 0.3 * l.h && t.y > l.y - 14 * l.h && t.x < a.end + 10 * l.h && t.x + t.w > l.x - 10 * l.h); };
+  const sRows = rows.filter(a => rows.some(b => b !== a && mates(a, b)) || headed(a));
+  sRows.forEach(a => { inSch.add(a.o); sched[a.o.k] = Object.assign(sched[a.o.k] || {}, a.sz, a.q ? {qty: +a.q[1]} : {}, {page: true}); });
+  occ.forEach(o => { if (!inSch.has(o) && o.lev && sRows.some(a => Math.abs(o.l.y - a.o.l.y) < 0.6 * Math.max(o.l.h, a.o.l.h) && o.x > a.o.l.x - 15 * a.o.l.h && o.x < a.end)) inSch.add(o); });   // another mark on a schedule row (the tag's symbol drawn beside its number): not a door either
+  const byX = occ.filter(o => !inSch.has(o) && o.lev).sort((a, b) => a.x - b.x || a.y - b.y);   // a column of marks close under each other: a schedule
   for (let i = 0; i < byX.length;) {
     let j = i + 1; while (j < byX.length && Math.abs(byX[j].x - byX[i].x) < 0.8 * byX[i].l.h) j++;
     const col = byX.slice(i, j).sort((a, b) => a.y - b.y); let run = [col[0]];
@@ -8389,13 +8410,14 @@ function putCounts(res, pick, group){   // count markers from scanned tags; grou
 }
 async function agentCount(filter, scope){
   scope = scope || "page";
-  const res = await scanTags(scope), f = String(filter || "").replace(/\s+/g, "").toUpperCase(), all = new Set(); res.forEach(r => Object.keys(r.T.plan).forEach(k2 => all.add(k2)));
-  const pick = [...all].filter(t2 => tagWanted(t2, f)).sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+  const fl = String(filter || "").split(/\s*(?:,|;|&|\+|\band\b)\s*/i).map(x => x.replace(/\s+/g, "").toUpperCase()).filter(Boolean), f = fl[0] || "";   // "D2, D2'" or "D2 and D2'": each mark
+  const res = await scanTags(scope), all = new Set(); res.forEach(r => Object.keys(r.T.plan).forEach(k2 => all.add(k2)));
+  const pick = [...all].filter(t2 => !fl.length || fl.some(x => tagWanted(t2, x))).sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
   if (!pick.length) {
-    if (f && !/^(DOORS?|WINDOWS?|VENT\w*|ALL|TAGS)$/.test(f) && scope === "page") { const T = await pageTexts(S.fileId, S.pageNo), hits = T.filter(x => x.s.trim().toUpperCase() === f);   // any other exact word
+    if (fl.length === 1 && !/^(DOORS?|WINDOWS?|VENT\w*|ALL|TAGS)$/.test(f) && scope === "page") { const T = await pageTexts(S.fileId, S.pageNo), hits = T.filter(x => x.s.trim().toUpperCase() === f);   // any other exact word
       if (hits.length) { let it; const c = condByName(f, "count"); if (!c.sym) c.sym = "circle";
         mutate(() => { it = P.proj.items.find(i => i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && i.kind === "shape"); if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); } it.ai = true; it.qa = "";
-          hits.forEach(h => { const p = [h.x + (h.w || 0) / 2, h.y - (h.h || 6) / 2]; if (!it.pts.some(o => dist(o, p) < 2)) it.pts.push(p); }); }, "Count " + f);
+          hits.forEach(h => { const p = tagAt(h, (h.w || 0) / 2, (h.h || 6) / 2); if (!it.pts.some(o => dist(o, p) < 2)) it.pts.push(p); }); }, "Count " + f);
         refresh(); aiLog("tool", `${esc(f)}: <b>${hits.length} Nos</b> counted`); return {counts: {[f]: hits.length}}; } }
     aiLog("err", "No matching tags " + (scope === "page" ? "on this page" : "in these pages") + (all.size ? " — tags found: " + [...all].map(esc).join(", ") : "") + ".");
     return {error: "no matching tags; tags found: " + ([...all].join(", ") || "none")};
@@ -8403,10 +8425,15 @@ async function agentCount(filter, scope){
   let lines; mutate(() => { lines = putCounts(res, pick, "mark"); }, "Count tags");
   refresh();
   const sched = {}; res.forEach(r => Object.assign(sched, r.T.sched));
+  /* the marks named and the other marks of the same number on the drawing (D2' and D2'' beside D2): each is its own type in the
+     schedule, so not counted with it — but said, as they are easy to take for it on the sheet */
+  const base = k2 => k2.replace(/[A-Z]?'*$/, ""), named = fl.map(x => tagParse(x)).filter(Boolean).map(g => base(g.k));
+  const sib = [...all].filter(k2 => !pick.includes(k2) && named.includes(base(k2))).sort((a, b) => a.localeCompare(b, undefined, {numeric: true})), nOf = k2 => res.reduce((a, r) => a + (r.T.plan[k2] || []).length, 0);
   aiLog("tool", pick.map(t2 => { const L = lines[t2] || {n: 0, added: 0, pages: []}, sc = sched[t2];
     return `${esc(t2)} <span class="small">${esc(tagKind(t2).replace(/s$/, ""))}</span>: <b>${L.n} Nos</b>${L.added < L.n ? ` <span class="small">(${L.n - L.added} already marked)</span>` : ""}${scope !== "page" && L.pages.length > 1 ? ` <span class="small">— ${esc(L.pages.join(", "))}</span>` : ""}${sc ? ` <span class="small">· schedule ${f3(sc.w)} × ${f3(sc.h)} ft${sc.qty ? ", qty " + sc.qty + (sc.qty !== L.n ? " <b style='color:#b3261e'>≠ " + L.n + " counted</b>" : " ✓") : ""}</span>` : ""}`; }).join("<br>")
+    + (sib.length ? `<br><span class="small">Not in this count: ${sib.map(k2 => `<b>${esc(k2)}</b> ${nOf(k2)} Nos`).join(" · ")} — other marks, each with its own size in the schedule. Type <i>count ${esc(sib[0])}</i>, or <i>count ${esc(pick.concat(sib).join(", "))}</i> for all of them.</span>` : "")
     + `<br><span class="small">One count condition per tag — markers sit on the tags. ${res.reduce((a, r) => a + r.T.inSched, 0) ? res.reduce((a, r) => a + r.T.inSched, 0) + " tags in schedule tables were left out. " : ""}A tag written once for several doors needs its Nos edited.</span>`);
-  return {counts: Object.fromEntries(pick.map(t2 => [t2, (lines[t2] || {n: 0}).n]))};
+  return Object.assign({counts: Object.fromEntries(pick.map(t2 => [t2, (lines[t2] || {n: 0}).n]))}, sib.length ? {others: Object.fromEntries(sib.map(k2 => [k2, nOf(k2)]))} : {});
 }
 /* 🚪 Doors / windows agent: scan, review (tick what to count), count — this page, this PDF or the whole project */
 async function doorWinDialog(){
@@ -9598,8 +9625,11 @@ function cadLoad(fid, proj = P.proj){
     if (rec && rec.scene && rec.scene.ver === C.CAD_VER) sc = rec.scene;
     else if (rec && rec.src) {
       try { const r = await cadWorker(rec.src, rec.name || "the drawing", meta.map);
-        if (r) sc = r.scene; else { busy("Reading " + (rec.name || "the drawing") + "…"); sc = C.cadScene(await C.cadRead(rec.src, rec.name || ""), {map: meta.map}); }
-        rec.scene = sc; await dbPut("pdfs", rec, fid).catch(() => {}); } finally { busy(""); } }
+        if (r) { sc = r.scene; if (r.pdf && r.pdf.byteLength) { rec.data = r.pdf.buffer.slice(r.pdf.byteOffset, r.pdf.byteOffset + r.pdf.byteLength); delete rec.pdfSha; } }   // its PDF written again too: exports show it as the screen does
+        else { busy("Reading " + (rec.name || "the drawing") + "…"); sc = C.cadScene(await C.cadRead(rec.src, rec.name || ""), {map: meta.map}); }
+        rec.scene = sc; await dbPut("pdfs", rec, fid).catch(() => {}); }
+      catch (e) { if (!rec.scene) throw e; sc = rec.scene; toast("Shown as it was first read — the drawing could not be read again here (" + (e.message || e) + ")", 6000); }   // the scene kept from before: still its objects
+      finally { busy(""); } }
     S.cadSc[fid] = sc; delete S.cadP[fid]; return sc;
   })().catch(e => { S.cadSc[fid] = null; delete S.cadP[fid]; toast("Shown from its PDF — the drawing's objects could not be read here (" + (e.message || e) + ")", 6000); return null; });
 }
