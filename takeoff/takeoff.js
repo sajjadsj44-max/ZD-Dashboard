@@ -3643,18 +3643,22 @@ async function pageTexts(fileId, pageNo){
   } catch (e) { S.texts[key] = withOcr(key, []); }   // (a PDF not attached in this browser still has its OCR words)
   return S.texts[key];
 }
+let findExact = false; try { findExact = localStorage.getItem("tkFindExact") === "1"; } catch (e) {}
+const exactTog = () => `<label class="small" style="display:flex;align-items:center;gap:4px;cursor:pointer" title="Match the whole word only: W1 finds W1, not W11 or DW1"><input type="checkbox" data-exact="1"${findExact ? " checked" : ""}> Exact word</label>`;
 async function findText(q){
   const box = $("findRes"); q = String(q || "").trim();
   if (!q || !P.proj) { box.classList.remove("on"); return; }
   const r0 = $("findIn").getBoundingClientRect(); box.style.left = Math.max(8, Math.min(r0.left, window.innerWidth - 350)) + "px";
   box.innerHTML = '<div class="fr small">Searching…</div>'; box.classList.add("on");
-  const ql = q.toLowerCase(), hits = [];
+  const ql = q.toLowerCase(), hits = [], ex = findExact && new RegExp("(?<![A-Za-z0-9])" + ql.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![A-Za-z0-9])");
   for (const f of P.proj.files) for (let i = 1; i <= f.pages && hits.length < 300; i++) {
-    (await pageTexts(f.id, i)).forEach(t => { if (t.s.toLowerCase().includes(ql) && hits.length < 300) hits.push({f, i, t}); });
+    (await pageTexts(f.id, i)).forEach(t => { if ((ex ? ex.test(t.s.toLowerCase()) : t.s.toLowerCase().includes(ql)) && hits.length < 300) hits.push({f, i, t}); });
   }
-  box.innerHTML = hits.length ? `<div class="fr small" style="flex-direction:row;align-items:center;gap:6px;cursor:default">${hits.length}${hits.length >= 300 ? "+" : ""} found <span style="flex:1"></span><button class="btn sm pri" data-cntall="1" title="Put a count marker on every hit">&#10003; Count all</button></div>` + hits.map((h, n) => `<div class="fr" data-hit="${n}" style="flex-direction:row;align-items:center;gap:6px"><span style="flex:1;display:flex;flex-direction:column"><b>${esc(h.t.s.trim().slice(0, 60))}</b><span class="small">${esc(h.f.name.replace(/\.pdf$/i, ""))} p.${h.i}</span></span><button class="btn sm" data-cnt1="${n}" title="Count this one">+1</button></div>`).join("")
-    : '<div class="fr small">Not found in the text of these PDFs. A scanned drawing has no text until it is read: <b>Pages → tick → OCR</b>, or Ctrl+K → OCR.</div>';
+  box.innerHTML = hits.length ? `<div class="fr small" style="flex-direction:row;align-items:center;gap:6px;cursor:default">${hits.length}${hits.length >= 300 ? "+" : ""} found <span style="flex:1"></span>${exactTog()}<button class="btn sm pri" data-cntall="1" title="Put a count marker on every hit">&#10003; Count all</button></div>` + hits.map((h, n) => `<div class="fr" data-hit="${n}" style="flex-direction:row;align-items:center;gap:6px"><span style="flex:1;display:flex;flex-direction:column"><b>${esc(h.t.s.trim().slice(0, 60))}</b><span class="small">${esc(h.f.name.replace(/\.pdf$/i, ""))} p.${h.i}</span></span><button class="btn sm" data-cnt1="${n}" title="Count this one">+1</button></div>`).join("")
+    : '<div class="fr small" style="flex-direction:row;justify-content:flex-end;cursor:default">' + exactTog() + '</div><div class="fr small">Not found in the text of these PDFs. A scanned drawing has no text until it is read: <b>Pages → tick → OCR</b>, or Ctrl+K → OCR.</div>';
+  box.onchange = e => { if (e.target.dataset.exact) { findExact = e.target.checked; try { localStorage.setItem("tkFindExact", findExact ? "1" : "0"); } catch (x) {} findText(q); } };
   box.onclick = async e => {
+    if (e.target.closest("[data-exact]")) { e.stopPropagation(); return; }
     const ca = e.target.closest("[data-cntall],[data-cnt1]");
     if (ca) { e.stopPropagation(); return countTextHits(q, ca.dataset.cntall ? hits : [hits[+ca.dataset.cnt1]]); }
     const r = e.target.closest("[data-hit]"); if (!r) return; const h = hits[+r.dataset.hit];
