@@ -608,6 +608,22 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   ok((await T(() => zdTakeoff.S.view.s)) > 2.5 * s0 && (await T(() => zdTakeoff.S.tool)) !== "zoomwin", "zoom window zoomed to the box, then went back to the tool");
   await page.click("#bFit"); await wait(200);
 
+  console.log("no text selected on the drawing");
+  /* a drag or double-click over text on the drawing (a label, a marker's number, the legend) selected it, and Edge put its own
+     copy / search bar (mini menu) over the takeoff */
+  await T(() => { zdTakeoff.setTool("select"); const st = document.getElementById("stage"), d = document.createElement("div"); d.id = "selTest"; d.textContent = "D2 KITCHEN label text"; Object.assign(d.style, {position: "absolute", left: "200px", top: "200px", font: "16px Arial", color: "#000", zIndex: 5}); st.appendChild(d); window.getSelection().removeAllRanges(); });
+  const lb = await page.locator("#selTest").boundingBox();
+  await page.mouse.move(lb.x + 2, lb.y + lb.height / 2); await page.mouse.down(); await page.mouse.move(lb.x + lb.width - 2, lb.y + lb.height / 2, {steps: 8}); await page.mouse.up(); await wait(120);
+  const sDrag = await T(() => window.getSelection().toString());
+  await page.mouse.dblclick(lb.x + 30, lb.y + lb.height / 2); await wait(120);
+  const sDbl = await T(() => window.getSelection().toString());
+  const sOut = await T(() => { const r = document.createRange(); r.selectNodeContents(document.getElementById("status")); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); return s.toString(); });
+  await page.mouse.click(lb.x + lb.width + 80, lb.y + 120); await wait(120);
+  const sAfter = await T(() => window.getSelection().toString());
+  await T(() => document.getElementById("selTest").remove()); await page.keyboard.press("Escape"); await wait();
+  ok(sDrag === "" && sDbl === "", "a drag or a double-click over text on the drawing selects nothing — no browser copy / search bar over the takeoff → " + JSON.stringify([sDrag, sDbl]));
+  ok(sOut.length > 0 && sAfter === "", "text selected elsewhere on the page is cleared by a click on the drawing (" + sOut.length + " characters → " + JSON.stringify(sAfter) + ")");
+
   console.log("layout");
   await page.setViewportSize({width: 390, height: 844}); await wait(400);
   const over = await T(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
