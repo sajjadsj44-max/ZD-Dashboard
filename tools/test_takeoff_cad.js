@@ -233,9 +233,12 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
   const reread = await T(async () => { const Z = zdTakeoff, f = Z.P.proj.files.find(x => x.name === "zd_test_2018.dwg"), m0 = JSON.stringify(Z.cadMeta(f.id).map);
     const db = await new Promise(r => { const q = indexedDB.open("zdTakeoff"); q.onsuccess = () => r(q.result); });
     const rec = await new Promise(r => { const t = db.transaction("pdfs").objectStore("pdfs").get(f.id); t.onsuccess = () => r(t.result); });
-    rec.scene.ver = 0; await new Promise(r => { const t = db.transaction("pdfs", "readwrite").objectStore("pdfs").put(rec, f.id); t.onsuccess = r; });
-    delete Z.S.cadSc[f.id]; const sc = await Z.cadLoad(f.id); return {same: JSON.stringify(sc.pages[0].map) === m0, n: sc.pages[0].n, ver: sc.ver}; });
-  ok(reread.same && reread.n > 20 && reread.ver >= 1, "a scene from an older reader is read again from the DWG onto exactly the same page");
+    rec.scene.ver = 0; rec.data = new Uint8Array([37, 80, 68, 70]).buffer; await new Promise(r => { const t = db.transaction("pdfs", "readwrite").objectStore("pdfs").put(rec, f.id); t.onsuccess = r; });
+    delete Z.S.cadSc[f.id]; const sc = await Z.cadLoad(f.id);
+    const rec2 = await new Promise(r => { const t = db.transaction("pdfs").objectStore("pdfs").get(f.id); t.onsuccess = () => r(t.result); });
+    return {same: JSON.stringify(sc.pages[0].map) === m0, n: sc.pages[0].n, ver: sc.ver, pdf: rec2.data.byteLength, stored: rec2.scene.ver}; });
+  ok(reread.same && reread.n > 20 && reread.ver >= 2 && reread.stored === reread.ver, "a scene from an older reader is read again from the DWG onto exactly the same page, and kept (version " + reread.ver + ")");
+  ok(reread.pdf > 1000, "its PDF is written again with it — exports show the drawing as the screen does (" + reread.pdf + " bytes)");
 
   console.log("Project + PDFs");
   const bnd = await T(async () => { const Z = zdTakeoff, rec = await new Promise(r => { const q = indexedDB.open("zdTakeoff"); q.onsuccess = () => { const t = q.result.transaction("pdfs").objectStore("pdfs").get(Z.P.proj.files[0].id); t.onsuccess = () => r(t.result); }; });
@@ -245,6 +248,33 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
   const bf = path.join(os.tmpdir(), "tk_cad_" + dl.suggestedFilename()); await dl.saveAs(bf);
   const B = fs.readFileSync(bf), ML = "ZDTAKEOFF-BUNDLE-1\n".length, hl = B.readUInt32BE(ML), H = JSON.parse(B.slice(ML + 4, ML + 4 + hl).toString("utf8"));
   ok(H.pdfs.filter(p => p.srcSize > 0).length === 4, "Project + PDFs carries the 4 drawings' DWG / DXF files too");
+
+  console.log("a door / window schedule: MTEXT cells, a capitals-only font");
+  /* as AutoCAD draws a schedule: each cell an MTEXT, attachment bottom right, the box as wide as the cell, \pxqc; centring the
+     word in it (SILL's box narrower than the word); the style's font Technic, which has capitals only — AutoCAD shows
+     "lintle level" as LINTLE LEVEL. A scene read before boxes were centred is read again (CAD_VER 2) */
+  const BS = String.fromCharCode(92), mt = (x, y, w, st, t) => ["0", "MTEXT", "8", "0", "10", x, "20", y, "30", "0", "40", "10", "41", w, "71", "9", "7", st, "1", t];
+  const sty = (n, f) => ["0", "STYLE", "2", n, "70", "0", "40", "0", "41", "1", "50", "0", "71", "0", "42", "0.2", "3", f, "4", ""];
+  const dxfSch = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1015", "9", "$INSUNITS", "70", "1", "0", "ENDSEC",
+    "0", "SECTION", "2", "TABLES", "0", "TABLE", "2", "STYLE", "70", "2", ...sty("Technic", "technic_.ttf"), ...sty("Standard", "arial.ttf"), "0", "ENDTAB", "0", "ENDSEC",
+    "0", "SECTION", "2", "ENTITIES", "0", "LINE", "8", "0", "10", "0", "20", "0", "30", "0", "11", "600", "21", "0", "31", "0", "0", "LINE", "8", "0", "10", "0", "20", "200", "30", "0", "11", "600", "21", "200", "31", "0",
+    ...mt("290", "100", "190", "Technic", BS + "pxqc;SIZE"), ...mt("318", "100", "16.76", "Technic", BS + "pxqc;SILL"), ...mt("500", "100", "190", "Technic", BS + "pxqc;lintle level"), ...mt("500", "150", "190", "Standard", BS + "pxqc;lintle level"),
+    "0", "ENDSEC", "0", "EOF", ""].join("\n");
+  await page.setInputFiles("#fileIn", {name: "zd_schedule.dxf", mimeType: "application/dxf", buffer: Buffer.from(dxfSch, "utf8")});
+  await page.waitForFunction(() => { const Z = zdTakeoff, F = Z.P.proj.files.find(x => x.name === "zd_schedule.dxf"); return F && Z.S.fileId === F.id && Z.S.cadSc && Z.S.cadSc[F.id]; }, null, {timeout: 60000}); await wait(300);
+  const sch = await T(() => { const Z = zdTakeoff, F = Z.P.proj.files.find(x => x.name === "zd_schedule.dxf"), pg = Z.S.cadSc[F.id].pages[0], m = pg.map, k = 72 * m.uIn / m.den, X = x => m.ox + (x - m.x0) * k, out = [];
+    for (let i = 0; i < pg.tn; i++) { const M = pg.tM, j = 6 * i, w = Math.hypot(M[j], M[j + 1]) * pg.tW[i]; out.push({s: pg.tS[i], off: +(M[j + 4] + w / 2 - X(pg.tS[i] === "SIZE" ? 195 : pg.tS[i] === "SILL" ? 318 - 16.76 / 2 : 405)).toFixed(3), em: Math.hypot(M[j + 2], M[j + 3])}); }
+    return out; });
+  ok(sch.length === 4 && sch.every(t => Math.abs(t.off) < 0.01), "each word centred in its cell (MTEXT box, attachment bottom right, \\pxqc;) — SILL too, wider than its box → " + JSON.stringify(sch));
+  ok(sch.some(t => t.s === "LINTLE LEVEL") && sch.some(t => t.s === "lintle level") && sch.some(t => t.s === "SIZE"), "text in Technic (capitals only) shown in capitals as AutoCAD draws it: LINTLE LEVEL; the same text in Arial stays lintle level");
+  { const em = t => sch.find(x => x.s === t).em; ok(near(em("LINTLE LEVEL") / em("SIZE"), 0.76, 0.002) && near(em("lintle level"), em("SIZE"), 1e-9), "its small letters as small capitals, 0.76 of a capital's height (" + (em("LINTLE LEVEL") / em("SIZE")).toFixed(3) + ")"); }
+  const fb = await T(async () => { const Z = zdTakeoff, f = Z.P.proj.files.find(x => x.name === "zd_test_2018.dwg");
+    const db = await new Promise(r => { const q = indexedDB.open("zdTakeoff"); q.onsuccess = () => r(q.result); });
+    const get = () => new Promise(r => { const t = db.transaction("pdfs").objectStore("pdfs").get(f.id); t.onsuccess = () => r(t.result); }), put = rec => new Promise(r => { const t = db.transaction("pdfs", "readwrite").objectStore("pdfs").put(rec, f.id); t.onsuccess = r; });
+    const rec = await get(), src = rec.src; rec.scene.ver = 0; rec.src = new TextEncoder().encode("AC1032 not a drawing").buffer; await put(rec);
+    delete Z.S.cadSc[f.id]; const sc = await Z.cadLoad(f.id), msg = document.getElementById("toast").textContent;
+    rec.src = src; await put(rec); return {n: sc && sc.pages[0].n, msg}; });
+  ok(fb.n > 20 && /first read/.test(fb.msg), "a drawing that cannot be read again keeps the scene it was first read into (its objects and snaps), not just its PDF → " + JSON.stringify(fb));
 
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
   await browser.close();

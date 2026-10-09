@@ -9625,8 +9625,11 @@ function cadLoad(fid, proj = P.proj){
     if (rec && rec.scene && rec.scene.ver === C.CAD_VER) sc = rec.scene;
     else if (rec && rec.src) {
       try { const r = await cadWorker(rec.src, rec.name || "the drawing", meta.map);
-        if (r) sc = r.scene; else { busy("Reading " + (rec.name || "the drawing") + "…"); sc = C.cadScene(await C.cadRead(rec.src, rec.name || ""), {map: meta.map}); }
-        rec.scene = sc; await dbPut("pdfs", rec, fid).catch(() => {}); } finally { busy(""); } }
+        if (r) { sc = r.scene; if (r.pdf && r.pdf.byteLength) { rec.data = r.pdf.buffer.slice(r.pdf.byteOffset, r.pdf.byteOffset + r.pdf.byteLength); delete rec.pdfSha; } }   // its PDF written again too: exports show it as the screen does
+        else { busy("Reading " + (rec.name || "the drawing") + "…"); sc = C.cadScene(await C.cadRead(rec.src, rec.name || ""), {map: meta.map}); }
+        rec.scene = sc; await dbPut("pdfs", rec, fid).catch(() => {}); }
+      catch (e) { if (!rec.scene) throw e; sc = rec.scene; toast("Shown as it was first read — the drawing could not be read again here (" + (e.message || e) + ")", 6000); }   // the scene kept from before: still its objects
+      finally { busy(""); } }
     S.cadSc[fid] = sc; delete S.cadP[fid]; return sc;
   })().catch(e => { S.cadSc[fid] = null; delete S.cadP[fid]; toast("Shown from its PDF — the drawing's objects could not be read here (" + (e.message || e) + ")", 6000); return null; });
 }
