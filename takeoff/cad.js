@@ -836,7 +836,7 @@ export async function cadDrawAsync(ctx, pg, v, o, stale){
 /* ------------------------------------------------------------------ the takeoff's index of the page, straight from the scene
    (no PDF parsed): its lines as indexPage makes them from a PDF — [x0, y0, x1, y1, flags (1 on a curve, 2 dashed, 4 a fill's
    outline), subpath, style, layer] with styles "#rrggbb|width" — hatch pattern lines left out (they are noise to snap to); its text
-   as [{s, x, y, w, h}] (x, y the baseline's start) */
+   as [{s, x, y, w, h, r}] (x, y the baseline's start, r its turn) */
 export function cadIndex(pg, max){
   const segs = [], styles = [], six = new Map(), O = pg.ops, X = pg.xy; let sp = 0; max = max || 600000;
   for (let i = 0; i < pg.n && segs.length < max; i++) {
@@ -853,7 +853,7 @@ export function cadIndex(pg, max){
       else { push(cx, cy, sx, sy, f0); cx = sx; cy = sy; } }
   }
   const texts = [];
-  for (let i = 0; i < pg.tn; i++) { const m = 6 * i, M = pg.tM, em = Math.hypot(M[m + 2], M[m + 3]); texts.push({s: pg.tS[i], x: M[m + 4], y: M[m + 5], w: Math.hypot(M[m], M[m + 1]) * pg.tW[i], h: em || 6, li: pg.tL[i]}); }
+  for (let i = 0; i < pg.tn; i++) { const m = 6 * i, M = pg.tM, em = Math.hypot(M[m + 2], M[m + 3]); texts.push({s: pg.tS[i], x: M[m + 4], y: M[m + 5], w: Math.hypot(M[m], M[m + 1]) * pg.tW[i], h: em || 6, r: Math.atan2(M[m + 1], M[m]), li: pg.tL[i]}); }   // r: the baseline's turn on the page, as a PDF's text has it
   return {segs, styles, texts};
 }
 

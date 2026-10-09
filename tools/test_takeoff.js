@@ -522,7 +522,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   ok(pc.D1 === 2 && pc.D2 === 1 && pc.D3 === 1 && pc.D4 === 1 && pc.W1 === 1 && pc["W1'"] === 1 && pc.V1 === 1 && pc.KW2 === 1 && pc.SD1 === 1 && pc.W3 === 1, "tags in every spelling: D1, D-1, DR-02, DOOR 3, D + 4 split, W over 1 stacked, W1', V-1, KW2, SD1, WN-3 → " + JSON.stringify(pc));
   ok(tg.inSched === 3 && tg.sched.D1 && tg.sched.D1.w === 3 && tg.sched.D1.h === 7 && tg.sched.D1.qty === 12 && tg.sched.W1.w === 4 && tg.sched.W1.h === 5 && tg.sched.W1.qty === 6 && near(tg.sched.V1.w, 2.953, 0.001), "schedule rows left out of the count, sizes read (3.000 × 7.000 qty 12; 4.000 × 5.000 qty 6; 900 × 600 mm → 2.953 × 1.969 ft)");
   ok(await T(() => ["D1", "D-01", "Dr 1", "DOOR-1", "d.01"].every(s => (zdTakeoff.tagParse(s) || {}).k === "D1") && zdTakeoff.tagParse("BED ROOM") === null && zdTakeoff.tagParse("W1A").k === "W1A"), "D1, D-01, Dr 1, DOOR-1, d.01 are one mark; BED ROOM is not a tag");
-  const saved = await T(() => { const S = zdTakeoff.S, k = S.key, old = S.texts[k]; S.texts[k] = [{s: "D1", x: 600, y: 300, w: 8, h: 6}, {s: "D-1", x: 700, y: 330, w: 12, h: 6}, {s: "W2", x: 650, y: 360, w: 8, h: 6}, {s: "D1", x: 600, y: 500, w: 8, h: 6}, {s: "3'-0\"x7'-0\"", x: 615, y: 500, w: 40, h: 6}]; window.__oldTexts = old; return true; });
+  const saved = await T(() => { const S = zdTakeoff.S, k = S.key, old = S.texts[k]; S.texts[k] = [{s: "D1", x: 600, y: 300, w: 8, h: 6}, {s: "D-1", x: 700, y: 330, w: 12, h: 6}, {s: "W2", x: 650, y: 360, w: 8, h: 6}, {s: "DOOR SCHEDULE", x: 600, y: 488, w: 60, h: 6}, {s: "D1", x: 600, y: 500, w: 8, h: 6}, {s: "3'-0\"x7'-0\"", x: 615, y: 500, w: 40, h: 6}]; window.__oldTexts = old; return true; });
   const cr = await T(() => zdTakeoff.agentCount("doors"));
   ok(saved && cr && cr.counts && cr.counts.D1 === 2 && !cr.counts.W2, "agent: count doors → D1 2 Nos (the schedule row left out, windows not counted)");
   const cw = await T(() => zdTakeoff.agentCount("windows"));
@@ -542,6 +542,36 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   await T(k => zdTakeoff.gotoPage(k.split(":")[0], 1), P1); await wait(600);
   const sw = await T(async () => { await zdTakeoff.indexPage(); return zdTakeoff.doorSwings(); });
   ok(sw && sw.length === 1 && near(sw[0].w, 3, 0.25) && sw[0].leaves === 1, `door swing symbols: ${sw && sw.length} door, leaf ${sw && sw[0] && sw[0].w.toFixed(2)} ft (3'-0" door in the fixture)`);
+  console.log("doors / windows: tags beside room labels, a schedule's symbol column, turned tags");
+  /* as on a real sheet (JADE 2nd floor, DWG): a plan tag with a room's label written beside it is a door on the plan, not a
+     schedule row, and the room's size is not the door's; the schedule is a table (a heading, rows under each other) whose rows
+     also carry the tag's symbol beside its number; tags along a skewed wall are turned, some in two pieces */
+  const tg2 = await T(() => { const r = -0.6, c = Math.cos(r), s = Math.sin(r), at = (x, y, u) => ({x: x + u * c, y: y + u * s, r});
+    return zdTakeoff.tagsOf([
+      {s: "D2", x: 100, y: 100, w: 8, h: 5}, {s: "KITCHEN", x: 112, y: 94, w: 28, h: 4}, {s: "6'-6\"X9'-7\"", x: 112, y: 100, w: 40, h: 4},
+      {s: "D2", x: 300, y: 160, w: 8, h: 5}, {s: "BALCONY 6'-0\"X 6'-0\"", x: 311, y: 160, w: 60, h: 4},
+      {s: "W4", x: 300, y: 260, w: 8, h: 5}, {s: "12'-0\"X11'-2\"", x: 320, y: 260, w: 40, h: 4},
+      {s: "D2", x: 500, y: 100, w: 8, h: 5}, {s: "D2", x: 500.3, y: 100.2, w: 8, h: 5},
+      {s: "D2\"", x: 500, y: 300, w: 9, h: 5},
+      Object.assign({s: "D", w: 4, h: 5}, at(700, 200, 0)), Object.assign({s: "2", w: 4, h: 5}, at(700, 200, 4.5)),
+      Object.assign({s: "W4", w: 8, h: 5}, at(700, 300, 0)), {s: "5'-0\"X8'-6\"", x: 712, y: 296, w: 40, h: 4},
+      {s: "DOOR WINDOW SCHEDULE", x: 40, y: 380, w: 90, h: 8}, {s: "NO.", x: 62, y: 392, w: 12, h: 5}, {s: "SIZE", x: 110, y: 392, w: 16, h: 5},
+      {s: "D1", x: 28, y: 405, w: 6, h: 3.5}, {s: "D1", x: 62, y: 406, w: 8, h: 5}, {s: "3'-9\"X8'-0\"", x: 105, y: 406, w: 30, h: 5},
+      {s: "D2", x: 28, y: 423, w: 6, h: 3.5}, {s: "D2", x: 62, y: 424, w: 8, h: 5}, {s: "3'-6\"X8'-0\"", x: 105, y: 424, w: 30, h: 5}, {s: "WOODEN DOOR", x: 150, y: 424, w: 40, h: 5},
+      {s: "D2''", x: 27, y: 441, w: 7, h: 3.5}, {s: "D2\"", x: 61, y: 442, w: 9, h: 5}, {s: "3'-3\"X8'-0\"", x: 105, y: 442, w: 30, h: 5},
+      {s: "W4", x: 28, y: 459, w: 6, h: 3.5}, {s: "W4", x: 62, y: 460, w: 8, h: 5}, {s: "4'-0\"X8'-6\"", x: 105, y: 460, w: 30, h: 5}]); });
+  const pc2 = Object.fromEntries(Object.entries(tg2.plan).map(([k, v]) => [k, v.length]));
+  ok(pc2.D2 === 4 && pc2.W4 === 2 && pc2["D2''"] === 1 && !pc2.D1 && Object.keys(pc2).length === 3, "plan tags beside a room's label counted: D2 × 4 (beside KITCHEN 6'-6\"X9'-7\", beside BALCONY 6'-0\"X 6'-0\", one written twice over itself, one turned in two pieces), W4 × 2 (one turned), D2\" read as D2''; the schedule's symbol column not counted → " + JSON.stringify(pc2));
+  ok(tg2.sched.D2 && tg2.sched.D2.w === 3.5 && tg2.sched.D2.h === 8 && tg2.sched.W4 && tg2.sched.W4.w === 4 && tg2.sched.W4.h === 8.5 && tg2.sched["D2''"] && tg2.sched["D2''"].w === 3.25 && tg2.sched.D1 && tg2.sched.D1.w === 3.75 && Object.keys(tg2.sched).length === 4, "sizes from the schedule table only: D1 3.750, D2 3.500 × 8.000, D2'' 3.250, W4 4.000 × 8.500 — not a room's (6'-6\" × 9'-7\") → " + JSON.stringify(tg2.sched));
+  ok(tg2.inSched === 8, "8 marks in the schedule left out: 4 rows, each its symbol and its number (" + tg2.inSched + ")");
+  const turned = await T(() => { const r = -0.6, c = Math.cos(r), s = Math.sin(r), e = [700 + 4.25 * c + 2.5 * s, 200 + 4.25 * s - 2.5 * c];
+    return zdTakeoff.tagsOf([{s: "D", x: 700, y: 200, w: 4, h: 5, r}, {s: "2", x: 700 + 4.5 * c, y: 200 + 4.5 * s, w: 4, h: 5, r}]).plan.D2.map(p => Math.hypot(p[0] - e[0], p[1] - e[1])); });
+  ok(turned.length === 1 && turned[0] < 0.01, "a turned two-piece tag's marker sits at its middle, turned with it (" + turned.map(v => v.toFixed(3)) + " pt off)");
+  await T(() => { const S = zdTakeoff.S; window.__old3 = S.texts[S.key]; S.texts[S.key] = [{s: "D2", x: 600, y: 300, w: 8, h: 6}, {s: "D2", x: 700, y: 330, w: 8, h: 6}, {s: "D2", x: 650, y: 400, w: 8, h: 6}, {s: "D2'", x: 600, y: 450, w: 10, h: 6}, {s: "D2'", x: 700, y: 480, w: 10, h: 6}]; });
+  const c1 = await T(() => zdTakeoff.agentCount("d2")), c2 = await T(() => zdTakeoff.agentCmd("count D2 and D2'"));
+  ok(c1 && c1.counts && c1.counts.D2 === 3 && !c1.counts["D2'"] && c1.others && c1.others["D2'"] === 2 && /Not in this count: D2' 2 Nos/.test(await page.innerText("#aiLog")), "count D2 → 3 Nos; D2' is another mark (its own schedule size): not counted, but said (D2' 2 Nos) → " + JSON.stringify(c1));
+  ok(c2 && c2.counts && c2.counts.D2 === 3 && c2.counts["D2'"] === 2, "count D2 and D2' → both marks counted → " + JSON.stringify(c2 && c2.counts));
+  await T(() => { zdTakeoff.S.texts[zdTakeoff.S.key] = window.__old3; });
 
 
   console.log("sketch to scale, explode, offset, lasso, keys");
