@@ -3,8 +3,11 @@
 
      await require("./zd_unlock")(ctx);   // once, right after browser.newContext()
 
-   ZD_PASSWORD overrides the password (default: the dashboards' own). */
-module.exports = async function zdUnlock(ctx, pw){
+   ZD_PASSWORD overrides the password (default: the dashboards' own). {sw: true} as the third argument leaves service workers on. */
+module.exports = async function zdUnlock(ctx, pw, opts){
+  /* no service worker in a test browser unless asked for ({sw: true}): a worker's own requests (the CDN libraries it caches) bypass
+     the test's page.route() answers, which would leave the app without pdf.js in an offline run */
+  if (!(opts && opts.sw)) await ctx.addInitScript(() => { try { delete Navigator.prototype.serviceWorker; } catch (e) {} });
   await ctx.addInitScript(p => {
     const go = () => { const i = document.getElementById("zd-lock-input"), b = i && i.parentNode.querySelector("button"); if (!b) return false;
       i.value = p; i.dispatchEvent(new Event("input", {bubbles: true})); b.click(); return true; };

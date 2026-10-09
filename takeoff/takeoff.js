@@ -649,7 +649,7 @@ async function gotoPage(fileId, pageNo, pn = ACT){
   pn.base = pn.page.getViewport({scale: 1});
   pn.rendered = null; pn.el.hi.style.display = "none"; { const lc = pn.el.low; lc.width = lc.width; }   // the last page's picture goes at once
   pn.autoShow = null; pn.cmp = null; pn.el.cmpLegend.style.display = "none"; pn.iso = null;
-  if (here()) { draftClear(); S.resume = null; S.gap = null; S.multi.clear(); S.hover = null; S.measure = null; S.measures = []; S.snap = null; }
+  if (here()) { draftClear(); S.resume = null; S.gap = null; S.multi.clear(); S.hover = null; S.measure = null; S.measures = []; S.snap = null; S.typeHint = null; if ($("stType")) $("stType").textContent = ""; }
   proj.last = {file: fileId, page: pageNo}; if (proj === P.proj) save(); else dbPut("projects", proj).catch(() => {});
   if (here()) { $("pageSel").value = fileId + "|" + pageNo; pgMark(); }
   pn.el.drop.style.display = "none"; if (here()) bgMark();
@@ -710,9 +710,84 @@ async function compareDialog(){
   if (v.v === "off") { S.cmp = null; $("cmpLegend").style.display = "none"; renderLow(); renderHi(true); return; }
   const o = opts[+v.v];
   try { await loadLayers(o.f.id); S.cmp = {file: o.f.id, page: o.i, pg: await (await doc(o.f.id)).getPage(o.i), dx: 0, dy: 0, name: o.f.name.replace(/\.pdf$/i, "") + " p." + o.i}; } catch (e) { return toast(e.message, 5000); }
-  $("cmpLegend").innerHTML = `<b style="color:#2a52d6">■ this page</b> · <b style="color:#d03b3b">■ ${esc(S.cmp.name)}</b> · dark = same <button class="btn sm" id="cmpOff">Off</button>`; $("cmpLegend").style.display = "flex";
+  $("cmpLegend").innerHTML = `<b style="color:#2a52d6">■ this page</b> · <b style="color:#d03b3b">■ ${esc(S.cmp.name)}</b> · dark = same <button class="btn sm" id="cmpDiff" title="List the measurements that sit on changed drawing and flag them for review">Diff → quantities</button> <button class="btn sm" id="cmpOff">Off</button>`; $("cmpLegend").style.display = "flex";
   $("cmpOff").onclick = () => { S.cmp = null; $("cmpLegend").style.display = "none"; renderLow(); renderHi(true); };
+  $("cmpDiff").onclick = revisionDiff;
   renderLow(); renderHi(true);
+}
+/* ------------------------------------------------------------------ revision diff → the measurements to re-check
+   With Compare on (this page against another revision, lined up with Alt + arrows), both sheets are drawn at the same size and
+   reduced to a grid of cells; a cell inked on one sheet and not on (or next to) the same cell of the other is a change. Each
+   measurement on this page is given the band of cells it depends on — an area's boundary, a run's length, a counted point's
+   neighbourhood, an opening's span — and one whose band changed is flagged. Flagged measurements join the review queue (the same
+   one the agents' work is in) until they are ✓ checked; nothing is re-measured or changed for you. */
+function diffCells(a, b, W, H){   // two ink grids -> {add, rem} grids of changed cells (ink with no ink in the 3 × 3 cells round it on the other sheet)
+  const add = new Uint8Array(W * H), rem = new Uint8Array(W * H);
+  const nb = (g, x, y) => { for (let j = Math.max(0, y - 1); j <= Math.min(H - 1, y + 1); j++) for (let i = Math.max(0, x - 1); i <= Math.min(W - 1, x + 1); i++) if (g[j * W + i]) return true; return false; };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const k = y * W + x; if (a[k] && !nb(b, x, y)) add[k] = 1; if (b[k] && !nb(a, x, y)) rem[k] = 1; }
+  return {add, rem};
+}
+function bandCells(segs, r, cell, W, H){   // the set of cells (cell = one cell's side in pt) within r (pt) of the segments [[a, b], …]; a lone point is [p, p]
+  const out = new Set(), rc = Math.ceil(r / cell);
+  segs.forEach(([a, b]) => { const n = Math.max(1, Math.ceil(dist(a, b) / cell));
+    for (let i = 0; i <= n; i++) { const x = Math.floor((a[0] + (b[0] - a[0]) * i / n) / cell), y = Math.floor((a[1] + (b[1] - a[1]) * i / n) / cell);
+      for (let j = Math.max(0, y - rc); j <= Math.min(H - 1, y + rc); j++) for (let q = Math.max(0, x - rc); q <= Math.min(W - 1, x + rc); q++) out.add(j * W + q); } });
+  return out;
+}
+function flagByChange(items, band, ch, ink){   // -> [{it, changed, frac}] of the items whose band changed (≥ 3 cells and ≥ 12 % of the ink in it)
+  const out = [];
+  items.forEach(it => { const B = band(it); if (!B) return; let c = 0, n = 0; B.forEach(k => { if (ch[k]) c++; if (ink[k]) n++; });
+    const frac = c / Math.max(n, 1); if (c >= 3 && frac >= 0.12) out.push({it, changed: c, frac}); });
+  return out.sort((x, y) => y.frac - x.frac);
+}
+async function revisionDiff(){
+  const cmp = S.cmp; if (!S.page || !cmp || !cmp.pg) return toast("Turn on Compare first (Compare with another revision), line the sheets up, then run the diff", 5000);
+  const key = S.key, base = S.base, sc = Math.min(2.5, 2400 / Math.max(base.width, base.height)), cell = 4, w = Math.ceil(base.width * sc), h = Math.ceil(base.height * sc), Wc = Math.ceil(w / cell), Hc = Math.ceil(h / cell);
+  busy("Comparing the two sheets…");
+  try {
+    const ink = async (pg, file, dx, dy) => {
+      const cv = document.createElement("canvas"); cv.width = w; cv.height = h; const cx = cv.getContext("2d", {willReadFrequently: true}); cx.fillStyle = "#fff"; cx.fillRect(0, 0, w, h);
+      await sliced(pg.render({...lay(file), canvasContext: cx, viewport: pg.getViewport({scale: sc}), transform: [1, 0, 0, 1, dx * sc, dy * sc]})).promise;
+      const d = cx.getImageData(0, 0, w, h).data, g = new Uint8Array(Wc * Hc);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4; if (d[i + 3] > 40 && d[i] + d[i + 1] + d[i + 2] < 510) g[((y / cell) | 0) * Wc + ((x / cell) | 0)] = 1; }
+      return g;
+    };
+    const A = await ink(S.page, S.fileId, 0, 0), B = await ink(cmp.pg, cmp.file, cmp.dx, cmp.dy);
+    if (key !== S.key) return;
+    const {add, rem} = diffCells(A, B, Wc, Hc), ch = new Uint8Array(Wc * Hc), inkU = new Uint8Array(Wc * Hc); let nAdd = 0, nRem = 0;
+    for (let i = 0; i < ch.length; i++) { if (add[i]) nAdd++; if (rem[i]) nRem++; ch[i] = add[i] | rem[i]; inkU[i] = A[i] | B[i]; }
+    const items = P.proj.items.filter(it => onPage(it) && !hiddenItem(it) && it.pts && it.pts.length), claimed = new Uint8Array(ch.length);
+    const band = it => { const k = itemScale(it), c = cond(it.cond); if (!k || !c) return null; const m = Math.max(4, 0.75 * k); let segs = [], rad = m;
+      const P2 = it.pts, loop = c.type === "area" && it.shape !== "circle";
+      if (it.shape === "circle" && P2.length >= 2) { const R = dist(P2[0], P2[1]); for (let a = 0; a < 16; a++) segs.push([[P2[0][0] + R * Math.cos(a * Math.PI / 8), P2[0][1] + R * Math.sin(a * Math.PI / 8)], [P2[0][0] + R * Math.cos((a + 1) * Math.PI / 8), P2[0][1] + R * Math.sin((a + 1) * Math.PI / 8)]]); }
+      else if (c.type === "count") { segs = P2.map(p => [p, p]); rad = 1.5 * k; }
+      else { for (let j = 1; j < P2.length; j++) segs.push([P2[j - 1], P2[j]]); if (loop && P2.length > 2) segs.push([P2[P2.length - 1], P2[0]]); if (it.kind === "open") rad = k; }
+      const set = bandCells(segs, rad, cell / sc, Wc, Hc); set.forEach(i => { claimed[i] = 1; }); return set; };
+    const flagged = flagByChange(items, band, ch, inkU);
+    // changes not near any measurement: clusters of changed cells (cells within 6 of each other join), the largest first
+    const seen = new Uint8Array(ch.length), clusters = [];
+    for (let i = 0; i < ch.length; i++) { if (!ch[i] || claimed[i] || seen[i]) continue; const st = [i]; seen[i] = 1; let n = 0, x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+      while (st.length) { const q = st.pop(), x = q % Wc, y = (q / Wc) | 0; n++; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+        for (let j = Math.max(0, y - 6); j <= Math.min(Hc - 1, y + 6); j++) for (let p = Math.max(0, x - 6); p <= Math.min(Wc - 1, x + 6); p++) { const t = j * Wc + p; if (ch[t] && !claimed[t] && !seen[t]) { seen[t] = 1; st.push(t); } } }
+      if (n >= 12) clusters.push({n, box: [x0 * cell / sc, y0 * cell / sc, (x1 + 1) * cell / sc, (y1 + 1) * cell / sc]}); }
+    clusters.sort((a, b) => b.n - a.n);
+    busy("");
+    const k0 = hereScale([0, 0]), pct = (100 * (nAdd + nRem) / Math.max(1, A.reduce((t, v) => t + v, 0) + B.reduce((t, v) => t + v, 0))).toFixed(1);
+    const name = it => esc(it.label || kindName(it, cond(it.cond))) + " — " + esc(cond(it.cond).name);
+    const qtyOf = it => { const k = itemScale(it); return k ? rowsOf(it, k).reduce((t, r) => t + r.qty, 0) : 0; };
+    const body = `<p>This page against <b>${esc(cmp.name)}</b>: <b style="color:#2a52d6">${nAdd}</b> cells only on this page, <b style="color:#d03b3b">${nRem}</b> only on the other (${pct} % of the drawn cells changed).</p>
+      ${flagged.length ? `<p style="margin-top:8px"><b>${flagged.length}</b> of ${items.length} measurements sit on changed drawing — check them against the new revision:</p>
+        <div style="max-height:260px;overflow:auto;margin-top:4px">${flagged.map((f, i) => `<label class="pk" style="display:block"><input type="checkbox" data-df="${i}" checked> ${name(f.it)} <span class="small">· ${fq(qtyOf(f.it), cond(f.it.cond).unit)} ${esc(cond(f.it.cond).unit)} · ${Math.round(100 * f.frac)} % of the drawing under it changed</span></label>`).join("")}</div>`
+        : `<p style="margin-top:8px;color:var(--green)"><b>No measurement sits on changed drawing.</b> Their quantities should stand.</p>`}
+      ${clusters.length ? `<p style="margin-top:8px"><b>${clusters.length}</b> changed place${clusters.length > 1 ? "s" : ""} with no measurement near ${clusters.length > 1 ? "them" : "it"} (new or removed work not yet measured?)${k0 ? ":" : "."}</p>
+        <div class="small" style="max-height:110px;overflow:auto">${clusters.slice(0, 10).map(c => { const k = hereScale([c.box[0], c.box[1]]); return "• " + (k ? "near x " + f3((c.box[0] + c.box[2]) / 2 / k) + ", y " + f3((c.box[1] + c.box[3]) / 2 / k) + " ft, " + f3((c.box[2] - c.box[0]) / k) + " × " + f3((c.box[3] - c.box[1]) / k) + " ft" : "at (" + Math.round(c.box[0]) + ", " + Math.round(c.box[1]) + ") pt") + " · " + c.n + " cells"; }).join("<br>")}</div>` : ""}
+      <p class="small" style="margin-top:8px">A flagged measurement is put back in the review queue (✓ Check when it is right for the new revision). Nothing is re-measured.</p>`;
+    const v = await ask("Revision diff", body, flagged.length ? "Flag for review" : "", () => ({sel: [...document.querySelectorAll("#dlgB [data-df]:checked")].map(x => +x.dataset.df)}));
+    if (!v || !flagged.length) return;
+    const ids = v.sel.map(i => flagged[i].it.id), at = new Date().toISOString();
+    mutate(() => { v.sel.forEach(i => { const it = flagged[i].it; it.revFlag = {vs: cmp.name, at}; delete it.qa; }); }, "Flag " + ids.length + " measurement" + (ids.length === 1 ? "" : "s") + " for the new revision");
+    setSel(ids); setTool("select"); zoomTo(ids); refresh(); toast(ids.length + " measurement" + (ids.length === 1 ? "" : "s") + " flagged for review against " + cmp.name, 4000);
+  } catch (e) { busy(""); toast("Revision diff failed: " + e.message, 5000); }
 }
 async function renderLow(pn = ACT){   // drawn off screen, then shown only if the page is still the one on screen
   if (cadOn(pn)) return cadLow(pn);   // an AutoCAD drawing: from its scene
@@ -856,7 +931,7 @@ async function indexPage(){
   if (!S.texts[key]) {
     try {
       const tc = await page.getTextContent();
-      S.texts[key] = withOcr(key, tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; }));
+      S.texts[key] = withOcr(key, tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6, r: Math.atan2(base.transform[1] * t.transform[0] + base.transform[3] * t.transform[1], base.transform[0] * t.transform[0] + base.transform[2] * t.transform[1])}; }));
     } catch (e) { S.texts[key] = withOcr(key, []); }
   }
   if (key === S.key && P.proj && !P.proj.scales[key]) {   // a scale saved in the PDF first, then a scale note in its text
@@ -870,8 +945,13 @@ async function indexPage(){
     if (c.length) { P.proj.scales[key] = {ptPerFt: c[0].ptPerFt, how: "note", text: c[0].text, note: c[0].note || "", factor: c[0].factor || 1, verified: false, at: new Date().toISOString()}; save(); toast(keyName(key) + ": scale read from the drawing, " + c[0].label + " — check it against a known dimension (scale chip → Verify)", 5200);
       checkScale(key, !S.agentRun); }   // (an agent working through the pages checks it itself, with no dialog in its way)
   }
+  if (key === S.key && P.proj && !P.proj.scales[key] && S.geo[key] && S.texts[key]) {   // no note, nothing saved in the PDF: the dimension strings
+    let d = null; try { d = await scaleFromDims(key); } catch (e) {}
+    if (d && key === S.key && !P.proj.scales[key]) { P.proj.scales[key] = {ptPerFt: d.ptPerFt, how: "dims", text: d.label, note: d.agree + " of " + d.dims + " dimension strings agree", factor: 1, verified: false, at: new Date().toISOString()}; save();
+      toast(keyName(key) + ": scale read from " + d.agree + " dimension strings — " + d.label + " · not verified, measure one dimension to check", 6000); }
+  }
   if (key === S.key && P.proj && (P.proj.scales[key] || {}).how === "cad") cadUnitsCheck(key);
-  if (key === S.key) refresh();
+  if (key === S.key) { try { showTypeHint(key); } catch (e) {} refresh(); }
 }
 /* ------------------------------------------------------------------ scale check: the room sizes written on the drawing
    (BEDROOM 12'-9"x11'-0") against the room as drawn. From each room's name the clear span to the walls is found left,
@@ -909,6 +989,52 @@ async function scaleFromRooms(key){
 }
 const STD_SCALES = [[1 / 32, "1/32\""], [1 / 16, "1/16\""], [3 / 32, "3/32\""], [1 / 8, "1/8\""], [3 / 16, "3/16\""], [1 / 4, "1/4\""], [3 / 8, "3/8\""], [1 / 2, "1/2\""], [3 / 4, "3/4\""], [1, "1\""], [1.5, "1-1/2\""], [3, "3\""]]
   .map(([v, t]) => ({ptPerFt: 72 * v, label: t + " = 1'-0\""})).concat([20, 25, 50, 75, 100, 125, 150, 200, 250, 500].map(n => ({ptPerFt: 864 / n, label: "1:" + n})));
+/* ------------------------------------------------------------------ scale from the dimension strings
+   For a sheet with no scale note and no scale saved in the PDF: every dimension written as a length (12'-6") is found with the
+   dimension line it labels — a line along the text with a tick, arrow or extension line at each side of it — and
+   (line length ÷ written length) is that dimension's pt per ft. Three or more dimensions that agree within 2 %
+   (and are at least half of all that were read) give the scale. Chain dimensions (one line, many ticks) use the two ticks
+   either side of the text. It is not marked verified: the first dimension measured is the check. */
+function dimEstimates(T, g){   // -> [{ptPerFt, ft, s}] one per dimension string with a dimension line
+  const out = []; if (!T || !g || !g.segs.length) return out;
+  const G = g.segs, near = 1.6;
+  T.forEach(t => {
+    const ft = parseFt(String(t.s).replace(/\s+/g, " ")); if (!/['’′"”″]/.test(t.s) || !(ft >= 2) || !(ft <= 400) || !(t.w > 0) || out.length > 400) return;
+    const r = t.r || 0, deg = Math.abs(((r * 180 / Math.PI) % 180 + 180) % 180), horiz = deg < 3 || deg > 177, vert = Math.abs(deg - 90) < 3;
+    if (!horiz && !vert) return;
+    const h = t.h || 6, w = t.w;   // along-axis coordinate a, across-axis c: the page's x, y for horizontal text, y, x for vertical
+    const A = (x, y) => horiz ? x : y, C = (x, y) => horiz ? y : x;
+    const up = horiz ? [0, -1] : [Math.sin(r) > 0 ? 1 : -1, 0], dir = horiz ? [Math.cos(r) > 0 ? 1 : -1, 0] : [0, Math.sin(r) > 0 ? -1 : 1];
+    const cen = [t.x + dir[0] * w / 2 + up[0] * h * 0.35, t.y + dir[1] * w / 2 + up[1] * h * 0.35], ca = A(cen[0], cen[1]), cc = C(cen[0], cen[1]);
+    const R = 2000, box = horiz ? [cen[0] - R, cen[1] - 3 * h, cen[0] + R, cen[1] + 3 * h] : [cen[0] - 3 * h, cen[1] - R, cen[0] + 3 * h, cen[1] + R];
+    const line = [], marks = [];
+    segsIn(g, ...box).forEach(i => { const s2 = G[i], a0 = A(s2[0], s2[1]), a1 = A(s2[2], s2[3]), c0 = C(s2[0], s2[1]), c1 = C(s2[2], s2[3]), len = Math.hypot(a1 - a0, c1 - c0);
+      if (len < 0.3) return;
+      if (Math.abs(c1 - c0) < 0.02 * len + 0.05 && !(s2[4] & 9) && Math.abs(c0 - cc) <= 2.6 * h) line.push({a0: Math.min(a0, a1), a1: Math.max(a0, a1), c: (c0 + c1) / 2});
+      else if (Math.abs(c1 - c0) > 0.25 * len) marks.push({a0, a1, c0, c1}); });
+    // the dimension line: the nearest run along the text (all pieces on its own across-position, joined — the text may sit in a gap)
+    const rows = []; line.forEach(l => { let row = rows.find(q => Math.abs(q.c - l.c) < 0.5); if (!row) rows.push(row = {c: l.c, p: []}); row.p.push(l); });
+    let best = null;
+    rows.forEach(row => { row.p.sort((x, y) => x.a0 - y.a0); const m = [];
+      row.p.forEach(l => { const q = m[m.length - 1]; if (q && l.a0 <= q.a1 + 0.6 + (q.a1 < ca && l.a0 > ca ? w + 4 * h : 0)) q.a1 = Math.max(q.a1, l.a1); else m.push({a0: l.a0, a1: l.a1}); });
+      const sp = m.find(q => q.a0 <= ca && q.a1 >= ca); if (sp && sp.a1 - sp.a0 >= 0.8 * w) { const d = Math.abs(row.c - cc); if (!best || d < best.d) best = {d, c: row.c, a0: sp.a0, a1: sp.a1}; } });
+    if (!best) return;
+    const ticks = []; marks.forEach(m => { const lo = Math.min(m.c0, m.c1), hi = Math.max(m.c0, m.c1);
+      if (lo <= best.c + near && hi >= best.c - near) { const f = (best.c - m.c0) / (m.c1 - m.c0 || 1), a = f >= 0 && f <= 1 ? m.a0 + (m.a1 - m.a0) * f : (Math.abs(m.c0 - best.c) < Math.abs(m.c1 - best.c) ? m.a0 : m.a1); if (a >= best.a0 - near && a <= best.a1 + near) ticks.push(a); } });
+    const Lt = Math.max(-Infinity, ...ticks.filter(a => a < ca - 0.2 * w)), Rt = Math.min(Infinity, ...ticks.filter(a => a > ca + 0.2 * w));
+    if (!isFinite(Lt) || !isFinite(Rt) || Rt - Lt < 0.4 * w) return;
+    const k = (Rt - Lt) / ft; if (k >= 1.2 && k <= 260) out.push({ptPerFt: k, ft, s: t.s});
+  });
+  return out;
+}
+async function scaleFromDims(key){
+  const g = S.geo[key], T = S.texts[key]; if (!g || !T) return null;
+  const est = dimEstimates(T, g); if (est.length < 3) return null;
+  let best = null; est.forEach(e => { const grp = est.filter(x => Math.abs(x.ptPerFt / e.ptPerFt - 1) < 0.02); if (!best || grp.length > best.length) best = grp; });
+  if (best.length < 3 || best.length < est.length / 2) return null;
+  const v = best.map(x => x.ptPerFt).sort((a, b) => a - b), med = v[v.length >> 1], std = STD_SCALES.find(x => Math.abs(x.ptPerFt / med - 1) < 0.02);
+  return {ptPerFt: std ? std.ptPerFt : med, label: std ? std.label : "1 ft = " + med.toFixed(3) + " pt", dims: est.length, agree: best.length, std: !!std};
+}
 async function checkScale(key, ask2){
   const sc = P.proj && P.proj.scales[key]; if (!sc || sc.verified || sc.how === "calibrated") return null;
   let ev; try { ev = await scaleFromRooms(key); } catch (e) { ev = null; }
@@ -1062,15 +1188,140 @@ function snapAt(q, ex){   // ex(item, i): points of the drawing's own takeoff to
     const c = g.cell, x0 = Math.floor((q[0] - r) / c), x1 = Math.floor((q[0] + r) / c), y0 = Math.floor((q[1] - r) / c), y1 = Math.floor((q[1] + r) / c), ids = new Set();
     for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) (g.grid.get(x + "," + y) || []).forEach(i => ids.add(i));
     const near = [];
-    ids.forEach(i => { const s = g.segs[i], a = [s[0], s[1]], b = [s[2], s[3]]; if (distSeg(q, a, b) <= r) near.push([a, b]); });
+    ids.forEach(i => { const s = g.segs[i], a = [s[0], s[1]], b = [s[2], s[3]]; if (distSeg(q, a, b) <= r) near.push([a, b, i]); });
     const K = snapKinds(), from = S.drag ? null : S.draft[S.draft.length - 1];
     if (K.endpoint) near.forEach(([a, b]) => { take(a, "endpoint", 1); take(b, "endpoint", 1); });
     if (K.intersection && near.length < 80) for (let i = 0; i < near.length; i++) for (let j = i + 1; j < near.length; j++) { const x = segX(near[i][0], near[i][1], near[j][0], near[j][1]); if (x) take(x, "intersection", 1); }
     if (K.midpoint) near.forEach(([a, b]) => take([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], "midpoint", 2));
     if (K.perpendicular && from && near.length < 80) near.forEach(([a, b]) => { const f = projSeg(from, a, b), t = dist(f, a) + dist(f, b); if (Math.abs(t - dist(a, b)) < 1e-6 && dist(f, from) > 1e-6) take(f, "perpendicular", 2.5); });   // the foot of the perpendicular from the last point, on the segment itself
     if (K.nearest) near.forEach(([a, b]) => take(projSeg(q, a, b), "on line", 3));
+    if (K.tangent && from && near.length < 80) {   // a curve (arc, circle, curved wall) under the cursor: where a line from the last point just touches it —
+      const seen = new Set();                       // ahead of the endpoints, which on a curve are only the corners of its short pieces
+      near.forEach(([a, b, i]) => { if (!(g.segs[i][4] & 1) || seen.has(i)) return;
+        const ch = curveChain(g, i); ch.ids.forEach(j => seen.add(j));
+        const t = curveTangent(ch.pts, from); if (t) take(t, "tangent", 0.9); });
+    }
   }
+  if ($("snapOn").checked && g && g.segs.length && snapKinds().center) curveCentres(g).forEach(o => take(o.c, "centre", 2.2));   // the centre of an arc or circle: the cursor is near the centre, not the curve
   return best;
+}
+/* the curve a short segment belongs to: neighbouring segments drawn as one curve (same sub-path, curve flag, ends meeting). Curves are
+   kept as 8 short segments per Bézier; a circle is four Béziers end to end. */
+function curveChain(g, i){
+  const G = g.segs, ok = (a, b) => G[a] && G[b] && G[a][5] === G[b][5] && (G[a][4] & 1) && (G[b][4] & 1);
+  let lo = i, hi = i;
+  while (i - lo < 400 && ok(lo, lo - 1) && Math.abs(G[lo - 1][2] - G[lo][0]) + Math.abs(G[lo - 1][3] - G[lo][1]) < 0.01) lo--;
+  while (hi - i < 400 && ok(hi, hi + 1) && Math.abs(G[hi][2] - G[hi + 1][0]) + Math.abs(G[hi][3] - G[hi + 1][1]) < 0.01) hi++;
+  const ids = [], pts = [[G[lo][0], G[lo][1]]]; for (let j = lo; j <= hi; j++) { ids.push(j); pts.push([G[j][2], G[j][3]]); }
+  return {ids, pts};
+}
+/* where a line from p is tangent to the curve (a point list): the tangent direction at each vertex against the line from p to it; the
+   sign change between two vertices is the touching point (found by interpolation). null if there is none */
+function curveTangent(pts, p){
+  if (pts.length < 4) return null;
+  const f = k => { const a = pts[Math.max(0, k - 1)], b = pts[Math.min(pts.length - 1, k + 1)], d = [b[0] - a[0], b[1] - a[1]], v = [pts[k][0] - p[0], pts[k][1] - p[1]], L = Math.hypot(d[0], d[1]) * Math.hypot(v[0], v[1]);
+    return L > 1e-9 ? (d[0] * v[1] - d[1] * v[0]) / L : 0; };
+  let best = null;
+  for (let k = 0; k + 1 < pts.length; k++) { const f0 = f(k), f1 = f(k + 1);
+    if ((f0 <= 0 && f1 >= 0 || f0 >= 0 && f1 <= 0) && f0 !== f1) { const t = f0 / (f0 - f1), q = [pts[k][0] + (pts[k + 1][0] - pts[k][0]) * t, pts[k][1] + (pts[k + 1][1] - pts[k][1]) * t];
+      if (dist(q, p) > 1e-6) best = best || q; } }
+  return best;
+}
+/* every circular curve of the page's lines -> [{c, R}] (found once, kept on the page's line index) */
+function curveCentres(g){
+  if (g.centres) return g.centres;
+  const out = [], seen = new Set();
+  for (let i = 0; i < g.segs.length && out.length < 4000; i++) { if (!(g.segs[i][4] & 1) || seen.has(i)) continue;
+    const ch = curveChain(g, i); ch.ids.forEach(j => seen.add(j)); const c = curveCentre(ch.pts); if (c) out.push({c, R: dist(c, ch.pts[0])}); }
+  return g.centres = out;
+}
+/* the centre of a circular curve (first, middle and last point agree with the vertices in between within 3 %); null for any other curve */
+function curveCentre(pts){
+  if (pts.length < 5) return null;
+  const n = pts.length - 1, C = circumcentre(pts[0], pts[Math.round(n / 4)], pts[Math.round(3 * n / 4)]); if (!C) return null;
+  const R = dist(C, pts[0]); if (!(R > 0.5)) return null;
+  return pts.every(q => Math.abs(dist(C, q) - R) < 0.03 * R) ? C : null;
+}
+
+/* ------------------------------------------------------------------ drawing type (discipline) from the sheet
+   What a sheet is — architectural, structural, electrical, plumbing, mechanical, civil, fire, landscape — is scored from four
+   signals: the discipline letter of the sheet no., the words of the sheet title, keywords anywhere on the page, and the PDF's layer
+   names. It is only a suggestion (shown in the status bar, nothing is added until it is clicked and confirmed), and it is
+   not made unless one discipline clearly leads. Each discipline carries the conditions (items to measure) that usually go with it;
+   a thickness or height is never filled in for you. */
+const DTYPES = [
+  {d: "Architectural", sheet: "Architectural", kw: /\b(?:BED ?ROOM|DRAWING ROOM|LOUNGE|KITCHEN|TOILET|DINING|BALCONY|VERANDAH?|PORCH|GARAGE|LOBBY|TV ?LOUNGE|STORE|DRESSING|SERVANT)\b/, title: [[/FLOOR PLAN|GROUND FLOOR|FIRST FLOOR|TYPICAL FLOOR|BASEMENT PLAN|LAYOUT PLAN/, "Floor plan"], [/ELEVATION/, "Elevation"], [/SECTION/, "Section"], [/FINISH/, "Finishes"], [/DOOR|WINDOW/, "Door / window schedule"]], layers: /A[-_]|WALL|DOOR|WIND|FURN|ARCH|ROOM|FLOOR|STAIR/i,
+    set: ["Floor area", "Ceiling plaster", "Brick masonry 9\" wall", "Partition wall 4.5\" (thickness 0.375 ft)", "Internal plaster on walls — both faces", "External plaster", "Skirting", "Doors", "Windows"]},
+  {d: "Structural", sheet: "Structural", kw: /\b(?:REINFORC\w*|REBAR|R\.?C\.?C\.?|STIRRUPS?|LAP LENGTH|CLEAR COVER|BAR BENDING|GRADE ?(?:40|60)|PCC|PLINTH BEAM|TIE BEAM|FOOTINGS?|RAFT|PILES?|LINTEL|DEVELOPMENT LENGTH)\b/, title: [[/FOUNDATION|FOOTING|PLINTH|PILE|RAFT/, "Foundation plan"], [/BEAM|FRAMING|SLAB/, "Beam / slab plan"], [/COLUMN/, "Column layout / schedule"], [/RETAINING|STAIR/, "Retaining wall / stair detail"]], layers: /S[-_]|STRUC|BEAM|COLUMN|REBAR|FOOT|SLAB|RCC|PILE/i,
+    set: ["RCC slab — state thickness", "Formwork — soffit", ["Columns", "count", "Nos"], ["Footings", "count", "Nos"], ["Beams — length", "linear", "ft"]]},
+  {d: "Electrical", sheet: "Electrical", kw: /\b(?:LIGHT\w*|LUMINAIRES?|SOCKETS?|SWITCH\w*|DISTRIBUTION BOARD|DB|CONDUITS?|CIRCUITS?|MCB|KVA|EARTHING|CCTV|LV PANEL|CABLE\w*|WATTS?|CEILING FAN|FAN POINT|AMP|ELECTRICAL)\b/, title: [[/LIGHTING/, "Lighting layout"], [/POWER|SOCKET/, "Power layout"], [/SINGLE LINE|SLD/, "Single-line diagram"], [/ELECTRICAL/, "Electrical layout"]], layers: /E[-_]|ELEC|LIGHT|POWER|CABLE|CONDUIT|SOCKET/i,
+    set: [["Light points", "count", "Nos"], ["Sockets", "count", "Nos"], ["Switches", "count", "Nos"], ["Fan points", "count", "Nos"], ["Conduit run", "linear", "ft"], ["Distribution boards", "count", "Nos"]]},
+  {d: "Plumbing", sheet: "Plumbing", kw: /\b(?:SANITARY|WATER SUPPLY|WC|FLOOR TRAP|GATE VALVE|UPVC|PVC|DRAINAGE|SEWER|SEPTIC|WASH BASIN|GEYSER|RISER|SOIL PIPE|WASTE PIPE|INSPECTION CHAMBER|GULLY|CPVC|PPR|PLUMBING)\b/, title: [[/DRAINAGE|SEWER|SEWERAGE/, "Drainage layout"], [/WATER SUPPLY|WATER/, "Water supply layout"], [/PLUMBING|SANITARY/, "Plumbing layout"]], layers: /P[-_]|PLUMB|SANIT|WATER|DRAIN|SEWER|PIPE/i,
+    set: [["Sanitary fixtures", "count", "Nos"], ["Water supply pipe", "linear", "ft"], ["Drain / soil pipe", "linear", "ft"], ["Floor traps", "count", "Nos"], ["Inspection chambers", "count", "Nos"]]},
+  {d: "Mechanical", sheet: "Mechanical", kw: /\b(?:HVAC|DUCTS?|AHU|FCU|DIFFUSERS?|CHILLER|SPLIT UNIT|VRF|EXHAUST|GRILLES?|CFM|AIR CONDITION\w*|CASSETTE|REFRIGERANT)\b/, title: [[/HVAC|AIR CONDITION|DUCT/, "HVAC layout"], [/VENTILATION|EXHAUST/, "Ventilation layout"]], layers: /M[-_]|HVAC|DUCT|MECH|AC[-_]|DIFFUS/i,
+    set: [["AC / split units", "count", "Nos"], ["Duct run", "linear", "ft"], ["Diffusers / grilles", "count", "Nos"], ["Refrigerant pipe", "linear", "ft"]]},
+  {d: "Civil", sheet: "Civil", kw: /\b(?:ROAD|KERB|CURB|CULVERT|EARTHWORK|CONTOURS?|CHAINAGE|FORMATION LEVEL|SUB ?BASE|PAVEMENT|LONGITUDINAL|CROSS SECTION|STORM|MANHOLES?|CUT AND FILL|EMBANKMENT|NGL|FGL)\b/, title: [[/ROAD|PAVEMENT/, "Road layout"], [/SITE|CONTOUR|GRADING/, "Site / grading plan"], [/LONGITUDINAL|CROSS SECTION/, "Profile / sections"]], layers: /C[-_]|CIVIL|ROAD|CONTOUR|KERB|TOPO|SURVEY/i,
+    set: [["Road / paved area", "area", "Sft"], ["Kerb length", "linear", "ft"], ["Drain length", "linear", "ft"], ["Manholes", "count", "Nos"]]},
+  {d: "Fire", sheet: "Fire", kw: /\b(?:SPRINKLERS?|FIRE ALARM|SMOKE DETECTORS?|HYDRANTS?|FIRE EXTINGUISHERS?|HOSE REEL|FIRE PUMP|MANUAL CALL POINT|FIRE FIGHTING)\b/, title: [[/FIRE/, "Fire protection layout"]], layers: /FIRE|FP[-_]|SPRINK|ALARM/i,
+    set: [["Sprinklers", "count", "Nos"], ["Smoke / heat detectors", "count", "Nos"], ["Fire pipe", "linear", "ft"], ["Fire extinguishers", "count", "Nos"]]},
+  {d: "Landscape", sheet: "Landscape", kw: /\b(?:PLANTING|SHRUBS?|TREES?|LAWN|HARDSCAPE|IRRIGATION|PAVERS?|PLANTER|GRASS|GROUND ?COVER)\b/, title: [[/LANDSCAPE|PLANTING|HARDSCAPE/, "Landscape plan"]], layers: /L[-_]|LAND|PLANT|TREE|HARD|IRRIG/i,
+    set: [["Lawn / planting area", "area", "Sft"], ["Paving", "area", "Sft"], ["Trees", "count", "Nos"], ["Edging", "linear", "ft"]]}
+];
+/* -> {d, kind, conf 0..1, why[], scores} or null when nothing leads clearly. T: the page's text pieces; layers: the PDF's layer names;
+   sheet: {title, disc} as saved or read from the title block */
+function detectDrawingType(T, layers, sheet){
+  sheet = sheet || {}; const up = s => String(s || "").toUpperCase(), title = up(sheet.title), sc = [], why = {}, kinds = {};
+  const texts = (T || []).map(t => up(t.s)).filter(Boolean);
+  DTYPES.forEach(D => {
+    let v = 0; const w = [];
+    if (sheet.disc && up(sheet.disc) === up(D.sheet)) { v += 4; w.push("sheet no. letters say " + D.sheet); }
+    const tm = D.title.find(([rx]) => rx.test(title)); if (tm) { v += 4; kinds[D.d] = tm[1]; w.push("title “" + sheet.title + "”"); }
+    let hit = 0; const seen = new Set(); texts.forEach(t => { const m = D.kw.exec(t); if (m) { hit++; seen.add(m[0]); } });
+    if (hit) { v += Math.min(6, hit * 0.5 + seen.size * 0.5); w.push(hit + " keyword" + (hit > 1 ? "s" : "") + " on the sheet (" + [...seen].slice(0, 4).join(", ") + ")"); }
+    const lh = (layers || []).filter(n => D.layers.test(n)).length; if (lh) { v += Math.min(3, lh * 0.5); w.push(lh + " matching PDF layer" + (lh > 1 ? "s" : "")); }
+    if (!kinds[D.d] && v > 0) { const km = D.title.find(([rx]) => texts.some(t => rx.test(t))); if (km) kinds[D.d] = km[1]; }
+    sc.push({d: D.d, v}); why[D.d] = w;
+  });
+  sc.sort((a, b) => b.v - a.v);
+  const top = sc[0], nxt = sc[1];
+  if (!top || top.v < 4 || top.v < 1.5 * nxt.v) return null;
+  return {d: top.d, kind: kinds[top.d] || "", conf: Math.min(1, top.v / 10) * (1 - nxt.v / top.v), why: why[top.d], scores: sc.filter(x => x.v > 0)};
+}
+function dtypeCondSpecs(d){   // the conditions that go with a discipline: [{name, type, unit, preset?}]
+  const D = DTYPES.find(x => x.d === d); if (!D) return [];
+  return D.set.map(x => { if (typeof x === "string") { const p = PRESETS.find(q => q.name === x); return p ? {name: p.name, type: p.type, unit: p.unit, faces: p.faces, t: p.t, dedMin: p.dedMin, needH: p.needH, needT: p.needT} : null; }
+    return {name: x[0], type: x[1], unit: x[2]}; }).filter(Boolean);
+}
+function typeHint(key){   // the status-bar suggestion for this page (cached per page; a page already decided on gets none)
+  const dt = (P.proj.dtype || {})[key]; if (dt && dt.done) return null;
+  const g = S.geo[key], T = S.texts[key]; if (!T || key !== S.key) return null;
+  let lay = []; try { const L = layerInfo(S.fileId); if (L) lay = Object.values(L).map(l => l.name); } catch (e) {}
+  const sh = Object.assign({}, sheetGuessFor(T, [S.base.width, S.base.height]), (P.proj.sheets || {})[key] || {});
+  return detectDrawingType(T, lay, sh);
+}
+function showTypeHint(key){
+  const el = $("stType"); if (!el) return;
+  const h = P.proj && key === S.key ? typeHint(key) : null; S.typeHint = h ? Object.assign({key}, h) : null;
+  el.textContent = h ? "Looks like " + h.d + (h.kind ? " · " + h.kind : "") + " — click to set it up" : "";
+  el.title = h ? "Sheet type suggested from " + h.why.join("; ") + ". Nothing is added until you confirm." : "";
+}
+async function typeDialog(){
+  const h = S.typeHint; if (!h || h.key !== S.key) return;
+  const specs = dtypeCondSpecs(h.d), have = new Set(P.proj.conds.map(c => c.name.toLowerCase())), sh = (P.proj.sheets || {})[h.key] || {};
+  const body = `<p>This page looks like a <b>${esc(h.d)}</b> sheet${h.kind ? " — <b>" + esc(h.kind) + "</b>" : ""} (${Math.round(h.conf * 100)} % sure).</p>
+    <p class="small">Seen from: ${h.why.map(esc).join("; ")}.</p>
+    <p style="margin-top:8px"><b>Add these items to measure</b> <span class="small">(heights and thicknesses are left for you to enter)</span></p>
+    ${specs.map((c, i) => `<label class="pk" style="display:block"><input type="checkbox" data-tc="${i}"${have.has(c.name.toLowerCase()) ? " disabled" : " checked"}> ${esc(c.name)} <span class="small">· ${esc(c.type)} · ${esc(c.unit)}${have.has(c.name.toLowerCase()) ? " · already there" : ""}</span></label>`).join("")}
+    ${sh.disc ? "" : `<label class="pk" style="display:block;margin-top:8px"><input type="checkbox" id="tcDisc" checked> Save “${esc(h.d)}” as this sheet's discipline</label>`}`;
+  const v = await ask("Set up for this sheet type", body, "Add", () => ({sel: [...document.querySelectorAll("#dlgB [data-tc]:checked")].map(x => +x.dataset.tc), disc: !!($("tcDisc") && $("tcDisc").checked)}));
+  P.proj.dtype = P.proj.dtype || {}; P.proj.dtype[h.key] = {d: h.d, done: true};
+  if (!v) { save(); showTypeHint(h.key); return; }
+  mutate(() => {
+    v.sel.forEach(i => { const c = specs[i]; if (!c || P.proj.conds.some(x => x.name.toLowerCase() === c.name.toLowerCase())) return;
+      P.proj.conds.push({id: uid("C"), name: c.name, type: c.type, unit: c.unit, color: COLORS[P.proj.conds.length % COLORS.length], h: "", t: c.t ? f3(c.t) : "", faces: c.faces || 1, dedMin: c.dedMin || 0}); });
+    if (v.disc) { P.proj.sheets = P.proj.sheets || {}; P.proj.sheets[h.key] = Object.assign({}, P.proj.sheets[h.key] || {}, {disc: h.d}); }
+  }, "Set up for " + h.d + " sheet");
+  renderConds(); showTypeHint(h.key); toast(v.sel.length + " item" + (v.sel.length === 1 ? "" : "s") + " added for a " + h.d + " sheet", 3000);
 }
 
 /* ------------------------------------------------------------------ auto area: one click inside a room
@@ -2761,6 +3012,8 @@ function drawNow(){
     else if (/intersection/.test(t)) dyn.push(`<path d="M${q[0] - 6} ${q[1] - 6}L${q[0] + 6} ${q[1] + 6}M${q[0] + 6} ${q[1] - 6}L${q[0] - 6} ${q[1] + 6}" stroke="#1baf7a" stroke-width="2.2"/>`);
     else if (/perpendicular/.test(t)) dyn.push(`<path d="M${q[0] - 6} ${q[1] + 6}H${q[0] + 6}M${q[0] - 6} ${q[1] + 6}V${q[1] - 6}M${q[0] - 6} ${q[1] + 1}H${q[0] - 1}V${q[1] + 6}" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
     else if (/polar/.test(t)) dyn.push(`<path d="M${q[0]} ${q[1] - 7}L${q[0] + 7} ${q[1]}L${q[0]} ${q[1] + 7}L${q[0] - 7} ${q[1]}Z" fill="none" stroke="#2b7de9" stroke-width="2"/>`);
+    else if (/tangent/.test(t)) dyn.push(`<circle cx="${q[0]}" cy="${q[1] + 3}" r="4.5" fill="none" stroke="#1baf7a" stroke-width="2"/><path d="M${q[0] - 7} ${q[1] - 2}H${q[0] + 7}" stroke="#1baf7a" stroke-width="2"/>`);
+    else if (/centre/.test(t)) dyn.push(`<circle cx="${q[0]}" cy="${q[1]}" r="5.5" fill="none" stroke="#1baf7a" stroke-width="2"/><path d="M${q[0] - 3} ${q[1]}H${q[0] + 3}M${q[0]} ${q[1] - 3}V${q[1] + 3}" stroke="#1baf7a" stroke-width="1.5"/>`);
     else if (/midpoint/.test(t)) dyn.push(`<path d="M${q[0]} ${q[1] - 7}L${q[0] + 6} ${q[1] + 5}L${q[0] - 6} ${q[1] + 5}Z" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
     else dyn.push(`<circle cx="${q[0]}" cy="${q[1]}" r="5" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
   }
@@ -2915,7 +3168,7 @@ function renderScaleChip(){
   const ch = $("scaleChip"), sc = P.proj && P.proj.scales[S.key];
   if (!S.page) { ch.className = "chip bad"; ch.lastElementChild.textContent = "No page"; return; }
   if (!sc) { ch.className = "chip bad"; ch.lastElementChild.textContent = "Scale not set — press K"; }
-  else { ch.className = "chip " + scaleState(sc).k; ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "pdf" ? sc.text + " · saved in the PDF" : sc.how === "cad" ? sc.text + " · from the drawing" : sc.how === "manual" ? sc.text + " · chosen" : sc.how === "inherited" ? "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · inherited from " + keyName(sc.from) : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · calibrated") + (sc.verified ? " · verified" : sc.doubt ? " · doubtful" : " · not verified"); ch.title = "Page scale: " + scaleState(sc).t + " — click to set or check"; }
+  else { ch.className = "chip " + scaleState(sc).k; ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "pdf" ? sc.text + " · saved in the PDF" : sc.how === "cad" ? sc.text + " · from the drawing" : sc.how === "dims" ? sc.text + " · from dimension strings" : sc.how === "manual" ? sc.text + " · chosen" : sc.how === "inherited" ? "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · inherited from " + keyName(sc.from) : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · calibrated") + (sc.verified ? " · verified" : sc.doubt ? " · doubtful" : " · not verified"); ch.title = "Page scale: " + scaleState(sc).t + " — click to set or check"; }
   markPageSel();
 }
 /* a page's scale status: Verified / Calibrated (both checked against a known length), Inherited (copied from another page,
@@ -2927,6 +3180,7 @@ function scaleState(sc){
   if (sc.how === "calibrated") return {k: "ok", ic: "✓", t: "Calibrated"};
   if (sc.how === "manual") return sc.verified ? {k: "ok", ic: "✓", t: "Chosen · verified"} : {k: "warn", ic: "⚠", t: "Chosen by hand — not verified"};
   if (sc.how === "cad") return sc.verified ? {k: "ok", ic: "✓", t: "From the drawing's units"} : {k: "warn", ic: "⚠", t: "Drawing units not set — check it"};
+  if (sc.how === "dims") return sc.verified ? {k: "ok", ic: "✓", t: "From dimension strings · verified"} : {k: "warn", ic: "⚠", t: "Read from the dimension strings — not verified"};
   if (sc.how === "pdf") return sc.verified ? {k: "ok", ic: "✓", t: "From the PDF · verified"} : {k: "warn", ic: "⚠", t: "Saved in the PDF — not verified"};
   return sc.verified ? {k: "ok", ic: "✓", t: "Verified"} : {k: "warn", ic: "⚠", t: "From note — not verified"};
 }
@@ -3081,6 +3335,7 @@ function qaBadges(it){
   if (it.qa === "checked") b.push(`<span class="tag g" title="Checked by ${esc(it.qaBy)} on ${esc(dmy(it.qaAt))}">✓ checked</span>`);
   if (it.qa === "recheck") b.push(`<span class="tag r" title="${esc(it.qaNote || "")}">recheck</span>`);
   if (it.ai && it.qa !== "checked") b.push('<span class="tag a" title="Measured by the AI assistant — check it">AI</span>');
+  if (it.revFlag && it.qa !== "checked") b.push('<span class="tag a" title="Sits on drawing that changed against ' + esc(it.revFlag.vs) + ' — check it against the new revision">REV</span>');
   if (it.copied && it.qa !== "checked") b.push(`<span class="tag a" title="Copied from ${esc(keyName(it.copied.from))} (${esc(it.copied.how)}) — check it">copied</span>`);
   return b.length ? " " + b.join("") : "";
 }
@@ -3639,7 +3894,7 @@ async function pageTexts(fileId, pageNo){
   if (S.texts[key]) return S.texts[key];
   try {
     const pg = await (await doc(fileId)).getPage(pageNo), base = pg.getViewport({scale: 1}), tc = await pg.getTextContent();
-    S.texts[key] = withOcr(key, tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6}; }));
+    S.texts[key] = withOcr(key, tc.items.filter(t => t.str && t.str.trim()).map(t => { const p = base.convertToViewportPoint(t.transform[4], t.transform[5]); return {s: normQ(t.str), x: p[0], y: p[1], w: (t.width || 0) * Math.hypot(base.transform[0], base.transform[1]), h: Math.hypot(t.transform[2], t.transform[3]) || 6, r: Math.atan2(base.transform[1] * t.transform[0] + base.transform[3] * t.transform[1], base.transform[0] * t.transform[0] + base.transform[2] * t.transform[1])}; }));
   } catch (e) { S.texts[key] = withOcr(key, []); }   // (a PDF not attached in this browser still has its OCR words)
   return S.texts[key];
 }
@@ -4685,6 +4940,8 @@ async function editCond(c){
   });
   if (isNew) setTool("draw");
 }
+document.addEventListener("click", e => { if (e.target.id === "stType") typeDialog(); });
+document.addEventListener("keydown", e => { if (e.target.id === "stType" && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); typeDialog(); } });
 document.addEventListener("click", e => {   // dialog: colour swatches
   const b = e.target.closest("#cSw [data-sw]"); if (!b) return;
   $("cC").value = b.dataset.sw; $("cSw").querySelectorAll(".swb").forEach(x => x.classList.toggle("on", x === b));
@@ -4704,7 +4961,7 @@ async function scaleDialog(){
   const key0 = S.key; let pv = []; try { pv = await pdfScalesOn(S.fileId, S.pageNo, S.base); } catch (e) {}
   if (key0 !== S.key) return;
   const sc = P.proj.scales[S.key], cands = scaleCandidates(S.key);
-  const body = `<p>Current: <b>${sc ? (sc.how === "note" ? esc(scaleLabel(sc)) + " (from the drawing note)" : sc.how === "pdf" ? esc(sc.text) + " (saved in the PDF)" : sc.how === "manual" ? esc(sc.text) + " (chosen by hand)" : sc.how === "inherited" ? "inherited — " + esc(sc.text) : "calibrated — " + esc(sc.text)) : "not set"}</b>${sc ? (sc.verified ? " · <span style='color:var(--green)'>verified</span>" : " · <span style='color:var(--amber)'>not verified</span>") : ""} · status <b>${esc(scaleState(sc).ic + " " + scaleState(sc).t)}</b></p>
+  const body = `<p>Current: <b>${sc ? (sc.how === "note" ? esc(scaleLabel(sc)) + " (from the drawing note)" : sc.how === "pdf" ? esc(sc.text) + " (saved in the PDF)" : sc.how === "manual" ? esc(sc.text) + " (chosen by hand)" : sc.how === "dims" ? esc(sc.text) + " (read from the dimension strings)" : sc.how === "inherited" ? "inherited — " + esc(sc.text) : "calibrated — " + esc(sc.text)) : "not set"}</b>${sc ? (sc.verified ? " · <span style='color:var(--green)'>verified</span>" : " · <span style='color:var(--amber)'>not verified</span>") : ""} · status <b>${esc(scaleState(sc).ic + " " + scaleState(sc).t)}</b></p>
     ${sc && sc.note ? `<p class="small">${esc(sc.note)}</p>` : ""}
     ${cands.length ? `<p style="margin-top:10px"><b>Scale notes found on this page</b></p>` + cands.map((c, i) => `<div class="cand" data-cand="${i}"><b>${esc(c.label)}</b><span class="small">“${esc(c.text.slice(0, 70))}”${c.note ? " · " + esc(c.note) : ""}</span></div>`).join("") : '<p class="small" style="margin-top:10px">No scale note was found in the text of this page (scanned drawings have no text).</p>'}
     ${pv.length ? `<p style="margin-top:10px"><b>Scale saved in this PDF</b> <span class="small">— by Bluebeam, Acrobat or the CAD plot; exact for the page as printed</span></p>` + pv.map((v, i) => `<div class="cand" data-pv="${i}"><b>${esc(v.label)}</b><span class="small">${v.name ? esc(v.name) + " · " : ""}${v.share >= 0.999 ? "whole page" : Math.round(v.share * 100) + "% of the sheet"} · 1 ft = ${v.ptPerFt.toFixed(4)} pt</span></div>`).join("") : ""}
@@ -4854,13 +5111,13 @@ async function exportExcel(){
     au.columns = [{header: "Drawing", width: 34}, {header: "Page", width: 7}, {header: "Scale", width: 26}, {header: "1 ft on the sheet (pt)", width: 18}, {header: "How", width: 12}, {header: "Verified", width: 10}, {header: "Check", width: 40}, {header: "Status", width: 26}];
     au.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; au.getRow(1).eachCell(c => { c.fill = HEAD; });
     Object.entries(P.proj.scales).forEach(([kk, sc]) => { const [fid, pg] = kk.split(":"), f = P.proj.files.find(x => x.id === fid); if (!f) return;
-      const r = au.addRow([f.name, +pg, sc.how === "calibrated" ? "calibrated: " + sc.text : sc.text, +sc.ptPerFt.toFixed(5), sc.how === "note" ? "scale note" : sc.how === "pdf" ? "PDF scale data" : sc.how === "inherited" ? "inherited" : sc.how === "manual" ? "chosen" : "calibrated", sc.verified ? "yes" : "NO", sc.check ? `measured ${f3(sc.check.measured)} ft vs printed ${f3(sc.check.printed)} ft` : sc.note || "", scaleState(sc).t]);
+      const r = au.addRow([f.name, +pg, sc.how === "calibrated" ? "calibrated: " + sc.text : sc.text, +sc.ptPerFt.toFixed(5), sc.how === "note" ? "scale note" : sc.how === "pdf" ? "PDF scale data" : sc.how === "dims" ? "dimension strings" : sc.how === "inherited" ? "inherited" : sc.how === "manual" ? "chosen" : "calibrated", sc.verified ? "yes" : "NO", sc.check ? `measured ${f3(sc.check.measured)} ft vs printed ${f3(sc.check.printed)} ft` : sc.note || "", scaleState(sc).t]);
       if (!sc.verified) r.eachCell(c => { c.fill = YELLOW; }); });
     const as = wb.addWorksheet("Assumptions");
     as.columns = [{header: "#", width: 5}, {header: "Item to confirm", width: 90}];
     as.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; as.getRow(1).eachCell(c => { c.fill = HEAD; });
     let an = 0;
-    Object.entries(P.proj.scales).forEach(([kk, sc]) => { if (!sc.verified) { const [fid, pg] = kk.split(":"), f = P.proj.files.find(x => x.id === fid); as.addRow([++an, `Scale of ${f ? f.name : fid} p.${pg} ${sc.how === "manual" ? "chosen by hand" : sc.how === "inherited" ? "copied from another page" : sc.how === "pdf" ? "read from the scale saved in the PDF" : "read from its note"} (${sc.text}) and not checked against a printed dimension`]).getCell(2).fill = YELLOW; } });
+    Object.entries(P.proj.scales).forEach(([kk, sc]) => { if (!sc.verified) { const [fid, pg] = kk.split(":"), f = P.proj.files.find(x => x.id === fid); as.addRow([++an, `Scale of ${f ? f.name : fid} p.${pg} ${sc.how === "manual" ? "chosen by hand" : sc.how === "inherited" ? "copied from another page" : sc.how === "pdf" ? "read from the scale saved in the PDF" : sc.how === "dims" ? "read from its dimension strings" : "read from its note"} (${sc.text}) and not checked against a printed dimension`]).getCell(2).fill = YELLOW; } });
     P.proj.conds.filter(c => c.h || c.t).forEach(c => as.addRow([++an, `${c.name}: ${c.h ? "height H " + f3(+c.h) + " ft" : ""}${c.h && c.t ? ", " : ""}${c.t ? "thickness T " + f3(+c.t) + " ft" : ""} entered for the condition — confirm against the sections`]));
     P.proj.items.filter(i => i.kind === "open").forEach(i => as.addRow([++an, `Opening ${i.label || ""} on ${pageName(i)}: height ${f3(+i.oh || 0)} ft entered — confirm against the door / window schedule`]));
     if (!an) as.addRow([1, "None"]);
@@ -5641,10 +5898,10 @@ function fullScreen(){ const d = document, el = d.documentElement; if (d.fullscr
    The toolbar is grouped into tabs (Select, Takeoff, Modify, Markup, Review) so the tools a QS uses are all visible and
    named, not hidden in the right-click menu. The tab follows the active tool (a shortcut such as W opens Takeoff). */
 const SNAP_KEY = "zdTakeoffSnaps", ORTHO_KEY = "zdTakeoffOrtho", POLAR_KEY = "zdTakeoffPolar";
-const SNAP_KINDS = [["endpoint", "Endpoint"], ["midpoint", "Midpoint"], ["intersection", "Intersection"], ["perpendicular", "Perpendicular to the last point"], ["nearest", "Nearest (anywhere on a line)"]];
+const SNAP_KINDS = [["endpoint", "Endpoint"], ["midpoint", "Midpoint"], ["intersection", "Intersection"], ["perpendicular", "Perpendicular to the last point"], ["tangent", "Tangent to a curve from the last point"], ["center", "Centre of an arc / circle"], ["nearest", "Nearest (anywhere on a line)"]];
 function snapKinds(){
   if (!S.snapK) { let o = null; try { o = JSON.parse(pref(SNAP_KEY) || "null"); } catch (e) { o = null; }
-    S.snapK = Object.assign({endpoint: true, midpoint: true, intersection: true, perpendicular: true, nearest: true}, o && typeof o === "object" ? o : {}); }
+    S.snapK = Object.assign({endpoint: true, midpoint: true, intersection: true, perpendicular: true, tangent: true, center: true, nearest: true}, o && typeof o === "object" ? o : {}); }
   return S.snapK;
 }
 function ribShow(tab){
@@ -6132,7 +6389,7 @@ async function sheetInfoDialog(readFirst){
 
 /* ------------------------------------------------------------------ QA: Measured → Checked, or Recheck required */
 const QA_NAMES = {"": "Measured", checked: "Checked", recheck: "Recheck required"};
-const needsReview = it => (it.ai || it.copied) && it.qa !== "checked";
+const needsReview = it => (it.ai || it.copied || it.revFlag) && it.qa !== "checked";
 function qaUser(){ return pref("zdTakeoffUser") || ""; }
 async function askUser(){
   let u = qaUser(); if (u) return u;
@@ -9032,6 +9289,34 @@ async function agentCheck(scope){
         const A = itemPoly(L[a]), B = itemPoly(L[b]), x = overlapSft(A, B, k); if (!(x > 1 && x > 0.02 * Math.min(polyArea(A), polyArea(B)) / k / k)) continue;
         ov++; F("err", `${pn} — ${esc(cond(cid).name)}: <b>${esc(L[a].label || "an area")}</b> and <b>${esc(L[b].label || "an area")}</b> overlap by about ${fq(x)} Sft — measured twice?`, show(key, [L[a].id, L[b].id])); } });
       if (areas.length > 1 && !ov) passed.push(`${pn}: no two areas of one condition overlap`);
+      /* walls and openings: a wall run measured twice (two runs of one condition on top of each other), an opening taken off twice, an
+         opening on no run of its condition (it deducts from nothing), a void outside the area it is taken from or off twice */
+      {
+        const lin = its.filter(i => i.kind === "shape" && i.shape !== "circle" && (cond(i.cond) || {}).type === "linear" && i.pts.length >= 2), opens = its.filter(i => i.kind === "open" && i.pts.length >= 2);
+        const legs = it => { const k = itemScale(it), o = []; if (!k) return o; for (let j = 1; j < it.pts.length; j++) { const a2 = it.pts[j - 1], b2 = it.pts[j], L = dist(a2, b2); if (L > 1e-6) o.push({a: a2, b: b2, u: [(b2[0] - a2[0]) / L, (b2[1] - a2[1]) / L], L, k}); } return o; };
+        let wr = 0;
+        const byL = new Map(); lin.forEach(i => { if (!byL.has(i.cond)) byL.set(i.cond, []); byL.get(i.cond).push(i); });
+        byL.forEach((L, cid) => { const LG = L.map(legs); let pairs = 0;
+          for (let x = 0; x < L.length; x++) for (let y = x + 1; y < L.length && pairs < 6000; y++) { let ov2 = 0;
+            LG[x].forEach(A2 => LG[y].forEach(B2 => { pairs++; if (Math.abs(A2.u[0] * B2.u[1] - A2.u[1] * B2.u[0]) > 0.03) return;
+              const rel = q => [(q[0] - A2.a[0]) * A2.u[0] + (q[1] - A2.a[1]) * A2.u[1], (q[0] - A2.a[0]) * -A2.u[1] + (q[1] - A2.a[1]) * A2.u[0]], q0 = rel(B2.a), q1 = rel(B2.b);
+              if (Math.abs(q0[1]) > 0.25 * A2.k || Math.abs(q1[1]) > 0.25 * A2.k) return;
+              const o = Math.min(A2.L, Math.max(q0[0], q1[0])) - Math.max(0, Math.min(q0[0], q1[0])); if (o > A2.k) ov2 += o / A2.k; }));
+            if (ov2 > 0) { wr++; F("err", `${pn} — ${esc(cond(cid).name)}: <b>${esc(L[x].label || "a run")}</b> and <b>${esc(L[y].label || "a run")}</b> lie on top of each other for about ${f3(ov2)} ft — the wall measured twice?`, show(key, [L[x].id, L[y].id])); } } });
+        if (lin.length > 1 && !wr) passed.push(`${pn}: no two runs of one condition lie on top of each other`);
+        let op = 0;
+        const mid = it => [(it.pts[0][0] + it.pts[1][0]) / 2, (it.pts[0][1] + it.pts[1][1]) / 2];
+        for (let x = 0; x < opens.length; x++) for (let y = x + 1; y < opens.length; y++) { const A2 = opens[x], B2 = opens[y], k = itemScale(A2); if (A2.cond !== B2.cond || !k) continue;
+          if (dist(mid(A2), mid(B2)) < 0.5 * k && Math.abs(dist(A2.pts[0], A2.pts[1]) - dist(B2.pts[0], B2.pts[1])) < 0.5 * k) { op++; F("err", `${pn} — ${esc(cond(A2.cond).name)}: opening <b>${esc(A2.label || "")}</b> is taken off twice at the same place`, show(key, [A2.id, B2.id])); } }
+        opens.forEach(o => { const k = itemScale(o), c2 = cond(o.cond); if (!k || !c2 || c2.type !== "linear") return;
+          const runs = lin.filter(i => i.cond === o.cond); if (!runs.length) return;
+          const m = mid(o); if (!runs.some(i => legs(i).some(l => distSeg(m, l.a, l.b) <= 0.75 * k))) { op++; F("warn", `${pn} — ${esc(c2.name)}: opening <b>${esc(o.label || "")}</b> is on no run of this condition — it takes off from nothing`, show(key, [o.id])); } });
+        const dedA = its.filter(i => i.kind === "ded" && (cond(i.cond) || {}).type === "area" && i.pts.length >= 3);
+        dedA.forEach((d, x) => { const k = itemScale(d); if (!k) return; const D = itemPoly(d), c2 = cond(d.cond);
+          for (let y = x + 1; y < dedA.length; y++) if (dedA[y].cond === d.cond) { const o = overlapSft(D, itemPoly(dedA[y]), k); if (o > 1) { op++; F("err", `${pn} — ${esc(c2.name)}: two voids overlap by about ${fq(o)} Sft — taken off twice?`, show(key, [d.id, dedA[y].id])); } }
+          const host = areas.filter(i => i.cond === d.cond); if (host.length && !host.some(h2 => pointInPoly(D[0], itemPoly(h2)) || pointInPoly([D.reduce((t, q) => t + q[0], 0) / D.length, D.reduce((t, q) => t + q[1], 0) / D.length], itemPoly(h2)))) { op++; F("warn", `${pn} — ${esc(c2.name)}: a void lies outside every area of its condition — it takes off from nothing`, show(key, [d.id])); } });
+        if ((opens.length || dedA.length) && !op) passed.push(`${pn}: no opening or void is taken off twice or from nothing`);
+      }
       const cm = new Map(); its.filter(isCnt).forEach(i => i.pts.forEach(pt => { if (!cm.has(i.cond)) cm.set(i.cond, []); cm.get(i.cond).push({pt, id: i.id}); }));
       cm.forEach((L, cid) => {   // a count marker on top of another: counted twice
         const k = scaleAt(f, p, L[0].pt), tl = k ? 0.5 * k : 4, ids = new Set(); let dup = 0; L.sort((a, b) => a.pt[0] - b.pt[0]);
@@ -9894,7 +10179,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
