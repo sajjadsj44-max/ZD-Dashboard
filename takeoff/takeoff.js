@@ -5731,12 +5731,10 @@ function mineAdd(k){ if (!k) return false; const o = tbPref(), L = o.mine || [];
 function mineRemove(k){ const o = tbPref(), L = (o.mine || []).filter(x => x !== k); mineSet(L); toast("Taken out of My tools", 1800); }
 function mineBuild(){
   const box = $("mineBox"), L = tbPref().mine || [], all = tbAll(); box.innerHTML = "";
-  L.forEach(k => { const src = all.find(x => x.k === k); if (!src) return; const c = document.createElement("button"); c.className = "tool"; c.dataset.mine = k; c.title = src.b.title + " — right-click or the × to take it out of My tools"; c.innerHTML = src.b.innerHTML; c.__src = src.b;
+  L.forEach(k => { const src = all.find(x => x.k === k); if (!src) return; const c = document.createElement("button"); c.className = "tool"; c.dataset.mine = k; c.title = src.b.title + " — right-click to take it out, or use Customize → My tools"; c.innerHTML = src.b.innerHTML; c.__src = src.b;
     c.addEventListener("click", () => { src.b.click(); setTimeout(syncMine, 60); });
     c.addEventListener("contextmenu", e => { e.preventDefault(); mineRemove(k); });
-    const x = document.createElement("span"); x.className = "mx"; x.title = "Take out of My tools"; x.textContent = "×";
-    x.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); mineRemove(k); });
-    c.appendChild(x); box.appendChild(c); });
+    box.appendChild(c); });
   $("mineHint").style.display = box.children.length ? "none" : "";
 }
 function syncMine(){ document.querySelectorAll("#mineBox [data-mine]").forEach(c => { c.classList.toggle("on", !!c.__src && c.__src.classList.contains("on")); }); }
