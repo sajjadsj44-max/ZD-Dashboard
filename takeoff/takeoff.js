@@ -303,7 +303,7 @@ if (TABCH) TABCH.onmessage = e => { const m = e.data || {}; if (!P.proj || m.tab
   if (m.t === "open") tabSay({t: "here", id: P.proj.id});
   S.otherTab = m.t === "saved" ? "changed in another tab or window at " + String(m.at || "").slice(11, 16) : "also open in another tab or window";
   renderSheet(); };
-const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters"];
+const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd"];
 function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 /* every change goes through mutate(): the project before it is kept for Ctrl+Z (200 steps), with a name for the
    undo / redo buttons ("Undo: Move 3 measurements") */
@@ -361,7 +361,8 @@ function restore(js){ const o = JSON.parse(js); UNDO_KEYS.forEach(k => { if (o[k
   if (S.sel && !P.proj.items.some(i => i.id === S.sel)) { S.sel = null; S.selPt = -1; }
   const live = new Set(P.proj.items.map(i => i.id).concat((P.proj.marks || []).map(m => m.id))); [...S.multi].forEach(id => { if (!live.has(id)) S.multi.delete(id); });
   if (S.selMark && !live.has(S.selMark)) S.selMark = null;
-  save(); refresh(); }
+  S.cedF = S.cedO = S.cedHov = null; S.cedJ = null;
+  save(); refresh(); if (P.proj.cadEd) cedSync(); }
 
 /* what is kept per drawing (its PDF document, lines, text, layers, thumbnails) is kept for the files of every project open in a window,
    and let go for the rest — a project left behind frees its memory as before */
@@ -849,11 +850,11 @@ const app = (M, x, y) => [M[0] * x + M[2] * y + M[4], M[1] * x + M[3] * y + M[5]
 async function indexPage(){
   const key = S.key, page = S.page, base = S.base, file = S.fileId, pageNo = S.pageNo, cpg = cadPage();
   if (cpg && !S.geo[key]) {   // an AutoCAD drawing: its lines and text come straight from its scene — no PDF to parse
-    const ix = CAD.cadIndex(cpg), sc = S.cadSc[file], cfg = S.ocgs && S.ocgs[file], byName = new Map(), cell = 24, grid = new Map();
+    const ed = cedC(file, cpg), ix = CAD.cadIndex(cpg, 0, ed), sc = S.cadSc[file], cfg = S.ocgs && S.ocgs[file], byName = new Map(), cell = 24, grid = new Map();
     if (cfg) Object.entries(cfg.getGroups()).forEach(([id, g]) => byName.set(g.name, id));
     ix.segs.forEach((s2, i) => { const x0 = Math.floor(Math.min(s2[0], s2[2]) / cell), x1 = Math.floor(Math.max(s2[0], s2[2]) / cell), y0 = Math.floor(Math.min(s2[1], s2[3]) / cell), y1 = Math.floor(Math.max(s2[1], s2[3]) / cell);
       if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4000) return; for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) { const k = x + "," + y; let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(i); } });
-    S.geo[key] = {segs: ix.segs, grid, cell, images: 0, styles: ix.styles, layerIds: sc.layers.map(l => byName.get(l.name) || null), file, cad: true};
+    S.geo[key] = {segs: ix.segs, grid, cell, images: 0, styles: ix.styles, layerIds: sc.layers.map(l => byName.get(l.name) || null), file, cad: true, edv: cedV(file, P.proj), addIds: ed ? ed.ids : []};
     if (!S.texts[key]) S.texts[key] = withOcr(key, ix.texts.map(t => ({s: normQ(t.s), x: t.x, y: t.y, w: t.w, h: t.h, r: t.r || 0})));
   }
   if (!S.geo[key]) {
@@ -2318,6 +2319,7 @@ function setTool(t){
   if (t !== "gap") S.gap = null;
   if (t !== "fillet" && t !== "chamfer") S.fc.first = null;
   if (t !== "stretch") S.str = null;
+  S.cedF = null; S.cedO = null; S.cedJ = null; S.cedHov = null;
   if (t !== "typref" && S.typ) { S.typ = null; $("cmpLegend").style.display = "none"; toast("Typical copy stopped — nothing copied"); }
   S.mkd = null;
   if (t !== "stamp" || S.tool !== "stamp") { S.stampBase = null; S.stampN = 0; }
@@ -2361,6 +2363,7 @@ function hint(){
     zoomwin: "Zoom window: drag a box round the part to see (a click zooms in 2×).",
     match: S.matchSource ? `Matching ${S.matchSource.name} — click compatible area, linear or count objects to apply its properties; Esc finishes.` : "Click a source area, linear or count object (or select one before starting Match), then click compatible targets; Esc finishes."};
   let h = H[t] || MK_HINTS[t] || "";
+  if (cedHere()) h = cedHint();
   if (S.arcMode) h = S.arcMid ? "Arc: click the end of the arc." : "Arc: click a point on the arc (then its end) · A again for straight.";
   $("stHint").textContent = h;
 }
@@ -2406,6 +2409,7 @@ function onDown(e){
   if (S.tool === "match") return matchClick(sp);
   const {p} = cursorPoint(e, sp);
   if (mkIsTool(S.tool)) return mkDown(p, sp, e);
+  if (cedHere()) return cedClick(sp, p, e);   // AutoCAD mode: the drawing's own objects
   if (S.tool === "break") return breakClick(sp, e);
   if (S.tool === "trim" || S.tool === "extend") return trimExtendClick(sp, e);
   if (S.tool === "fillet" || S.tool === "chamfer") return fcClick(sp);
@@ -2491,6 +2495,7 @@ function onMove(e){
     if (it && D.live) { it.pts[D.vertex] = p; D.moved = true; refreshSheetSoon(); } }
   if (S.tool === "select" && !S.drag) hoverAt(sp, e);
   if (S.tool === "cadsel" && !S.drag) cadHoverAt(sp);
+  if (cedHere() && cadOn() && !S.drag) cedHover(sp);
   const k = hereScale(p), vp = viewportAt(S.fileId, S.pageNo, p);
   $("stPos").innerHTML = k ? `x <b>${f3(p[0] / k)}</b> ft · y <b>${f3(p[1] / k)}</b> ft${vp ? " · <b>" + esc(vp.name) + "</b>" : ""}` : "Scale not set";
   $("stSnap").textContent = s ? "Snap: " + s.type : "";
@@ -2918,6 +2923,7 @@ function drawNow(){
     h.push(label([a[0] + 6 + (v.name.length + 14) * 3.2, a[1] + 12], v.name + " · " + (v.ptPerFt ? v.text || "own scale" : "scale not set"), "#4b3b8f")); });
   if (!keep && !S.hideMk) (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo && !mkHidden(m)).forEach(m => h.push(markSvg(m, toScr, 1)));
   if (!keep && S.cadSel) h.push(cadSelSvg(cadSelIds()));   // AutoCAD objects selected (Shift+V)
+  if (cedHere()) dyn.push(cedSvg());
   if (S.tool === "cadsel" && S.cadHov >= 0 && !S.cbox && !(S.cadSel && S.cadSel.f === S.fileId && S.cadSel.ids.has(S.cadHov))) dyn.push(cadSelSvg([S.cadHov], true));
   if (S.cbox && dist(S.cbox.a, S.cbox.b) >= 4) { const a = S.cbox.a, b = S.cbox.b, cr = b[0] < a[0];   // AutoCAD: window blue and solid, crossing green and dashed
     dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="${cr ? "rgba(27,175,122,.12)" : "rgba(42,120,214,.12)"}" stroke="${cr ? "#1baf7a" : "#2a78d6"}" stroke-width="1.5"${cr ? ' stroke-dasharray="6 4"' : ""}/>`); }
@@ -6115,6 +6121,7 @@ function modAct(a){
   if (a === "scalesel") return items.length ? scaleSelDialog() : need();
   if (a === "front") return items.length ? orderSel(1) : need();
   if (a === "lock") return items.length ? lockSel() : need();
+  if (cedOn() && (a === "offset" || a === "join" || a === "explode")) return cedModAct(a);   // AutoCAD mode: the drawing's own objects
   if (a === "offset") { if (meas.length !== 1) return toast("Select one measurement to offset", 2600); const c = cond(meas[0].cond); if (meas[0].kind === "open" || (c && c.type === "count")) return toast("A count point or an opening cannot be offset", 2600); return offsetDialog(meas[0]); }
   const runs = meas.filter(isRun);
   if (a === "join") return runs.length >= 2 ? joinRuns(new Set(runs.map(r => r.id))) : toast("Select two or more length runs to join", 2600);
@@ -6779,7 +6786,7 @@ function extendRun(r){
 
 /* FILLET / CHAMFER: pick two runs (or two legs of one run, at their corner) — they are cut or extended to meet, the corner rounded / bevelled */
 S.fc = S.fc || {r: 0, d1: 0, d2: 0, first: null};
-function cornerPts(X, u1, u2, len1, len2, kind, k){   // the points that replace the corner X: {pts, arc} or {err}
+function cornerPts(X, u1, u2, len1, len2, kind, k, fine){   // the points that replace the corner X: {pts, arc} or {err} (fine: the arc in 1° steps, else 5°)
   const F = S.fc, th = Math.acos(Math.max(-1, Math.min(1, u1[0] * u2[0] + u1[1] * u2[1])));
   if (th < 1e-3 || th > Math.PI - 1e-3) return {err: "The two lines are parallel — they have no corner"};
   let d1, d2;
@@ -6790,7 +6797,7 @@ function cornerPts(X, u1, u2, len1, len2, kind, k){   // the points that replace
   if (kind === "chamfer") return {pts: [T1, T2]};
   const bx = u1[0] + u2[0], by = u1[1] + u2[1], bl = Math.hypot(bx, by) || 1, cd = F.r * k / Math.sin(th / 2), C = [X[0] + bx / bl * cd, X[1] + by / bl * cd];
   const a1 = Math.atan2(T1[1] - C[1], T1[0] - C[0]); let sw = Math.atan2(T2[1] - C[1], T2[0] - C[0]) - a1; while (sw > Math.PI) sw -= 2 * Math.PI; while (sw < -Math.PI) sw += 2 * Math.PI;
-  const m = Math.max(3, Math.ceil(Math.abs(sw) / (Math.PI / 36))), out = [];
+  const m = Math.max(3, Math.ceil(Math.abs(sw) / (Math.PI / (fine ? 180 : 36)))), out = [];
   for (let i = 0; i <= m; i++) { const a = a1 + sw * i / m; out.push([C[0] + F.r * k * Math.cos(a), C[1] + F.r * k * Math.sin(a)]); }
   out[0] = T1; out[m] = T2;
   return {pts: out, arc: true};
@@ -7063,6 +7070,9 @@ function paletteCmds(){
   if (S.page && cadMeta(S.fileId)) add("AutoCAD quantities — lengths, areas and blocks from the drawing", () => cadQtyDialog(), "Page");
   add("Background: black, as AutoCAD's model space", () => setBg("black"), "View"); add("Background: white", () => setBg("white"), "View"); add("Background: auto — black for AutoCAD drawings, white for PDFs", () => setBg("auto"), "View");
   add("Monochrome view on / off", () => setMono(!S.mono), "View");
+  add("PDF mode — dimmer 60 %, white, monochrome, line weights; the edit tools work on the takeoff's markups", () => setEdMode("pdf"), "View");
+  add("AutoCAD mode — no dimming, black, colours; the edit tools work on the AutoCAD drawing's own lines", () => setEdMode("cad"), "View");
+  add("AutoCAD edits: put this drawing back as it was read", () => cedRestore(), "Modify");
   if (S.page) { add("Split window: this drawing in two windows (side by side)", () => splitOpen("same", "v"), "View", "Ctrl+\\"); add("Split window: stacked, one above the other", () => splitOpen("same", "h"), "View"); }
   if (P.proj) add("Split window: open another project in a second window…", splitPickProject, "View");
   if (SPLIT.on) { add("Split window: close (back to one window)", () => splitClose(), "View", "Ctrl+\\"); add("Split window: work in the other window", splitFocusNext, "View", "F6"); add("Split window: sync zoom & pan " + (SPLIT.sync ? "off" : "on"), () => splitSetSync(!SPLIT.sync), "View");
@@ -7704,6 +7714,7 @@ function wire(){
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
   $("bLw").onclick = () => setThin(!S.thin);
+  $("bModePdf").onclick = () => setEdMode("pdf"); $("bModeCad").onclick = () => setEdMode("cad");
   ["auto", "black", "white"].forEach(v => { $("bBg_" + v).onclick = () => setBg(v); }); $("bMono").onclick = () => setMono(!S.mono); $("bPdfBw").onclick = () => setPdfBw(!(S.bg === "white" && S.mono));
   const vpop = $("viewPop"), vOpen = on => { vpop.classList.toggle("on", on); $("bView").setAttribute("aria-expanded", on ? "true" : "false"); };
   $("bView").onclick = e => { e.stopPropagation(); vOpen(!vpop.classList.contains("on")); };
@@ -7863,7 +7874,10 @@ function wire(){
     if (e.key === "Escape" && S.drag && (S.drag.vertex != null || S.drag.move || S.drag.mh != null)) { cancelDrag(); return; }
     if (e.key === "Escape" && S.tool === "match") { setTool("select"); return; }
     if (e.key === "Escape" && S.tool === "stretch" && S.str && S.str.stage) { S.str = null; hint(); draw(); return; }
-    if (e.key === "Escape" && (S.tool === "fillet" || S.tool === "chamfer") && S.fc.first) { S.fc.first = null; hint(); draw(); return; }
+    if (e.key === "Escape" && (S.tool === "fillet" || S.tool === "chamfer") && (S.fc.first || S.cedF)) { S.fc.first = null; S.cedF = null; hint(); draw(); return; }
+    if (e.key === "Escape" && S.tool === "cedoffset" && S.cedO) { S.cedO = null; hint(); draw(); return; }
+    if (e.key === "Escape" && S.tool === "cedjoin" && S.cedJ && S.cedJ.length) { S.cedJ = null; hint(); draw(); return; }
+    if (e.key === "Enter" && S.tool === "cedjoin") { e.preventDefault(); cedJoin(S.cedJ); return; }
     if (e.key === "Enter" && (S.tool === "fillet" || S.tool === "chamfer") && !S.fc.first) { e.preventDefault(); fcSetup(S.tool); return; }
     if (e.key === "Escape" && S.tool === "cadsel") { if (S.cbox) { S.cbox = null; draw(); } else if (cadSelIds().length) cadSelSet([]); else setTool("select"); return; }
     if (e.key === "Escape" && S.tool === "stamp" && S.stampBase) { S.stampBase = null; $("stMeas").innerHTML = ""; hint(); draw(); return; }
@@ -7873,7 +7887,7 @@ function wire(){
       if (S.pickWall) { S.pickWall = false; hint(); }
       else if (S.arcMode) { S.arcMode = 0; S.arcMid = null; hint(); }
       else if (S.draft.length) { if (S.resume) toast("Run left as it was", 1500); S.resume = null; draftClear(); hint(); }
-      else if (["gap", "stamp", "break", "zoomwin", "lasso", "match", "trim", "extend", "fillet", "chamfer", "stretch"].indexOf(S.tool) >= 0) setTool("select");
+      else if (["gap", "stamp", "break", "zoomwin", "lasso", "match", "trim", "extend", "fillet", "chamfer", "stretch", "cedoffset", "cedjoin", "cedexplode"].indexOf(S.tool) >= 0) setTool("select");
       else if (S.measures.length || S.measure) { S.measures = []; S.measure = null; }
       else if (S.sel || S.selMark) { setSel([]); }
       else setTool("select");
@@ -9700,7 +9714,7 @@ function cadHidden(fid, sc, proj = P.proj){ const off = new Set(((proj && proj.l
 
 /* the background (black as AutoCAD's model space, white, or black for CAD drawings only) and monochrome */
 const darkNow = (fid = S.fileId, proj = P.proj) => S.bg === "black" || (S.bg !== "white" && !!cadMeta(fid, proj));
-function viewOpts(dpr, fast, pn = ACT){ const fid = pn.fileId, proj = pn.sess.proj, sc = S.cadSc && S.cadSc[fid]; return {dark: darkNow(fid, proj), mono: !!S.mono, thin: !!S.thin, hidden: sc ? cadHidden(fid, sc, proj) : null, dpr, fast}; }
+function viewOpts(dpr, fast, pn = ACT){ const fid = pn.fileId, proj = pn.sess.proj, sc = S.cadSc && S.cadSc[fid]; return {dark: darkNow(fid, proj), mono: !!S.mono, thin: !!S.thin, hidden: sc ? cadHidden(fid, sc, proj) : null, ed: sc ? cedC(fid, cadPage(pn), proj) : null, dpr, fast}; }
 function bgMark(){
   ["auto", "black", "white"].forEach(v => { const b = $("bBg_" + v); if (b) b.classList.toggle("on", (S.bg || "auto") === v); });
   const m = $("bMono"); if (m) m.classList.toggle("on", !!S.mono);
@@ -9748,7 +9762,7 @@ function freeCadBitmap(pn = ACT){
 const CAD_FRAME = 24;   // ms
 const cadMs = cost => cost * (S.cadRate || 1.5e-4);   // ms per path step, measured on this machine as light views are drawn
 const cadLook = pn => [darkNow(pn.fileId, pn.sess.proj), !!S.mono, !!S.thin].join("|");
-const cadKey = pn => cadLook(pn) + "|" + JSON.stringify(((pn.sess.proj && pn.sess.proj.layersOff) || {})[pn.fileId] || []);   // what the whole-page picture was drawn with
+const cadKey = pn => cadLook(pn) + "|" + cedV(pn.fileId, pn.sess.proj) + "|" + JSON.stringify(((pn.sess.proj && pn.sess.proj.layersOff) || {})[pn.fileId] || []);   // what the whole-page picture was drawn with
 function cadLowPaint(src, pg, pn){   // the picture under the screen (shown for a moment when a big zoom step outruns the screen)
   const lc = pn.el.low, sc = Math.min(3, 3000 / Math.max(pn.base.width, pn.base.height)); lc.width = Math.ceil(pn.base.width * sc); lc.height = Math.ceil(pn.base.height * sc);
   const x = lc.getContext("2d"); if (src) x.drawImage(src, 0, 0, lc.width, lc.height); else CAD.cadDraw(x, pg, {s: sc, tx: 0, ty: 0, W: lc.width, H: lc.height}, viewOpts(1, false, pn));
@@ -9839,7 +9853,7 @@ function cadPick(ei, how){   // the object under the cursor, in the condition pi
 }
 function cadCtxItems(q){   // right-click: the AutoCAD object under the cursor
   const pg = cadPage(); if (!pg || !q) return [];
-  const sc = S.cadSc[S.fileId], h = CAD.cadHit(pg, q[0], q[1], 7 / S.view.s, cadHidden(S.fileId, sc)); if (!h) return [];
+  const sc = S.cadSc[S.fileId], h = CAD.cadHit(pg, q[0], q[1], 7 / S.view.s, cadHidden(S.fileId, sc), cedC(S.fileId, pg)); if (!h) return [];
   const r = pg.ents[h.e]; if (!r || r.L < 0) return [];
   const lname = (sc.layers[r.L] || {}).name || "0", L = [{h: "AutoCAD: " + (r.t === "INSERT" ? "block " + (r.n || "") : r.t.toLowerCase()) + " · " + lname, s: [r.area ? f2(r.area) + " Sft" : "", r.len ? f2(r.len) + " ft" : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ")}];
   if (r.t === "INSERT") { const same = pg.ents.filter(x => x.t === "INSERT" && x.n === r.n).length; L.push({t: "Count this " + (r.n || "block"), fn: () => cadPick(h.e, "count")}, {t: "Count every " + (r.n || "block") + " (" + same + ")…", fn: () => cadQtyDialog({B: r.n})}); }
@@ -9857,8 +9871,8 @@ function cadCtxItems(q){   // right-click: the AutoCAD object under the cursor
    drawing and on the right-click menu. The drawing itself is never changed. */
 function cadSelIds(){   // the selected objects that can still be seen (their layer on), on this drawing
   const pg = cadPage(); if (!pg || !S.cadSel || S.cadSel.f !== S.fileId || !S.cadSel.ids.size) return [];
-  const hid = cadHidden(S.fileId, S.cadSc[S.fileId]);
-  return [...S.cadSel.ids].filter(ei => { const r = pg.ents[ei]; return r && r.L >= 0 && !hid[r.L]; });
+  const hid = cadHidden(S.fileId, S.cadSc[S.fileId]), ed = cedC(S.fileId, pg);
+  return [...S.cadSel.ids].filter(ei => { const r = pg.ents[ei]; return r && r.L >= 0 && !hid[r.L] && !cedGone(pg, ed, ei); });
 }
 function cadSelSet(ids, how){   // how: "" replaces, "add", "toggle", "remove"
   if (!cadPage()) return;
@@ -9867,10 +9881,16 @@ function cadSelSet(ids, how){   // how: "" replaces, "add", "toggle", "remove"
   S.cadSel = {f: S.fileId, ids: next}; S.cadSelV = (S.cadSelV || 0) + 1; S.cadHov = -1;
   renderProps(); draw();
 }
+function cedGone(pg, ed, ei){   // an object every line and text of which the AutoCAD-mode edits took out
+  if (!ed) return false; const E = CAD.cadEnts(pg); if (E.ps[ei] === E.ps[ei + 1] && E.ts[ei] === E.ts[ei + 1]) return false;
+  for (let j = E.ps[ei]; j < E.ps[ei + 1]; j++) if (!ed.hp[E.pl[j]]) return false;
+  for (let j = E.ts[ei]; j < E.ts[ei + 1]; j++) if (!ed.ht[E.tl[j]]) return false;
+  return true;
+}
 function cadMid(pg, ei){ const E = CAD.cadEnts(pg), k = 4 * ei; return E.eb[k] <= E.eb[k + 2] ? [(E.eb[k] + E.eb[k + 2]) / 2, (E.eb[k + 1] + E.eb[k + 3]) / 2] : null; }
 function cadPickAt(sp){   // the object under a screen point (on a layer that is on) -> its index, or -1
   const pg = cadPage(); if (!pg) return -1;
-  const q = toBase(sp[0], sp[1]), hid = cadHidden(S.fileId, S.cadSc[S.fileId]), h = CAD.cadHit(pg, q[0], q[1], 7 / S.view.s, hid), r = h && pg.ents[h.e];
+  const q = toBase(sp[0], sp[1]), hid = cadHidden(S.fileId, S.cadSc[S.fileId]), h = CAD.cadHit(pg, q[0], q[1], 7 / S.view.s, hid, cedC(S.fileId, pg)), r = h && pg.ents[h.e];
   return r && r.L >= 0 && !hid[r.L] ? h.e : -1;
 }
 function cadSelDown(sp, e){
@@ -9985,6 +10005,429 @@ function cadSelCtx(){   // right-click with AutoCAD objects selected
     {t: "Take off the selection", fn: A("take")}, {t: "All as length", fn: A("len")}, {t: "Count them", fn: A("count")}, {t: "Select similar", fn: A("similar")}, {t: "Quick select…", fn: A("qsel")},
     {t: "Layer off (LAYOFF)", fn: A("layoff")}, {t: "Isolate their layers (LAYISO)", fn: A("iso")}, {t: "Zoom to the selection", fn: A("zoom")}, {t: "Clear the selection", k: "Esc", fn: A("clear")}, {sep: 1}];
 }
+/* ------------------------------------------------------------------ PDF mode / AutoCAD mode (the two buttons after the search box)
+   PDF mode: dimmer 60 %, white background, monochrome, line weights on — Offset, Trim, Extend, Fillet, Break, Join and Explode
+   work on the takeoff's own markups (runs and outlines); the drawing is only what they are cut and extended to.
+   AutoCAD mode: no dimming, black background, the drawing's colours — the same tools work on the AutoCAD drawing's own lines,
+   polylines, arcs and circles (DWG / DXF), as AutoCAD's commands do. An edited object is taken out of the drawing and drawn again
+   as edited, on its own layer in its own colour, lineweight and linetype. The edits are kept with the project (Ctrl+Z steps back
+   through them); snapping, Auto area, find and plots see the drawing as edited. The DWG file itself is never changed. */
+const CED_TOOLS = ["trim", "extend", "fillet", "chamfer", "break", "cedoffset", "cedjoin", "cedexplode"];
+const CED_EDIT = /^(LINE|LWPOLYLINE|POLYLINE|ARC|CIRCLE|ELLIPSE|SPLINE|XLINE|RAY)$/;   // objects edited as lines / polylines
+const CED_BLOCKY = /^(INSERT|DIMENSION|MLINE|LEADER|MULTILEADER|ACAD_TABLE)$/;        // objects Explode breaks into their lines
+const cedOn = () => S.edMode === "cad";
+const cedHere = () => cedOn() && CED_TOOLS.indexOf(S.tool) >= 0;
+function setEdMode(m, quiet){
+  S.edMode = m === "cad" ? "cad" : "pdf"; pref("zdTakeoffEdMode", S.edMode); S.cedF = null; S.cedJ = null; S.cedO = null; S.cedHov = null; S.fc.first = null;
+  if (S.edMode === "pdf") { setDim(60); S.bg = "white"; S.mono = true; S.thin = true; }   // (setThin below turns the line weights on and draws)
+  else { setDim(0); S.bg = "black"; S.mono = false; }
+  pref("zdTakeoffBg", S.bg); pref("zdTakeoffMono", S.mono ? "1" : ""); bgMark(); renderLayers();
+  if (S.edMode === "pdf") setThin(false); else renderAll();
+  if (["cedoffset", "cedjoin", "cedexplode"].indexOf(S.tool) >= 0) setTool("select");
+  edModeMark(); hint(); draw();
+  if (!quiet) toast(S.edMode === "pdf" ? "PDF mode — dimmer 60 %, white, monochrome, line weights · Offset, Trim, Extend, Fillet, Break, Join and Explode edit the takeoff's markups"
+    : "AutoCAD mode — no dimming, black, colours · Offset, Trim, Extend, Fillet, Break, Join and Explode edit the AutoCAD drawing's own lines, polylines, arcs and circles" + (cadOn() ? "" : " (open a DWG / DXF page)"), 5000);
+}
+function edModeMark(){ const a = $("bModePdf"), b = $("bModeCad"); if (a) a.classList.toggle("on", !cedOn()); if (b) b.classList.toggle("on", cedOn()); }
+
+/* the drawing's edits, kept in the project by file: {v (changes with every edit), ver, n, tn (the scene they were made on), hp (primitives taken
+   out), ht (texts taken out), add: [{id, li (layer), si (style), pts, cl (closed), cv (per segment: 0 straight, else the arc it is part of)}]} */
+function cedRec(fid = S.fileId, make){
+  if (!P.proj) return null;
+  if (!P.proj.cadEd) { if (!make) return null; P.proj.cadEd = {}; }
+  let r = P.proj.cadEd[fid];
+  if (!r && make) { const pg = cadPage(); r = P.proj.cadEd[fid] = {v: uid("E"), ver: CAD.CAD_VER, n: pg ? pg.n : 0, tn: pg ? pg.tn : 0, hp: [], ht: [], add: []}; }
+  return r || null;
+}
+const plBox = Q => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; Q.forEach(p => { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }); return [x0, y0, x1, y1]; };
+function cedC(fid, pg, proj = P.proj){   // the edits as cad.js draws them {hp, ht, add (with boxes)}, made again only when they change
+  const r = proj && proj.cadEd && proj.cadEd[fid]; if (!r || !pg) return null;
+  const c = (S.cedCache = S.cedCache || {})[fid]; if (c && c.r === r && c.v === r.v && c.pg === pg) return c.o;
+  const same = r.n === pg.n && r.tn === pg.tn, hp = new Uint8Array(pg.n), ht = new Uint8Array(pg.tn);   // (a drawing read again by a newer reader: what was taken out cannot be found by number)
+  if (same) { r.hp.forEach(i => { if (i < pg.n) hp[i] = 1; }); r.ht.forEach(i => { if (i < pg.tn) ht[i] = 1; }); }
+  const A = r.add.filter(a => a.pts && a.pts.length >= 2), o = {hp, ht, ids: A.map(a => a.id), add: A.map(a => ({li: a.li, si: a.si, pts: a.pts, cl: !!a.cl, cv: a.cv, b: plBox(a.pts)}))};
+  S.cedCache[fid] = {r, v: r.v, pg, o}; return o;
+}
+const cedV = (fid, proj) => { const r = proj && proj.cadEd && proj.cadEd[fid]; return r ? r.v : ""; };
+function cedSync(){   // after an edit, undo or redo: the snapping lines read again, every window drawn again
+  const key = S.key, g = S.geo && S.geo[key];
+  if (g && g.cad && g.edv !== cedV(S.fileId, P.proj)) { delete S.geo[key]; if (cadPage()) indexPage(); }
+  renderAll(); draw();
+}
+/* a change to the drawing: one step of Ctrl+Z. fn(rec) returns a message when it could not be done — then nothing is changed */
+function cedMut(label, fn){
+  if (!cedRec(S.fileId, true)) return null; let res;
+  mutate(() => { const rec = cedRec(); res = fn(rec); rec.v = uid("E"); }, label);
+  if (typeof res === "string" || res === false) { const e = undoEntry(S.undo.pop()); restore(e.js); if (res) toast(res, 4200); cedSync(); return null; }
+  cedSync(); return res;
+}
+
+/* polylines as point lists: segment j runs from pts[j] to pts[j + 1] (the last of a closed one back to pts[0]); T = j + t is a place on it */
+const plN = o => o.cl ? o.pts.length : o.pts.length - 1;
+const plA = (o, j) => o.pts[j], plB = (o, j) => o.pts[(j + 1) % o.pts.length];
+const plCv = (o, j) => o.cv ? o.cv[((j % plN(o)) + plN(o)) % plN(o)] || 0 : 0;
+const rp = p => [Math.round(p[0] * 1e4) / 1e4, Math.round(p[1] * 1e4) / 1e4];
+function plNear(o, q){   // the nearest place on o to q -> {j, t, T, p, d}
+  let best = null;
+  for (let j = 0, n = plN(o); j < n; j++) { const a = plA(o, j), b = plB(o, j), dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy, t = L ? Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / L)) : 0, p = [a[0] + t * dx, a[1] + t * dy], d = dist(p, q);
+    if (!best || d < best.d) best = {j, t, T: j + t, p, d}; }
+  return best;
+}
+function plAt(o, T){ const n = plN(o); if (o.cl) T = ((T % n) + n) % n; else T = Math.max(0, Math.min(n, T)); let j = Math.floor(T + 1e-12); if (j >= n) j = n - 1; const t = T - j, a = plA(o, j), b = plB(o, j); return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]; }
+function plCut(o, T0, T1){   // the part of o from T0 to T1 (T1 > T0; round a closed one T1 may pass its end) -> {pts, cv} or null
+  const L = o.pts.length, P = [plAt(o, T0)], C = [];
+  for (let k = Math.floor(T0 + 1e-12) + 1; k < T1 - 1e-9; k++) { C.push(plCv(o, k - 1)); P.push(o.pts[k % L].slice()); }
+  C.push(plCv(o, Math.ceil(T1 - 1e-9) - 1)); P.push(plAt(o, T1));
+  const Q = [P[0]], D = []; for (let k = 1; k < P.length; k++) { if (dist(P[k], Q[Q.length - 1]) < 1e-7) continue; Q.push(P[k]); D.push(C[k - 1]); }
+  return Q.length >= 2 ? {pts: Q.map(rp), cv: D.some(Boolean) ? D : undefined} : null;
+}
+const plMade = (src, part) => Object.assign({id: uid("A"), li: src.li, si: src.si, pts: part.pts}, part.cv ? {cv: part.cv} : {}, part.cl ? {cl: true} : {});
+function plGroups(P){   // a primitive's curves (Béziers, numbered by primPaths) -> the arc each segment is part of: Béziers in a row on one circle are one arc
+  const cv = P.cv || [], n = P.length - 1 + (P.closed ? 1 : 0), out = new Array(n).fill(0), at = j => P[j % P.length]; let g = 0, last = null;
+  for (let j = 0; j < n; j++) { const b = cv[j]; if (!b) { last = null; continue; }
+    if (last && last.b === b) { out[j] = g; continue; }
+    let j1 = j; while (j1 + 1 < n && cv[j1 + 1] === b) j1++;
+    const c = circ3(at(j), at(Math.round((j + j1 + 1) / 2)), at(j1 + 1)), same = last && last.c && c && dist(last.c.c, c.c) <= 1e-3 * c.r + 1e-6 && Math.abs(last.c.r - c.r) <= 1e-3 * c.r + 1e-6;
+    if (!same) g++; out[j] = g; last = {b, c}; }
+  return out.some(Boolean) ? out : undefined;
+}
+function plTrue(P, cv){   // each arc's points put exactly on its circle (a Bézier stands up to 0.03 % off it); an ellipse or spline (not on one circle) is left as it is
+  if (!cv) return P; const Q = P.map(p => p.slice()), n = cv.length, at = j => j % Q.length;
+  for (let j = 0; j < n;) { const g = cv[j]; if (!g) { j++; continue; } let j1 = j; while (j1 + 1 < n && cv[j1 + 1] === g) j1++;
+    let m = 1; while (j + m <= j1 && P.cv[j + m] === P.cv[j]) m++;   // the arc's first Bézier: its start, middle and end are exactly on the circle
+    const c = circ3(P[at(j)], P[at(j + Math.floor(m / 2))], P[at(j + m)]);
+    if (c && c.r > 0 && isFinite(c.r)) { let ok = true; for (let i = j; i <= j1 + 1 && ok; i++) ok = Math.abs(dist(P[at(i)], c.c) - c.r) <= 6e-4 * c.r;
+      if (ok) for (let i = j; i <= j1 + 1; i++) { const p = P[at(i)], d = dist(p, c.c) || 1; Q[at(i)] = [c.c[0] + (p[0] - c.c[0]) * c.r / d, c.c[1] + (p[1] - c.c[1]) * c.r / d]; } }
+    j = j1 + 1; }
+  return Q;
+}
+function plFromPrim(P, li, si){   // a primitive's subpath -> an edited object
+  const cv0 = plGroups(P); let cv = cv0, cl = !!P.closed, Q = plTrue(P, cv0).map(rp);
+  if (!cl && Q.length > 3 && dist(Q[0], Q[Q.length - 1]) < 1e-6) { cl = true; Q.pop(); if (cv) cv = cv.slice(0, Q.length); }   // a circle: back on its start
+  else if (cl && Q.length > 2 && dist(Q[0], Q[Q.length - 1]) < 1e-6) { Q.pop(); if (cv) cv = cv.slice(0, Q.length); }   // (the closing step had no length)
+  if (Q.length < 2) return null;
+  return Object.assign({id: uid("A"), li, si, pts: Q}, cv ? {cv} : {}, cl ? {cl: true} : {});
+}
+
+/* the AutoCAD object under a screen point: an edited one {a, j, t, T, p, d} or one of the drawing's {e, i, q} */
+function cedPick(sp){
+  const pg = cadPage(); if (!pg) return null;
+  const q = toBase(sp[0], sp[1]), tol = 7 / S.view.s, sc = S.cadSc[S.fileId], hid = cadHidden(S.fileId, sc), rec = cedRec(); let best = null;
+  if (rec) rec.add.forEach(a => { if (hid[a.li] || !a.pts || a.pts.length < 2) return; const h = plNear(a, q); if (h && h.d <= tol && (!best || h.d < best.d)) best = Object.assign({a, q}, h); });
+  if (best) return best;
+  const h = CAD.cadHit(pg, q[0], q[1], tol, hid, cedC(S.fileId, pg)); if (!h || h.e < 0 || !pg.ents[h.e] || pg.ents[h.e].L < 0) return null;
+  return {e: h.e, i: h.i, q};
+}
+/* a picked object made editable (inside cedMut): a drawing object is taken out and its lines become edited objects -> {a, j, t, T, p, d}, or a message */
+function cedTake(rec, pk){
+  if (pk.a) { const a = rec.add.find(x => x.id === pk.a.id); if (!a) return "That object has changed — pick it again"; return Object.assign({}, plNear(a, pk.q), {a, q: pk.q}); }
+  const pg = cadPage(), r = pg.ents[pk.e], sc = S.cadSc[S.fileId];
+  if (!r) return "Nothing to edit there";
+  if (!CED_EDIT.test(r.t)) return CED_BLOCKY.test(r.t) ? (r.t === "INSERT" ? "That is block " + (r.n || "") : "That is a " + r.t.toLowerCase()) + " — Explode it first, then edit its lines"
+    : "A " + cadDesc(sc, r).replace(/ ·.*/, "").toLowerCase() + " cannot be edited — lines, polylines, arcs and circles can";
+  const E = CAD.cadEnts(pg), prims = []; for (let j = E.ps[pk.e]; j < E.ps[pk.e + 1]; j++) prims.push(E.pl[j]);
+  const hidden = new Set(rec.hp);
+  if (prims.length && prims.every(i => hidden.has(i))) {   // already taken out (the same object picked twice in one command): its edited lines
+    let b = null; rec.add.forEach(a => { const h = plNear(a, pk.q); if (h && (!b || h.d < b.d)) b = Object.assign({a, q: pk.q}, h); }); return b || "That object has changed — pick it again"; }
+  if (prims.some(i => pg.kind[i] !== 0)) return "That object is drawn filled (a wide polyline or a solid) — it cannot be edited as a line";
+  const made = [];
+  prims.forEach(i => { rec.hp.push(i); CAD.primPaths(pg, i, 96).forEach(P => { const o = plFromPrim(P, pg.lay[i], pg.sty[i]); if (o) { rec.add.push(o); made.push(o); } }); });
+  for (let j = E.ts[pk.e]; j < E.ts[pk.e + 1]; j++) rec.ht.push(E.tl[j]);
+  let b = null; made.forEach(a => { const h = plNear(a, pk.q); if (h && (!b || h.d < b.d)) b = Object.assign({a, q: pk.q}, h); });
+  return b || "Nothing to edit there";
+}
+const cedDrop = (rec, a, put) => { const i = rec.add.indexOf(a); if (i >= 0) rec.add.splice(i, 1, ...(put || [])); else if (put) rec.add.push(...put); };
+/* the drawing's lines (as edited, layers that are on) near a box: [{a, b}] — o itself left out */
+function cedEdges(rec, o, box){
+  const g = S.geo && S.geo[S.key]; if (!g || !g.cad) return [];
+  const hid = cadHidden(S.fileId, S.cadSc[S.fileId]), gone = new Set(rec.hp), ids = g.addIds || [], live = new Set(rec.add.filter(a => a !== o).map(a => a.id)), inIx = new Set(ids), E = [];
+  const take = s => { if (hid[s[7]] || (s[8] >= 0 && gone.has(s[8])) || (s[8] < 0 && !live.has(ids[-1 - s[8]]))) return; E.push({a: [s[0], s[1]], b: [s[2], s[3]]}); };   // (o itself, and objects changed since, left out)
+  if (box) { const ix = segsIn(g, box[0], box[1], box[2], box[3]); for (let n = 0; n < ix.length; n++) take(g.segs[ix[n]]); }
+  else g.segs.forEach(take);
+  rec.add.forEach(a => { if (a === o || hid[a.li] || inIx.has(a.id)) return;   // edited in this command, not yet in the index
+    for (let j = 0, n = plN(a); j < n; j++) E.push({a: plA(a, j), b: plB(a, j)}); });
+  return E;
+}
+function cedCross(rec, o){   // the places T on o where another line crosses it (and where it crosses itself)
+  const n = plN(o), bx = plBox(o.pts), pad = 1, E = cedEdges(rec, o, [bx[0] - pad, bx[1] - pad, bx[2] + pad, bx[3] + pad]), T = [];
+  for (let j = 0; j < n; j++) { const a = plA(o, j), b = plB(o, j);
+    E.forEach(ed => { const h = segInter(a, b, ed.a, ed.b); if (h) T.push(j + h.t); });
+    for (let m = j + 2; m < n; m++) { if (o.cl && j === 0 && m === n - 1) continue; const h = segInter(a, b, plA(o, m), plB(o, m)); if (h) { T.push(j + h.t); T.push(m + h.u); } } }
+  return T.sort((x, y) => x - y).filter((t, i, A) => !i || t - A[i - 1] > 1e-7);
+}
+
+function cedClick(sp, p, e){
+  if (!cadOn()) return toast("AutoCAD mode edits an AutoCAD drawing's own objects — this page is a PDF. Switch to PDF mode to edit the takeoff's markups.", 4500);
+  const t = S.tool;
+  if (t === "cedjoin") return cedJoinPick(sp);
+  if (t === "cedoffset") return cedOffsetClick(sp, p);
+  const pk = cedPick(sp);
+  if (!pk) return toast("Click on a line, polyline, arc or circle of the drawing", 2600);
+  if (t === "cedexplode") return cedExplode([pk]);
+  if (t === "trim" || t === "extend") return (t === "extend" ? !e.shiftKey : !!e.shiftKey) ? cedExtend(pk) : cedTrim(pk);
+  if (t === "break") return cedBreak(pk, p, e.shiftKey);
+  if (t === "fillet" || t === "chamfer") return cedFillet(pk);
+}
+/* TRIM: the part clicked is cut back to the nearest lines that cross the object; nothing crosses it — the object goes (AutoCAD's quick mode) */
+function cedTrim(pk){
+  let msg = "";
+  cedMut("Trim (AutoCAD)", rec => {
+    const h = cedTake(rec, pk); if (typeof h === "string") return h;
+    const o = h.a, n = plN(o), X = cedCross(rec, o).filter(T => o.cl || (T > 1e-6 && T < n - 1e-6)), Tc = h.T;
+    if (!X.length) { cedDrop(rec, o); msg = "Nothing crosses it — the object is erased (as AutoCAD's Trim does) · Ctrl+Z brings it back"; return; }
+    if (o.cl) {
+      if (X.length < 2) return "Only one line crosses this closed object — Trim needs two to cut a part of it away";
+      const lo = X.filter(T => T < Tc - 1e-7), hi = X.filter(T => T > Tc + 1e-7), a = lo.length ? lo[lo.length - 1] : X[X.length - 1] - n, b = hi.length ? hi[0] : X[0] + n;
+      const part = plCut(o, b, a + n); if (!part) return "Nothing would be left"; cedDrop(rec, o, [plMade(o, part)]); msg = "Trimmed"; return;
+    }
+    const lo = X.filter(T => T < Tc - 1e-7), hi = X.filter(T => T > Tc + 1e-7), put = [];
+    if (lo.length) { const q = plCut(o, 0, lo[lo.length - 1]); if (q) put.push(plMade(o, q)); }
+    if (hi.length) { const q = plCut(o, hi[0], n); if (q) put.push(plMade(o, q)); }
+    cedDrop(rec, o, put); msg = "Trimmed" + (put.length === 2 ? " — the object is now two" : "");
+  }) !== null && msg && toast(msg, 2400);
+}
+/* EXTEND: the end nearer the click grows to the first line in its way — a straight end along its line, an arc's end round its circle */
+function cedExtend(pk){
+  let msg = "";
+  cedMut("Extend (AutoCAD)", rec => {
+    const h = cedTake(rec, pk); if (typeof h === "string") return h;
+    let o = h.a; if (o.cl) return "A closed object has no end to extend";
+    const n = plN(o), atStart = h.T < n / 2, k = hereScale(h.p) || 0;
+    const W = atStart ? {pts: o.pts.slice().reverse(), cv: o.cv ? o.cv.slice().reverse() : undefined} : {pts: o.pts.slice(), cv: o.cv ? o.cv.slice() : undefined};   // worked on with the end to extend last
+    const m = W.pts.length - 1, e0 = W.pts[m], E = cedEdges(rec, o, null), gid = W.cv ? W.cv[m - 1] || 0 : 0;
+    if (!gid) {   // straight: along the line of the last segment
+      const q0 = W.pts[m - 1], v = unitV(q0, e0); let best = null;
+      E.forEach(ed => { const sx = ed.b[0] - ed.a[0], sy = ed.b[1] - ed.a[1], den = v[0] * sy - v[1] * sx; if (Math.abs(den) < 1e-12) return;
+        const wx = ed.a[0] - e0[0], wy = ed.a[1] - e0[1], s = (wx * sy - wy * sx) / den, u = (wx * v[1] - wy * v[0]) / den;
+        if (s > 1e-6 && u >= -1e-9 && u <= 1 + 1e-9 && (!best || s < best.s)) best = {s, p: [e0[0] + v[0] * s, e0[1] + v[1] * s]}; });
+      if (!best) return "Nothing in line with that end to extend to";
+      W.pts[m] = rp(best.p); msg = "Extended" + (k ? " by " + f3(best.s / k) + " ft" : "");
+    } else {   // an arc: round its circle
+      let j0 = m - 1; while (j0 > 0 && W.cv[j0 - 1] === gid) j0--;
+      const A = W.pts[j0], B = W.pts[Math.round((j0 + m) / 2)], C = e0, c = circ3(A, B, C); if (!c) return "That end's arc could not be read";
+      const dir = Math.sign((B[0] - A[0]) * (C[1] - B[1]) - (B[1] - A[1]) * (C[0] - B[0])) || 1, a0 = Math.atan2(e0[1] - c.c[1], e0[0] - c.c[0]);
+      let sweep = 0; for (let j = j0; j < m; j++) { const p1 = W.pts[j], p2 = W.pts[j + 1]; sweep += Math.abs(Math.atan2((p1[0] - c.c[0]) * (p2[1] - c.c[1]) - (p1[1] - c.c[1]) * (p2[0] - c.c[0]), (p1[0] - c.c[0]) * (p2[0] - c.c[0]) + (p1[1] - c.c[1]) * (p2[1] - c.c[1]))); }
+      let best = null;
+      E.forEach(ed => circSeg(c.c, c.r, ed.a, ed.b).forEach(X => { let f = dir * (Math.atan2(X[1] - c.c[1], X[0] - c.c[0]) - a0); f = ((f % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+        if (f > 1e-6 && f < 2 * Math.PI - sweep - 1e-6 && (!best || f < best.f)) best = {f}; }));
+      if (!best) return "Nothing round that arc's circle to extend it to";
+      const steps = Math.max(2, Math.ceil(best.f / (Math.PI / 192)));
+      for (let s = 1; s <= steps; s++) { const a = a0 + dir * best.f * s / steps; W.pts.push(rp([c.c[0] + c.r * Math.cos(a), c.c[1] + c.r * Math.sin(a)])); W.cv.push(gid); }
+      msg = "Arc extended" + (k ? " by " + f3(c.r * best.f / k) + " ft" : "");
+    }
+    if (atStart) { W.pts.reverse(); if (W.cv) W.cv.reverse(); }
+    o.pts = W.pts; if (W.cv) o.cv = W.cv;
+  }) !== null && msg && toast(msg, 2400);
+}
+function circ3(A, B, C){   // the circle through three points -> {c, r} or null
+  const d = 2 * (A[0] * (B[1] - C[1]) + B[0] * (C[1] - A[1]) + C[0] * (A[1] - B[1])); if (Math.abs(d) < 1e-12) return null;
+  const a2 = A[0] * A[0] + A[1] * A[1], b2 = B[0] * B[0] + B[1] * B[1], c2 = C[0] * C[0] + C[1] * C[1];
+  const c = [(a2 * (B[1] - C[1]) + b2 * (C[1] - A[1]) + c2 * (A[1] - B[1])) / d, (a2 * (C[0] - B[0]) + b2 * (A[0] - C[0]) + c2 * (B[0] - A[0])) / d];
+  return {c, r: dist(c, A)};
+}
+function circSeg(c, r, a, b){   // where the segment ab meets the circle
+  const dx = b[0] - a[0], dy = b[1] - a[1], fx = a[0] - c[0], fy = a[1] - c[1], A = dx * dx + dy * dy, B = 2 * (fx * dx + fy * dy), C = fx * fx + fy * fy - r * r, D = B * B - 4 * A * C;
+  if (A < 1e-18 || D < 0) return []; const s = Math.sqrt(D), out = [];
+  [(-B - s) / (2 * A), (-B + s) / (2 * A)].forEach(t => { if (t >= -1e-9 && t <= 1 + 1e-9) out.push([a[0] + t * dx, a[1] + t * dy]); });
+  return out;
+}
+/* BREAK: cut the object in two at the point clicked (a closed one opens there) · Shift: delete the segment (an arc: the whole arc) */
+function cedBreak(pk, p, del){
+  let msg = "";
+  cedMut(del ? "Delete segment (AutoCAD)" : "Break (AutoCAD)", rec => {
+    const h = cedTake(rec, pk); if (typeof h === "string") return h;
+    const o = h.a, n = plN(o);
+    if (del) { let j0 = h.j, j1 = h.j; const g = plCv(o, h.j);
+      if (g) { while ((o.cl ? j0 > h.j - n + 1 : j0 > 0) && plCv(o, j0 - 1) === g) j0--; while ((o.cl ? j1 < j0 + n - 1 : j1 < n - 1) && plCv(o, j1 + 1) === g) j1++; }
+      if (o.cl) { if (j1 - j0 + 1 >= n) { cedDrop(rec, o); msg = "Deleted"; return; } const q = plCut(o, j1 + 1, j0 + n); cedDrop(rec, o, q ? [plMade(o, q)] : []); msg = "Segment deleted — the object is open there"; return; }
+      const put = []; if (j0 > 0) { const q = plCut(o, 0, j0); if (q) put.push(plMade(o, q)); } if (j1 + 1 < n) { const q = plCut(o, j1 + 1, n); if (q) put.push(plMade(o, q)); }
+      cedDrop(rec, o, put); msg = put.length === 2 ? "Segment deleted — the object is now two" : put.length ? "Segment deleted" : "Deleted"; return; }
+    let at = plNear(o, p || h.p); if (!at || at.d > 7 / S.view.s) at = h;
+    { const V = o.pts.findIndex(v => dist(v, at.p) * S.view.s < 4); if (V >= 0) at = {T: V, p: o.pts[V]}; }   // on a corner: exactly there
+    if (o.cl) { const q = plCut(o, at.T, at.T + n); if (!q) return "Nothing to break there"; cedDrop(rec, o, [plMade(o, q)]); msg = "Broken — the closed object is open at that point"; return; }
+    if (at.T < 1e-6 || at.T > n - 1e-6) return "That is the end of the object — nothing to break there";
+    const A = plCut(o, 0, at.T), B = plCut(o, at.T, n); if (!A || !B) return "Nothing to break there";
+    cedDrop(rec, o, [plMade(o, A), plMade(o, B)]);
+    const k = hereScale(at.p); msg = "Broken in two" + (k ? ": " + f3(polyLen(A.pts) / k) + " + " + f3(polyLen(B.pts) / k) + " ft" : "");
+  }) !== null && msg && toast(msg, 2600);
+}
+/* FILLET / CHAMFER: two lines (or two sides of one polyline) cut or extended to meet, the corner rounded with an arc of the radius set
+   (a new arc on the first object's layer, as AutoCAD) or bevelled — radius 0: a sharp corner */
+function cedFillet(pk){
+  const kind = S.tool;
+  if (!S.cedF) { const r = !pk.a && cadPage().ents[pk.e]; if (r && !CED_EDIT.test(r.t)) return toast(CED_BLOCKY.test(r.t) ? "That is a " + (r.t === "INSERT" ? "block" : r.t.toLowerCase()) + " — Explode it first, then fillet its lines" : "Fillet works on lines and polylines", 3000);
+    S.cedF = pk; hint(); draw(); return toast("Now click the second line (or the next side of the same polyline)", 2200); }
+  const A0 = S.cedF; S.cedF = null; hint();
+  if (pk.e != null && A0.e === pk.e && A0.i === pk.i && !pk.a && dist(A0.q, pk.q) * S.view.s < 3) { draw(); return toast("That is the same line — pick a second one", 2200); }
+  const k = hereScale(pk.q) || hereScale(A0.q || pk.q); if (!k) { draw(); return toast("Set the page scale first (K) — the radius is in feet", 2600); }
+  let msg = "";
+  cedMut(kind === "fillet" ? "Fillet (AutoCAD)" : "Chamfer (AutoCAD)", rec => {
+    const A = cedTake(rec, A0); if (typeof A === "string") return A;
+    const B = cedTake(rec, pk); if (typeof B === "string") return B;
+    if (plCv(A.a, A.j) || plCv(B.a, B.j)) return "Fillet and Chamfer work between straight lines — pick a line or a straight side";
+    const gid = () => 1 + Math.max(0, ...rec.add.map(a => a.cv ? Math.max(0, ...a.cv) : 0));
+    if (A.a === B.a) {   // two sides of one polyline: its corner
+      let o = A.a; const n = plN(o), jl = Math.min(A.j, B.j), jh = Math.max(A.j, B.j);
+      let V = jh - jl === 1 ? jh : o.cl && jl === 0 && jh === n - 1 ? 0 : -1; if (V < 0) return "Pick two sides that meet at a corner of the polyline";
+      if (o.cl) { const L = o.pts.length, s = (V - 1 + L) % L; o.pts = o.pts.slice(s).concat(o.pts.slice(0, s)); if (o.cv) o.cv = o.cv.slice(s).concat(o.cv.slice(0, s)); V = 1; }   // started one before the corner
+      const P0 = o.pts[V - 1], X = o.pts[V], P1 = o.pts[V + 1], c = cornerPts(X, unitV(X, P0), unitV(X, P1), lenOf(X, P0), lenOf(X, P1), kind, k, true); if (c.err) return c.err;
+      const g = c.arc ? gid() : 0, cv = o.cv || o.pts.map(() => 0);
+      o.pts = o.pts.slice(0, V).concat(c.pts.map(rp), o.pts.slice(V + 1)); const nc = cv.slice(0, V).concat(c.pts.slice(1).map(() => g), cv.slice(V)); if (nc.some(Boolean)) o.cv = nc; else delete o.cv;
+      msg = c.pts.length > 1 ? (kind === "fillet" ? "Filleted" : "Chamfered") : "Corner made sharp"; return;
+    }
+    if (A.a.cl || B.a.cl) return "Pick open lines or polylines (for a closed polyline, pick two of its sides that meet)";
+    const a1 = plA(A.a, A.j), b1 = plB(A.a, A.j), a2 = plA(B.a, B.j), b2 = plB(B.a, B.j), I = lineInter(a1, b1, a2, b2);
+    if (!I) return "The two lines are parallel — they have no corner";
+    const side = (h, t) => { const o = h.a, cv = o.cv || o.pts.map(() => 0); let P, C;   // the picked side, ending at the corner X
+      if (h.t < t) { P = o.pts.slice(0, h.j + 1).concat([I.p]); C = cv.slice(0, h.j).concat([0]); } else { P = [I.p].concat(o.pts.slice(h.j + 1)); C = [0].concat(cv.slice(h.j + 1, o.pts.length - 1)); P.reverse(); C.reverse(); }
+      return {P: P.map(p => p.slice()), C}; };
+    const S1 = side(A, I.t), S2 = side(B, I.u), X = I.p, e1 = S1.P[S1.P.length - 2], e2 = S2.P[S2.P.length - 2];
+    const c = cornerPts(X, unitV(X, e1), unitV(X, e2), lenOf(X, e1), lenOf(X, e2), kind, k, true); if (c.err) return c.err;
+    const fin = (Sx, end) => { Sx.P[Sx.P.length - 1] = rp(end); const Q = [Sx.P[0]], D = []; for (let i = 1; i < Sx.P.length; i++) { if (dist(Sx.P[i], Q[Q.length - 1]) < 1e-7) continue; Q.push(Sx.P[i]); D.push(Sx.C[i - 1]); } return Q.length >= 2 ? {pts: Q, cv: D.some(Boolean) ? D : undefined} : null; };
+    const nA = fin(S1, c.pts[0]), nB = fin(S2, c.pts[c.pts.length - 1]); if (!nA || !nB) return "Nothing would be left of one of the lines";
+    const put = [plMade(A.a, nA)]; if (c.pts.length > 1) { const g = c.arc ? gid() : 0, arc = {pts: c.pts.map(rp)}; if (g) arc.cv = c.pts.slice(1).map(() => g); put.push(plMade(A.a, arc)); }
+    cedDrop(rec, B.a, [plMade(B.a, nB)]); cedDrop(rec, A.a, put);
+    msg = c.pts.length > 1 ? (kind === "fillet" ? "Filleted — radius " + f3(S.fc.r) + " ft" : "Chamfered") : "The two lines now meet at a sharp corner";
+  }) !== null && msg && toast(msg, 2400);
+  draw();
+}
+/* JOIN: objects whose ends touch become one polyline (closed when the chain comes back on itself); straight pieces in line become one */
+function cedJoinPick(sp){
+  const pk = cedPick(sp); if (!pk) return toast("Click the lines, polylines and arcs to join — Enter (or Join again) joins them", 2800);
+  const J = S.cedJ = S.cedJ || [], same = x => pk.a ? x.a && x.a.id === pk.a.id : x.e === pk.e && x.i === pk.i;
+  const at = J.findIndex(same); if (at >= 0) J.splice(at, 1); else J.push(pk);
+  hint(); draw();
+}
+function cedJoin(picks){
+  if (!picks || picks.length < 2) return toast("Pick two or more objects whose ends touch, then press Enter", 2800);
+  let msg = "";
+  cedMut("Join (AutoCAD)", rec => {
+    const objs = []; for (const pk of picks) { const h = cedTake(rec, pk); if (typeof h === "string") return h; if (objs.indexOf(h.a) < 0) objs.push(h.a); }
+    const open = objs.filter(o => !o.cl), tol = 0.01; let left = open.slice(), made = 0, used = 0;
+    if (open.length < 2) return "Closed objects cannot be joined — pick open lines, polylines or arcs";
+    const W = o => ({pts: o.pts.map(p => p.slice()), cv: o.cv ? o.cv.slice() : o.pts.slice(1).map(() => 0)});
+    while (left.length >= 2) {
+      const first = left.shift(), ch = W(first), group = [first]; let grew = true;
+      while (grew) { grew = false;
+        for (let i = 0; i < left.length; i++) { const o = left[i], w = W(o), s0 = ch.pts[0], e0 = ch.pts[ch.pts.length - 1], a = w.pts[0], b = w.pts[w.pts.length - 1];
+          const rev = () => { w.pts.reverse(); w.cv.reverse(); };
+          if (dist(e0, a) <= tol) {} else if (dist(e0, b) <= tol) rev(); else if (dist(s0, b) <= tol) { ch.pts = w.pts.slice(0, -1).concat(ch.pts); ch.cv = w.cv.concat(ch.cv); group.push(o); left.splice(i, 1); grew = true; break; }
+          else if (dist(s0, a) <= tol) { rev(); ch.pts = w.pts.slice(0, -1).concat(ch.pts); ch.cv = w.cv.concat(ch.cv); group.push(o); left.splice(i, 1); grew = true; break; } else continue;
+          ch.pts = ch.pts.concat(w.pts.slice(1)); ch.cv = ch.cv.concat(w.cv); group.push(o); left.splice(i, 1); grew = true; break; } }
+      if (group.length < 2) continue;
+      let cl = false; if (ch.pts.length > 3 && dist(ch.pts[0], ch.pts[ch.pts.length - 1]) <= tol) { ch.pts.pop(); cl = true; }
+      for (let i = ch.pts.length - 2; i >= 1; i--) { const a = ch.pts[i - 1], v = ch.pts[i], b = ch.pts[i + 1];   // straight pieces in line: one segment
+        if (ch.cv[i - 1] || ch.cv[i]) continue; const ux = v[0] - a[0], uy = v[1] - a[1], wx = b[0] - v[0], wy = b[1] - v[1];
+        if (Math.abs(ux * wy - uy * wx) <= 1e-9 * Math.hypot(ux, uy) * Math.hypot(wx, wy) + 1e-12 && ux * wx + uy * wy > 0) { ch.pts.splice(i, 1); ch.cv.splice(i, 1); } }
+      const o = Object.assign({id: uid("A"), li: first.li, si: first.si, pts: ch.pts.map(rp)}, ch.cv.some(Boolean) ? {cv: cl ? ch.cv : ch.cv.slice(0, ch.pts.length - 1)} : {}, cl ? {cl: true} : {});
+      group.forEach(g => cedDrop(rec, g)); rec.add.push(o); made++; used += group.length;
+    }
+    if (!made) return "Their ends do not touch — nothing joined (AutoCAD's Join needs objects end to end)";
+    const rest = objs.length - used;
+    msg = used + " objects joined into " + (made > 1 ? made + " polylines" : "one polyline") + (rest ? " · " + rest + " left as they were (their ends do not touch)" : "");
+  }) !== null && msg && toast(msg, 3600);
+  S.cedJ = null; hint(); draw();
+}
+/* EXPLODE: a polyline into its lines and arcs; a block, dimension, multiline or leader into its lines (its text and fills stay as they are) */
+function cedExplode(picks){
+  let msg = "";
+  cedMut("Explode (AutoCAD)", rec => {
+    const pg = cadPage(), E = CAD.cadEnts(pg), hidden = new Set(rec.hp); let n = 0, pieces = 0; const why = [];
+    for (const pk of picks) {
+      const r = !pk.a && pg.ents[pk.e];
+      if (r && CED_BLOCKY.test(r.t)) { let got = 0;
+        for (let j = E.ps[pk.e]; j < E.ps[pk.e + 1]; j++) { const i = E.pl[j]; if (pg.kind[i] !== 0 || pg.pf[i] === 1 || hidden.has(i)) continue;
+          rec.hp.push(i); hidden.add(i); CAD.primPaths(pg, i, 96).forEach(P => { const o = plFromPrim(P, pg.lay[i], pg.sty[i]); if (o) { rec.add.push(o); got++; } }); }
+        if (got) { n++; pieces += got; } else why.push("nothing in " + (r.n || "it") + " to explode"); continue; }
+      if (r && !CED_EDIT.test(r.t)) { why.push(cadDesc(S.cadSc[S.fileId], r).replace(/ ·.*/, "") + " cannot be exploded"); continue; }
+      const h = cedTake(rec, pk); if (typeof h === "string") { why.push(h); continue; }
+      const o = h.a, m = plN(o), cuts = [];
+      for (let j = 0; j < m; j++) if (j === 0 || !(plCv(o, j) && plCv(o, j) === plCv(o, j - 1))) cuts.push(j);   // at every corner, not inside an arc
+      if (o.cl && cuts.length > 1 && plCv(o, 0) && plCv(o, 0) === plCv(o, m - 1)) cuts.shift();   // a closed one whose start is inside an arc
+      if (cuts.length < 2) { why.push("a single " + (plCv(o, 0) ? "arc" : "line") + " — nothing to explode"); continue; }
+      const put = cuts.map((c, i) => plCut(o, c, i + 1 < cuts.length ? cuts[i + 1] : o.cl ? cuts[0] + m : m)).filter(Boolean).map(q => plMade(o, q));
+      cedDrop(rec, o, put); n++; pieces += put.length;
+    }
+    if (!n) return why[0] ? why[0].charAt(0).toUpperCase() + why[0].slice(1) : "Nothing to explode";
+    msg = "Exploded" + (n > 1 ? " " + n + " objects" : "") + " into " + pieces + " lines / arcs" + (why.length ? " · " + why.length + " could not be: " + why[0] : "");
+  }) !== null && msg && toast(msg, 3200);
+}
+/* OFFSET: a distance, then pick an object and click the side — a parallel copy there, on the same layer in the same style (again and again) */
+async function cedOffsetStart(){
+  const v = await ask("Offset — AutoCAD objects", `<p class="small">A parallel copy of a line, polyline, arc or circle at this distance, on its own layer — click the object, then the side to put the copy on (as AutoCAD's OFFSET). Esc when done.</p><div class="grid" style="margin-top:8px"><div class="fg"><label>Distance (ft, or ft-in)</label><input type="text" id="cedOD" value="${f3(S.cedOD || 0.5)}"></div></div>`, "Pick objects",
+    () => { const raw = $("cedOD").value.trim(); let d = parseFt(raw); if (isNaN(d) && /^\d+(\.\d+)?\s*"$/.test(raw)) d = parseFloat(raw) / 12; return d > 0 && isFinite(d) ? d : "Enter a distance more than 0, e.g. 0.75 or 9\""; }, "cedOD");
+  if (!v) return;
+  S.cedOD = v; setTool("cedoffset"); S.cedO = null; hint();
+}
+function offClosed(Q, d){ const L = Q.length; return offsetRun([Q[L - 1]].concat(Q, [Q[0]]), d).slice(1, L + 1); }
+function offCad(o, d){   // an edited object moved sideways by d: corners mitred (extended, as AutoCAD), an arc's points straight out from its centre — the copy exactly concentric
+  const Q = o.cl ? offClosed(o.pts, d) : offsetRun(o.pts, d), L = o.pts.length, n = plN(o);
+  if (o.cv) for (let i = 0; i < L; i++) { const jp = o.cl ? (i - 1 + n) % n : i - 1; if (jp < 0 || i >= n) continue; const g = o.cv[i]; if (!g || o.cv[jp] !== g) continue;
+    const a = o.pts[(i - 1 + L) % L], v = o.pts[i], b = o.pts[(i + 1) % L], u1 = unitV(a, v), u2 = unitV(v, b), nx = u1[1] + u2[1], ny = -u1[0] - u2[0], nl = Math.hypot(nx, ny);
+    if (nl > 1e-9) Q[i] = [v[0] + nx / nl * d, v[1] + ny / nl * d]; }
+  return Q;
+}
+function cedOffsetClick(sp, p){
+  if (!S.cedO) { const pk = cedPick(sp); if (!pk) return toast("Click a line, polyline, arc or circle to offset", 2400); S.cedO = pk; hint(); draw(); return; }
+  const pk = S.cedO, k = hereScale(p); S.cedO = null; hint();
+  if (!k) { draw(); return toast("Set the page scale first (K) — the distance is in feet", 2600); }
+  const d = S.cedOD * k;
+  cedMut("Offset (AutoCAD)", rec => {
+    const h = cedTake(rec, pk); if (typeof h === "string") return h;
+    const o = h.a, A = offCad(o, d), B = offCad(o, -d);
+    const near = Q => { const t = {pts: Q, cl: o.cl}; const r = plNear(t, p); return r ? r.d : Infinity; };
+    const Q = near(A) <= near(B) ? A : B;
+    if (Q.some(q => !isFinite(q[0]) || !isFinite(q[1]))) return "That object cannot be offset by this distance";
+    rec.add.push(Object.assign({id: uid("A"), li: o.li, si: o.si, pts: Q.map(rp)}, o.cv ? {cv: o.cv.slice()} : {}, o.cl ? {cl: true} : {}));
+  }) !== null && toast("Offset " + f3(S.cedOD) + " ft — click the next object, or Esc", 2000);
+  draw();
+}
+function cedModAct(a){   // Offset / Join / Explode buttons in AutoCAD mode
+  if (!cadOn()) return toast("AutoCAD mode edits an AutoCAD drawing's own objects — this page is a PDF. Switch to PDF mode to edit the takeoff's markups.", 4500);
+  const sel = cadSelIds(), picks = () => { const pg = cadPage(); return sel.map(ei => ({e: ei, i: -1, q: cadMid(pg, ei) || [0, 0]})); };
+  if (a === "offset") return cedOffsetStart();
+  if (a === "join") { if (S.tool === "cedjoin") return cedJoin(S.cedJ); if (sel.length >= 2) return cedJoinSel(sel); setTool("cedjoin"); return; }
+  if (a === "explode") { if (sel.length) { cedExplode(picks()); cadSelSet([]); return; } setTool("cedexplode"); return; }
+}
+function cedJoinSel(sel){   // the AutoCAD selection joined: each object picked at one of its own points
+  const pg = cadPage(), picks = sel.map(ei => { const E = CAD.cadEnts(pg), i = E.pl[E.ps[ei]]; const P = i != null ? CAD.primPaths(pg, i)[0] : null; return P && P.length ? {e: ei, i, q: P[0]} : null; }).filter(Boolean);
+  cedJoin(picks); cadSelSet([]);
+}
+function cedRestore(){   // the drawing back as it was read
+  const r = cedRec(); if (!r || (!r.hp.length && !r.add.length)) return toast("No AutoCAD edits on this drawing", 2200);
+  cedMut("Restore the drawing", rec => { rec.hp = []; rec.ht = []; rec.add = []; }) !== null && toast("The drawing is back as it was read — Ctrl+Z undoes this", 3000);
+}
+/* what the AutoCAD-mode tools show: the object under the cursor, the first pick of Fillet / Offset, the objects picked to join */
+function cedPkPath(pk){
+  if (!pk) return "";
+  const pts = []; if (pk.a) { const a = (cedRec() || {add: []}).add.find(x => x.id === pk.a.id); if (a) pts.push(a.cl ? a.pts.concat([a.pts[0]]) : a.pts); }
+  else { const pg = cadPage(); if (!pg) return ""; const E = CAD.cadEnts(pg); for (let j = E.ps[pk.e]; j < E.ps[pk.e + 1]; j++) { const i = E.pl[j]; if (pg.pf[i] !== 1) CAD.primPaths(pg, i).forEach(P => pts.push(P.closed ? P.concat([P[0]]) : P)); } }
+  return pts.map(P => P.map((p, n) => { const q = toScr(p); return (n ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1); }).join("")).join("");
+}
+function cedSvg(){
+  if (!cedHere() || !cadOn()) return "";
+  const out = [], pth = (d, col, w, dash) => d ? `<path d="${d}" fill="none" stroke="${col}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"${dash ? ` stroke-dasharray="${dash}"` : ""}/>` : "";
+  (S.cedJ || []).forEach(pk => out.push(pth(cedPkPath(pk), "#2f8bff", 3, "7 4")));
+  if (S.cedF) out.push(pth(cedPkPath(S.cedF), "#ff2d55", 3.5, ""));
+  if (S.cedO) out.push(pth(cedPkPath(S.cedO), "#ff2d55", 3.5, "7 4"));
+  if (S.cedHov) out.push(pth(cedPkPath(S.cedHov), "rgba(255,196,0,.85)", 4, ""));
+  return out.join("");
+}
+function cedHover(sp){ const pk = cedPick(sp), k0 = S.cedHov ? (S.cedHov.a ? S.cedHov.a.id : S.cedHov.e) : null, k1 = pk ? (pk.a ? pk.a.id : pk.e) : null; S.cedHov = pk; if (k0 !== k1) draw(); }
+const CED_HINTS = {
+  trim: "AutoCAD Trim: click the part of a line, polyline, arc or circle to cut away — it is cut back to the nearest lines crossing it (nothing crosses: it is erased) · Shift+click: Extend · Esc when done.",
+  extend: "AutoCAD Extend: click a line, polyline or arc near the end to grow — it reaches the first line in its way (an arc round its circle) · Shift+click: Trim · Esc when done.",
+  break: "AutoCAD Break: click a line, polyline, arc or circle where it should be cut in two (a closed one opens there) · Shift+click deletes that segment / arc · Esc when done.",
+  cedjoin: "AutoCAD Join: click the lines, polylines and arcs to join (click again to leave one out) · Enter or Join joins those whose ends touch · Esc when done.",
+  cedexplode: "AutoCAD Explode: click a polyline (into lines and arcs) or a block, dimension, multiline or leader (into its lines) · Esc when done."};
+function cedHint(){
+  const t = S.tool, n = (S.cedJ || []).length;
+  if (t === "fillet" || t === "chamfer") return S.cedF ? "AutoCAD " + (t === "fillet" ? "Fillet" : "Chamfer") + ": click the second line (or the next side of the same polyline) · Esc: pick the first again."
+    : t === "fillet" ? "AutoCAD Fillet (radius " + f3(S.fc.r) + " ft): click the first line near the corner, then the second · Enter: change the radius · Esc when done." : "AutoCAD Chamfer (" + f3(S.fc.d1) + " × " + f3(S.fc.d2) + " ft): click the first line, then the second · Enter: change the distances · Esc when done.";
+  if (t === "cedoffset") return S.cedO ? "AutoCAD Offset " + f3(S.cedOD) + " ft: click the side to put the copy on · Esc: pick another." : "AutoCAD Offset " + f3(S.cedOD) + " ft: click the line, polyline, arc or circle to offset · Esc when done.";
+  return (CED_HINTS[t] || "") + (t === "cedjoin" && n ? " — " + n + " picked" : "");
+}
+
 async function cadQuickSelect(){   // AutoCAD's QSELECT: by layer, type, block name, length and area
   const pg = cadPage(); if (!pg) return toast("Open an AutoCAD drawing first — + PDF adds a DWG or DXF", 4000);
   const sc = S.cadSc[S.fileId], hid = cadHidden(S.fileId, sc), E = CAD.cadEnts(pg), Q = pg.ents.map((r, ei) => r && r.L >= 0 && !hid[r.L] && E.eb[4 * ei] <= E.eb[4 * ei + 2] ? ei : -1).filter(ei => ei >= 0);
@@ -10155,7 +10598,7 @@ async function plotPdf(o){
   const page = out.addPage([lo.PW, lo.PH]), font = await out.embedFont(Lb.StandardFonts.Helvetica), cp = cadOn() ? cadPage() : null;
   if (cp) {
     const sc = S.cadSc[f], hid = cadHidden(f, sc); if (o.np) sc.layers.forEach((l, i) => { if (!l.plot || /^defpoints$/i.test(l.name)) hid[i] = 1; });
-    await CAD.cadPlotPage(Lb, out, page, cp, {win, s: lo.s, at: [lo.x, lo.y], style: o.style, hidden: hid, lw: o.lw, font});
+    await CAD.cadPlotPage(Lb, out, page, cp, {win, s: lo.s, at: [lo.x, lo.y], style: o.style, hidden: hid, lw: o.lw, font, ed: cedC(f, cp)});
   } else {
     const rec = await dbGet("pdfs", f); let src = null; try { src = rec && await Lb.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); } catch (e) { src = null; }
     if (!src || src.isEncrypted || pgp.rotate % 360 || o.style === "mono" || mkRedacted(f, p)) {   // as a picture: a turned, locked or redacted page, or monochrome
@@ -10211,12 +10654,12 @@ function ocFix(Lb, out, fids){
 (async function init(){
   loadLbl(); loadLegend(); wire(); wirePanels(); setLblOn(S.lbl.on); setLegendOn(S.legendOn); iconize(); wsApply();
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
-  S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark();
+  S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   window.zdTakeoff = {snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
-    cadLoad, cadMod, cadPage, cadOn, cadHidden, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
+    cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
     mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");

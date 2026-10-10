@@ -685,8 +685,9 @@ function pdfOps(pg, o, w){
   };
   const layer = li => { if (!o.oc || li === open) return; if (open >= 0) w.s("EMC\n"); w.s("/OC /L" + li + " BDC\n"); open = li; };
   const alpha = a => { if (a === g0 || !o.A) return; w.s("/" + o.A.get(a < 1 ? a : 1) + " gs\n"); g0 = a; };
+  const ed = o.ed || null, hp = ed && ed.hp, ht = ed && ed.ht;
   for (let i = 0; i < pg.n; i++) {
-    if (hid && hid[pg.lay[i]]) continue;
+    if ((hid && hid[pg.lay[i]]) || (hp && hp[i])) continue;
     const st = pg.styles[pg.sty[i]], kd = pg.kind[i]; layer(pg.lay[i]); alpha(st.a);
     if (kd === 1 || kd === 2) { const k = "f" + st.c; if (k !== fk) { col(st.c, true, "rg"); fk = k; } }
     else { const k = "s" + st.c; if (k !== sk) { col(st.c, false, "RG"); sk = k; }
@@ -700,9 +701,14 @@ function pdfOps(pg, o, w){
       else w.s("h "); }
     w.s(kd === 1 ? "f\n" : kd === 2 ? "f*\n" : "S\n");
   }
+  if (ed && ed.add) ed.add.forEach(a => { const st = pg.styles[a.si]; if ((hid && hid[a.li]) || !st || a.pts.length < 2) return; layer(a.li); alpha(st.a);   // the edited objects
+    const k = "s" + st.c; if (k !== sk) { col(st.c, false, "RG"); sk = k; }
+    const lw = st.wid > 0 ? st.wid : (o.thin ? 0.25 : st.lw * 72 / 25.4) * (o.lwk || 1); if (lw !== w0) { w.v(lw).s("w\n"); w0 = lw; }
+    const d = st.dash || null; if (d !== d0) { if (d) { w.s("["); d.forEach(x => w.v(x)); w.s("] 0 d\n"); } else w.s("[] 0 d\n"); d0 = d; }
+    a.pts.forEach((p, j) => w.v(p[0]).v(H - p[1]).s(j ? "l " : "m ")); w.s(a.cl ? "h S\n" : "S\n"); });
   alpha(1);
   for (let i = 0; i < pg.tn; i++) {
-    if (hid && hid[pg.tL[i]]) continue;
+    if ((hid && hid[pg.tL[i]]) || (ht && ht[i])) continue;
     layer(pg.tL[i]); const c = pg.tC[i], k = "t" + c; if (k !== fk) { col(c, false, "rg"); fk = k; }
     const m = 6 * i, M = pg.tM;
     w.s("BT " + o.fk + " 1 Tf ").v(M[m]).v(-M[m + 1]).v(M[m + 2]).v(-M[m + 3]).v(M[m + 4]).v(H - M[m + 5]).s("Tm <" + winHex(pg.tS[i]) + "> Tj ET\n");
@@ -746,7 +752,7 @@ export async function cadPlotPage(L, doc, page, pg, o){
   const font = o.font || await doc.embedFont(L.StandardFonts.Helvetica), R = pdfRes(L, doc, page, pg, font), [x0, y0, x1, y1] = o.win, s = o.s, ctx = doc.context, N = L.PDFName.of;
   const ww = (x1 - x0) * s, wh = (y1 - y0) * s, tx = o.at[0] - s * x0, ty = o.at[1] - s * (pg.h - y1), w = new Ops(pg.ops.length * 14 + pg.tn * 80);
   w.s("q\n").v(o.at[0]).v(o.at[1]).v(ww).v(wh).s("re W n\n1 J 1 j\n").v(s).s("0 0 ").v(s).v(tx).v(ty).s("cm\n");
-  pdfOps(pg, {fk: R.fk, A: R.A, hidden: o.hidden, style: o.style, lwk: 1 / s, thin: o.lw === false}, w); w.s("Q\n");
+  pdfOps(pg, {fk: R.fk, A: R.A, hidden: o.hidden, style: o.style, lwk: 1 / s, thin: o.lw === false, ed: o.ed}, w); w.s("Q\n");
   const ref = await opsStream(ctx, w), cur = page.node.normalizedEntries().Contents;
   if (cur) cur.push(ref); else page.node.set(N("Contents"), ctx.obj([ref]));
 }
@@ -801,7 +807,8 @@ function* drawSteps(ctx, pg, v, o){
   const ids = all ? null : cand(pg, g, x0, y0, x1, y1), cnt = ids ? ids.length : pg.n, at = j => ids ? ids[j] : j;
   const ck = (dark ? 1 : 0) + (mono ? 2 : 0), css = g.css[ck] || (g.css[ck] = pg.styles.map(st => cadCss(st.c, dark, mono)));
   const fillCss = mono ? (dark ? "#4d4d4d" : "#cfcfcf") : null, lod = (o.fast ? 1.6 : 0.45) / s, bb = pg.bb, K = pg.kind, Ly = pg.lay, St = pg.sty;
-  const vis = i => { const b = 4 * i; return !hid[Ly[i]] && !(bb[b + 2] < x0 || bb[b] > x1 || bb[b + 3] < y0 || bb[b + 1] > y1); };
+  const ed = o.ed || null, hp = ed && ed.hp, ht = ed && ed.ht;   // AutoCAD-mode edits: objects taken out of the drawing, and the edited ones drawn instead
+  const vis = i => { const b = 4 * i; return !hid[Ly[i]] && !(hp && hp[i]) && !(bb[b + 2] < x0 || bb[b] > x1 || bb[b + 3] < y0 || bb[b + 1] > y1); };
   const page = () => { ctx.setTransform(s, 0, 0, s, v.tx, v.ty); ctx.lineCap = "round"; ctx.lineJoin = "round"; };
   const P0 = pg.p0, SLICE = 6000;   // path steps between pauses: a slice of a drawing made in the background stays a few ms
   page();
@@ -819,12 +826,19 @@ function* drawSteps(ctx, pg, v, o){
     pen(); let ops = 0;   // one stroke per style, cut into slices (every object is its own subpath: the cut does not show)
     for (let q = 0; q < L.length; q++) { const i = L[q]; addPath(ctx, pg, i); if ((ops += P0[i + 1] - P0[i] + 2) > SLICE && q < L.length - 1) { ctx.stroke(); yield; page(); pen(); ops = 0; } }
     ctx.stroke(); yield; page(); }
+  if (ed && ed.add && ed.add.length) {   // the edited objects, each in its own object's style (colour, lineweight, linetype)
+    const by = new Map(); ed.add.forEach(a => { const b = a.b; if (hid[a.li] || !b || b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1 || !pg.styles[a.si]) return; let L = by.get(a.si); if (!L) by.set(a.si, L = []); L.push(a); });
+    for (const [si, L] of by) { const st = pg.styles[si], lwPx = o.thin ? 1 : Math.max(1, Math.round(st.lw / 0.3)), lw = st.wid > 0 ? Math.max(st.wid, lwPx * px * dpr) : lwPx * px * dpr, per = st.dash ? st.dash.reduce((a, b) => a + b, 0) * s : 0;
+      ctx.globalAlpha = st.a; ctx.lineWidth = lw; ctx.setLineDash(per > 4 * dpr ? st.dash : []); ctx.strokeStyle = css[si]; ctx.beginPath();
+      L.forEach(a => { const Q = a.pts; ctx.moveTo(Q[0][0], Q[0][1]); for (let k = 1; k < Q.length; k++) ctx.lineTo(Q[k][0], Q[k][1]); if (a.cl) ctx.lineTo(Q[0][0], Q[0][1]); });
+      ctx.stroke(); }
+    ctx.globalAlpha = 1; yield; page(); }
   ctx.setLineDash([]);
   if (!o.fast) { const r = 1.2 * px * dpr; for (let j = 0, n = 0; j < cnt; j++) { const i = at(j); if (K[i] !== 3 || !vis(i)) continue; ctx.fillStyle = css[St[i]]; const q = pg.q0[i]; ctx.fillRect(pg.xy[q] - r, pg.xy[q + 1] - r, 2 * r, 2 * r); if (++n % 5000 === 0) { yield; page(); } } }
   if (pg.tn) {
     const tB = pg.tB, tM = pg.tM, minPx = o.fast ? 7 : 3.5; ctx.textBaseline = "alphabetic"; let f0 = "";
     for (let i = 0, n = 0; i < pg.tn; i++) {
-      if (hid[pg.tL[i]]) continue; const b = 4 * i; if (tB[b + 2] < x0 || tB[b] > x1 || tB[b + 3] < y0 || tB[b + 1] > y1) continue;
+      if (hid[pg.tL[i]] || (ht && ht[i])) continue; const b = 4 * i; if (tB[b + 2] < x0 || tB[b] > x1 || tB[b + 3] < y0 || tB[b + 1] > y1) continue;
       const m = 6 * i, em = Math.hypot(tM[m + 2], tM[m + 3]) * s; if (em < minPx) continue;
       ctx.setTransform(tM[m] * s / em, tM[m + 1] * s / em, -tM[m + 2] * s / em, -tM[m + 3] * s / em, tM[m + 4] * s + v.tx, tM[m + 5] * s + v.ty);
       const f = em.toFixed(1) + "px Arial, Helvetica, sans-serif"; if (f !== f0) { ctx.font = f; f0 = f; }
@@ -846,14 +860,14 @@ export async function cadDrawAsync(ctx, pg, v, o, stale){
    (no PDF parsed): its lines as indexPage makes them from a PDF — [x0, y0, x1, y1, flags (1 on a curve, 2 dashed, 4 a fill's
    outline), subpath, style, layer] with styles "#rrggbb|width" — hatch pattern lines left out (they are noise to snap to); its text
    as [{s, x, y, w, h, r}] (x, y the baseline's start, r its turn) */
-export function cadIndex(pg, max){
-  const segs = [], styles = [], six = new Map(), O = pg.ops, X = pg.xy; let sp = 0; max = max || 600000;
+export function cadIndex(pg, max, ed){   // ed: AutoCAD-mode edits — the objects taken out are left out, the edited ones put in; s[8] says where a line came from (its primitive, or -1 - the edited object's index)
+  const segs = [], styles = [], six = new Map(), O = pg.ops, X = pg.xy, hp = ed && ed.hp, ht = ed && ed.ht; let sp = 0; max = max || 600000;
+  const styleOf = (st, fill) => { const w = fill ? 0 : st.wid > 0 ? st.wid : st.lw * 72 / 25.4, key = (st.c === INK ? "#000000" : hex6(st.c)) + "|" + Math.round(w * 10) / 10; let si = six.get(key); if (si === undefined) { si = styles.length; styles.push(key); six.set(key, si); } return si; };
   for (let i = 0; i < pg.n && segs.length < max; i++) {
-    const kd = pg.kind[i]; if (kd === 3 || pg.pf[i] === 1) continue;
-    const st = pg.styles[pg.sty[i]], fill = kd === 1 || kd === 2, w = fill ? 0 : st.wid > 0 ? st.wid : st.lw * 72 / 25.4;
-    const key = (st.c === INK ? "#000000" : hex6(st.c)) + "|" + Math.round(w * 10) / 10; let si = six.get(key); if (si === undefined) { si = styles.length; styles.push(key); six.set(key, si); }
+    const kd = pg.kind[i]; if (kd === 3 || pg.pf[i] === 1 || (hp && hp[i])) continue;
+    const st = pg.styles[pg.sty[i]], fill = kd === 1 || kd === 2, si = styleOf(st, fill);
     const f0 = fill ? 4 : st.dash ? 2 : 0, li = pg.lay[i];
-    const push = (a, b, c, d, f) => { if (Math.abs(a - c) + Math.abs(b - d) > 0.05 && segs.length < max) segs.push([a, b, c, d, f, sp, si, li]); };
+    const push = (a, b, c, d, f) => { if (Math.abs(a - c) + Math.abs(b - d) > 0.05 && segs.length < max) segs.push([a, b, c, d, f, sp, si, li, i]); };
     let q = pg.q0[i], cx = 0, cy = 0, sx = 0, sy = 0;
     for (let j = pg.p0[i], e = pg.p0[i + 1]; j < e; j++) { const op = O[j];
       if (op === 0) { cx = sx = X[q]; cy = sy = X[q + 1]; sp++; q += 2; }
@@ -861,36 +875,38 @@ export function cadIndex(pg, max){
       else if (op === 2) { let px = cx, py = cy; for (let t = 1; t <= 8; t++) { const u = t / 8, x = bez(cx, X[q], X[q + 2], X[q + 4], u), y = bez(cy, X[q + 1], X[q + 3], X[q + 5], u); push(px, py, x, y, f0 | 1); px = x; py = y; } cx = X[q + 4]; cy = X[q + 5]; q += 6; }
       else { push(cx, cy, sx, sy, f0); cx = sx; cy = sy; } }
   }
+  if (ed && ed.add) ed.add.forEach((a, ai) => { const st = pg.styles[a.si]; if (!st) return; const si = styleOf(st, false), f0 = st.dash ? 2 : 0, Q = a.pts, n = a.cl ? Q.length : Q.length - 1; sp++;
+    for (let j = 0; j < n && segs.length < max; j++) { const p = Q[j], q = Q[(j + 1) % Q.length]; if (Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) > 1e-6) segs.push([p[0], p[1], q[0], q[1], f0 | (a.cv && a.cv[j] ? 1 : 0), sp, si, a.li, -1 - ai]); } });
   const texts = [];
-  for (let i = 0; i < pg.tn; i++) { const m = 6 * i, M = pg.tM, em = Math.hypot(M[m + 2], M[m + 3]); texts.push({s: pg.tS[i], x: M[m + 4], y: M[m + 5], w: Math.hypot(M[m], M[m + 1]) * pg.tW[i], h: em || 6, r: Math.atan2(M[m + 1], M[m]), li: pg.tL[i]}); }   // r: the baseline's turn on the page, as a PDF's text has it
+  for (let i = 0; i < pg.tn; i++) { if (ht && ht[i]) continue; const m = 6 * i, M = pg.tM, em = Math.hypot(M[m + 2], M[m + 3]); texts.push({s: pg.tS[i], x: M[m + 4], y: M[m + 5], w: Math.hypot(M[m], M[m + 1]) * pg.tW[i], h: em || 6, r: Math.atan2(M[m + 1], M[m]), li: pg.tL[i]}); }   // r: the baseline's turn on the page, as a PDF's text has it
   return {segs, styles, texts};
 }
 
 /* ------------------------------------------------------------------ picking and quantities */
 const bez = (a, b, c, d, t) => { const u = 1 - t; return u * u * u * a + 3 * u * u * t * b + 3 * u * t * t * c + t * t * t * d; };
 /* a primitive's subpaths as point lists (curves as short lines), page points */
-export function primPaths(pg, i){
-  const O = pg.ops, X = pg.xy, out = []; let q = pg.q0[i], P = null;
+export function primPaths(pg, i, steps){   // steps: points per curve (8; the AutoCAD-mode edits take 48 — an arc to well under a thousandth of its radius)
+  const O = pg.ops, X = pg.xy, out = [], N = steps || 8; let q = pg.q0[i], P = null;
   for (let j = pg.p0[i]; j < pg.p0[i + 1]; j++) { const op = O[j];
     if (op === 0) { P = [[X[q], X[q + 1]]]; out.push(P); q += 2; }
     else if (op === 1) { if (P) P.push([X[q], X[q + 1]]); q += 2; }
-    else if (op === 2) { if (P) { const p0 = P[P.length - 1]; for (let s = 1; s <= 8; s++) { const t = s / 8; P.push([bez(p0[0], X[q], X[q + 2], X[q + 4], t), bez(p0[1], X[q + 1], X[q + 3], X[q + 5], t)]); } } q += 6; }
+    else if (op === 2) { if (P) { const p0 = P[P.length - 1], bz = (P.nb = (P.nb || 0) + 1); P.cv = P.cv || []; for (let s = 1; s <= N; s++) { const t = s / N; P.cv[P.length - 1] = bz; P.push([bez(p0[0], X[q], X[q + 2], X[q + 4], t), bez(p0[1], X[q + 1], X[q + 3], X[q + 5], t)]); } } q += 6; }
     else if (P) P.closed = true; }
   return out;
 }
 const segD = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy, t = L ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L)) : 0; return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); };
 /* the drawing object under a page point: {e (its index in ents), i (the primitive), d} or null */
-export function cadHit(pg, x, y, tol, hidden){
-  const g = cadPrep(pg), ids = cand(pg, g, x - tol, y - tol, x + tol, y + tol), p = [x, y], bb = pg.bb; let best = null;
+export function cadHit(pg, x, y, tol, hidden, ed){   // ed: AutoCAD-mode edits — what was taken out cannot be picked
+  const g = cadPrep(pg), ids = cand(pg, g, x - tol, y - tol, x + tol, y + tol), p = [x, y], bb = pg.bb, hp = ed && ed.hp, ht = ed && ed.ht; let best = null;
   for (const i of ids) {
-    if (hidden && hidden[pg.lay[i]]) continue; const b = 4 * i; if (bb[b] - tol > x || bb[b + 2] + tol < x || bb[b + 1] - tol > y || bb[b + 3] + tol < y) continue;
+    if ((hidden && hidden[pg.lay[i]]) || (hp && hp[i])) continue; const b = 4 * i; if (bb[b] - tol > x || bb[b + 2] + tol < x || bb[b + 1] - tol > y || bb[b + 3] + tol < y) continue;
     let d = Infinity; const S = primPaths(pg, i), fill = pg.kind[i] === 1 || pg.kind[i] === 2;
     S.forEach(P => { for (let k = 1; k < P.length; k++) d = Math.min(d, segD(p, P[k - 1], P[k])); if ((P.closed || fill) && P.length > 2) d = Math.min(d, segD(p, P[P.length - 1], P[0])); });
     if (fill && d > tol) { let inside = false; S.forEach(P => { if (P.length > 2 && inPoly(p, P)) inside = !inside; }); if (inside) d = tol * 0.95; }
     if (d <= tol && (!best || d < best.d)) best = {e: pg.ent[i], i, d};
   }
   if (!best && pg.tE) for (let t = 0; t < pg.tn; t++) {   // no line here: a text whose box holds the point
-    const b = 4 * t; if (hidden && hidden[pg.tL[t]]) continue;
+    const b = 4 * t; if ((hidden && hidden[pg.tL[t]]) || (ht && ht[t])) continue;
     if (pg.tB[b] - tol <= x && pg.tB[b + 2] + tol >= x && pg.tB[b + 1] - tol <= y && pg.tB[b + 3] + tol >= y && pg.tE[t] >= 0) return {e: pg.tE[t], i: -1, t, d: tol};
   }
   return best;
