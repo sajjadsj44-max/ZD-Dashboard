@@ -303,3 +303,21 @@ colour, lineweight and linetype; arcs are held on their true circle (not the Bé
 with AutoCAD to a few thousandths of an inch. The edits are kept in the project (`cadEd`, one Ctrl+Z step each), seen by snapping,
 Auto area, find and Ctrl+P plots; *AutoCAD edits: put this drawing back as it was read* (Ctrl+K) clears them. The DWG / DXF itself
 is never changed.
+
+## Measurement appearance — Bluebeam's properties toolbar, and more (2026-10-10)
+
+Set in **Properties** (a condition, or one measurement — *Whole condition / This measurement only*) and in the **condition
+dialog** (*Appearance*, with a live preview). The screen and the marked-up PNG / PDF exports draw a measurement with the same
+function (`measSvg`), so what is set is what is printed. Covered by `tools/test_takeoff_appearance.js`.
+
+| Bluebeam | ZD Takeoff |
+|---|---|
+| Line colour, opacity, line style, width (pt) | colour, opacity %, 8 styles (solid, dashed, long dash, dotted, dash-dot, centre, phantom, hidden), width in **px on screen or pt on paper** (grows with zoom) |
+| Start / End line ends | 9 ends: open / closed arrow, dot, open circle, architectural tick, square, diamond, bar — with a size factor |
+| Fill colour, fill opacity, hatch | fill colour + opacity, **12 hatches** (diagonal both ways, cross, grid, horizontal, vertical, dots, brick, concrete, earth, insulation) with their own colour and spacing |
+| Units | ft, ft-in (rounded to 1", 1/2", 1/4", 1/8", 1/16"), in, m, cm, mm, with decimals — labels and totals only; the bill stays in the condition's unit |
+| Label alignment | centre / above / below / left / right / none; box (colour, opacity, border) or halo |
+| Font, size, colour, Style | 12 fonts, size, colour, **B / I / U** |
+| Totals | Totals list in Properties: length / gross / deducted / wall area (× H) / volume / segments, area / perimeter / volume, count, quantity, measurements, pages without scale |
+| — | segment lengths always / never / as View → Labels; vertex marks; count symbols (11, incl. star, hexagon, pin, plus), size, fill, caption font |
+| — | Copy / Paste appearance, Apply to all conditions of the type (colours kept), Set as default for new conditions, Reset; every change one Ctrl+Z step |

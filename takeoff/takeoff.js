@@ -2964,16 +2964,7 @@ function drawNow(){
       const a = toScr(it.pts[0]), b = toScr(it.pts[1]);
       h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${sel ? 6 : Math.max(1, +c.sw || 4)}" stroke-linecap="round" opacity=".85"/>`);
       if (k) { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], r = rowsOf(it, k)[0]; h.push(label(m, (it.label ? it.label + " " : "") + f3(r.L) + " × " + f3(+it.oh || 0), "#9b2222")); }
-    } else if (c.type === "area") {
-      const ded = it.kind === "ded";
-      h.push(`<polygon points="${ptsS(it.pts)}" fill="${ded ? "url(#hatch)" : col}" fill-opacity="${ded ? 1 : 0.22}" stroke="${ded ? "#d03b3b" : col}" stroke-width="${sel ? 3 : Math.max(1, +c.sw || 1.6)}" ${ded ? 'stroke-dasharray="5 3"' : ""}/>`);
-      if (k && S.lbl.on) { const scr = it.pts.map(toScr), ar = polyArea(scr); if (ar > 2500 || sel || !S.lbl.small) { const L = capLines(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, k); if (L.length) h.push(labelBox(labelPt(scr), L, ded ? "#9b2222" : "#0b0b0b")); } }
-    } else {
-      const ded = it.kind === "ded";
-      h.push(`<poly${it._pts ? "gon" : "line"} points="${ptsS(it.pts)}" fill="none" stroke="${ded ? "#d03b3b" : col}" stroke-width="${sel ? 5 : Math.max(1, +c.sw || 3)}" stroke-linejoin="round" stroke-linecap="round" opacity=".85" ${ded ? 'stroke-dasharray="7 4"' : ""}/>`);
-      if (k && S.lbl.on && (sel || polyLen(it.pts) * S.view.s > 60 || !S.lbl.small)) { const L = capLines(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, k); if (L.length) h.push(labelBox(lineLabelPt(it.pts.map(toScr)), L, ded ? "#9b2222" : "#0b0b0b")); }
-    }
-    if (k && it.kind !== "open" && it.shape !== "circle" && (sel || (S.lbl.on && S.lbl.seg))) h.push(segLabels(it.pts.map(toScr), it.pts, k, c.type === "area", 1));
+    } else h.push(measSvg(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, {T: toScr, z: 1, sp: S.view.s, sel, k, lbl: S.lbl.on, seg: S.lbl.on && S.lbl.seg, small: S.lbl.small, screen: true}));   // as its appearance says (the exports draw it the same way)
     if (sel && !S.multi.size) {
       (it._pts || it.pts).forEach((p, i) => { const q = toScr(p); h.push(`<rect x="${(q[0] - 4).toFixed(1)}" y="${(q[1] - 4).toFixed(1)}" width="8" height="8" fill="${it.locked ? "#e8ecf1" : i === S.selPt ? "#0b0b0b" : "#fff"}" stroke="${it.locked ? "#8a97a6" : i === S.selPt ? "#0b0b0b" : col}" stroke-width="2"/>`); });
       if (!it.locked && editPts(it) && S.tool === "select") { const n = closedOf(it) ? it.pts.length : it.pts.length - 1;   // a "+" at the middle of each side: drag it to add a point
@@ -3041,6 +3032,273 @@ function hoverText(id){
   const q = k ? rowsOf(o, k).reduce((a, r) => a + r.qty, 0) : null;
   return (o.label ? o.label + " · " : "") + c.name + (q == null ? " · scale not set" : " · " + fq(q, c.unit) + " " + c.unit) + (o.locked ? " · locked" : "");
 }
+/* ------------------------------------------------------------------ appearance (as Bluebeam's Properties toolbar, and more)
+   Every condition has an appearance (c.ap) — line colour, opacity, style, width (screen px or paper pt), start / end heads,
+   fill colour and opacity, hatch and hatch colour, the units and decimals its labels show, the label's place, background,
+   font, size, colour, bold / italic / underline, segment lengths, vertex marks, and for counts the symbol, size and fill.
+   One measurement can carry its own (it.ap, "This measurement only"), over its condition's. The screen and the marked-up
+   exports draw a measurement with the same function (measSvg), so what is set is what is printed. Quantities never change:
+   the units here are how a label reads, the bill stays in the condition's unit. */
+const AP_DASH = {solid: "Solid ────", dash: "Dashed ─ ─ ─", long: "Long dash ── ──", dot: "Dotted · · · ·", dashdot: "Dash-dot ─ · ─", center: "Centre ── ─ ──", phantom: "Phantom ── ─ ─ ──", hidden: "Hidden - - - -"};
+const AP_HEADS = {none: "None", open: "Open arrow", closed: "Closed arrow", dot: "Dot", tick: "Architectural tick", square: "Square", diamond: "Diamond", circle: "Open circle", bar: "Bar (dimension end)"};
+const AP_HATCH = {none: "None", diag: "Diagonal ////", rdiag: "Diagonal \\\\\\\\", cross: "Cross-hatch ×", grid: "Square grid +", horiz: "Horizontal ≡", vert: "Vertical |||", dots: "Dots", brick: "Brick", concrete: "Concrete", earth: "Earth", insul: "Insulation"};
+const AP_UNITS = {ft: "Feet  12.500 ft", ftin: "Feet-inches  12'-6\"", in: "Inches  150\"", m: "Metres  3.810 m", cm: "Centimetres", mm: "Millimetres"};
+const AP_FONTS = ["Segoe UI", "Helvetica", "Arial", "Arial Narrow", "Calibri", "Verdana", "Tahoma", "Trebuchet MS", "Times New Roman", "Georgia", "Courier New", "Consolas"];
+const AP_LPOS = {center: "Centre", above: "Above", below: "Below", left: "Left", right: "Right", none: "No label"};
+const AP_SYMS = {circle: "Circle", square: "Square", triangle: "Triangle", diamond: "Diamond", hexagon: "Hexagon", star: "Star", check: "Check ✓", cross: "Cross ✕", plus: "Plus +", dot: "Dot", pin: "Pin"};
+const AP_FRAC = {0: "1\"", 2: "1/2\"", 4: "1/4\"", 8: "1/8\"", 16: "1/16\""};
+function apBase(c){   // what a condition looks like with nothing set: the look the app has always had
+  const area = c && c.type === "area", cnt = c && c.type === "count";
+  return {col: "", lineOp: area || cnt ? 100 : 85, dash: "solid", sw: +(c && c.sw) || (area ? 1.6 : cnt ? 2.5 : 3), swU: "px", h0: "none", h1: "none", hs: 1,
+    fill: "", fillOp: cnt ? 30 : 22, hatch: "none", hcol: "", hsp: 8, units: "ft", dec: 3, frac: 8, font: "Segoe UI", fsz: 11.5, fcol: "#0b0b0b", fb: false, fi: false, fu: false,
+    lpos: "center", lbg: true, lbgCol: "#ffffff", lbgOp: 88, lbd: false, seg: "auto", vtx: false, csz: ({s: 7, m: 10, l: 14})[c && c.sz] || 10};
+}
+function apOf(c, it){   // the appearance a measurement is drawn with: its condition's, then its own
+  const a = Object.assign(apBase(c), c && c.ap || {}, it && it.ap || {});
+  if (!a.col) a.col = c && c.color || "#2a78d6"; if (!a.fill) a.fill = a.col; if (!a.hcol) a.hcol = a.col;
+  return a;
+}
+/* lengths, areas and volumes as the appearance's units read them */
+function apFtIn(ft, den){
+  const s = ft < 0 ? "-" : ""; let inch = Math.abs(ft) * 12; den = +den || 0;
+  let whole = Math.floor(inch + 1e-9), fr = den ? Math.round((inch - whole) * den) : 0; if (!den) { whole = Math.round(inch); fr = 0; }
+  if (den && fr === den) { whole++; fr = 0; }
+  let f = Math.floor(whole / 12), i = whole - f * 12; let g = den, n = fr; while (n && g && n % 2 === 0 && g % 2 === 0) { n /= 2; g /= 2; }
+  return s + f + "'-" + i + (n ? " " + n + "/" + g : "") + "\"";
+}
+function apLen(ft, a){
+  const d = a.dec == null ? 3 : +a.dec;
+  switch (a.units) {
+    case "ftin": return apFtIn(ft, a.frac);
+    case "in": return (ft * 12).toFixed(d) + "\"";
+    case "m": return (ft * 0.3048).toFixed(d) + " m";
+    case "cm": return (ft * 30.48).toFixed(Math.max(0, d - 1)) + " cm";
+    case "mm": return (ft * 304.8).toFixed(Math.max(0, d - 2)) + " mm";
+    default: return ft.toFixed(d) + (S.lbl && S.lbl.units === false ? "" : " ft"); }
+}
+function apArea(sft, a){
+  const d = a.dec == null ? 3 : +a.dec;
+  switch (a.units) {
+    case "in": return (sft * 144).toFixed(Math.max(0, d - 1)) + " sq in";
+    case "m": return (sft * 0.09290304).toFixed(d) + " m²";
+    case "cm": return (sft * 929.0304).toFixed(Math.max(0, d - 2)) + " cm²";
+    case "mm": return (sft * 92903.04).toFixed(0) + " mm²";
+    default: return sft.toFixed(d) + (S.lbl && S.lbl.units === false ? "" : " Sft"); }
+}
+function apVol(cft, a){ const d = a.dec == null ? 3 : +a.dec; return a.units === "m" || a.units === "cm" || a.units === "mm" ? (cft * 0.028316846592).toFixed(d) + " m³" : cft.toFixed(d) + " cft"; }
+function apQty(q, unit, a){   // a quantity in the condition's unit, read in the appearance's units where it has one
+  if (a.units === "ft" && (+a.dec === 3 || a.dec == null)) return fq(q, unit) + (S.lbl && S.lbl.units === false ? "" : " " + unit);
+  if (unit === "ft") return apLen(q, a); if (unit === "Sft") return apArea(q, a); if (unit === "cft") return apVol(q, a);
+  return fq(q, unit) + " " + unit;
+}
+/* dashes, heads and hatches */
+function apDash(d, w){
+  w = Math.max(1, w); const n = v => (v * w).toFixed(1);
+  return {dash: `${n(5)} ${n(3)}`, long: `${n(10)} ${n(4)}`, dot: `0.1 ${n(2.6)}`, dashdot: `${n(7)} ${n(2.6)} 0.1 ${n(2.6)}`, center: `${n(12)} ${n(3)} ${n(3)} ${n(3)}`, phantom: `${n(12)} ${n(3)} ${n(3)} ${n(3)} ${n(3)} ${n(3)}`, hidden: `${n(3)} ${n(2)}`}[d] || "";
+}
+function apHead(kind, tip, from, w, col, op, s){   // a line end at tip, the line coming from `from`; w the line's width, s its size factor
+  if (!kind || kind === "none") return "";
+  const L = Math.max(8, 4 * w) * (+s || 1), u = unitV(from, tip), n = [-u[1], u[0]], P = (a, b) => [tip[0] + u[0] * a + n[0] * b, tip[1] + u[1] * a + n[1] * b], pt = p => p[0].toFixed(1) + " " + p[1].toFixed(1);
+  const st = `stroke="${col}" stroke-width="${w.toFixed(2)}" stroke-opacity="${op}" stroke-linecap="round" stroke-linejoin="round"`;
+  switch (kind) {
+    case "open": return `<path d="M${pt(P(-L, L * 0.38))}L${pt(tip)}L${pt(P(-L, -L * 0.38))}" fill="none" ${st}/>`;
+    case "closed": return `<path d="M${pt(P(-L, L * 0.36))}L${pt(tip)}L${pt(P(-L, -L * 0.36))}Z" fill="${col}" fill-opacity="${op}" ${st}/>`;
+    case "dot": return `<circle cx="${tip[0].toFixed(1)}" cy="${tip[1].toFixed(1)}" r="${(L * 0.28).toFixed(1)}" fill="${col}" fill-opacity="${op}"/>`;
+    case "circle": return `<circle cx="${tip[0].toFixed(1)}" cy="${tip[1].toFixed(1)}" r="${(L * 0.3).toFixed(1)}" fill="none" ${st}/>`;
+    case "tick": return `<path d="M${pt(P(-L * 0.35, -L * 0.35))}L${pt(P(L * 0.35, L * 0.35))}" fill="none" ${st.replace(/stroke-width="[^"]+"/, `stroke-width="${(w * 1.6).toFixed(2)}"`)}/>`;
+    case "bar": return `<path d="M${pt(P(0, -L * 0.45))}L${pt(P(0, L * 0.45))}" fill="none" ${st}/>`;
+    case "square": { const r = L * 0.25; return `<path d="M${pt(P(-r, -r))}L${pt(P(r, -r))}L${pt(P(r, r))}L${pt(P(-r, r))}Z" fill="${col}" fill-opacity="${op}"/>`; }
+    case "diamond": { const r = L * 0.34; return `<path d="M${pt(P(-r, 0))}L${pt(P(0, r * 0.7))}L${pt(P(r, 0))}L${pt(P(0, -r * 0.7))}Z" fill="${col}" fill-opacity="${op}"/>`; }
+  }
+  return "";
+}
+let AP_PID = 0;
+function apHatchDefs(id, kind, col, z, sp){   // an SVG pattern for a hatch, in screen units (sp: the spacing)
+  const s = Math.max(4, (+sp || 8) * z), w = (0.9 * Math.max(0.6, z)).toFixed(2), L = (d, extra) => `<path d="${d}" stroke="${col}" stroke-width="${w}" fill="none"${extra || ""}/>`;
+  const body = {diag: [L(`M0 ${s}L${s} 0M${-s / 4} ${s / 4}L${s / 4} ${-s / 4}M${s * 0.75} ${s * 1.25}L${s * 1.25} ${s * 0.75}`)],
+    rdiag: [L(`M0 0L${s} ${s}M${s * 0.75} ${-s / 4}L${s * 1.25} ${s / 4}M${-s / 4} ${s * 0.75}L${s / 4} ${s * 1.25}`)],
+    cross: [L(`M0 ${s}L${s} 0M0 0L${s} ${s}`)], grid: [L(`M0 0H${s}M0 0V${s}`)], horiz: [L(`M0 ${s / 2}H${s}`)], vert: [L(`M${s / 2} 0V${s}`)],
+    dots: [`<circle cx="${s / 2}" cy="${s / 2}" r="${(s * 0.12).toFixed(2)}" fill="${col}"/>`],
+    brick: [L(`M0 0H${s * 2}M0 ${s}H${s * 2}M0 0V${s}M${s} ${s}V${s * 2}`)],
+    concrete: [`<circle cx="${s * 0.3}" cy="${s * 0.4}" r="${(s * 0.07).toFixed(2)}" fill="${col}"/><circle cx="${s * 1.3}" cy="${s * 1.2}" r="${(s * 0.06).toFixed(2)}" fill="${col}"/><circle cx="${s * 0.8}" cy="${s * 1.6}" r="${(s * 0.05).toFixed(2)}" fill="${col}"/>`, L(`M${s * 1.1} ${s * 0.3}l${s * 0.3} ${s * 0.5}h${-s * 0.6}Z`), L(`M${s * 0.25} ${s * 1.1}l${s * 0.22} ${s * 0.38}h${-s * 0.44}Z`)],
+    earth: [L(`M0 ${s * 2}L${s * 2} 0`), L(`M${s * 0.2} ${s * 0.6}h${s * 0.5}M${s * 1.1} ${s * 1.5}h${s * 0.5}`)],
+    insul: [L(`M0 ${s}C${s * 0.25} 0 ${s * 0.75} 0 ${s} ${s}S${s * 1.75} ${s * 2} ${s * 2} ${s}`)]}[kind];
+  if (!body) return "";
+  const big = kind === "brick" || kind === "concrete" || kind === "earth" || kind === "insul", W = big ? 2 * s : s, H = kind === "brick" ? 2 * s : big ? 2 * s : s;
+  return `<defs><pattern id="${id}" width="${W.toFixed(2)}" height="${H.toFixed(2)}" patternUnits="userSpaceOnUse">${body.join("")}</pattern></defs>`;
+}
+/* the label box, in the appearance's font */
+function apLabel(p, lines, a, col, z){
+  z = z || 1; const fs = (+a.fsz || 11.5) * z, lh = fs * 1.22, cw = fs * (a.fb ? 0.6 : 0.56), w = Math.max(...lines.map(t => t.length)) * cw + 10 * z, hh = lines.length * lh + 4 * z, y0 = p[1] - hh / 2;
+  const fam = esc(a.font || "Segoe UI") + ",Arial,sans-serif", deco = a.fu ? ' text-decoration="underline"' : "", it = a.fi ? ' font-style="italic"' : "";
+  const box = a.lbg !== false ? `<rect x="${(p[0] - w / 2).toFixed(1)}" y="${y0.toFixed(1)}" width="${w.toFixed(1)}" height="${hh.toFixed(1)}" rx="${4 * z}" fill="${esc(a.lbgCol || "#ffffff")}" fill-opacity="${((+a.lbgOp || 0) / 100).toFixed(2)}"${a.lbd ? ` stroke="${esc(col)}" stroke-width="${z}"` : ""}/>` : "";
+  const halo = a.lbg === false ? ` stroke="#fff" stroke-width="${3 * z}" paint-order="stroke"` : "";
+  return `<g class="aplbl">${box}` + lines.map((t, i) => `<text x="${p[0].toFixed(1)}" y="${(y0 + 2 * z + lh * (i + 0.78)).toFixed(1)}" text-anchor="middle" font-family="${fam}" font-size="${fs.toFixed(1)}" font-weight="${a.fb || (i === 0 && lines.length > 1) ? 700 : 600}"${it}${deco} fill="${esc(col)}"${halo}>${esc(t)}</text>`).join("") + "</g>";
+}
+function apLabelPt(scr, area, a, z){   // where the label goes: in the shape / beside the run, or above / below / left / right of it
+  z = z || 1; const xs = scr.map(p => p[0]), ys = scr.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), g = 14 * z + (+a.fsz || 11.5) * z;
+  switch (a.lpos) {
+    case "above": return [(x0 + x1) / 2, y0 - g];
+    case "below": return [(x0 + x1) / 2, y1 + g];
+    case "left": return [x0 - g * 2.6, (y0 + y1) / 2];
+    case "right": return [x1 + g * 2.6, (y0 + y1) / 2];
+  }
+  if (area) return labelPt(scr);
+  return lineLabelPt(scr, z);
+}
+/* a measurement (area or run) as SVG: o {T page -> screen, z sizes, sp page pt -> screen px, sel, k, lbl (labels on), seg (segment lengths on), small} */
+function measSvg(it, c, o){
+  const a = apOf(c, it), T = o.T, z = o.z || 1, sp = o.sp || 1, ded = it.kind === "ded", poly = itemPoly(it), scr = poly.map(T), area = c.type === "area", closed = area || it.shape === "circle";
+  const col = ded ? "#d03b3b" : a.col, op = Math.max(0.05, Math.min(1, (+a.lineOp || 100) / 100)), w0 = a.swU === "pt" ? +a.sw * sp : +a.sw * z, w = Math.max(0.5, o.sel ? w0 + (area ? 1.4 : 2) * z : w0);
+  const dash = ded && a.dash === "solid" ? `${7 * z} ${4 * z}` : apDash(a.dash, w), ps = scr.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" "), out = [];
+  if (area) {
+    if (ded) out.push(`<polygon points="${ps}" fill="${o.screen ? "url(#hatch)" : "#d03b3b"}" fill-opacity="${o.screen ? 1 : 0.14}" stroke="none"/>`);
+    else {
+      if ((+a.fillOp || 0) > 0) out.push(`<polygon points="${ps}" fill="${esc(a.fill)}" fill-opacity="${((+a.fillOp) / 100).toFixed(2)}" stroke="none"/>`);
+      if (a.hatch && a.hatch !== "none") { const id = "aph" + (++AP_PID); out.push(apHatchDefs(id, a.hatch, esc(a.hcol), z, a.hsp) + `<polygon points="${ps}" fill="url(#${id})" stroke="none"/>`); }
+    }
+  }
+  out.push(`<${closed ? "polygon" : "polyline"} points="${ps}" fill="none" stroke="${esc(col)}" stroke-width="${w.toFixed(2)}" stroke-opacity="${op}" stroke-linejoin="round" stroke-linecap="${a.dash === "dot" ? "round" : area ? "butt" : "round"}"${dash ? ` stroke-dasharray="${dash}"` : ""}/>`);
+  if (!closed && scr.length >= 2) { const n = scr.length; out.push(apHead(a.h0, scr[0], scr[1], w0, esc(col), op, a.hs), apHead(a.h1, scr[n - 1], scr[n - 2], w0, esc(col), op, a.hs)); }
+  if (a.vtx) (it.shape === "circle" ? [] : it.pts.map(T)).forEach(q => out.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(Math.max(2.2, w0 * 0.9)).toFixed(1)}" fill="#fff" stroke="${esc(col)}" stroke-width="${(1.2 * z).toFixed(2)}"/>`));
+  const k = o.k;
+  if (k && o.lbl && a.lpos !== "none") {
+    const big = area ? polyArea(scr) > 2500 * z * z : polyLen(scr) > 60 * z;
+    if (big || o.sel || !o.small) { const L = capLines(it, c, k, a); if (L.length) out.push(apLabel(apLabelPt(scr, area, a, z), L, a, ded ? "#9b2222" : a.fcol, z)); }
+  }
+  const segOn = a.seg === "on" || (a.seg !== "off" && (o.seg || o.sel));
+  if (k && segOn && it.shape !== "circle") out.push(segLabels(it.pts.map(T), it.pts, k, area, z, a));
+  return out.join("");
+}
+
+/* ---- the editor: the same controls in the condition dialog and in Properties */
+const apOpts = (O, v) => Object.entries(O).map(([k2, t]) => `<option value="${esc(k2)}"${String(v) === String(k2) ? " selected" : ""}>${esc(t)}</option>`).join("");
+const apHex = v => /^#[0-9a-f]{6}$/i.test(v || "") ? v : "#2a78d6";
+function apEditorHtml(c, a, o){   // o {totals: [[name, text]], scope, dialog}
+  o = o || {}; const t = c.type, F = (lbl, html, cls) => `<div class="apf${cls ? " " + cls : ""}"><label>${lbl}</label><span class="apc">${html}</span></div>`;
+  const num = (f, v, mn, mx, st, w) => `<input type="number" data-ap="${f}" value="${v}" min="${mn}" max="${mx}" step="${st}" style="width:${w || 58}px">`;
+  const sel = (f, O, v, w) => `<select data-ap="${f}"${w ? ` style="width:${w}px"` : ""}>${apOpts(O, v)}</select>`, colr = (f, v, title) => `<input type="color" data-ap="${f}" value="${apHex(v)}" title="${title}">`;
+  const tog = (f, v, txt, title, st) => `<button type="button" class="aptg${v ? " on" : ""}" data-ap="${f}" data-on="${v ? 1 : 0}" title="${title}"${st ? ` style="${st}"` : ""}>${txt}</button>`;
+  const rows = [];
+  rows.push(`<div class="apr"><span class="aph">Line</span>${F("Colour", colr("col", a.col, "Line colour"))}${F("Opacity %", num("lineOp", +a.lineOp, 5, 100, 5))}${F("Style", sel("dash", AP_DASH, a.dash, 132))}${F("Width", num("sw", +a.sw, 0.25, 24, 0.25) + sel("swU", {px: "px on screen", pt: "pt on paper"}, a.swU, 100))}</div>`);
+  if (t === "linear") rows.push(`<div class="apr"><span class="aph">Ends</span>${F("Start", sel("h0", AP_HEADS, a.h0, 118))}${F("End", sel("h1", AP_HEADS, a.h1, 118))}${F("Size ×", num("hs", +a.hs, 0.5, 4, 0.25))}</div>`);
+  if (t === "area") rows.push(`<div class="apr"><span class="aph">Fill</span>${F("Colour", colr("fill", a.fill, "Fill colour"))}${F("Opacity %", num("fillOp", +a.fillOp, 0, 100, 5))}${F("Hatch", sel("hatch", AP_HATCH, a.hatch, 124))}${F("Hatch colour", colr("hcol", a.hcol, "Hatch colour"))}${F("Spacing", num("hsp", +a.hsp, 3, 40, 1, 50))}</div>`);
+  if (t === "count") rows.push(`<div class="apr"><span class="aph">Symbol</span>${o.dialog ? "" : F("Shape", sel("sym", AP_SYMS, c.sym || "circle", 110))}${F("Size px", num("csz", +a.csz, 4, 40, 1))}${F("Fill %", num("fillOp", +a.fillOp, 0, 100, 5))}${o.dialog ? "" : F("Caption", sel("cap", {seq: "1, 2, 3…", name: "Condition name", text: "Custom text", none: "None"}, c.cap || "seq", 116))}${F("Font", sel("font", Object.fromEntries(AP_FONTS.map(f => [f, f])), a.font, 120))}${F("Size", num("fsz", +a.fsz, 6, 48, 0.5, 52))}</div>`);
+  rows.push(`<div class="apr"><span class="aph">Units</span>${F("Show as", sel("units", AP_UNITS, a.units, 150))}${a.units === "ftin" ? F("Round to", sel("frac", AP_FRAC, a.frac, 70)) : F("Decimals", num("dec", +a.dec, 0, 4, 1, 48))}${t !== "count" ? F("Segment lengths", sel("seg", {auto: "As View → Labels", on: "Always", off: "Never"}, a.seg, 128)) : ""}${t !== "count" ? F("Vertices", tog("vtx", a.vtx, "● Marks", "Show a mark on every point")) : ""}</div>`);
+  if (t !== "count") rows.push(`<div class="apr"><span class="aph">Label</span>${F("Place", sel("lpos", AP_LPOS, a.lpos, 92))}${F("Font", sel("font", Object.fromEntries(AP_FONTS.map(f => [f, f])), a.font, 132))}${F("Size", num("fsz", +a.fsz, 6, 48, 0.5, 52))}${F("Colour", colr("fcol", a.fcol, "Text colour"))}
+    ${F("Style", tog("fb", a.fb, "B", "Bold", "font-weight:800") + tog("fi", a.fi, "I", "Italic", "font-style:italic;font-family:serif") + tog("fu", a.fu, "U", "Underline", "text-decoration:underline"))}${F("Background", tog("lbg", a.lbg !== false, "▭ Box", "A box behind the label (off: a white halo)") + colr("lbgCol", a.lbgCol, "Box colour") + num("lbgOp", +a.lbgOp, 0, 100, 5, 50) + tog("lbd", a.lbd, "Border", "A border round the box"))}</div>`);
+  if (o.totals && o.totals.length) rows.push(`<div class="apr"><span class="aph">Totals</span>${F("", `<select class="aptot" title="Totals (read only)">${o.totals.map(([n, v]) => `<option>${esc(n)} = ${esc(v)}</option>`).join("")}</select>`)}</div>`);
+  return `<div class="apbar" data-apscope="${esc(o.scope || "cond")}">${rows.join("")}<div class="apr apbtns">${o.dialog ? "" : `<button type="button" class="btn sm" data-apact="default" title="New conditions of this type start with this appearance">Set as default</button><button type="button" class="btn sm" data-apact="all" title="Every ${t === "area" ? "area" : t === "linear" ? "length" : "count"} condition in the project takes this appearance (colours kept)">Apply to all ${t === "area" ? "areas" : t === "linear" ? "lengths" : "counts"}</button><button type="button" class="btn sm" data-apact="copy" title="Copy this appearance">Copy</button><button type="button" class="btn sm" data-apact="paste" title="Paste the copied appearance"${S.apClip ? "" : " disabled"}>Paste</button>`}<button type="button" class="btn sm" data-apact="reset" title="Back to the standard look">Reset</button></div></div>`;
+}
+function apPreviewSvg(c, a){   // a small sample of the look, in the condition dialog
+  const W = 300, H = 92, it = c.type === "count" ? null : {id: "pv", cond: c.id, kind: "shape", pts: c.type === "area" ? [[20, 14], [170, 14], [170, 78], [20, 78]] : [[16, 66], [110, 22], [210, 58], [284, 26]], label: c.name || "Sample", nos: 1, ap: null};
+  const cc = Object.assign({}, c, {ap: a, color: a.col, sym: a.sym || c.sym, cap: a.cap || c.cap});
+  let body;
+  if (!it) body = countSvg(cc, [[60, 46], [150, 46], [240, 46]], p => p, 1, -1);
+  else body = measSvg(it, cc, {T: p => p, z: 1, sp: 1, k: 0, lbl: false}) + (a.lpos === "none" ? "" : apLabel(c.type === "area" ? [95, 46] : [150, 80], [c.name || (c.type === "area" ? "Area" : "Run"), c.type === "area" ? apArea(132.5, a) : apLen(23.75, a)], a, a.fcol, 1));
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:#fff;border:1px solid var(--line);border-radius:6px;display:block">${body}</svg>`;
+}
+function apReadFrom(root){   // the editor's values -> an appearance (only what differs from the standard look is kept)
+  const v = {}; root.querySelectorAll("[data-ap]").forEach(el => { const f = el.dataset.ap;
+    if (el.classList.contains("aptg")) v[f] = el.dataset.on === "1";
+    else if (el.type === "number") { const x = parseFloat(el.value); if (isFinite(x)) v[f] = x; }
+    else v[f] = el.value; });
+  return v;
+}
+function apClean(c, v){   // keep only what differs from the condition's standard look; colour, width, symbol and caption live on the condition itself
+  const b = apBase(c), out = {};
+  Object.keys(v).forEach(f => { if (["col", "sw", "sym", "cap"].includes(f)) return; if (f === "fill" || f === "hcol") { if (v[f] && v[f].toLowerCase() !== String(v.col || c.color || "").toLowerCase()) out[f] = v[f]; return; } if (v[f] !== b[f]) out[f] = v[f]; });
+  return out;
+}
+/* the totals a condition's measurements add up to, read in its appearance's units */
+function condTotalsList(c, its){
+  const a = apOf(c), T0 = {len: 0, ded: 0, area: 0, darea: 0, per: 0, n: 0, pts: 0, segs: 0, noScale: 0}, out = [];
+  its.forEach(it => { const k = itemScale(it); if (!k) { T0.noScale++; return; } const poly = itemPoly(it), sgn = it.kind === "ded" || it.kind === "open" ? -1 : 1, nos = +it.nos || 1;
+    if (c.type === "count") { T0.pts += it.pts.length * nos; return; }
+    if (c.type === "area") { const A = polyArea(poly) / k / k * nos; if (sgn > 0) T0.area += A; else T0.darea += A; T0.per += polyLen(poly, true) / k * nos * (sgn > 0 ? 1 : 0); }
+    else { const L = (it.kind === "open" ? dist(it.pts[0], it.pts[1]) : it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k * nos; if (sgn > 0) T0.len += L; else T0.ded += L; T0.segs += Math.max(1, it.pts.length - 1); }
+    T0.n++; });
+  const q = condTotals(c);
+  if (c.type === "linear") { out.push(["Length", apLen(T0.len - T0.ded, a)]); if (T0.ded) out.push(["Gross length", apLen(T0.len, a)], ["Deducted", apLen(T0.ded, a)]); if (+c.h) out.push(["Wall area (× H)", apArea((T0.len - T0.ded) * +c.h * (+c.faces || 1), a)]); if (+c.h && +c.t) out.push(["Volume (× H × T)", apVol((T0.len - T0.ded) * +c.h * +c.t, a)]); out.push(["Segments", String(T0.segs)]); }
+  else if (c.type === "area") { out.push(["Area", apArea(T0.area - T0.darea, a)]); if (T0.darea) out.push(["Gross area", apArea(T0.area, a)], ["Deducted", apArea(T0.darea, a)]); out.push(["Perimeter", apLen(T0.per, a)]); if (+c.t) out.push(["Volume (× T)", apVol((T0.area - T0.darea) * +c.t, a)]); }
+  else out.push(["Count", String(T0.pts) + " Nos"]);
+  out.push(["Quantity", fq(q.net, c.unit) + " " + c.unit + (c.unit !== "ft" && c.unit !== "Sft" && c.unit !== "cft" ? "" : a.units !== "ft" ? " (" + apQty(q.net, c.unit, a) + ")" : "")], ["Measurements", String(T0.n)]);
+  if (T0.noScale) out.push(["No scale", T0.noScale + " measurement" + (T0.noScale > 1 ? "s" : "")]);
+  return out;
+}
+
+function itemTotalsList(it, c, k){   // one measurement's own totals, in its appearance's units
+  const a = apOf(c, it); if (!k) return [["Scale", "not set"]];
+  const poly = itemPoly(it), nos = +it.nos || 1, rows = rowsOf(it, k), q = rows.reduce((s2, r) => s2 + (r.below ? 0 : r.qty), 0), out = [];
+  if (c.type === "area") { out.push(["Area", apArea(polyArea(poly) / k / k * nos, a)], ["Perimeter", apLen(polyLen(poly, true) / k, a)]); if (+c.t) out.push(["Volume", apVol(polyArea(poly) / k / k * +c.t * nos, a)]); }
+  else if (c.type === "linear") { const L = (it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k; out.push(["Length", apLen(L * nos, a)]); if (+c.h) out.push(["Wall area", apArea(L * +c.h * (+c.faces || 1) * nos, a)]); out.push(["Segments", String(Math.max(1, it.pts.length - 1))]); }
+  else out.push(["Count", it.pts.length * nos + " Nos"]);
+  out.push(["Quantity", fq(q, c.unit) + " " + c.unit]);
+  return out;
+}
+/* the condition dialog: its appearance editor, kept in step with the colour swatches, with a live preview */
+function apFromDialog(type){
+  const box = $("cAp"); if (!box) return {};
+  const v = apReadFrom(box), cnd = {type, color: $("cC").value, sw: v.sw}, out = {sw: Math.max(0.25, Math.min(24, +v.sw || 2))};
+  if (type === "count" && v.sym) { out.sym = v.sym; if (v.cap) out.cap = v.cap; }
+  const ap = apClean(Object.assign({}, cnd, {sw: out.sw}), Object.assign(v, {col: $("cC").value}));
+  out.ap = Object.keys(ap).length ? ap : undefined;
+  return out;
+}
+function apDialogWire(d){
+  const box = $("cAp"); if (!box) return;
+  const pv = () => { const t = $("cType").value, v = apReadFrom(box); v.col = $("cC").value; const cc = Object.assign({}, d, {type: t, color: $("cC").value, sw: v.sw, name: $("cName").value});
+    $("cApPv").innerHTML = apPreviewSvg(cc, Object.assign(apBase(cc), v, {fill: v.fill || v.col, hcol: v.hcol || v.col})); };
+  const rebuild = () => { const t = $("cType").value, v = apReadFrom(box), cc = Object.assign({}, d, {type: t, color: $("cC").value, sw: v.sw}); box.innerHTML = apEditorHtml(cc, Object.assign(apOf(cc), v, {col: $("cC").value}), {dialog: true}); pv(); };
+  box.addEventListener("input", pv); box.addEventListener("change", e => { if (e.target.dataset.ap === "units") rebuild(); else if (e.target.dataset.ap === "col") { $("cC").value = e.target.value; pv(); } else pv(); });
+  box.addEventListener("click", e => { const b = e.target.closest(".aptg"); if (b) { b.dataset.on = b.dataset.on === "1" ? "0" : "1"; b.classList.toggle("on", b.dataset.on === "1"); pv(); }
+    const r = e.target.closest("[data-apact=reset]"); if (r) { const t = $("cType").value, cc = {type: t, color: $("cC").value, sym: d.sym, cap: d.cap}; box.innerHTML = apEditorHtml(cc, apOf(cc), {dialog: true}); pv(); } });
+  $("cType").addEventListener("change", rebuild);
+  $("cSw").addEventListener("click", () => setTimeout(() => { const ci = box.querySelector('[data-ap="col"]'); if (ci) ci.value = apHex($("cC").value); pv(); }, 0));
+  $("cCx").addEventListener("input", () => { const ci = box.querySelector('[data-ap="col"]'); if (ci) ci.value = apHex($("cCx").value); pv(); });
+  $("cName").addEventListener("input", pv);
+  pv();
+}
+/* Properties: a change in the appearance bar — on the condition (every measurement of it) or on the one measurement */
+function apSet(f, val){
+  const it = S.sel && P.proj.items.find(i => i.id === S.sel), c = it ? cond(it.cond) : S.cond ? cond(S.cond) : null; if (!c) return;
+  const own = !!(it && it.ap);
+  mutate(() => {
+    if (own) { const tgt = it.ap; if (f === "col" || f === "sw") tgt[f] = val; else tgt[f] = val; return; }
+    if (f === "col") { if (HEXCOL.test(val)) c.color = val; return; }
+    if (f === "sw") { c.sw = Math.max(0.25, Math.min(24, +val || 2)); return; }
+    if (f === "sym" || f === "cap") { c[f] = val; return; }
+    c.ap = Object.assign({}, c.ap || {}); c.ap[f] = val; const b = apBase(c); if (c.ap[f] === b[f]) delete c.ap[f]; if (!Object.keys(c.ap).length) delete c.ap;
+  }, "Appearance");
+}
+function apAct(a){
+  const it = S.sel && P.proj.items.find(i => i.id === S.sel), c = it ? cond(it.cond) : S.cond ? cond(S.cond) : null; if (!c) return;
+  const cur = it && it.ap ? Object.assign({}, it.ap) : Object.assign({}, c.ap || {}, {sw: c.sw});
+  if (a === "copy") { S.apClip = {type: c.type, ap: cur}; renderProps(); return toast("Appearance copied — select another condition or measurement and Paste", 2400); }
+  if (a === "paste") { if (!S.apClip) return; const v = Object.assign({}, S.apClip.ap);
+    mutate(() => { if (it && it.ap) it.ap = v; else { if (v.sw != null) c.sw = v.sw; delete v.sw; c.ap = Object.keys(v).length ? v : undefined; if (!c.ap) delete c.ap; } }, "Paste appearance");
+    return toast("Appearance pasted" + (S.apClip.type !== c.type ? " (from a " + S.apClip.type + " condition: what does not apply is ignored)" : ""), 2400); }
+  if (a === "reset") { mutate(() => { if (it && it.ap) it.ap = {}; else delete c.ap; }, "Reset appearance"); return; }
+  if (a === "default") { const d = toolDefaults(), by = Object.assign({}, d.apBy || {}); by[c.type] = Object.assign({}, c.ap || {}); d.apBy = by; d.condWidth = +c.sw || d.condWidth; saveToolDefaults(d); return toast("New " + (c.type === "area" ? "area" : c.type === "linear" ? "length" : "count") + " conditions will start with this appearance", 2600); }
+  if (a === "all") { const L = P.proj.conds.filter(x => x.type === c.type && x !== c); if (!L.length) return toast("No other condition of this type", 2000);
+    mutate(() => L.forEach(x => { x.ap = c.ap ? JSON.parse(JSON.stringify(c.ap)) : undefined; if (!x.ap) delete x.ap; x.sw = c.sw; }), "Appearance to all " + c.type + " conditions");
+    return toast("Appearance applied to " + L.length + " other condition" + (L.length > 1 ? "s" : "") + " (their colours kept)", 2600); }
+}
+function apWire(){
+  const el = $("props");
+  el.addEventListener("change", e => {
+    if (e.target.dataset.apown != null) { const it = S.sel && P.proj.items.find(i => i.id === S.sel); if (!it) return;
+      mutate(() => { if (e.target.value === "item") { const c = cond(it.cond); it.ap = Object.assign({}, c.ap || {}, {col: c.color, sw: c.sw}); } else delete it.ap; }, "Appearance: " + (e.target.value === "item" ? "this measurement only" : "whole condition")); return; }
+    const f = e.target.dataset.ap; if (!f || !e.target.closest(".apbar")) return;
+    const v = e.target.type === "number" ? parseFloat(e.target.value) : e.target.value; if (e.target.type === "number" && !isFinite(v)) return;
+    apSet(f, v);
+  });
+  el.addEventListener("click", e => {
+    const b = e.target.closest(".apbar .aptg"); if (b) { apSet(b.dataset.ap, b.dataset.on !== "1"); return; }
+    const a = e.target.closest(".apbar [data-apact]"); if (a) apAct(a.dataset.apact);
+  });
+}
+
 function label(p, text, col){
   const t = esc(text), w = text.length * 6.4 + 10;
   return `<g><rect x="${(p[0] - w / 2).toFixed(1)}" y="${(p[1] - 9).toFixed(1)}" width="${w.toFixed(1)}" height="18" rx="4" fill="rgba(255,255,255,.88)"/><text x="${p[0].toFixed(1)}" y="${(p[1] + 4).toFixed(1)}" text-anchor="middle" font-size="11.5" font-weight="600" fill="${col}">${t}</text></g>`;
@@ -3049,20 +3307,21 @@ function label(p, text, col){
    and in the marked-up exports. Areas: name, quantity, area, perimeter, L × W; lengths: name, length, quantity, H / T. */
 const LBL_DEF = {on: true, name: true, qty: true, area: false, perim: false, len: true, dims: false, cond: false, seg: false, units: true, small: true, autoName: true};
 function loadLbl(){ let o = null; try { o = JSON.parse(pref("zdTakeoffLbl") || "null"); } catch (e) { o = null; } S.lbl = Object.assign({}, LBL_DEF, o || {}); }
-function capLines(it, c, k){
+function capLines(it, c, k, ap){
   const o = S.lbl, out = [], u = t => o.units ? " " + t : "", rows = rowsOf(it, k), q = rows.reduce((a, r) => a + r.qty, 0), poly = itemPoly(it);
+  const A0 = ap || null, fL = v => A0 ? apLen(v, A0) : f3(v) + u("ft"), fA = v => A0 ? apArea(v, A0) : fq(v) + u("Sft"), fQ = v => A0 ? apQty(v, c.unit, A0) : fq(v, c.unit) + u(c.unit);
   if (o.name && it.label) out.push(it.label);
   if (o.cond) out.push(c.name);
   if (c.type === "area") {
     const A = polyArea(poly) / k / k * (it.kind === "ded" ? -1 : 1), P = polyLen(poly, true) / k, r = rows[0];
-    if (o.qty) out.push(fq(q, c.unit) + u(c.unit));
-    if (o.area && !(o.qty && c.unit === "Sft")) out.push("A " + fq(A) + u("Sft"));
-    if (o.perim) out.push("P " + f3(P) + u("ft"));
-    if (o.dims && r) { if (r.how === "rect") out.push(f3(r.L) + " × " + f3(r.W) + u("ft")); else if (r.how === "circle") out.push("Ø " + f3(r.D) + u("ft")); }
+    if (o.qty) out.push(fQ(q));
+    if (o.area && !(o.qty && c.unit === "Sft")) out.push("A " + fA(A));
+    if (o.perim) out.push("P " + fL(P));
+    if (o.dims && r) { if (r.how === "rect") out.push(A0 && A0.units !== "ft" ? apLen(r.L, A0) + " × " + apLen(r.W, A0) : f3(r.L) + " × " + f3(r.W) + u("ft")); else if (r.how === "circle") out.push("Ø " + fL(r.D)); }
   } else if (c.type === "linear") {
     const L = (it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k;
-    if (o.len) out.push("L " + f3(it.kind === "ded" ? -L : L) + u("ft"));
-    if (o.qty && (c.unit !== "ft" || !o.len)) out.push(fq(q, c.unit) + u(c.unit));
+    if (o.len) out.push("L " + fL(it.kind === "ded" ? -L : L));
+    if (o.qty && (c.unit !== "ft" || !o.len)) out.push(fQ(q));
     if (o.dims && c.unit !== "ft") out.push((+c.h ? "H " + f3(+c.h) : "") + (+c.t ? (+c.h ? " · " : "") + "T " + f3(+c.t) : "") + ((+c.faces || 1) > 1 && c.unit === "Sft" ? " · " + c.faces + " faces" : ""));
   }
   if (!out.length && it.label) out.push(it.label);
@@ -3089,11 +3348,11 @@ function lineLabelPt(P, z){   // beside the middle of the longest run, clear of 
   const a = P[bi - 1], b = P[bi] || a, L = dist(a, b) || 1, n = [(b[1] - a[1]) / L, -(b[0] - a[0]) / L], off = (S.lbl.seg ? 34 : 18) * z, m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   return Math.abs(n[0]) > Math.abs(n[1]) ? [m[0] + (n[0] < 0 ? -1 : 1) * (off + 30 * z), m[1]] : [m[0], m[1] - off];
 }
-function segLabels(scr, pts, k, closed, z){   // the length of every side, at its middle (Bluebeam "show segment values")
-  const out = [], n = closed ? pts.length : pts.length - 1;
+function segLabels(scr, pts, k, closed, z, ap){   // the length of every side, at its middle (Bluebeam "show segment values")
+  const out = [], n = closed ? pts.length : pts.length - 1, fam = ap ? esc(ap.font || "Segoe UI") + ",Arial" : "Segoe UI,Arial", fs = ap ? Math.max(6, (+ap.fsz || 11.5) * 0.87) : 10, fc = ap ? esc(ap.fcol || "#33475b") : "#33475b";
   for (let i = 0; i < n; i++) { const a = scr[i], b = scr[(i + 1) % scr.length]; if (dist(a, b) < 46 * z) continue;
-    const t = f3(dist(pts[i], pts[(i + 1) % pts.length]) / k), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    out.push(`<text x="${m[0].toFixed(1)}" y="${(m[1] - 4 * z).toFixed(1)}" text-anchor="middle" font-family="Segoe UI,Arial" font-size="${10 * z}" font-weight="600" fill="#33475b" stroke="#fff" stroke-width="${3 * z}" paint-order="stroke">${t}</text>`); }
+    const d = dist(pts[i], pts[(i + 1) % pts.length]) / k, t = ap && ap.units !== "ft" ? apLen(d, ap) : f3(d), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    out.push(`<text x="${m[0].toFixed(1)}" y="${(m[1] - 4 * z).toFixed(1)}" text-anchor="middle" font-family="${fam}" font-size="${(fs * z).toFixed(1)}" font-weight="600" fill="${fc}" stroke="#fff" stroke-width="${3 * z}" paint-order="stroke">${esc(t)}</text>`); }
   return out.join("");
 }
 async function labelDialog(){
@@ -3358,6 +3617,10 @@ function condDetailHtml(c){
   return `<div class="pcard"><div style="display:flex;gap:8px;align-items:center"><span class="lsw" style="background:${esc(c.color)};width:14px;height:14px"></span><b style="color:var(--navy);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}</b><button class="btn sm" data-act="editCond" title="Edit this condition: name, unit, H, T, faces, BOQ and Rate Analysis codes, colour">&#9998; Edit</button></div>
     <div class="big" style="margin-top:6px">${fq(t.net, c.unit)}<small>${esc(c.unit)}</small></div>
     <div class="dimstr">${t.ded ? "gross " + fq(t.gross, c.unit) + " − deductions " + fq(t.ded, c.unit) : its.length + " measurement" + (its.length === 1 ? "" : "s")}</div></div>
+    <div class="psec">Totals</div>
+    ${dl(condTotalsList(c, its))}
+    <div class="psec">Appearance <span class="small" style="font-weight:400;text-transform:none;letter-spacing:0">— every measurement of this condition</span></div>
+    ${apEditorHtml(c, apOf(c), {scope: "cond", totals: condTotalsList(c, its).slice(0, 4)})}
     <div class="psec">Condition</div>
     ${dl([["Measured as", tp], ["Unit", c.unit], c.h ? ["Height H", f3(+c.h) + " ft"] : null, c.t ? ["Thickness T", f3(+c.t) + " ft"] : null, c.faces > 1 ? ["Faces", String(c.faces)] : null,
       +c.dedMin ? ["Deduct over", f2(+c.dedMin)] : null, ["BOQ code", c.boq || "not set", c.boq ? "" : "warn"], c.ra ? ["Rate Analysis", c.ra] : null, rateLine(c), r.src ? ["Rate source", r.src + (r.date ? ", " + r.date : "")] : null,
@@ -3417,16 +3680,23 @@ function renderProps(){
     <div class="row" style="margin-top:6px">${LOC_KEYS.map(lk => { const sh = (P.proj.sheets || {})[keyOf(it.file, it.page)] || {}; return `<div class="fg"><label>${LOC_NAMES[lk]}</label><input type="text" data-prop="${lk}" list="dlp_${lk}" value="${esc(it[lk] || "")}" placeholder="${esc(sh[lk] || (lk === "room" ? it.label || "" : ""))}"><datalist id="dlp_${lk}">${locValues(lk).map(x => `<option value="${esc(x)}">`).join("")}</datalist></div>`; }).join("")}</div>
     <div class="row" style="margin-top:6px"><div class="fg"><label>QA status</label><select data-prop="qa">${Object.entries(QA_NAMES).map(([q, n]) => `<option value="${q}"${(it.qa || "") === q ? " selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="fg" style="flex:2"><label>QA note</label><input type="text" data-prop="qaNote" value="${esc(it.qaNote || "")}" placeholder="e.g. confirm against section B-B"></div></div>
-    <div class="small" style="margin-top:4px">${it.qa === "checked" ? "Checked by " + esc(it.qaBy) + ", " + esc(dmy(it.qaAt)) : "Not checked"}${it.ai ? " · AI-generated" : ""}${it.copied ? " · copied from " + esc(keyName(it.copied.from)) + " (" + esc(it.copied.how) + ")" : ""}</div></div>`;
+    <div class="small" style="margin-top:4px">${it.qa === "checked" ? "Checked by " + esc(it.qaBy) + ", " + esc(dmy(it.qaAt)) : "Not checked"}${it.ai ? " · AI-generated" : ""}${it.copied ? " · copied from " + esc(keyName(it.copied.from)) + " (" + esc(it.copied.how) + ")" : ""}</div>
+    ${it.kind !== "open" ? `<div class="psec" style="display:flex;align-items:center;gap:6px">Appearance <select data-apown style="margin-left:auto;font-size:11px;padding:1px 4px"><option value="cond"${it.ap ? "" : " selected"}>Whole condition</option><option value="item"${it.ap ? " selected" : ""}>This measurement only</option></select></div>
+    ${apEditorHtml(c, apOf(c, it), {scope: it.ap ? "item" : "cond", totals: itemTotalsList(it, c, k)})}` : ""}</div>`;
   el.classList.add("on");
 }
 
 /* ------------------------------------------------------------------ count markers (Bluebeam-style symbols and captions) */
-const SYMS = {check: "Check ✓", circle: "Circle", square: "Square", triangle: "Triangle", diamond: "Diamond", cross: "Cross ✕", dot: "Dot"};
+const SYMS = AP_SYMS;
 function countSvg(c, pts, T, z, selIdx){
-  const sym = c.sym || "circle", cap = c.cap || "seq", r = ({s: 7, m: 10, l: 14}[c.sz || "m"]) * z, col = c.color, out = [];
+  const a = apOf(c), sym = c.sym || "circle", cap = c.cap || "seq", r = (+a.csz || 10) * z, col = esc(a.col), out = [], lop = Math.max(0.05, (+a.lineOp || 100) / 100), sw0 = (+a.sw || 2.5);
+  const fam = esc(a.font || "Segoe UI") + ",Arial", fsz = (+a.fsz || 11.5) - 0.5;
   pts.forEach((p, i) => {
-    const q = T(p), x = q[0], y = q[1], w = (i === selIdx ? 3.5 : 2.5) * z, fo = 'fill-opacity=".3"';
+    const q = T(p), x = q[0], y = q[1], w = (i === selIdx ? sw0 + 1 : sw0) * z, fo = `fill-opacity="${((+a.fillOp || 0) / 100).toFixed(2)}" stroke-opacity="${lop}"`;
+    if (sym === "hexagon") { const H = [0, 1, 2, 3, 4, 5].map(j => [x + r * Math.cos(Math.PI / 3 * j), y + r * Math.sin(Math.PI / 3 * j)]); out.push(`<path d="M${H.map(v => v[0].toFixed(1) + " " + v[1].toFixed(1)).join("L")}Z" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}"/>`); }
+    else if (sym === "star") { const H = []; for (let j = 0; j < 10; j++) { const R = j % 2 ? r * 0.45 : r, t = -Math.PI / 2 + Math.PI / 5 * j; H.push([x + R * Math.cos(t), y + R * Math.sin(t)]); } out.push(`<path d="M${H.map(v => v[0].toFixed(1) + " " + v[1].toFixed(1)).join("L")}Z" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}" stroke-linejoin="round"/>`); }
+    else if (sym === "plus") out.push(`<path d="M${x - r} ${y}H${x + r}M${x} ${y - r}V${y + r}" stroke="${col}" stroke-opacity="${lop}" stroke-width="${w + z}" stroke-linecap="round"/>`);
+    else if (sym === "pin") out.push(`<path d="M${x} ${y}L${x - r * 0.55} ${y - r * 1.1}A${r * 0.62} ${r * 0.62} 0 1 1 ${x + r * 0.55} ${y - r * 1.1}Z" fill="${col}" ${fo} stroke="${col}" stroke-width="${w * 0.8}"/>`);
     if (sym === "check") out.push(`<path d="M${x - r} ${y}L${x - r * 0.3} ${y + r * 0.7}L${x + r} ${y - r * 0.8}" fill="none" stroke="${col}" stroke-width="${w + z}" stroke-linecap="round" stroke-linejoin="round"/>`);
     else if (sym === "square") out.push(`<rect x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}"/>`);
     else if (sym === "triangle") out.push(`<path d="M${x} ${y - r}L${x + r} ${y + r * 0.8}L${x - r} ${y + r * 0.8}Z" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}"/>`);
@@ -3436,8 +3706,8 @@ function countSvg(c, pts, T, z, selIdx){
     else out.push(`<circle cx="${x}" cy="${y}" r="${r}" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}"/>`);
     const t = cap === "seq" ? String(i + 1) : cap === "name" ? c.name : cap === "text" ? (c.capText || "") : "";
     if (t) { const inside = cap === "seq" && ["circle", "square", "diamond"].indexOf(sym) >= 0 && t.length <= 3;
-      out.push(inside ? `<text x="${x}" y="${y + 4 * z}" text-anchor="middle" font-size="${11.5 * z}" font-weight="700" fill="#0b0b0b">${esc(t)}</text>`
-        : `<text x="${x + r + 3 * z}" y="${y + 4 * z}" font-size="${11 * z}" font-weight="700" fill="${col}" stroke="#fff" stroke-width="${3 * z}" paint-order="stroke">${esc(t)}</text>`); }
+      out.push(inside ? `<text x="${x}" y="${y + 4 * z * r / (10 * z)}" text-anchor="middle" font-family="${fam}" font-size="${(Math.min(fsz + 0.5, r / z * 1.15) * z).toFixed(1)}" font-weight="700" fill="${esc(a.fcol || "#0b0b0b")}">${esc(t)}</text>`
+        : `<text x="${x + r + 3 * z}" y="${y + 4 * z}" font-family="${fam}" font-size="${(fsz * z).toFixed(1)}" font-weight="700"${a.fi ? ' font-style="italic"' : ""} fill="${col}" stroke="#fff" stroke-width="${3 * z}" paint-order="stroke">${esc(t)}</text>`); }
   });
   return out.join("");
 }
@@ -4895,7 +5165,7 @@ async function defaultsDialog(){
 async function editCond(c){
   const isNew = !c, used = c && P.proj.items.some(i => i.cond === c.id);
   const dflt = toolDefaults();
-  const d = c ? Object.assign({}, c) : {name: "", type: "area", unit: "Sft", color: dflt.condColor, sw: dflt.condWidth, h: "", t: "", faces: 1, dedMin: 0};
+  const d = c ? Object.assign({}, c) : {name: "", type: "area", unit: "Sft", color: dflt.condColor, sw: dflt.condWidth, h: "", t: "", faces: 1, dedMin: 0, ap: (dflt.apBy || {}).area || undefined};
   const unitOpts = t => UNITS[t].map(u => `<option${u === d.unit ? " selected" : ""}>${u}</option>`).join("");
   const body = (isNew ? `<div class="fg w2" style="margin-bottom:10px"><label>Start from</label><select id="cPre"><option value="">— choose a common item —</option>${PRESETS.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join("")}</select></div>` : "") +
     `<div class="grid"><div class="fg w2"><label>Name (as it should read on the sheet)</label><input type="text" id="cName" value="${esc(d.name)}"></div>
@@ -4913,7 +5183,8 @@ async function editCond(c){
      <div class="fg cntonly"><label>Caption</label><select id="cCap"><option value="seq"${(d.cap || "seq") === "seq" ? " selected" : ""}>Number 1, 2, 3…</option><option value="name"${d.cap === "name" ? " selected" : ""}>Condition name</option><option value="text"${d.cap === "text" ? " selected" : ""}>Custom label</option><option value="none"${d.cap === "none" ? " selected" : ""}>None</option></select></div>
      <div class="fg cntonly"><label>Custom label</label><input type="text" id="cCapT" value="${esc(d.capText || "")}" placeholder="e.g. LGT-EM"></div>
      <div class="fg cntonly"><label>Size</label><select id="cSz"><option value="s"${d.sz === "s" ? " selected" : ""}>Small</option><option value="m"${(d.sz || "m") === "m" ? " selected" : ""}>Medium</option><option value="l"${d.sz === "l" ? " selected" : ""}>Large</option></select></div>
-     <div class="fg w2"><label>Colour</label><input type="hidden" id="cC" value="${esc(d.color)}"><div class="swg" id="cSw">${swatches(d.color)}<label class="cust">Custom <input type="color" id="cCx" value="${/^#[0-9a-f]{6}$/i.test(d.color) ? d.color : "#2a78d6"}"></label></div></div></div>
+     <div class="fg w2"><label>Colour</label><input type="hidden" id="cC" value="${esc(d.color)}"><div class="swg" id="cSw">${swatches(d.color)}<label class="cust">Custom <input type="color" id="cCx" value="${/^#[0-9a-f]{6}$/i.test(d.color) ? d.color : "#2a78d6"}"></label></div></div>
+     <div class="fg w2"><details id="cApD" class="apdlg"${c && c.ap && Object.keys(c.ap).length ? " open" : ""}><summary>Appearance — line, ends, fill, hatch, units, label font <span class="small">(as Bluebeam)</span></summary><div id="cApPv" style="margin:8px 0"></div><div id="cAp">${apEditorHtml(d, apOf(d), {dialog: true})}</div></details></div></div>
      <p class="small" style="margin-top:10px">Area → Sft, or cft with T (slab, screed). Length → ft; Sft with H (plaster, 4.5" partition — 2 faces for internal plaster); cft with H and T (9" and thicker walls).
      House thresholds: masonry and plaster openings 1.00 Sft, formwork 5.00 Sft, concrete voids 0.50 cft.</p>`;
   const pr = ask(isNew ? "New condition" : "Edit condition", body, isNew ? "Create" : "Save", () => {
@@ -4923,8 +5194,9 @@ async function editCond(c){
     if (type === "linear" && unit !== "ft" && !(H > 0)) return "A wall measured in " + unit + " needs its height H";
     if (unit === "cft" && !(T > 0)) return "A quantity in cft needs the thickness T";
     return {name, type, unit, h: H || "", t: T || "", faces: Math.max(1, Math.min(2, +$("cF").value || 1)), dedMin: Math.max(0, parseFloat($("cD").value) || 0), color: $("cC").value,
-      sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value, group: $("cGrp").value.trim().slice(0, 60), boq: $("cBoq").value.trim(), ra: $("cRa").value.trim().toUpperCase()};
+      sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value, group: $("cGrp").value.trim().slice(0, 60), boq: $("cBoq").value.trim(), ra: $("cRa").value.trim().toUpperCase(), ...apFromDialog(type)};
   }, "cName");
+  apDialogWire(d);
   const raInfo = () => { const code = $("cRa").value.trim(); if (!code) { $("cRaInfo").innerHTML = raLib().o ? "Link a Rate Analysis item to take its built-up rate (or type the rate in the bill’s Assembly)." : "Rate Analysis library not found in this browser — open SAJ QSCOST → Rate Analysis on this site once to link codes."; return; }
     const r = rateOf({ra: code.toUpperCase()}, $("cUnit").value), p = raPrice(code);
     $("cRaInfo").innerHTML = r.na ? `<span style="color:var(--red)">${esc(r.na)}</span>` : `<b>${esc(p.code)}</b> — ${esc(String(p.desc).slice(0, 110))} · <b>PKR ${f2(r.rate)} / ${esc(p.unit)}</b>${r.assumed ? ` · <span style="color:var(--amber)">${r.assumed} assumed row(s)</span>` : ""}`; };
@@ -4942,8 +5214,8 @@ async function editCond(c){
   }
   if (!v) return;
   mutate(() => {
-    if (isNew) { const nc = Object.assign({id: uid("C")}, v); P.proj.conds.push(nc); S.cond = nc.id; }
-    else Object.assign(cond(c.id), v);
+    if (isNew) { const nc = Object.assign({id: uid("C")}, v); if (!nc.ap) delete nc.ap; P.proj.conds.push(nc); S.cond = nc.id; }
+    else { const cc = cond(c.id); Object.assign(cc, v); if (!v.ap) delete cc.ap; }
   });
   if (isNew) setTool("draw");
 }
@@ -5160,14 +5432,7 @@ function pageOverlaySvg0(file, page, sc, W, H, legend){
     tot[c.id] = (tot[c.id] || 0) + q;
     if (c.type === "count") { h.push(countSvg(c, it.pts, T, z, -1)); return; }
     if (it.kind === "open") { const a = T(it.pts[0]), b = T(it.pts[1]); h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${4 * z}" stroke-linecap="round"/>`); return; }
-    const poly = itemPoly(it);
-    if (c.type === "area") {
-      h.push(`<polygon points="${ps(poly)}" fill="${ded ? "#d03b3b" : col}" fill-opacity="${ded ? 0.14 : 0.22}" stroke="${ded ? "#d03b3b" : col}" stroke-width="${1.8 * z}" ${ded ? `stroke-dasharray="${5 * z} ${3 * z}"` : ""}/>`);
-      if (k && lblOn) { const scr = poly.map(T), L = capLines(it, c, k); if (L.length) h.push(labelBox(labelPt(scr), L, ded ? "#9b2222" : "#0b0b0b", z)); if (S.lbl.seg && it.shape !== "circle") h.push(segLabels(scr, it.pts, k, true, z)); }
-    } else {
-      h.push(`<poly${it.shape === "circle" ? "gon" : "line"} points="${ps(poly)}" fill="none" stroke="${ded ? "#d03b3b" : col}" stroke-width="${3 * z}" stroke-linejoin="round" stroke-linecap="round" ${ded ? `stroke-dasharray="${7 * z} ${4 * z}"` : ""}/>`);
-      if (k && lblOn) { const scr = poly.map(T), L = capLines(it, c, k), m = lineLabelPt(scr, z); if (L.length) h.push(labelBox(m, L, ded ? "#9b2222" : "#0b0b0b", z)); if (S.lbl.seg && it.shape !== "circle") h.push(segLabels(scr, it.pts, k, false, z)); }
-    }
+    h.push(measSvg(it, c, {T, z, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false}));
   });
   if (o.mk !== false) (P.proj.marks || []).filter(m => m.file === file && m.page === page && m.type !== "fence" && (!mkHidden(m) || m.type === "redact")).forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
   const sh = (P.proj.sheets || {})[keyOf(file, page)] || {}, lz = z * ({s: 0.8, m: 1, l: 1.3}[o.lsz] || 1), pos = o.legend || "none";
@@ -7802,6 +8067,7 @@ function wire(){
     if (x1 < 0 || x0 > w || y1 < 0 || y0 > h) { S.view.tx += w / 2 - (x0 + x1) / 2; S.view.ty += h / 2 - (y0 + y1) / 2; applyView(); renderHi(); }
     refresh();
   });
+  apWire();   // the appearance bar (Bluebeam-style properties)
   $("props").addEventListener("change", e => {
     const mk = e.target.dataset.mprop && (P.proj.marks || []).find(m => m.id === S.selMark);
     if (mk) { mkPropSet(mk, e.target.dataset.mprop, e.target); return; }
