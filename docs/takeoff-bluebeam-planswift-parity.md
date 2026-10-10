@@ -282,3 +282,24 @@ Researched against AutoCAD model-space viewports (VPORTS: click a viewport to ma
 | Synchronize zoom & pan | — | ✓ | ★ Sync zoom & pan (keeps the offset the windows had) |
 | Cross-hair of the cursor in the other window | — | — | ★ Link cursor |
 | Match / swap windows | — | — | ★ |
+
+## PDF mode / AutoCAD mode (2026-10-10)
+
+Two buttons right after the search box set the view and what the editing tools work on — covered by `tools/test_takeoff_edmode.js`.
+
+| Mode | View | Offset · Trim · Extend · Fillet (Chamfer) · Break · Join · Explode work on |
+|---|---|---|
+| **PDF Mode** | dimmer 60 %, white background, monochrome on, line weights on | the takeoff's own markups (runs and outlines), cut and extended to the drawing's lines as before |
+| **AutoCAD Mode** | dimmer 0 %, black background, monochrome off (the drawing's colours) | the AutoCAD drawing's own LINE / LWPOLYLINE / POLYLINE / ARC / CIRCLE / ELLIPSE / SPLINE objects, as AutoCAD's commands |
+
+AutoCAD mode, as AutoCAD: Trim cuts back to the nearest crossing lines (quick mode — nothing crossing erases the object; a closed
+object needs two crossings); Extend runs a straight end along its line and an arc's end round its own circle; Fillet / Chamfer trim
+or extend two lines to meet and add the arc as a new object on the first line's layer (two sides of one polyline: the arc goes into
+it); Break cuts at the point (a closed object opens there, Shift deletes a segment / whole arc); Join makes objects whose ends touch
+one polyline (straight pieces in line become one segment, a chain back on itself closes); Explode splits a polyline into its lines
+and arcs, and a block / dimension / multiline / leader into its lines (its text and fills stay); Offset asks the distance, then the
+object and the side, again and again. An edited object is taken out of the drawing and drawn again on its own layer in its own
+colour, lineweight and linetype; arcs are held on their true circle (not the Bézier the reader draws them with), so lengths agree
+with AutoCAD to a few thousandths of an inch. The edits are kept in the project (`cadEd`, one Ctrl+Z step each), seen by snapping,
+Auto area, find and Ctrl+P plots; *AutoCAD edits: put this drawing back as it was read* (Ctrl+K) clears them. The DWG / DXF itself
+is never changed.
