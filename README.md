@@ -9,7 +9,8 @@ Static, self-contained HTML dashboards published live on GitHub Pages.
 | Zameen Developments | https://sajjadsj44-max.github.io/ZD-Dashboard/zameen-developments/ |
 | Drawing Tracker | https://sajjadsj44-max.github.io/ZD-Dashboard/drawing-tracker/ |
 | PDF Takeoff | https://sajjadsj44-max.github.io/ZD-Dashboard/takeoff/ |
-| Dashboard index | https://sajjadsj44-max.github.io/ZD-Dashboard/ |
+| Dashboard index | https://sajjadsj44-max.github.io/ZD-Dashboard/dashboards/ |
+| Site address (opens PDF Takeoff) | https://sajjadsj44-max.github.io/ZD-Dashboard/ |
 
 GitHub Pages is the only host. Always open the same address: the takeoff keeps
 its projects in that browser, per address.
@@ -636,6 +637,48 @@ node tools/test_price_trends.js       # 29 browser checks, worked against the pa
 Added 01-Oct-2026 (Phase 1). Measure quantities straight off PDF drawings, in the browser — linked from the
 dashboard sidebar (QS Cost Control → PDF Takeoff) and the landing page.
 
+Since 11-Oct-2026 the site's own address (`https://sajjadsj44-max.github.io/ZD-Dashboard/`) opens the PDF Takeoff:
+the root `index.html` sends the browser on to `takeoff/` (a `location.replace`, with a meta refresh and a plain link as
+fallbacks), so the takeoff's projects — kept per site in the browser — are the same ones as before. The dashboards
+list moved to `dashboards/`; every dashboard keeps its own address. `tools/test_root.js` checks the landing, that
+`takeoff/` does not loop, and that every dashboard link still opens.
+
+- **Command line** (status bar, 11-Oct-2026): type an AutoCAD alias or a command's name and Enter — `l`, `rec`, `ci`,
+  `pol 8`, `tr`, `ex`, `f 0.5`, `cha 0.5 0.75`, `o 0.375`, `ro 37`, `sc 1.5`, `qs`, `inv`… Enter on an empty line repeats
+  the last command, ↑ / ↓ walk the history, `:` on the drawing puts the cursor there. It uses the same commands as the
+  Ctrl+K palette. **Polygon** (`pol`): a regular n-sided outline (centre, then a corner), kept as an ordinary area or
+  closed run so every edit and the sheet work on it. **Invert selection** (`Ctrl+I`), **Quick select** (by condition,
+  kind of measurement, markup type, check state; new / add / within) and **Deselect all** — right-click the page.
+  Tests: `tools/test_takeoff_cmdline.js`. The audit behind these: `docs/takeoff-cad-audit-2026-10-11.md`.
+- **Free local AI** (11-Oct-2026): the takeoff agent can run on **Ollama on your own computer** — free, offline once
+  the model is downloaded — with the same real tools as Claude (trace rooms, measure, count tags, walls, totals, explain a
+  quantity, undo). Agent panel → **⚙ Engine**: choose Auto / Local AI only / Claude / Built-in rule agent, the Ollama
+  address and model, **Test connection** and **Benchmark installed models** (right tool, valid arguments, reply time,
+  tokens/s — measured on your PC). One-time setup: install Ollama, set `OLLAMA_ORIGINS=https://sajjadsj44-max.github.io`,
+  restart it, `ollama pull` a tool-capable model; allow Chrome's local-network prompt. If the local model cannot be
+  reached the built-in rule agent answers — never a cloud service. Every tool call is checked against its schema;
+  quantities in replies come from the measurement sheet. Chat history is kept per project, text only.
+- **Agent instructions** (**Rules** in the agent panel): working rules taught in the chat (“remember: exclude shafts from
+  net flooring”) or typed — this request only / this session / this project / every project — with on / off, edit,
+  delete and a conflict warning. They go with every message to the local AI and Claude; “show me the boundary before
+  accepting” also switches on Auto area's preview.
+- **Auto area record and preview**: every Auto-area outline keeps how it was found (drawing image / vector lines, door
+  gap), its original outline, area and time; Properties show “as detected” or “edited (+x Sft)”, **Show detected** and
+  **Restore detected**; leaks, short traces and non-square outlines count as *needs review*. Auto area settings ⚙ →
+  “Show the outline before adding it”: Accept (Enter) / Tighter gap / Wider gap / Cancel (Esc).
+  Tests: `tools/test_takeoff_localai.js` (with the stand-in `tools/mock_ollama.js`). Report:
+  `docs/takeoff-autoarea-agent-localai-2026-10-11.md`.
+- **Agent runs Auto area** (`auto_area_page`): scale checked first, every named room traced, shafts / ducts / voids left
+  out (and deducted when inside a room), checked against written sizes and existing areas, previewed dashed until you
+  accept (`accept_preview` / `discard_preview`); `validate_takeoff`; subtotals by floor / room / page.
+- **Project knowledge** (agent panel → Knowledge): offline keyword search over the help, the PDFs' text, rules,
+  measurements and documents you add (specs, schedules — .txt / .md / .csv / PDF), cited by file + page, measurement id or
+  document. **KPIs** (agent panel): Auto-area accuracy from the recorded drawing suite, your own Auto-area and agent use,
+  local-AI status — from recorded results only (local log, export / clear).
+- **Drawing test suite**: `node tools/takeoff_drawings.js out.pdf` writes 38 test pages (36 drawing conditions) with known
+  reference outlines; `tools/test_takeoff_drawings.js [--write]` runs Auto area on each (area error, IoU, flagged, time)
+  and saves `takeoff/kpi/drawing-tests.json` for the KPI dashboard. Agent workflow: `tools/test_takeoff_agentflow.js`.
+
 - **Private by design**: a PDF opens in the viewer's browser and is stored with the takeoff in that browser's
   IndexedDB — nothing is uploaded and nothing is committed here. Projects move between computers as
   **Export → Project (.json)**; the PDF is re-attached by adding it again (matched by file name and size).
@@ -1032,7 +1075,8 @@ connection.
 ## Repo layout
 
 ```
-index.html                          landing page listing all dashboards
+index.html                          the site address: opens the PDF Takeoff (takeoff/), query and hash kept
+dashboards/index.html               landing page listing all dashboards
 zameen-developments/index.html      Zameen Developments dashboard
 drawing-tracker/index.html          Drawing Tracker dashboard
 takeoff/index.html, takeoff.js      PDF Takeoff (pdf.js viewer, scale, snapping, measurement sheet)

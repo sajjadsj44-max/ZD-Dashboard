@@ -9,7 +9,7 @@
 */
 const {chromium} = require("playwright");
 const fs = require("fs"), os = require("os"), path = require("path");
-const BASE = process.env.ZD_URL || "http://127.0.0.1:8765/", LIBS = process.env.TK_LIBS || "", PAGES = ["index.html", "takeoff/", "drawing-tracker/", "zameen-developments/"];
+const BASE = process.env.ZD_URL || "http://127.0.0.1:8765/", LIBS = process.env.TK_LIBS || "", PAGES = ["dashboards/", "takeoff/", "drawing-tracker/", "zameen-developments/"];
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else fail++; console.log((c ? "  ok   " : "  FAIL ") + m); };
 const LOCKISH = /lock|pass|pw|unlock|secret/i;
@@ -55,7 +55,7 @@ const LOCKISH = /lock|pass|pw|unlock|secret/i;
   const ctx2 = await browser.newContext();
   await ctx2.addInitScript(() => { const s = CSS.supports.bind(CSS); CSS.supports = (a, b) => /text-security/.test(String(a)) ? false : s(a, b); });
   const page = await ctx2.newPage();
-  await page.goto(BASE + "index.html", {waitUntil: "load"});
+  await page.goto(BASE + "dashboards/", {waitUntil: "load"});
   await page.click("#zd-lock-input"); await page.keyboard.type("1245");
   ok(await page.inputValue("#zd-lock-input") === "••••", "the field shows dots, not the characters");
   await page.keyboard.press("Backspace"); await page.keyboard.press("Backspace"); await page.keyboard.type("3");

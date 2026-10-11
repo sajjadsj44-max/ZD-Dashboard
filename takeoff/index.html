@@ -301,12 +301,17 @@ table.sh .rn:hover{color:var(--purple)}
 #ctx .csep{height:1px;background:var(--line);margin:3px 0}
 #ctx .cm{display:none;position:absolute;left:100%;top:-4px;min-width:210px;max-height:70vh;overflow:auto;background:#fff;border:1px solid #c9d6e4;border-radius:8px;box-shadow:0 10px 32px rgba(15,41,66,.28);padding:4px 0}
 #ctx.flip .cm{left:auto;right:100%}
-#ctx .ci.sub:hover>.cm{display:block}
+#ctx .ci.sub:hover>.cm,#ctx .ci.sub.open>.cm{display:block}
 kbd{display:inline-block;border:1px solid #c9d6e4;border-bottom-width:2px;border-radius:4px;padding:0 4px;font-size:10.5px;color:#3c4c60;background:#fbfcfe;font-family:inherit}
 table.keyt td{vertical-align:top;border-bottom:1px solid #f2f5f9}
 .status{display:flex;gap:14px;align-items:center;padding:5px 10px;background:#fff;border-top:1px solid var(--line);font-size:11.5px;color:#3c4c60;min-height:28px;flex-wrap:wrap}
 .status b{font-variant-numeric:tabular-nums}
 .status .hint{color:var(--muted);margin-left:auto}
+.aimsg.meta{font-size:10.5px;color:var(--muted);background:none;padding:0 4px;align-self:flex-start}
+#autoPrevBar{position:fixed;left:50%;top:150px;transform:translateX(-50%);z-index:30;display:none;align-items:center;gap:8px;flex-wrap:wrap;max-width:min(760px,96vw);padding:8px 12px;background:#fff;border:1px solid #e8a33d;border-left:4px solid #e8a33d;border-radius:8px;box-shadow:0 6px 22px rgba(15,41,66,.18);font-size:12.5px}#autoPrevBar.on{display:flex}#autoPrevBar .small{color:var(--muted);flex:1;min-width:120px}
+.status .cmdwrap{display:flex;align-items:center;gap:5px;min-width:0}.status .cmdwrap label{font-weight:700;color:var(--navy)}
+#cmdLine{width:190px;height:21px;padding:1px 6px;border:1px solid var(--line);border-radius:4px;font:11.5px ui-monospace,Consolas,monospace;background:#fbfcfe}#cmdLine:focus{outline:2px solid #e8a33d;outline-offset:0;background:#fff}
+.cmdsay{font:11px ui-monospace,Consolas,monospace;color:#3c4c60;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cmdsay.err{color:#b42318}
 .tipx{position:absolute;pointer-events:none;background:#fff;border:1px solid rgba(11,11,11,.15);border-radius:6px;padding:4px 8px;font-size:12px;font-weight:600;color:#0b0b0b;box-shadow:0 2px 8px rgba(15,41,66,.15);white-space:nowrap;display:none;z-index:3;font-variant-numeric:tabular-nums}
 .dropx{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#3c4c60;text-align:center;padding:20px}
 .dropx .box{border:2px dashed #9fb0c6;border-radius:12px;padding:28px 34px;background:rgba(255,255,255,.75);max-width:520px;line-height:1.6}
@@ -685,6 +690,29 @@ table.sh td.n:not(:last-child),table.sh th.n:not(:last-child){white-space:normal
 table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 #sheet,#bill{overflow-x:hidden}
 .cond .q{font-size:12px}.cond .nm b{font-size:12.5px}
+/* compact condition rows and the By page tree (PlanSwift-style) */
+.cview{display:flex;gap:2px;margin:0 2px 6px;background:var(--pg2,#eef2f7);border-radius:6px;padding:2px}.cview button{flex:1;border:0;background:none;font-size:11px;padding:3px 4px;border-radius:5px;color:#5b6b80;cursor:pointer}.cview button.on{background:#fff;color:var(--navy);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.ctree{font-size:12px}
+.ctr{display:flex;align-items:center;gap:5px;padding:3px 4px;cursor:pointer;user-select:none;color:var(--navy);white-space:nowrap;overflow:hidden}.ctr b{overflow:hidden;text-overflow:ellipsis;font-size:12px}.ctr .small{margin-left:auto;font-size:10.5px;color:var(--muted);flex:none}.ctr .car{color:#8a98ac;width:10px;flex:none}
+.ctr.root{background:#eef3fb;border-radius:4px;margin-top:3px}.ctr.pg b{color:#2b4fb8}.ctr.pg.cur{background:#f1f6ff}.ctr .ed{border:0;background:none;color:#8a98ac;cursor:pointer;padding:0 3px;flex:none}
+.crow{display:flex;align-items:center;gap:5px;height:22px;padding-right:2px;border-bottom:1px solid #f0f3f7;cursor:pointer;font-size:12px}
+.crow:hover{background:#f4f7fc}.crow.on{background:#dbe7fb;box-shadow:inset 3px 0 0 var(--blue)}.crow.off .cn,.crow.off .cq{opacity:.45}
+.crow input[type=checkbox]{margin:0;width:12px;height:12px;flex:none;display:none}.crow:hover input[type=checkbox],.crow input[type=checkbox]:checked,.ticking .crow input[type=checkbox]{display:block}
+.crow .ed.pen{display:none}.crow:hover .ed.pen{display:block}.crow:hover .cq{max-width:none}
+.crow .cn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--navy)}
+.crow .cq{font-variant-numeric:tabular-nums;color:#1d3fc4;font-weight:600;text-align:right;white-space:nowrap}.crow .cu{width:22px;flex:none;font-size:10px;color:var(--muted)}.crow .cn{min-width:40px}
+.crow .sw{width:13px;height:13px;border-radius:2px;flex:none;border:1px solid rgba(0,0,0,.2);padding:0;cursor:pointer}
+.crow .ed{border:0;background:none;color:#8a98ac;cursor:pointer;font-size:12px;padding:0 2px;flex:none}.crow .bulb.out{filter:grayscale(1);opacity:.35}
+.cic{flex:none;width:14px;height:12px;position:relative;display:inline-block}
+.cic.linear::before{content:"";position:absolute;left:1px;right:1px;top:5px;height:2px;background:var(--cc);transform:rotate(-30deg)}
+.cic.area::before{content:"";position:absolute;inset:1px 1px;border:1.5px solid var(--cc);background:color-mix(in srgb,var(--cc) 30%,transparent)}
+.cic.count::before{content:"";position:absolute;left:4px;top:3px;width:6px;height:6px;border-radius:50%;background:#d22}
+table.mattbl{width:100%;border-collapse:collapse;font-size:12px}table.mattbl td{padding:2px 4px;border-bottom:1px solid #eef1f5}table.mattbl td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--navy)}table.mattbl td:last-child{width:34px;color:var(--muted);font-size:11px}
+table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl .warn{color:#b45309}table.mattbl td:first-child{white-space:normal}table.mattbl td.n{white-space:nowrap}table.mattbl td.n small{font-weight:400;color:var(--muted);font-size:10px}table.mattbl td.amt{width:auto;color:var(--navy);font-size:12px;font-weight:600}table.mattbl tr.tot td{border-top:1.5px solid #cfd8e3;font-weight:600}
+.matset{flex-wrap:wrap;gap:4px;margin-bottom:4px}
+.boql{max-height:190px;overflow:auto;border:1px solid var(--line);border-radius:6px;margin-top:4px;background:#fff}.boqr{display:flex;gap:8px;align-items:baseline;padding:4px 8px;border-bottom:1px solid #eef1f5;cursor:pointer;font-size:12px}.boqr:hover{background:#f4f7fc}.boqr.on{background:#dbe7fb}.boqr b{flex:none;color:var(--navy);font-size:11.5px}.boqr .bd{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.boqr .bu{flex:none;color:var(--muted);font-size:11px;width:34px}.boqr .bu.x{color:#b45309}.boqr .br{flex:none;font-variant-numeric:tabular-nums;font-weight:600;min-width:70px;text-align:right}.boqr .br i{font-weight:400;color:var(--muted)}
+@media (hover:none){.crow input[type=checkbox],.crow .ed.pen{display:block}.pgt .pgck{opacity:1}.crow{height:30px}.ctr{padding:6px 4px}}
+.msplit{display:flex;flex-wrap:wrap;gap:2px 10px;font-variant-numeric:tabular-nums}.msplit span{white-space:nowrap}.matset .fg{min-width:80px;flex:1}
 .propsbox{max-height:40%}
 </style>
 </head>
@@ -751,6 +779,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
           <button class="tool" data-tool="draw" title="Length / run — draw along the drawing with the active condition: click each point, Enter to finish (A)"><svg class="ic"><use href="#i-draw"/></svg><span class="tl">Length</span> <kbd>A</kbd></button>
           <button class="tool" data-tool="rect" title="Rectangle area (R)"><svg class="ic"><use href="#i-rect"/></svg><span class="tl">Rect</span> <kbd>R</kbd></button>
           <button class="tool" data-tool="circle" title="Circle — round slab, column, tank: centre then edge (E)"><svg class="ic"><use href="#i-circle"/></svg><span class="tl">Circle</span> <kbd>E</kbd></button>
+          <button class="tool" data-tool="polygon" title="Polygon — regular n-sided outline (hexagonal column, pad): centre then a corner; type pol 8 for 8 sides"><svg class="ic"><use href="#i-polygon"/></svg><span class="tl">Polygon</span></button>
         </div><div class="rgl">Measure</div></div>
         <div class="rg"><div class="rgb">
           <button class="tool" data-tool="auto" title="Auto area (Dynamic fill) — click inside a room; its area is traced from the walls (W)"><svg class="ic"><use href="#i-auto"/></svg><span class="tl">Auto area</span> <kbd>W</kbd></button>
@@ -926,6 +955,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
       <symbol id="i-auto" viewBox="0 0 24 24"><path d="M12 3l2 5.5L19.5 10 14 12l-2 5.5L10 12 4.5 10 10 8.5z"/><path d="M19 16v4M17 18h4"/></symbol>
       <symbol id="i-fence" viewBox="0 0 24 24"><path d="M5 4v16M12 4v16M19 4v16M3 9h18M3 15h18"/></symbol>
       <symbol id="i-cog" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></symbol>
+      <symbol id="i-polygon" viewBox="0 0 24 24"><path d="M7.5 4.2h9l4.5 7.8-4.5 7.8h-9L3 12z"/><circle cx="12" cy="12" r="1" fill="currentColor"/></symbol>
       <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="1" fill="currentColor"/><path d="M12 12l5.6-5.6"/></symbol>
       <symbol id="i-count" viewBox="0 0 24 24"><path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0113 0c0 5-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.2"/></symbol>
       <symbol id="i-vsearch" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="M15 15l6 6M8 10h4M10 8v4"/></symbol>
@@ -1044,7 +1074,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
     </div>
     </div></div>
     <div id="mkList" class="mkl" style="display:none" aria-label="Markups list"></div>
-    <div class="status" id="status"><span id="stPos">—</span><span id="stSnap"></span><span id="stType" style="cursor:pointer;color:var(--navy);font-weight:600" role="button" tabindex="0"></span><span id="stMeas"></span><span class="hint" id="stHint"></span></div>
+    <div class="status" id="status"><span class="cmdwrap"><label for="cmdLine">Command:</label><input type="text" id="cmdLine" autocomplete="off" spellcheck="false" placeholder="l, tr, f 0.5, ro 37, pol 8, qs… Enter" title="Command line — type an AutoCAD alias or a command's name and Enter (Enter alone repeats the last one, ↑ ↓ history, Esc leaves). Press : on the drawing to type here."><span class="cmdsay" id="cmdSay"></span></span><span id="stPos">—</span><span id="stSnap"></span><span id="stType" style="cursor:pointer;color:var(--navy);font-weight:600" role="button" tabindex="0"></span><span id="stMeas"></span><span class="hint" id="stHint"></span></div>
   </section>
 
   <aside class="panel right">
@@ -1060,7 +1090,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 </div>
 
 <div id="start"><div class="wrap">
-  <h2>PDF Takeoff</h2>
+  <h2>PDF Takeoff <a class="btn sm" href="../dashboards/" style="float:right;font-size:12px;font-weight:600;text-decoration:none" title="Change Management, Drawing Tracker and the other ZD dashboards">All dashboards &rarr;</a></h2>
   <p class="sub">Measure areas, lengths and counts straight off PDF drawings, with the scale read from the drawing, snapping to the
     drawing's own lines, and a measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as their own rows).</p>
   <div class="card"><div class="hd"><h3>Projects</h3><input type="search" id="projectSearch" placeholder="Search projects…" aria-label="Search projects"><button class="btn" id="bImport">Import project</button><input type="file" id="impIn" accept=".json,.zdtakeoff,application/json" hidden>
@@ -1075,9 +1105,10 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 <div id="ctx" role="menu" aria-label="Actions"></div>
 <aside id="aiPanel" aria-label="Claude assistant">
   <div class="aih"><b>&#10022; Claude</b><span class="small">reads the drawing, measures rooms</span><span class="sp"></span>
-    <button class="btn sm" id="aiNew" title="Start a new conversation">New</button><button class="btn sm" id="aiKeyBtn" title="API key">Key</button><button class="btn sm" id="aiClose" title="Close">&times;</button></div>
+    <button class="btn sm" id="aiEngBtn" title="AI engine: local AI on this computer (free, offline), Claude, or the built-in rule agent — setup, health check, benchmark">&#9881; Engine</button><button class="btn sm" id="aiKbBtn" title="Project knowledge — add specifications / schedules and search them, the PDFs' text and the help, offline">Knowledge</button><button class="btn sm" id="aiKpiBtn" title="KPIs — Auto area and agent performance from recorded test results and this browser's log">KPIs</button><button class="btn sm" id="aiRulesBtn" title="Agent instructions — the working rules the AI follows (teach one in the chat: remember …)">Rules</button><button class="btn sm" id="aiNew" title="Start a new conversation">New</button><button class="btn sm" id="aiKeyBtn" title="API key">Key</button><button class="btn sm" id="aiClose" title="Close">&times;</button></div>
   <div id="aiKeyRow"><input type="text" class="secret" id="aiKey" placeholder="Anthropic API key (sk-ant-…)" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"><button class="btn sm pri" id="aiKeySave">Save</button>
     <div class="small">Your own key, from console.anthropic.com. Kept in this browser only and sent only to api.anthropic.com. Each request is billed to your Anthropic account.</div></div>
+  <div id="aiEngLine" class="small" style="padding:4px 12px;border-bottom:1px solid var(--line)"></div>
   <div id="aiLog"></div>
   <div class="aif"><textarea id="aiIn" rows="2" placeholder="e.g. measure every bedroom, or: the lounge outline is wrong, redo it"></textarea>
     <div class="aib"><button class="btn sm" id="aiRead" title="API key: send a picture of the view on screen with your message">&#128065; Read this view</button><span class="sp"></span><button class="btn sm pri" id="aiSend">Send</button></div>
@@ -1090,7 +1121,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-10b"></script>
+<script type="module" src="takeoff.js?v=2026-10-12a"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
