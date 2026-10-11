@@ -3296,11 +3296,11 @@ function drawNow(){
     if (it.shape === "circle") it = Object.assign({}, it, {pts: itemPoly(it), _pts: pts0});
     if ((it.id === S.hover && S.tool === "select" && !S.drag) || (sel && S.multi.size)) {   // hover glow (Bluebeam), and every object of a multiple selection
       const gc = sel ? "#4b3b8f" : col;
-      if (c.type === "count") it.pts.forEach(p => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="15" fill="none" stroke="${gc}" stroke-width="4" opacity=".35"/>`); });
+      if (c.type === "count") it.pts.forEach(p => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(15 * cntZ()).toFixed(1)}" fill="none" stroke="${gc}" stroke-width="4" opacity=".35"/>`); });
       else h.push(`<${c.type === "area" || it._pts ? "polygon" : "polyline"} points="${ptsS(it.pts)}" fill="none" stroke="${gc}" stroke-width="9" stroke-linejoin="round" stroke-linecap="round" opacity="${sel ? 0.28 : 0.22}"/>`);
     }
     if (c.type === "count") {
-      h.push(countSvg(c, it.pts, toScr, 1, sel ? S.selPt : -1));
+      h.push(countSvg(c, it.pts, toScr, cntZ(), sel ? S.selPt : -1));
       if (it.locked && sel) it.pts.forEach(p => { const q = toScr(p); h.push(lockBadge([q[0] + 9, q[1] - 12])); });
       return;
     }
@@ -4084,6 +4084,9 @@ function renderProps(){
 }
 
 /* ------------------------------------------------------------------ count markers (Bluebeam-style symbols and captions) */
+/* how big count markers are on screen: full size once a foot is about 12 px across, smaller when zoomed out (down to 30 %,
+   their numbers then hidden), so a whole floor seen at once is not covered by its markers; exports are not affected */
+function cntZ(){ const k = S.key && P.proj && P.proj.scales && P.proj.scales[S.key] && P.proj.scales[S.key].ptPerFt, ppf = (k || 9) * S.view.s; return Math.max(0.3, Math.min(1, ppf / 12)); }
 const SYMS = AP_SYMS;
 function countSvg(c, pts, T, z, selIdx){
   const a = apOf(c), sym = c.sym || "circle", cap = c.cap || "seq", r = (+a.csz || 10) * z, col = esc(a.col), out = [], lop = Math.max(0.05, (+a.lineOp || 100) / 100), sw0 = (+a.sw || 2.5);
@@ -4102,7 +4105,7 @@ function countSvg(c, pts, T, z, selIdx){
     else if (sym === "dot") out.push(`<circle cx="${x}" cy="${y}" r="${r * 0.55}" fill="${col}" stroke="#fff" stroke-width="${z}"/>`);
     else out.push(`<circle cx="${x}" cy="${y}" r="${r}" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}"/>`);
     const t = cap === "seq" ? String(i + 1) : cap === "name" ? c.name : cap === "text" ? (c.capText || "") : "";
-    if (t) { const inside = cap === "seq" && ["circle", "square", "diamond"].indexOf(sym) >= 0 && t.length <= 3;
+    if (t && z >= 0.5) { const inside = cap === "seq" && ["circle", "square", "diamond"].indexOf(sym) >= 0 && t.length <= 3;
       out.push(inside ? `<text x="${x}" y="${y + 4 * z * r / (10 * z)}" text-anchor="middle" font-family="${fam}" font-size="${(Math.min(fsz + 0.5, r / z * 1.15) * z).toFixed(1)}" font-weight="700" fill="${esc(a.fcol || "#0b0b0b")}">${esc(t)}</text>`
         : `<text x="${x + r + 3 * z}" y="${y + 4 * z}" font-family="${fam}" font-size="${(fsz * z).toFixed(1)}" font-weight="700"${a.fi ? ' font-style="italic"' : ""} fill="${col}" stroke="#fff" stroke-width="${3 * z}" paint-order="stroke">${esc(t)}</text>`); }
   });
@@ -10337,7 +10340,7 @@ function wallLineIds(rect, k){   // the drawing's lines in rect less door swings
   const g = S.geo[S.key]; if (!g || !g.segs.length) return null;
   const wf = segRoleFilter(g, new Set(["wall"]));   // the PDF's wall layers, when it has them: no furniture, fixtures or hatch
   const ids = (rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i)).filter(i => !wf || wf(i)), door = doorSymbols(g, ids, k);
-  return ids.filter(i => !door.has(i));
+  const out = ids.filter(i => !door.has(i)); out.doorLines = door.lines || []; return out;   // (the doorways too: the walls agent gives a doorway between a thin and a thick wall to the thin one)
 }
 function wallThicknesses(rect){   // the wall thicknesses drawn here, most wall length first: [{t ft, len ft}]
   const k = curScale(), ids = k && wallLineIds(rect, k), G = ids && faceLines(null, k, ids); if (!k || !G) return [];
@@ -10352,14 +10355,33 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
   const tol = Math.max(0.04, 0.08 * T) * k, bridge = Math.max(1.6 * T, bridgeFt || 0) * k, runs = [], gg = S.geo[S.key];
   /* a gap is bridged (a door or window opening) only if no other line crosses the wall's band inside it: a cross wall,
      a corridor's partition — then the two pieces are separate walls with a room or passage between them */
-  const crossed = (g, o, ta, tb) => { const u = g.u, n = g.n, hw = 0.4 * T * k, P = (t, oo) => [u[0] * t + n[0] * oo, u[1] * t + n[1] * oo], a = P(ta, o - hw), b = P(tb, o + hw), c2 = P(ta, o + hw), d2 = P(tb, o - hw);
+  const crossed = (g, o, ta, tb, longOnly) => { const u = g.u, n = g.n, hw = 0.4 * T * k, P = (t, oo) => [u[0] * t + n[0] * oo, u[1] * t + n[1] * oo], a = P(ta, o - hw), b = P(tb, o + hw), c2 = P(ta, o + hw), d2 = P(tb, o - hw);
     const xs = [a[0], b[0], c2[0], d2[0]], ys = [a[1], b[1], c2[1], d2[1]];
     return segsIn(gg, Math.min(...xs) - 1, Math.min(...ys) - 1, Math.max(...xs) + 1, Math.max(...ys) + 1).some(i => { const s2 = gg.segs[i]; if (s2[4] & 9) return false;
       const t1 = u[0] * s2[0] + u[1] * s2[1], o1 = n[0] * s2[0] + n[1] * s2[1], t2 = u[0] * s2[2] + u[1] * s2[3], o2 = n[0] * s2[2] + n[1] * s2[3];
       if (Math.min(o1, o2) > o - hw || Math.max(o1, o2) < o + hw) return false;   // must cross the whole band
+      if (longOnly && Math.abs(o2 - o1) <= T * k + 0.8 * k) return false;   // (a window: its jambs and mullions cross the band and stop)
       const tc = t1 + (t2 - t1) * (o - o1) / ((o2 - o1) || 1e-9); if (tc > ta + 0.1 * k && tc < tb - 0.1 * k) return true;
+      if (longOnly) return false;
       // at the gap's end, a line running on well past a face is a column's (or a wider block's) edge, not a jamb's end cap
       return Math.abs(tc - (tc - ta < tb - tc ? ta : tb)) <= 0.1 * k && (Math.min(o1, o2) < o - T * k / 2 - 0.3 * k || Math.max(o1, o2) > o + T * k / 2 + 0.3 * k); }); };
+  /* a window (or a glazed screen) drawn in the wall: lines along the wall at both its faces (and its glass between) fill the
+     gap — the opening is part of the wall run whatever its length (deducted as an opening), as long as no cross wall runs through it */
+  const near = (g, lo, hi, fn) => { if (!g._Lo) { g._Lo = g.L.slice().sort((a, b) => a.o - b.o); g._os = g._Lo.map(l => l.o); }   // the lines of g with lo <= o <= hi
+    const os = g._os; let a = 0, b = os.length; while (a < b) { const m = (a + b) >> 1; if (os[m] < lo) a = m + 1; else b = m; }
+    for (let i = a; i < os.length && os[i] <= hi; i++) if (fn(g._Lo[i]) === false) return; };
+  const windowIn = (g, o, ta, tb) => { const hw = T * k / 2 + 0.08 * k, gap = tb - ta, u = g.u, n = g.n, by = [];   // (every line here, not only the wall layers': a window's glass and frame are on a layer of their own)
+    const P = (t, oo) => [u[0] * t + n[0] * oo, u[1] * t + n[1] * oo], cs = [P(ta, o - hw), P(tb, o + hw), P(ta, o + hw), P(tb, o - hw)], xs = cs.map(c => c[0]), ys = cs.map(c => c[1]);
+    segsIn(gg, Math.min(...xs) - 1, Math.min(...ys) - 1, Math.max(...xs) + 1, Math.max(...ys) + 1).forEach(i => { const q = gg.segs[i]; if (q[4] & 9) return;   // (curves — a door's swing — and clip paths)
+      const o1 = n[0] * q[0] + n[1] * q[1], o2 = n[0] * q[2] + n[1] * q[3]; if (Math.abs(o1 - o2) > 0.02 * k) return;   // along the wall
+      const oo = (o1 + o2) / 2; if (Math.abs(oo - o) > hw) return;
+      const t1 = u[0] * q[0] + u[1] * q[1], t2 = u[0] * q[2] + u[1] * q[3], a = Math.max(ta, Math.min(t1, t2)), b = Math.min(tb, Math.max(t1, t2)); if (b > a) by.push({o: oo, a, b}); });
+    by.sort((x, y) => x.o - y.o); const cov = [];   // lines at one offset (within 0.03 ft) together: how much of the gap they cover
+    for (let i = 0; i < by.length;) { let j = i; while (j + 1 < by.length && by[j + 1].o - by[i].o < 0.03 * k) j++;
+      const iv = by.slice(i, j + 1).map(x => [x.a, x.b]).sort((x, y) => x[0] - y[0]); let c = 0, e = -Infinity; iv.forEach(([a, b]) => { if (b > e) { c += b - Math.max(a, e); e = b; } });
+      if (c >= 0.7 * gap) cov.push(by[i].o); i = j + 1; }
+    const atFace = sg => cov.some(v => Math.abs(v - (o + sg * T * k / 2)) <= 0.06 * k);   // a window spans the wall's whole thickness: lines at both faces (a thinner wall in line with this one sits at one face, or neither)
+    return cov.length >= 2 && atFace(-1) && atFace(1) && !crossed(g, o, ta, tb, true); };
   /* an L corner with a thinner wall: the run stops where its inner face meets the thinner wall, but its outer face runs on to
      the corner's outside edge — the run is taken on to that edge (the thinner wall stops at this one's face, so the corner is
      counted once, in the thicker wall). Not moved: an end closed by a line across it (a jamb's cap, a column's edge), an end
@@ -10381,25 +10403,63 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
       // glass beside a bed, a cupboard against a wall) — a wall's hollow is empty but for its windows
       // (counted: lines that run on past the pair at both ends — a window's glass lines stop within its wall, and a door's
       // leaf or frame drawn in the wall's band runs on past one end only, into the opening: neither counts)
-      const iv = []; g.L.forEach(l => { if (l.o > o - d / 2 + 0.04 * k && l.o < o + d / 2 - 0.04 * k && l.t0 < t0 - 0.5 * k && l.t1 > t1 + 0.5 * k) { const a = Math.max(t0, l.t0), b = Math.min(t1, l.t1); if (b > a) iv.push([a, b]); } });
+      const iv = []; near(g, o - d / 2 + 0.04 * k, o + d / 2 - 0.04 * k, l => { if (l.o > o - d / 2 + 0.04 * k && l.o < o + d / 2 - 0.04 * k && l.t0 < t0 - 0.5 * k && l.t1 > t1 + 0.5 * k) { const a = Math.max(t0, l.t0), b = Math.min(t1, l.t1); if (b > a) iv.push([a, b]); } });
       iv.sort((a, b) => a[0] - b[0]); let inside = 0, e = -Infinity; iv.forEach(([a, b]) => { if (b > e) { inside += b - Math.max(a, e); e = b; } });
-      if (inside <= 0.5 * (t1 - t0)) C.push({o, t0, t1}); });
+      if (inside > 0.5 * (t1 - t0)) return;
+      // a comb — wardrobe hangers, shelves, stair treads, tile or hatch lines: three or more more lines of this direction
+      // beside the pair (within 1.5 ft, clear of a face's finish line) over most of its length — not a wall's two faces
+      let comb = 0; const len = t1 - t0;
+      near(g, o - 1.5 * k, o + 1.5 * k, l => { const off = Math.abs(l.o - o); if (off <= d / 2 + 0.15 * k) return; if (Math.min(t1, l.t1) - Math.max(t0, l.t0) >= 0.6 * len && ++comb >= 3) return false; });
+      if (comb < 3) C.push({o, t0, t1}); });
     C.sort((a, b) => a.o - b.o);
     const lines = []; C.forEach(c => { const l = lines[lines.length - 1]; if (l && c.o - l.o <= 0.12 * k) { l.iv.push([c.t0, c.t1]); l.o = (l.o * l.n + c.o) / (l.n + 1); l.n++; } else lines.push({o: c.o, n: 1, iv: [[c.t0, c.t1]]}); });
     lines.forEach(l => {
       l.iv.sort((a, b) => a[0] - b[0]); const m = [];
-      l.iv.forEach(v => { const q = m[m.length - 1]; if (q && (v[0] - q[1] <= 0.1 * k || (v[0] - q[1] <= bridge && !crossed(g, l.o, q[1], v[0])))) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
-      m.forEach(v => { if (v[1] - v[0] < 0.2 * k) return; const short = v[1] - v[0] < 0.6 * k; if (!short) v = [cornerEnd(g, l.o, v[0], -1), cornerEnd(g, l.o, v[1], 1)];
-        runs.push({u: g.u, n: g.n, short, a: [g.u[0] * v[0] + g.n[0] * l.o, g.u[1] * v[0] + g.n[1] * l.o], b: [g.u[0] * v[1] + g.n[0] * l.o, g.u[1] * v[1] + g.n[1] * l.o]}); });
+      l.iv.forEach(v => { const q = m[m.length - 1]; if (q && (v[0] - q[1] <= 0.1 * k || (v[0] - q[1] <= bridge && !crossed(g, l.o, q[1], v[0])) || (v[0] - q[1] <= 25 * k && windowIn(g, l.o, q[1], v[0])))) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
+      m.forEach(v => { if (v[1] - v[0] < 0.2 * k) return; const short = v[1] - v[0] < 0.6 * k, loose = v[1] - v[0] < 2 * k; if (!short) v = [cornerEnd(g, l.o, v[0], -1), cornerEnd(g, l.o, v[1], 1)];
+        runs.push({u: g.u, n: g.n, short, loose, a: [g.u[0] * v[0] + g.n[0] * l.o, g.u[1] * v[0] + g.n[1] * l.o], b: [g.u[0] * v[1] + g.n[0] * l.o, g.u[1] * v[1] + g.n[1] * l.o]}); });
     });
   });
+  /* a doorway with a wall of this thickness on one side and a thicker wall on the other: the opening belongs to this (the
+     thinner) wall, so the run is carried across it to the thick wall's end — then it is deducted as an opening like any other.
+     Found from each run's ends: on its line, 1.5–7 ft on, a thicker wall begins, nothing of this thickness lies between, and a
+     curve (the door's swing) is in the gap. (Cheap enough for a whole floor: no door-symbol search.) */
+  const oOfP = (R, p) => R.n[0] * p[0] + R.n[1] * p[1], tOfP = (R, p) => R.u[0] * p[0] + R.u[1] * p[1];
+  runs.slice().forEach(R => { const gq = G.find(q => q.u === R.u); if (!gq) return;
+    const o = oOfP(R, R.a), band = T * k / 2 + 0.45 * k;
+    const lines = []; near(gq, o - band, o + band, l => { if (l.t1 - l.t0 >= 0.3 * k) lines.push(l); });
+    const thick = (t0, t1) => {   // a wall there: two or three lines running on through most of t0..t1, a standard wall thickness apart (not a wardrobe's hangers, not furniture)
+      const os = lines.filter(l => Math.min(t1, l.t1) - Math.max(t0, l.t0) >= 0.8 * (t1 - t0)).map(l => l.o).sort((x, y) => x - y).filter((v, i, A) => !i || v - A[i - 1] > 0.03 * k);
+      if (os.length < 2 || os.length > 3) return 0; const w = os[os.length - 1] - os[0]; return stdWall(w / k) ? w : 0; };
+    [[R.a, R.b], [R.b, R.a]].forEach(([E, F]) => {
+      const tE = tOfP(R, E), sg = Math.sign(tE - tOfP(R, F)) || 1; let ts = null;
+      lines.forEach(l => { const st = sg > 0 ? l.t0 : l.t1, d = (st - tE) * sg; if (d >= 1.5 * k && d <= 7 * k && (ts === null || d < (ts - tE) * sg)) ts = st; });   // the next wall end on this line
+      if (ts === null) return;
+      const lo = Math.min(tE, ts) + 0.1 * k, hi = Math.max(tE, ts) - 0.1 * k;
+      if (lines.some(l => Math.min(hi, l.t1) - Math.max(lo, l.t0) > 0.3 * k)) return;   // lines in the gap: not an opening
+      if (runs.some(Q => Q !== R && Q.u === R.u && Math.abs(oOfP(Q, Q.a) - o) <= 0.1 * k && Math.min(hi, Math.max(tOfP(Q, Q.a), tOfP(Q, Q.b))) - Math.max(lo, Math.min(tOfP(Q, Q.a), tOfP(Q, Q.b))) > 0)) return;
+      const w = sg > 0 ? thick(ts, ts + 1.5 * k) : thick(ts - 1.5 * k, ts); if (!(w > T * k + Math.max(0.04 * k, 0.15 * T * k))) return;   // a thicker wall there
+      const Lg = Math.abs(ts - tE), J1 = [R.u[0] * tE + R.n[0] * o, R.u[1] * tE + R.n[1] * o], J2 = [R.u[0] * ts + R.n[0] * o, R.u[1] * ts + R.n[1] * o], rr = Lg + 0.6 * k;
+      const onSwing = J => segsIn(gg, J[0] - rr, J[1] - rr, J[0] + rr, J[1] + rr).some(i => { const q = gg.segs[i]; if (!(q[4] & 1)) return false;
+        return [[q[0], q[1]], [q[2], q[3]]].every(p2 => Math.abs(dist(p2, J) - Lg) <= 0.3 * Lg + 0.15 * k); });   // a curve round this jamb as wide as the opening: this door's swing
+      if (!onSwing(J1) && !onSwing(J2)) return;
+      const P = [R.u[0] * ts + R.n[0] * o, R.u[1] * ts + R.n[1] * o]; if (E === R.a) R.a = P; else R.b = P;
+      R.short = false; R.loose = false; }); });
   const reach = 0.65 * T * k + 0.05 * k;
   /* a short piece (under 0.6 ft) is a wall only when it stands square off a longer wall — a nib at a door jamb, the
      return at a corner beside a door: one of its ends at the other's centre line (a T) or at its end (an L). Loose short
      pairs (hatching, ticks, a frame) are dropped. */
   const attached = A => runs.some(B => { if (B === A || B.short || Math.abs(A.u[0] * B.u[0] + A.u[1] * B.u[1]) > 0.2) return false;
     const X = segXInf(A.a, A.b, B.a, B.b); return !!X && Math.min(dist(A.a, X), dist(A.b, X)) <= reach && distSeg(X, B.a, B.b) <= reach; });
-  for (let i = runs.length - 1; i >= 0; i--) if (runs[i].short && !attached(runs[i])) runs.splice(i, 1);
+  /* …and a piece under 2 ft must at least meet a wall's face (of any thickness) at an end: a line square to it with a parallel
+     line 0.3–1.6 ft off — two hanger strokes in a wardrobe end at its frame, which has no such partner */
+  const atFace = A => [A.a, A.b].some(E => G.some(gp => { if (Math.abs(gp.u[0] * A.u[0] + gp.u[1] * A.u[1]) > 0.2) return false;
+    const oE = gp.n[0] * E[0] + gp.n[1] * E[1], tE = gp.u[0] * E[0] + gp.u[1] * E[1]; let hit = false;
+    near(gp, oE - reach, oE + reach, l => { if (tE < l.t0 - reach || tE > l.t1 + reach) return;
+      near(gp, l.o - 1.6 * k, l.o + 1.6 * k, l2 => { const d = Math.abs(l2.o - l.o); if (d >= 0.3 * k && d <= 1.6 * k && tE >= l2.t0 - reach && tE <= l2.t1 + reach) { hit = true; return false; } });
+      if (hit) return false; });
+    return hit; }));
+  for (let i = runs.length - 1; i >= 0; i--) if ((runs[i].short && !attached(runs[i])) || (runs[i].loose && !runs[i].short && !attached(runs[i]) && !atFace(runs[i]))) runs.splice(i, 1);
   // L corners: two runs ending within ~T/2 of where their centre lines cross are both taken to that point
   for (let i = 0; i < runs.length; i++) for (let j = i + 1; j < runs.length; j++) {
     const A = runs[i], B = runs[j]; if (Math.abs(A.u[0] * B.u[0] + A.u[1] * B.u[1]) > 0.2) continue;
