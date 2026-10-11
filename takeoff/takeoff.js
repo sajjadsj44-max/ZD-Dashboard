@@ -9277,7 +9277,7 @@ async function locSetup(){
       ${radio("rules", "Built-in rule agent only", "offline, no model at all: the ⚡ agents and typed commands")}</div>
     <div class="row" style="gap:8px;margin-top:8px"><div class="fg" style="flex:2"><label>Ollama address (this computer)</label><input type="text" id="leUrl" value="${esc(locUrl())}"></div>
       <div class="fg" style="flex:2"><label>Model</label><select id="leModel"><option value="">— choose —</option>${opts}</select></div>
-      <div class="fg"><label>Context (tokens)</label><input type="number" id="leCtx" min="2048" step="1024" value="${+(pref("zdTakeoffLocalCtx") || 8192)}"></div></div>
+      <div class="fg"><label>Context (tokens)</label><input type="number" id="leCtx" min="2048" step="1024" value="${locCtx()}"></div></div>
     <p class="small" id="leSt" style="margin:4px 0"><b>Status:</b> ${esc(LOC.msg)}</p>
     <div class="row" style="gap:6px"><button type="button" class="btn sm" id="leTest">Test connection</button><a class="btn sm" id="leOpen" href="${esc(locUrl())}" target="_blank" rel="noopener" title="Should show “Ollama is running” — if it does not open, Ollama is not running">Open ${esc(locUrl())}</a><button type="button" class="btn sm" id="leBench"${LOC.models.length ? "" : " disabled"}>Benchmark installed models</button></div>
     <div id="leBenchOut" class="small" style="margin-top:6px">${bench.length ? benchTable(bench) : ""}</div>
@@ -9292,7 +9292,7 @@ async function locSetup(){
       <p class="small">Keep Ollama on this computer only (its default, 127.0.0.1): do not set OLLAMA_HOST=0.0.0.0, which would open it to your network. Stop it from the tray icon / <code>ollama stop &lt;model&gt;</code>; update by installing the new version.
       Rule of thumb (4-bit models): about 0.6–0.7 GB of memory per billion parameters plus the context — a 4B model needs about 3–4 GB, an 8B model 6–8 GB; vision models more. Small models (under 4B) often call tools wrongly — the benchmark shows how each one does on this computer.<br>
       This computer, as the browser reports it: memory ${esc(String(hw.mem))} · ${esc(String(hw.cores))} processor threads · WebGPU ${hw.gpu ? "yes" : "no"}. The browser cannot see the graphics card's memory; Ollama uses it by itself when it can.</p></details>`;
-  const pr = ask("AI engine — local AI (free, offline)", body, "Save", () => ({eng: (document.querySelector("input[name=leEng]:checked") || {}).value || "auto", url: $("leUrl").value.trim(), model: $("leModel").value, ctx: Math.max(2048, +$("leCtx").value || 8192)}), "leUrl");
+  const pr = ask("AI engine — local AI (free, offline)", body, "Save", () => ({eng: (document.querySelector("input[name=leEng]:checked") || {}).value || "auto", url: $("leUrl").value.trim(), model: $("leModel").value, ctx: Math.max(2048, +$("leCtx").value || 16384)}), "leUrl");
   $("leTest").onclick = async () => { pref("zdTakeoffLocalUrl", $("leUrl").value.trim()); const m0 = locModel(); pref("zdTakeoffLocalModel", $("leModel").value || m0); $("leSt").innerHTML = "<b>Status:</b> checking…"; await locHealth(); pref("zdTakeoffLocalModel", m0);
     $("leSt").innerHTML = "<b>Status:</b> " + esc(LOC.msg); $("leOpen").href = locUrl(); $("leOpen").textContent = "Open " + locUrl(); const sel = $("leModel"), keep = sel.value; sel.innerHTML = '<option value="">— choose —</option>' + LOC.models.map(m => `<option value="${esc(m.name)}">${esc(m.name)}${m.params ? " · " + esc(m.params) : ""}</option>`).join(""); sel.value = keep; $("leBench").disabled = !LOC.models.length; };
   $("leCopy").onclick = async () => { try { await navigator.clipboard.writeText($("leSetx").textContent); toast("Copied — paste it in PowerShell", 2000); } catch (e) { toast("Select the line and copy it", 2500); } };
@@ -9332,8 +9332,18 @@ const LOC_SYS = `\n\nYOU RUN LOCALLY AND OFFLINE on the user's computer (a small
 function locHistKey(){ return "zdTakeoffChat:" + (P.proj ? P.proj.id : "-"); }
 function locHist(){ try { const h = JSON.parse(pref(locHistKey()) || "[]"); return Array.isArray(h) ? h : []; } catch (e) { return []; } }
 function locHistPut(h){ try { pref(locHistKey(), JSON.stringify(h.slice(-24))); } catch (e) {} }   // text only — no pictures, no tool traffic
+function locCtx(){ return +(pref("zdTakeoffLocalCtx") || 16384); }
 async function locChat(messages, tools, opts){
-  const t0 = performance.now(), r = await locFetch("/api/chat", Object.assign({model: locModel(), messages, tools, stream: false, keep_alive: "15m", options: {temperature: 0.2, num_ctx: +(pref("zdTakeoffLocalCtx") || 8192)}}, opts || {}), 300000);
+  const t0 = performance.now(), call = ctx => locFetch("/api/chat", Object.assign({model: locModel(), messages, tools, stream: false, keep_alive: "15m", options: {temperature: 0.2, num_ctx: ctx}}, opts || {}), 300000);
+  let r;
+  try { r = await call(locCtx()); }
+  catch (e) {   // the prompt (instructions + tools + drawing) is bigger than the context: retry once with room for it, and keep that size
+    const m = String(e.message).match(/n_prompt_tokens\W*(\d+)/) || String(e.message).match(/request \((\d+) tokens\) exceeds/);
+    if (!m) throw e;
+    const need = Math.min(65536, Math.ceil((+m[1] + 4096) / 4096) * 4096);
+    if (need <= locCtx()) throw e;
+    pref("zdTakeoffLocalCtx", String(need)); r = await call(need);
+  }
   r._ms = performance.now() - t0; if (r.load_duration > 2e8) r._load = r.load_duration / 1e6; return r;
 }
 async function aiSendLocal(text){
