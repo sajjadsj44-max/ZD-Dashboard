@@ -10081,6 +10081,20 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
       const tc = t1 + (t2 - t1) * (o - o1) / ((o2 - o1) || 1e-9); if (tc > ta + 0.1 * k && tc < tb - 0.1 * k) return true;
       // at the gap's end, a line running on well past a face is a column's (or a wider block's) edge, not a jamb's end cap
       return Math.abs(tc - (tc - ta < tb - tc ? ta : tb)) <= 0.1 * k && (Math.min(o1, o2) < o - T * k / 2 - 0.3 * k || Math.max(o1, o2) > o + T * k / 2 + 0.3 * k); }); };
+  /* an L corner with a thinner wall: the run stops where its inner face meets the thinner wall, but its outer face runs on to
+     the corner's outside edge — the run is taken on to that edge (the thinner wall stops at this one's face, so the corner is
+     counted once, in the thicker wall). Not moved: an end closed by a line across it (a jamb's cap, a column's edge), an end
+     with both faces or neither running on (a wall crossing it, a T), or a wall there as thick or thicker (the corner join) */
+  const cornerEnd = (g, o, te, sg) => { const u = g.u, n = g.n, hw = T * k / 2 - tol, far = T * k + tol, P = (t, oo) => [u[0] * t + n[0] * oo, u[1] * t + n[1] * oo];
+    const Q = [P(te - sg * 0.1 * k, o - T * k), P(te - sg * 0.1 * k, o + T * k), P(te + sg * far, o - T * k), P(te + sg * far, o + T * k)], xs = Q.map(q => q[0]), ys = Q.map(q => q[1]);
+    let e = Infinity;   // the first line across the whole band, square to it, ahead of the end
+    segsIn(gg, Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)).forEach(i => { const s2 = gg.segs[i]; if (s2[4] & 9) return;
+      const t1 = u[0] * s2[0] + u[1] * s2[1], o1 = n[0] * s2[0] + n[1] * s2[1], t2 = u[0] * s2[2] + u[1] * s2[3], o2 = n[0] * s2[2] + n[1] * s2[3];
+      if (Math.abs(t2 - t1) > 0.3 * Math.abs(o2 - o1) || Math.min(o1, o2) > o - hw || Math.max(o1, o2) < o + hw) return;
+      const d = (t1 + (t2 - t1) * (o - o1) / ((o2 - o1) || 1e-9) - te) * sg; if (d >= -0.05 * k && d < e) e = d; });
+    if (!(e > 0.05 * k && e <= far)) return te;
+    const a = Math.min(te, te + sg * e) + 0.05 * k, b = Math.max(te, te + sg * e) - 0.05 * k, on = s => g.L.some(l => Math.abs(l.o - (o + s * T * k / 2)) <= tol && l.t0 <= a && l.t1 >= b);
+    return on(1) !== on(-1) ? te + sg * e : te; };
   G.forEach(g => {
     const C = [];   // centre lines of this direction
     facePairs(g, T * k - tol, T * k + tol, 0.2 * k, (d, o, t0, t1) => {
@@ -10096,7 +10110,8 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
     lines.forEach(l => {
       l.iv.sort((a, b) => a[0] - b[0]); const m = [];
       l.iv.forEach(v => { const q = m[m.length - 1]; if (q && (v[0] - q[1] <= 0.1 * k || (v[0] - q[1] <= bridge && !crossed(g, l.o, q[1], v[0])))) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
-      m.forEach(v => { if (v[1] - v[0] >= 0.2 * k) runs.push({u: g.u, n: g.n, short: v[1] - v[0] < 0.6 * k, a: [g.u[0] * v[0] + g.n[0] * l.o, g.u[1] * v[0] + g.n[1] * l.o], b: [g.u[0] * v[1] + g.n[0] * l.o, g.u[1] * v[1] + g.n[1] * l.o]}); });
+      m.forEach(v => { if (v[1] - v[0] < 0.2 * k) return; const short = v[1] - v[0] < 0.6 * k; if (!short) v = [cornerEnd(g, l.o, v[0], -1), cornerEnd(g, l.o, v[1], 1)];
+        runs.push({u: g.u, n: g.n, short, a: [g.u[0] * v[0] + g.n[0] * l.o, g.u[1] * v[0] + g.n[1] * l.o], b: [g.u[0] * v[1] + g.n[0] * l.o, g.u[1] * v[1] + g.n[1] * l.o]}); });
     });
   });
   const reach = 0.65 * T * k + 0.05 * k;
