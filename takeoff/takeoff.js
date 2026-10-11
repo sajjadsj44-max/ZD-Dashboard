@@ -317,7 +317,7 @@ function mutate(fn, label){
 /* the shape being drawn keeps its own history in steps: a click is one step, an arc (many points) is one step, so
    Ctrl+Z / Backspace take back the last click or the whole arc and Ctrl+Y puts it back. With nothing being drawn,
    Ctrl+Z / Ctrl+Y step through the project history. */
-const DRAFT_TOOLS = ["draw", "ded", "measure", "fence", "area", "rect", "open", "cal", "circle", "vp", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref",
+const DRAFT_TOOLS = ["draw", "ded", "measure", "fence", "area", "rect", "open", "cal", "circle", "polygon", "vp", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref",
   "mk_polyline", "mk_polygon", "mk_line", "mk_box", "mk_ellipse", "mk_link", "mk_redact", "mk_erase", "mk_callout", "mk_text", "mk_stamp", "mk_image"];
 function draftPush(pts, arc){
   if (!S.draftSteps || S.draftSteps.reduce((a, n) => a + n, 0) !== S.draft.length) S.draftSteps = S.draft.map(() => 1);
@@ -2451,6 +2451,8 @@ function setTool(t){
   if (t === "rect" && c && c.type !== "area") { toast("Rectangle is for area conditions"); t = "draw"; }
   if (t === "circle" && c && c.type === "count") { toast("Circle is for area (round slab, column) or length (round wall) conditions"); t = "draw"; }
   if (t === "circle" && !c) { toast("Pick or create a condition first (left panel)"); t = "select"; }
+  if (t === "polygon" && c && c.type === "count") { toast("Polygon is for area (hexagonal column, pad) or length (its perimeter) conditions"); t = "draw"; }
+  if (t === "polygon" && !c) { toast("Pick or create a condition first (left panel)"); t = "select"; }
   if (t === "count" || t === "vsearch") {   // the count tools work on a count condition: the active one, else the first, else a new "Count"
     let cc = c && c.type === "count" ? c : P.proj && P.proj.conds.find(x => x.type === "count");
     if (!cc && P.proj) { cc = {id: uid("C"), name: "Count", type: "count", unit: "Nos", color: COLORS[P.proj.conds.length % COLORS.length], h: "", t: "", faces: 1, dedMin: 0}; P.proj.conds.push(cc); save(); renderConds(); }
@@ -2496,7 +2498,7 @@ function hint(){
     draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." + drawing : c.type === "linear" ? (S.resume ? "Continuing the run — click on; Enter, double-click or right-click to finish." : "Click along the run; Enter, double-click or right-click to finish.") + drawing : "Click each item to count it; Esc when done.",
     fence: "Draw a line across the opening where Auto area leaks (click points; double-click, right-click or Enter to finish). It counts as a wall for Auto area only.", vsearch: "Box one symbol (two corners) — every matching symbol is counted.", note: "Click where the note goes, then type it.", cloud: "Click two opposite corners of the area to cloud.", arrow: "Click the tail, then the head of the arrow.", hilite: "Click two opposite corners to highlight.",
     area: "Box the takeoff area: click two opposite corners around the part of the drawing to take off. Esc cancels.",
-    rect: "Click two opposite corners — or one corner, then type L x W (e.g. 12 x 14) and Enter.", circle: "Click the centre, then a point on the edge.", vp: "Click two opposite corners of the detail drawn at another scale.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.", ded: (c && c.type === "area" ? "Draw the void / cut-out to deduct; Enter to close." : "Draw the length to deduct; Enter to finish.") + drawing,
+    rect: "Click two opposite corners — or one corner, then type L x W (e.g. 12 x 14) and Enter.", circle: "Click the centre, then a point on the edge.", polygon: "Regular polygon: click the centre, then a corner (" + polySides() + " sides — type pol 8 in the command line for 8).", vp: "Click two opposite corners of the detail drawn at another scale.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.", ded: (c && c.type === "area" ? "Draw the void / cut-out to deduct; Enter to close." : "Draw the length to deduct; Enter to finish.") + drawing,
     open: schOf(S.openMark) ? "Placing " + schOf(S.openMark).mark + " (" + f3(schOf(S.openMark).w) + " × " + f3(schOf(S.openMark).h) + ") — click both sides of each opening. Esc stops." : "Click both sides of the opening, then enter its height or pick its schedule mark.",
     typref: S.typ ? (S.key === S.typ.src ? "Typical copy: click reference point " + (S.typ.a.length + 1) + " of 2 on this (source) sheet." : "Typical copy: click the same reference point " + (S.typ.b.length + 1) + " of 2 on this sheet.") : "", measure: "Click points; double-click, right-click or Enter ends a measurement (it stays on screen). Esc clears. Nothing is saved." + drawing,
     cal: "Click both ends of a known dimension, then enter its length.",
@@ -2522,7 +2524,7 @@ function cursorPoint(e, sp){
   let p = raw, s = null;
   const free = e && (e.ctrlKey || e.metaKey) && S.tool !== "select";   // Ctrl: the point goes exactly where clicked, no snap (Bluebeam)
   const ex = S.drag && S.drag.vertex != null ? ((it, i) => it.id === S.drag.item && i === S.drag.vertex) : null;   // a dragged point never snaps onto itself
-  if (!free && (["draw", "rect", "ded", "open", "measure", "cal", "circle", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp", "stretch"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
+  if (!free && (["draw", "rect", "ded", "open", "measure", "cal", "circle", "polygon", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp", "stretch"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
   let last = S.drag ? null : S.tool === "stamp" ? S.stampBase : S.tool === "stretch" ? (S.str && S.str.stage === 3 ? S.str.base : null) : S.draft[S.draft.length - 1];
   if (S.drag && S.drag.vertex != null) { const it = P.proj.items.find(i => i.id === S.drag.item); if (it) last = S.drag.orig[S.drag.vertex - 1] || S.drag.orig[S.drag.vertex + 1] || null; }
   if (((e && e.shiftKey) !== !!S.ortho) && last && !S.arcMid) { const dx = Math.abs(p[0] - last[0]), dy = Math.abs(p[1] - last[1]); p = dx >= dy ? [p[0], last[1]] : [last[0], p[1]]; if (s) s = Object.assign({}, s, {type: s.type + " + straight"}); }   // Shift, or Ortho (F8; Shift then frees one click)
@@ -2586,7 +2588,7 @@ function onDown(e){
     if (S.draft.length && dist(S.draft[S.draft.length - 1], p) < 1e-6) return;
     draftPush([p]); draftBtns(); draw(); return;
   }
-  if (S.tool === "open" || S.tool === "cal" || S.tool === "circle" || S.tool === "vp") { draftPush([p]); if (S.draft.length === 2) finish(S.draft.slice()); draftBtns(); draw(); }
+  if (S.tool === "open" || S.tool === "cal" || S.tool === "circle" || S.tool === "polygon" || S.tool === "vp") { draftPush([p]); if (S.draft.length === 2) finish(S.draft.slice()); draftBtns(); draw(); }
   if (S.tool === "note") return addMark("note", [p]);
   if (S.tool === "area") { draftPush([toBase(sp[0], sp[1])]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); areaBoxed([Math.min(d[0][0], d[1][0]), Math.min(d[0][1], d[1][1]), Math.max(d[0][0], d[1][0]), Math.max(d[0][1], d[1][1])]); } return; }
   if (S.tool === "vsearch") { draftPush([toBase(sp[0], sp[1])]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); findSimilar([Math.min(d[0][0], d[1][0]), Math.min(d[0][1], d[1][1]), Math.max(d[0][0], d[1][0]), Math.max(d[0][1], d[1][1])]); } draftBtns(); draw(); return; }
@@ -2950,6 +2952,9 @@ function zoomTo(ids){
   const s2 = Math.max(0.05, Math.min(5000, Math.min(st.clientWidth / (x1 - x0 + 2 * m), st.clientHeight / (y1 - y0 + 2 * m))));
   S.view = {s: s2, tx: st.clientWidth / 2 - (x0 + x1) / 2 * s2, ty: st.clientHeight / 2 - (y0 + y1) / 2 * s2}; applyView(); renderHi();
 }
+/* regular polygon, inscribed: n corners round centre c, the first at v */
+function polyPts(c, v, n){ const R = dist(c, v), a0 = Math.atan2(v[1] - c[1], v[0] - c[0]); return Array.from({length: n}, (_, i) => [c[0] + R * Math.cos(a0 + 2 * Math.PI * i / n), c[1] + R * Math.sin(a0 + 2 * Math.PI * i / n)]); }
+function polySides(n){ if (n != null) { n = Math.round(+n); if (n >= 3 && n <= 64) { S.polyN = n; pref("zdTakeoffPolyN", String(n)); } } return S.polyN || (S.polyN = Math.min(64, Math.max(3, +pref("zdTakeoffPolyN") || 6))); }
 function selectAll(){
   setSel(pageItems().map(i => i.id).concat(pageMarks().map(m => m.id)));
   setTool("select"); refresh(); toast(selIds().size + " selected on this page", 2000);
@@ -2957,6 +2962,51 @@ function selectAll(){
 function selectSimilar(o){   // every object of the same condition (or markup type) on this page
   const ids = o.cond ? pageItems().filter(i => i.cond === o.cond).map(i => i.id) : pageMarks().filter(m => m.type === o.type).map(m => m.id);
   setSel(ids); setTool("select"); refresh(); toast(ids.length + " × " + (o.cond ? cond(o.cond).name : MARK_TOOLS[o.type]) + " selected on this page", 2200);
+}
+function invertSel(){   // everything on this page that is not selected becomes the selection (AutoCAD / Bluebeam: Invert selection)
+  const cur = selIds(), ids = pageItems().map(i => i.id).concat(pageMarks().map(m => m.id)).filter(id => !cur.has(id));
+  setSel(ids); setTool("select"); refresh(); toast("Inverted: " + ids.length + " selected on this page", 2000);
+}
+function clearSel(){ setSel([]); refresh(); }
+/* Quick select for the takeoff (AutoCAD's QSELECT, on the measurements and markups of this page): by condition, by kind of
+   measurement, by markup type and by check state — new selection, add to it, or keep only what is already selected */
+const QS_KINDS = [["len", "Lengths"], ["area", "Areas"], ["count", "Counts"], ["ded", "Deductions (cut-outs)"], ["open", "Openings"]];
+function qsKind(it){ const c = cond(it.cond) || {}; return it.kind === "open" ? "open" : it.kind === "ded" ? "ded" : c.type === "count" ? "count" : c.type === "area" ? "area" : "len"; }
+function qsHit(o, v){
+  if (o.cond) {
+    if (v.M.size && !v.C.size && !v.K.size) return false;   // only markup types picked: measurements are not wanted
+    if (v.C.size && !v.C.has(o.cond)) return false; if (v.K.size && !v.K.has(qsKind(o))) return false;
+    if (v.Q === "unchecked" && o.qa === "checked") return false; if (v.Q && v.Q !== "unchecked" && o.qa !== v.Q) return false;
+    if (v.ai && !o.ai) return false;
+    return true;
+  }
+  if ((v.C.size || v.K.size) && !v.M.size) return false;   // only conditions / kinds picked: markups are not wanted
+  if (v.M.size && !v.M.has(o.type)) return false;
+  return !v.Q && !v.ai;
+}
+async function quickSelect(){
+  if (!S.page) return toast("Open a drawing first", 2500);
+  const its = pageItems(), mks = pageMarks(), have = selIds().size;
+  const cnt = (L, f) => { const m = new Map(); L.forEach(o => { const k = f(o); if (k != null) m.set(k, (m.get(k) || 0) + 1); }); return m; };
+  const Cn = cnt(its, i => i.cond), Kn = cnt(its, qsKind), Mn = cnt(mks, m => m.type);
+  const C = [...Cn].map(([id, n]) => [id, (cond(id) || {}).name || id, n]).sort((a, b) => String(a[1]).localeCompare(String(b[1]), undefined, {numeric: true}));
+  const K = QS_KINDS.filter(([k]) => Kn.get(k)).map(([k, t]) => [k, t, Kn.get(k)]), M = [...Mn].map(([t, n]) => [t, MARK_TOOLS[t] || t, n]);
+  if (!C.length && !M.length) return toast("Nothing on this page to select", 2500);
+  const opts = (L, id) => L.length ? `<select id="${id}" multiple size="${Math.min(8, Math.max(3, L.length))}" style="width:100%">${L.map(([k, t, n]) => `<option value="${esc(k)}">${esc(t)} (${n})</option>`).join("")}</select>` : '<div class="small" style="padding:6px 0">none on this page</div>';
+  const body = `<div class="wide"></div><p class="small">The measurements and markups of this page that are shown. Leave a list with nothing picked for “any”; Ctrl+click picks several.</p>
+    <div class="row" style="gap:10px;align-items:flex-start"><div class="fg" style="flex:1.4"><label>Condition (takeoff item)</label>${opts(C, "tqC")}</div><div class="fg" style="flex:1"><label>Kind of measurement</label>${opts(K, "tqK")}</div><div class="fg" style="flex:1"><label>Markup type</label>${opts(M, "tqM")}</div></div>
+    <div class="row" style="gap:10px"><div class="fg"><label>Check state</label><select id="tqQ"><option value="">any</option><option value="unchecked">not checked</option><option value="checked">checked</option><option value="recheck">to recheck</option></select></div>
+      <label class="pk" style="align-self:flex-end"><input type="checkbox" id="tqAI" style="width:auto"> only AI / agent measurements</label></div>
+    <div class="row"><label class="pk"><input type="radio" name="tqHow" value="" checked style="width:auto"> New selection</label>${have ? `<label class="pk"><input type="radio" name="tqHow" value="add" style="width:auto"> Add to the ${have} selected</label><label class="pk"><input type="radio" name="tqHow" value="in" style="width:auto"> Only within the ${have} selected</label>` : ""}</div>`;
+  const v = await ask("Quick select — measurements and markups", body, "Select", () => {
+    const pick = id => { const el = $(id); return el ? new Set([...el.selectedOptions].map(o => o.value)) : new Set(); };
+    return {C: pick("tqC"), K: pick("tqK"), M: pick("tqM"), Q: $("tqQ").value, ai: $("tqAI").checked, how: (document.querySelector("input[name=tqHow]:checked") || {}).value || ""};
+  });
+  if (!v) return;
+  const cur = selIds(), hit = its.concat(mks).filter(o => qsHit(o, v) && (v.how !== "in" || cur.has(o.id))).map(o => o.id);
+  setSel(v.how === "add" ? [...new Set([...cur, ...hit])] : hit); setTool("select"); refresh();
+  toast("Quick select: " + hit.length + " object" + (hit.length === 1 ? "" : "s") + (v.how === "add" ? " added" : ""), 2500);
+  return hit;
 }
 function nudgeSel(dx, dy){   // arrow keys: move the selection (screen pixels)
   const ids = new Set([...selIds()].filter(id => !(objById(id) || {}).locked)); if (!ids.size) return false; const d = [dx / S.view.s, dy / S.view.s];
@@ -3045,6 +3095,12 @@ async function finish(pts){
       if (v.keep && sch) S.openMark = sch.id;
     });
     hint(); draw(); return;
+  }
+  if (t === "polygon") {   // AutoCAD's POLYGON (inscribed): the centre, then a corner — kept as an ordinary outline, so every edit and the sheet work on it
+    if (dist(pts[0], pts[1]) < 0.5) { draw(); return; }
+    const Q = polyPts(pts[0], pts[1], polySides()); if (c.type !== "area") Q.push(Q[0].slice());
+    const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: Q, nos: 1, label: ""};
+    mutate(() => { P.proj.items.push(it); }, "Polygon (" + polySides() + " sides)"); return;
   }
   if (t === "circle") { if (dist(pts[0], pts[1]) < 0.5) { draw(); return; } mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", shape: "circle", pts, nos: 1, label: ""}); }); return; }
   const area = c.type === "area";
@@ -3151,7 +3207,11 @@ function drawNow(){
   if (S.tool === "stretch" && S.str && cur) dyn.push(...stretchPreview(cur));
   if ((S.tool === "fillet" || S.tool === "chamfer") && S.fc.first) { const f = S.fc.first, a = toScr(f.it.pts[f.i]), b = toScr(f.it.pts[f.i + 1]); dyn.push(`<path d="M${a[0].toFixed(1)} ${a[1].toFixed(1)}L${b[0].toFixed(1)} ${b[1].toFixed(1)}" stroke="#ff2d55" stroke-width="4" opacity=".7" stroke-linecap="round"/>`); }
   { const kk = hereScale(S.draft[0] || cur); if (kk) k = kk; }
-  if (S.draft.length && cur && S.tool === "circle") {
+  if (S.draft.length && cur && S.tool === "polygon") {
+    const n = polySides(), Q = polyPts(S.draft[0], cur, n), col = c ? c.color : "#0b0b0b";
+    dyn.push(`<polygon points="${Q.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>`);
+    if (k) live = n + " sides · side " + f3(dist(Q[0], Q[1]) / k) + " ft · " + fq(polyArea(Q) / k / k) + " Sft · perimeter " + f3(n * dist(Q[0], Q[1]) / k) + " ft";
+  } else if (S.draft.length && cur && S.tool === "circle") {
     const a = S.draft[0], r = dist(a, cur), q = toScr(a), col = c ? c.color : "#0b0b0b";
     dyn.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(r * S.view.s).toFixed(1)}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>`);
     if (k) live = "dia " + f3(2 * r / k) + " ft · " + fq(Math.PI * r * r / k / k) + " Sft · round " + f3(2 * Math.PI * r / k) + " ft";
@@ -7458,7 +7518,8 @@ function paletteCmds(){
   add("Undo", undoAny, "Edit", "Ctrl+Z"); add("Redo", redoAny, "Edit", "Ctrl+Y");
   add("Find text on the drawings", () => { $("findIn").focus(); $("findIn").select(); }, "View", "Ctrl+F");
   add("Set scale", scaleDialog, "Page", "K"); add("Keyboard shortcuts", keysDialog, "Help");
-  add("New condition", () => editCond(null), "Condition"); add("All projects", showStart, "Project");
+  add("Invert selection", invertSel, "Select", "Ctrl+I"); add("Quick select… (by condition, kind, markup type, check state)", quickSelect, "Select"); add("Deselect all", clearSel, "Select", "Esc");
+    add("New condition", () => editCond(null), "Condition"); add("All projects", showStart, "Project");
   document.querySelectorAll("header button[id], #viewPop button[id], #qaBar button, aside button[id], .panel button[id]").forEach(b => btn(b, b.closest("#viewPop") ? "View" : b.closest("#qaBar") ? "Check" : "Button"));
   P.proj.conds.forEach(c => add("Use condition: " + c.name + " (" + (c.type === "count" ? "count" : c.unit || c.type) + ")", () => { S.cond = c.id; setTool(c.type === "count" ? "count" : "draw"); refresh(); toast("Condition: " + c.name, 1800); }, "Condition"));
   palAlias(L);
@@ -7468,7 +7529,7 @@ function paletteCmds(){
 /* AutoCAD command aliases: type tr + Enter for Trim, f for Fillet, sc for Scale… (the command whose name starts so; a "…" one — the dialog — first) */
 const PAL_ALIAS = [["tr", "trim"], ["ex", "extend"], ["f", "fillet"], ["fil", "fillet"], ["cha", "chamfer"], ["s", "stretch"], ["str", "stretch"], ["sc", "scale selection"], ["scale", "scale selection"],
   ["ro", "rotate…"], ["rotate", "rotate…"], ["o", "offset"], ["off", "offset"], ["m", "move"], ["mo", "move"], ["co", "copy"], ["cp", "copy"], ["mi", "mirror"], ["br", "break"], ["j", "join"], ["x", "explode"],
-  ["ar", "array"], ["l", "length"], ["rec", "rectangle"], ["ci", "circle"], ["di", "measure"], ["dist", "measure"], ["z", "zoom window"], ["pl", "plot"], ["xh", "cross-hair"], ["cross", "cross-hair"],
+  ["ar", "array"], ["l", "length"], ["rec", "rectangle"], ["ci", "circle"], ["pol", "polygon"], ["qs", "quick select"], ["qselect", "quick select"], ["inv", "invert selection"], ["di", "measure"], ["dist", "measure"], ["z", "zoom window"], ["pl", "plot"], ["xh", "cross-hair"], ["cross", "cross-hair"],
   ["dxf", "dxf"], ["dxfout", "dxf"], ["u", "undo"], ["re", "redo"], ["or", "ortho"], ["po", "polar"], ["os", "object snaps"], ["lock", "lock"], ["w", "auto area"], ["aa", "auto area"]];
 function palAlias(L){
   PAL_ALIAS.forEach(([a, pre]) => {
@@ -7482,6 +7543,7 @@ function palTyped(q){   // a command typed with its number: "ro 37", "sc 1.5", "
   const add = (t, run) => out.push({t, run, g: "Command", k: "", al: []});
   if (P.proj && S.page) {
     if ((m = new RegExp("^(?:ro|rot|rotate)\\s+" + num + "\\s*°?\\s*(cw)?$", "i").exec(q))) { const a = (m[2] ? -1 : 1) * +m[1]; add("Rotate the selection " + Math.abs(a) + "° " + (a < 0 ? "clockwise" : "anticlockwise"), () => rotateBy(a)); add("Rotate a copy of the selection " + Math.abs(a) + "° " + (a < 0 ? "clockwise" : "anticlockwise"), () => rotateBy(a, {copy: true})); }
+    if ((m = /^(?:pol|polygon)\s+(\d+)$/i.exec(q)) && +m[1] >= 3 && +m[1] <= 64) { const n = +m[1]; add("Polygon with " + n + " sides — click the centre, then a corner", () => { polySides(n); setTool("polygon"); }); }
     if ((m = new RegExp("^(?:sc|scale)\\s+" + num + "$", "i").exec(q)) && +m[1] > 0) { const f = +m[1]; add("Scale the selection × " + f, () => scaleBy(f)); add("Scale a copy of the selection × " + f, () => scaleBy(f, {copy: true})); }
     if ((m = new RegExp("^(?:f|fil|fillet)\\s+" + num + "$", "i").exec(q)) && +m[1] >= 0) add("Fillet with radius " + m[1] + " ft", () => { S.fc.r = +m[1]; S.fcSkip = true; setTool("fillet"); });
     if ((m = new RegExp("^(?:cha|chamfer)\\s+" + num + "(?:\\s+" + num + ")?$", "i").exec(q)) && +m[1] >= 0) add("Chamfer " + m[1] + " × " + (m[2] || m[1]) + " ft", () => { S.fc.d1 = +m[1]; S.fc.d2 = +(m[2] || m[1]); S.fcSkip = true; setTool("chamfer"); });
@@ -7505,6 +7567,42 @@ function palScore(c, q){
 }
 let PAL_USE = null;
 function palUse(c){ if (!PAL_USE) { try { PAL_USE = JSON.parse(pref("zdTakeoffPalUse") || "{}"); } catch (e) { PAL_USE = {}; } } return Math.min(2, (PAL_USE[c.t] || 0) * 0.25); }
+/* the command line (status bar, AutoCAD-style): an alias or a command's name + Enter runs it — tr, f 0.5, ro 37, pol 8, qs —
+   Enter on an empty line repeats the last command, ↑ / ↓ walk the history (kept in this browser), Esc leaves it. ":" from the
+   drawing puts the cursor in it. Typing in it never reaches the tool shortcuts. */
+const CMD_KEY = "zdTakeoffCmdHist";
+function cmdHist(){ try { return JSON.parse(pref(CMD_KEY) || "[]"); } catch (e) { return []; } }
+function cmdFind(q){   // the command a typed line runs: a typed command with its number, an exact alias, else the best name match
+  const t = palTyped(q); if (t.length) return t[0];
+  const best = paletteCmds().map(c => ({c, s: palScore(c, q)})).filter(o => o.s > 0).sort((a, b) => b.s - a.s)[0];
+  return best && best.s >= 10 ? best.c : null;
+}
+function cmdRun(q){
+  q = String(q || "").trim(); const H = cmdHist();
+  if (!q) q = S.cmdLast || ""; if (!q) return null;   // Enter alone: the last command that ran, again
+  try { pref(CMD_KEY, JSON.stringify([q].concat(H.filter(x => x.toLowerCase() !== q.toLowerCase())).slice(0, 30))); } catch (e) {}   // every line typed, for ↑ (a typo too, to fix it)
+  const c = cmdFind(q), say = $("cmdSay");
+  if (!c) { if (say) { say.textContent = "Unknown command: " + q; say.className = "cmdsay err"; } toast("Unknown command “" + q + "” — Ctrl+K lists every command", 3000); return null; }
+  S.cmdLast = q;
+  if (say) { say.textContent = q.toUpperCase() + " → " + c.t; say.className = "cmdsay"; }
+  Promise.resolve().then(c.run).catch(e => toast(String(e && e.message || e), 5000));
+  return c.t;
+}
+function cmdWire(){
+  const inp = $("cmdLine"); if (!inp || inp.dataset.w) return; inp.dataset.w = "1"; let at = -1;
+  inp.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); const v = inp.value; inp.value = ""; at = -1; inp.blur(); cmdRun(v); }
+    else if (e.key === "Escape") { e.preventDefault(); inp.value = ""; at = -1; inp.blur(); }
+    else if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); const H = cmdHist(); if (!H.length) return; at = Math.max(-1, Math.min(H.length - 1, at + (e.key === "ArrowUp" ? 1 : -1))); inp.value = at < 0 ? "" : H[at]; }
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key !== ":" || e.ctrlKey || e.metaKey || e.altKey) return;
+    const a = document.activeElement; if (a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable)) return;
+    if ($("dlgBack").classList.contains("on") || ($("pal") && $("pal").classList.contains("on"))) return;
+    e.preventDefault(); e.stopPropagation(); inp.focus();
+  }, true);
+}
 function openPalette(){
   if ($("dlgBack").classList.contains("on")) return;
   let el = $("pal");
@@ -7643,7 +7741,7 @@ function ctxCanvas(q){
   const u = S.undo.length ? undoEntry(S.undo[S.undo.length - 1]).label : "", r = S.redo.length ? undoEntry(S.redo[S.redo.length - 1]).label : "", T = (t, n, key) => ({t: n, k: key, fn: () => setTool(t), on: S.tool === t});
   return [{h: pageName({file: S.fileId, page: S.pageNo}), s: S.clip ? "clipboard: " + S.clip.n + " object" + (S.clip.n > 1 ? "s" : "") : ""}, ...cadSelCtx(), ...cadCtxItems(q), ...sheetLinkItems(q),
     {t: "Paste here", k: "Ctrl+V", fn: () => pasteClip("cursor", q), dis: !S.clip}, {t: "Paste in place", k: "Ctrl+Shift+V", fn: () => pasteClip("inplace"), dis: !S.clip},
-    {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {sep: 1},
+    {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {t: "Invert selection", k: "Ctrl+I", fn: invertSel}, {t: "Quick select…", fn: quickSelect}, {t: "Deselect all", k: "Esc", fn: clearSel, dis: !selIds().size}, {sep: 1},
     {t: "Undo" + (u ? ": " + u : ""), k: "Ctrl+Z", fn: undoAny, dis: !S.undo.length}, {t: "Redo" + (r ? ": " + r : ""), k: "Ctrl+Y", fn: redoAny, dis: !S.redo.length}, {sep: 1},
     {t: "Tools", sub: [T("select", "Select", "V"), T("cadsel", "Select AutoCAD objects", "Shift+V"), T("lasso", "Lasso select", "Shift+O"), T("pan", "Pan", "H"), {sep: 1}, T("draw", "Draw", "A"), T("rect", "Rectangle", "R"), T("auto", "Auto area", "W"), T("circle", "Circle", "E"), T("count", "Count", "C"), T("ded", "Deduct", "D"), T("open", "Opening", "O"), {sep: 1}, T("break", "Break a run", "B"), T("measure", "Measure", "M"), T("cal", "Set scale", "K")]},
     {t: "View", sub: [{t: "Fit page", k: "F", fn: () => { fit(); renderHi(); }}, {t: "Fit width", k: "Shift+F", fn: fitWidth}, {t: "Zoom window", k: "Z", fn: () => setTool("zoomwin")}, {t: "Zoom in", k: "+", fn: () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2)}, {t: "Zoom out", k: "−", fn: () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2)}, {sep: 1},
@@ -7655,11 +7753,12 @@ function keysDialog(){
   const R = (k, t) => `<tr><td style="white-space:nowrap;padding:2px 10px 2px 0">${k.split(" | ").map(x => `<kbd>${esc(x)}</kbd>`).join(" ")}</td><td style="padding:2px 0">${esc(t)}</td></tr>`;
   const G = (t, rows) => `<tr><td colspan="2" style="padding:8px 0 2px;font-weight:700;color:var(--navy)">${esc(t)}</td></tr>` + rows.map(x => R(x[0], x[1])).join("");
   ask("Keyboard & mouse", `<table class="keyt" style="font-size:12px;border-collapse:collapse;width:100%">
-    ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift+V", "select AutoCAD objects (DWG / DXF): click, box, Ctrl+A — then take off, count, select similar, quick select, layer off"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
+    ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift+V", "select AutoCAD objects (DWG / DXF): click, box, Ctrl+A — then take off, count, select similar, quick select, layer off"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Ctrl+I", "invert the selection (this page)"], ["Quick select… (right-click the page, or type qs)", "select by condition, kind of measurement, markup type, check state"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
     ${G("Find anything", [["Ctrl+K", "command palette: type the name of any tool, export, dialog, page or condition — or an AutoCAD alias (tr, ex, f, cha, s, sc, ro, o, co, m…) or ‘ro 37’, ‘sc 1.5’, ‘f 0.5’"], ["Ctrl+F", "find text on the drawings"]])}
     ${G("AutoCAD-style editing (Modify tab)", [["Shift+T | Shift+X", "Trim · Extend (Shift+click flips one into the other)"], ["Fillet | Chamfer", "pick two runs, or two legs of one run · Enter changes the radius / distances"], ["Shift+S", "Stretch: crossing window, base point, destination"], ["Rotate… | Scale…", "any angle · any factor (or reference), about the selection's middle, in place or as a copy"], ["Shift+C", "full-screen cross-hair"]])}
     ${G("Pages (Forma Takeoff sheets)", [["Tick a thumbnail | Shift+tick", "tick pages to export, read sheet info or OCR together · Shift: the pages in between"], ["Ctrl+click | Shift+click a thumbnail", "tick / untick it without opening it"], ["☆ on a thumbnail", "pin the page to the top"], ["Double-click a sheet no. on the drawing", "open that sheet (right-click lists the sheets referenced)"]])}
     ${G("Markups (Bluebeam)", [["T | Q | N", "text box · callout · note"], ["Shift+L | Y | G", "line · polyline · polygon"], ["Shift+R | Shift+E | U", "rectangle · ellipse · cloud"], ["P | Shift+H", "pen · highlighter pen"], ["X | I", "stamp · image"], ["Markup ▾", "every markup tool: hyperlink, file attachment, redaction, erase…"], ["Dbl-click a markup", "edit its text · open a link or an attached file"], ["Drag a handle", "resize a box, move a line's end or a point"], ["Alt+L", "Markups list: every markup — filter, sort, status, replies, layers, CSV / XML / PDF summary"]])}
+    ${G("Command line (status bar)", [[":", "put the cursor in the command line"], ["alias + Enter", "l, rec, ci, pol, tr, ex, f, cha, o, m, co, ro, sc, mi, br, j, x, ar, qs, inv, u, re…"], ["with a number", "pol 8 · ro 37 · sc 1.5 · f 0.5 · cha 0.5 0.75 · o 0.375"], ["Enter on an empty line", "repeat the last command"], ["↑ | ↓", "history"], ["Esc", "leave the command line"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
     ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["F8 | F10", "Ortho (0° / 90°) · Polar tracking (every 15°…) — Shift frees one click while Ortho is on"], ["Snap ▾ (toolbar)", "choose the object snaps: endpoint, midpoint, intersection, perpendicular, nearest"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"]])}
     ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"], ["Ctrl+\\", "split window: this drawing in two windows (own zoom each) — again to close"], ["F6", "split window: work in the other window"], ["Split ▾ (toolbar)", "stacked, another project in the second window, sync zoom & pan, link cursor, match, swap"]])}
@@ -7743,7 +7842,7 @@ function paneUi(old){   // the panels and the bar follow the window worked in
   if (pr) {
     saveSay("ok", pr.updated); buildPageSel(); localStorage.setItem("zdTakeoffLast", pr.id);
     if (!S.cond || !cond(S.cond)) S.cond = (pr.conds[0] || {}).id || null;
-    if (!S.cond && ["draw", "rect", "ded", "open", "auto", "circle"].indexOf(S.tool) >= 0) { S.tool = "select"; document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === "select")); }
+    if (!S.cond && ["draw", "rect", "ded", "open", "auto", "circle", "polygon"].indexOf(S.tool) >= 0) { S.tool = "select"; document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === "select")); }
     stageCls(); hint();
     if (S.page) { pgMark(); renderLayers(); if (!S.geo[S.key]) indexPage(); }
     $("zoomPct").textContent = S.base ? Math.round(S.view.s * 100) + "%" : "—";
@@ -8041,7 +8140,7 @@ function wire(){
   $("bToolChest").onclick = () => toolChestDialog();
   $("bDefaults").onclick = () => defaultsDialog();
   $("bWs").onclick = e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); wsMenu(Math.max(4, r.right - 300), r.bottom + 4); };
-  $("bCmd").onclick = () => openPalette();
+  $("bCmd").onclick = () => openPalette(); cmdWire();
   $("bMini").onclick = () => { wsSet({mini: !wsPref().mini}); toast(wsPref().mini ? "Minimap on — it shows when you zoom in" : "Minimap off", 1800); };
   $("bFull").onclick = () => fullScreen();
   document.addEventListener("fullscreenchange", () => { if ($("bFull")) $("bFull").classList.toggle("on", !!document.fullscreenElement); });
@@ -8237,6 +8336,7 @@ function wire(){
     if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); return redoAny(); }
     if (e.altKey && S.cmp && /^Arrow/.test(e.key)) { e.preventDefault(); const st2 = (e.shiftKey ? 10 : 1) / S.view.s; S.cmp.dx += e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0; S.cmp.dy += e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0; clearTimeout(S.cmpT); S.cmpT = setTimeout(() => { renderLow(); renderHi(true); }, 120); return; }
     if (mod && k === "a") { e.preventDefault(); return S.tool === "cadsel" ? cadSelAct("all") : selectAll(); }
+    if (mod && !e.shiftKey && k === "i" && S.tool !== "cadsel") { e.preventDefault(); return invertSel(); }
     if (mod && /^Arrow/.test(e.key) && selIds().size) { e.preventDefault(); return arrayDialog({ArrowRight: "right", ArrowLeft: "left", ArrowUp: "up", ArrowDown: "down"}[e.key]); }   // PlanSwift: Ctrl + arrow copies at a distance
     if (!e.altKey && !mod && /^Arrow/.test(e.key) && selIds().size) { e.preventDefault(); const st2 = e.shiftKey ? 10 : 1; nudgeSel(e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0, e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0); return; }
     if (mod && k === "c") { e.preventDefault(); return copySel(); }
@@ -11046,7 +11146,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
