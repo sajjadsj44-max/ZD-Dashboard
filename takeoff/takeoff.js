@@ -2528,6 +2528,17 @@ function cursorPoint(e, sp){
   if (free) s = {p, type: "free (Ctrl — no snap)", pri: 9, d: 0, free: true};
   return {p, s};
 }
+/* a wheel step in pixels: Firefox gives a mouse wheel in lines (deltaMode 1) and some devices in pages (2) */
+const wheelPx = e => e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
+/* Safari has no canvas filter (ctx.filter is ignored): grey / black-and-white is then done on the pixels themselves */
+let CFOK = null;
+function canvasFilterOk(){ if (CFOK == null) { try { const x = document.createElement("canvas").getContext("2d"); x.filter = "grayscale(1)"; CFOK = x.filter === "grayscale(1)"; } catch (e) { CFOK = false; } } return CFOK; }
+function grayPixels(c, x, y, w, h, mono){
+  x = Math.max(0, Math.floor(x)); y = Math.max(0, Math.floor(y)); w = Math.min(c.canvas.width - x, Math.ceil(w)); h = Math.min(c.canvas.height - y, Math.ceil(h)); if (w < 1 || h < 1) return;
+  try { const d = c.getImageData(x, y, w, h), a = d.data;
+    for (let i = 0; i < a.length; i += 4) { let v = 0.2126 * a[i] + 0.7152 * a[i + 1] + 0.0722 * a[i + 2]; if (mono) v = Math.max(0, Math.min(255, (v - 128) * 4 + 128)); a[i] = a[i + 1] = a[i + 2] = v; }
+    c.putImageData(d, x, y); } catch (e) {}
+}
 function onDown(e){
   if (!S.page || (e.target.closest && e.target.closest(".cmplegend"))) return;   // the floating bar's own buttons
   ctxClose();
@@ -2654,7 +2665,8 @@ function cancelDrag0(){   // a long press became the menu: drop what the press h
   S.drag = null;
 }
 function onUp(e){
-  if (S.lp) { clearTimeout(S.lp.t); const fired = S.lp.fired; S.lp = null; if (fired) { if (S.touches) delete S.touches[e.pointerId]; return; } }
+  if (S.touches && e.pointerType === "touch") { delete S.touches[e.pointerId]; if (Object.keys(S.touches).length < 2) S.pinch = null; }   // first: a finger lifted after a markup drag, lasso or box is forgotten too (else the next tap reads as a pinch)
+  if (S.lp) { clearTimeout(S.lp.t); const fired = S.lp.fired; S.lp = null; if (fired) return; }
   if (S.mkd) { mkUp(); return; }
   if (S.drag && S.drag.mh != null) { const D = S.drag, m = objById(D.mark); S.drag = null;
     if (m && D.moved) { const np = m.pts.map(q => q.slice()); m.pts = D.orig; mutate(() => { m.pts = np; m.mod = new Date().toISOString(); }, "Edit " + (MARK_TOOLS[m.type] || "markup").toLowerCase()); } else draw(); return; }
@@ -2664,7 +2676,6 @@ function onUp(e){
   if (S.cbox) { cadSelUp(); return; }
   if (S.press) { const pr = S.press; S.press = null; pressClick(pr); }
   if (S.box) boxSelect();
-  if (S.touches) { delete S.touches[e.pointerId]; if (Object.keys(S.touches).length < 2) S.pinch = null; }
   if (S.drag && S.drag.move) { endMove(); return; }
   if (S.drag && S.drag.vertex != null && S.drag.moved) { const D = S.drag, it = P.proj.items.find(i => i.id === D.item);
     if (it) { const pts = it.pts.slice(); it.pts = D.orig; if (D.arcs) it.arcs = D.arcs; mutate(() => { it.pts = pts; if (D.ins) delete it.arcs; qaMoved(it); }, D.ins ? "Add point" : "Move point"); if (D.ins) S.lastIns = {id: it.id, vi: D.vertex, t: Date.now()}; if (crossed(it)) toast(crossMsg, 6000); } }
@@ -7822,7 +7833,11 @@ function wireStage(pn){
     } else if (vertexAt(one, sp) >= 0 && (cond(one.cond) || {}).type !== "count") return toast(one.kind === "open" ? "An opening has two ends — drag them to change it" : "A circle is its centre and edge point — drag them to change it", 2600);
     if (hitItem(sp) === one) focusProps();
   });
-  st.addEventListener("wheel", e => { if (!pn.page) return; e.preventDefault(); ctxClose(); const sp = here(e); zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018)), sp[0], sp[1], pn); }, {passive: false});   // zooms the window under the cursor, worked in or not
+  st.addEventListener("wheel", e => { if (!pn.page) return; e.preventDefault(); ctxClose(); const sp = here(e), dy = wheelPx(e); zoomAt(Math.exp(-Math.max(-600, Math.min(600, dy)) * (e.ctrlKey ? 0.01 : 0.0018)), sp[0], sp[1], pn); }, {passive: false});   // zooms the window under the cursor, worked in or not
+  /* Safari (Mac): a trackpad pinch comes as gesture events, not as a wheel with Ctrl */
+  st.addEventListener("gesturestart", e => { e.preventDefault(); pn.gs = 1; }, {passive: false});
+  st.addEventListener("gesturechange", e => { if (!pn.page) return; e.preventDefault(); const f = (+e.scale || 1) / (pn.gs || 1); pn.gs = +e.scale || 1; if (Math.abs(f - 1) < 1e-4) return; const sp = here(e); zoomAt(f, sp[0], sp[1], pn); }, {passive: false});
+  st.addEventListener("gestureend", e => { e.preventDefault(); pn.gs = 1; }, {passive: false});
   st.addEventListener("pointerleave", () => { if (pn !== ACT) return; S.cursor = null; S.snap = null; S.hover = null; draw(); });
   st.addEventListener("dragover", e => { e.preventDefault(); pn.el.drop.classList.add("over"); });
   st.addEventListener("dragleave", () => pn.el.drop.classList.remove("over"));
@@ -7851,7 +7866,8 @@ function wire(){
   }, true);
   $("warnbar").addEventListener("click", e => { if (e.target.closest("[data-reload]")) { clearTimeout(saveT); savePr = null; location.reload(); } });   // this tab's pending change is dropped, not written over the other's
   window.addEventListener("blur", () => { if (S.space) { S.space = false; stage().classList.toggle("pan", S.tool === "pan"); } });   // Space released in another window must not leave pan on
-  $("ctx").addEventListener("click", e => { const it = e.target.closest("[data-ci]"); if (!it || it.classList.contains("dis")) return; const fn = CTX_FN[+it.dataset.ci]; if (!(S.ctxPinned && it.dataset.ci === "0")) ctxClose(); if (fn) fn(); });
+  $("ctx").addEventListener("click", e => { const sb = e.target.closest(".ci.sub"); if (sb && !e.target.closest("[data-ci]")) { if (!sb.classList.contains("dis")) { $("ctx").querySelectorAll(".ci.sub.open").forEach(x => { if (x !== sb && !x.contains(sb)) x.classList.remove("open"); }); sb.classList.toggle("open"); } return; }   // a tap opens a submenu (touch: no hover)
+    const it = e.target.closest("[data-ci]"); if (!it || it.classList.contains("dis")) return; const fn = CTX_FN[+it.dataset.ci]; if (!(S.ctxPinned && it.dataset.ci === "0")) ctxClose(); if (fn) fn(); });
   $("ctx").addEventListener("contextmenu", e => e.preventDefault());
   document.addEventListener("pointerdown", e => { if (!S.ctxPinned && !e.target.closest("#ctx")) ctxClose(); }, true);
   window.addEventListener("blur", () => { if (!S.ctxPinned) ctxClose(); });
@@ -10783,7 +10799,8 @@ function plotPreview(o){   // the paper, small, with the drawing on it as it wil
   if (pg) { const off = document.createElement("canvas"), gen = S.plGen = (S.plGen || 0) + 1; off.width = Math.max(1, Math.ceil(L.pw * k)); off.height = Math.max(1, Math.ceil(L.ph * k));
     CAD.cadDrawAsync(off.getContext("2d"), pg, {s, tx: dx - px, ty: dy - py, W: off.width, H: off.height}, {dark: false, mono: o.style === "mono", hidden: cadHidden(S.fileId, S.cadSc[S.fileId]), dpr: 1}, () => gen !== S.plGen)
       .then(ok => { if (ok && gen === S.plGen && $("plPrev") === cv) c.drawImage(off, px, py); off.width = 0; }).catch(() => {}); }
-  else if (S.low) { const lw = $("low"), r = S.low.s; c.filter = o.style === "mono" ? "grayscale(1) contrast(4)" : o.style === "gray" ? "grayscale(1)" : "none"; c.drawImage(lw, L.win[0] * r, L.win[1] * r, (L.win[2] - L.win[0]) * r, (L.win[3] - L.win[1]) * r, px, py, L.pw * k, L.ph * k); c.filter = "none"; }
+  else if (S.low) { const lw = $("low"), r = S.low.s; c.filter = o.style === "mono" ? "grayscale(1) contrast(4)" : o.style === "gray" ? "grayscale(1)" : "none"; c.drawImage(lw, L.win[0] * r, L.win[1] * r, (L.win[2] - L.win[0]) * r, (L.win[3] - L.win[1]) * r, px, py, L.pw * k, L.ph * k); c.filter = "none";
+    if (o.style !== "color" && !canvasFilterOk()) grayPixels(c, px, py, L.pw * k, L.ph * k, o.style === "mono"); }
   c.restore();
   const info = $("plInfo"); if (info) info.innerHTML = esc(L.paper + " " + (L.land ? "landscape" : "portrait") + " · " + L.scTxt) + (L.note ? '<br><span style="color:#8a5a00">' + esc(L.note) + "</span>" : "");
   const wi = $("plWin"); if (wi) wi.textContent = o.win ? "window picked" : "no window yet — pick one";
@@ -10895,7 +10912,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
