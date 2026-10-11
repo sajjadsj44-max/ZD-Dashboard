@@ -5421,7 +5421,8 @@ async function editCond(c){
   const pkUnit = it => { const u = normU(it.unit); return u === "ft" ? ["linear", "ft"] : u === "nos" ? ["count", "Nos"] : u === "sft" ? [$("cType").value === "linear" ? "linear" : "area", "Sft"] : u === "cft" ? [/wall|block|brick|masonry|partition/i.test([it.desc, it.sub, $("cName").value].join(" ")) ? "linear" : $("cType").value === "count" ? "area" : $("cType").value, "cft"] : null; };   // walls are taken off as runs (L × H × T)
   const pkFill = (code, auto) => { const L = raLib(), it = L.items.get(String(code).toUpperCase()); if (!it) return;
     $("cRa").value = it.code || it.id; pk.auto = !!auto;
-    if (!$("cBoq").value.trim() || pk.boqAuto) { $("cBoq").value = it.code || it.id; pk.boqAuto = true; }
+    // a click also replaces a BOQ code that is another library item's (the one picked before); a WBS code typed by hand stays
+    const bq = $("cBoq").value.trim(); if (!bq || pk.boqAuto || (!auto && L.items.has(bq.toUpperCase()))) { $("cBoq").value = it.code || it.id; pk.boqAuto = true; }
     if (!$("cName").value.trim()) { $("cName").value = String(it.desc || "").slice(0, 80); pk.nameAuto = true; }
     const tu = pkUnit(it); if (tu && !used) { if ($("cType").value !== tu[0]) { $("cType").value = tu[0]; $("cType").dispatchEvent(new Event("change", {bubbles: true})); }
       $("cUnit").innerHTML = UNITS[tu[0]].map(u => `<option${u === tu[1] ? " selected" : ""}>${u}</option>`).join("");
