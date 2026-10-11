@@ -78,8 +78,19 @@ const BAG = 50 / 1440 / 0.028316846592;
   { const r = await mat("cB"), V = 100 * 10 * (8 / 12), bl = 12 / 12, bh = 8 / 12, j = 0.375 / 12, N = V / ((bl + j) * (bh + j) * (8 / 12));
     ok(r.rows.Blocks === Math.ceil(N * 1.05 - 1e-9), "5 % waste added to the blocks"); }
   await T(() => { const c = zdTakeoff.P.proj.conds.find(c => c.id === "cB"); c.h = ""; });
-  ok(/Set Height H/.test((await mat("cB")).err), "no height on a length condition → asks for H, nothing guessed");
+  ok(/Type Height H/.test((await mat("cB")).err), "no height on a length condition → asks for H, nothing guessed");
   await T(() => { const c = zdTakeoff.P.proj.conds.find(c => c.id === "cB"); c.h = 10; delete c.mat; zdTakeoff.refresh(); });
+
+  console.log("T and H typed in the Materials section");
+  await T(() => { const P = zdTakeoff.P.proj, k = P.scales[zdTakeoff.S.key].ptPerFt; P.conds.push({id: "cC", name: "Roof slab", type: "area", unit: "Sft", color: "#999999", sw: 2, h: "", t: "", faces: 1, dedMin: 0, mat: {kind: "concrete", mix: "1:2:4"}});
+    P.items.push({id: "i9", cond: "cC", file: zdTakeoff.S.fileId, page: 1, kind: "shape", nos: 1, pts: [[60, 300], [60 + 10 * k, 300], [60 + 10 * k, 300 + 10 * k], [60, 300 + 10 * k]]}); zdTakeoff.S.cond = "cC"; zdTakeoff.S.sel = null; zdTakeoff.refresh(); });
+  await wait(200);
+  ok(/Type the thickness T/.test(await page.textContent("#props")) && (await page.locator('#props input[data-matk="T"]').count()) === 1, "concrete area with no T: a Thickness box right in Materials, and it says to type it there");
+  await page.fill('#props input[data-matk="T"]', "6"); await page.dispatchEvent('#props input[data-matk="T"]', "change"); await wait(250);
+  { const r = await mat("cC"), dry = 100 * 0.5 * 1.54;
+    ok(await T(() => zdTakeoff.P.proj.conds.find(c => c.id === "cC").t === 0.5) && near(r.rows.Concrete, 50, 1e-6) && near(r.rows.Cement, dry / 7 / BAG, 1e-6) && near(r.rows["Crush (coarse aggregate)"], dry * 4 / 7, 1e-6), `6" typed → T 0.500 ft; 100 Sft slab = 50.000 cft → cement ${(dry / 7 / BAG).toFixed(2)} bags, crush ${(dry * 4 / 7).toFixed(3)} cft`); }
+  ok(/Cement/.test(await page.textContent("#props")), "the cement / sand / crush table shows at once");
+  await T(() => { const P = zdTakeoff.P.proj; P.items = P.items.filter(i => i.id !== "i9"); P.conds = P.conds.filter(c => c.id !== "cC"); zdTakeoff.S.cond = "cB"; zdTakeoff.refresh(); });
 
   console.log("priced from the Cost Control rate library");
   ok(await T(() => /open SAJ QSCOST/.test(document.getElementById("props").textContent)), "no library in this browser → says where the rates come from, no rate made up");

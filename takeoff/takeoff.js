@@ -2194,7 +2194,7 @@ function matCalc(c, Q){
   if (m.kind === "plaster" || m.kind === "screed") {   // area × thickness
     const t = (+m.tin || 0) / 12, faces = +c.faces || 1; if (!(t > 0)) { out.err = "Set the " + m.kind + " thickness"; return out; }
     let A = u === "Sft" ? Q : u === "ft" ? (H > 0 ? Q * H * faces : NaN) : NaN;
-    if (isNaN(A)) { out.err = u === "ft" ? "Set Height H on the condition (Edit) — plaster area = L × H" : "Plaster is taken from an area (Sft) or a length (ft) with H, not " + u; return out; }
+    if (isNaN(A)) { out.err = u === "ft" ? "Type Height H in the box above — plaster area = L × H" : "Plaster is taken from an area (Sft) or a length (ft) with H, not " + u; return out; }
     const wet = A * t, dry = wet * 1.27 * wst;
     out.basis = (u === "ft" ? f3(Q) + " ft × H " + f3(H) + (faces > 1 ? " × " + faces + " faces" : "") + " = " : "") + f3(A) + " Sft × " + f3(+m.tin) + '" (' + f3(t) + " ft)";
     out.rows.push(["Area", A, "Sft", ""], ["Wet mortar", wet, "cft", "A × t"], ["Dry mortar", dry, "cft", "wet × 1.27" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out;
@@ -2205,7 +2205,7 @@ function matCalc(c, Q){
   if (u === "cft") V = Q;
   else if (u === "Sft") V = T > 0 ? Q * T : NaN;
   else if (u === "ft") V = T > 0 && H > 0 ? Q * H * T : NaN;
-  if (isNaN(V)) { out.err = u === "ft" ? "Set Height H" + (T > 0 ? "" : " and thickness T") + " on the condition (Edit) — volume = L × H × T" : "Set thickness T on the condition (Edit) — volume = area × T"; return out; }
+  if (isNaN(V)) { out.err = u === "ft" ? "Type Height H" + (T > 0 ? "" : " and thickness T") + " in the boxes above — volume = L × H × T" : "Type the thickness T (inches) in the box above — volume = area × T"; return out; }
   out.basis = u === "cft" ? f3(V) + " cft" : u === "Sft" ? f3(Q) + " Sft × T " + f3(T) + " = " + f3(V) + " cft" : f3(Q) + " ft × H " + f3(H) + " × T " + f3(T) + " = " + f3(V) + " cft";
   if (!c.t && tIn) out.basis += ' (T ' + tIn + '" from the name)';
   if (m.kind === "concrete") { const dry = V * 1.54 * wst; out.rows.push(["Concrete", V, "cft", ""], ["Dry volume", dry, "cft", "V × 1.54" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out; }
@@ -2234,7 +2234,8 @@ const matQ = (q, u) => u === "Nos" ? fq(q, "Nos") : u === "bags" ? f2(q) : f3(q)
 function matHtml(c, Q, own){
   const m = matOf(c), r = matCalc(c, Q), mixes = MAT_MIXES[m.kind] || [];
   const sel = (k, opts, v) => `<select data-matk="${k}" style="min-width:0">${opts.map(o => { const [a, b] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(a)}"${String(v) === String(a) ? " selected" : ""}>${esc(b)}</option>`; }).join("")}</select>`;
-  const mortar = m.kind !== "none";
+  const mortar = m.kind !== "none", vol = m.kind === "brick" || m.kind === "block" || m.kind === "concrete", tName = vol && m.kind !== "concrete" ? matNameIn(c) : 0;
+  const needT = vol && c.unit !== "cft", needH = (vol && c.unit === "ft") || ((m.kind === "plaster" || m.kind === "screed") && c.unit === "ft");   // the T / H the materials need, typed here
   const set = own ? "" : `<div class="row matset"><div class="fg"><label>Material</label>${sel("kind", MAT_KINDS, m.kind)}</div>
     ${mixes.length ? `<div class="fg"><label>Mix</label>${sel("mix", mixes.includes(m.mix) ? mixes : mixes.concat([m.mix]), m.mix)}</div>` : ""}
     ${m.kind === "plaster" || m.kind === "screed" ? `<div class="fg"><label>Thickness in</label><input type="number" min="0" step="0.125" data-matk="tin" value="${+m.tin || 0}"></div>` : ""}
@@ -2242,6 +2243,8 @@ function matHtml(c, Q, own){
     ${m.kind === "brick" ? `<div class="fg"><label>Brick</label>${sel("brk", MAT_BRICKS, m.brk || "BRK-1")}</div>` : ""}
     ${mortar ? `<div class="fg"><label>Sand</label>${sel("sand", MAT_SANDS, m.sand || "SAND-CH")}</div>` : ""}
     ${m.kind === "concrete" ? `<div class="fg"><label>Crush</label>${sel("crush", MAT_CRUSH, m.crush || "CRSH-SG")}</div>` : ""}
+    ${needT ? `<div class="fg"><label>${m.kind === "concrete" ? "Thickness T in" : "Wall T in"}</label><input type="text" data-matk="T" value="${+c.t ? r3(c.t * 12) : ""}" placeholder="${tName ? tName + ' (name)' : m.kind === "concrete" ? "e.g. 5" : "e.g. 9"}" title="Inches (or ft-in, e.g. 0'-6&quot;) — saved as T on the condition in decimal ft"></div>` : ""}
+    ${needH ? `<div class="fg"><label>Height H ft</label><input type="text" data-matk="H" value="${+c.h ? f3(c.h) : ""}" placeholder="e.g. 10" title="Decimal ft or ft-in — saved as H on the condition"></div>` : ""}
     ${mortar ? `<div class="fg"><label>Waste %</label><input type="number" min="0" max="50" step="0.5" data-matk="wst" value="${+m.wst || 0}"></div>` : ""}</div>`;
   if (!r) return own ? "" : `<div class="psec">Materials</div>${set}<div class="small">Pick a material (brick, block, plaster, concrete...) to see cement, sand and crush.</div>`;
   let body;
@@ -8059,6 +8062,8 @@ function wire(){
     const mt = e.target.dataset.matk, mc = mt && cond(S.cond);   // the condition's material settings (Materials section)
     if (mc) { mutate(() => { const m = Object.assign({}, matOf(mc)); delete m.guessed; const v = e.target.value;
       if (mt === "kind") { mc.mat = {kind: v}; return; }
+      if (mt === "T") { const t = parseFt(String(v).trim() + (/["'a-z]/i.test(v) ? "" : '"')); if (!isNaN(t) && t >= 0) mc.t = t > 0 ? r3(t) : ""; return; }   // thickness typed in inches (or ft-in) → T on the condition, decimal ft
+      if (mt === "H") { const h = parseFt(String(v).trim()); if (!isNaN(h) && h >= 0) mc.h = h > 0 ? r3(h) : ""; return; }
       m[mt] = mt === "tin" || mt === "wst" ? Math.max(0, Math.min(mt === "wst" ? 50 : 24, +v || 0)) : v; mc.mat = m; }); return; }
     const it = P.proj.items.find(i => i.id === S.sel), f = e.target.dataset.prop; if (!it || !f) return;
     if (f === "qa") return setQa([it], e.target.value);
