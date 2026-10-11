@@ -7283,20 +7283,21 @@ const PAL_KEY = "zdTakeoffPal";
 function palClean(t){ return String(t || "").replace(/[\u2190-\u2BFF\u{1F300}-\u{1FAFF}\uFE0F]/gu, "").replace(/\s+/g, " ").trim(); }
 function paletteCmds(){
   const L = [], seen = new Set();
-  const add = (t, run, g, k) => { t = palClean(t); if (!t || seen.has(g + "|" + t)) return; seen.add(g + "|" + t); L.push({t, run, g, k: k || ""}); };
+  const add = (t, run, g, k, kw) => { t = palClean(t); if (!t || seen.has(g + "|" + t)) return; seen.add(g + "|" + t); L.push({t, run, g, k: k || "", kw: String(kw || "").toLowerCase()}); };
   const btn = (b, g) => {
     if (b.disabled || b.closest("#dlgBack,#pal,#ctx")) return;
     const k = [...b.querySelectorAll("kbd")].map(x => x.textContent).join("+"), c = b.cloneNode(true); c.querySelectorAll("kbd,.vdot").forEach(x => x.remove());
     let t = palClean(c.textContent); const ti = palClean((b.title || "").split(/ — | \(|: /)[0]);
-    if (t.length < 3) t = ti; else if (ti && ti.toLowerCase() !== t.toLowerCase() && ti.length < 50 && !ti.toLowerCase().includes(t.toLowerCase())) t = t + " — " + ti;
-    add(t, () => b.click(), g, k);
+    if (t.length < 3) t = ti; else if (ti && ti.toLowerCase() !== t.toLowerCase() && (t.length <= 7 ? true : ti.length < 60 && !ti.toLowerCase().includes(t.toLowerCase()))) t = t + " — " + (ti.length > 56 ? ti.slice(0, 54).replace(/[\s,;]+\S*$/, "") + "…" : ti);   // a short name ("Auto", "Rooms") says what it is
+    add(t, () => b.click(), g, k, [b.title, b.getAttribute("aria-label"), b.dataset.tool, b.dataset.mod, b.dataset.px, b.dataset.rv].filter(Boolean).join(" "));
   };
   if (!P.proj) {
     add("New project", () => $("bNewProj").click(), "Project"); add("Import project (.json or .zdtakeoff)", () => $("impIn").click(), "Project"); add("Full screen", fullScreen, "View");
     return L;
   }
-  document.querySelectorAll("#tools [data-tool]").forEach(b => btn(b, "Tool"));
-  document.querySelectorAll("#tools [data-mod]").forEach(b => btn(b, "Modify")); document.querySelectorAll("#tools [data-rv]").forEach(b => btn(b, "Check"));
+  { const TAB = {}; document.querySelectorAll("#tools [data-rtab]").forEach(b => { TAB[b.dataset.rtab] = palClean(b.textContent) || b.dataset.rtab; });   // every button of the ribbon, under its tab's name
+    document.querySelectorAll("#tools button").forEach(b => { if (b.dataset.rtab || b.closest(".rgl")) return; const pn = b.closest("[data-rp]"); btn(b, pn ? TAB[pn.dataset.rp] || "Tool" : b.dataset.tool ? "Tool" : "Button"); }); }
+  try { palCtx().forEach(x => add(x.t, x.fn, x.g, x.k, x.kw)); } catch (e) {}   // what the right-click menu offers for the selection
   add("Ortho on / off", () => setOrtho(!S.ortho), "Tool", "F8"); add("Polar tracking on / off", () => setPolar(!S.polar), "Tool", "F10"); add("Object snaps…", () => snapPopToggle(true), "Tool");
   add("Search the measurement sheet", () => { const q = $("shQ"); if (q) { q.focus(); q.select(); } }, "View");
   Object.entries(MK_TOOL_NAMES).forEach(([t, n]) => add("Markup: " + n, () => setTool(t), "Tool"));
@@ -7339,6 +7340,27 @@ function paletteCmds(){
   let n = 0; P.proj.files.forEach(f => { for (let i = 1; i <= f.pages && n < 600; i++, n++) { const sh = (P.proj.sheets || {})[keyOf(f.id, i)] || {}; add("Go to: " + f.name.replace(/\.pdf$/i, "") + " p." + i + (sh.no ? " · " + sh.no : "") + (sh.title ? " " + sh.title : ""), () => gotoPage(f.id, i), "Page"); } });
   return L;
 }
+/* the right-click menu's commands for what is selected (a measurement, a markup), and for the drawing — so they can be searched too */
+function palCtx(){
+  const out = [], flat = (L, g, pre) => (L || []).forEach(x => { if (!x || x.sep || x.h || x.dis) return; if (x.sub) return flat(x.sub, g, x.t + ": "); if (typeof x.fn === "function") out.push({t: (pre || "") + x.t, fn: x.fn, g, k: x.k || "", kw: "right-click selected selection"}); });
+  if (!P.proj || !S.page) return out;
+  const it = S.sel && P.proj.items.find(i => i.id === S.sel && onPage(i)), mk = !it && S.selMark && (P.proj.marks || []).find(m => m.id === S.selMark);
+  if (it) flat(ctxItem({it, pt: -1}, toScr(it.pts[0]), it.pts[0], {}), "Selected");
+  else if (mk) flat(ctxMark(mk), "Selected markup");
+  const st = stage(), q = toBase(st.clientWidth / 2, st.clientHeight / 2); flat(ctxCanvas(q), "Drawing");
+  return out;
+}
+/* words people type for a tool, and the words the tools are named with */
+const PAL_SYN = {polyline: "length run line", pline: "length run", line: "length run", wall: "length wall masonry", walls: "length wall", run: "length", linear: "length",
+  area: "area rect auto room", room: "auto area room", floor: "area", rectangle: "rect", rect: "rectangle", circle: "circle", round: "circle", count: "count", number: "count", symbol: "count",
+  delete: "delete remove", remove: "delete remove", erase: "delete erase", del: "delete", hatch: "appearance hatch", colour: "colour color appearance", color: "colour color", style: "appearance",
+  print: "plot print export pdf", plot: "plot print", save: "save export", pdf: "pdf export", excel: "excel xlsx export", xlsx: "excel", layer: "layers", layers: "layers",
+  dim: "dimmer dimension", text: "text note find", note: "note text", label: "labels", labels: "labels", scale: "scale calibrate", calibrate: "scale", zoom: "zoom fit window", fit: "fit",
+  select: "select lasso pick", pick: "pick select", copy: "copy duplicate", paste: "paste", move: "move", rotate: "rotate", mirror: "mirror flip", flip: "mirror flip", cut: "cut gap opening",
+  door: "door opening tag", window: "window opening tag", opening: "opening cut-out", deduct: "deduct cut-out", hole: "cut-out deduct", void: "cut-out deduct",
+  check: "check review qa", review: "review check", compare: "compare revision", markup: "markup", cloud: "cloud markup", arrow: "arrow markup", highlight: "highlight", stamp: "stamp",
+  undo: "undo", redo: "redo", split: "split window", dark: "background black", black: "background black", white: "background white", mono: "monochrome", autocad: "autocad dwg cad", cad: "autocad cad",
+  ai: "agent claude ai", agent: "agent ai", cost: "costing rate cost", rate: "rate costing", boq: "boq bill", bill: "bill boq", report: "report", legend: "legend", page: "page sheet", sheet: "sheet page"};
 /* AutoCAD command aliases: type tr + Enter for Trim, f for Fillet, sc for Scale… (the command whose name starts so; a "…" one — the dialog — first) */
 const PAL_ALIAS = [["tr", "trim"], ["ex", "extend"], ["f", "fillet"], ["fil", "fillet"], ["cha", "chamfer"], ["s", "stretch"], ["str", "stretch"], ["sc", "scale selection"], ["scale", "scale selection"],
   ["ro", "rotate…"], ["rotate", "rotate…"], ["o", "offset"], ["off", "offset"], ["m", "move"], ["mo", "move"], ["co", "copy"], ["cp", "copy"], ["mi", "mirror"], ["br", "break"], ["j", "join"], ["x", "explode"],
@@ -7373,12 +7395,51 @@ function palScore(c, q){
   if (c.al && c.al.indexOf(ql) >= 0) return 100;   // an exact alias is the first answer
   const t = (c.t + " " + c.g).toLowerCase(), w = ql.split(/\s+/).filter(Boolean), tl = c.t.toLowerCase();
   if (w.every(x => t.includes(x))) return 10 + (tl.startsWith(w[0]) ? 6 : new RegExp("(^|[\\s:(—-])" + w[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(tl) ? 3 : 0) + (c.g === "Page" ? -2 : 0) + palUse(c) - tl.length / 200;
+  const kw = t + " " + (c.kw || ""), syn = x => (PAL_SYN[x] || "").split(" ").filter(Boolean);   // the tooltip, or a word people use for it
+  if (w.every(x => kw.includes(x) || syn(x).some(y => t.includes(y)))) return 6 + (w.some(x => t.includes(x) || syn(x).some(y => t.includes(y))) ? 1 : 0) + (c.g === "Page" ? -2 : 0) + palUse(c) - tl.length / 200;
   const q2 = ql.replace(/\s+/g, "");   // letters in order ("shtr" -> "Shutter…"): a looser match, listed after the exact ones
-  if (q2.length >= 3) { let j = 0; for (let i = 0; i < tl.length && j < q2.length; i++) if (tl[i] === q2[j]) j++; if (j === q2.length) return 4 + palUse(c) - tl.length / 200; }
+  if (q2.length >= 3) { const nm = tl.split(" — ")[0]; let j = 0, i0 = -1, i = 0; for (; i < nm.length && j < q2.length; i++) if (nm[i] === q2[j]) { if (!j) i0 = i; j++; }   // in the name, close together (not across a long tooltip)
+    if (j === q2.length && i - i0 <= q2.length * 2 + 2) return 4 + palUse(c) - tl.length / 200; }
   return 0;
 }
 let PAL_USE = null;
 function palUse(c){ if (!PAL_USE) { try { PAL_USE = JSON.parse(pref("zdTakeoffPalUse") || "{}"); } catch (e) { PAL_USE = {}; } } return Math.min(2, (PAL_USE[c.t] || 0) * 0.25); }
+function palFind(cmds, q, recent, max){   // the commands for what is typed (best first), or the recent ones and the rest
+  max = max || 60;
+  let qq = q, gf = null; { const m = /^([a-z]+):\s*(.*)$/i.exec(q); if (m && cmds.some(c => c.g.toLowerCase().startsWith(m[1].toLowerCase()))) { gf = m[1].toLowerCase(); qq = m[2]; } }   // "export: excel" — only that group
+  return q ? palTyped(q).concat(cmds.filter(c => !gf || c.g.toLowerCase().startsWith(gf)).map(c => ({c, s: palScore(c, qq)})).filter(o => o.s > 0).sort((a, b) => b.s - a.s).slice(0, max).map(o => o.c))
+    : recent.map(t => cmds.find(c => c.t === t)).filter(Boolean).concat(cmds.filter(c => !recent.includes(c.t) && c.g !== "Page")).slice(0, max);
+}
+function palRun(c, recent){
+  if (!c) return;
+  try { pref(PAL_KEY, JSON.stringify([c.t].concat((recent || []).filter(x => x !== c.t)).slice(0, 8))); palUse(c); if (c.g !== "Command") { PAL_USE[c.t] = (PAL_USE[c.t] || 0) + 1; pref("zdTakeoffPalUse", JSON.stringify(PAL_USE)); } } catch (e) {}
+  Promise.resolve().then(c.run).catch(e => toast("Could not run “" + c.t + "”: " + (e.message || e), 4000));
+}
+/* the box in the top bar: every tool and command by name as you type (/ to get there; Ctrl+K: the same list in a large window) */
+function cmdBox(){
+  const inp = $("cmdIn"), res = $("cmdRes"); if (!inp || !res) return;
+  let cmds = [], shown = [], at = 0, recent = [];
+  const close = () => { res.classList.remove("on"); };
+  const draw = () => {
+    const q = inp.value.trim().replace(/^[/>]\s*/, "");
+    shown = palFind(cmds, q, recent, 40); at = Math.min(at, Math.max(0, shown.length - 1));
+    const r0 = inp.getBoundingClientRect(); res.style.left = Math.max(8, Math.min(r0.left, window.innerWidth - 470)) + "px";
+    res.innerHTML = (shown.length ? shown.map((c, i) => `<div class="ci${i === at ? " on" : ""}" data-ci="${i}" role="option"><span class="ct">${!q && recent.includes(c.t) ? '<span class="pr">recent</span>' : ""}${q ? palHi(c.t, q) : esc(c.t)}${q && c.al && c.al.indexOf(q.toLowerCase()) >= 0 ? '<span class="pal-al">alias ' + esc(q) + "</span>" : ""}</span><span class="cg">${esc(c.g)}</span>${c.k ? `<kbd>${esc(c.k)}</kbd>` : ""}</div>`).join("")
+      : `<div class="ci none">No tool or command called “${esc(q)}” — try another word (area, trim, export, layer…)</div>`) + `<div class="cf small">${shown.length ? "↑↓ choose · Enter run · Esc close · " : ""}${cmds.length} commands · aliases <b>tr ex f o j x br</b> · <b>ro 37</b> · <b>export:</b> one group</div>`;
+    res.classList.add("on"); const on = res.querySelector(".ci.on"); if (on) on.scrollIntoView({block: "nearest"});
+  };
+  const open = () => { try { recent = JSON.parse(pref(PAL_KEY) || "[]"); } catch (e) { recent = []; } cmds = paletteCmds(); at = 0; draw(); };
+  inp.addEventListener("focus", open);
+  inp.addEventListener("input", () => { at = 0; if (!res.classList.contains("on")) open(); else draw(); });
+  inp.addEventListener("keydown", e => {
+    if (e.key === "Escape") { e.preventDefault(); close(); inp.value = ""; inp.blur(); }
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (!shown.length) return; at = (at + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length; draw(); }
+    else if (e.key === "Enter") { e.preventDefault(); const c = shown[at]; if (!c) return; close(); inp.value = ""; inp.blur(); palRun(c, recent); }
+  });
+  res.addEventListener("mousedown", e => { const r = e.target.closest("[data-ci]"); if (!r) return; e.preventDefault(); const c = shown[+r.dataset.ci]; close(); inp.value = ""; inp.blur(); palRun(c, recent); });
+  document.addEventListener("pointerdown", e => { if (!e.target.closest("#cmdRes,#cmdIn")) close(); });
+}
+const cmdFocus = q => { const i = $("cmdIn"); if (!i || !i.offsetWidth) return false; i.value = q || ""; i.focus(); i.dispatchEvent(new Event("input")); return true; };
 function openPalette(){
   if ($("dlgBack").classList.contains("on")) return;
   let el = $("pal");
@@ -7387,12 +7448,10 @@ function openPalette(){
   let recent = []; try { recent = JSON.parse(pref(PAL_KEY) || "[]"); } catch (e) { recent = []; }
   let shown = [], at = 0;
   const close = () => { el.classList.remove("on"); document.removeEventListener("keydown", key, true); };
-  const run = c => { close(); if (!c) return; try { pref(PAL_KEY, JSON.stringify([c.t].concat(recent.filter(x => x !== c.t)).slice(0, 8))); palUse(c); if (c.g !== "Command") { PAL_USE[c.t] = (PAL_USE[c.t] || 0) + 1; pref("zdTakeoffPalUse", JSON.stringify(PAL_USE)); } } catch (e) {} Promise.resolve().then(c.run).catch(e => toast(String(e && e.message || e), 5000)); };
+  const run = c => { close(); palRun(c, recent); };
   const draw = () => {
     const q = inp.value.trim();
-    let qq = q, gf = null; { const m = /^([a-z]+):\s*(.*)$/i.exec(q); if (m && cmds.some(c => c.g.toLowerCase().startsWith(m[1].toLowerCase()))) { gf = m[1].toLowerCase(); qq = m[2]; } }   // "export: excel" — only that group
-    shown = q ? palTyped(q).concat(cmds.filter(c => !gf || c.g.toLowerCase().startsWith(gf)).map(c => ({c, s: palScore(c, qq)})).filter(o => o.s > 0).sort((a, b) => b.s - a.s).slice(0, 60).map(o => o.c))
-      : recent.map(t => cmds.find(c => c.t === t)).filter(Boolean).concat(cmds.filter(c => !recent.includes(c.t) && c.g !== "Page")).slice(0, 60);
+    shown = palFind(cmds, q, recent);
     at = Math.min(at, Math.max(0, shown.length - 1));
     list.innerHTML = shown.length ? shown.map((c, i) => `<div class="pi${i === at ? " on" : ""}" data-pi="${i}" role="option"><span class="pt">${!q && recent.includes(c.t) ? '<span class="pr">recent</span>' : ""}${q ? palHi(c.t, q) : esc(c.t)}${q && c.al && c.al.indexOf(q.toLowerCase().trim()) >= 0 ? '<span class="pal-al">alias ' + esc(q.toLowerCase().trim()) + "</span>" : ""}</span><span class="pg">${esc(c.g)}</span>${c.k ? `<kbd>${esc(c.k)}</kbd>` : ""}</div>`).join("") : '<div class="pi small">Nothing matches — try fewer letters</div>';
     const on = list.querySelector(".pi.on"); if (on) on.scrollIntoView({block: "nearest"});
@@ -7853,7 +7912,9 @@ function wireStage(pn){
 function wire(){
   document.addEventListener("keydown", e => {   // Ctrl+K: command palette (not the browser's search box)
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") { e.preventDefault(); e.stopPropagation(); if ($("pal") && $("pal").classList.contains("on")) return; openPalette(); }
+    else if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || "") && !(e.target && e.target.isContentEditable) && !$("dlgBack").classList.contains("on")) { if (cmdFocus("")) { e.preventDefault(); e.stopPropagation(); } }
   }, true);
+  cmdBox();
   document.addEventListener("keydown", e => {   // Ctrl+S: save now (not the browser's "Save page as")
     if (!((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s")) return;
     e.preventDefault(); if (!P.proj) return;
@@ -7944,7 +8005,7 @@ function wire(){
     const f = e.target.closest("[data-qf]"); if (f) { S.qaFilter = S.qaFilter === f.dataset.qf ? "" : f.dataset.qf; renderSheet(); renderQaBar(); return; }
     const a = e.target.closest("[data-qact]"); if (a && a.dataset.qact === "next") return nextUnchecked(1); if (a && a.dataset.qact === "prev") return nextUnchecked(-1); if (a) setQa(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.qa !== "checked"), "checked");
   });
-  let findT = null; $("findIn").addEventListener("input", e => { clearTimeout(findT); findT = setTimeout(() => findText(e.target.value), 350); });
+  let findT = null; $("findIn").addEventListener("input", e => { clearTimeout(findT); if (/^[/>]/.test(e.target.value) && cmdFocus(e.target.value.slice(1))) { e.target.value = ""; $("findRes").classList.remove("on"); return; } findT = setTimeout(() => findText(e.target.value), 350); });   // "/trim": a command, not text
   $("findIn").addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(findT); findText(e.target.value); } if (e.key === "Escape") { $("findRes").classList.remove("on"); e.target.blur(); } });
   document.addEventListener("pointerdown", e => { if (!e.target.closest("#findRes,#findIn")) $("findRes").classList.remove("on"); });
   $("bClaude").onclick = () => aiToggle(!$("aiPanel").classList.contains("on"));

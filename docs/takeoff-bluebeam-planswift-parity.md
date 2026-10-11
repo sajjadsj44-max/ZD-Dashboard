@@ -303,3 +303,13 @@ colour, lineweight and linetype; arcs are held on their true circle (not the Bé
 with AutoCAD to a few thousandths of an inch. The edits are kept in the project (`cadEd`, one Ctrl+Z step each), seen by snapping,
 Auto area, find and Ctrl+P plots; *AutoCAD edits: put this drawing back as it was read* (Ctrl+K) clears them. The DWG / DXF itself
 is never changed.
+
+## Search tools & commands (2026-10-11)
+
+A box in the top bar, beside the text search (press **/** to get there; Ctrl+K still opens the same list in a large window).
+It lists every button of every ribbon tab (Takeoff, Modify, Markup, Review, Costing, Export, My tools, View — 27 View / Export
+buttons and the AI agents were missing before), the markup tools, the conditions, the pages, and the right-click commands for
+what is selected — so *trim*, *match*, *join*, *area*, *lock*, *duplicate* all come up as you type. It finds a command by its
+name, by its tooltip, by a word people use (*polyline* → Length, *erase* → Delete, *print* → Plot) and by AutoCAD alias
+(*tr*, *ex*, *f*, *o*, *j*, *x*, *br*); *export: excel* keeps to one group; *ro 37* / *sc 1.5* / *f 0.5* run with the number.
+Typing */trim* in the text search moves there. Covered by `tools/test_takeoff_cmdsearch.js`.

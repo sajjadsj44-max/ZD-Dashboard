@@ -66,6 +66,13 @@ header .btn.tg2.on{background:#fff;color:var(--navy);border-color:#fff}
 .hidebtn{border:0;background:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px}
 .openp{position:absolute;top:50%;z-index:7;background:#fff;border:1px solid var(--line);padding:10px 3px;cursor:pointer;font-size:12px;color:var(--purple);box-shadow:0 2px 8px rgba(15,41,66,.15)}
 #openL{left:0;border-radius:0 6px 6px 0}#openR{right:0;border-radius:6px 0 0 6px}
+/* the tools & commands search in the top bar */
+.cmdw{position:relative}#cmdIn{width:250px}
+#cmdRes{position:fixed;top:calc(var(--hh) - 2px);width:460px;max-width:calc(100vw - 16px);max-height:62vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(15,41,66,.22);z-index:13;display:none;color:var(--txt)}
+#cmdRes.on{display:block}#cmdRes .ci{display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;font-size:12.5px;border-bottom:1px solid #f2f5f9}
+#cmdRes .ci.on,#cmdRes .ci:hover{background:#f1eefc}#cmdRes .ci.none{cursor:default;color:var(--muted)}#cmdRes .ct{flex:1;min-width:0}
+#cmdRes .cg{font-size:10px;color:var(--muted);background:#f1f4f9;border-radius:9px;padding:1px 7px;white-space:nowrap}#cmdRes kbd{font-size:10px}
+#cmdRes .cf{padding:6px 10px;color:var(--muted);background:#fbfcfe;position:sticky;bottom:0;border-top:1px solid var(--line)}#cmdRes .pm{background:#fff1a8;border-radius:2px}
 .findw{position:relative}
 .edmode{display:flex;flex:none}.edmode .btn{font-weight:600}.edmode .btn:first-child{border-radius:6px 0 0 6px}.edmode .btn:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
 .lyrbar{display:flex;gap:4px;padding:8px 10px;border-bottom:1px solid var(--line);flex-wrap:wrap}.lyrbar input{flex:1;min-width:80px}
@@ -636,6 +643,11 @@ header .btn{background:rgba(255,255,255,.7);border-color:#b7d1ea}
 header .btn:hover{background:#fff}
 .projpill{background:rgba(255,255,255,.65);border-color:#b7d1ea}
 header #findIn{background:rgba(255,255,255,.8);border-color:#b7d1ea}
+header #findIn,header #cmdIn{width:170px;max-width:20vw}
+header #cmdIn{border-radius:18px;padding-left:12px;background:rgba(255,255,255,.8);border-color:#b7d1ea}
+@media (max-width:1750px){header #findIn,header #cmdIn{width:150px}}
+@media (max-width:1400px){header #findIn,header #cmdIn{width:125px}}
+@media (max-width:860px){header #findIn,header #cmdIn{max-width:none;width:100%}header .cmdw{flex:1 1 100%}}
 .tools{background:linear-gradient(180deg,var(--sky2),var(--sky3));border-bottom-color:#b7d1ea}
 .rtabs{background:transparent;border-bottom-color:#b7d1ea}
 .rtab:hover{background:rgba(255,255,255,.55)}
@@ -718,11 +730,12 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
   <input type="file" id="dirIn" webkitdirectory multiple hidden>
   <input type="file" id="imgIn" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,.jpg,.jpeg,.png" multiple hidden>
   <div class="findw"><input type="search" id="findIn" placeholder="Search text on the drawings (Ctrl+F)" aria-label="Find text on the drawings"><div id="findRes"></div></div>
+  <div class="cmdw"><input type="search" id="cmdIn" placeholder="Search tools &amp; commands — area, trim, match… ( / )" aria-label="Search every tool and command" autocomplete="off" spellcheck="false"><div id="cmdRes" role="listbox" aria-label="Tools and commands"></div></div>
   <div class="edmode" role="group" aria-label="Edit mode"><button class="btn sm tg2" id="bModePdf" title="PDF mode — dimmer 60 %, white background, monochrome, line weights on · Offset, Trim, Extend, Fillet, Break, Join and Explode edit the takeoff's markups">PDF Mode</button><button class="btn sm tg2" id="bModeCad" title="AutoCAD mode — no dimming, black background, the drawing's colours · Offset, Trim, Extend, Fillet, Break, Join and Explode edit the AutoCAD drawing's own lines, polylines, arcs and circles (DWG / DXF)">AutoCAD Mode</button></div>
   <div class="sp"></div>
   <button class="btn sm" id="bUndo" title="Undo (Ctrl+Z)">&#8630;</button>
   <button class="btn sm" id="bRedo" title="Redo (Ctrl+Y)">&#8631;</button>
-  <button class="btn sm" id="bCmd" title="Every command by name — tools, exports, pages, AI agents (Ctrl+K)">&#8984; Commands</button>
+  <button class="btn sm" id="bCmd" title="All commands in a large window (Ctrl+K) — or type in Search tools &amp; commands ( / )" aria-label="All commands">&#8984;</button>
   <button class="btn sm" id="bToolChest" title="Tool Chest — reusable, favorited tool profiles; click a profile to activate its saved appearance">&#129520; Tool Chest</button>
   <button class="btn sm" id="bDefaults" title="Professional defaults for new measurements, markups, dimensions and highlights">&#9881; Defaults</button>
   <button class="btn sm" id="bWs" title="Workspace: layouts (takeoff, drawing only, pages), icons-only toolbar, minimap, full screen, thumbnail size" aria-haspopup="true">&#9638; Workspace</button>
@@ -1101,7 +1114,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-11d"></script>
+<script type="module" src="takeoff.js?v=2026-10-11a"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
