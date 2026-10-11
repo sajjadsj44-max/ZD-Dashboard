@@ -9236,8 +9236,18 @@ async function locHealth(){   // -> LOC: ready | offline | blocked | nomodel | n
     else if (!LOC.models.some(x => x.name === m || x.name === m + ":latest")) { LOC.st = "nomodel"; LOC.msg = "Model " + m + " is not installed — run: ollama pull " + m; }
     else { if (!LOC.caps[m]) { try { const sh = await locFetch("/api/show", {model: m}, 8000); LOC.caps[m] = sh.capabilities || []; } catch (e) { LOC.caps[m] = []; } }
       LOC.st = "ready"; LOC.msg = m + " ready" + (LOC.caps[m].length ? " · " + LOC.caps[m].join(", ") : "") + " · Ollama " + LOC.ver; }
-  } catch (e) { LOC.st = e.code === "blocked" ? "blocked" : "offline"; LOC.msg = e.message; }
+  } catch (e) { LOC.st = e.code === "blocked" ? "blocked" : "offline"; LOC.msg = e.message; if (e.code === "offline") await locWhy(); }
   LOC.checked = Date.now(); locLine(); kpiLog("local-health", {st: LOC.st}); return LOC;
+}
+/* why Ollama could not be reached: a request the browser makes without reading the answer (no-cors) still goes through when
+   Ollama is running but refuses this site — then OLLAMA_ORIGINS is missing (or Ollama was not restarted after setting it);
+   when even that fails, Ollama is not running, or the browser's local-network permission for this site is blocked */
+async function locWhy(){
+  let lna = ""; try { const q = await navigator.permissions.query({name: "local-network-access"}); lna = q.state; } catch (e) {}
+  let up = false; try { const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 3000); await fetch(locUrl() + "/api/version", {mode: "no-cors", signal: ctl.signal}); clearTimeout(t); up = true; } catch (e) {}
+  if (up) { LOC.st = "blocked"; LOC.why = "origins"; LOC.msg = "Ollama IS running at " + locUrl() + ", but it does not allow this site yet. Set OLLAMA_ORIGINS=" + location.origin + " (Windows: run the setx line below in PowerShell), then QUIT Ollama from the tray icon and start it again, then Test connection."; }
+  else if (lna === "denied") { LOC.st = "blocked"; LOC.why = "lna"; LOC.msg = "The browser blocked this site from reaching programs on this computer (local network access). Click the icon left of the address bar → Site settings → Local network access → Allow, reload, then Test connection."; }
+  else { LOC.why = "down"; LOC.msg = "Ollama is not running at " + locUrl() + " (nothing answered). Install it from ollama.com and start it (its llama icon shows in the tray), or check the address. Open " + locUrl() + " in a new tab: it should say “Ollama is running”."; }
 }
 const locCan = cap => (LOC.caps[locModel()] || []).includes(cap);
 function locLine(){
@@ -9266,12 +9276,13 @@ async function locSetup(){
       <div class="fg" style="flex:2"><label>Model</label><select id="leModel"><option value="">— choose —</option>${opts}</select></div>
       <div class="fg"><label>Context (tokens)</label><input type="number" id="leCtx" min="2048" step="1024" value="${+(pref("zdTakeoffLocalCtx") || 8192)}"></div></div>
     <p class="small" id="leSt" style="margin:4px 0"><b>Status:</b> ${esc(LOC.msg)}</p>
-    <div class="row" style="gap:6px"><button type="button" class="btn sm" id="leTest">Test connection</button><button type="button" class="btn sm" id="leBench"${LOC.models.length ? "" : " disabled"}>Benchmark installed models</button></div>
+    <div class="row" style="gap:6px"><button type="button" class="btn sm" id="leTest">Test connection</button><a class="btn sm" id="leOpen" href="${esc(locUrl())}" target="_blank" rel="noopener" title="Should show “Ollama is running” — if it does not open, Ollama is not running">Open ${esc(locUrl())}</a><button type="button" class="btn sm" id="leBench"${LOC.models.length ? "" : " disabled"}>Benchmark installed models</button></div>
     <div id="leBenchOut" class="small" style="margin-top:6px">${bench.length ? benchTable(bench) : ""}</div>
     <details style="margin-top:10px"${LOC.st === "ready" ? "" : " open"}><summary><b>Set up the free local AI (one time)</b></summary><ol class="small" style="margin:6px 0 0 18px;line-height:1.6">
       <li>Install <b>Ollama</b> from ollama.com (Windows, macOS, Linux).</li>
       <li>Let this site talk to it: set the environment variable <code>OLLAMA_ORIGINS=${esc(org)}</code><br>
-        Windows: Settings → System → About → Advanced system settings → Environment Variables → New (user variable), then quit Ollama from the tray and start it again.<br>
+        <b>Windows</b> (easiest): open PowerShell and run <code id="leSetx">setx OLLAMA_ORIGINS "${esc(org)}"</code> <button type="button" class="btn sm" id="leCopy">Copy</button>, then right-click the Ollama icon in the tray → <b>Quit Ollama</b>, and start Ollama again from the Start menu (it only reads the setting when it starts).
+        Or: Settings → System → About → Advanced system settings → Environment Variables → New (user variable).<br>
         macOS: <code>launchctl setenv OLLAMA_ORIGINS "${esc(org)}"</code>, then quit and reopen Ollama. Linux (systemd): <code>sudo systemctl edit ollama</code> → <code>[Service]</code> <code>Environment="OLLAMA_ORIGINS=${esc(org)}"</code>, then <code>sudo systemctl restart ollama</code>.</li>
       <li>Download a model that can call tools, e.g. <code>ollama pull qwen3:8b</code> — or one that can also see the drawing (vision + tools). Check the current names and sizes at ollama.com/library: models change often.</li>
       <li>Press <b>Test connection</b>, choose the model, Save. Chrome may ask to let this site reach devices on your local network — allow it.</li></ol>
@@ -9280,7 +9291,8 @@ async function locSetup(){
       This computer, as the browser reports it: memory ${esc(String(hw.mem))} · ${esc(String(hw.cores))} processor threads · WebGPU ${hw.gpu ? "yes" : "no"}. The browser cannot see the graphics card's memory; Ollama uses it by itself when it can.</p></details>`;
   const pr = ask("AI engine — local AI (free, offline)", body, "Save", () => ({eng: (document.querySelector("input[name=leEng]:checked") || {}).value || "auto", url: $("leUrl").value.trim(), model: $("leModel").value, ctx: Math.max(2048, +$("leCtx").value || 8192)}), "leUrl");
   $("leTest").onclick = async () => { pref("zdTakeoffLocalUrl", $("leUrl").value.trim()); const m0 = locModel(); pref("zdTakeoffLocalModel", $("leModel").value || m0); $("leSt").innerHTML = "<b>Status:</b> checking…"; await locHealth(); pref("zdTakeoffLocalModel", m0);
-    $("leSt").innerHTML = "<b>Status:</b> " + esc(LOC.msg); const sel = $("leModel"), keep = sel.value; sel.innerHTML = '<option value="">— choose —</option>' + LOC.models.map(m => `<option value="${esc(m.name)}">${esc(m.name)}${m.params ? " · " + esc(m.params) : ""}</option>`).join(""); sel.value = keep; $("leBench").disabled = !LOC.models.length; };
+    $("leSt").innerHTML = "<b>Status:</b> " + esc(LOC.msg); $("leOpen").href = locUrl(); $("leOpen").textContent = "Open " + locUrl(); const sel = $("leModel"), keep = sel.value; sel.innerHTML = '<option value="">— choose —</option>' + LOC.models.map(m => `<option value="${esc(m.name)}">${esc(m.name)}${m.params ? " · " + esc(m.params) : ""}</option>`).join(""); sel.value = keep; $("leBench").disabled = !LOC.models.length; };
+  $("leCopy").onclick = async () => { try { await navigator.clipboard.writeText($("leSetx").textContent); toast("Copied — paste it in PowerShell", 2000); } catch (e) { toast("Select the line and copy it", 2500); } };
   $("leBench").onclick = async () => { const out = $("leBenchOut"); out.textContent = "Running… (each model is loaded in turn — the first answer of a model includes its loading time)"; const res = await locBenchmark(t => { out.textContent = t; }); out.innerHTML = benchTable(res); };
   const v = await pr; if (!v) return locLine();
   pref("zdTakeoffAiEngine", v.eng === "auto" ? "" : v.eng); pref("zdTakeoffLocalUrl", v.url && v.url !== "http://127.0.0.1:11434" ? v.url : ""); pref("zdTakeoffLocalModel", v.model); pref("zdTakeoffLocalCtx", String(v.ctx));

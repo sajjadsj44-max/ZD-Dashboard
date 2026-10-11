@@ -112,7 +112,16 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.01 : t);
   console.log("local AI: setup states");
   await T(u => { localStorage.setItem("zdTakeoffLocalUrl", u); localStorage.removeItem("zdTakeoffLocalModel"); }, "http://127.0.0.1:11999");
   let L = await T(() => zdTakeoff.locHealth().then(x => ({st: x.st, msg: x.msg})));
-  ok(L.st === "offline" && /OLLAMA_ORIGINS=/.test(L.msg), "nothing listening: offline, with how to fix it (" + L.msg.slice(0, 70) + "…)");
+  ok(L.st === "offline" && /Ollama is not running/.test(L.msg) && /Ollama is running/.test(L.msg), "nothing listening: says Ollama is not running, how to check (" + L.msg.slice(0, 70) + "…)");
+  // Ollama running but not allowing this site (OLLAMA_ORIGINS unset): told apart from "not running"
+  const mock2 = spawn(process.execPath, [path.join(__dirname, "mock_ollama.js"), "11503", "https://some-other-site.example"], {stdio: "ignore"}); await new Promise(r => setTimeout(r, 400));
+  await T(u => localStorage.setItem("zdTakeoffLocalUrl", u), "http://127.0.0.1:11503");
+  L = await T(() => zdTakeoff.locHealth().then(x => ({st: x.st, msg: x.msg})));
+  ok(L.st === "blocked" && /IS running/.test(L.msg) && /OLLAMA_ORIGINS=/.test(L.msg) && /Quit Ollama|QUIT Ollama/i.test(L.msg), "running but not allowed: says so, with OLLAMA_ORIGINS and ‘quit and restart Ollama’ (" + L.msg.slice(0, 60) + "…)");
+  mock2.kill();
+  const pr0 = T(() => zdTakeoff.locSetup()); await page.waitForSelector("#leSetx", {timeout: 6000});
+  ok(new RegExp('setx OLLAMA_ORIGINS "' + new globalThis.URL(URL).origin.replace(/[.]/g, "\\.") + '"').test(await page.innerText("#leSetx")) && await page.isVisible("#leOpen"), "the setup shows the one-line Windows command (setx) with this site, and a link to open Ollama's own page");
+  await page.click("#dlgCancel"); await pr0;
   await T(u => localStorage.setItem("zdTakeoffLocalUrl", u), MOCK);
   L = await T(() => zdTakeoff.locHealth().then(x => ({st: x.st, msg: x.msg, models: x.models.map(m => m.name)})));
   ok(L.st === "none" && L.models.length === 2, "Ollama running, no model chosen: lists the installed models (" + L.models.join(", ") + ")");
