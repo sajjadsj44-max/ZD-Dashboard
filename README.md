@@ -650,6 +650,24 @@ list moved to `dashboards/`; every dashboard keeps its own address. `tools/test_
   closed run so every edit and the sheet work on it. **Invert selection** (`Ctrl+I`), **Quick select** (by condition,
   kind of measurement, markup type, check state; new / add / within) and **Deselect all** — right-click the page.
   Tests: `tools/test_takeoff_cmdline.js`. The audit behind these: `docs/takeoff-cad-audit-2026-10-11.md`.
+- **Free local AI** (11-Oct-2026): the takeoff agent can run on **Ollama on your own computer** — free, offline once
+  the model is downloaded — with the same real tools as Claude (trace rooms, measure, count tags, walls, totals, explain a
+  quantity, undo). Agent panel → **⚙ Engine**: choose Auto / Local AI only / Claude / Built-in rule agent, the Ollama
+  address and model, **Test connection** and **Benchmark installed models** (right tool, valid arguments, reply time,
+  tokens/s — measured on your PC). One-time setup: install Ollama, set `OLLAMA_ORIGINS=https://sajjadsj44-max.github.io`,
+  restart it, `ollama pull` a tool-capable model; allow Chrome's local-network prompt. If the local model cannot be
+  reached the built-in rule agent answers — never a cloud service. Every tool call is checked against its schema;
+  quantities in replies come from the measurement sheet. Chat history is kept per project, text only.
+- **Agent instructions** (**Rules** in the agent panel): working rules taught in the chat (“remember: exclude shafts from
+  net flooring”) or typed — this request only / this session / this project / every project — with on / off, edit,
+  delete and a conflict warning. They go with every message to the local AI and Claude; “show me the boundary before
+  accepting” also switches on Auto area's preview.
+- **Auto area record and preview**: every Auto-area outline keeps how it was found (drawing image / vector lines, door
+  gap), its original outline, area and time; Properties show “as detected” or “edited (+x Sft)”, **Show detected** and
+  **Restore detected**; leaks, short traces and non-square outlines count as *needs review*. Auto area settings ⚙ →
+  “Show the outline before adding it”: Accept (Enter) / Tighter gap / Wider gap / Cancel (Esc).
+  Tests: `tools/test_takeoff_localai.js` (with the stand-in `tools/mock_ollama.js`). Report:
+  `docs/takeoff-autoarea-agent-localai-2026-10-11.md`.
 
 - **Private by design**: a PDF opens in the viewer's browser and is stored with the takeoff in that browser's
   IndexedDB — nothing is uploaded and nothing is committed here. Projects move between computers as

@@ -1332,7 +1332,7 @@ async function typeDialog(){
    (the room's core). The core is grown back out over the thin lines to the wall faces, pockets narrower than the
    furniture setting are filled (furniture against a wall), and the outline is traced, squared up when the room is
    rectilinear (the bulge through a door opening is dropped there) and snapped onto the wall lines. */
-const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false, layers: true};
+const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false, layers: true, confirm: false};
 const autoOpt = () => Object.assign({}, AUTO_DEF, (P.proj && P.proj.auto) || {});
 function segsIn(g, x0, y0, x1, y1){   // lines in a box — not those on PDF layers switched off
   const c = g.cell, ids = new Set(), off = layerOffIx(g);
@@ -2004,14 +2004,53 @@ async function autoAt(p){
   busy(""); S.autoBusy = false;
   if (S.key !== key || !cond(c.id)) return toast("The page changed while the room was traced — nothing added; click again", 4000);   // never a room of one page put on another
   if (res.err) return toast(res.err, 6000);
-  const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "";
-  mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm}); });
+  if (autoOpt().confirm) {   // "show me the boundary before it is added": accept, trace again with a tighter / wider door gap, or cancel
+    for (let round = 0; round < 6; round++) {
+      const ans = await autoPreview(res, p); if (!ans) return draw();
+      if (ans === "ok") break;
+      const g0 = res.gap || autoOpt().gap, g2 = ans === "tight" ? Math.max(0.5, g0 * 0.75) : Math.min(29, g0 * 1.5);
+      busy("Tracing again — openings closed up to " + f3(g2) + " ft…"); S.autoBusy = true; await new Promise(r => setTimeout(r, 20));
+      let r2; try { r2 = await autoRoom(p, {gap: g2}); } catch (e) { r2 = {err: e.message || String(e)}; }
+      busy(""); S.autoBusy = false;
+      if (S.key !== key) return toast("The page changed — nothing added", 3000);
+      if (r2.err) toast("With openings up to " + f3(g2) + " ft: " + r2.err + " — the last outline is kept", 5000); else { r2.gap = g2; r2.note = "openings closed up to " + f3(g2) + " ft"; res = r2; }
+    }
+  }
+  const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "", kk = hereScale(p);
+  const det = {how: "auto", src: autoOpt().src === "vector" ? "vector lines" : "drawing image", gap: +(res.gap || autoOpt().gap), note: res.note || "",
+    flag: res.leak ? "leaks — " + res.leak : res.short ? res.short : res.rect ? "" : "not square — check the outline", a0: kk ? +(polyArea(res.pts) / kk / kk).toFixed(4) : null, pts0: res.pts.map(q => q.slice()), at: new Date().toISOString()};
+  mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm, det}); });
   S.sel = id; draw(); renderSheet();
   const k = hereScale(p);
   if (res.short && !res.leak) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — " + res.short + ".", 9000);
   if (res.leak) { if (!autoOpt().show) { P.proj.auto = Object.assign({}, P.proj.auto || {}, {show: true}); save(); }
     return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
   toast((nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
+}
+/* Preview before adding (Auto area settings ⚙ "Show the outline before adding it", or the agent rule "show me the boundary
+   before accepting"): the outline is drawn dashed orange with its area; Accept (Enter), Tighter / Wider door gap, Cancel (Esc) */
+function autoPreview(res, p){
+  return new Promise(done => {
+    const k = hereScale(p), a = k ? fq(polyArea(res.pts) / k / k) + " Sft" : "", nm = roomNameAt(res.pts) || "Room";
+    S.autoPrev = {pts: res.pts, key: S.key}; draw();
+    let bar = $("autoPrevBar"); if (!bar) { bar = document.createElement("div"); bar.id = "autoPrevBar"; document.body.appendChild(bar); }
+    bar.innerHTML = `<b>${esc(nm)} — ${esc(a)}</b><span class="small">${esc([res.note, res.leak ? "⚠ leaks: " + res.leak : res.short ? "⚠ " + res.short : res.rect ? "" : "not square"].filter(Boolean).join(" · ") || "door gap " + f3(res.gap || autoOpt().gap) + " ft")}</span>
+      <button class="btn pri sm" data-ap="ok">Accept <kbd>Enter</kbd></button><button class="btn sm" data-ap="tight" title="Trace again closing only narrower openings — when the outline ran out through a gap that is not a door">Tighter gap</button><button class="btn sm" data-ap="wide" title="Trace again closing wider openings — when the outline leaked into the next room">Wider gap</button><button class="btn sm" data-ap="">Cancel <kbd>Esc</kbd></button>`;
+    bar.classList.add("on");
+    const end = v => { bar.classList.remove("on"); S.autoPrev = null; document.removeEventListener("keydown", key, true); bar.onclick = null; draw(); done(v); };
+    const key = e => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); end("ok"); } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(null); } };
+    document.addEventListener("keydown", key, true);
+    bar.onclick = e => { const b = e.target.closest("[data-ap]"); if (b) end(b.dataset.ap || null); };
+    autoPreview.end = end;
+  });
+}
+const detEdited = it => !!(it.det && it.det.pts0 && (it.det.pts0.length !== it.pts.length || it.det.pts0.some((q, i) => dist(q, it.pts[i]) > 1e-6)));
+function detHtml(it, k){   // the properties panel line for an outline found by Auto area: how, the original outline, review flag
+  const d = it.det; if (!d) return "";
+  const a0 = k && d.pts0 ? polyArea(d.pts0) / k / k : d.a0, a1 = k ? polyArea(it.pts) / k / k : null, ed = detEdited(it);
+  return `<div class="row detrow" style="margin-top:6px;gap:6px;align-items:center"><span class="small" style="flex:1;min-width:200px"><b>Auto area</b> · from the ${esc(d.src)}, door gap ${f3(d.gap)} ft · ${esc(dmy(d.at))}${d.note ? " · " + esc(d.note) : ""}
+    · detected <b>${a0 != null ? fq(a0) : "?"} Sft</b>${ed ? ` → now <b>${a1 != null ? fq(a1) : "?"} Sft</b> (edited${a0 && a1 != null ? ", " + (a1 >= a0 ? "+" : "") + fq(a1 - a0) + " Sft" : ""})` : " (as detected)"}${d.flag ? ` · <span style="color:#b45309">⚠ ${esc(d.flag)}</span>` : ""}</span>
+    <button class="btn sm${S.detShow ? " on" : ""}" data-act="detShow" title="Show the outline as Auto area found it (grey dashes) next to the current one">${S.detShow ? "Hide" : "Show"} detected</button>${ed && !it.locked ? '<button class="btn sm" data-act="detRestore" title="Put the outline back as Auto area found it (Ctrl+Z undoes)">Restore detected</button>' : ""}</div>`;
 }
 /* Leak guard: a room's outline must not swallow another room's name, nor grow far past its own written size.
    When it does, trace again closing wider gaps and dashed lines, and keep the first clean outline. */
@@ -2063,12 +2102,13 @@ async function autoSettings(){
     <div class="fg w2"><label><input type="checkbox" id="aoLay" style="width:auto"${o.layers ? " checked" : ""}> Use the PDF's layers: only walls, doors / windows, columns and railings bound a room (furniture, fixtures, glass screens, hatch, text and clouds ignored) — when the PDF has them</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDoor" style="width:auto"${o.skipDoors ? " checked" : ""}> Ignore door swings and door leaves</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDash" style="width:auto"${o.dashBound ? " checked" : ""}> Straight dashed lines bound a room (e.g. an open dress / wardrobe area) — untick if dashed lines on your drawings are beams overhead</label></div>
-    <div class="fg w2"><label><input type="checkbox" id="aoShow" style="width:auto"${o.show ? " checked" : ""}> Show the detected walls (pink) after each auto area — to see why a room leaks</label></div></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoShow" style="width:auto"${o.show ? " checked" : ""}> Show the detected walls (pink) after each auto area — to see why a room leaks</label></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoConfirm" style="width:auto"${o.confirm ? " checked" : ""}> Show the outline before adding it — Accept, trace again with a tighter / wider door gap, or Cancel</label></div></div>
     <p class="small" style="margin-top:10px">If furniture or fixtures are drawn in the same pen as the walls, <b>Pick a wall</b> so only lines of that colour and weight bound the room.</p>`, "Save", () => {
       const gap = parseFt($("aoGap").value), pocket = parseFt($("aoPk").value || "0"), minLen = parseFt($("aoMin").value || "0");
       if (!(gap > 0.2 && gap < 30)) return "Close gaps: a width in ft, e.g. 4";
       if (isNaN(pocket) || isNaN(minLen)) return "Enter decimal feet";
-      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, layers: $("aoLay").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked}; }, "aoGap");
+      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, layers: $("aoLay").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked, confirm: $("aoConfirm").checked}; }, "aoGap");
   if (v) { P.proj.auto = Object.assign({}, P.proj.auto || {}, v); if (!v.show) S.autoShow = null; save(); draw(); toast("Auto area settings saved"); }
 }
 document.addEventListener("click", e => {   // auto-area dialog: pick / clear the wall pen
@@ -3205,6 +3245,8 @@ function drawNow(){
   const c = S.cond ? cond(S.cond) : null, cur = S.cursor;
   let live = "";
   if (S.tool === "stretch" && S.str && cur) dyn.push(...stretchPreview(cur));
+  if (S.autoPrev && S.autoPrev.key === S.key) dyn.push(`<polygon points="${S.autoPrev.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="#e8a33d" fill-opacity=".18" stroke="#c77700" stroke-width="2.5" stroke-dasharray="8 5"/>`);
+  { const di = S.detShow && S.sel && P.proj.items.find(i => i.id === S.sel); if (di && di.det && di.det.pts0 && onPage(di)) dyn.push(`<polygon points="${di.det.pts0.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="none" stroke="#6b7d92" stroke-width="2" stroke-dasharray="4 4"/>`); }
   if ((S.tool === "fillet" || S.tool === "chamfer") && S.fc.first) { const f = S.fc.first, a = toScr(f.it.pts[f.i]), b = toScr(f.it.pts[f.i + 1]); dyn.push(`<path d="M${a[0].toFixed(1)} ${a[1].toFixed(1)}L${b[0].toFixed(1)} ${b[1].toFixed(1)}" stroke="#ff2d55" stroke-width="4" opacity=".7" stroke-linecap="round"/>`); }
   { const kk = hereScale(S.draft[0] || cur); if (kk) k = kk; }
   if (S.draft.length && cur && S.tool === "polygon") {
@@ -3682,6 +3724,7 @@ function renderProps(){
     <div class="row" style="margin-top:6px">${LOC_KEYS.map(lk => { const sh = (P.proj.sheets || {})[keyOf(it.file, it.page)] || {}; return `<div class="fg"><label>${LOC_NAMES[lk]}</label><input type="text" data-prop="${lk}" list="dlp_${lk}" value="${esc(it[lk] || "")}" placeholder="${esc(sh[lk] || (lk === "room" ? it.label || "" : ""))}"><datalist id="dlp_${lk}">${locValues(lk).map(x => `<option value="${esc(x)}">`).join("")}</datalist></div>`; }).join("")}</div>
     <div class="row" style="margin-top:6px"><div class="fg"><label>QA status</label><select data-prop="qa">${Object.entries(QA_NAMES).map(([q, n]) => `<option value="${q}"${(it.qa || "") === q ? " selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="fg" style="flex:2"><label>QA note</label><input type="text" data-prop="qaNote" value="${esc(it.qaNote || "")}" placeholder="e.g. confirm against section B-B"></div></div>
+    ${detHtml(it, k)}
     <div class="small" style="margin-top:4px">${it.qa === "checked" ? "Checked by " + esc(it.qaBy) + ", " + esc(dmy(it.qaAt)) : "Not checked"}${it.ai ? " · AI-generated" : ""}${it.copied ? " · copied from " + esc(keyName(it.copied.from)) + " (" + esc(it.copied.how) + ")" : ""}</div></div>`;
   el.classList.add("on");
 }
@@ -3735,7 +3778,7 @@ function runAt(sp){   // the length run under a screen point -> {it, i, p, d}
   for (let n = items.length - 1; n >= 0; n--) { const it = items[n]; if (!isRun(it)) continue; const s = segAt(it, sp); if (s) return Object.assign({it}, s); }
   return null;
 }
-function cloneItem(it, pts){ const nb = Object.assign(JSON.parse(JSON.stringify(it)), {id: uid("I"), pts: pts.map(p => p.slice())}); delete nb.arcs; delete nb.locked; return nb; }
+function cloneItem(it, pts){ const nb = Object.assign(JSON.parse(JSON.stringify(it)), {id: uid("I"), pts: pts.map(p => p.slice())}); delete nb.arcs; delete nb.locked; delete nb.det; return nb; }
 function breakRun(it, i, p){
   if (it.locked) return lockedMsg();
   const A = it.pts.slice(0, i + 1).map(q => q.slice()), B = it.pts.slice(i + 1).map(q => q.slice());
@@ -6825,7 +6868,7 @@ async function sheetInfoDialog(readFirst){
 
 /* ------------------------------------------------------------------ QA: Measured → Checked, or Recheck required */
 const QA_NAMES = {"": "Measured", checked: "Checked", recheck: "Recheck required"};
-const needsReview = it => (it.ai || it.copied || it.revFlag) && it.qa !== "checked";
+const needsReview = it => (it.ai || it.copied || it.revFlag || (it.det && it.det.flag)) && it.qa !== "checked";
 function qaUser(){ return pref("zdTakeoffUser") || ""; }
 async function askUser(){
   let u = qaUser(); if (u) return u;
@@ -7518,6 +7561,7 @@ function paletteCmds(){
   add("Undo", undoAny, "Edit", "Ctrl+Z"); add("Redo", redoAny, "Edit", "Ctrl+Y");
   add("Find text on the drawings", () => { $("findIn").focus(); $("findIn").select(); }, "View", "Ctrl+F");
   add("Set scale", scaleDialog, "Page", "K"); add("Keyboard shortcuts", keysDialog, "Help");
+  add("AI engine — local AI (free, offline) setup and benchmark", locSetup, "AI"); add("Agent instructions — the working rules the AI follows", rulesDialog, "AI");
   add("Invert selection", invertSel, "Select", "Ctrl+I"); add("Quick select… (by condition, kind, markup type, check state)", quickSelect, "Select"); add("Deselect all", clearSel, "Select", "Esc");
     add("New condition", () => editCond(null), "Condition"); add("All projects", showStart, "Project");
   document.querySelectorAll("header button[id], #viewPop button[id], #qaBar button, aside button[id], .panel button[id]").forEach(b => btn(b, b.closest("#viewPop") ? "View" : b.closest("#qaBar") ? "Check" : "Button"));
@@ -8177,7 +8221,8 @@ function wire(){
   $("aiKeyBtn").onclick = () => aiShowKey($("aiKeyRow").style.display === "none");
   secretField($("aiKey"));
   $("aiKeySave").onclick = () => { const v = secretVal($("aiKey")).trim(); pref("zdTakeoffApiKey", v); AI.client = null; aiShowKey(!v); aiLog("bot", v ? "Key saved in this browser." : "Key removed."); };
-  $("aiNew").onclick = () => { if (AI.stop) AI.stop.abort(); AI.plan = []; AI.history = []; AI.view = null; $("aiLog").innerHTML = ""; aiToggle(true); };
+  $("aiEngBtn").onclick = () => locSetup(); $("aiRulesBtn").onclick = () => rulesDialog();
+  $("aiNew").onclick = () => { if (AI.stop) AI.stop.abort(); AI.plan = []; AI.history = []; pref(locHistKey(), ""); AI.view = null; $("aiLog").innerHTML = ""; aiToggle(true); };
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
   $("aiDetails").onclick = () => agentCmd("drawing details");
@@ -8319,6 +8364,8 @@ function wire(){
     const a = e.target.closest("[data-act]"); if (!a) return;
     if (a.dataset.act === "editCond") return editCond(cond(S.sel && P.proj.items.find(i => i.id === S.sel) ? P.proj.items.find(i => i.id === S.sel).cond : S.cond));
     if (a.dataset.act === "lock") return lockSel();
+    if (a.dataset.act === "detShow") { S.detShow = !S.detShow; draw(); return renderProps(); }
+    if (a.dataset.act === "detRestore") { const it = P.proj.items.find(i => i.id === S.sel); if (it && it.det && it.det.pts0 && !it.locked) { mutate(() => { it.pts = it.det.pts0.map(q => q.slice()); delete it.arcs; }, "Restore detected outline"); toast("Outline back as Auto area found it", 2000); } return; }
     if (a.dataset.act === "dup") return duplicateSel();
     if (a.dataset.act === "brk") return setTool("break");
     if (a.dataset.act === "delMark") return delObjects(new Set([S.selMark]));
@@ -8535,6 +8582,7 @@ function aiAreaCond(){
   return c;
 }
 async function aiRunTool(b){
+  { const t2 = await aiRunTool2(b); if (t2) return t2; }   // project questions, totals, explain, undo, rules: no picture or scale needed
   const V = AI.view, k = curScale(), inp = b.input || {};
   if (!V || V.key !== S.key) return {err: "The page changed — ask the user to press ‘Read this view’ again."};
   if (!k) return {err: "The page scale is not set; ask the user to set it (K) first."};
@@ -8609,7 +8657,11 @@ function aiLog(kind, html){ const d = document.createElement("div"); d.className
 const aiText = t => esc(t).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
 async function aiSend(text, fresh){
   if (AI.busy || !P.proj) return;
+  { const t = await ruleTeach(text); if (t === true) return; if (typeof t === "string") text = t.slice(5); }   // "remember: …" — a working rule, asked where to keep it
   if (!S.page) return aiLog("err", "Open a PDF page first.");
+  const eng = aiEngine();
+  if (eng === "rules") return agentCmd(text);
+  if (eng === "local" || (eng === "auto" && locModel())) return aiSendLocal(text);   // local AI: never handed to a cloud service
   let client;
   try { client = await aiClient(); } catch (e) { aiLog("err", esc(e.message) + " Answering with the free agent instead."); return agentCmd(text); }
   if (!client) { const smp = await aiSampler(); return smp ? aiSendPlan(smp, text) : agentCmd(text); }   // no API key: Claude through claude.ai, else the free rule-based agent
@@ -8629,8 +8681,8 @@ async function aiSend(text, fresh){
       const res = await client.beta.messages.create({
         model: AI_MODEL, max_tokens: 16000, output_config: {effort: "high"},
         betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
-        system: [{type: "text", text: AI_SYSTEM, cache_control: {type: "ephemeral"}}],
-        tools: AI_TOOLS, messages: AI.history
+        system: [{type: "text", text: AI_SYSTEM, cache_control: {type: "ephemeral"}}].concat(rulesPrompt() ? [{type: "text", text: rulesPrompt()}] : []),
+        tools: AI_TOOLS_ALL(), messages: AI.history
       }); replied = true;
       if (res.stop_reason === "refusal") { AI.history = []; aiLog("err", "Claude declined this request" + (res.stop_details && res.stop_details.explanation ? ": " + esc(res.stop_details.explanation) : "") + ". The chat was reset."); break; }
       AI.history.push({role: "assistant", content: res.content});
@@ -8656,6 +8708,319 @@ async function aiSend(text, fresh){
   }
   wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
   if (free) await agentCmd(text, true);
+}
+/* ------------------------------------------------------------------ agent instructions (the user's working rules)
+   Taught in the chat ("remember: exclude shafts from net flooring", "always show me the boundary before accepting") or typed
+   in Rules. Four scopes: this request only (not kept), this session (until the page is closed), this project (saved with the
+   project) and every project (kept in this browser). Active rules go to every language-model route (local AI, Claude) as
+   part of its instructions; a rule the app can carry out itself (preview the Auto area outline before adding) is also
+   switched on. Nothing is said to be saved unless it was. */
+const RULE_KEY = "zdTakeoffAgentRules", RULE_SCOPES = {once: "this request only", session: "this session", project: "this project", global: "every project"};
+function rulesGlobal(){ try { const r = JSON.parse(pref(RULE_KEY) || "[]"); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
+function rulesOf(scope){ return scope === "global" ? rulesGlobal() : scope === "project" ? ((P.proj && P.proj.agentRules) || []) : scope === "session" ? (AI.sessRules = AI.sessRules || []) : []; }
+function rulesPut(scope, L){
+  if (scope === "global") { pref(RULE_KEY, L.length ? JSON.stringify(L) : ""); return rulesGlobal().length === L.length; }
+  if (scope === "project") { if (!P.proj) return false; P.proj.agentRules = L; save(); return true; }
+  if (scope === "session") { AI.sessRules = L; return true; }
+  return false;
+}
+function rulesActive(){ return ["project", "global", "session"].flatMap(sc => rulesOf(sc).filter(r => r && r.on !== false && String(r.text || "").trim()).map(r => Object.assign({scope: sc}, r))); }
+function rulesPrompt(){
+  const L = rulesActive(); if (!L.length) return "";
+  return "\n\nTHE USER'S WORKING RULES — follow them unless the user says otherwise in this message:\n" + L.map(r => "- " + r.text + " (" + RULE_SCOPES[r.scope] + ")").join("\n");
+}
+const RULE_NEG = /\b(never|don'?t|do not|no|exclude|without|avoid|stop)\b/i;
+function ruleCore(t){ return String(t).toLowerCase().replace(/\b(please|always|never|don'?t|do not|from now on|remember( that)?|for this project|make sure( to)?|you should|i want you to|by default)\b/g, " ").replace(/[^a-z0-9"' ]+/g, " ").replace(/\s+/g, " ").trim(); }
+function ruleConflicts(text){   // an active rule about the same thing with the opposite sense ("always …" vs "never …")
+  const c = ruleCore(text), neg = RULE_NEG.test(text), w = new Set(c.split(" ").filter(x => x.length > 2));
+  return rulesActive().filter(r => { const c2 = ruleCore(r.text), w2 = c2.split(" ").filter(x => x.length > 2); if (!w2.length || !w.size) return false;
+    const same = w2.filter(x => w.has(x)).length / Math.max(w.size, w2.length); return same >= 0.6 && RULE_NEG.test(r.text) !== neg; });
+}
+function ruleEffects(text){   // rules the app itself can carry out
+  const out = [];
+  if (/\b(show|preview|confirm|see|check)\b.*\b(boundar|outline|polygon|area)/i.test(text) && /\b(before|first|prior)\b/i.test(text) && !RULE_NEG.test(text.replace(/\bbefore\b.*$/i, "")))
+    out.push({t: "Auto area shows each outline first (Accept / Tighter / Wider / Cancel)", run: () => { if (P.proj) { P.proj.auto = Object.assign({}, P.proj.auto || {}, {confirm: true}); save(); } }});
+  return out;
+}
+const RULE_TEACH = /^\s*(?!never\s*mind)(?:please\s+)?(?:remember(?:\s+that)?|from\s+now\s+on|always|never|as\s+a\s+rule|new\s+rule|rule\s*:|for\s+this\s+project\s*,?\s*(?:always|never|use|do|don'?t))\b[\s,:-]*/i;
+async function ruleTeach(text, fromAi){   // a message that sets a working rule: asked where to keep it, then saved and confirmed (true: handled; "once:…": use it for this request)
+  if (!RULE_TEACH.test(text)) return false;
+  aiLog(fromAi ? "bot" : "user", fromAi ? "The AI asks to save a rule: “" + esc(text.replace(/^remember:\s*/i, "")) + "”" : esc(text));
+  const body0 = text.replace(/^\s*(?:please\s+)?(?:remember(?:\s+that)?|as\s+a\s+rule|new\s+rule|rule\s*:)\s*[,:-]?\s*/i, "").trim();
+  const body = body0.charAt(0).toUpperCase() + body0.slice(1), conf = ruleConflicts(body), eff = ruleEffects(body), proj = !!P.proj;
+  const opt = (v, t, on) => `<label class="pk" style="display:block;margin:3px 0"><input type="radio" name="ruSc" value="${v}"${on ? " checked" : ""} style="width:auto"> ${t}</label>`;
+  const v = await ask("Save a working rule?", `<div class="fg w2"><label>Rule</label><textarea id="ruTx" style="width:100%;height:60px">${esc(body)}</textarea></div>
+    <div style="margin-top:6px"><b class="small">Keep it for</b>${opt("once", "This request only — not saved")}${opt("session", "This session — until the page is closed")}${proj ? opt("project", "This project — saved with the project", true) : ""}${opt("global", "Every project — kept in this browser", !proj)}</div>
+    ${conf.length ? `<p class="small" style="color:#b45309;margin-top:6px">⚠ It may conflict with: ${conf.map(r => "“" + esc(r.text) + "” (" + RULE_SCOPES[r.scope] + ")").join(", ")} — turn that one off in <b>Rules</b> if this replaces it.</p>` : ""}
+    ${eff.length ? `<p class="small" style="margin-top:6px">The app will also: ${eff.map(e => esc(e.t)).join("; ")}.</p>` : ""}
+    <p class="small" style="margin-top:6px">Rules go to the language-model routes (local AI, Claude) with every message. The built-in rule agent cannot read them; see them all in <b>Rules</b>.</p>`, "Save", () => {
+      const t = $("ruTx").value.trim(); if (!t) return "Write the rule";
+      return {t, sc: (document.querySelector("input[name=ruSc]:checked") || {}).value || "session"}; }, "ruTx");
+  if (!v) { aiLog("bot", "Not saved."); return true; }
+  if (v.sc === "once") { aiLog("bot", "Not saved — it applies to this request only."); return "once:" + v.t; }
+  const L = rulesOf(v.sc).slice(); L.push({id: uid("R"), text: v.t, on: true, at: new Date().toISOString()});
+  if (!rulesPut(v.sc, L)) { aiLog("err", "The rule could not be saved (browser storage refused it)."); return true; }
+  ruleEffects(v.t).forEach(e => e.run());
+  aiLog("tool", `Rule saved for <b>${RULE_SCOPES[v.sc]}</b>: “${esc(v.t)}” · ${rulesActive().length} active rule${rulesActive().length === 1 ? "" : "s"}${ruleEffects(v.t).length ? " · " + ruleEffects(v.t).map(e => esc(e.t)).join("; ") : ""}`);
+  return true;
+}
+async function rulesDialog(){
+  const rows = sc => rulesOf(sc).map((r, i) => `<div class="row" style="gap:6px;align-items:center;margin:3px 0"><input type="checkbox" data-ruon="${sc}:${i}"${r.on !== false ? " checked" : ""} style="width:auto" title="On / off"><input type="text" data-rutx="${sc}:${i}" value="${esc(r.text)}" style="flex:1"><button type="button" class="btn sm dng" data-rudel="${sc}:${i}" title="Delete">&times;</button></div>`).join("") || '<div class="small" style="padding:2px 0 6px">none</div>';
+  const sec = sc => `<h4 style="margin:10px 0 2px">${RULE_SCOPES[sc].replace(/^./, m => m.toUpperCase())}</h4><div data-rusec="${sc}">${rows(sc)}</div>`;
+  const dels = new Set();
+  const read = () => { const out = {newT: ($("ruNew").value || "").trim(), newSc: $("ruNewSc").value}; ["project", "global", "session"].forEach(sc => { out[sc] = rulesOf(sc).map((r, i) => dels.has(sc + ":" + i) ? null : Object.assign({}, r, {text: (document.querySelector(`[data-rutx="${sc}:${i}"]`) || {}).value || r.text, on: !!(document.querySelector(`[data-ruon="${sc}:${i}"]`) || {}).checked})).filter(Boolean); }); return out; };
+  const pr = ask("Agent instructions", `<div class="wide"></div><p class="small">Working rules the AI follows. Teach one in the chat (“remember: exclude shafts from net flooring”, “always show me the boundary before accepting”) or add it here. Untick to switch a rule off without deleting it.</p>
+    ${P.proj ? sec("project") : ""}${sec("global")}${sec("session")}
+    <div class="row" style="gap:6px;margin-top:10px"><input type="text" id="ruNew" placeholder="New rule, e.g. Group finishing quantities by floor and trade" style="flex:1"><select id="ruNewSc">${P.proj ? '<option value="project">this project</option>' : ""}<option value="global">every project</option><option value="session">this session</option></select></div>`, "Save", read, "ruNew");
+  document.getElementById("dlgB").onclick = e => { const d = e.target.closest("[data-rudel]"); if (d) { dels.add(d.dataset.rudel); d.parentElement.style.display = "none"; } };
+  const v = await pr; if (!v) return;
+  ["project", "global", "session"].forEach(sc => { if (sc !== "project" || P.proj) rulesPut(sc, v[sc]); });
+  if (v.newT) { const L = rulesOf(v.newSc).slice(); L.push({id: uid("R"), text: v.newT, on: true, at: new Date().toISOString()}); rulesPut(v.newSc, L); ruleEffects(v.newT).forEach(e => e.run()); }
+  toast(rulesActive().length + " active rule" + (rulesActive().length === 1 ? "" : "s"), 2000);
+}
+
+/* ------------------------------------------------------------------ more tools for the language-model routes
+   Project questions answered from the project itself (never guessed): what is in it, totals by condition, how one
+   measurement's quantity is worked out, undo the last change, the user's rules. */
+const AI_TOOLS2 = [
+  {name: "get_project_context", description: "The open project: its PDFs and pages, the page on screen (sheet number / title, scale and whether it is verified), every condition with its unit and total, how many measurements need review, the selected measurement and the user's active rules. Call it first for any question about the project.",
+   input_schema: {type: "object", properties: {}}},
+  {name: "quantity_totals", description: "Quantities by condition from the measurement sheet (the source of truth): gross, deductions and net with the unit, for this page or the whole project. Use it to answer 'how much', 'total', 'summary' questions — never estimate a quantity yourself.",
+   input_schema: {type: "object", properties: {scope: {type: "string", enum: ["page", "project"], description: "page (default) or project"}, condition: {type: "string", description: "Only this condition (name, optional)"}}}},
+  {name: "explain_measurement", description: "How one measurement's quantity is worked out: each sheet row as Nos × L × W × H = quantity with its unit, deductions as their own rows, and how it was made (Auto area: method, door gap, detected vs current area, warnings). Give its id, or leave it out for the selected one.",
+   input_schema: {type: "object", properties: {id: {type: "string", description: "Measurement id (from list_measured); empty = the selected measurement"}}}},
+  {name: "undo_last", description: "Undo the last change to the takeoff (the same as Ctrl+Z). Returns what was undone.",
+   input_schema: {type: "object", properties: {}}},
+  {name: "save_instruction", description: "Save a working rule the user asked you to remember. The user is asked to confirm it and where to keep it, so it is only saved if they agree.",
+   input_schema: {type: "object", required: ["text"], properties: {text: {type: "string", description: "The rule in the user's words"}, scope: {type: "string", enum: ["session", "project", "global"], description: "Suggested scope"}}}},
+  {name: "list_instructions", description: "The user's saved working rules with their scope and whether they are on.",
+   input_schema: {type: "object", properties: {}}}
+];
+const AI_TOOLS_ALL = () => AI_TOOLS.concat(AI_TOOLS2);
+function qtyOf(it){ const k = itemScale(it); return k ? rowsOf(it, k).reduce((a, r) => a + r.qty, 0) : null; }
+async function aiRunTool2(b){   // the tools that need no picture and no page scale (null: not one of them)
+  const inp = b.input || {};
+  if (b.name === "get_project_context") {
+    if (!P.proj) return {err: "No project is open."};
+    const sh = S.page ? (P.proj.sheets || {})[S.key] || {} : {}, sc = S.page ? P.proj.scales[S.key] : null, st = sc ? scaleState(sc) : null, sel = S.sel && P.proj.items.find(i => i.id === S.sel);
+    return {ok: {project: P.proj.name, pdfs: P.proj.files.map(f => ({name: f.name, pages: f.pages})),
+      page: S.page ? {pdf: (P.proj.files.find(f => f.id === S.fileId) || {}).name, page: S.pageNo, sheet_no: sh.no || "", sheet_title: sh.title || "", scale: sc ? scaleLabel(sc) : "not set", scale_status: st ? st.t : "not set", measurements_on_page: P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo).length} : null,
+      conditions: P.proj.conds.map(c => { const t = condTotals(c); return {name: c.name, type: c.type, unit: c.unit, net: +t.net.toFixed(3), measurements: P.proj.items.filter(i => i.cond === c.id).length, unscaled: t.noScale}; }),
+      need_review: P.proj.items.filter(needsReview).length, selected: sel ? {id: sel.id, name: sel.label || "", condition: (cond(sel.cond) || {}).name} : null,
+      rules: rulesActive().map(r => r.text)}};
+  }
+  if (b.name === "quantity_totals") {
+    if (!P.proj) return {err: "No project is open."};
+    const pg = inp.scope !== "project", want = String(inp.condition || "").trim().toLowerCase();
+    const cs = P.proj.conds.filter(c => !want || c.name.toLowerCase().includes(want));
+    if (!cs.length) return {err: "No condition matches “" + inp.condition + "”."};
+    const rows = cs.map(c => { let g = 0, d = 0, n = 0, un = 0; P.proj.items.filter(i => i.cond === c.id && (!pg || (i.file === S.fileId && i.page === S.pageNo))).forEach(it => { const k = itemScale(it); if (!k) { un++; return; } n++; rowsOf(it, k).forEach(r => { if (r.sign > 0) g += r.qty; else d -= r.qty; }); });
+      return {condition: c.name, unit: c.unit, gross: +g.toFixed(3), deductions: +d.toFixed(3), net: +(g - d).toFixed(3), measurements: n, left_out_no_scale: un}; }).filter(r => r.measurements || r.left_out_no_scale);
+    return {ok: {scope: pg ? "page " + (S.page ? pageName({file: S.fileId, page: S.pageNo}) : "") : "project", totals: rows}};
+  }
+  if (b.name === "explain_measurement") {
+    if (!P.proj) return {err: "No project is open."};
+    const it = P.proj.items.find(i => i.id === (inp.id || S.sel)); if (!it) return {err: inp.id ? "No measurement with that id." : "Nothing is selected — give an id."};
+    const c = cond(it.cond) || {}, k = itemScale(it); if (!k) return {err: "That page has no scale, so the measurement has no quantity yet."};
+    const fmt = v => v == null ? null : +(+v).toFixed(3), R = rowsOf(it, k).map(r => ({desc: rowDesc({r, it, i: 0}), sign: r.sign < 0 ? "deduct" : "add", dims: [r.nos, r.A, r.L, r.W, r.H].map((v, i) => v == null ? null : ["Nos", "A", "L", "W", "H"][i] + " " + fmt(v)).filter(Boolean).join(" × "), qty: fmt(r.qty), unit: r.unit}));
+    const d = it.det;
+    return {ok: {id: it.id, name: it.label || "", condition: c.name, page: pageName(it), rows: R, total: fmt(R.reduce((a, r) => a + r.qty, 0)), unit: c.unit,
+      made_by: d ? {how: "Auto area", from: d.src, door_gap_ft: d.gap, detected_sft: d.a0, edited_since: detEdited(it), warning: d.flag || null} : it.ai ? "AI / agent (needs checking)" : "drawn by hand",
+      check: it.qa || "not checked"}};
+  }
+  if (b.name === "undo_last") { if (!S.undo.length) return {err: "Nothing to undo."}; const lab = undoEntry(S.undo[S.undo.length - 1]).label || "last change"; undo(); return {ok: {undone: lab}}; }
+  if (b.name === "list_instructions") return {ok: {rules: ["project", "global", "session"].flatMap(sc => rulesOf(sc).map(r => ({text: r.text, scope: RULE_SCOPES[sc], on: r.on !== false})))}};
+  if (b.name === "save_instruction") { const t = String(inp.text || "").trim(); if (!t) return {err: "No rule text."};
+    const r = await ruleTeach("remember: " + t, true); return r === true && rulesActive().some(x => x.text === t || x.text.toLowerCase() === t.toLowerCase()) ? {ok: {asked_user: true, active_rules: rulesActive().map(x => x.text)}} : {err: "Not saved."}; }
+  return null;
+}
+
+/* ------------------------------------------------------------------ local AI (free, offline): Ollama on this computer
+   The page talks to an Ollama server the user runs on this computer (http://127.0.0.1:11434). The model gets the same tools
+   as Claude and runs them for real here; a model that can see pictures also gets the view on screen. Nothing goes to the
+   internet once the model is downloaded, and nothing falls back to a paid or cloud service: if the local model cannot be
+   reached, the built-in rule agent answers (also offline) and says so. Ollama only lets this site in when it is started
+   with OLLAMA_ORIGINS naming this site (setup in ⚙ Engine). */
+const LOC = {st: "unknown", msg: "", models: [], caps: {}, ver: "", checked: 0};
+const locUrl = () => (pref("zdTakeoffLocalUrl") || "http://127.0.0.1:11434").replace(/\/+$/, "");
+const locModel = () => pref("zdTakeoffLocalModel") || "";
+const aiEngine = () => pref("zdTakeoffAiEngine") || "auto";
+async function locFetch(path, body, ms){
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms || 4000);
+  try {
+    const r = await fetch(locUrl() + path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body), signal: ctl.signal} : {signal: ctl.signal});
+    if (r.status === 403) throw Object.assign(new Error("Ollama refused this site (403) — start it with OLLAMA_ORIGINS=" + location.origin + " (⚙ Engine → setup)"), {code: "blocked"});
+    if (!r.ok) { let m = ""; try { m = (await r.json()).error || ""; } catch (e) {} throw Object.assign(new Error("Ollama: " + (m || "HTTP " + r.status)), {code: r.status === 404 ? "nomodel" : "http"}); }
+    return await r.json();
+  } catch (e) {
+    if (e.code) throw e;
+    if (e.name === "AbortError") throw Object.assign(new Error("Ollama did not answer in time at " + locUrl()), {code: "timeout"});
+    throw Object.assign(new Error("No local AI at " + locUrl() + " — Ollama is not running, or it does not allow this site yet (OLLAMA_ORIGINS=" + location.origin + ", see ⚙ Engine → setup)"), {code: "offline"});
+  } finally { clearTimeout(t); }
+}
+async function locHealth(){   // -> LOC: ready | offline | blocked | nomodel | none (no model chosen)
+  try {
+    const v = await locFetch("/api/version"); LOC.ver = v.version || "";
+    const tags = await locFetch("/api/tags"); LOC.models = (tags.models || []).map(m => ({name: m.name || m.model, size: m.size || 0, params: (m.details || {}).parameter_size || "", quant: (m.details || {}).quantization_level || "", family: (m.details || {}).family || ""}));
+    const m = locModel();
+    if (!m) { LOC.st = "none"; LOC.msg = LOC.models.length ? "Ollama " + LOC.ver + " is running — choose a model" : "Ollama " + LOC.ver + " is running but has no models — ollama pull a model"; }
+    else if (!LOC.models.some(x => x.name === m || x.name === m + ":latest")) { LOC.st = "nomodel"; LOC.msg = "Model " + m + " is not installed — run: ollama pull " + m; }
+    else { if (!LOC.caps[m]) { try { const sh = await locFetch("/api/show", {model: m}, 8000); LOC.caps[m] = sh.capabilities || []; } catch (e) { LOC.caps[m] = []; } }
+      LOC.st = "ready"; LOC.msg = m + " ready" + (LOC.caps[m].length ? " · " + LOC.caps[m].join(", ") : "") + " · Ollama " + LOC.ver; }
+  } catch (e) { LOC.st = e.code === "blocked" ? "blocked" : "offline"; LOC.msg = e.message; }
+  LOC.checked = Date.now(); locLine(); return LOC;
+}
+const locCan = cap => (LOC.caps[locModel()] || []).includes(cap);
+function locLine(){
+  const el = $("aiEngLine"); if (!el) return;
+  const e = aiEngine(), dot = {ready: "#1e8e5a", none: "#c77700", nomodel: "#c77700", offline: "#b42318", blocked: "#b42318", unknown: "#6b7d92"}[LOC.st];
+  const route = e === "rules" ? "Built-in rule agent (offline)" : e === "claude" ? "Claude (your API key / claude.ai — online)" : e === "local" || locModel() ? "Local AI — " + (locModel() || "no model chosen") : "Auto — Claude if a key is set, else the built-in rule agent";
+  el.innerHTML = `<span style="color:${dot}">●</span> <b>${esc(route)}</b>${e !== "rules" && e !== "claude" && (e === "local" || locModel()) ? " · " + esc(LOC.msg || "not checked yet") : ""} · ${navigator.onLine ? "online" : "offline"}`;
+}
+function hwInfo(){   // what the browser tells about this computer (memory is rounded and capped at 8 GB by the browser)
+  const m = navigator.deviceMemory, c = navigator.hardwareConcurrency;
+  return {mem: m ? (m >= 8 ? "8 GB or more (the browser reports at most 8)" : m + " GB (rounded by the browser)") : "not reported by this browser", cores: c || "?", gpu: !!navigator.gpu};
+}
+async function locSetup(){
+  await locHealth();
+  const hw = hwInfo(), org = location.origin, e = aiEngine(), cur = locModel();
+  const opts = LOC.models.map(m => `<option value="${esc(m.name)}"${m.name === cur || m.name === cur + ":latest" ? " selected" : ""}>${esc(m.name)}${m.params ? " · " + esc(m.params) : ""}${m.size ? " · " + (m.size / 1e9).toFixed(1) + " GB" : ""}</option>`).join("");
+  const radio = (v, t, d) => `<label class="pk" style="display:block;margin:3px 0"><input type="radio" name="leEng" value="${v}"${e === v ? " checked" : ""} style="width:auto"> <b>${t}</b> <span class="small">${d}</span></label>`;
+  const bench = (() => { try { return JSON.parse(pref("zdTakeoffBench") || "[]"); } catch (er) { return []; } })();
+  const body = `<div class="wide"></div>
+    <div><b class="small">Which AI answers the takeoff agent</b>
+      ${radio("auto", "Auto", "local AI when a model is chosen below; otherwise Claude if you set a key, else the built-in rule agent")}
+      ${radio("local", "Local AI only", "free and offline — never sends anything to the internet; if the local model cannot be reached the built-in rule agent answers")}
+      ${radio("claude", "Claude", "your Anthropic API key or claude.ai — online, billed / plan-limited")}
+      ${radio("rules", "Built-in rule agent only", "offline, no model at all: the ⚡ agents and typed commands")}</div>
+    <div class="row" style="gap:8px;margin-top:8px"><div class="fg" style="flex:2"><label>Ollama address (this computer)</label><input type="text" id="leUrl" value="${esc(locUrl())}"></div>
+      <div class="fg" style="flex:2"><label>Model</label><select id="leModel"><option value="">— choose —</option>${opts}</select></div>
+      <div class="fg"><label>Context (tokens)</label><input type="number" id="leCtx" min="2048" step="1024" value="${+(pref("zdTakeoffLocalCtx") || 8192)}"></div></div>
+    <p class="small" id="leSt" style="margin:4px 0"><b>Status:</b> ${esc(LOC.msg)}</p>
+    <div class="row" style="gap:6px"><button type="button" class="btn sm" id="leTest">Test connection</button><button type="button" class="btn sm" id="leBench"${LOC.models.length ? "" : " disabled"}>Benchmark installed models</button></div>
+    <div id="leBenchOut" class="small" style="margin-top:6px">${bench.length ? benchTable(bench) : ""}</div>
+    <details style="margin-top:10px"${LOC.st === "ready" ? "" : " open"}><summary><b>Set up the free local AI (one time)</b></summary><ol class="small" style="margin:6px 0 0 18px;line-height:1.6">
+      <li>Install <b>Ollama</b> from ollama.com (Windows, macOS, Linux).</li>
+      <li>Let this site talk to it: set the environment variable <code>OLLAMA_ORIGINS=${esc(org)}</code><br>
+        Windows: Settings → System → About → Advanced system settings → Environment Variables → New (user variable), then quit Ollama from the tray and start it again.<br>
+        macOS: <code>launchctl setenv OLLAMA_ORIGINS "${esc(org)}"</code>, then quit and reopen Ollama. Linux (systemd): <code>sudo systemctl edit ollama</code> → <code>[Service]</code> <code>Environment="OLLAMA_ORIGINS=${esc(org)}"</code>, then <code>sudo systemctl restart ollama</code>.</li>
+      <li>Download a model that can call tools, e.g. <code>ollama pull qwen3:8b</code> — or one that can also see the drawing (vision + tools). Check the current names and sizes at ollama.com/library: models change often.</li>
+      <li>Press <b>Test connection</b>, choose the model, Save. Chrome may ask to let this site reach devices on your local network — allow it.</li></ol>
+      <p class="small">Keep Ollama on this computer only (its default, 127.0.0.1): do not set OLLAMA_HOST=0.0.0.0, which would open it to your network. Stop it from the tray icon / <code>ollama stop &lt;model&gt;</code>; update by installing the new version.
+      Rule of thumb (4-bit models): about 0.6–0.7 GB of memory per billion parameters plus the context — a 4B model needs about 3–4 GB, an 8B model 6–8 GB; vision models more. Small models (under 4B) often call tools wrongly — the benchmark shows how each one does on this computer.<br>
+      This computer, as the browser reports it: memory ${esc(String(hw.mem))} · ${esc(String(hw.cores))} processor threads · WebGPU ${hw.gpu ? "yes" : "no"}. The browser cannot see the graphics card's memory; Ollama uses it by itself when it can.</p></details>`;
+  const pr = ask("AI engine — local AI (free, offline)", body, "Save", () => ({eng: (document.querySelector("input[name=leEng]:checked") || {}).value || "auto", url: $("leUrl").value.trim(), model: $("leModel").value, ctx: Math.max(2048, +$("leCtx").value || 8192)}), "leUrl");
+  $("leTest").onclick = async () => { pref("zdTakeoffLocalUrl", $("leUrl").value.trim()); const m0 = locModel(); pref("zdTakeoffLocalModel", $("leModel").value || m0); $("leSt").innerHTML = "<b>Status:</b> checking…"; await locHealth(); pref("zdTakeoffLocalModel", m0);
+    $("leSt").innerHTML = "<b>Status:</b> " + esc(LOC.msg); const sel = $("leModel"), keep = sel.value; sel.innerHTML = '<option value="">— choose —</option>' + LOC.models.map(m => `<option value="${esc(m.name)}">${esc(m.name)}${m.params ? " · " + esc(m.params) : ""}</option>`).join(""); sel.value = keep; $("leBench").disabled = !LOC.models.length; };
+  $("leBench").onclick = async () => { const out = $("leBenchOut"); out.textContent = "Running… (each model is loaded in turn — the first answer of a model includes its loading time)"; const res = await locBenchmark(t => { out.textContent = t; }); out.innerHTML = benchTable(res); };
+  const v = await pr; if (!v) return locLine();
+  pref("zdTakeoffAiEngine", v.eng === "auto" ? "" : v.eng); pref("zdTakeoffLocalUrl", v.url && v.url !== "http://127.0.0.1:11434" ? v.url : ""); pref("zdTakeoffLocalModel", v.model); pref("zdTakeoffLocalCtx", String(v.ctx));
+  await locHealth(); toast("AI engine saved — " + (LOC.st === "ready" ? LOC.msg : aiEngine()), 3000);
+}
+function toOllamaTools(L){ return L.map(t => ({type: "function", function: {name: t.name, description: t.description, parameters: t.input_schema}})); }
+function toolArgsCheck(t, a){   // the model's arguments against the tool's schema: required fields there, types right, enums kept
+  if (!t) return "no such tool";
+  if (!a || typeof a !== "object" || Array.isArray(a)) return "arguments must be an object";
+  const S2 = t.input_schema || {}, P2 = S2.properties || {};
+  for (const r of S2.required || []) if (a[r] == null || a[r] === "") return "missing " + r;
+  for (const [k, v] of Object.entries(a)) { const d = P2[k]; if (!d || v == null) continue;
+    if (d.type === "number" && !isFinite(+v)) return k + " must be a number";
+    if (d.type === "string" && typeof v !== "string") a[k] = String(v);
+    if (d.type === "array" && !Array.isArray(v)) return k + " must be a list";
+    if (d.enum && !d.enum.includes(a[k])) return k + " must be one of " + d.enum.join(", ");
+    if (d.type === "boolean" && typeof v !== "boolean") a[k] = v === "true" || v === 1; }
+  return "";
+}
+function locCalls(msg){   // tool calls from a reply: the proper field, else a JSON call written in the text (small models do this)
+  const out = (msg.tool_calls || []).map(c => { const f = c.function || c; let a = f.arguments; if (typeof a === "string") { try { a = JSON.parse(a); } catch (e) { a = null; } } return {name: f.name, args: a || {}}; });
+  if (out.length || !msg.content) return {calls: out, inText: false};
+  const names = new Set(AI_TOOLS_ALL().map(t => t.name)), txt = String(msg.content).replace(/<think>[\s\S]*?<\/think>/g, "");
+  const m = txt.match(/\{[\s\S]*"name"\s*:\s*"([a-z_]+)"[\s\S]*\}/);
+  if (m && names.has(m[1])) { try { const j = JSON.parse(m[0]); const a = j.arguments || j.parameters || j.input || {}; return {calls: [{name: j.name, args: typeof a === "string" ? JSON.parse(a) : a}], inText: true}; } catch (e) {} }
+  return {calls: [], inText: false};
+}
+const LOC_SYS = `\n\nYOU RUN LOCALLY AND OFFLINE on the user's computer (a small open model). Rules for you:
+- Use the tools for everything about the drawing and the takeoff; every quantity you state must come from a tool result (quantity_totals, explain_measurement, list_measured or a measuring tool). Never estimate, round up or invent a quantity, a rate or a size.
+- For questions about the project call get_project_context first. For "how much / total" call quantity_totals. For "show the calculation" call explain_measurement.
+- If a tool returns an error, say what failed and what the user can do. Never say something was measured, saved or deleted unless a tool result says so.
+- General construction / quantity-surveying knowledge comes from your training and may be out of date or wrong; say so when unsure, and say "I don't know" rather than guess. You have no internet.
+- Keep replies short: what you did, the quantities (from the tools), what needs the user's check.`;
+function locHistKey(){ return "zdTakeoffChat:" + (P.proj ? P.proj.id : "-"); }
+function locHist(){ try { const h = JSON.parse(pref(locHistKey()) || "[]"); return Array.isArray(h) ? h : []; } catch (e) { return []; } }
+function locHistPut(h){ try { pref(locHistKey(), JSON.stringify(h.slice(-24))); } catch (e) {} }   // text only — no pictures, no tool traffic
+async function locChat(messages, tools, opts){
+  const t0 = performance.now(), r = await locFetch("/api/chat", Object.assign({model: locModel(), messages, tools, stream: false, keep_alive: "15m", options: {temperature: 0.2, num_ctx: +(pref("zdTakeoffLocalCtx") || 8192)}}, opts || {}), 300000);
+  r._ms = performance.now() - t0; return r;
+}
+async function aiSendLocal(text){
+  if (AI.busy || !P.proj) return;
+  if (!S.page) return aiLog("err", "Open a PDF page first.");
+  AI.busy = true; $("aiSend").disabled = true; $("aiRead").disabled = true;
+  aiLog("user", esc(text));
+  const wait = aiLog("wait", "Local AI (" + esc(locModel()) + ") is working… <span class=\"small\">first answer after loading the model can take a while</span>");
+  const met = {ms: 0, tok: 0, evalNs: 0, calls: 0, bad: 0, turns: 0};
+  let fallback = null;
+  try {
+    if (LOC.st !== "ready" || Date.now() - LOC.checked > 60000) await locHealth();
+    if (LOC.st !== "ready") throw Object.assign(new Error(LOC.msg), {code: LOC.st});
+    AI.view = await aiSnapshot(locCan("vision") ? 1150000 : 0);
+    const tools = AI_TOOLS_ALL(), user = {role: "user", content: aiContext(AI.view) + "\n\n" + text};
+    if (locCan("vision")) user.images = [AI.view.data];
+    const msgs = [{role: "system", content: AI_SYSTEM + LOC_SYS + rulesPrompt()}, ...locHist(), user];
+    let final = "";
+    for (let turn = 0; turn < 10; turn++) {
+      const r = await locChat(msgs, toOllamaTools(tools)); met.turns++; met.ms += r._ms; met.tok += r.eval_count || 0; met.evalNs += r.eval_duration || 0;
+      const msg = r.message || {}, {calls, inText} = locCalls(msg), said = String(msg.content || "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+      msgs.push({role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls});
+      if (said && !inText) { aiLog("bot", aiText(said)); final = said; }
+      if (!calls.length) break;
+      for (const c of calls) {
+        met.calls++; const t = tools.find(x => x.name === c.name), bad = toolArgsCheck(t, c.args);
+        let out;
+        if (bad) { met.bad++; out = {err: "Tool call rejected (" + bad + ") — call " + (t ? t.name : "a listed tool") + " again with valid arguments."}; }
+        else { try { out = await aiRunTool({name: c.name, input: c.args}); } catch (e) { out = {err: e.message || String(e)}; } }
+        aiLog(out.ok ? "tool" : "err", aiToolMsg(c.name, c.args || {}, out));
+        msgs.push({role: "tool", tool_name: c.name, content: JSON.stringify(out.ok || {error: out.err})});
+      }
+      refresh();
+    }
+    locHistPut(locHist().concat([{role: "user", content: text}, {role: "assistant", content: final || "(done with tools)"}]));
+    const tps = met.evalNs ? met.tok / (met.evalNs / 1e9) : 0;
+    aiLog("meta", `local · ${esc(locModel())} · ${(met.ms / 1000).toFixed(1)} s · ${tps ? tps.toFixed(1) + " tokens/s" : "—"} · ${met.calls} tool call${met.calls === 1 ? "" : "s"}${met.bad ? " (" + met.bad + " rejected)" : ""} · nothing sent to the internet`);
+    AI.locMet = Object.assign({at: new Date().toISOString(), model: locModel(), tps}, met);
+  } catch (e) { fallback = e; }
+  wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
+  if (fallback) { aiLog("err", esc(fallback.message || String(fallback)) + " — answered by the <b>built-in rule agent</b> instead (offline; nothing sent to a cloud service)."); await agentCmd(text, true); }
+}
+/* benchmark: the same three tasks for each installed model — does it pick the right tool with valid arguments, how long it
+   takes, how fast it writes. Nothing is changed on the drawing: the tools are offered but not run. Kept in this browser. */
+const BENCH = [
+  {q: "How many conditions does this project have, and what is on this page?", tool: "get_project_context", ok: a => true},
+  {q: "Measure the floor area of the BEDROOM on this page.", tool: "measure_rooms", alt: ["trace_room"], ok: a => !a.names || !a.names.length || JSON.stringify(a).toUpperCase().includes("BED")},
+  {q: "Count the doors tagged D1 on this page.", tool: "count_tags", ok: a => /d\s*-?1/i.test(String(a.what || ""))},
+  {q: "What is the total floor area measured on this page? Do not guess.", tool: "quantity_totals", ok: a => true}];
+async function locBenchmark(say){
+  const models = LOC.models.map(m => m.name), out = [], tools = toOllamaTools(AI_TOOLS_ALL()), m0 = locModel();
+  for (const m of models) {
+    pref("zdTakeoffLocalModel", m);
+    const row = {model: m, at: new Date().toISOString(), right: 0, valid: 0, n: BENCH.length, ms: [], tps: [], err: ""};
+    for (const [i, b] of BENCH.entries()) {
+      say && say("Benchmark: " + m + " — task " + (i + 1) + " of " + BENCH.length + "…");
+      try { const r = await locChat([{role: "system", content: AI_SYSTEM + LOC_SYS}, {role: "user", content: b.q}], tools, {keep_alive: "2m"});
+        row.ms.push(r._ms); if (r.eval_duration) row.tps.push((r.eval_count || 0) / (r.eval_duration / 1e9));
+        const {calls} = locCalls(r.message || {}), c = calls[0];
+        if (c && (c.name === b.tool || (b.alt || []).includes(c.name))) { row.right++; const t = AI_TOOLS_ALL().find(x => x.name === c.name); if (!toolArgsCheck(t, c.args) && b.ok(c.args || {})) row.valid++; }
+      } catch (e) { row.err = e.message; break; }
+    }
+    out.push(row);
+  }
+  pref("zdTakeoffLocalModel", m0);
+  try { pref("zdTakeoffBench", JSON.stringify(out)); } catch (e) {}
+  return out;
+}
+function benchTable(R){
+  const med = a => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+  return `<table class="mattbl"><tr><td><b>Model</b></td><td class="n"><b>Right tool</b></td><td class="n"><b>Valid args</b></td><td class="n"><b>Median reply</b></td><td class="n"><b>Tokens/s</b></td></tr>${R.map(r => `<tr><td>${esc(r.model)}${r.err ? ` <span class="warn">${esc(r.err)}</span>` : ""}</td><td class="n">${r.right}/${r.n}</td><td class="n">${r.valid}/${r.n}</td><td class="n">${med(r.ms) != null ? (med(r.ms) / 1000).toFixed(1) + " s" : "—"}</td><td class="n">${med(r.tps) != null ? med(r.tps).toFixed(1) : "—"}</td></tr>`).join("")}</table><div class="small">Measured on this computer${R[0] ? ", " + esc(dmy(R[0].at)) : ""}. Right tool: the model chose the tool the task needs; valid args: and filled it correctly.</div>`;
 }
 /* the claude.ai route: when this page is opened as a Claude artifact, Claude runs on the viewer's own Claude plan through
    the artifact's `sample` capability — no API key. Same tools as above; each message sends a fresh picture of the view
@@ -8684,7 +9049,8 @@ async function aiSendPlan(smp, text){
     AI.view = await aiSnapshot(1150000);
     const blob = await (await fetch("data:image/png;base64," + AI.view.data)).blob();
     const order = ["measure_rooms", "measure_unit", "detect_walls", "count_tags", "list_wall_thicknesses", "trace_room", "draw_area", "draw_length", "add_counts", "delete_area", "find_text", "set_condition", "list_measured"];
-    const tools = AI_TOOLS.slice().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).slice(0, AI.toolMax || 99).map(t => ({name: t.name, description: t.description, inputSchema: t.input_schema,
+    const oi = n => { const i = order.indexOf(n); return i < 0 ? 99 : i; };
+    const tools = AI_TOOLS_ALL().slice().sort((a, b) => oi(a.name) - oi(b.name)).slice(0, AI.toolMax || 99).map(t => ({name: t.name, description: t.description, inputSchema: t.input_schema,
       execute: async input => {
         if (ctl.signal.aborted) throw new Error("Stopped by the user.");
         const b = {name: t.name, input: input || {}};
@@ -8696,7 +9062,7 @@ async function aiSendPlan(smp, text){
       }}));
     AI.plan = (AI.plan || []).slice(-8);
     const turn = `${aiContext(AI.view)}\n\nThe attached image is the view on screen now; tool coordinates are pixels of this image.\n\n${text}`;
-    const input = [{role: "user", content: AI_SYSTEM}, ...AI.plan, {role: "user", content: turn}];
+    const input = [{role: "user", content: AI_SYSTEM + rulesPrompt()}, ...AI.plan, {role: "user", content: turn}];
     const res = await smp(input, {images: blob, tools, signal: ctl.signal,
       onText: ({text: t}) => { said = t; const part = t.slice(from).trim(); if (!part) return; if (!bubble) bubble = aiLog("bot", ""); bubble.innerHTML = aiText(part); $("aiLog").scrollTop = 1e9; }});
     if (!said) aiLog("bot", aiText(res.text));
@@ -8781,6 +9147,7 @@ async function freeImport(){
 function aiShowKey(on){ $("aiKeyRow").style.display = on ? "flex" : "none"; if (on) secretSet($("aiKey"), pref("zdTakeoffApiKey") || ""); }
 function aiToggle(on){
   $("aiPanel").classList.toggle("on", on); $("bClaude").classList.toggle("on", on);
+  if (on) { locLine(); if (aiEngine() === "local" || (aiEngine() === "auto" && locModel())) locHealth(); }
   if (on) { aiShowKey(false); if (!$("aiLog").children.length) aiLog("bot", "I read the drawing and do the takeoff with you.<br><b>Free agents (no API key, no cost):</b> ⚡ <b>Full takeoff</b> does rooms, walls, doors / windows and finishes in one run — this page, the PDF or the project · 🏠 <b>Rooms</b> traces every named room and checks it against its written size · 🧱 <b>Walls</b> finds walls from their face lines · 🚪 <b>Doors / windows</b> counts the tags · 🎨 <b>Finishes</b> gives each room's plaster / paint, skirting and ceiling, openings deducted · ✅ <b>Check</b> audits the takeoff. Or type <i>measure bedroom</i>, <i>walls 9\"</i>, <i>count D1</i>, <i>how many doors</i>, <i>help</i>.<br><b>Claude:</b> with an API key, or opened in claude.ai — type what you want and press <b>Read this view</b>; Claude uses the agents, draws what they cannot, and asks you when something is unclear."); aiSampler().then(smp => { if (smp && !pref("zdTakeoffApiKey")) aiLog("bot", "<b>Connected to Claude through claude.ai — no API key needed.</b> Zoom to an area, type what to measure (e.g. <i>9\" walls on this floor, count doors D1</i>) and press <b>Read this view</b>. It runs on your Claude plan; the first time, press Allow."); }); setTimeout(() => $("aiIn").focus(), 0); }
 }
 
@@ -11146,7 +11513,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
