@@ -413,6 +413,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     ok(JSON.stringify(await T(() => zdTakeoff.cmdSteps('measure all rooms, then count doors and walls 9"; how many D1'))) === JSON.stringify(["measure all rooms", "count doors", 'walls 9"', "how many D1"]), "a chained command is split into its steps");
     ok((await T(() => zdTakeoff.cmdSteps("apartment no. 107"))).length === 1 && (await T(() => zdTakeoff.cmdSteps("count D1 and D2"))).length === 1, "…but not inside one (apartment no. 107 · count D1 and D2)");
     await T(() => { const P = zdTakeoff.P.proj; P.items = P.items.filter(i => !(i.cond === "CFA" && i.label === "KITCHEN")); zdTakeoff.S.cond = "CFA"; });
+    await T(() => { window.__autoWhere = setInterval(() => { const d = document.querySelector(".dlg"); if (document.getElementById("dlgBack").classList.contains("on") && d && /Where —/.test(d.textContent)) {   // typed commands ask where first: the whole page here
+      const r = d.querySelector('input[name="arW"][value="all"]'); if (r) r.checked = true; document.getElementById("dlgOk").click(); } }, 40); });
     const kt = await T(() => zdTakeoff.agentCmd("measure kitchn")), kr = kt && kt.rooms ? kt.rooms.find(x => x.name === "KITCHEN") : null;
     calc("“measure kitchn” (a typing slip) measures the KITCHEN", 168, kr ? kr.area_sft : NaN, 0.01, "Sft");
     const again = await T(() => zdTakeoff.agentCmd("measure kitchen"));
@@ -428,7 +430,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     const fb = () => T(() => { const t = document.getElementById("aiLog").innerText; return /free agent instead/.test(t) && /D1: \d+ Nos/.test(t); });
     for (let i = 0; i < 60 && !(await fb()); i++) await wait(250);
     ok(await fb(), "with an API key that cannot be used, the chat still answers — by the free agent, and says so");
-    await T(() => localStorage.removeItem("zdTakeoffApiKey"));
+    await T(() => { localStorage.removeItem("zdTakeoffApiKey"); clearInterval(window.__autoWhere); });
     // the panel
     ok(await T(() => ["agFull", "agFin", "agCheck"].every(id => document.getElementById(id))), "⚡ Full takeoff, 🎨 Finishes and ✅ Check buttons in the Claude panel");
     await page.click("#agFull"); await wait(250); ok(await page.isVisible("#ftScope"), "⚡ Full takeoff opens its dialog (where, what, room and door heights)"); await closeDlg();

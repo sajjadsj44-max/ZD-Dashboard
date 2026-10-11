@@ -317,7 +317,7 @@ function mutate(fn, label){
 /* the shape being drawn keeps its own history in steps: a click is one step, an arc (many points) is one step, so
    Ctrl+Z / Backspace take back the last click or the whole arc and Ctrl+Y puts it back. With nothing being drawn,
    Ctrl+Z / Ctrl+Y step through the project history. */
-const DRAFT_TOOLS = ["draw", "ded", "measure", "fence", "rect", "open", "cal", "circle", "vp", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref",
+const DRAFT_TOOLS = ["draw", "ded", "measure", "fence", "area", "rect", "open", "cal", "circle", "polygon", "vp", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref",
   "mk_polyline", "mk_polygon", "mk_line", "mk_box", "mk_ellipse", "mk_link", "mk_redact", "mk_erase", "mk_callout", "mk_text", "mk_stamp", "mk_image"];
 function draftPush(pts, arc){
   if (!S.draftSteps || S.draftSteps.reduce((a, n) => a + n, 0) !== S.draft.length) S.draftSteps = S.draft.map(() => 1);
@@ -1332,7 +1332,7 @@ async function typeDialog(){
    (the room's core). The core is grown back out over the thin lines to the wall faces, pockets narrower than the
    furniture setting are filled (furniture against a wall), and the outline is traced, squared up when the room is
    rectilinear (the bulge through a door opening is dropped there) and snapped onto the wall lines. */
-const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false, layers: true};
+const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false, layers: true, confirm: false};
 const autoOpt = () => Object.assign({}, AUTO_DEF, (P.proj && P.proj.auto) || {});
 function segsIn(g, x0, y0, x1, y1){   // lines in a box — not those on PDF layers switched off
   const c = g.cell, ids = new Set(), off = layerOffIx(g);
@@ -1453,9 +1453,19 @@ function jambLines(ids, k, gapFt){
 }
 /* room names (BEDROOM, BATH…) written in the window, as pixel masks: a space that has its own name is never taken
    into another room as a recess or pocket */
+/* shafts, ducts, lift wells, voids: not rooms to stop at, but holes in the floor round them — kept out of the pocket rule and
+   deducted (Auto area records them as cut-outs of the room) */
+const VOID_RX = /\b(SHAFT|DUCT|VOID|LIFT|O\.?T\.?S|OPEN\s+TO\s+SKY|CUT\s*-?\s*OUT|LIGHT\s*WELL|STAIR\s*WELL)\b/i;
+function voidMask(x0, y0, W, H, px){
+  const m = new Uint8Array(W * H), T = S.texts[S.key] || []; let n = 0;
+  textLines(T).forEach(l => { if (l.tag || !VOID_RX.test(l.s) || l.s.length > 32) return; n++;
+    const kk = hereScale([l.x, l.y]) || 9, x = Math.round((l.x + l.w / 2 - x0) / px), y = Math.round((l.y - l.h / 2 - y0) / px), r = Math.max(2, Math.round(Math.max(l.h / 2, l.w / 2 + 0.3 * kk, 0.75 * kk) / px));   // wider than the text itself: the text is ink, the open floor round it marks the pocket
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) m[yy * W + xx] = 1; } });
+  m.n = n; m.names = textLines(T).filter(l => !l.tag && VOID_RX.test(l.s) && l.s.length <= 32); return m;
+}
 function labelMask(x0, y0, W, H, px, own){   // own: the name of the room being measured (not a reason to stop)
   const m = new Uint8Array(W * H), T = S.texts[S.key] || [];
-  textLines(T).forEach(l => { if (l.tag || !ROOM_RX.test(l.s) || l.s.length > 32) return;
+  textLines(T).forEach(l => { if (l.tag || !ROOM_RX.test(l.s) || l.s.length > 32 || VOID_RX.test(l.s)) return;
     if (own && dist(own, [l.x + l.w / 2, l.y - l.h / 2]) < Math.max(2, l.h)) return;
     const x = Math.round((l.x + l.w / 2 - x0) / px), y = Math.round((l.y - l.h / 2 - y0) / px), r = Math.max(2, Math.round(l.h / px / 2));
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) m[yy * W + xx] = 1; } });
@@ -1798,7 +1808,7 @@ async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
   };
   // small separate marks go first: letters, stipple dots, dashed door swings — and the dashes of dashed lines, unless they
   // run on in a straight row (a dashed boundary of an open area): those rows are joined into one solid line and kept
-  const small = []; await breathe();
+  const small = [], dashM = new Uint8Array(N); await breathe();
   comps(m, (c, w, h) => { if (Math.max(w, h) < minPx) small.push({c, x0: c.reduce((a, i) => Math.min(a, i % W), W), y0: c.reduce((a, i) => Math.min(a, (i - i % W) / W), H), w, h}); });
   if (dashBound) {
     const G = 0.8 * kft / px, L = 2 * kft / px, keep = new Set();
@@ -1816,12 +1826,13 @@ async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
         run.forEach(r => keep.add(r.d));
         const c = Math.round(run.reduce((s2, r) => s2 + r.c, 0) / run.length), t = Math.max(1, Math.round(run.reduce((s2, r) => s2 + r.t, 0) / run.length / 2));
         for (let a = Math.floor(run[0].a); a <= Math.ceil(run[run.length - 1].b); a++) for (let o2 = -t; o2 <= t; o2++) {
-          const x = dir === "H" ? a : c + o2, y = dir === "H" ? c + o2 : a; if (x >= 0 && y >= 0 && x < W && y < H) m[y * W + x] = 1; }
+          const x = dir === "H" ? a : c + o2, y = dir === "H" ? c + o2 : a; if (x >= 0 && y >= 0 && x < W && y < H) { m[y * W + x] = 1; dashM[y * W + x] = 1; } }
       }
     }
     small.forEach(d => { if (!keep.has(d)) d.c.forEach(i => { m[i] = 0; }); });
     keep.forEach(d => d.c.forEach(i => { m[i] = 1; }));
   } else small.forEach(d => d.c.forEach(i => { m[i] = 0; }));
+  const raw = m.slice();   // the cleaned ink before it is thickened: a drawn line's own width is measured on it
   // then ink closer than ~0.4 ft fuses (hatching into a solid wall, so no fill runs between its strokes), 1 px thicker
   // so an 8-neighbour step cannot slip between diagonal pixels
   await breathe();
@@ -1837,7 +1848,7 @@ async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
   // the room but must not split its core when openings are closed
   await breathe(); const big = new Uint8Array(N), bigPx = 8 * kft / px;
   comps(thin, (c, w, h) => { if (Math.max(w, h) >= bigPx) c.forEach(i => { big[i] = 1; }); });
-  return {thin, big};
+  return {thin, big, dash: dashM, raw};
 }
 function widen(m, W, H, r){   // every ink pixel widened to a disc of radius r px
   const N = W * H, f = new Float32Array(N), out = new Uint8Array(N), r2 = r * r;
@@ -1851,7 +1862,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
   if (!k) return {err: "Set the page scale first (K) — the door gap and wall offsets are in feet."};
   const o = Object.assign(autoOpt(), over || {}), img = o.src !== "vector";
   if (!img && !g.segs.length) return {err: "This page has no vector lines — switch Auto area settings (⚙) to ‘walls from the drawing image’."};
-  for (const [half, pxFt] of [[45, 0.06], [110, 0.14]]) {
+  for (const [half, pxFt] of [[45, 0.06], [110, 0.14], [240, 0.3]]) {
     const px = pxFt * k, W = Math.ceil(2 * half * k / px), H = W, x0 = seed[0] - half * k, y0 = seed[1] - half * k;
     const bf = o.layers ? segRoleFilter(g, BOUND) : null, ocb = o.layers && bf ? await boundCfg(S.fileId) : null;   // the PDF's wall / door / window / column / railing layers only
     const ids = barrierIds(g, segsIn(g, x0, y0, x0 + W * px, y0 + H * px).filter(i => !bf || bf(i)), k, o);
@@ -1902,7 +1913,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
         done.forEach(it => { ctx.beginPath(); it.pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath(); ctx.fill(); });
         const d = ctx.getImageData(0, 0, W, H).data; for (let i = 0; i < N; i++) if (d[i * 4 + 3] > 128) { thin[i] = 1; bar[i] = 1; } } }
     if (o.show) S.autoShow = {key: S.key, x0, y0, px, W, H, url: maskUrl(thin, W, H)};
-    await breathe(); const named = labelMask(x0, y0, W, H, px, o.own);
+    await breathe(); const named = labelMask(x0, y0, W, H, px, o.own), vm = voidMask(x0, y0, W, H, px), keepOut = vm.n ? named.map((v, i) => v || vm[i]) : named;
     // the click in a space narrower than the door gap (a passage, a corridor as wide as a door): its width and length here
     const csx = Math.floor((seed[0] - x0) / px), csy = Math.floor((seed[1] - y0) / px); let passage = null;
     if (csx > 0 && csy > 0 && csx < W - 1 && csy < H - 1 && !thin[csy * W + csx] && bar[csy * W + csx]) {
@@ -1943,7 +1954,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
       m = A.m;
     }
     await breathe();
-    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) { await breathe(); fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2, named); } await breathe(); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
+    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) { await breathe(); fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2, keepOut); } await breathe(); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
     let partial = false;
     if (passage) { let n = 0; if (passage.horiz) { for (let x = 0; x < W; x++) if (m[csy * W + x]) n++; } else for (let y = 0; y < H; y++) if (m[y * W + csx]) n++;
       partial = n * px / k < 0.6 * passage.along; }   // the outline takes in less than 60 % of the passage's length: a piece by a doorway, not the passage
@@ -1959,9 +1970,77 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
       for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const u = xx + dx, v = yy + dy; if (u >= 0 && v >= 0 && u < W && v < H && thin[v * W + u]) return true; } return false; }, px, o.gap));
     if (sq && !ids.length) Q = cleanPoly(pushSides(Q, inkPx, px, k));
     if (Q.length < 3 || polyArea(Q) < 1e-6) return {err: "No closed space found at that point.", passage};
-    return {pts: Q, rect: !!sq, passage, partial};
+    if (!ids.length) Q = cleanPoly(inkCentre(Q, x0, y0, W, H, px, k, img ? ink.raw : thin));   // a scan: to the middle of the wall line, as on a vector page
+    // holes: a shaft / duct / void inside the room (its label inside, the room all round it) — deducted, not floor
+    const holes = [];
+    if (vm.n) { const mN = m.reduce((a, v) => a + v, 0), sIdx = csy * W + csx, inkT = img ? ink.thin : thin;
+      for (const l of vm.names) {   // the closed space round each void label, inside its own lines: the shaft's inside
+        const lx = Math.round((l.x + l.w / 2 - x0) / px), ly = Math.round((l.y - l.h / 2 - y0) / px); if (lx < 1 || ly < 1 || lx >= W - 1 || ly >= H - 1 || !m[ly * W + lx]) continue;
+        let s0 = -1; for (let r = 0; r < 40 && s0 < 0; r++) for (let dy = -r; dy <= r && s0 < 0; dy++) for (let dx = -r; dx <= r && s0 < 0; dx++) { const x = lx + dx, y = ly + dy; if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !inkT[y * W + x] && !named[y * W + x]) s0 = y * W + x; }
+        if (s0 < 0) continue;
+        const R = new Uint8Array(N), st = new Int32Array(N); let top = 0, cnt = 0, open = false; R[s0] = 1; st[top++] = s0;
+        while (top) { const i = st[--top], x = i % W, y = (i - x) / W; if (++cnt > 0.6 * mN || i === sIdx || x === 0 || y === 0 || x === W - 1 || y === H - 1) { open = true; break; }
+          for (const j of [i - 1, i + 1, i - W, i + W]) if (!R[j] && !inkT[j] && Math.abs(j % W - x) <= 1) { R[j] = 1; st[top++] = j; } }
+        if (open || cnt < (k / px) ** 2) continue;
+        const lp = outerLoop(R, W, H); if (!lp || lp.length < 4) continue;
+        let Hq = dpClosed(lp.map(q => [x0 + q[0] * px, y0 + q[1] * px]), 1.6 * px);
+        Hq = cleanPoly(ids.length ? outerFace(snapPoly(Hq, ids.map(i => g.segs[i]), Math.max(4 * px, 0.35 * k), k, 0, px), g, k) : offsetPoly(Hq, px));
+        if (Hq.length >= 3 && polyArea(Hq) > 1e-6 && Hq.every(q => pointInPoly(q, Q)) && !holes.some(h => pointInPoly(Hq[0], h.pts))) holes.push({pts: Hq, name: l.s.trim()});
+      } }
+    // warnings: the outline is not clearly the room — the user is told, never a wrong area that looks right
+    let warn = "";
+    if (img && ink.dash) { let on = 0, all = 0; for (let i = 0; i < Q.length; i++) { const a = Q[i], b = Q[(i + 1) % Q.length], L = dist(a, b), n = Math.max(2, Math.ceil(L / (0.5 * k))); let e = 0;
+        for (let j = 1; j < n; j++) { const q = [a[0] + (b[0] - a[0]) * j / n, a[1] + (b[1] - a[1]) * j / n]; let hit = false;
+          for (let dy = -3; dy <= 3 && !hit; dy++) for (let dx = -3; dx <= 3 && !hit; dx++) { const u = Math.round((q[0] - x0) / px) + dx, v = Math.round((q[1] - y0) / px) + dy; if (u >= 0 && v >= 0 && u < W && v < H && ink.dash[v * W + u]) hit = true; }
+          if (hit) e++; }
+        all++; if (L > 1.5 * k && e / (n - 1) > 0.6) on++; }
+      if (on) warn = "bounded on " + (on === 1 ? "one side" : on + " sides") + " by a dashed line — a grid line or an open edge? Check the outline"; }
+    if (!warn && g.segs.length && ids.length) { const sup = lineSupport(Q, g, k); if (sup < 0.75) warn = "only " + Math.round(sup * 100) + " % of the outline follows the drawing's lines — something (text, a watermark, a gap) may have broken a wall; check it"; }
+    return {pts: Q, rect: !!sq, passage, partial, holes, warn};
   }
   return {err: "The space leaks — an opening wider than the door gap (" + f3(autoOpt().gap) + " ft) joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it."};
+}
+/* a scan has no vector lines to snap to: the trace stops at the inside edge of the ink. Each side is moved out to the middle of
+   the line it lies against (half the line's width, measured across it), as a vector outline lies on the line itself. Solid
+   (poché) walls — ink much wider than a drawn line — are left as traced: their face is the ink's edge. */
+function inkCentre(Q, x0, y0, W, H, px, k, ink){
+  const at = (x, y) => { const u = Math.round((x - x0) / px), v = Math.round((y - y0) / px); return u >= 0 && v >= 0 && u < W && v < H && !!ink[v * W + u]; };
+  let sa = 0; for (let i = 0; i < Q.length; i++) { const p = Q[i], q = Q[(i + 1) % Q.length]; sa += p[0] * q[1] - q[0] * p[1]; }
+  const cw = sa > 0 ? 1 : -1, ws = [];
+  for (let i = 0; i < Q.length; i++) { const a = Q[i], b = Q[(i + 1) % Q.length], L = dist(a, b); if (L < 1.5 * k) continue;
+    const nx = cw * (b[1] - a[1]) / L, ny = -cw * (b[0] - a[0]) / L;   // outward
+    for (const f of [0.3, 0.5, 0.7]) { const p = [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; let t = -2 * px;
+      while (t < 4 * px && !at(p[0] + nx * t, p[1] + ny * t)) t += px / 4; if (t >= 4 * px) continue;
+      const t0 = t; while (t < t0 + 0.6 * k && at(p[0] + nx * t, p[1] + ny * t)) t += px / 4; ws.push({w: t - t0, s: t0}); } }
+  if (ws.length < 4) return Q;
+  ws.sort((p, q) => p.w - q.w); const w = ws[Math.floor(ws.length / 2)].w, s0 = ws.map(o => o.s).sort((p, q) => p - q)[Math.floor(ws.length / 2)];
+  if (w > 0.25 * k) return Q;   // solid walls: the ink's edge is the face
+  return offsetPoly(Q, s0 + w / 2);
+}
+/* a shaft's inside, moved out to its walls' outer face: the drawing's line parallel to each side, 0.2–1.6 ft further out
+   (the same distance all round — the median of the sides that have one); none found: the inside as traced */
+function outerFace(Q, g, k){
+  let sa = 0; for (let i = 0; i < Q.length; i++) { const p = Q[i], q = Q[(i + 1) % Q.length]; sa += p[0] * q[1] - q[0] * p[1]; }
+  const cw = sa > 0 ? 1 : -1, ds = [];
+  for (let i = 0; i < Q.length; i++) { const a = Q[i], b = Q[(i + 1) % Q.length], L = dist(a, b); if (L < 1.5 * k) continue;
+    const u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L], n = [cw * u[1], -cw * u[0]], mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], R = 1.7 * k;
+    let best = null;
+    segsIn(g, mid[0] - R - L / 2, mid[1] - R - L / 2, mid[0] + R + L / 2, mid[1] + R + L / 2).forEach(si => { const s = g.segs[si], sl = Math.hypot(s[2] - s[0], s[3] - s[1]); if (sl < 0.5 * k) return;
+      if (Math.abs((s[2] - s[0]) / sl * u[1] - (s[3] - s[1]) / sl * u[0]) > 0.05) return;   // not parallel
+      const d = (s[0] - mid[0]) * n[0] + (s[1] - mid[1]) * n[1]; if (d < 0.2 * k || d > 1.6 * k) return;
+      const t0 = (s[0] - mid[0]) * u[0] + (s[1] - mid[1]) * u[1], t1 = (s[2] - mid[0]) * u[0] + (s[3] - mid[1]) * u[1]; if (Math.max(t0, t1) < -L / 4 || Math.min(t0, t1) > L / 4) return;
+      if (best == null || d < best) best = d; });
+    if (best != null) ds.push(best); }
+  if (!ds.length) return Q;
+  ds.sort((p, q) => p - q); return offsetPoly(Q, ds[Math.floor(ds.length / 2)]);
+}
+/* how much of an outline lies on the drawing's own lines (vector pages): sampled every half foot */
+function lineSupport(Q, g, k){
+  const r = Math.max(0.3 * k, 1.5); let on = 0, n = 0;
+  for (let i = 0; i < Q.length; i++) { const a = Q[i], b = Q[(i + 1) % Q.length], L = dist(a, b), m = Math.max(1, Math.ceil(L / (0.5 * k)));
+    for (let j = 0; j < m; j++) { const p = [a[0] + (b[0] - a[0]) * (j + 0.5) / m, a[1] + (b[1] - a[1]) * (j + 0.5) / m]; n++;
+      if (segsIn(g, p[0] - r, p[1] - r, p[0] + r, p[1] + r).some(si => { const s = g.segs[si]; return distSeg(p, [s[0], s[1]], [s[2], s[3]]) <= r; })) on++; } }
+  return n ? on / n : 1;
 }
 /* the inside of walls drawn as two lines with nothing between them: without this, the empty strip between a wall's faces
    is an enclosed space next to the room and the pocket rule would add it (the room would run to the wall's far face).
@@ -2000,18 +2079,60 @@ async function autoAt(p){
   busy("Finding the room…"); S.autoBusy = true;
   const key = S.key;
   await new Promise(r => setTimeout(r, 20));
-  let res; try { res = await autoRoomGuarded(p); } catch (e) { res = {err: "Auto area failed: " + (e.message || e)}; }
-  busy(""); S.autoBusy = false;
+  const t0 = performance.now(); let res; try { res = await autoRoomGuarded(p); } catch (e) { res = {err: "Auto area failed: " + (e.message || e)}; }
+  busy(""); S.autoBusy = false; kpiLog("auto", {ms: Math.round(performance.now() - t0), err: !!res.err, flag: !!(res.leak || res.short || res.warn), holes: (res.holes || []).length});
   if (S.key !== key || !cond(c.id)) return toast("The page changed while the room was traced — nothing added; click again", 4000);   // never a room of one page put on another
   if (res.err) return toast(res.err, 6000);
-  const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "";
-  mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm}); });
+  if (autoOpt().confirm) {   // "show me the boundary before it is added": accept, trace again with a tighter / wider door gap, or cancel
+    for (let round = 0; round < 6; round++) {
+      const ans = await autoPreview(res, p); if (!ans) return draw();
+      if (ans === "ok") break;
+      const g0 = res.gap || autoOpt().gap, g2 = ans === "tight" ? Math.max(0.5, g0 * 0.75) : Math.min(29, g0 * 1.5);
+      busy("Tracing again — openings closed up to " + f3(g2) + " ft…"); S.autoBusy = true; await new Promise(r => setTimeout(r, 20));
+      let r2; try { r2 = await autoRoom(p, {gap: g2}); } catch (e) { r2 = {err: e.message || String(e)}; }
+      busy(""); S.autoBusy = false;
+      if (S.key !== key) return toast("The page changed — nothing added", 3000);
+      if (r2.err) toast("With openings up to " + f3(g2) + " ft: " + r2.err + " — the last outline is kept", 5000); else { r2.gap = g2; r2.note = "openings closed up to " + f3(g2) + " ft"; res = r2; }
+    }
+  }
+  const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "", kk = hereScale(p);
+  const det = {how: "auto", src: autoOpt().src === "vector" ? "vector lines" : "drawing image", gap: +(res.gap || autoOpt().gap), note: res.note || "",
+    flag: res.leak ? "leaks — " + res.leak : res.short ? res.short : res.warn ? res.warn : res.rect || (res.holes || []).length ? "" : "not square — check the outline", a0: kk ? +(polyArea(res.pts) / kk / kk).toFixed(4) : null, pts0: res.pts.map(q => q.slice()), at: new Date().toISOString(),
+    holes: (res.holes || []).map(h => ({name: h.name, a: kk ? +(polyArea(h.pts) / kk / kk).toFixed(4) : null}))};
+  mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm, det});
+    (res.holes || []).forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, label: h.name + " (void in " + (nm || "room") + ")", det: {how: "auto-void", of: id, src: det.src, gap: det.gap, pts0: h.pts.map(q => q.slice()), a0: kk ? +(polyArea(h.pts) / kk / kk).toFixed(4) : null, at: det.at, flag: ""}})); }, "Auto area");
   S.sel = id; draw(); renderSheet();
   const k = hereScale(p);
   if (res.short && !res.leak) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — " + res.short + ".", 9000);
   if (res.leak) { if (!autoOpt().show) { P.proj.auto = Object.assign({}, P.proj.auto || {}, {show: true}); save(); }
     return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
-  toast((nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
+  if (res.warn) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — " + res.warn + ".", 9000);
+  toast((nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + ((res.holes || []).length ? " less " + res.holes.map(h => h.name + " " + fq(polyArea(h.pts) / k / k)).join(", ") + " Sft (deducted)" : "") + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
+}
+/* Preview before adding (Auto area settings ⚙ "Show the outline before adding it", or the agent rule "show me the boundary
+   before accepting"): the outline is drawn dashed orange with its area; Accept (Enter), Tighter / Wider door gap, Cancel (Esc) */
+function autoPreview(res, p){
+  return new Promise(done => {
+    const k = hereScale(p), a = k ? fq(polyArea(res.pts) / k / k) + " Sft" : "", nm = roomNameAt(res.pts) || "Room";
+    S.autoPrev = {pts: res.pts, holes: res.holes || [], key: S.key}; draw();
+    let bar = $("autoPrevBar"); if (!bar) { bar = document.createElement("div"); bar.id = "autoPrevBar"; document.body.appendChild(bar); }
+    bar.innerHTML = `<b>${esc(nm)} — ${esc(a)}</b><span class="small">${esc([res.note, (res.holes || []).length ? res.holes.length + " void" + (res.holes.length > 1 ? "s" : "") + " deducted (" + res.holes.map(h => h.name).join(", ") + ")" : "", res.leak ? "⚠ leaks: " + res.leak : res.short ? "⚠ " + res.short : res.warn ? "⚠ " + res.warn : res.rect ? "" : "not square"].filter(Boolean).join(" · ") || "door gap " + f3(res.gap || autoOpt().gap) + " ft")}</span>
+      <button class="btn pri sm" data-ap="ok">Accept <kbd>Enter</kbd></button><button class="btn sm" data-ap="tight" title="Trace again closing only narrower openings — when the outline ran out through a gap that is not a door">Tighter gap</button><button class="btn sm" data-ap="wide" title="Trace again closing wider openings — when the outline leaked into the next room">Wider gap</button><button class="btn sm" data-ap="">Cancel <kbd>Esc</kbd></button>`;
+    bar.classList.add("on");
+    const end = v => { bar.classList.remove("on"); S.autoPrev = null; document.removeEventListener("keydown", key, true); bar.onclick = null; draw(); done(v); };
+    const key = e => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); end("ok"); } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(null); } };
+    document.addEventListener("keydown", key, true);
+    bar.onclick = e => { const b = e.target.closest("[data-ap]"); if (b) end(b.dataset.ap || null); };
+    autoPreview.end = end;
+  });
+}
+const detEdited = it => !!(it.det && it.det.pts0 && (it.det.pts0.length !== it.pts.length || it.det.pts0.some((q, i) => dist(q, it.pts[i]) > 1e-6)));
+function detHtml(it, k){   // the properties panel line for an outline found by Auto area: how, the original outline, review flag
+  const d = it.det; if (!d) return "";
+  const a0 = k && d.pts0 ? polyArea(d.pts0) / k / k : d.a0, a1 = k ? polyArea(it.pts) / k / k : null, ed = detEdited(it);
+  return `<div class="row detrow" style="margin-top:6px;gap:6px;align-items:center"><span class="small" style="flex:1;min-width:200px"><b>Auto area</b> · from the ${esc(d.src)}, door gap ${f3(d.gap)} ft · ${esc(dmy(d.at))}${d.note ? " · " + esc(d.note) : ""}
+    · detected <b>${a0 != null ? fq(a0) : "?"} Sft</b>${ed ? ` → now <b>${a1 != null ? fq(a1) : "?"} Sft</b> (edited${a0 && a1 != null ? ", " + (a1 >= a0 ? "+" : "") + fq(a1 - a0) + " Sft" : ""})` : " (as detected)"}${d.flag ? ` · <span style="color:#b45309">⚠ ${esc(d.flag)}</span>` : ""}</span>
+    <button class="btn sm${S.detShow ? " on" : ""}" data-act="detShow" title="Show the outline as Auto area found it (grey dashes) next to the current one">${S.detShow ? "Hide" : "Show"} detected</button>${ed && !it.locked ? '<button class="btn sm" data-act="detRestore" title="Put the outline back as Auto area found it (Ctrl+Z undoes)">Restore detected</button>' : ""}</div>`;
 }
 /* Leak guard: a room's outline must not swallow another room's name, nor grow far past its own written size.
    When it does, trace again closing wider gaps and dashed lines, and keep the first clean outline. */
@@ -2036,10 +2157,12 @@ async function autoRoomGuarded(p){
   let F = null; try { F = await drawingFacts(S.fileId, S.pageNo); } catch (e) {}
   if (!F || !F.rooms.length) return first;
   const k = hereScale(p), o = autoOpt();
-  const judge = r => { const inn = F.rooms.filter(m => pointInPoly([m.x + m.w / 2, m.y - m.h / 2], r.pts)), a = polyArea(r.pts) / k / k;
-    const own = inn.length === 1 ? inn[0] : null, big = own && own.sft && a > own.sft * 1.25;
-    return {n: inn.length, bad: inn.length > 1 || big, names: inn.map(m => m.name), a}; };
-  let j = judge(first); if (!j.bad) return first;
+  const judge = r => { const inn = F.rooms.filter(m => !VOID_RX.test(m.name) && pointInPoly([m.x + m.w / 2, m.y - m.h / 2], r.pts)), a = (polyArea(r.pts) - (r.holes || []).reduce((s2, h) => s2 + polyArea(h.pts), 0)) / k / k;
+    const own = inn.length === 1 ? inn[0] : null, big = own && own.sft && a > own.sft * 1.25, small = own && own.sft && a < own.sft * 0.9;
+    return {n: inn.length, bad: inn.length > 1 || big, small, own, names: inn.map(m => m.name), a}; };
+  let j = judge(first);
+  if (!j.bad && j.small && !first.short) first.short = "smaller than the size written in it (" + j.own.size + " = " + fq(j.own.sft) + " Sft, traced " + fq(j.a) + " Sft) — furniture or fittings in the wall pen may cut it: Pick a wall (⚙) or adjust the outline";
+  if (!j.bad) return first;
   let best = {res: first, j};
   for (const over of [{dashBound: true}, {dashBound: true, gap: o.gap * 1.5}, {dashBound: true, gap: o.gap * 2, pocket: Math.max(o.pocket || 0, 1.5)}, {dashBound: true, gap: o.gap * 3, pocket: Math.max(o.pocket || 0, 2)}]) {
     busy("Room leaked into " + j.names.filter(Boolean).slice(0, 3).join(", ") + " — closing wider gaps…"); await new Promise(r => setTimeout(r, 10));
@@ -2063,12 +2186,13 @@ async function autoSettings(){
     <div class="fg w2"><label><input type="checkbox" id="aoLay" style="width:auto"${o.layers ? " checked" : ""}> Use the PDF's layers: only walls, doors / windows, columns and railings bound a room (furniture, fixtures, glass screens, hatch, text and clouds ignored) — when the PDF has them</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDoor" style="width:auto"${o.skipDoors ? " checked" : ""}> Ignore door swings and door leaves</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDash" style="width:auto"${o.dashBound ? " checked" : ""}> Straight dashed lines bound a room (e.g. an open dress / wardrobe area) — untick if dashed lines on your drawings are beams overhead</label></div>
-    <div class="fg w2"><label><input type="checkbox" id="aoShow" style="width:auto"${o.show ? " checked" : ""}> Show the detected walls (pink) after each auto area — to see why a room leaks</label></div></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoShow" style="width:auto"${o.show ? " checked" : ""}> Show the detected walls (pink) after each auto area — to see why a room leaks</label></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoConfirm" style="width:auto"${o.confirm ? " checked" : ""}> Show the outline before adding it — Accept, trace again with a tighter / wider door gap, or Cancel</label></div></div>
     <p class="small" style="margin-top:10px">If furniture or fixtures are drawn in the same pen as the walls, <b>Pick a wall</b> so only lines of that colour and weight bound the room.</p>`, "Save", () => {
       const gap = parseFt($("aoGap").value), pocket = parseFt($("aoPk").value || "0"), minLen = parseFt($("aoMin").value || "0");
       if (!(gap > 0.2 && gap < 30)) return "Close gaps: a width in ft, e.g. 4";
       if (isNaN(pocket) || isNaN(minLen)) return "Enter decimal feet";
-      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, layers: $("aoLay").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked}; }, "aoGap");
+      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, layers: $("aoLay").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked, confirm: $("aoConfirm").checked}; }, "aoGap");
   if (v) { P.proj.auto = Object.assign({}, P.proj.auto || {}, v); if (!v.show) S.autoShow = null; save(); draw(); toast("Auto area settings saved"); }
 }
 document.addEventListener("click", e => {   // auto-area dialog: pick / clear the wall pen
@@ -2194,7 +2318,7 @@ function matCalc(c, Q){
   if (m.kind === "plaster" || m.kind === "screed") {   // area × thickness
     const t = (+m.tin || 0) / 12, faces = +c.faces || 1; if (!(t > 0)) { out.err = "Set the " + m.kind + " thickness"; return out; }
     let A = u === "Sft" ? Q : u === "ft" ? (H > 0 ? Q * H * faces : NaN) : NaN;
-    if (isNaN(A)) { out.err = u === "ft" ? "Set Height H on the condition (Edit) — plaster area = L × H" : "Plaster is taken from an area (Sft) or a length (ft) with H, not " + u; return out; }
+    if (isNaN(A)) { out.err = u === "ft" ? "Type Height H in the box above — plaster area = L × H" : "Plaster is taken from an area (Sft) or a length (ft) with H, not " + u; return out; }
     const wet = A * t, dry = wet * 1.27 * wst;
     out.basis = (u === "ft" ? f3(Q) + " ft × H " + f3(H) + (faces > 1 ? " × " + faces + " faces" : "") + " = " : "") + f3(A) + " Sft × " + f3(+m.tin) + '" (' + f3(t) + " ft)";
     out.rows.push(["Area", A, "Sft", ""], ["Wet mortar", wet, "cft", "A × t"], ["Dry mortar", dry, "cft", "wet × 1.27" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out;
@@ -2205,7 +2329,7 @@ function matCalc(c, Q){
   if (u === "cft") V = Q;
   else if (u === "Sft") V = T > 0 ? Q * T : NaN;
   else if (u === "ft") V = T > 0 && H > 0 ? Q * H * T : NaN;
-  if (isNaN(V)) { out.err = u === "ft" ? "Set Height H" + (T > 0 ? "" : " and thickness T") + " on the condition (Edit) — volume = L × H × T" : "Set thickness T on the condition (Edit) — volume = area × T"; return out; }
+  if (isNaN(V)) { out.err = u === "ft" ? "Type Height H" + (T > 0 ? "" : " and thickness T") + " in the boxes above — volume = L × H × T" : "Type the thickness T (inches) in the box above — volume = area × T"; return out; }
   out.basis = u === "cft" ? f3(V) + " cft" : u === "Sft" ? f3(Q) + " Sft × T " + f3(T) + " = " + f3(V) + " cft" : f3(Q) + " ft × H " + f3(H) + " × T " + f3(T) + " = " + f3(V) + " cft";
   if (!c.t && tIn) out.basis += ' (T ' + tIn + '" from the name)';
   if (m.kind === "concrete") { const dry = V * 1.54 * wst; out.rows.push(["Concrete", V, "cft", ""], ["Dry volume", dry, "cft", "V × 1.54" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out; }
@@ -2234,7 +2358,8 @@ const matQ = (q, u) => u === "Nos" ? fq(q, "Nos") : u === "bags" ? f2(q) : f3(q)
 function matHtml(c, Q, own){
   const m = matOf(c), r = matCalc(c, Q), mixes = MAT_MIXES[m.kind] || [];
   const sel = (k, opts, v) => `<select data-matk="${k}" style="min-width:0">${opts.map(o => { const [a, b] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(a)}"${String(v) === String(a) ? " selected" : ""}>${esc(b)}</option>`; }).join("")}</select>`;
-  const mortar = m.kind !== "none";
+  const mortar = m.kind !== "none", vol = m.kind === "brick" || m.kind === "block" || m.kind === "concrete", tName = vol && m.kind !== "concrete" ? matNameIn(c) : 0;
+  const needT = vol && c.unit !== "cft", needH = (vol && c.unit === "ft") || ((m.kind === "plaster" || m.kind === "screed") && c.unit === "ft");   // the T / H the materials need, typed here
   const set = own ? "" : `<div class="row matset"><div class="fg"><label>Material</label>${sel("kind", MAT_KINDS, m.kind)}</div>
     ${mixes.length ? `<div class="fg"><label>Mix</label>${sel("mix", mixes.includes(m.mix) ? mixes : mixes.concat([m.mix]), m.mix)}</div>` : ""}
     ${m.kind === "plaster" || m.kind === "screed" ? `<div class="fg"><label>Thickness in</label><input type="number" min="0" step="0.125" data-matk="tin" value="${+m.tin || 0}"></div>` : ""}
@@ -2242,6 +2367,8 @@ function matHtml(c, Q, own){
     ${m.kind === "brick" ? `<div class="fg"><label>Brick</label>${sel("brk", MAT_BRICKS, m.brk || "BRK-1")}</div>` : ""}
     ${mortar ? `<div class="fg"><label>Sand</label>${sel("sand", MAT_SANDS, m.sand || "SAND-CH")}</div>` : ""}
     ${m.kind === "concrete" ? `<div class="fg"><label>Crush</label>${sel("crush", MAT_CRUSH, m.crush || "CRSH-SG")}</div>` : ""}
+    ${needT ? `<div class="fg"><label>${m.kind === "concrete" ? "Thickness T in" : "Wall T in"}</label><input type="text" data-matk="T" value="${+c.t ? r3(c.t * 12) : ""}" placeholder="${tName ? tName + ' (name)' : m.kind === "concrete" ? "e.g. 5" : "e.g. 9"}" title="Inches (or ft-in, e.g. 0'-6&quot;) — saved as T on the condition in decimal ft"></div>` : ""}
+    ${needH ? `<div class="fg"><label>Height H ft</label><input type="text" data-matk="H" value="${+c.h ? f3(c.h) : ""}" placeholder="e.g. 10" title="Decimal ft or ft-in — saved as H on the condition"></div>` : ""}
     ${mortar ? `<div class="fg"><label>Waste %</label><input type="number" min="0" max="50" step="0.5" data-matk="wst" value="${+m.wst || 0}"></div>` : ""}</div>`;
   if (!r) return own ? "" : `<div class="psec">Materials</div>${set}<div class="small">Pick a material (brick, block, plaster, concrete...) to see cement, sand and crush.</div>`;
   let body;
@@ -2448,6 +2575,8 @@ function setTool(t){
   if (t === "rect" && c && c.type !== "area") { toast("Rectangle is for area conditions"); t = "draw"; }
   if (t === "circle" && c && c.type === "count") { toast("Circle is for area (round slab, column) or length (round wall) conditions"); t = "draw"; }
   if (t === "circle" && !c) { toast("Pick or create a condition first (left panel)"); t = "select"; }
+  if (t === "polygon" && c && c.type === "count") { toast("Polygon is for area (hexagonal column, pad) or length (its perimeter) conditions"); t = "draw"; }
+  if (t === "polygon" && !c) { toast("Pick or create a condition first (left panel)"); t = "select"; }
   if (t === "count" || t === "vsearch") {   // the count tools work on a count condition: the active one, else the first, else a new "Count"
     let cc = c && c.type === "count" ? c : P.proj && P.proj.conds.find(x => x.type === "count");
     if (!cc && P.proj) { cc = {id: uid("C"), name: "Count", type: "count", unit: "Nos", color: COLORS[P.proj.conds.length % COLORS.length], h: "", t: "", faces: 1, dedMin: 0}; P.proj.conds.push(cc); save(); renderConds(); }
@@ -2457,6 +2586,7 @@ function setTool(t){
   if (t === "open" && c && !(c.type === "linear")) { toast("Openings are deducted from a wall (length) condition"); t = "draw"; }
   if (t === "ded" && c && c.type === "count") { toast("Counts have no deductions — select a point and press Delete"); t = "draw"; }
   if (t === "stamp" && !S.clip) { toast("Copy something first (Ctrl+C) — then click each place for a copy"); t = "select"; }
+  if (t !== "area" && S.areaWait) { const w = S.areaWait; S.areaWait = null; w(false); }   // leaving the box tool cancels the area pick
   if (t !== "auto") S.pickWall = false;
   if (t !== "open") S.openMark = null;
   if (t !== "draw") S.resume = null;
@@ -2491,7 +2621,8 @@ function hint(){
     lasso: "Lasso: drag round the objects to select (touching counts) · Shift adds to the selection.", pan: "Drag to pan; scroll to zoom.",
     draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." + drawing : c.type === "linear" ? (S.resume ? "Continuing the run — click on; Enter, double-click or right-click to finish." : "Click along the run; Enter, double-click or right-click to finish.") + drawing : "Click each item to count it; Esc when done.",
     fence: "Draw a line across the opening where Auto area leaks (click points; double-click, right-click or Enter to finish). It counts as a wall for Auto area only.", vsearch: "Box one symbol (two corners) — every matching symbol is counted.", note: "Click where the note goes, then type it.", cloud: "Click two opposite corners of the area to cloud.", arrow: "Click the tail, then the head of the arrow.", hilite: "Click two opposite corners to highlight.",
-    rect: "Click two opposite corners — or one corner, then type L x W (e.g. 12 x 14) and Enter.", circle: "Click the centre, then a point on the edge.", vp: "Click two opposite corners of the detail drawn at another scale.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.", ded: (c && c.type === "area" ? "Draw the void / cut-out to deduct; Enter to close." : "Draw the length to deduct; Enter to finish.") + drawing,
+    area: "Box the takeoff area: click two opposite corners around the part of the drawing to take off. Esc cancels.",
+    rect: "Click two opposite corners — or one corner, then type L x W (e.g. 12 x 14) and Enter.", circle: "Click the centre, then a point on the edge.", polygon: "Regular polygon: click the centre, then a corner (" + polySides() + " sides — type pol 8 in the command line for 8).", vp: "Click two opposite corners of the detail drawn at another scale.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.", ded: (c && c.type === "area" ? "Draw the void / cut-out to deduct; Enter to close." : "Draw the length to deduct; Enter to finish.") + drawing,
     open: schOf(S.openMark) ? "Placing " + schOf(S.openMark).mark + " (" + f3(schOf(S.openMark).w) + " × " + f3(schOf(S.openMark).h) + ") — click both sides of each opening. Esc stops." : "Click both sides of the opening, then enter its height or pick its schedule mark.",
     typref: S.typ ? (S.key === S.typ.src ? "Typical copy: click reference point " + (S.typ.a.length + 1) + " of 2 on this (source) sheet." : "Typical copy: click the same reference point " + (S.typ.b.length + 1) + " of 2 on this sheet.") : "", measure: "Click points; double-click, right-click or Enter ends a measurement (it stays on screen). Esc clears. Nothing is saved." + drawing,
     cal: "Click both ends of a known dimension, then enter its length.",
@@ -2517,7 +2648,7 @@ function cursorPoint(e, sp){
   let p = raw, s = null;
   const free = e && (e.ctrlKey || e.metaKey) && S.tool !== "select";   // Ctrl: the point goes exactly where clicked, no snap (Bluebeam)
   const ex = S.drag && S.drag.vertex != null ? ((it, i) => it.id === S.drag.item && i === S.drag.vertex) : null;   // a dragged point never snaps onto itself
-  if (!free && (["draw", "rect", "ded", "open", "measure", "cal", "circle", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp", "stretch"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
+  if (!free && (["draw", "rect", "ded", "open", "measure", "cal", "circle", "polygon", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp", "stretch"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
   let last = S.drag ? null : S.tool === "stamp" ? S.stampBase : S.tool === "stretch" ? (S.str && S.str.stage === 3 ? S.str.base : null) : S.draft[S.draft.length - 1];
   if (S.drag && S.drag.vertex != null) { const it = P.proj.items.find(i => i.id === S.drag.item); if (it) last = S.drag.orig[S.drag.vertex - 1] || S.drag.orig[S.drag.vertex + 1] || null; }
   if (((e && e.shiftKey) !== !!S.ortho) && last && !S.arcMid) { const dx = Math.abs(p[0] - last[0]), dy = Math.abs(p[1] - last[1]); p = dx >= dy ? [p[0], last[1]] : [last[0], p[1]]; if (s) s = Object.assign({}, s, {type: s.type + " + straight"}); }   // Shift, or Ortho (F8; Shift then frees one click)
@@ -2581,8 +2712,9 @@ function onDown(e){
     if (S.draft.length && dist(S.draft[S.draft.length - 1], p) < 1e-6) return;
     draftPush([p]); draftBtns(); draw(); return;
   }
-  if (S.tool === "open" || S.tool === "cal" || S.tool === "circle" || S.tool === "vp") { draftPush([p]); if (S.draft.length === 2) finish(S.draft.slice()); draftBtns(); draw(); }
+  if (S.tool === "open" || S.tool === "cal" || S.tool === "circle" || S.tool === "polygon" || S.tool === "vp") { draftPush([p]); if (S.draft.length === 2) finish(S.draft.slice()); draftBtns(); draw(); }
   if (S.tool === "note") return addMark("note", [p]);
+  if (S.tool === "area") { draftPush([toBase(sp[0], sp[1])]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); areaBoxed([Math.min(d[0][0], d[1][0]), Math.min(d[0][1], d[1][1]), Math.max(d[0][0], d[1][0]), Math.max(d[0][1], d[1][1])]); } return; }
   if (S.tool === "vsearch") { draftPush([toBase(sp[0], sp[1])]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); findSimilar([Math.min(d[0][0], d[1][0]), Math.min(d[0][1], d[1][1]), Math.max(d[0][0], d[1][0]), Math.max(d[0][1], d[1][1])]); } draftBtns(); draw(); return; }
   if (S.tool === "cloud" || S.tool === "arrow" || S.tool === "dimension" || S.tool === "hilite") { draftPush([p]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); addMark(S.tool, d); } draftBtns(); draw(); }
 }
@@ -2944,6 +3076,9 @@ function zoomTo(ids){
   const s2 = Math.max(0.05, Math.min(5000, Math.min(st.clientWidth / (x1 - x0 + 2 * m), st.clientHeight / (y1 - y0 + 2 * m))));
   S.view = {s: s2, tx: st.clientWidth / 2 - (x0 + x1) / 2 * s2, ty: st.clientHeight / 2 - (y0 + y1) / 2 * s2}; applyView(); renderHi();
 }
+/* regular polygon, inscribed: n corners round centre c, the first at v */
+function polyPts(c, v, n){ const R = dist(c, v), a0 = Math.atan2(v[1] - c[1], v[0] - c[0]); return Array.from({length: n}, (_, i) => [c[0] + R * Math.cos(a0 + 2 * Math.PI * i / n), c[1] + R * Math.sin(a0 + 2 * Math.PI * i / n)]); }
+function polySides(n){ if (n != null) { n = Math.round(+n); if (n >= 3 && n <= 64) { S.polyN = n; pref("zdTakeoffPolyN", String(n)); } } return S.polyN || (S.polyN = Math.min(64, Math.max(3, +pref("zdTakeoffPolyN") || 6))); }
 function selectAll(){
   setSel(pageItems().map(i => i.id).concat(pageMarks().map(m => m.id)));
   setTool("select"); refresh(); toast(selIds().size + " selected on this page", 2000);
@@ -2951,6 +3086,51 @@ function selectAll(){
 function selectSimilar(o){   // every object of the same condition (or markup type) on this page
   const ids = o.cond ? pageItems().filter(i => i.cond === o.cond).map(i => i.id) : pageMarks().filter(m => m.type === o.type).map(m => m.id);
   setSel(ids); setTool("select"); refresh(); toast(ids.length + " × " + (o.cond ? cond(o.cond).name : MARK_TOOLS[o.type]) + " selected on this page", 2200);
+}
+function invertSel(){   // everything on this page that is not selected becomes the selection (AutoCAD / Bluebeam: Invert selection)
+  const cur = selIds(), ids = pageItems().map(i => i.id).concat(pageMarks().map(m => m.id)).filter(id => !cur.has(id));
+  setSel(ids); setTool("select"); refresh(); toast("Inverted: " + ids.length + " selected on this page", 2000);
+}
+function clearSel(){ setSel([]); refresh(); }
+/* Quick select for the takeoff (AutoCAD's QSELECT, on the measurements and markups of this page): by condition, by kind of
+   measurement, by markup type and by check state — new selection, add to it, or keep only what is already selected */
+const QS_KINDS = [["len", "Lengths"], ["area", "Areas"], ["count", "Counts"], ["ded", "Deductions (cut-outs)"], ["open", "Openings"]];
+function qsKind(it){ const c = cond(it.cond) || {}; return it.kind === "open" ? "open" : it.kind === "ded" ? "ded" : c.type === "count" ? "count" : c.type === "area" ? "area" : "len"; }
+function qsHit(o, v){
+  if (o.cond) {
+    if (v.M.size && !v.C.size && !v.K.size) return false;   // only markup types picked: measurements are not wanted
+    if (v.C.size && !v.C.has(o.cond)) return false; if (v.K.size && !v.K.has(qsKind(o))) return false;
+    if (v.Q === "unchecked" && o.qa === "checked") return false; if (v.Q && v.Q !== "unchecked" && o.qa !== v.Q) return false;
+    if (v.ai && !o.ai) return false;
+    return true;
+  }
+  if ((v.C.size || v.K.size) && !v.M.size) return false;   // only conditions / kinds picked: markups are not wanted
+  if (v.M.size && !v.M.has(o.type)) return false;
+  return !v.Q && !v.ai;
+}
+async function quickSelect(){
+  if (!S.page) return toast("Open a drawing first", 2500);
+  const its = pageItems(), mks = pageMarks(), have = selIds().size;
+  const cnt = (L, f) => { const m = new Map(); L.forEach(o => { const k = f(o); if (k != null) m.set(k, (m.get(k) || 0) + 1); }); return m; };
+  const Cn = cnt(its, i => i.cond), Kn = cnt(its, qsKind), Mn = cnt(mks, m => m.type);
+  const C = [...Cn].map(([id, n]) => [id, (cond(id) || {}).name || id, n]).sort((a, b) => String(a[1]).localeCompare(String(b[1]), undefined, {numeric: true}));
+  const K = QS_KINDS.filter(([k]) => Kn.get(k)).map(([k, t]) => [k, t, Kn.get(k)]), M = [...Mn].map(([t, n]) => [t, MARK_TOOLS[t] || t, n]);
+  if (!C.length && !M.length) return toast("Nothing on this page to select", 2500);
+  const opts = (L, id) => L.length ? `<select id="${id}" multiple size="${Math.min(8, Math.max(3, L.length))}" style="width:100%">${L.map(([k, t, n]) => `<option value="${esc(k)}">${esc(t)} (${n})</option>`).join("")}</select>` : '<div class="small" style="padding:6px 0">none on this page</div>';
+  const body = `<div class="wide"></div><p class="small">The measurements and markups of this page that are shown. Leave a list with nothing picked for “any”; Ctrl+click picks several.</p>
+    <div class="row" style="gap:10px;align-items:flex-start"><div class="fg" style="flex:1.4"><label>Condition (takeoff item)</label>${opts(C, "tqC")}</div><div class="fg" style="flex:1"><label>Kind of measurement</label>${opts(K, "tqK")}</div><div class="fg" style="flex:1"><label>Markup type</label>${opts(M, "tqM")}</div></div>
+    <div class="row" style="gap:10px"><div class="fg"><label>Check state</label><select id="tqQ"><option value="">any</option><option value="unchecked">not checked</option><option value="checked">checked</option><option value="recheck">to recheck</option></select></div>
+      <label class="pk" style="align-self:flex-end"><input type="checkbox" id="tqAI" style="width:auto"> only AI / agent measurements</label></div>
+    <div class="row"><label class="pk"><input type="radio" name="tqHow" value="" checked style="width:auto"> New selection</label>${have ? `<label class="pk"><input type="radio" name="tqHow" value="add" style="width:auto"> Add to the ${have} selected</label><label class="pk"><input type="radio" name="tqHow" value="in" style="width:auto"> Only within the ${have} selected</label>` : ""}</div>`;
+  const v = await ask("Quick select — measurements and markups", body, "Select", () => {
+    const pick = id => { const el = $(id); return el ? new Set([...el.selectedOptions].map(o => o.value)) : new Set(); };
+    return {C: pick("tqC"), K: pick("tqK"), M: pick("tqM"), Q: $("tqQ").value, ai: $("tqAI").checked, how: (document.querySelector("input[name=tqHow]:checked") || {}).value || ""};
+  });
+  if (!v) return;
+  const cur = selIds(), hit = its.concat(mks).filter(o => qsHit(o, v) && (v.how !== "in" || cur.has(o.id))).map(o => o.id);
+  setSel(v.how === "add" ? [...new Set([...cur, ...hit])] : hit); setTool("select"); refresh();
+  toast("Quick select: " + hit.length + " object" + (hit.length === 1 ? "" : "s") + (v.how === "add" ? " added" : ""), 2500);
+  return hit;
 }
 function nudgeSel(dx, dy){   // arrow keys: move the selection (screen pixels)
   const ids = new Set([...selIds()].filter(id => !(objById(id) || {}).locked)); if (!ids.size) return false; const d = [dx / S.view.s, dy / S.view.s];
@@ -3040,6 +3220,12 @@ async function finish(pts){
     });
     hint(); draw(); return;
   }
+  if (t === "polygon") {   // AutoCAD's POLYGON (inscribed): the centre, then a corner — kept as an ordinary outline, so every edit and the sheet work on it
+    if (dist(pts[0], pts[1]) < 0.5) { draw(); return; }
+    const Q = polyPts(pts[0], pts[1], polySides()); if (c.type !== "area") Q.push(Q[0].slice());
+    const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: Q, nos: 1, label: ""};
+    mutate(() => { P.proj.items.push(it); }, "Polygon (" + polySides() + " sides)"); return;
+  }
   if (t === "circle") { if (dist(pts[0], pts[1]) < 0.5) { draw(); return; } mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", shape: "circle", pts, nos: 1, label: ""}); }); return; }
   const area = c.type === "area";
   if (area && (pts.length < 3 || polyArea(pts) < 1e-6)) { if (selfCross(pts)) toast("⚠ This outline crosses itself and its two halves cancel out (0 Sft) — nothing added. Draw it again without crossing the sides.", 7000); draw(); return; }   // a figure of eight with equal halves: said why, never dropped silently
@@ -3090,6 +3276,9 @@ function drawNow(){
       else h.push(`<${c && c.type === "area" || it.shape === "circle" ? "polygon" : "polyline"} points="${ptsS(Q)}" fill="${c && c.type === "area" ? "rgba(123,92,224,.10)" : "none"}" stroke="#7b5ce0" stroke-width="2" stroke-dasharray="7 4"/>`); });
     (S.key === T.src ? T.a : T.b).forEach((p, i) => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="9" fill="rgba(255,45,85,.15)" stroke="#ff2d55" stroke-width="2"/><text x="${(q[0] + 12).toFixed(1)}" y="${(q[1] - 10).toFixed(1)}" font-size="13" font-weight="700" fill="#ff2d55" stroke="#fff" stroke-width="3" paint-order="stroke">${i + 1}</text>`); });
   }
+  if (S.tool === "area" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(255,122,0,.07)" stroke="#ff7a00" stroke-width="2" stroke-dasharray="8 4"/>`); }
+  { const ar = areaOf(); if (ar && S.tool !== "area") { const a = toScr([ar[0], ar[1]]), b = toScr([ar[2], ar[3]]), x = Math.min(a[0], b[0]), y = Math.min(a[1], b[1]);
+    dyn.push(`<rect x="${x}" y="${y}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="none" stroke="#ff7a00" stroke-width="2" stroke-dasharray="8 4" pointer-events="none"/><text x="${x + 4}" y="${y - 6}" font-size="12" font-weight="700" fill="#ff7a00" stroke="#fff" stroke-width="3" paint-order="stroke" pointer-events="none">Takeoff area</text>`); } }
   if (S.tool === "vsearch" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(42,120,214,.08)" stroke="#2a78d6" stroke-width="1.5" stroke-dasharray="4 3"/>`); }
   if (mkIsTool(S.tool)) dyn.push(mkDraftSvg());
   if (S.tool === "stamp" && S.clip) dyn.push(stampGhostSvg());
@@ -3140,9 +3329,20 @@ function drawNow(){
   const c = S.cond ? cond(S.cond) : null, cur = S.cursor;
   let live = "";
   if (S.tool === "stretch" && S.str && cur) dyn.push(...stretchPreview(cur));
+  if (S.autoPrev && S.autoPrev.key === S.key) { dyn.push(`<polygon points="${S.autoPrev.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="#e8a33d" fill-opacity=".18" stroke="#c77700" stroke-width="2.5" stroke-dasharray="8 5"/>`);
+    (S.autoPrev.holes || []).forEach(h => dyn.push(`<polygon points="${h.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="#fff" fill-opacity=".6" stroke="#b42318" stroke-width="2" stroke-dasharray="4 3"/>`)); }
+  if (S.agentPrev && S.agentPrev.key === S.key) S.agentPrev.cand.forEach(x => { const Q = x.pts.map(toScr), cx = Q.reduce((a, q) => a + q[0], 0) / Q.length, cy = Q.reduce((a, q) => a + q[1], 0) / Q.length;
+    dyn.push(`<polygon points="${Q.map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="${x.flag ? "#d97706" : "#e8a33d"}" fill-opacity=".16" stroke="${x.flag ? "#b42318" : "#c77700"}" stroke-width="2.2" stroke-dasharray="8 5"/>`);
+    x.holes.forEach(h => dyn.push(`<polygon points="${h.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="#fff" fill-opacity=".6" stroke="#b42318" stroke-width="1.5" stroke-dasharray="4 3"/>`));
+    dyn.push(`<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="#7a4a00" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(x.name)}${x.flag ? " ⚠" : ""} — review</text>`); });
+  { const di = S.detShow && S.sel && P.proj.items.find(i => i.id === S.sel); if (di && di.det && di.det.pts0 && onPage(di)) dyn.push(`<polygon points="${di.det.pts0.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="none" stroke="#6b7d92" stroke-width="2" stroke-dasharray="4 4"/>`); }
   if ((S.tool === "fillet" || S.tool === "chamfer") && S.fc.first) { const f = S.fc.first, a = toScr(f.it.pts[f.i]), b = toScr(f.it.pts[f.i + 1]); dyn.push(`<path d="M${a[0].toFixed(1)} ${a[1].toFixed(1)}L${b[0].toFixed(1)} ${b[1].toFixed(1)}" stroke="#ff2d55" stroke-width="4" opacity=".7" stroke-linecap="round"/>`); }
   { const kk = hereScale(S.draft[0] || cur); if (kk) k = kk; }
-  if (S.draft.length && cur && S.tool === "circle") {
+  if (S.draft.length && cur && S.tool === "polygon") {
+    const n = polySides(), Q = polyPts(S.draft[0], cur, n), col = c ? c.color : "#0b0b0b";
+    dyn.push(`<polygon points="${Q.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>`);
+    if (k) live = n + " sides · side " + f3(dist(Q[0], Q[1]) / k) + " ft · " + fq(polyArea(Q) / k / k) + " Sft · perimeter " + f3(n * dist(Q[0], Q[1]) / k) + " ft";
+  } else if (S.draft.length && cur && S.tool === "circle") {
     const a = S.draft[0], r = dist(a, cur), q = toScr(a), col = c ? c.color : "#0b0b0b";
     dyn.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(r * S.view.s).toFixed(1)}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>`);
     if (k) live = "dia " + f3(2 * r / k) + " ft · " + fq(Math.PI * r * r / k / k) + " Sft · round " + f3(2 * Math.PI * r / k) + " ft";
@@ -3613,6 +3813,7 @@ function renderProps(){
     <div class="row" style="margin-top:6px">${LOC_KEYS.map(lk => { const sh = (P.proj.sheets || {})[keyOf(it.file, it.page)] || {}; return `<div class="fg"><label>${LOC_NAMES[lk]}</label><input type="text" data-prop="${lk}" list="dlp_${lk}" value="${esc(it[lk] || "")}" placeholder="${esc(sh[lk] || (lk === "room" ? it.label || "" : ""))}"><datalist id="dlp_${lk}">${locValues(lk).map(x => `<option value="${esc(x)}">`).join("")}</datalist></div>`; }).join("")}</div>
     <div class="row" style="margin-top:6px"><div class="fg"><label>QA status</label><select data-prop="qa">${Object.entries(QA_NAMES).map(([q, n]) => `<option value="${q}"${(it.qa || "") === q ? " selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="fg" style="flex:2"><label>QA note</label><input type="text" data-prop="qaNote" value="${esc(it.qaNote || "")}" placeholder="e.g. confirm against section B-B"></div></div>
+    ${detHtml(it, k)}
     <div class="small" style="margin-top:4px">${it.qa === "checked" ? "Checked by " + esc(it.qaBy) + ", " + esc(dmy(it.qaAt)) : "Not checked"}${it.ai ? " · AI-generated" : ""}${it.copied ? " · copied from " + esc(keyName(it.copied.from)) + " (" + esc(it.copied.how) + ")" : ""}</div></div>`;
   el.classList.add("on");
 }
@@ -3666,7 +3867,7 @@ function runAt(sp){   // the length run under a screen point -> {it, i, p, d}
   for (let n = items.length - 1; n >= 0; n--) { const it = items[n]; if (!isRun(it)) continue; const s = segAt(it, sp); if (s) return Object.assign({it}, s); }
   return null;
 }
-function cloneItem(it, pts){ const nb = Object.assign(JSON.parse(JSON.stringify(it)), {id: uid("I"), pts: pts.map(p => p.slice())}); delete nb.arcs; delete nb.locked; return nb; }
+function cloneItem(it, pts){ const nb = Object.assign(JSON.parse(JSON.stringify(it)), {id: uid("I"), pts: pts.map(p => p.slice())}); delete nb.arcs; delete nb.locked; delete nb.det; return nb; }
 function breakRun(it, i, p){
   if (it.locked) return lockedMsg();
   const A = it.pts.slice(0, i + 1).map(q => q.slice()), B = it.pts.slice(i + 1).map(q => q.slice());
@@ -3999,6 +4200,72 @@ function matchInk(I, W, H, T, tw, th, thr){
   }
   return out;
 }
+/* ------------------------------------------------------------------ takeoff area
+   Before the takeoff agent, auto area of every room, counting tags or Find similar runs, it asks where: a part of the page
+   boxed now (or the box already drawn) or the whole page. The box stays on the page (dashed orange) until the whole page is
+   chosen; only what is found inside it is kept — rooms and tags by their position, wall runs cut at its edge. */
+function areaOf(key){ const a = S.area; return a && a.key === (key || S.key) ? a.r : null; }
+const inArea = (r, p) => p[0] >= r[0] - 1e-6 && p[0] <= r[2] + 1e-6 && p[1] >= r[1] - 1e-6 && p[1] <= r[3] + 1e-6;
+function areaBoxed(r){ if (r[2] - r[0] < 2 || r[3] - r[1] < 2) return toast("Box a larger area — click two opposite corners", 3000);
+  S.area = {key: S.key, r}; const w = S.areaWait; S.areaWait = null; setTool(S.areaPrev || "select"); S.areaPrev = null; draw(); if (w) w(r); }
+function boxArea(){ return new Promise(res => { if (S.areaWait) S.areaWait(false); S.areaPrev = S.tool === "area" ? "select" : S.tool; setTool("area"); S.areaWait = res; toast("Box the takeoff area: click two opposite corners (Esc cancels)", 6000); }); }
+/* where to work -> a box [x0,y0,x1,y1] in page points, null for the whole page, false when cancelled */
+async function askArea(what){
+  if (!S.page) return null;
+  let v; const cur = areaOf(), opt = (v, t, on) => `<label class="pk" style="display:block;margin:4px 0"><input type="radio" name="arW" value="${v}"${on ? " checked" : ""}> ${t}</label>`;
+  v = await ask("Where — " + what, `<p>Take off a part of this drawing, or all of it?</p><div style="margin-top:8px">${cur ? opt("cur", "<b>The takeoff area already boxed</b> <span class=\"small\">(dashed orange)</span>", true) : ""}${opt("box", "<b>Box an area now</b> — click two opposite corners on the drawing", !cur)}${opt("all", "The whole page", false)}</div>
+    <p class="small" style="margin-top:8px">Only what is found inside the box is kept: rooms and tags by their place, wall runs cut at its edge. The box stays shown until you choose the whole page.</p>`, "Next", () => ({w: (document.querySelector('input[name="arW"]:checked') || {}).value || "all"}));   // (a string back would read as an error)
+  if (!v) return false;
+  v = v.w;
+  if (v === "all") { if (S.area && S.area.key === S.key) { S.area = null; draw(); } return null; }
+  if (v === "cur" && cur) return cur;
+  return boxArea();
+}
+function areaSnap(){ const m = new Map(); P.proj.items.forEach(i => m.set(i.id, i.pts.length)); return m; }
+function clipSeg(a, b, r){   // Liang–Barsky: the part of a→b inside r, or null
+  let t0 = 0, t1 = 1; const dx = b[0] - a[0], dy = b[1] - a[1];
+  for (const [p, q] of [[-dx, a[0] - r[0]], [dx, r[2] - a[0]], [-dy, a[1] - r[1]], [dy, r[3] - a[1]]]) {
+    if (Math.abs(p) < 1e-12) { if (q < 0) return null; continue; }
+    const t = q / p; if (p < 0) { if (t > t1) return null; if (t > t0) t0 = t; } else { if (t < t0) return null; if (t < t1) t1 = t; } }
+  return t1 - t0 < 1e-9 ? null : [[a[0] + t0 * dx, a[1] + t0 * dy], [a[0] + t1 * dx, a[1] + t1 * dy]];
+}
+function clipRun(pts, r){   // a polyline cut to r -> its pieces inside
+  const out = []; let cur = null;
+  for (let i = 1; i < pts.length; i++) { const s2 = clipSeg(pts[i - 1], pts[i], r);
+    if (!s2) { cur = null; continue; }
+    if (cur && dist(cur[cur.length - 1], s2[0]) < 1e-6) cur.push(s2[1]); else { cur = [s2[0], s2[1]]; out.push(cur); }
+    if (dist(s2[1], pts[i]) > 1e-6) cur = null; }
+  return out.filter(q => q.length >= 2 && polyLen(q) > 0.5);
+}
+/* keep only what a run added inside r on page key (snap: item id -> its point count before) -> how many were left out */
+function areaClip(snap, r, key){
+  let left = 0; const out = [];
+  P.proj.items.forEach(it => {
+    if (keyOf(it.file, it.page) !== key) { out.push(it); return; }
+    const was = snap.get(it.id), c = cond(it.cond);
+    if (!c) { out.push(it); return; }
+    if (was !== undefined) {   // there before: only count points it gained are checked
+      if (c.type === "count" && it.pts.length > was) { const add = it.pts.slice(was), keep = add.filter(p => inArea(r, p)); left += add.length - keep.length; it.pts = it.pts.slice(0, was).concat(keep); }
+      out.push(it); return; }
+    if (c.type === "count") { const keep = it.pts.filter(p => inArea(r, p)); left += it.pts.length - keep.length; if (keep.length) { it.pts = keep; out.push(it); } return; }
+    if (c.type === "linear" && it.kind !== "open" && it.shape !== "circle") {
+      if (it.pts.every(p => inArea(r, p))) { out.push(it); return; }
+      const pcs = clipRun(it.pts, r); if (!pcs.length) { left++; return; }
+      pcs.forEach((q, n) => { const o = n ? Object.assign(JSON.parse(JSON.stringify(it)), {id: uid("I")}) : it; o.pts = q; delete o.arcs; out.push(o); }); return; }
+    const P0 = itemPoly(it), ctr = P0.length ? [P0.reduce((a, p) => a + p[0], 0) / P0.length, P0.reduce((a, p) => a + p[1], 0) / P0.length] : it.pts[0];
+    if (ctr && inArea(r, ctr)) out.push(it); else left++;
+  });
+  P.proj.items = out; return left;
+}
+/* ask where, then run fn; with a box, everything fn adds on this page outside it is taken out again — all one undo step */
+async function areaThen(what, fn){
+  const r = await askArea(what); if (r === false) return {error: "cancelled"};
+  if (!r) return fn();
+  const key = S.key, snap = areaSnap(); let res, left = 0;
+  await asOneStep(what, async () => { res = await fn(); if (keyOf(S.fileId, S.pageNo) === key) left = areaClip(snap, r, key); });
+  refresh(); if (left) toast(left + " found outside the takeoff area — left out", 4000);
+  return res;
+}
 /* Find similar: the boxed symbol is looked for on this page, every page of this PDF, or every PDF of the project; what
    is found is shown as a list of small pictures, weakest match first, to tick or untick — only the ticked ones are counted */
 async function findSimilar(rect){
@@ -4006,11 +4273,15 @@ async function findSimilar(rect){
   const c = cond(S.cond);
   const nPdf = P.proj.files.length;
   const v = await ask("Find similar — " + esc(c.name), `<p>Every symbol that looks like the one you boxed is found and shown to you first — untick any wrong ones, and only the ticked ones are counted into <b>${esc(c.name)}</b>.</p>
-    <div class="grid" style="margin-top:10px"><div class="fg"><label>Search</label><select id="vsWhere"><option value="page">This page</option><option value="pdf">Every page of this PDF</option>${nPdf > 1 ? `<option value="all">Every PDF of the project (${nPdf})</option>` : ""}</select></div>
+    <div class="grid" style="margin-top:10px"><div class="fg"><label>Search</label><select id="vsWhere">${areaOf() ? '<option value="cur" selected>Inside the takeoff area (boxed)</option>' : ""}<option value="area"${areaOf() ? "" : " selected"}>An area of this page — box it next</option><option value="page">This whole page</option><option value="pdf">Every page of this PDF</option>${nPdf > 1 ? `<option value="all">Every PDF of the project (${nPdf})</option>` : ""}</select></div>
     <div class="fg"><label>Match</label><select id="vsThr"><option value="0.9">Strict (90%)</option><option value="0.82" selected>Normal (82%)</option><option value="0.72">Loose (72%)</option></select></div>
     <div class="fg w2"><label><input type="checkbox" id="vsRot" style="width:auto" checked> Also find it turned 90°, 180°, 270°</label></div></div>`, "Find",
     () => ({where: $("vsWhere").value, thr: +$("vsThr").value, rot: $("vsRot").checked}));
   if (!v) { setTool("count"); return; }
+  let area = null;
+  if (v.where === "cur") area = areaOf();
+  else if (v.where === "area") { area = await boxArea(); if (!area) { setTool("count"); return toast("Search cancelled"); } }
+  if (area) v.where = "page";
   const longSym = Math.max(rect[2] - rect[0], rect[3] - rect[1]); if (longSym < 1) return;
   const sc = Math.max(0.5, Math.min(6, 30 / longSym, 7000 / Math.max(S.base.width, S.base.height)));
   busy("Reading the symbol…"); await new Promise(r => setTimeout(r, 20));
@@ -4044,6 +4315,7 @@ async function findSimilar(rect){
       hits.forEach(q => { if (!keep.some(k2 => Math.hypot(k2.x - q.x, k2.y - q.y) < 0.6 * Math.max(k2.r, q.r))) keep.push(q); });
       const it = P.proj.items.find(i => i.cond === c.id && i.file === f.id && i.page === pn && i.kind === "shape"), near = Math.max(4, longSym * 0.5);
       keep.forEach(q => { const pt = [q.x / sc, q.y / sc]; if (it && it.pts.some(p2 => dist(p2, pt) < near)) return;   // already counted
+        if (area && !inArea(area, pt)) return;   // outside the takeoff area
         cands.push({f, pn, pt, F: q.F, img: inkThumb(ink, q.x, q.y, q.r)}); });
     }
   } catch (e) { busy(""); toast("Search failed: " + (e.message || e), 5000); setTool("count"); return; }
@@ -5088,6 +5360,21 @@ async function defaultsDialog(){
   mutate(() => { if (v.applyC) P.proj.conds.forEach(c => { c.color = v.condColor; c.sw = v.condWidth; }); if (v.applyMk) (P.proj.marks || []).forEach(m => { m.color = m.type === "dimension" ? v.dimColor : m.type === "hilite" ? v.hiliteColor : v.markColor; m.width = m.type === "dimension" ? v.dimWidth : v.markWidth; if (m.type === "dimension") { m.size = v.dimSize; m.arrow = v.dimArrow; m.offset = v.dimOffset; } if (m.type === "hilite") m.opacity = v.hiliteOpacity; }); });
   toast("Professional defaults saved" + (v.applyMk || v.applyC ? " and applied" : ""), 2500);
 }
+/* library items ranked for a name (or a search): words and sizes in common with the item's code, description and category,
+   a little extra for the same unit; sug: suggestions from a name (weaker matches dropped). [{it, p (raPrice), score 0..1}] */
+const boqWords = t => String(t || "").toLowerCase().replace(/(\d+(?:\.\d+)?)\s*(?:"|''|in\b|inch)/g, " $1in ").replace(/[^a-z0-9.]+/g, " ").split(" ").filter(w => w.length > 1 || /\d/.test(w));
+const BOQ_SYN = {rcc: ["concrete", "reinforced"], pcc: ["concrete", "plain"], plaster: ["plaster", "render"], block: ["block", "blockwork"], brick: ["brick", "brickwork"], tile: ["tile", "tiles", "tiling"], paint: ["paint", "painting", "emulsion"], slab: ["slab"]};
+function boqMatches(q, unit, sug){
+  const L = raLib(); if (!L.o) return [];
+  const W = [...new Set(boqWords(q))]; if (!W.length) return sug ? [] : [...L.items.values()].map(it => ({it, p: raPrice(it.code || it.id), score: 0}));
+  const out = [];
+  L.items.forEach(it => { const hay = " " + boqWords([it.code, it.id, it.desc, it.sub, it.cat, it.qs].join(" ")).join(" ") + " ";
+    let hit = 0; W.forEach(w => { if (hay.includes(" " + w + " ") || (w.length > 3 && hay.includes(" " + w)) || (BOQ_SYN[w] || []).some(x => hay.includes(" " + x))) hit++; });
+    if (!hit) return; const score = hit / W.length + (unit && normU(it.unit) === normU(unit) ? 0.1 : 0);
+    if (sug && score < 0.5) return; out.push({it, score}); });
+  out.sort((a, b) => b.score - a.score || String(a.it.code).localeCompare(String(b.it.code), undefined, {numeric: true}));
+  return out.slice(0, 60).map(o => Object.assign(o, {p: raPrice(o.it.code || o.it.id)}));
+}
 async function editCond(c){
   const isNew = !c, used = c && P.proj.items.some(i => i.cond === c.id);
   const dflt = toolDefaults();
@@ -5102,8 +5389,10 @@ async function editCond(c){
      <div class="fg"><label>Faces</label><input type="number" id="cF" min="1" max="2" step="1" value="${+d.faces || 1}"></div>
      <div class="fg"><label>Deduct openings / voids over</label><input type="text" id="cD" value="${f2(+d.dedMin || 0)}"></div>
      <div class="fg w2"><label>Group (folder in the conditions list, e.g. Exterior working)</label><input type="text" id="cGrp" list="dlGrp" value="${esc(d.group || "")}" placeholder="none" autocomplete="off"><datalist id="dlGrp">${[...new Set(P.proj.conds.map(x => x.group).filter(Boolean))].map(g => `<option value="${esc(g)}">`).join("")}</datalist></div>
+     <div class="fg w2 boqpk"><label>BOQ item — from the Cost Control rate library <span class="small" id="cBoqHint"></span></label>
+       <input type="search" id="cBoqQ" placeholder="Search code or description — e.g. block 8, plaster, RCC slab" autocomplete="off"><div class="boql" id="cBoqL"></div></div>
      <div class="fg"><label>BOQ / WBS code</label><input type="text" id="cBoq" value="${esc(d.boq || "")}" placeholder="e.g. CW-01-009"></div>
-     <div class="fg"><label>Rate Analysis code</label><input type="text" id="cRa" value="${esc(d.ra || "")}" list="dlRa" placeholder="e.g. CIV-MAS-001" autocomplete="off"><datalist id="dlRa">${raLib().o ? [...raLib().items.values()].map(i => `<option value="${esc(i.code || i.id)}">${esc((i.qs || i.sub || "") + " — " + String(i.desc || "").slice(0, 60) + " (" + i.unit + ")")}</option>`).join("") : ""}</datalist></div>
+     <div class="fg"><label>Rate Analysis code</label><input type="text" id="cRa" value="${esc(d.ra || "")}" placeholder="e.g. CIV-MAS-001" autocomplete="off"></div>
      <div class="fg w2 small" id="cRaInfo"></div>
      <div class="fg cntonly"><label>Count symbol</label><select id="cSym">${Object.entries(SYMS).map(([k2, v2]) => `<option value="${k2}"${(d.sym || "circle") === k2 ? " selected" : ""}>${v2}</option>`).join("")}</select></div>
      <div class="fg cntonly"><label>Caption</label><select id="cCap"><option value="seq"${(d.cap || "seq") === "seq" ? " selected" : ""}>Number 1, 2, 3…</option><option value="name"${d.cap === "name" ? " selected" : ""}>Condition name</option><option value="text"${d.cap === "text" ? " selected" : ""}>Custom label</option><option value="none"${d.cap === "none" ? " selected" : ""}>None</option></select></div>
@@ -5121,10 +5410,39 @@ async function editCond(c){
     return {name, type, unit, h: H || "", t: T || "", faces: Math.max(1, Math.min(2, +$("cF").value || 1)), dedMin: Math.max(0, parseFloat($("cD").value) || 0), color: $("cC").value,
       sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value, group: $("cGrp").value.trim().slice(0, 60), boq: $("cBoq").value.trim(), ra: $("cRa").value.trim().toUpperCase()};
   }, "cName");
+  const pk = {auto: false, boqAuto: false, nameAuto: false};
   const raInfo = () => { const code = $("cRa").value.trim(); if (!code) { $("cRaInfo").innerHTML = raLib().o ? "Link a Rate Analysis item to take its built-up rate (or type the rate in the bill’s Assembly)." : "Rate Analysis library not found in this browser — open SAJ QSCOST → Rate Analysis on this site once to link codes."; return; }
     const r = rateOf({ra: code.toUpperCase()}, $("cUnit").value), p = raPrice(code);
-    $("cRaInfo").innerHTML = r.na ? `<span style="color:var(--red)">${esc(r.na)}</span>` : `<b>${esc(p.code)}</b> — ${esc(String(p.desc).slice(0, 110))} · <b>PKR ${f2(r.rate)} / ${esc(p.unit)}</b>${r.assumed ? ` · <span style="color:var(--amber)">${r.assumed} assumed row(s)</span>` : ""}`; };
-  $("cRa").addEventListener("input", raInfo); $("cUnit").addEventListener("change", raInfo); raInfo();
+    $("cRaInfo").innerHTML = "<div>" + (pk.auto ? '<span class="tag a" title="Picked by itself from the name — click another item to change, or clear the RA code">auto-picked</span> ' : "") + (r.na ? `<span style="color:var(--red)">${esc(r.na)}</span>` : `<b>${esc(p.code)}</b> — ${esc(String(p.desc).slice(0, 110))} · <b>PKR ${f2(r.rate)} / ${esc(p.unit)}</b> — rate taken from Rate Analysis${r.assumed ? ` · <span style="color:var(--amber)">${r.assumed} assumed row(s)</span>` : ""}`) + "</div>"; };
+  $("cRa").addEventListener("input", () => { pk.auto = false; raInfo(); pkDraw(); }); $("cUnit").addEventListener("change", () => { raInfo(); pkDraw(); }); raInfo();
+  /* the BOQ item picker: library items ranked by the name typed (or filtered by the search), with their built-up rate; a click
+     fills the RA code (so the rate follows it), the BOQ code if empty, the name if empty, and a fitting unit. A new condition
+     takes the best match by itself when it is a clear one — marked auto-picked, and dropped again if the name changes away. */
+  const pkUnit = it => { const u = normU(it.unit); return u === "ft" ? ["linear", "ft"] : u === "nos" ? ["count", "Nos"] : u === "sft" ? [$("cType").value === "linear" ? "linear" : "area", "Sft"] : u === "cft" ? [/wall|block|brick|masonry|partition/i.test([it.desc, it.sub, $("cName").value].join(" ")) ? "linear" : $("cType").value === "count" ? "area" : $("cType").value, "cft"] : null; };   // walls are taken off as runs (L × H × T)
+  const pkFill = (code, auto) => { const L = raLib(), it = L.items.get(String(code).toUpperCase()); if (!it) return;
+    $("cRa").value = it.code || it.id; pk.auto = !!auto;
+    if (!$("cBoq").value.trim() || pk.boqAuto) { $("cBoq").value = it.code || it.id; pk.boqAuto = true; }
+    if (!$("cName").value.trim()) { $("cName").value = String(it.desc || "").slice(0, 80); pk.nameAuto = true; }
+    const tu = pkUnit(it); if (tu && !used) { if ($("cType").value !== tu[0]) { $("cType").value = tu[0]; $("cType").dispatchEvent(new Event("change", {bubbles: true})); }
+      $("cUnit").innerHTML = UNITS[tu[0]].map(u => `<option${u === tu[1] ? " selected" : ""}>${u}</option>`).join("");
+      if (tu[1] === "cft" && !$("cT").value.trim()) { const ti = matNameIn({name: $("cName").value}) || matNameIn({name: it.desc}); if (ti) $("cT").value = f3(ti / 12); } }   // 8" in the name → T 0.667
+    raInfo(); pkDraw(); };
+  const pkDraw = () => { const L = raLib(), el = $("cBoqL"); if (!el) return;
+    if (!L.o) { el.innerHTML = '<div class="small" style="padding:6px">Rate library not in this browser — open SAJ QSCOST → Rate Analysis on this site once; then BOQ items and their rates are listed here.</div>'; $("cBoqHint").textContent = ""; return; }
+    const q = $("cBoqQ").value.trim(), list = boqMatches(q || $("cName").value, $("cUnit").value, !q), cur = $("cRa").value.trim().toUpperCase();
+    $("cBoqHint").textContent = q ? list.length + " found" : list.length ? "suggested from the name" : "type a name or search";
+    el.innerHTML = list.slice(0, 40).map(o => { const r = o.p.err ? null : o.p, ok = r && !r.gaps, same = normU(o.it.unit) === normU($("cUnit").value);
+      return `<div class="boqr${String(o.it.code || o.it.id).toUpperCase() === cur ? " on" : ""}" data-boqpick="${esc(o.it.code || o.it.id)}" title="${esc(o.it.desc || "")}"><b>${esc(o.it.code || o.it.id)}</b><span class="bd">${esc(String(o.it.desc || "").slice(0, 90))}</span><span class="bu${same ? "" : " x"}">${esc(o.it.unit || "")}</span><span class="br">${ok ? f2(r.rate) : '<i>no rate</i>'}</span></div>`; }).join("")
+      || '<div class="small" style="padding:6px">No library item matches — type the BOQ code and rate yourself, or add the item in Rate Analysis.</div>'; };
+  $("cBoqL").addEventListener("click", e => { const r = e.target.closest("[data-boqpick]"); if (r) pkFill(r.dataset.boqpick, false); });
+  $("cBoqQ").addEventListener("input", pkDraw);
+  $("cBoq").addEventListener("input", () => { pk.boqAuto = false; });
+  const pkAuto = () => { if (!isNew || (!pk.auto && $("cRa").value.trim())) return pkDraw();   // only a new condition, and never over a code the user chose
+    const m = boqMatches($("cName").value, $("cUnit").value, true)[0];
+    if (m && m.score >= 0.6) pkFill(m.it.code || m.it.id, true); else if (pk.auto) { $("cRa").value = ""; if (pk.boqAuto) $("cBoq").value = ""; pk.auto = false; raInfo(); pkDraw(); } else pkDraw(); };
+  $("cName").addEventListener("input", () => { pk.nameAuto = false; pkAuto(); }); $("cType").addEventListener("change", pkDraw);
+  document.getElementById("cPre") && $("cPre").addEventListener("change", () => setTimeout(pkAuto, 0));
+  pkDraw();
   const showCnt = () => document.querySelectorAll(".dlg .cntonly").forEach(el => { el.style.display = $("cType").value === "count" ? "" : "none"; });
   showCnt(); $("cType").addEventListener("change", showCnt);
   let del = false;
@@ -6639,7 +6957,7 @@ async function sheetInfoDialog(readFirst){
 
 /* ------------------------------------------------------------------ QA: Measured → Checked, or Recheck required */
 const QA_NAMES = {"": "Measured", checked: "Checked", recheck: "Recheck required"};
-const needsReview = it => (it.ai || it.copied || it.revFlag) && it.qa !== "checked";
+const needsReview = it => (it.ai || it.copied || it.revFlag || (it.det && it.det.flag)) && it.qa !== "checked";
 function qaUser(){ return pref("zdTakeoffUser") || ""; }
 async function askUser(){
   let u = qaUser(); if (u) return u;
@@ -7333,7 +7651,9 @@ function paletteCmds(){
   add("Undo", undoAny, "Edit", "Ctrl+Z"); add("Redo", redoAny, "Edit", "Ctrl+Y");
   add("Find text on the drawings", () => { $("findIn").focus(); $("findIn").select(); }, "View", "Ctrl+F");
   add("Set scale", scaleDialog, "Page", "K"); add("Keyboard shortcuts", keysDialog, "Help");
-  add("New condition", () => editCond(null), "Condition"); add("All projects", showStart, "Project");
+  add("AI engine — local AI (free, offline) setup and benchmark", locSetup, "AI"); add("KPIs — Auto area and agent performance (from recorded results)", kpiDialog, "AI"); add("Project knowledge — documents and offline search", kbDialog, "AI"); add("Agent instructions — the working rules the AI follows", rulesDialog, "AI");
+  add("Invert selection", invertSel, "Select", "Ctrl+I"); add("Quick select… (by condition, kind, markup type, check state)", quickSelect, "Select"); add("Deselect all", clearSel, "Select", "Esc");
+    add("New condition", () => editCond(null), "Condition"); add("All projects", showStart, "Project");
   document.querySelectorAll("header button[id], #viewPop button[id], #qaBar button, aside button[id], .panel button[id]").forEach(b => btn(b, b.closest("#viewPop") ? "View" : b.closest("#qaBar") ? "Check" : "Button"));
   P.proj.conds.forEach(c => add("Use condition: " + c.name + " (" + (c.type === "count" ? "count" : c.unit || c.type) + ")", () => { S.cond = c.id; setTool(c.type === "count" ? "count" : "draw"); refresh(); toast("Condition: " + c.name, 1800); }, "Condition"));
   palAlias(L);
@@ -7364,7 +7684,7 @@ const PAL_SYN = {polyline: "length run line", pline: "length run", line: "length
 /* AutoCAD command aliases: type tr + Enter for Trim, f for Fillet, sc for Scale… (the command whose name starts so; a "…" one — the dialog — first) */
 const PAL_ALIAS = [["tr", "trim"], ["ex", "extend"], ["f", "fillet"], ["fil", "fillet"], ["cha", "chamfer"], ["s", "stretch"], ["str", "stretch"], ["sc", "scale selection"], ["scale", "scale selection"],
   ["ro", "rotate…"], ["rotate", "rotate…"], ["o", "offset"], ["off", "offset"], ["m", "move"], ["mo", "move"], ["co", "copy"], ["cp", "copy"], ["mi", "mirror"], ["br", "break"], ["j", "join"], ["x", "explode"],
-  ["ar", "array"], ["l", "length"], ["rec", "rectangle"], ["ci", "circle"], ["di", "measure"], ["dist", "measure"], ["z", "zoom window"], ["pl", "plot"], ["xh", "cross-hair"], ["cross", "cross-hair"],
+  ["ar", "array"], ["l", "length"], ["rec", "rectangle"], ["ci", "circle"], ["pol", "polygon"], ["qs", "quick select"], ["qselect", "quick select"], ["inv", "invert selection"], ["di", "measure"], ["dist", "measure"], ["z", "zoom window"], ["pl", "plot"], ["xh", "cross-hair"], ["cross", "cross-hair"],
   ["dxf", "dxf"], ["dxfout", "dxf"], ["u", "undo"], ["re", "redo"], ["or", "ortho"], ["po", "polar"], ["os", "object snaps"], ["lock", "lock"], ["w", "auto area"], ["aa", "auto area"]];
 function palAlias(L){
   PAL_ALIAS.forEach(([a, pre]) => {
@@ -7378,6 +7698,7 @@ function palTyped(q){   // a command typed with its number: "ro 37", "sc 1.5", "
   const add = (t, run) => out.push({t, run, g: "Command", k: "", al: []});
   if (P.proj && S.page) {
     if ((m = new RegExp("^(?:ro|rot|rotate)\\s+" + num + "\\s*°?\\s*(cw)?$", "i").exec(q))) { const a = (m[2] ? -1 : 1) * +m[1]; add("Rotate the selection " + Math.abs(a) + "° " + (a < 0 ? "clockwise" : "anticlockwise"), () => rotateBy(a)); add("Rotate a copy of the selection " + Math.abs(a) + "° " + (a < 0 ? "clockwise" : "anticlockwise"), () => rotateBy(a, {copy: true})); }
+    if ((m = /^(?:pol|polygon)\s+(\d+)$/i.exec(q)) && +m[1] >= 3 && +m[1] <= 64) { const n = +m[1]; add("Polygon with " + n + " sides — click the centre, then a corner", () => { polySides(n); setTool("polygon"); }); }
     if ((m = new RegExp("^(?:sc|scale)\\s+" + num + "$", "i").exec(q)) && +m[1] > 0) { const f = +m[1]; add("Scale the selection × " + f, () => scaleBy(f)); add("Scale a copy of the selection × " + f, () => scaleBy(f, {copy: true})); }
     if ((m = new RegExp("^(?:f|fil|fillet)\\s+" + num + "$", "i").exec(q)) && +m[1] >= 0) add("Fillet with radius " + m[1] + " ft", () => { S.fc.r = +m[1]; S.fcSkip = true; setTool("fillet"); });
     if ((m = new RegExp("^(?:cha|chamfer)\\s+" + num + "(?:\\s+" + num + ")?$", "i").exec(q)) && +m[1] >= 0) add("Chamfer " + m[1] + " × " + (m[2] || m[1]) + " ft", () => { S.fc.d1 = +m[1]; S.fc.d2 = +(m[2] || m[1]); S.fcSkip = true; setTool("chamfer"); });
@@ -7440,6 +7761,42 @@ function cmdBox(){
   document.addEventListener("pointerdown", e => { if (!e.target.closest("#cmdRes,#cmdIn")) close(); });
 }
 const cmdFocus = q => { const i = $("cmdIn"); if (!i || !i.offsetWidth) return false; i.value = q || ""; i.focus(); i.dispatchEvent(new Event("input")); return true; };
+/* the command line (status bar, AutoCAD-style): an alias or a command's name + Enter runs it — tr, f 0.5, ro 37, pol 8, qs —
+   Enter on an empty line repeats the last command, ↑ / ↓ walk the history (kept in this browser), Esc leaves it. ":" from the
+   drawing puts the cursor in it. Typing in it never reaches the tool shortcuts. */
+const CMD_KEY = "zdTakeoffCmdHist";
+function cmdHist(){ try { return JSON.parse(pref(CMD_KEY) || "[]"); } catch (e) { return []; } }
+function cmdFind(q){   // the command a typed line runs: a typed command with its number, an exact alias, else the best name match
+  const t = palTyped(q); if (t.length) return t[0];
+  const best = paletteCmds().map(c => ({c, s: palScore(c, q)})).filter(o => o.s > 0).sort((a, b) => b.s - a.s)[0];
+  return best && best.s >= 10 ? best.c : null;
+}
+function cmdRun(q){
+  q = String(q || "").trim(); const H = cmdHist();
+  if (!q) q = S.cmdLast || ""; if (!q) return null;   // Enter alone: the last command that ran, again
+  try { pref(CMD_KEY, JSON.stringify([q].concat(H.filter(x => x.toLowerCase() !== q.toLowerCase())).slice(0, 30))); } catch (e) {}   // every line typed, for ↑ (a typo too, to fix it)
+  const c = cmdFind(q), say = $("cmdSay");
+  if (!c) { if (say) { say.textContent = "Unknown command: " + q; say.className = "cmdsay err"; } toast("Unknown command “" + q + "” — Ctrl+K lists every command", 3000); return null; }
+  S.cmdLast = q;
+  if (say) { say.textContent = q.toUpperCase() + " → " + c.t; say.className = "cmdsay"; }
+  Promise.resolve().then(c.run).catch(e => toast(String(e && e.message || e), 5000));
+  return c.t;
+}
+function cmdWire(){
+  const inp = $("cmdLine"); if (!inp || inp.dataset.w) return; inp.dataset.w = "1"; let at = -1;
+  inp.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); const v = inp.value; inp.value = ""; at = -1; inp.blur(); cmdRun(v); }
+    else if (e.key === "Escape") { e.preventDefault(); inp.value = ""; at = -1; inp.blur(); }
+    else if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); const H = cmdHist(); if (!H.length) return; at = Math.max(-1, Math.min(H.length - 1, at + (e.key === "ArrowUp" ? 1 : -1))); inp.value = at < 0 ? "" : H[at]; }
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key !== ":" || e.ctrlKey || e.metaKey || e.altKey) return;
+    const a = document.activeElement; if (a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable)) return;
+    if ($("dlgBack").classList.contains("on") || ($("pal") && $("pal").classList.contains("on"))) return;
+    e.preventDefault(); e.stopPropagation(); inp.focus();
+  }, true);
+}
 function openPalette(){
   if ($("dlgBack").classList.contains("on")) return;
   let el = $("pal");
@@ -7576,7 +7933,7 @@ function ctxCanvas(q){
   const u = S.undo.length ? undoEntry(S.undo[S.undo.length - 1]).label : "", r = S.redo.length ? undoEntry(S.redo[S.redo.length - 1]).label : "", T = (t, n, key) => ({t: n, k: key, fn: () => setTool(t), on: S.tool === t});
   return [{h: pageName({file: S.fileId, page: S.pageNo}), s: S.clip ? "clipboard: " + S.clip.n + " object" + (S.clip.n > 1 ? "s" : "") : ""}, ...cadSelCtx(), ...cadCtxItems(q), ...sheetLinkItems(q),
     {t: "Paste here", k: "Ctrl+V", fn: () => pasteClip("cursor", q), dis: !S.clip}, {t: "Paste in place", k: "Ctrl+Shift+V", fn: () => pasteClip("inplace"), dis: !S.clip},
-    {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {sep: 1},
+    {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {t: "Invert selection", k: "Ctrl+I", fn: invertSel}, {t: "Quick select…", fn: quickSelect}, {t: "Deselect all", k: "Esc", fn: clearSel, dis: !selIds().size}, {sep: 1},
     {t: "Undo" + (u ? ": " + u : ""), k: "Ctrl+Z", fn: undoAny, dis: !S.undo.length}, {t: "Redo" + (r ? ": " + r : ""), k: "Ctrl+Y", fn: redoAny, dis: !S.redo.length}, {sep: 1},
     {t: "Tools", sub: [T("select", "Select", "V"), T("cadsel", "Select AutoCAD objects", "Shift+V"), T("lasso", "Lasso select", "Shift+O"), T("pan", "Pan", "H"), {sep: 1}, T("draw", "Draw", "A"), T("rect", "Rectangle", "R"), T("auto", "Auto area", "W"), T("circle", "Circle", "E"), T("count", "Count", "C"), T("ded", "Deduct", "D"), T("open", "Opening", "O"), {sep: 1}, T("break", "Break a run", "B"), T("measure", "Measure", "M"), T("cal", "Set scale", "K")]},
     {t: "View", sub: [{t: "Fit page", k: "F", fn: () => { fit(); renderHi(); }}, {t: "Fit width", k: "Shift+F", fn: fitWidth}, {t: "Zoom window", k: "Z", fn: () => setTool("zoomwin")}, {t: "Zoom in", k: "+", fn: () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2)}, {t: "Zoom out", k: "−", fn: () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2)}, {sep: 1},
@@ -7588,11 +7945,12 @@ function keysDialog(){
   const R = (k, t) => `<tr><td style="white-space:nowrap;padding:2px 10px 2px 0">${k.split(" | ").map(x => `<kbd>${esc(x)}</kbd>`).join(" ")}</td><td style="padding:2px 0">${esc(t)}</td></tr>`;
   const G = (t, rows) => `<tr><td colspan="2" style="padding:8px 0 2px;font-weight:700;color:var(--navy)">${esc(t)}</td></tr>` + rows.map(x => R(x[0], x[1])).join("");
   ask("Keyboard & mouse", `<table class="keyt" style="font-size:12px;border-collapse:collapse;width:100%">
-    ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift+V", "select AutoCAD objects (DWG / DXF): click, box, Ctrl+A — then take off, count, select similar, quick select, layer off"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
+    ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift+V", "select AutoCAD objects (DWG / DXF): click, box, Ctrl+A — then take off, count, select similar, quick select, layer off"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Ctrl+I", "invert the selection (this page)"], ["Quick select… (right-click the page, or type qs)", "select by condition, kind of measurement, markup type, check state"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
     ${G("Find anything", [["Ctrl+K", "command palette: type the name of any tool, export, dialog, page or condition — or an AutoCAD alias (tr, ex, f, cha, s, sc, ro, o, co, m…) or ‘ro 37’, ‘sc 1.5’, ‘f 0.5’"], ["Ctrl+F", "find text on the drawings"]])}
     ${G("AutoCAD-style editing (Modify tab)", [["Shift+T | Shift+X", "Trim · Extend (Shift+click flips one into the other)"], ["Fillet | Chamfer", "pick two runs, or two legs of one run · Enter changes the radius / distances"], ["Shift+S", "Stretch: crossing window, base point, destination"], ["Rotate… | Scale…", "any angle · any factor (or reference), about the selection's middle, in place or as a copy"], ["Shift+C", "full-screen cross-hair"]])}
     ${G("Pages (Forma Takeoff sheets)", [["Tick a thumbnail | Shift+tick", "tick pages to export, read sheet info or OCR together · Shift: the pages in between"], ["Ctrl+click | Shift+click a thumbnail", "tick / untick it without opening it"], ["☆ on a thumbnail", "pin the page to the top"], ["Double-click a sheet no. on the drawing", "open that sheet (right-click lists the sheets referenced)"]])}
     ${G("Markups (Bluebeam)", [["T | Q | N", "text box · callout · note"], ["Shift+L | Y | G", "line · polyline · polygon"], ["Shift+R | Shift+E | U", "rectangle · ellipse · cloud"], ["P | Shift+H", "pen · highlighter pen"], ["X | I", "stamp · image"], ["Markup ▾", "every markup tool: hyperlink, file attachment, redaction, erase…"], ["Dbl-click a markup", "edit its text · open a link or an attached file"], ["Drag a handle", "resize a box, move a line's end or a point"], ["Alt+L", "Markups list: every markup — filter, sort, status, replies, layers, CSV / XML / PDF summary"]])}
+    ${G("Command line (status bar)", [[":", "put the cursor in the command line"], ["alias + Enter", "l, rec, ci, pol, tr, ex, f, cha, o, m, co, ro, sc, mi, br, j, x, ar, qs, inv, u, re…"], ["with a number", "pol 8 · ro 37 · sc 1.5 · f 0.5 · cha 0.5 0.75 · o 0.375"], ["Enter on an empty line", "repeat the last command"], ["↑ | ↓", "history"], ["Esc", "leave the command line"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
     ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["F8 | F10", "Ortho (0° / 90°) · Polar tracking (every 15°…) — Shift frees one click while Ortho is on"], ["Snap ▾ (toolbar)", "choose the object snaps: endpoint, midpoint, intersection, perpendicular, nearest"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"]])}
     ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"], ["Ctrl+\\", "split window: this drawing in two windows (own zoom each) — again to close"], ["F6", "split window: work in the other window"], ["Split ▾ (toolbar)", "stacked, another project in the second window, sync zoom & pan, link cursor, match, swap"]])}
@@ -7676,7 +8034,7 @@ function paneUi(old){   // the panels and the bar follow the window worked in
   if (pr) {
     saveSay("ok", pr.updated); buildPageSel(); localStorage.setItem("zdTakeoffLast", pr.id);
     if (!S.cond || !cond(S.cond)) S.cond = (pr.conds[0] || {}).id || null;
-    if (!S.cond && ["draw", "rect", "ded", "open", "auto", "circle"].indexOf(S.tool) >= 0) { S.tool = "select"; document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === "select")); }
+    if (!S.cond && ["draw", "rect", "ded", "open", "auto", "circle", "polygon"].indexOf(S.tool) >= 0) { S.tool = "select"; document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === "select")); }
     stageCls(); hint();
     if (S.page) { pgMark(); renderLayers(); if (!S.geo[S.key]) indexPage(); }
     $("zoomPct").textContent = S.base ? Math.round(S.view.s * 100) + "%" : "—";
@@ -7976,7 +8334,7 @@ function wire(){
   $("bToolChest").onclick = () => toolChestDialog();
   $("bDefaults").onclick = () => defaultsDialog();
   $("bWs").onclick = e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); wsMenu(Math.max(4, r.right - 300), r.bottom + 4); };
-  $("bCmd").onclick = () => openPalette();
+  $("bCmd").onclick = () => openPalette(); cmdWire();
   $("bMini").onclick = () => { wsSet({mini: !wsPref().mini}); toast(wsPref().mini ? "Minimap on — it shows when you zoom in" : "Minimap off", 1800); };
   $("bFull").onclick = () => fullScreen();
   document.addEventListener("fullscreenchange", () => { if ($("bFull")) $("bFull").classList.toggle("on", !!document.fullscreenElement); });
@@ -8013,7 +8371,8 @@ function wire(){
   $("aiKeyBtn").onclick = () => aiShowKey($("aiKeyRow").style.display === "none");
   secretField($("aiKey"));
   $("aiKeySave").onclick = () => { const v = secretVal($("aiKey")).trim(); pref("zdTakeoffApiKey", v); AI.client = null; aiShowKey(!v); aiLog("bot", v ? "Key saved in this browser." : "Key removed."); };
-  $("aiNew").onclick = () => { if (AI.stop) AI.stop.abort(); AI.plan = []; AI.history = []; AI.view = null; $("aiLog").innerHTML = ""; aiToggle(true); };
+  $("aiEngBtn").onclick = () => locSetup(); $("aiRulesBtn").onclick = () => rulesDialog(); $("aiKpiBtn").onclick = () => kpiDialog(); $("aiKbBtn").onclick = () => kbDialog();
+  $("aiNew").onclick = () => { if (AI.stop) AI.stop.abort(); AI.plan = []; AI.history = []; pref(locHistKey(), ""); AI.view = null; $("aiLog").innerHTML = ""; aiToggle(true); };
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
   $("aiDetails").onclick = () => agentCmd("drawing details");
@@ -8120,6 +8479,8 @@ function wire(){
     const mt = e.target.dataset.matk, mc = mt && cond(S.cond);   // the condition's material settings (Materials section)
     if (mc) { mutate(() => { const m = Object.assign({}, matOf(mc)); delete m.guessed; const v = e.target.value;
       if (mt === "kind") { mc.mat = {kind: v}; return; }
+      if (mt === "T") { const t = parseFt(String(v).trim() + (/["'a-z]/i.test(v) ? "" : '"')); if (!isNaN(t) && t >= 0) mc.t = t > 0 ? r3(t) : ""; return; }   // thickness typed in inches (or ft-in) → T on the condition, decimal ft
+      if (mt === "H") { const h = parseFt(String(v).trim()); if (!isNaN(h) && h >= 0) mc.h = h > 0 ? r3(h) : ""; return; }
       m[mt] = mt === "tin" || mt === "wst" ? Math.max(0, Math.min(mt === "wst" ? 50 : 24, +v || 0)) : v; mc.mat = m; }); return; }
     const it = P.proj.items.find(i => i.id === S.sel), f = e.target.dataset.prop; if (!it || !f) return;
     if (f === "qa") return setQa([it], e.target.value);
@@ -8153,6 +8514,8 @@ function wire(){
     const a = e.target.closest("[data-act]"); if (!a) return;
     if (a.dataset.act === "editCond") return editCond(cond(S.sel && P.proj.items.find(i => i.id === S.sel) ? P.proj.items.find(i => i.id === S.sel).cond : S.cond));
     if (a.dataset.act === "lock") return lockSel();
+    if (a.dataset.act === "detShow") { S.detShow = !S.detShow; draw(); return renderProps(); }
+    if (a.dataset.act === "detRestore") { const it = P.proj.items.find(i => i.id === S.sel); if (it && it.det && it.det.pts0 && !it.locked) { mutate(() => { it.pts = it.det.pts0.map(q => q.slice()); delete it.arcs; }, "Restore detected outline"); toast("Outline back as Auto area found it", 2000); } return; }
     if (a.dataset.act === "dup") return duplicateSel();
     if (a.dataset.act === "brk") return setTool("break");
     if (a.dataset.act === "delMark") return delObjects(new Set([S.selMark]));
@@ -8170,6 +8533,7 @@ function wire(){
     if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); return redoAny(); }
     if (e.altKey && S.cmp && /^Arrow/.test(e.key)) { e.preventDefault(); const st2 = (e.shiftKey ? 10 : 1) / S.view.s; S.cmp.dx += e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0; S.cmp.dy += e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0; clearTimeout(S.cmpT); S.cmpT = setTimeout(() => { renderLow(); renderHi(true); }, 120); return; }
     if (mod && k === "a") { e.preventDefault(); return S.tool === "cadsel" ? cadSelAct("all") : selectAll(); }
+    if (mod && !e.shiftKey && k === "i" && S.tool !== "cadsel") { e.preventDefault(); return invertSel(); }
     if (mod && /^Arrow/.test(e.key) && selIds().size) { e.preventDefault(); return arrayDialog({ArrowRight: "right", ArrowLeft: "left", ArrowUp: "up", ArrowDown: "down"}[e.key]); }   // PlanSwift: Ctrl + arrow copies at a distance
     if (!e.altKey && !mod && /^Arrow/.test(e.key) && selIds().size) { e.preventDefault(); const st2 = e.shiftKey ? 10 : 1; nudgeSel(e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0, e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0); return; }
     if (mod && k === "c") { e.preventDefault(); return copySel(); }
@@ -8188,6 +8552,7 @@ function wire(){
     if (e.key === "Escape" && S.typed) { S.typed = ""; draw(); return; }
     if (e.key === "Escape" && S.mkd) { S.mkd = null; draftClear(); draw(); return; }
     if (e.key === "Escape" && S.drag && (S.drag.vertex != null || S.drag.move || S.drag.mh != null)) { cancelDrag(); return; }
+    if (e.key === "Escape" && S.tool === "area") { const pv = S.areaPrev || "select"; S.areaPrev = null; setTool(pv); toast("Takeoff area not boxed — nothing run"); return; }   // (leaving the tool cancels the wait)
     if (e.key === "Escape" && S.tool === "match") { setTool("select"); return; }
     if (e.key === "Escape" && S.tool === "stretch" && S.str && S.str.stage) { S.str = null; hint(); draw(); return; }
     if (e.key === "Escape" && (S.tool === "fillet" || S.tool === "chamfer") && (S.fc.first || S.cedF)) { S.fc.first = null; S.cedF = null; hint(); draw(); return; }
@@ -8367,6 +8732,11 @@ function aiAreaCond(){
   return c;
 }
 async function aiRunTool(b){
+  const out = await aiRunTool0(b); kpiLog("tool", {name: b.name, ok: !!(out && out.ok)}); return out;
+}
+async function aiRunTool0(b){
+  { const t2 = await aiRunTool2(b); if (t2) return t2; }   // project questions, totals, explain, undo, rules: no picture or scale needed
+  { const t3 = await aiRunTool3(b); if (t3) return t3; }   // Auto area over the page, review, validation, knowledge search
   const V = AI.view, k = curScale(), inp = b.input || {};
   if (!V || V.key !== S.key) return {err: "The page changed — ask the user to press ‘Read this view’ again."};
   if (!k) return {err: "The page scale is not set; ask the user to set it (K) first."};
@@ -8374,9 +8744,12 @@ async function aiRunTool(b){
   const add = (name, pts) => { const c = aiAreaCond(), id = uid("I"); mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(name || "").slice(0, 60)}); }); return id; };
   if (b.name === "trace_room") {
     const x = +inp.x, y = +inp.y; if (!(x >= 0 && y >= 0 && x <= V.W && y <= V.H)) return {err: "Point is outside the image."};
-    const res = await autoRoom(aiToBase(V, x, y)); if (res.err) return {err: res.err};
-    const nm = inp.name || roomNameAt(res.pts), id = add(nm, res.pts);
-    return {ok: {id, name: nm, area_sft: +(polyArea(res.pts) / k / k).toFixed(2), squared: res.rect, outline_px: res.pts.map(p => aiToPx(V, p))}};
+    const res = await autoRoomGuarded(aiToBase(V, x, y)); if (res.err) return {err: res.err};
+    const nm = inp.name || roomNameAt(res.pts), id = add(nm, res.pts), c0 = aiAreaCond();
+    if ((res.holes || []).length) mutate(() => res.holes.forEach(h => P.proj.items.push({id: uid("I"), cond: c0.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, ai: true, label: h.name + " (void in " + (nm || "room") + ")"})));
+    const net = (polyArea(res.pts) - (res.holes || []).reduce((a, h) => a + polyArea(h.pts), 0)) / k / k;
+    return {ok: {id, name: nm, area_sft: +(polyArea(res.pts) / k / k).toFixed(2), voids_deducted: (res.holes || []).map(h => ({name: h.name, sft: +(polyArea(h.pts) / k / k).toFixed(2)})), net_sft: +net.toFixed(2), squared: res.rect,
+      warning: res.leak ? "leaks — " + res.leak : res.short || res.warn || null, outline_px: res.pts.map(p => aiToPx(V, p))}};
   }
   if (b.name === "draw_area") {
     let pts = (Array.isArray(inp.points) ? inp.points : []).filter(p => p && isFinite(+p.x) && isFinite(+p.y)).map(p => aiToBase(V, +p.x, +p.y));
@@ -8441,12 +8814,16 @@ function aiLog(kind, html){ const d = document.createElement("div"); d.className
 const aiText = t => esc(t).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
 async function aiSend(text, fresh){
   if (AI.busy || !P.proj) return;
+  { const t = await ruleTeach(text); if (t === true) return; if (typeof t === "string") text = t.slice(5); }   // "remember: …" — a working rule, asked where to keep it
   if (!S.page) return aiLog("err", "Open a PDF page first.");
+  const eng = aiEngine();
+  if (eng === "rules") { const t0 = performance.now(), r = await agentCmd(text); kpiLog("agent", {route: "rules", ms: Math.round(performance.now() - t0)}); return r; }
+  if (eng === "local" || (eng === "auto" && locModel())) return aiSendLocal(text);   // local AI: never handed to a cloud service
   let client;
   try { client = await aiClient(); } catch (e) { aiLog("err", esc(e.message) + " Answering with the free agent instead."); return agentCmd(text); }
   if (!client) { const smp = await aiSampler(); return smp ? aiSendPlan(smp, text) : agentCmd(text); }   // no API key: Claude through claude.ai, else the free rule-based agent
   AI.busy = true; $("aiSend").disabled = true; $("aiRead").disabled = true;
-  aiLog("user", esc(text));
+  aiLog("user", esc(text)); const tC = performance.now();
   const wait = aiLog("wait", "Claude is reading the drawing…");
   let replied = false, free = false;   // free: the paid route failed before Claude did anything — the free agent answers instead
   try {
@@ -8461,8 +8838,8 @@ async function aiSend(text, fresh){
       const res = await client.beta.messages.create({
         model: AI_MODEL, max_tokens: 16000, output_config: {effort: "high"},
         betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
-        system: [{type: "text", text: AI_SYSTEM, cache_control: {type: "ephemeral"}}],
-        tools: AI_TOOLS, messages: AI.history
+        system: [{type: "text", text: AI_SYSTEM, cache_control: {type: "ephemeral"}}].concat(rulesPrompt() ? [{type: "text", text: rulesPrompt()}] : []),
+        tools: AI_TOOLS_ALL(), messages: AI.history
       }); replied = true;
       if (res.stop_reason === "refusal") { AI.history = []; aiLog("err", "Claude declined this request" + (res.stop_details && res.stop_details.explanation ? ": " + esc(res.stop_details.explanation) : "") + ". The chat was reset."); break; }
       AI.history.push({role: "assistant", content: res.content});
@@ -8486,8 +8863,532 @@ async function aiSend(text, fresh){
     // keep the conversation valid: drop a trailing user turn the API never answered
     while (AI.history.length && AI.history[AI.history.length - 1].role === "user" && !(AI.history[AI.history.length - 1].content || []).some(x => x.type === "tool_result")) AI.history.pop();
   }
-  wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
+  wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh(); kpiLog("agent", {route: "claude", ms: Math.round(performance.now() - tC)});
   if (free) await agentCmd(text, true);
+}
+/* ------------------------------------------------------------------ agent instructions (the user's working rules)
+   Taught in the chat ("remember: exclude shafts from net flooring", "always show me the boundary before accepting") or typed
+   in Rules. Four scopes: this request only (not kept), this session (until the page is closed), this project (saved with the
+   project) and every project (kept in this browser). Active rules go to every language-model route (local AI, Claude) as
+   part of its instructions; a rule the app can carry out itself (preview the Auto area outline before adding) is also
+   switched on. Nothing is said to be saved unless it was. */
+const RULE_KEY = "zdTakeoffAgentRules", RULE_SCOPES = {once: "this request only", session: "this session", project: "this project", global: "every project"};
+function rulesGlobal(){ try { const r = JSON.parse(pref(RULE_KEY) || "[]"); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
+function rulesOf(scope){ return scope === "global" ? rulesGlobal() : scope === "project" ? ((P.proj && P.proj.agentRules) || []) : scope === "session" ? (AI.sessRules = AI.sessRules || []) : []; }
+function rulesPut(scope, L){
+  if (scope === "global") { pref(RULE_KEY, L.length ? JSON.stringify(L) : ""); return rulesGlobal().length === L.length; }
+  if (scope === "project") { if (!P.proj) return false; P.proj.agentRules = L; save(); return true; }
+  if (scope === "session") { AI.sessRules = L; return true; }
+  return false;
+}
+function rulesActive(){ return ["project", "global", "session"].flatMap(sc => rulesOf(sc).filter(r => r && r.on !== false && String(r.text || "").trim()).map(r => Object.assign({scope: sc}, r))); }
+function rulesPrompt(){
+  const L = rulesActive(); if (!L.length) return "";
+  return "\n\nTHE USER'S WORKING RULES — follow them unless the user says otherwise in this message:\n" + L.map(r => "- " + r.text + " (" + RULE_SCOPES[r.scope] + ")").join("\n");
+}
+const RULE_NEG = /\b(never|don'?t|do not|no|exclude|without|avoid|stop)\b/i;
+function ruleCore(t){ return String(t).toLowerCase().replace(/\b(please|always|never|don'?t|do not|from now on|remember( that)?|for this project|make sure( to)?|you should|i want you to|by default)\b/g, " ").replace(/[^a-z0-9"' ]+/g, " ").replace(/\s+/g, " ").trim(); }
+function ruleConflicts(text){   // an active rule about the same thing with the opposite sense ("always …" vs "never …")
+  const c = ruleCore(text), neg = RULE_NEG.test(text), w = new Set(c.split(" ").filter(x => x.length > 2));
+  return rulesActive().filter(r => { const c2 = ruleCore(r.text), w2 = c2.split(" ").filter(x => x.length > 2); if (!w2.length || !w.size) return false;
+    const same = w2.filter(x => w.has(x)).length / Math.max(w.size, w2.length); return same >= 0.6 && RULE_NEG.test(r.text) !== neg; });
+}
+function ruleEffects(text){   // rules the app itself can carry out
+  const out = [];
+  if (/\b(show|preview|confirm|see|check)\b.*\b(boundar|outline|polygon|area)/i.test(text) && /\b(before|first|prior)\b/i.test(text) && !RULE_NEG.test(text.replace(/\bbefore\b.*$/i, "")))
+    out.push({t: "Auto area shows each outline first (Accept / Tighter / Wider / Cancel)", run: () => { if (P.proj) { P.proj.auto = Object.assign({}, P.proj.auto || {}, {confirm: true}); save(); } }});
+  return out;
+}
+const RULE_TEACH = /^\s*(?!never\s*mind)(?:please\s+)?(?:remember(?:\s+that)?|from\s+now\s+on|always|never|as\s+a\s+rule|new\s+rule|rule\s*:|for\s+this\s+project\s*,?\s*(?:always|never|use|do|don'?t))\b[\s,:-]*/i;
+async function ruleTeach(text, fromAi){   // a message that sets a working rule: asked where to keep it, then saved and confirmed (true: handled; "once:…": use it for this request)
+  if (!RULE_TEACH.test(text)) return false;
+  aiLog(fromAi ? "bot" : "user", fromAi ? "The AI asks to save a rule: “" + esc(text.replace(/^remember:\s*/i, "")) + "”" : esc(text));
+  const body0 = text.replace(/^\s*(?:please\s+)?(?:remember(?:\s+that)?|as\s+a\s+rule|new\s+rule|rule\s*:)\s*[,:-]?\s*/i, "").trim();
+  const body = body0.charAt(0).toUpperCase() + body0.slice(1), conf = ruleConflicts(body), eff = ruleEffects(body), proj = !!P.proj;
+  const opt = (v, t, on) => `<label class="pk" style="display:block;margin:3px 0"><input type="radio" name="ruSc" value="${v}"${on ? " checked" : ""} style="width:auto"> ${t}</label>`;
+  const v = await ask("Save a working rule?", `<div class="fg w2"><label>Rule</label><textarea id="ruTx" style="width:100%;height:60px">${esc(body)}</textarea></div>
+    <div style="margin-top:6px"><b class="small">Keep it for</b>${opt("once", "This request only — not saved")}${opt("session", "This session — until the page is closed")}${proj ? opt("project", "This project — saved with the project", true) : ""}${opt("global", "Every project — kept in this browser", !proj)}</div>
+    ${conf.length ? `<p class="small" style="color:#b45309;margin-top:6px">⚠ It may conflict with: ${conf.map(r => "“" + esc(r.text) + "” (" + RULE_SCOPES[r.scope] + ")").join(", ")} — turn that one off in <b>Rules</b> if this replaces it.</p>` : ""}
+    ${eff.length ? `<p class="small" style="margin-top:6px">The app will also: ${eff.map(e => esc(e.t)).join("; ")}.</p>` : ""}
+    <p class="small" style="margin-top:6px">Rules go to the language-model routes (local AI, Claude) with every message. The built-in rule agent cannot read them; see them all in <b>Rules</b>.</p>`, "Save", () => {
+      const t = $("ruTx").value.trim(); if (!t) return "Write the rule";
+      return {t, sc: (document.querySelector("input[name=ruSc]:checked") || {}).value || "session"}; }, "ruTx");
+  if (!v) { aiLog("bot", "Not saved."); return true; }
+  if (v.sc === "once") { aiLog("bot", "Not saved — it applies to this request only."); return "once:" + v.t; }
+  const L = rulesOf(v.sc).slice(); L.push({id: uid("R"), text: v.t, on: true, at: new Date().toISOString()});
+  if (!rulesPut(v.sc, L)) { aiLog("err", "The rule could not be saved (browser storage refused it)."); return true; }
+  ruleEffects(v.t).forEach(e => e.run());
+  aiLog("tool", `Rule saved for <b>${RULE_SCOPES[v.sc]}</b>: “${esc(v.t)}” · ${rulesActive().length} active rule${rulesActive().length === 1 ? "" : "s"}${ruleEffects(v.t).length ? " · " + ruleEffects(v.t).map(e => esc(e.t)).join("; ") : ""}`);
+  return true;
+}
+async function rulesDialog(){
+  const rows = sc => rulesOf(sc).map((r, i) => `<div class="row" style="gap:6px;align-items:center;margin:3px 0"><input type="checkbox" data-ruon="${sc}:${i}"${r.on !== false ? " checked" : ""} style="width:auto" title="On / off"><input type="text" data-rutx="${sc}:${i}" value="${esc(r.text)}" style="flex:1"><button type="button" class="btn sm dng" data-rudel="${sc}:${i}" title="Delete">&times;</button></div>`).join("") || '<div class="small" style="padding:2px 0 6px">none</div>';
+  const sec = sc => `<h4 style="margin:10px 0 2px">${RULE_SCOPES[sc].replace(/^./, m => m.toUpperCase())}</h4><div data-rusec="${sc}">${rows(sc)}</div>`;
+  const dels = new Set();
+  const read = () => { const out = {newT: ($("ruNew").value || "").trim(), newSc: $("ruNewSc").value}; ["project", "global", "session"].forEach(sc => { out[sc] = rulesOf(sc).map((r, i) => dels.has(sc + ":" + i) ? null : Object.assign({}, r, {text: (document.querySelector(`[data-rutx="${sc}:${i}"]`) || {}).value || r.text, on: !!(document.querySelector(`[data-ruon="${sc}:${i}"]`) || {}).checked})).filter(Boolean); }); return out; };
+  const pr = ask("Agent instructions", `<div class="wide"></div><p class="small">Working rules the AI follows. Teach one in the chat (“remember: exclude shafts from net flooring”, “always show me the boundary before accepting”) or add it here. Untick to switch a rule off without deleting it.</p>
+    ${P.proj ? sec("project") : ""}${sec("global")}${sec("session")}
+    <div class="row" style="gap:6px;margin-top:10px"><input type="text" id="ruNew" placeholder="New rule, e.g. Group finishing quantities by floor and trade" style="flex:1"><select id="ruNewSc">${P.proj ? '<option value="project">this project</option>' : ""}<option value="global">every project</option><option value="session">this session</option></select></div>`, "Save", read, "ruNew");
+  document.getElementById("dlgB").onclick = e => { const d = e.target.closest("[data-rudel]"); if (d) { dels.add(d.dataset.rudel); d.parentElement.style.display = "none"; } };
+  const v = await pr; if (!v) return;
+  ["project", "global", "session"].forEach(sc => { if (sc !== "project" || P.proj) rulesPut(sc, v[sc]); });
+  if (v.newT) { const L = rulesOf(v.newSc).slice(); L.push({id: uid("R"), text: v.newT, on: true, at: new Date().toISOString()}); rulesPut(v.newSc, L); ruleEffects(v.newT).forEach(e => e.run()); }
+  toast(rulesActive().length + " active rule" + (rulesActive().length === 1 ? "" : "s"), 2000);
+}
+
+/* ------------------------------------------------------------------ more tools for the language-model routes
+   Project questions answered from the project itself (never guessed): what is in it, totals by condition, how one
+   measurement's quantity is worked out, undo the last change, the user's rules. */
+const AI_TOOLS2 = [
+  {name: "get_project_context", description: "The open project: its PDFs and pages, the page on screen (sheet number / title, scale and whether it is verified), every condition with its unit and total, how many measurements need review, the selected measurement and the user's active rules. Call it first for any question about the project.",
+   input_schema: {type: "object", properties: {}}},
+  {name: "quantity_totals", description: "Quantities by condition from the measurement sheet (the source of truth): gross, deductions and net with the unit, for this page or the whole project. Use it to answer 'how much', 'total', 'summary' questions — never estimate a quantity yourself.",
+   input_schema: {type: "object", properties: {scope: {type: "string", enum: ["page", "project"], description: "page (default) or project"}, condition: {type: "string", description: "Only this condition (name, optional)"}, group_by: {type: "string", enum: ["condition", "floor", "page", "room"], description: "Subtotals by condition (default), floor, page or room"}}}},
+  {name: "explain_measurement", description: "How one measurement's quantity is worked out: each sheet row as Nos × L × W × H = quantity with its unit, deductions as their own rows, and how it was made (Auto area: method, door gap, detected vs current area, warnings). Give its id, or leave it out for the selected one.",
+   input_schema: {type: "object", properties: {id: {type: "string", description: "Measurement id (from list_measured); empty = the selected measurement"}}}},
+  {name: "undo_last", description: "Undo the last change to the takeoff (the same as Ctrl+Z). Returns what was undone.",
+   input_schema: {type: "object", properties: {}}},
+  {name: "save_instruction", description: "Save a working rule the user asked you to remember. The user is asked to confirm it and where to keep it, so it is only saved if they agree.",
+   input_schema: {type: "object", required: ["text"], properties: {text: {type: "string", description: "The rule in the user's words"}, scope: {type: "string", enum: ["session", "project", "global"], description: "Suggested scope"}}}},
+  {name: "list_instructions", description: "The user's saved working rules with their scope and whether they are on.",
+   input_schema: {type: "object", properties: {}}}
+];
+const AI_TOOLS_ALL = () => AI_TOOLS.concat(AI_TOOLS2, AI_TOOLS3);
+function qtyOf(it){ const k = itemScale(it); return k ? rowsOf(it, k).reduce((a, r) => a + r.qty, 0) : null; }
+async function aiRunTool2(b){   // the tools that need no picture and no page scale (null: not one of them)
+  const inp = b.input || {};
+  if (b.name === "get_project_context") {
+    if (!P.proj) return {err: "No project is open."};
+    const sh = S.page ? (P.proj.sheets || {})[S.key] || {} : {}, sc = S.page ? P.proj.scales[S.key] : null, st = sc ? scaleState(sc) : null, sel = S.sel && P.proj.items.find(i => i.id === S.sel);
+    return {ok: {project: P.proj.name, pdfs: P.proj.files.map(f => ({name: f.name, pages: f.pages})),
+      page: S.page ? {pdf: (P.proj.files.find(f => f.id === S.fileId) || {}).name, page: S.pageNo, sheet_no: sh.no || "", sheet_title: sh.title || "", scale: sc ? scaleLabel(sc) : "not set", scale_status: st ? st.t : "not set", measurements_on_page: P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo).length} : null,
+      conditions: P.proj.conds.map(c => { const t = condTotals(c); return {name: c.name, type: c.type, unit: c.unit, net: +t.net.toFixed(3), measurements: P.proj.items.filter(i => i.cond === c.id).length, unscaled: t.noScale}; }),
+      need_review: P.proj.items.filter(needsReview).length, selected: sel ? {id: sel.id, name: sel.label || "", condition: (cond(sel.cond) || {}).name} : null,
+      rules: rulesActive().map(r => r.text)}};
+  }
+  if (b.name === "quantity_totals") {
+    if (!P.proj) return {err: "No project is open."};
+    const pg = inp.scope !== "project", want = String(inp.condition || "").trim().toLowerCase();
+    const cs = P.proj.conds.filter(c => !want || c.name.toLowerCase().includes(want));
+    if (!cs.length) return {err: "No condition matches “" + inp.condition + "”."};
+    const rows = cs.map(c => { let g = 0, d = 0, n = 0, un = 0; P.proj.items.filter(i => i.cond === c.id && (!pg || (i.file === S.fileId && i.page === S.pageNo))).forEach(it => { const k = itemScale(it); if (!k) { un++; return; } n++; rowsOf(it, k).forEach(r => { if (r.sign > 0) g += r.qty; else d -= r.qty; }); });
+      return {condition: c.name, unit: c.unit, gross: +g.toFixed(3), deductions: +d.toFixed(3), net: +(g - d).toFixed(3), measurements: n, left_out_no_scale: un}; }).filter(r => r.measurements || r.left_out_no_scale);
+    let groups;
+    if (inp.group_by && inp.group_by !== "condition") { const G = new Map();
+      P.proj.items.filter(i => cs.some(c => c.id === i.cond) && (!pg || (i.file === S.fileId && i.page === S.pageNo))).forEach(it => { const k2 = itemScale(it); if (!k2) return; const c = cond(it.cond), L = locOf(it);
+        const key = (inp.group_by === "floor" ? L.floor || "(no floor set)" : inp.group_by === "page" ? pageName(it) : it.label || L.room || "(no name)") + " | " + c.name + " | " + c.unit;
+        G.set(key, (G.get(key) || 0) + rowsOf(it, k2).reduce((a, r) => a + r.qty, 0)); });
+      groups = [...G].map(([kk, q]) => { const [g, cn, u] = kk.split(" | "); return {[inp.group_by]: g, condition: cn, unit: u, net: +q.toFixed(3)}; }).sort((a, b) => String(a[inp.group_by]).localeCompare(String(b[inp.group_by]), undefined, {numeric: true})); }
+    return {ok: {scope: pg ? "page " + (S.page ? pageName({file: S.fileId, page: S.pageNo}) : "") : "project", totals: rows, groups}};
+  }
+  if (b.name === "explain_measurement") {
+    if (!P.proj) return {err: "No project is open."};
+    const it = P.proj.items.find(i => i.id === (inp.id || S.sel)); if (!it) return {err: inp.id ? "No measurement with that id." : "Nothing is selected — give an id."};
+    const c = cond(it.cond) || {}, k = itemScale(it); if (!k) return {err: "That page has no scale, so the measurement has no quantity yet."};
+    const fmt = v => v == null ? null : +(+v).toFixed(3), R = rowsOf(it, k).map(r => ({desc: rowDesc({r, it, i: 0}), sign: r.sign < 0 ? "deduct" : "add", dims: [r.nos, r.A, r.L, r.W, r.H].map((v, i) => v == null ? null : ["Nos", "A", "L", "W", "H"][i] + " " + fmt(v)).filter(Boolean).join(" × "), qty: fmt(r.qty), unit: r.unit}));
+    const d = it.det;
+    return {ok: {id: it.id, name: it.label || "", condition: c.name, page: pageName(it), rows: R, total: fmt(R.reduce((a, r) => a + r.qty, 0)), unit: c.unit,
+      made_by: d ? {how: "Auto area", from: d.src, door_gap_ft: d.gap, detected_sft: d.a0, edited_since: detEdited(it), warning: d.flag || null} : it.ai ? "AI / agent (needs checking)" : "drawn by hand",
+      check: it.qa || "not checked"}};
+  }
+  if (b.name === "undo_last") { if (!S.undo.length) return {err: "Nothing to undo."}; const lab = undoEntry(S.undo[S.undo.length - 1]).label || "last change"; undo(); return {ok: {undone: lab}}; }
+  if (b.name === "list_instructions") return {ok: {rules: ["project", "global", "session"].flatMap(sc => rulesOf(sc).map(r => ({text: r.text, scope: RULE_SCOPES[sc], on: r.on !== false})))}};
+  if (b.name === "save_instruction") { const t = String(inp.text || "").trim(); if (!t) return {err: "No rule text."};
+    const r = await ruleTeach("remember: " + t, true); return r === true && rulesActive().some(x => x.text === t || x.text.toLowerCase() === t.toLowerCase()) ? {ok: {asked_user: true, active_rules: rulesActive().map(x => x.text)}} : {err: "Not saved."}; }
+  return null;
+}
+
+/* ------------------------------------------------------------------ local AI (free, offline): Ollama on this computer
+   The page talks to an Ollama server the user runs on this computer (http://127.0.0.1:11434). The model gets the same tools
+   as Claude and runs them for real here; a model that can see pictures also gets the view on screen. Nothing goes to the
+   internet once the model is downloaded, and nothing falls back to a paid or cloud service: if the local model cannot be
+   reached, the built-in rule agent answers (also offline) and says so. Ollama only lets this site in when it is started
+   with OLLAMA_ORIGINS naming this site (setup in ⚙ Engine). */
+const LOC = {st: "unknown", msg: "", models: [], caps: {}, ver: "", checked: 0};
+const locUrl = () => (pref("zdTakeoffLocalUrl") || "http://127.0.0.1:11434").replace(/\/+$/, "");
+const locModel = () => pref("zdTakeoffLocalModel") || "";
+const aiEngine = () => pref("zdTakeoffAiEngine") || "auto";
+async function locFetch(path, body, ms){
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms || 4000);
+  try {
+    const r = await fetch(locUrl() + path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body), signal: ctl.signal} : {signal: ctl.signal});
+    if (r.status === 403) throw Object.assign(new Error("Ollama refused this site (403) — start it with OLLAMA_ORIGINS=" + location.origin + " (⚙ Engine → setup)"), {code: "blocked"});
+    if (!r.ok) { let m = ""; try { m = (await r.json()).error || ""; } catch (e) {} throw Object.assign(new Error("Ollama: " + (m || "HTTP " + r.status)), {code: r.status === 404 ? "nomodel" : "http"}); }
+    return await r.json();
+  } catch (e) {
+    if (e.code) throw e;
+    if (e.name === "AbortError") throw Object.assign(new Error("Ollama did not answer in time at " + locUrl()), {code: "timeout"});
+    throw Object.assign(new Error("No local AI at " + locUrl() + " — Ollama is not running, or it does not allow this site yet (OLLAMA_ORIGINS=" + location.origin + ", see ⚙ Engine → setup)"), {code: "offline"});
+  } finally { clearTimeout(t); }
+}
+async function locHealth(){   // -> LOC: ready | offline | blocked | nomodel | none (no model chosen)
+  try {
+    const v = await locFetch("/api/version"); LOC.ver = v.version || "";
+    const tags = await locFetch("/api/tags"); LOC.models = (tags.models || []).map(m => ({name: m.name || m.model, size: m.size || 0, params: (m.details || {}).parameter_size || "", quant: (m.details || {}).quantization_level || "", family: (m.details || {}).family || ""}));
+    const m = locModel();
+    if (!m) { LOC.st = "none"; LOC.msg = LOC.models.length ? "Ollama " + LOC.ver + " is running — choose a model" : "Ollama " + LOC.ver + " is running but has no models — ollama pull a model"; }
+    else if (!LOC.models.some(x => x.name === m || x.name === m + ":latest")) { LOC.st = "nomodel"; LOC.msg = "Model " + m + " is not installed — run: ollama pull " + m; }
+    else { if (!LOC.caps[m]) { try { const sh = await locFetch("/api/show", {model: m}, 8000); LOC.caps[m] = sh.capabilities || []; } catch (e) { LOC.caps[m] = []; } }
+      LOC.st = "ready"; LOC.msg = m + " ready" + (LOC.caps[m].length ? " · " + LOC.caps[m].join(", ") : "") + " · Ollama " + LOC.ver; }
+  } catch (e) { LOC.st = e.code === "blocked" ? "blocked" : "offline"; LOC.msg = e.message; }
+  LOC.checked = Date.now(); locLine(); kpiLog("local-health", {st: LOC.st}); return LOC;
+}
+const locCan = cap => (LOC.caps[locModel()] || []).includes(cap);
+function locLine(){
+  const el = $("aiEngLine"); if (!el) return;
+  const e = aiEngine(), dot = {ready: "#1e8e5a", none: "#c77700", nomodel: "#c77700", offline: "#b42318", blocked: "#b42318", unknown: "#6b7d92"}[LOC.st];
+  const route = e === "rules" ? "Built-in rule agent (offline)" : e === "claude" ? "Claude (your API key / claude.ai — online)" : e === "local" || locModel() ? "Local AI — " + (locModel() || "no model chosen") : "Auto — Claude if a key is set, else the built-in rule agent";
+  el.innerHTML = `<span style="color:${dot}">●</span> <b>${esc(route)}</b>${e !== "rules" && e !== "claude" && (e === "local" || locModel()) ? " · " + esc(LOC.msg || "not checked yet") : ""} · ${navigator.onLine ? "online" : "offline"}`;
+}
+function hwInfo(){   // what the browser tells about this computer (memory is rounded and capped at 8 GB by the browser)
+  const m = navigator.deviceMemory, c = navigator.hardwareConcurrency;
+  return {mem: m ? (m >= 8 ? "8 GB or more (the browser reports at most 8)" : m + " GB (rounded by the browser)") : "not reported by this browser", cores: c || "?", gpu: !!navigator.gpu};
+}
+async function locSetup(){
+  await locHealth();
+  const hw = hwInfo(), org = location.origin, e = aiEngine(), cur = locModel();
+  const opts = LOC.models.map(m => `<option value="${esc(m.name)}"${m.name === cur || m.name === cur + ":latest" ? " selected" : ""}>${esc(m.name)}${m.params ? " · " + esc(m.params) : ""}${m.size ? " · " + (m.size / 1e9).toFixed(1) + " GB" : ""}</option>`).join("");
+  const radio = (v, t, d) => `<label class="pk" style="display:block;margin:3px 0"><input type="radio" name="leEng" value="${v}"${e === v ? " checked" : ""} style="width:auto"> <b>${t}</b> <span class="small">${d}</span></label>`;
+  const bench = (() => { try { return JSON.parse(pref("zdTakeoffBench") || "[]"); } catch (er) { return []; } })();
+  const body = `<div class="wide"></div>
+    <div><b class="small">Which AI answers the takeoff agent</b>
+      ${radio("auto", "Auto", "local AI when a model is chosen below; otherwise Claude if you set a key, else the built-in rule agent")}
+      ${radio("local", "Local AI only", "free and offline — never sends anything to the internet; if the local model cannot be reached the built-in rule agent answers")}
+      ${radio("claude", "Claude", "your Anthropic API key or claude.ai — online, billed / plan-limited")}
+      ${radio("rules", "Built-in rule agent only", "offline, no model at all: the ⚡ agents and typed commands")}</div>
+    <div class="row" style="gap:8px;margin-top:8px"><div class="fg" style="flex:2"><label>Ollama address (this computer)</label><input type="text" id="leUrl" value="${esc(locUrl())}"></div>
+      <div class="fg" style="flex:2"><label>Model</label><select id="leModel"><option value="">— choose —</option>${opts}</select></div>
+      <div class="fg"><label>Context (tokens)</label><input type="number" id="leCtx" min="2048" step="1024" value="${+(pref("zdTakeoffLocalCtx") || 8192)}"></div></div>
+    <p class="small" id="leSt" style="margin:4px 0"><b>Status:</b> ${esc(LOC.msg)}</p>
+    <div class="row" style="gap:6px"><button type="button" class="btn sm" id="leTest">Test connection</button><button type="button" class="btn sm" id="leBench"${LOC.models.length ? "" : " disabled"}>Benchmark installed models</button></div>
+    <div id="leBenchOut" class="small" style="margin-top:6px">${bench.length ? benchTable(bench) : ""}</div>
+    <details style="margin-top:10px"${LOC.st === "ready" ? "" : " open"}><summary><b>Set up the free local AI (one time)</b></summary><ol class="small" style="margin:6px 0 0 18px;line-height:1.6">
+      <li>Install <b>Ollama</b> from ollama.com (Windows, macOS, Linux).</li>
+      <li>Let this site talk to it: set the environment variable <code>OLLAMA_ORIGINS=${esc(org)}</code><br>
+        Windows: Settings → System → About → Advanced system settings → Environment Variables → New (user variable), then quit Ollama from the tray and start it again.<br>
+        macOS: <code>launchctl setenv OLLAMA_ORIGINS "${esc(org)}"</code>, then quit and reopen Ollama. Linux (systemd): <code>sudo systemctl edit ollama</code> → <code>[Service]</code> <code>Environment="OLLAMA_ORIGINS=${esc(org)}"</code>, then <code>sudo systemctl restart ollama</code>.</li>
+      <li>Download a model that can call tools, e.g. <code>ollama pull qwen3:8b</code> — or one that can also see the drawing (vision + tools). Check the current names and sizes at ollama.com/library: models change often.</li>
+      <li>Press <b>Test connection</b>, choose the model, Save. Chrome may ask to let this site reach devices on your local network — allow it.</li></ol>
+      <p class="small">Keep Ollama on this computer only (its default, 127.0.0.1): do not set OLLAMA_HOST=0.0.0.0, which would open it to your network. Stop it from the tray icon / <code>ollama stop &lt;model&gt;</code>; update by installing the new version.
+      Rule of thumb (4-bit models): about 0.6–0.7 GB of memory per billion parameters plus the context — a 4B model needs about 3–4 GB, an 8B model 6–8 GB; vision models more. Small models (under 4B) often call tools wrongly — the benchmark shows how each one does on this computer.<br>
+      This computer, as the browser reports it: memory ${esc(String(hw.mem))} · ${esc(String(hw.cores))} processor threads · WebGPU ${hw.gpu ? "yes" : "no"}. The browser cannot see the graphics card's memory; Ollama uses it by itself when it can.</p></details>`;
+  const pr = ask("AI engine — local AI (free, offline)", body, "Save", () => ({eng: (document.querySelector("input[name=leEng]:checked") || {}).value || "auto", url: $("leUrl").value.trim(), model: $("leModel").value, ctx: Math.max(2048, +$("leCtx").value || 8192)}), "leUrl");
+  $("leTest").onclick = async () => { pref("zdTakeoffLocalUrl", $("leUrl").value.trim()); const m0 = locModel(); pref("zdTakeoffLocalModel", $("leModel").value || m0); $("leSt").innerHTML = "<b>Status:</b> checking…"; await locHealth(); pref("zdTakeoffLocalModel", m0);
+    $("leSt").innerHTML = "<b>Status:</b> " + esc(LOC.msg); const sel = $("leModel"), keep = sel.value; sel.innerHTML = '<option value="">— choose —</option>' + LOC.models.map(m => `<option value="${esc(m.name)}">${esc(m.name)}${m.params ? " · " + esc(m.params) : ""}</option>`).join(""); sel.value = keep; $("leBench").disabled = !LOC.models.length; };
+  $("leBench").onclick = async () => { const out = $("leBenchOut"); out.textContent = "Running… (each model is loaded in turn — the first answer of a model includes its loading time)"; const res = await locBenchmark(t => { out.textContent = t; }); out.innerHTML = benchTable(res); };
+  const v = await pr; if (!v) return locLine();
+  pref("zdTakeoffAiEngine", v.eng === "auto" ? "" : v.eng); pref("zdTakeoffLocalUrl", v.url && v.url !== "http://127.0.0.1:11434" ? v.url : ""); pref("zdTakeoffLocalModel", v.model); pref("zdTakeoffLocalCtx", String(v.ctx));
+  await locHealth(); toast("AI engine saved — " + (LOC.st === "ready" ? LOC.msg : aiEngine()), 3000);
+}
+function toOllamaTools(L){ return L.map(t => ({type: "function", function: {name: t.name, description: t.description, parameters: t.input_schema}})); }
+function toolArgsCheck(t, a){   // the model's arguments against the tool's schema: required fields there, types right, enums kept
+  if (!t) return "no such tool";
+  if (!a || typeof a !== "object" || Array.isArray(a)) return "arguments must be an object";
+  const S2 = t.input_schema || {}, P2 = S2.properties || {};
+  for (const r of S2.required || []) if (a[r] == null || a[r] === "") return "missing " + r;
+  for (const [k, v] of Object.entries(a)) { const d = P2[k]; if (!d || v == null) continue;
+    if (d.type === "number" && !isFinite(+v)) return k + " must be a number";
+    if (d.type === "string" && typeof v !== "string") a[k] = String(v);
+    if (d.type === "array" && !Array.isArray(v)) return k + " must be a list";
+    if (d.enum && !d.enum.includes(a[k])) return k + " must be one of " + d.enum.join(", ");
+    if (d.type === "boolean" && typeof v !== "boolean") a[k] = v === "true" || v === 1; }
+  return "";
+}
+function locCalls(msg){   // tool calls from a reply: the proper field, else a JSON call written in the text (small models do this)
+  const out = (msg.tool_calls || []).map(c => { const f = c.function || c; let a = f.arguments; if (typeof a === "string") { try { a = JSON.parse(a); } catch (e) { a = null; } } return {name: f.name, args: a || {}}; });
+  if (out.length || !msg.content) return {calls: out, inText: false};
+  const names = new Set(AI_TOOLS_ALL().map(t => t.name)), txt = String(msg.content).replace(/<think>[\s\S]*?<\/think>/g, "");
+  const m = txt.match(/\{[\s\S]*"name"\s*:\s*"([a-z_]+)"[\s\S]*\}/);
+  if (m && names.has(m[1])) { try { const j = JSON.parse(m[0]); const a = j.arguments || j.parameters || j.input || {}; return {calls: [{name: j.name, args: typeof a === "string" ? JSON.parse(a) : a}], inText: true}; } catch (e) {} }
+  return {calls: [], inText: false};
+}
+const LOC_SYS = `\n\nYOU RUN LOCALLY AND OFFLINE on the user's computer (a small open model). Rules for you:
+- Use the tools for everything about the drawing and the takeoff; every quantity you state must come from a tool result (quantity_totals, explain_measurement, list_measured or a measuring tool). Never estimate, round up or invent a quantity, a rate or a size.
+- For questions about the project call get_project_context first. For "how much / total" call quantity_totals. For "show the calculation" call explain_measurement.
+- If a tool returns an error, say what failed and what the user can do. Never say something was measured, saved or deleted unless a tool result says so.
+- General construction / quantity-surveying knowledge comes from your training and may be out of date or wrong; say so when unsure, and say "I don't know" rather than guess. You have no internet.
+- Keep replies short: what you did, the quantities (from the tools), what needs the user's check.`;
+function locHistKey(){ return "zdTakeoffChat:" + (P.proj ? P.proj.id : "-"); }
+function locHist(){ try { const h = JSON.parse(pref(locHistKey()) || "[]"); return Array.isArray(h) ? h : []; } catch (e) { return []; } }
+function locHistPut(h){ try { pref(locHistKey(), JSON.stringify(h.slice(-24))); } catch (e) {} }   // text only — no pictures, no tool traffic
+async function locChat(messages, tools, opts){
+  const t0 = performance.now(), r = await locFetch("/api/chat", Object.assign({model: locModel(), messages, tools, stream: false, keep_alive: "15m", options: {temperature: 0.2, num_ctx: +(pref("zdTakeoffLocalCtx") || 8192)}}, opts || {}), 300000);
+  r._ms = performance.now() - t0; if (r.load_duration > 2e8) r._load = r.load_duration / 1e6; return r;
+}
+async function aiSendLocal(text){
+  if (AI.busy || !P.proj) return;
+  if (!S.page) return aiLog("err", "Open a PDF page first.");
+  AI.busy = true; $("aiSend").disabled = true; $("aiRead").disabled = true;
+  aiLog("user", esc(text));
+  const wait = aiLog("wait", "Local AI (" + esc(locModel()) + ") is working… <span class=\"small\">first answer after loading the model can take a while</span>");
+  const met = {ms: 0, tok: 0, evalNs: 0, calls: 0, bad: 0, turns: 0};
+  let fallback = null;
+  try {
+    if (LOC.st !== "ready" || Date.now() - LOC.checked > 60000) await locHealth();
+    if (LOC.st !== "ready") throw Object.assign(new Error(LOC.msg), {code: LOC.st});
+    AI.view = await aiSnapshot(locCan("vision") ? 1150000 : 0);
+    const tools = AI_TOOLS_ALL(), user = {role: "user", content: aiContext(AI.view) + "\n\n" + text};
+    if (locCan("vision")) user.images = [AI.view.data];
+    const msgs = [{role: "system", content: AI_SYSTEM + LOC_SYS + rulesPrompt()}, ...locHist(), user];
+    let final = "";
+    for (let turn = 0; turn < 10; turn++) {
+      const r = await locChat(msgs, toOllamaTools(tools)); met.turns++; met.ms += r._ms; if (r._load) met.load = r._load; met.tok += r.eval_count || 0; met.evalNs += r.eval_duration || 0;
+      const msg = r.message || {}, {calls, inText} = locCalls(msg), said = String(msg.content || "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+      msgs.push({role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls});
+      if (said && !inText) { aiLog("bot", aiText(said)); final = said; }
+      if (!calls.length) break;
+      for (const c of calls) {
+        met.calls++; const t = tools.find(x => x.name === c.name), bad = toolArgsCheck(t, c.args);
+        let out;
+        if (bad) { met.bad++; out = {err: "Tool call rejected (" + bad + ") — call " + (t ? t.name : "a listed tool") + " again with valid arguments."}; }
+        else { try { out = await aiRunTool({name: c.name, input: c.args}); } catch (e) { out = {err: e.message || String(e)}; } }
+        aiLog(out.ok ? "tool" : "err", aiToolMsg(c.name, c.args || {}, out));
+        msgs.push({role: "tool", tool_name: c.name, content: JSON.stringify(out.ok || {error: out.err})});
+      }
+      refresh();
+    }
+    locHistPut(locHist().concat([{role: "user", content: text}, {role: "assistant", content: final || "(done with tools)"}]));
+    const tps = met.evalNs ? met.tok / (met.evalNs / 1e9) : 0;
+    aiLog("meta", `local · ${esc(locModel())} · ${(met.ms / 1000).toFixed(1)} s · ${tps ? tps.toFixed(1) + " tokens/s" : "—"} · ${met.calls} tool call${met.calls === 1 ? "" : "s"}${met.bad ? " (" + met.bad + " rejected)" : ""} · nothing sent to the internet`);
+    AI.locMet = Object.assign({at: new Date().toISOString(), model: locModel(), tps}, met);
+    kpiLog("agent", {route: "local", ms: Math.round(met.ms), calls: met.calls, bad: met.bad, turns: met.turns, load: met.load || 0, tps: +tps.toFixed(1)});
+  } catch (e) { fallback = e; }
+  wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
+  if (fallback) { kpiLog("agent", {route: "rules", fallback: true}); aiLog("err", esc(fallback.message || String(fallback)) + " — answered by the <b>built-in rule agent</b> instead (offline; nothing sent to a cloud service)."); await agentCmd(text, true); }
+}
+/* benchmark: the same three tasks for each installed model — does it pick the right tool with valid arguments, how long it
+   takes, how fast it writes. Nothing is changed on the drawing: the tools are offered but not run. Kept in this browser. */
+const BENCH = [
+  {q: "How many conditions does this project have, and what is on this page?", tool: "get_project_context", ok: a => true},
+  {q: "Measure the floor area of the BEDROOM on this page.", tool: "measure_rooms", alt: ["trace_room"], ok: a => !a.names || !a.names.length || JSON.stringify(a).toUpperCase().includes("BED")},
+  {q: "Count the doors tagged D1 on this page.", tool: "count_tags", ok: a => /d\s*-?1/i.test(String(a.what || ""))},
+  {q: "What is the total floor area measured on this page? Do not guess.", tool: "quantity_totals", ok: a => true}];
+async function locBenchmark(say){
+  const models = LOC.models.map(m => m.name), out = [], tools = toOllamaTools(AI_TOOLS_ALL()), m0 = locModel();
+  for (const m of models) {
+    pref("zdTakeoffLocalModel", m);
+    const row = {model: m, at: new Date().toISOString(), right: 0, valid: 0, n: BENCH.length, ms: [], tps: [], err: ""};
+    for (const [i, b] of BENCH.entries()) {
+      say && say("Benchmark: " + m + " — task " + (i + 1) + " of " + BENCH.length + "…");
+      try { const r = await locChat([{role: "system", content: AI_SYSTEM + LOC_SYS}, {role: "user", content: b.q}], tools, {keep_alive: "2m"});
+        row.ms.push(r._ms); if (r.eval_duration) row.tps.push((r.eval_count || 0) / (r.eval_duration / 1e9));
+        const {calls} = locCalls(r.message || {}), c = calls[0];
+        if (c && (c.name === b.tool || (b.alt || []).includes(c.name))) { row.right++; const t = AI_TOOLS_ALL().find(x => x.name === c.name); if (!toolArgsCheck(t, c.args) && b.ok(c.args || {})) row.valid++; }
+      } catch (e) { row.err = e.message; break; }
+    }
+    out.push(row);
+  }
+  pref("zdTakeoffLocalModel", m0);
+  try { pref("zdTakeoffBench", JSON.stringify(out)); } catch (e) {}
+  return out;
+}
+function benchTable(R){
+  const med = a => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+  return `<table class="mattbl"><tr><td><b>Model</b></td><td class="n"><b>Right tool</b></td><td class="n"><b>Valid args</b></td><td class="n"><b>Median reply</b></td><td class="n"><b>Tokens/s</b></td></tr>${R.map(r => `<tr><td>${esc(r.model)}${r.err ? ` <span class="warn">${esc(r.err)}</span>` : ""}</td><td class="n">${r.right}/${r.n}</td><td class="n">${r.valid}/${r.n}</td><td class="n">${med(r.ms) != null ? (med(r.ms) / 1000).toFixed(1) + " s" : "—"}</td><td class="n">${med(r.tps) != null ? med(r.tps).toFixed(1) : "—"}</td></tr>`).join("")}</table><div class="small">Measured on this computer${R[0] ? ", " + esc(dmy(R[0].at)) : ""}. Right tool: the model chose the tool the task needs; valid args: and filled it correctly.</div>`;
+}
+/* ------------------------------------------------------------------ KPI log (this browser only)
+   Numbers about what the app did — Auto area runs, agent replies, tool calls, local-AI checks — kept in this browser for the
+   KPI dashboard. No drawing content, no text of the conversation, nothing sent anywhere. View, export or clear it in KPIs. */
+const KPI_KEY = "zdTakeoffKpi";
+function kpiLog(e, o){ try { const L = JSON.parse(pref(KPI_KEY) || "[]"); L.push(Object.assign({t: new Date().toISOString(), e, on: navigator.onLine}, o || {})); pref(KPI_KEY, JSON.stringify(L.slice(-3000))); } catch (er) {} }
+function kpiAll(){ try { const L = JSON.parse(pref(KPI_KEY) || "[]"); return Array.isArray(L) ? L : []; } catch (e) { return []; } }
+const pctl = (a, p) => { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.floor(p * b.length))]; };
+const kpiPct = (n, d) => d ? (100 * n / d).toFixed(1) + " %" : "Insufficient data";
+let KPI_SUITE = null;
+async function kpiSuite(){   // the drawing test suite's recorded results (tools/test_takeoff_drawings.js --write), shipped with the app
+  if (KPI_SUITE) return KPI_SUITE;
+  try { const r = await fetch("kpi/drawing-tests.json", {cache: "no-cache"}); if (r.ok) KPI_SUITE = await r.json(); } catch (e) {}
+  return KPI_SUITE;
+}
+async function kpiDialog(){
+  const L = kpiAll(), A = L.filter(x => x.e === "auto"), G = L.filter(x => x.e === "agent"), TL = L.filter(x => x.e === "tool"), H = L.filter(x => x.e === "local-health"), suite = await kpiSuite();
+  const row = (k, v, note) => `<tr><td>${k}</td><td class="n">${v}</td>${note != null ? `<td class="small">${note}</td>` : "<td></td>"}</tr>`, nt = '<span class="small" style="color:var(--muted)">Not tested</span>';
+  const tbl = rows => `<table class="mattbl" style="margin:4px 0 10px">${rows.join("")}</table>`;
+  let sHtml = '<p class="small">Not tested — no recorded results shipped with this version.</p>';
+  if (suite && suite.cases) {
+    const S2 = suite.cases.flatMap(c => c.seeds.map(s => Object.assign({cat: c.cat, id: c.id, kind: c.kind}, s))), V = v => S2.filter(s => s.verdict === v).length, J = S2.filter(s => s.expect === "area");
+    const e = J.filter(s => s.errPct != null).map(s => Math.abs(s.errPct)), io = J.filter(s => s.iou != null).map(s => s.iou), neg = S2.filter(s => s.expect === "none");
+    const cats = [...new Set(suite.cases.map(c => c.cat))], byCat = cats.map(c => { const x = J.filter(s => s.cat === c); return x.length ? `<tr><td>${esc(c)}</td><td class="n">${x.filter(s => s.verdict === "pass").length}/${x.length}</td><td class="small">${x.map(s => s.verdict + (s.errPct != null ? " " + (s.errPct >= 0 ? "+" : "") + s.errPct.toFixed(2) + " %" : "")).join(", ")}</td></tr>` : ""; }).join("");
+    const cnt = suite.cases.filter(c => c.counts), cOk = cnt.reduce((a, c) => a + Object.entries(c.counts.expected).filter(([t, n]) => (c.counts.got[t.toUpperCase()] || 0) === n).length, 0), cN = cnt.reduce((a, c) => a + Object.keys(c.counts.expected).length, 0);
+    sHtml = `<p class="small">Recorded ${esc(dmy(suite.at))}${suite.commit ? " · commit " + esc(suite.commit) : ""} · ${esc(suite.browser || "")} · ${esc(suite.settings || "")} · generated test drawings with known reference outlines (${esc(suite.suite)}).</p>` + tbl([
+      row("Test cases (seed points) / pages / drawing conditions", S2.length + " / " + suite.cases.length + " / " + cats.length),
+      row("Boundary found and within tolerance", kpiPct(V("pass"), J.length), V("pass") + " of " + J.length + " with a verified reference"),
+      row("Wrong but flagged (error / warning to the user)", V("flagged") + "", "the user is told to check or draw it"),
+      row("Silent misses (wrong area, no warning)", V("silent-miss") + "", "the failure that matters most"),
+      row("Negative cases refused (no valid room → asks for manual input)", neg.length ? V("neg-pass") + " / " + neg.length : nt),
+      row("Area error |%| — median / mean / worst", e.length ? pctl(e, 0.5).toFixed(2) + " / " + (e.reduce((a, v) => a + v, 0) / e.length).toFixed(2) + " / " + Math.max(...e).toFixed(2) : nt, "all judged seeds, flagged ones included"),
+      row("Outline IoU against the reference — median / worst", io.length ? pctl(io, 0.5).toFixed(3) + " / " + Math.min(...io).toFixed(3) : nt, "IoU measures the shape, area error the quantity"),
+      row("Processing time per room — median / 90th percentile", pctl(S2.map(s => s.ms), 0.5) + " / " + pctl(S2.map(s => s.ms), 0.9) + " ms"),
+      row("Exploratory (no verified reference)", V("explore") + "", "recorded, not judged"),
+      row("Tag counts correct", cN ? cOk + " / " + cN : nt)]) + `<details><summary class="small">By drawing condition</summary><table class="mattbl">${byCat}</table></details>`;
+  }
+  // Auto area in this browser, and the outlines of this project
+  const dets = P.proj ? P.proj.items.filter(i => i.det && i.det.how === "auto") : [], ed = dets.filter(detEdited).length, ms = A.map(x => x.ms).filter(Boolean);
+  const uHtml = tbl([
+    row("Auto area runs (this browser)", A.length || nt),
+    row("Outline found (no error)", kpiPct(A.filter(x => !x.err).length, A.length)),
+    row("Found but flagged for checking", kpiPct(A.filter(x => x.flag).length, A.filter(x => !x.err).length)),
+    row("Processing time — median / 90th percentile", ms.length ? pctl(ms, 0.5) + " / " + pctl(ms, 0.9) + " ms" : "Insufficient data"),
+    row("This project: Auto-area outlines kept", dets.length || nt),
+    row("…accepted without correction / corrected by the user", dets.length ? kpiPct(dets.length - ed, dets.length) + " / " + kpiPct(ed, dets.length) : "Insufficient data"),
+    row("…voids deducted", dets.reduce((a, d) => a + ((d.det.holes || []).length), 0) || "0")]);
+  // the agent
+  const byR = r => G.filter(x => x.route === r).length, gms = G.map(x => x.ms).filter(Boolean), tOk = TL.filter(x => x.ok).length, bad = G.reduce((a, x) => a + (x.bad || 0), 0), calls = G.reduce((a, x) => a + (x.calls || 0), 0);
+  const bench = (() => { try { return JSON.parse(pref("zdTakeoffBench") || "[]"); } catch (er) { return []; } })();
+  const gHtml = tbl([
+    row("Messages answered — local AI / Claude / built-in rule agent", G.length ? byR("local") + " / " + byR("claude") + " / " + byR("rules") : nt),
+    row("Tool calls run / succeeded", TL.length ? TL.length + " / " + kpiPct(tOk, TL.length) : nt, "a tool that ran and returned a result"),
+    row("Tool calls rejected (invalid arguments, not run)", calls ? bad + " of " + calls : "Insufficient data"),
+    row("Reply time — median / 90th percentile", gms.length ? (pctl(gms, 0.5) / 1000).toFixed(1) + " / " + (pctl(gms, 0.9) / 1000).toFixed(1) + " s" : "Insufficient data"),
+    row("Local AI unavailable → answered by the rule agent", G.filter(x => x.fallback).length + ""),
+    row("Requests to an external AI service", byR("claude") + "", "Claude route only, when you chose it; the local route sends nothing out"),
+    row("Local-AI replies with the browser offline", G.filter(x => x.route === "local" && x.on === false).length + "")]) +
+    (bench.length ? '<p class="small"><b>Model benchmark on this computer</b> (⚙ Engine):</p>' + benchTable(bench) : '<p class="small">Model benchmark: Not tested — run it in ⚙ Engine.</p>') +
+    '<p class="small">The agent\'s plumbing is tested in tools/test_takeoff_localai.js against a stand-in Ollama (scripted replies) — that proves the app runs tools, validates arguments and never fabricates a result, not how well any model understands. A fluent answer is not proof that a takeoff step succeeded: the tool lines in the chat are.</p>';
+  const h = H[H.length - 1], lms = L.filter(x => x.e === "agent" && x.load).map(x => x.load);
+  const yHtml = tbl([
+    row("Local AI status", esc(LOC.msg || "not checked"), h ? "last checked " + esc(dmy(h.t)) : ""),
+    row("Model loading time — last / median", lms.length ? (lms[lms.length - 1] / 1000).toFixed(1) + " / " + (pctl(lms, 0.5) / 1000).toFixed(1) + " s" : "Insufficient data"),
+    row("Memory in use", "Not measurable here", "the browser reports at most 8 GB; Ollama manages the model's memory"),
+    row("Page errors recorded", L.filter(x => x.e === "error").length + ""),
+    row("Browser now", navigator.onLine ? "online" : "offline")]);
+  await ask("KPIs — Auto area and the takeoff agent", `<div class="wide"></div><p class="small">Every figure comes from recorded results: the drawing test suite shipped with this version, and what this browser has logged (numbers only — no drawing content, nothing sent anywhere). “Not tested” / “Insufficient data” where there is no evidence.</p>
+    <h4>Auto area — drawing test suite</h4>${sHtml}<h4>Auto area — your use</h4>${uHtml}<h4>Takeoff agent</h4>${gHtml}<h4>System</h4>${yHtml}
+    <div class="row" style="gap:6px"><button type="button" class="btn sm" id="kpiExp">Export the log (JSON)</button><button type="button" class="btn sm dng" id="kpiClr">Clear the log</button><span class="small">${L.length} entries</span></div>`, null);
+}
+document.addEventListener("click", e => {
+  if (e.target.id === "kpiClr") { pref(KPI_KEY, ""); toast("KPI log cleared", 1500); $("dlgCancel").click(); }
+  if (e.target.id === "kpiExp") { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(kpiAll(), null, 1)], {type: "application/json"})); a.download = "zd-takeoff-kpi-log.json"; a.click(); }
+});
+window.addEventListener("error", e => { if (!/ResizeObserver/.test(String(e.message))) kpiLog("error", {m: String(e.message || "").slice(0, 80)}); });
+
+/* ------------------------------------------------------------------ local knowledge: search, offline
+   A keyword index (BM25) built in this browser over: the app's own help (every tool's tooltip and the keys list), the PDFs'
+   text page by page, sheet numbers and titles, the user's rules, the measurements (id, name, condition, quantity, page) and
+   documents the user adds to the project (specifications, schedules, notes — text, CSV, Markdown or PDF). Results carry
+   their source — file and page, measurement id, document name — and are extracted text, not interpretation. Nothing leaves
+   the browser. (A local embedding model could rank by meaning; keyword search needs no model and works for codes, tags and
+   item names, which is most of a takeoff.) */
+const KB_STOP = new Set("a an the of and or to in on at for by with is are be this that it as from what which how many much do does i me my we our you your all any".split(" "));
+const kbTok = t => String(t || "").toLowerCase().replace(/(\d)'-(\d)/g, "$1ft$2").split(/[^a-z0-9.]+/).map(w => w.replace(/^\.+|\.+$/g, "")).filter(w => w && !KB_STOP.has(w));
+function kbChunks(text, size){ const out = [], s = String(text || "").replace(/\s+/g, " ").trim(); for (let i = 0; i < s.length; i += size - 60) out.push(s.slice(i, i + size)); return out.filter(x => x.trim().length > 2); }
+async function kbDocs(want){   // [{src, ref, text}]
+  const D = [], W = want || {};
+  if (!W.only || W.only.includes("help")) {
+    document.querySelectorAll("button[title], [data-tool][title], .rtab[title]").forEach(b => { const t = (b.textContent || "").replace(/\s+/g, " ").trim(), ti = b.title || ""; if (ti.length > 12) D.push({src: "help", ref: "Help: " + (t || ti.split(/ — |: /)[0]).slice(0, 40), text: (t ? t + " — " : "") + ti}); });
+    D.push({src: "help", ref: "Help: Auto area", text: "Auto area: click inside a room to trace it from its walls. Settings ⚙: find walls from the drawing image or vector lines, close gaps (door openings) up to a width, ignore furniture narrower than, ignore small marks, dashed lines as walls, use the PDF's wall layers, show the detected walls, show the outline before adding it (Accept, Tighter gap, Wider gap, Cancel). Shafts, ducts and voids labelled inside a room are deducted. Leaks, short traces, dashed sides and outlines that do not follow the drawing's lines are flagged for checking. Fence draws a line that closes a leak."});
+    D.push({src: "help", ref: "Help: gross and net", text: "Gross area is the whole measured outline; net area is gross less deductions (cut-outs, voids, shafts, openings). The measurement sheet shows deductions as their own rows (Ded.), so net = gross − deductions. Each row is Nos × L × W × H in decimal feet."});
+  }
+  if (!P.proj) return D;
+  if (!W.only || W.only.includes("drawings")) for (const f of P.proj.files) for (let pg = 1; pg <= (f.pages || 1); pg++) {
+    let T = S.texts[keyOf(f.id, pg)]; if (!T && W.read !== false) { try { T = await pageTexts(f.id, pg); } catch (e) { T = null; } }
+    if (!T) continue; const txt = textLines(T).map(l => l.s).join(" · "), sh = (P.proj.sheets || {})[keyOf(f.id, pg)] || {};
+    kbChunks(txt, 420).forEach(ch => D.push({src: "drawing", ref: f.name + " p." + pg + (sh.no ? " (" + sh.no + ")" : ""), file: f.id, page: pg, text: ch}));
+    if (sh.no || sh.title) D.push({src: "drawing", ref: f.name + " p." + pg, file: f.id, page: pg, text: "Sheet " + (sh.no || "") + " " + (sh.title || "")});
+  }
+  if (!W.only || W.only.includes("rules")) rulesActive().forEach(r => D.push({src: "rule", ref: "Rule (" + RULE_SCOPES[r.scope] + ")", text: r.text}));
+  if (!W.only || W.only.includes("measurements")) P.proj.items.forEach(it => { const c = cond(it.cond) || {}, q = qtyOf(it), L = locOf(it);
+    D.push({src: "measurement", ref: "Measurement " + it.id, id: it.id, text: [it.label, c.name, c.boq, q != null ? q.toFixed(3) + " " + c.unit : "no scale", pageName(it), L.floor, L.zone, it.kind === "ded" ? "deduction" : "", it.qa === "checked" ? "checked accepted" : "not checked", it.det ? "auto area" : "", it.ai ? "AI" : ""].filter(Boolean).join(" · ")}); });
+  if (!W.only || W.only.includes("documents")) (P.proj.kb || []).forEach(d => kbChunks(d.text, 520).forEach((ch, i) => D.push({src: "document", ref: d.name + " §" + (i + 1), doc: d.id, text: ch})));
+  return D;
+}
+async function kbSearch(q, opt){
+  const D = await kbDocs(opt), qt = [...new Set(kbTok(q))]; if (!qt.length) return [];
+  const toks = D.map(d => kbTok(d.ref + " " + d.text)), N = D.length, avg = toks.reduce((a, t) => a + t.length, 0) / Math.max(1, N), df = {};
+  qt.forEach(w => { df[w] = toks.filter(t => t.includes(w)).length; });
+  const k1 = 1.4, b = 0.75;
+  return D.map((d, i) => { const t = toks[i]; let s = 0; qt.forEach(w => { const f = t.filter(x => x === w).length; if (!f) return; const idf = Math.log(1 + (N - df[w] + 0.5) / (df[w] + 0.5)); s += idf * f * (k1 + 1) / (f + k1 * (1 - b + b * t.length / avg)); }); return {d, s}; })
+    .filter(o => o.s > 0).sort((a, b2) => b2.s - a.s).slice(0, (opt && opt.k) || 6).map(o => ({source: o.d.src, ref: o.d.ref, id: o.d.id, file: o.d.file, page: o.d.page, excerpt: o.d.text.slice(0, 360), score: +o.s.toFixed(2)}));
+}
+async function kbDialog(){
+  if (!P.proj) return toast("Open a project first", 2000);
+  const docs = () => (P.proj.kb || []).map(d => `<div class="row" style="gap:6px;align-items:center"><span style="flex:1">${esc(d.name)} <span class="small">${(d.text.length / 1000).toFixed(1)} k characters · ${esc(dmy(d.at))}</span></span><button type="button" class="btn sm dng" data-kbdel="${esc(d.id)}">Remove</button></div>`).join("") || '<div class="small">No documents yet.</div>';
+  const pr = ask("Project knowledge (offline search)", `<div class="wide"></div><p class="small">The agent searches these with <b>search_knowledge</b> and names its source: the app's help, the PDFs' text (page by page), sheet titles, your rules, the measurements, and documents you add here — specifications, schedules, notes (.txt, .md, .csv or a PDF's text). Kept with this project in this browser; nothing is uploaded.</p>
+    <div id="kbDocs">${docs()}</div><div class="row" style="gap:6px;margin-top:6px"><input type="file" id="kbIn" accept=".txt,.md,.csv,.json,.pdf,text/plain,application/pdf" multiple></div>
+    <div class="row" style="gap:6px;margin-top:10px"><input type="search" id="kbQ" placeholder="Try a search, e.g. D1 door size, plaster thickness, BED ROOM" style="flex:1"><button type="button" class="btn sm" id="kbGo">Search</button></div><div id="kbOut" class="small" style="margin-top:6px"></div>`, null, null, "kbQ");
+  const B = $("dlgB");
+  B.onclick = async e => { const d = e.target.closest("[data-kbdel]"); if (d) { P.proj.kb = (P.proj.kb || []).filter(x => x.id !== d.dataset.kbdel); save(); $("kbDocs").innerHTML = docs(); }
+    if (e.target.id === "kbGo") { const R = await kbSearch($("kbQ").value, {k: 8}); $("kbOut").innerHTML = R.length ? R.map(r => `<div style="margin:4px 0"><b>${esc(r.ref)}</b> <span class="tag">${esc(r.source)}</span><br>${esc(r.excerpt)}</div>`).join("") : "Nothing found."; } };
+  $("kbIn").onchange = async e => { for (const f of e.target.files) { let text = "";
+      try { if (/\.pdf$/i.test(f.name)) { const lib = await loadPdfjs(), d = await lib.getDocument({data: new Uint8Array(await f.arrayBuffer())}).promise; for (let i = 1; i <= d.numPages; i++) { const tc = await (await d.getPage(i)).getTextContent(); text += "\n[p." + i + "] " + tc.items.map(x => x.str).join(" "); } }
+        else text = await f.text(); } catch (er) { toast(f.name + ": could not be read — " + (er.message || er), 5000); continue; }
+      text = text.slice(0, 2e6); P.proj.kb = (P.proj.kb || []).concat([{id: uid("K"), name: f.name, text, at: new Date().toISOString()}]); }
+    save(); $("kbDocs").innerHTML = docs(); e.target.value = ""; };
+  await pr;
+}
+
+/* ------------------------------------------------------------------ the agent runs Auto area over a page (Phase 5)
+   One deterministic pipeline the language model calls: scale checked first (asks to calibrate when missing or doubtful),
+   every named room on the page found from the drawing's text, shafts / ducts / voids and any names the user excludes left
+   out, each room traced by Auto area, checked (closed, not crossing itself, not on top of a room already measured, its
+   written size), quantities from the sheet engine. With review on, nothing is added: the outlines are shown dashed for the
+   user to accept or discard; otherwise they are added marked AI (to check) with their detection record. */
+const AI_TOOLS3 = [
+  {name: "auto_area_page", description: "Run Auto area over every room named on this page (the deterministic engine, not a guess): checks the scale first, leaves out shafts / ducts / voids and the names in exclude, traces each room, validates it (closed, no self-crossing, no duplicate of an existing area, compared with its written size) and flags uncertain ones. review=true (default) only previews the outlines for the user to accept — use it when the user wants to review before saving. Returns each room's status and quantities.",
+   input_schema: {type: "object", properties: {names: {type: "array", items: {type: "string"}, description: "Only these rooms (empty = all named rooms)"}, exclude: {type: "array", items: {type: "string"}, description: "Room names or words to leave out (e.g. SHAFT, BALCONY)"}, review: {type: "boolean", description: "true: preview only, the user accepts; false: add them now (marked AI, to check)"}, gap_ft: {type: "number", description: "Door gap to close, ft (default: the Auto area setting); smaller = tighter boundaries"}}}},
+  {name: "accept_preview", description: "Add the previewed Auto-area outlines (from auto_area_page with review) to the takeoff: all, or only the names given.",
+   input_schema: {type: "object", properties: {names: {type: "array", items: {type: "string"}}}}},
+  {name: "discard_preview", description: "Throw away the previewed outlines without adding anything.", input_schema: {type: "object", properties: {}}},
+  {name: "validate_takeoff", description: "Check the takeoff on this page (or project): duplicates, outlines crossing themselves, measurements without a scale, items needing review (AI / flagged Auto area / copied). Returns the problems with measurement ids.",
+   input_schema: {type: "object", properties: {scope: {type: "string", enum: ["page", "project"]}}}},
+  {name: "search_knowledge", description: "Search the project's local knowledge: the app's help, the PDFs' text page by page, sheet titles, the user's rules, measurements and documents the user added (specs, schedules). Returns excerpts with their source (file + page, measurement id, document). Quote the source in your answer; say clearly what is extracted text and what is your interpretation.",
+   input_schema: {type: "object", required: ["query"], properties: {query: {type: "string"}, sources: {type: "array", items: {type: "string", enum: ["help", "drawings", "rules", "measurements", "documents"]}}}}}
+];
+async function autoAreaPage(inp){
+  const k = curScale();
+  if (!k) return {err: "This page has no scale. Ask the user to set it (K: two points and a known length) or confirm the scale note — nothing was measured."};
+  if (scaleDoubt()) return {err: "The page scale is doubtful (the drawing measures " + scaleDoubt().label + ", not the note). Ask the user to verify it first — nothing was measured."};
+  const F = await drawingFacts(S.fileId, S.pageNo); if (!F || !F.rooms.length) return {err: "No room names found in this page's text (a scan has none). Ask the user to click rooms with Auto area, or to name the rooms — nothing was measured."};
+  const want = (inp.names || []).map(x => String(x).toUpperCase().trim()).filter(Boolean), ex = (inp.exclude || []).map(x => String(x).toUpperCase().trim()).filter(Boolean);
+  const out = [], cand = [], c = aiAreaCond(), existing = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.kind === "shape" && (cond(i.cond) || {}).type === "area");
+  for (const r of F.rooms) {
+    const nm = r.name.trim(), up = nm.toUpperCase();
+    if (want.length && !want.some(w => up.includes(w))) continue;
+    if (VOID_RX.test(nm) || ex.some(w => up.includes(w))) { out.push({name: nm, status: "excluded", why: VOID_RX.test(nm) ? "shaft / duct / void — not floor" : "excluded by the user"}); continue; }
+    const seed = [r.x + r.w / 2, r.y - r.h / 2];
+    if (existing.some(i => pointInPoly(seed, i.pts))) { out.push({name: nm, status: "skipped", why: "already measured here"}); continue; }
+    const t0 = performance.now(); let res; try { res = inp.gap_ft > 0 ? await autoRoom(seed, {gap: +inp.gap_ft}) : await autoRoomGuarded(seed); } catch (e) { res = {err: e.message || String(e)}; }
+    kpiLog("auto", {ms: Math.round(performance.now() - t0), err: !!res.err, flag: !!(res.leak || res.short || res.warn), agent: true});
+    if (res.err) { out.push({name: nm, status: "failed", why: res.err}); continue; }
+    const net = (polyArea(res.pts) - (res.holes || []).reduce((a, h) => a + polyArea(h.pts), 0)) / k / k;
+    const issues = [];
+    if (res.pts.length < 3) issues.push("not closed"); if (selfCross(res.pts)) issues.push("crosses itself");
+    if (existing.concat(cand.map(x => ({pts: x.pts}))).some(i => overlapSft(i.pts, res.pts, k) > 1)) issues.push("overlaps an area already measured");
+    if (r.sft && Math.abs(net - r.sft) / r.sft > 0.05) issues.push("differs from its written size " + r.size + " (" + fq(r.sft) + " Sft) by " + (100 * (net - r.sft) / r.sft).toFixed(1) + " %");
+    const flag = [res.leak ? "leaks — " + res.leak : "", res.short || "", res.warn || ""].concat(issues).filter(Boolean).join("; ");
+    cand.push({name: nm, pts: res.pts, holes: res.holes || [], flag, gap: inp.gap_ft || autoOpt().gap, note: res.note || ""});
+    out.push({name: nm, status: flag ? "flagged" : "ok", net_sft: +net.toFixed(2), written_sft: r.sft || null, voids_deducted: (res.holes || []).map(h => h.name), flag: flag || null});
+  }
+  if (!cand.length) return {ok: {rooms: out, added: 0, note: "No outline was created."}};
+  if (inp.review !== false) { AI.pending = {key: S.key, cand}; S.agentPrev = {key: S.key, cand}; draw();
+    return {ok: {rooms: out, previewed: cand.length, added: 0, note: "Shown dashed on the drawing for review — nothing added yet. Call accept_preview (all or some names) or discard_preview."}}; }
+  const ids = autoAreaAdd(cand, c);
+  return {ok: {rooms: out.map(o => Object.assign(o, {id: ids[o.name] || undefined})), added: Object.keys(ids).length, totals_now: condTotals(c).net.toFixed(3) + " " + c.unit + " in " + c.name}};
+}
+function autoAreaAdd(cand, c){
+  const ids = {}, k = curScale(), at = new Date().toISOString();
+  mutate(() => cand.forEach(x => { const id = uid("I"); ids[x.name] = id;
+    P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: x.pts, nos: 1, ai: true, label: x.name.slice(0, 60),
+      det: {how: "auto", src: (autoOpt().src === "vector" ? "vector lines" : "drawing image") + " (agent)", gap: +x.gap, note: x.note, flag: x.flag, a0: +(polyArea(x.pts) / k / k).toFixed(4), pts0: x.pts.map(q => q.slice()), at, holes: x.holes.map(h => ({name: h.name, a: +(polyArea(h.pts) / k / k).toFixed(4)}))}});
+    x.holes.forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, ai: true, label: h.name + " (void in " + x.name + ")"})); }), "Agent: Auto area");
+  refresh(); return ids;
+}
+async function aiRunTool3(b){
+  const inp = b.input || {};
+  if (b.name === "auto_area_page") { if (!P.proj || !S.page) return {err: "Open a PDF page first."}; busy("Auto area over the page…"); try { return await autoAreaPage(inp); } finally { busy(""); } }
+  if (b.name === "accept_preview") { const p = AI.pending; if (!p || p.key !== S.key) return {err: "Nothing is waiting for review on this page."};
+    const want = (inp.names || []).map(x => String(x).toUpperCase()), pick = p.cand.filter(x => !want.length || want.some(w => x.name.toUpperCase().includes(w)));
+    if (!pick.length) return {err: "None of the previewed rooms match those names."};
+    const ids = autoAreaAdd(pick, aiAreaCond()); p.cand = p.cand.filter(x => !pick.includes(x)); if (!p.cand.length) { AI.pending = null; S.agentPrev = null; } else S.agentPrev = {key: p.key, cand: p.cand}; draw();
+    return {ok: {added: Object.entries(ids).map(([name, id]) => ({name, id})), still_waiting: p.cand.map(x => x.name)}}; }
+  if (b.name === "discard_preview") { const n = AI.pending ? AI.pending.cand.length : 0; AI.pending = null; S.agentPrev = null; draw(); return {ok: {discarded: n}}; }
+  if (b.name === "validate_takeoff") { if (!P.proj) return {err: "No project is open."};
+    const pg = inp.scope !== "project", here = i => !pg || (i.file === S.fileId && i.page === S.pageNo), its = P.proj.items.filter(here);
+    return {ok: {measurements: its.length, duplicates: dupFind().filter(d => here(d.a)).map(d => d.count ? {condition: d.c.name, count_markers_on_top_of_each_other: d.n} : {condition: d.c.name, ids: [d.a.id, d.b.id]}),
+      self_crossing: its.filter(crossed).map(i => i.id), no_scale: its.filter(i => !itemScale(i)).map(i => i.id),
+      need_review: its.filter(needsReview).map(i => ({id: i.id, name: i.label || "", why: i.det && i.det.flag ? i.det.flag : i.ai ? "AI / agent — not checked" : i.copied ? "copied" : "revision"}))}}; }
+  if (b.name === "search_knowledge") { const R = await kbSearch(String(inp.query || ""), {only: Array.isArray(inp.sources) && inp.sources.length ? inp.sources : null, k: 6}); return {ok: {results: R, note: R.length ? "Extracted text with its source — cite the ref." : "Nothing found in the local knowledge."}}; }
+  return null;
 }
 /* the claude.ai route: when this page is opened as a Claude artifact, Claude runs on the viewer's own Claude plan through
    the artifact's `sample` capability — no API key. Same tools as above; each message sends a fresh picture of the view
@@ -8516,7 +9417,8 @@ async function aiSendPlan(smp, text){
     AI.view = await aiSnapshot(1150000);
     const blob = await (await fetch("data:image/png;base64," + AI.view.data)).blob();
     const order = ["measure_rooms", "measure_unit", "detect_walls", "count_tags", "list_wall_thicknesses", "trace_room", "draw_area", "draw_length", "add_counts", "delete_area", "find_text", "set_condition", "list_measured"];
-    const tools = AI_TOOLS.slice().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).slice(0, AI.toolMax || 99).map(t => ({name: t.name, description: t.description, inputSchema: t.input_schema,
+    const oi = n => { const i = order.indexOf(n); return i < 0 ? 99 : i; };
+    const tools = AI_TOOLS_ALL().slice().sort((a, b) => oi(a.name) - oi(b.name)).slice(0, AI.toolMax || 99).map(t => ({name: t.name, description: t.description, inputSchema: t.input_schema,
       execute: async input => {
         if (ctl.signal.aborted) throw new Error("Stopped by the user.");
         const b = {name: t.name, input: input || {}};
@@ -8528,7 +9430,7 @@ async function aiSendPlan(smp, text){
       }}));
     AI.plan = (AI.plan || []).slice(-8);
     const turn = `${aiContext(AI.view)}\n\nThe attached image is the view on screen now; tool coordinates are pixels of this image.\n\n${text}`;
-    const input = [{role: "user", content: AI_SYSTEM}, ...AI.plan, {role: "user", content: turn}];
+    const input = [{role: "user", content: AI_SYSTEM + rulesPrompt()}, ...AI.plan, {role: "user", content: turn}];
     const res = await smp(input, {images: blob, tools, signal: ctl.signal,
       onText: ({text: t}) => { said = t; const part = t.slice(from).trim(); if (!part) return; if (!bubble) bubble = aiLog("bot", ""); bubble.innerHTML = aiText(part); $("aiLog").scrollTop = 1e9; }});
     if (!said) aiLog("bot", aiText(res.text));
@@ -8613,6 +9515,7 @@ async function freeImport(){
 function aiShowKey(on){ $("aiKeyRow").style.display = on ? "flex" : "none"; if (on) secretSet($("aiKey"), pref("zdTakeoffApiKey") || ""); }
 function aiToggle(on){
   $("aiPanel").classList.toggle("on", on); $("bClaude").classList.toggle("on", on);
+  if (on) { locLine(); if (aiEngine() === "local" || (aiEngine() === "auto" && locModel())) locHealth(); }
   if (on) { aiShowKey(false); if (!$("aiLog").children.length) aiLog("bot", "I read the drawing and do the takeoff with you.<br><b>Free agents (no API key, no cost):</b> ⚡ <b>Full takeoff</b> does rooms, walls, doors / windows and finishes in one run — this page, the PDF or the project · 🏠 <b>Rooms</b> traces every named room and checks it against its written size · 🧱 <b>Walls</b> finds walls from their face lines · 🚪 <b>Doors / windows</b> counts the tags · 🎨 <b>Finishes</b> gives each room's plaster / paint, skirting and ceiling, openings deducted · ✅ <b>Check</b> audits the takeoff. Or type <i>measure bedroom</i>, <i>walls 9\"</i>, <i>count D1</i>, <i>how many doors</i>, <i>help</i>.<br><b>Claude:</b> with an API key, or opened in claude.ai — type what you want and press <b>Read this view</b>; Claude uses the agents, draws what they cannot, and asks you when something is unclear."); aiSampler().then(smp => { if (smp && !pref("zdTakeoffApiKey")) aiLog("bot", "<b>Connected to Claude through claude.ai — no API key needed.</b> Zoom to an area, type what to measure (e.g. <i>9\" walls on this floor, count doors D1</i>) and press <b>Read this view</b>. It runs on your Claude plan; the first time, press Allow."); }); setTimeout(() => $("aiIn").focus(), 0); }
 }
 
@@ -8880,12 +9783,12 @@ async function agentStep(text){
     if (/measure|area|trace/.test(t) && scope !== "page" && !/apartment|appartment|\bapt\b|unit|flat/.test(t)) {   // rooms on every page: the full takeoff with only its rooms
       const w = t.replace(/\b(measure|auto|area|areas|trace|all|every|each|the|rooms?|of|floor|please|on|in|this|pages?|sheets?|pdfs?|project|drawings?|whole|set)\b/g, " ").replace(/\s+/g, " ").trim();
       return fullTakeoff({scope, rooms: true, filter: w}); }
-    if (/measure|area|trace/.test(t)) { const w = t.replace(/\b(measure|auto|area|areas|trace|all|every|each|the|rooms?|of|floor|please|on|this|page)\b/g, " ").trim(); return agentMeasure(w); }
+    if (/measure|area|trace/.test(t)) { const w = t.replace(/\b(measure|auto|area|areas|trace|all|every|each|the|rooms?|of|floor|please|on|this|page)\b/g, " ").trim(); return areaThen("auto area of the rooms", () => agentMeasure(w)); }
     if (/count|tag/.test(t)) {
       if (/swing/.test(t)) return agentSwings();
       let w = t.replace(/\b(on|in|of|the|this|whole|every|each|all|pages?|sheets?|pdfs?|project|drawings?|set)\b/g, " ").replace(/\b(count|tags?|please|marks?)\b/g, " ").trim();
       if (/\b(doors?|windows?|vent\w*)\b.*\b(and|&|\+)\b/.test(w)) w = "all";   // "count doors and windows": every tag
-      return agentCount(w, scope); }
+      return scope === "page" ? areaThen("count tags", () => agentCount(w, scope)) : agentCount(w, scope); }
     let um = /(?:apartment|appartment|apt|unit|flat)\s*(?:no\.?|#)?\s*([0-9]{1,4}[a-z]?)/.exec(t) || /^\s*(?:measure\s+)?([0-9]{2,4}[a-z]?)\s*$/.exec(t);
     if (um) return agentUnit(um[1]);
     if (/apartment|unit|flat/.test(t)) return unitDialog();
@@ -9001,7 +9904,7 @@ async function agentDetails(){
     ${tasks.length ? `<div style="margin-top:8px"><b>Tasks</b> — give one to the agent:</div>` + tasks.map(([id, l2]) => `<div style="display:flex;gap:6px;align-items:center;margin-top:4px"><span style="flex:1">☐ ${esc(l2)}</span><button class="btn sm pri" data-task="${esc(id)}">Do it</button></div>`).join("") : ""}`);
   d.addEventListener("click", e => { const b = e.target.closest("[data-task]"); if (!b) return; const id = b.dataset.task; b.disabled = true; b.textContent = "Done ✓";
     b.parentElement.firstElementChild.textContent = b.parentElement.firstElementChild.textContent.replace("☐", "☑");
-    if (id === "full") fullTakeoffDialog("page"); else if (id === "measure") agentMeasure(""); else if (id === "schedule") agentSchedule(); else if (id.startsWith("count:")) agentCount(id.slice(6).toLowerCase()); });
+    if (id === "full") fullTakeoffDialog("page"); else if (id === "measure") areaThen("auto area of the rooms", () => agentMeasure("")); else if (id === "schedule") agentSchedule(); else if (id.startsWith("count:")) areaThen("count tags", () => agentCount(id.slice(6).toLowerCase())); });
 }
 const sameRoom = (a, b) => !!a && !!b && a.name === b.name && Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;   // one label, whichever list it came from
 async function agentMeasure(filter, only, opt){   // only: these rooms (an apartment), whatever the view; opt.quiet: no lines in the panel (the full takeoff reports)
@@ -9013,9 +9916,12 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
   let rooms = F.rooms.filter(r => !words.length || words.some(w => r.name.toLowerCase().replace(/\s+/g, "").includes(w.replace(/\s+/g, ""))));
   if (!rooms.length && words.length) rooms = F.rooms.filter(r => words.some(w => nameLike(r.name, w)));   // "bedrom", "kitchn": a slip of the keyboard is still the room
   const vr = viewRect(), zoomed = (vr[2] - vr[0]) * (vr[3] - vr[1]) < 0.6 * S.base.width * S.base.height, all = rooms.length;
-  if (only) rooms = only; else if (zoomed) rooms = rooms.filter(r => { const x = r.x + r.w / 2, y = r.y - r.h / 2; return x >= vr[0] && x <= vr[2] && y >= vr[1] && y <= vr[3]; });
-  if (!only && zoomed && all && !rooms.length) { say("err", "No room names in the part on screen — pan to the rooms, or zoom out (Fit) for the whole page."); return {error: "no rooms in the view"}; }
-  if (!only && zoomed && rooms.length < all) say("bot", `Measuring the <b>${rooms.length}</b> rooms on screen (of ${all} on the page) — press <b>Fit</b> first for all of them.`);
+  const ar = !only && areaOf();
+  if (only) rooms = only; else if (ar) rooms = rooms.filter(r => inArea(ar, [r.x + r.w / 2, r.y - r.h / 2])); else if (zoomed) rooms = rooms.filter(r => { const x = r.x + r.w / 2, y = r.y - r.h / 2; return x >= vr[0] && x <= vr[2] && y >= vr[1] && y <= vr[3]; });
+  if (ar && all && !rooms.length) { say("err", "No room names inside the takeoff area — box a larger area, or choose the whole page."); return {error: "no rooms in the takeoff area"}; }
+  if (ar && rooms.length < all) say("bot", `Measuring the <b>${rooms.length}</b> rooms inside the takeoff area (of ${all} on the page).`);
+  if (!only && !ar && zoomed && all && !rooms.length) { say("err", "No room names in the part on screen — pan to the rooms, or zoom out (Fit) for the whole page."); return {error: "no rooms in the view"}; }
+  if (!only && !ar && zoomed && rooms.length < all) say("bot", `Measuring the <b>${rooms.length}</b> rooms on screen (of ${all} on the page) — press <b>Fit</b> first for all of them.`);
   if (!rooms.length) { say("err", F.rooms.length ? "No room name on this page matches “" + esc(filter) + "”." : "I found no room names in this page's text."); return {error: F.rooms.length ? "no room matches " + filter + "; rooms on the page: " + F.rooms.map(r => r.name).join(", ") : "no room names in the page text (scanned?) — use trace_room / draw_area"}; }
   const done = new Set(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo).map(i => (i.label || "").toLowerCase()));
   const c = aiAreaCond(), got = [], res = []; let ok = 0, chk = 0, same2 = 0;
@@ -9341,8 +10247,8 @@ async function wallsDialog(){
       if (!(T > 0.15 && T < 3)) return "Choose or type the wall thickness"; const H = $("wlH").value.trim() ? parseFt($("wlH").value) : 0, B = parseFt($("wlB").value || "0");
       if (isNaN(H) || isNaN(B)) return "Height and bridge are decimal feet"; return {t: T, cond: $("wlC").value || null, h: H, bridge: B, page: $("wlP").checked}; });
   if (!v) return;
-  busy("Finding walls…"); await new Promise(r => setTimeout(r, 20));
-  const r = wallsAgent(v); busy("");
+  const r = await areaThen("walls", async () => { busy("Finding walls…"); await new Promise(r2 => setTimeout(r2, 20)); try { return wallsAgent(areaOf() ? Object.assign(v, {page: true}) : v); } finally { busy(""); } });   // with a box: the whole page, cut to it
+  if (r.error === "cancelled") return;
   if (r.error) return aiLog("err", esc(r.error));
   aiLog("tool", `<b>${esc(r.condition)}</b>: ${r.runs} run${r.runs > 1 ? "s" : ""}, <b>${f3(r.total_length_ft)} ft</b> centre line${r.unit !== "ft" ? " → see the sheet for " + esc(r.unit) : ""}`);
   aiLog("bot", "Check the runs on the drawing (they are marked AI). Deduct doors and windows with the <b>Opening</b> tool (O)." + (r.needs_height ? " Give the condition its height H (✎) to get cft." : ""));
@@ -9404,7 +10310,9 @@ async function fullTakeoffDialog(scope){
       if (isNaN(H) || isNaN(DH)) return "Heights are in feet, e.g. 10.5 or 10'-6\"";
       if (o.fin && !(H > 0)) return "Give the room height H for the finishes (or untick Finishes)";
       return Object.assign(o, {H, DH}); });
-  if (v) return fullTakeoff(v);
+  if (!v) return;
+  if (v.scope !== "page") return fullTakeoff(v);
+  return areaThen("full takeoff", () => fullTakeoff(Object.assign(v, {area: areaOf()})));
 }
 async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, filter} -> {pages: [one report per page], ms}
   if (!P.proj || !S.page) return {error: "no page open"};
@@ -9423,7 +10331,7 @@ async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, 
       if (scaleDoubt()) { R.skip = "scale doubtful — the written room sizes measure " + scaleDoubt().label + "; settle it on the scale chip"; continue; }
       if (o.rooms) {
         const F = await drawingFacts(S.fileId, S.pageNo), have = P.proj.items.filter(i => onPage(i) && i.kind === "shape" && (cond(i.cond) || {}).type === "area");
-        const want = F.rooms.filter(r => roomWanted(r, words)), todo = want.filter(r => !have.some(i => pointInPoly([r.x + r.w / 2, r.y - r.h / 2], itemPoly(i))));
+        const want = F.rooms.filter(r => roomWanted(r, words)), todo = want.filter(r => !have.some(i => pointInPoly([r.x + r.w / 2, r.y - r.h / 2], itemPoly(i))) && (!o.area || inArea(o.area, [r.x + r.w / 2, r.y - r.h / 2])));
         R.rooms = {named: want.length, had: want.length - todo.length, ok: 0, chk: [], bad: [], sft: 0};
         if (todo.length) {
           if (roomC && cond(roomC)) S.cond = roomC;
@@ -10973,7 +11881,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),

@@ -1,0 +1,1408 @@
+{
+ "suite": "tools/test_takeoff_drawings.js",
+ "at": "2026-10-11T09:28:29.355Z",
+ "commit": "2089cb1",
+ "browser": "Chromium 141.0.7390.37",
+ "settings": "Auto area defaults",
+ "cases": [
+  {
+   "id": "vector-clean",
+   "cat": "Clean vector floor plan",
+   "desc": "12' × 14' room, 9\" double-line walls",
+   "page": 1,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 168,
+     "gotSft": 168,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 776,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "thick-walls",
+   "cat": "Thick (solid, poché) walls",
+   "desc": "15' × 12' room, 13½\" walls filled solid",
+   "page": 2,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 180,
+     "gotSft": 180,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 696,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "thin-overlap",
+   "cat": "Thin, overlapping lines",
+   "desc": "10' × 10' room bounded by single thin lines drawn twice, slightly offset, overshooting the corners by 1'",
+   "page": 3,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 100,
+     "gotSft": 99,
+     "errPct": -1,
+     "iou": 0.9802,
+     "ms": 706,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 2,
+     "iouMin": 0.95,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "small-gap",
+   "cat": "Small boundary gap",
+   "desc": "12' × 10' room with a 0.4' drafting gap in one wall",
+   "page": 4,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 120,
+     "gotSft": 120,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 631,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "door-opening",
+   "cat": "Door opening with swing",
+   "desc": "14' × 12' room, 3' door with leaf and swing arc",
+   "page": 5,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 168,
+     "gotSft": 167.972,
+     "errPct": -0.017,
+     "iou": 0.9917,
+     "ms": 760,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "l-shape",
+   "cat": "Irregular / L-shaped room",
+   "desc": "L-shaped room 20' × 16' less an 8' × 8' corner = 256 Sft",
+   "page": 6,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 256,
+     "gotSft": 256,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 557,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "shared-walls",
+   "cat": "Rooms sharing boundaries",
+   "desc": "three 10' × 12' rooms side by side on 4½\" partitions — each must stay separate",
+   "page": 7,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 120,
+     "gotSft": 120,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 539,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    },
+    {
+     "truthSft": 120,
+     "gotSft": 120,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 491,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    },
+    {
+     "truthSft": 120,
+     "gotSft": 120,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 479,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "furniture-text",
+   "cat": "Furniture and text inside",
+   "desc": "16' × 14' room with bed, side tables, round table, cabinet and labels",
+   "page": 8,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 224,
+     "gotSft": 183.08,
+     "errPct": -18.268,
+     "iou": 0.8176,
+     "ms": 2680,
+     "flagged": true,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "only 75 % of the outline follows the drawing's lines — something (text, a watermark, a gap) may have broken a wall; check it",
+     "holes": 0,
+     "note": "leak closed (gap 8.000 ft, dashed lines as walls)",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "flagged",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "colour",
+   "cat": "Coloured drawing",
+   "desc": "12' × 12' room, red walls, tinted floor fill, a blue fixture",
+   "page": 9,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 144,
+     "gotSft": 144,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 536,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "grid-dims",
+   "cat": "Gridlines and dimensions crossing the room",
+   "desc": "18' × 12' room crossed by two chain-dashed gridlines and a dimension line",
+   "page": 10,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 216,
+     "gotSft": 216,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 568,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "hatch",
+   "cat": "Hatching / floor-finish pattern",
+   "desc": "12' × 12' room filled with a 45° hatch at 1' spacing",
+   "page": 11,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 144,
+     "gotSft": 144,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 474,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "shaft-void",
+   "cat": "Nested shaft / void",
+   "desc": "20' × 16' hall with a walled 4' × 4' shaft inside (shaft 4'-9\" outside) — net 297.44 Sft",
+   "page": 12,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 297.438,
+     "gotSft": 296.52,
+     "errPct": -0.309,
+     "iou": 0.9949,
+     "ms": 559,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 1,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "angled",
+   "cat": "Angled walls (trapezoid)",
+   "desc": "trapezoid room 18' / 10' × 12' deep = 168 Sft",
+   "page": 13,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 168,
+     "gotSft": 167.457,
+     "errPct": -0.323,
+     "iou": 0.9858,
+     "ms": 602,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "tiny-room",
+   "cat": "Very small room",
+   "desc": "4' × 3' WC beside a bed room, 2'-6\" door",
+   "page": 14,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 12,
+     "gotSft": 12,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 462,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 3,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "tiny-isolated",
+   "cat": "Very small room",
+   "desc": "4' × 3' box drawn on its own, joined to no other wall",
+   "page": 15,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 12,
+     "gotSft": null,
+     "errPct": null,
+     "iou": null,
+     "ms": 3833,
+     "flagged": true,
+     "err": "The space leaks — an opening wider than the door gap (4.000 ft) joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it.",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 3,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "flagged",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "large-hall",
+   "cat": "Very large room",
+   "desc": "150' × 100' hall at 1/16\" = 1'-0\"",
+   "page": 16,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 4.5,
+    "read": 4.5,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 15000,
+     "gotSft": 15000,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 1439,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "open-room",
+   "cat": "Room open to the next space (no wall)",
+   "desc": "12' × 12' room whose whole east side is open to a long corridor",
+   "page": 17,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 144,
+     "gotSft": null,
+     "errPct": null,
+     "iou": null,
+     "ms": 3798,
+     "flagged": true,
+     "err": "The space leaks — an opening wider than the door gap (4.000 ft) joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it.",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "none",
+     "verdict": "neg-pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "no-boundary",
+   "cat": "Incomplete / ambiguous boundary",
+   "desc": "two loose lines meeting at a corner — nothing closed",
+   "page": 18,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": null,
+     "gotSft": null,
+     "errPct": null,
+     "iou": null,
+     "ms": 4232,
+     "flagged": true,
+     "err": "The space leaks — an opening wider than the door gap (4.000 ft) joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it.",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "none",
+     "verdict": "neg-pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "rotate-90",
+   "cat": "Page rotated 90°",
+   "desc": "12' × 10' room on a page with /Rotate 90",
+   "page": 19,
+   "rotate": 90,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 120,
+     "gotSft": 120,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 699,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "rotate-270",
+   "cat": "Page rotated 270°",
+   "desc": "14' × 11' room on a page with /Rotate 270",
+   "page": 20,
+   "rotate": 270,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 154,
+     "gotSft": 154,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 446,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "scale-quarter",
+   "cat": "Another scale on another page",
+   "desc": "10' × 8' kitchen at 1/4\" = 1'-0\" (18 pt per ft)",
+   "page": 21,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 18,
+    "read": 18,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 80,
+     "gotSft": 80,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 466,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "watermark",
+   "cat": "Watermark and stamp",
+   "desc": "14' × 12' room under a large grey DRAFT watermark, stamp box in the corner",
+   "page": 22,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 168,
+     "gotSft": 168,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 1409,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "scan-clean",
+   "cat": "Scanned black-and-white plan",
+   "desc": "12' × 14' room as a 150 dpi scan (no vector lines, no text)",
+   "page": 23,
+   "rotate": 0,
+   "kind": "raster",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "calibrated",
+    "state": "Calibrated"
+   },
+   "seeds": [
+    {
+     "truthSft": 168,
+     "gotSft": 170.106,
+     "errPct": 1.254,
+     "iou": 0.9847,
+     "ms": 487,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 2,
+     "iouMin": 0.95,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "scan-faint",
+   "cat": "Faint, low-resolution scan",
+   "desc": "16' × 12' room, 72 dpi, grey lines, noise and specks",
+   "page": 24,
+   "rotate": 0,
+   "kind": "raster",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "calibrated",
+    "state": "Calibrated"
+   },
+   "seeds": [
+    {
+     "truthSft": 192,
+     "gotSft": 194.77,
+     "errPct": 1.443,
+     "iou": 0.9825,
+     "ms": 497,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 3,
+     "iouMin": 0.93,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "scan-skewed",
+   "cat": "Skewed scan (2°)",
+   "desc": "12' × 12' room scanned 2° off square — area unchanged, outline turned",
+   "page": 25,
+   "rotate": 0,
+   "kind": "raster",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "calibrated",
+    "state": "Calibrated"
+   },
+   "seeds": [
+    {
+     "truthSft": 144,
+     "gotSft": 144.352,
+     "errPct": 0.245,
+     "iou": 0.9633,
+     "ms": 451,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 2,
+     "iouMin": 0.94,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "mixed",
+   "cat": "Mixed raster and vector",
+   "desc": "13' × 10' room as a scanned image, dimensions and labels as vector text on top",
+   "page": 26,
+   "rotate": 0,
+   "kind": "mixed",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 130,
+     "gotSft": 120.96,
+     "errPct": -6.954,
+     "iou": 0.9212,
+     "ms": 556,
+     "flagged": true,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "only 0 % of the outline follows the drawing's lines — something (text, a watermark, a gap) may have broken a wall; check it",
+     "holes": 0,
+     "note": "",
+     "tol": 2,
+     "iouMin": 0.95,
+     "expect": "area",
+     "verdict": "flagged",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "footing-plan",
+   "cat": "Structural footing layout",
+   "desc": "six 6' × 6' isolated footings (single closed outlines) on dashed grid lines",
+   "page": 27,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 18,
+    "read": 18,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 36,
+     "gotSft": 18,
+     "errPct": -50,
+     "iou": 0.5,
+     "ms": 448,
+     "flagged": true,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "bounded on one side by a dashed line — a grid line or an open edge? Check the outline",
+     "holes": 0,
+     "note": "",
+     "tol": 2,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "flagged",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "framing-plan",
+   "cat": "Beam / slab framing plan",
+   "desc": "24' × 18' bay split by drawn beams into slab panels; the panel 8' × 9' clear of beams (less beam halves)",
+   "page": 28,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 65.36,
+     "gotSft": 65.36,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 537,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 3,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "rcp-grid",
+   "cat": "Reflected ceiling plan (2' × 2' grid)",
+   "desc": "14' × 12' office with a 2' × 2' ceiling grid drawn across the whole room",
+   "page": 29,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 168,
+     "gotSft": 168,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 477,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "electrical",
+   "cat": "Electrical layout with dense lines",
+   "desc": "16' × 12' room with light fittings and curved wiring runs",
+   "page": 30,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 192,
+     "gotSft": 192,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 564,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "site-plan",
+   "cat": "Site layout with road and trees",
+   "desc": "five-sided plot boundary (single line) beside a road, trees inside; 1\" = 32' (2.25 pt per ft)",
+   "page": 31,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 2.25,
+    "read": 2.25,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 22200,
+     "gotSft": 22188.038,
+     "errPct": -0.054,
+     "iou": 0.9992,
+     "ms": 1404,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 2,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "section",
+   "cat": "Building section / elevation",
+   "desc": "two-storey section: floor slabs, walls, roof — no single room area is defined",
+   "page": 32,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": null,
+     "gotSft": 270.75,
+     "errPct": null,
+     "iou": null,
+     "ms": 496,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "explore",
+     "verdict": "explore",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "revision-a",
+   "cat": "Revised drawing (rev A → rev B)",
+   "desc": "rev A: bed room 12' × 14'",
+   "page": 33,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 168,
+     "gotSft": 168,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 479,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "revision-b",
+   "cat": "Revised drawing (rev A → rev B)",
+   "desc": "rev B: the same room lengthened to 12' × 16' (+24 Sft)",
+   "page": 34,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 192,
+     "gotSft": 192,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 439,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": true
+    }
+   ]
+  },
+  {
+   "id": "count-tags",
+   "cat": "Repeated door / window tags (count)",
+   "desc": "7 × D1, 3 × D2, 2 × W1 tags on the plan, plus a door schedule (not counted)",
+   "page": 35,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [],
+   "counts": {
+    "expected": {
+     "d1": 7,
+     "d2": 3,
+     "w1": 2
+    },
+    "got": {
+     "D1": 7,
+     "D2": 3,
+     "W1": 2
+    }
+   }
+  },
+  {
+   "id": "no-scale",
+   "cat": "Scale unknown (no note)",
+   "desc": "12' × 12' room, no scale note anywhere — Auto area must ask for the scale",
+   "page": 36,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 0,
+    "read": 0,
+    "how": "none",
+    "state": "not set"
+   },
+   "seeds": [
+    {
+     "truthSft": null,
+     "gotSft": null,
+     "errPct": null,
+     "iou": null,
+     "ms": 21,
+     "flagged": true,
+     "err": "Set the page scale first (K) — the door gap and wall offsets are in feet.",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "none",
+     "verdict": "neg-pass",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "scale-conflict",
+   "cat": "Scale conflicting with the dimensions",
+   "desc": "note says 1/8\" = 1'-0\" but the dimension string reads 24'-0\" over a 12' (at 1/8\") line",
+   "page": 37,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified",
+    "conflictFlagged": false
+   },
+   "seeds": [
+    {
+     "truthSft": 144,
+     "gotSft": 144,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 443,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "explore",
+     "verdict": "explore",
+     "must": false
+    }
+   ]
+  },
+  {
+   "id": "agent-plan",
+   "cat": "Multi-room plan for the agent",
+   "desc": "bed room, kitchen and lounge with written sizes (the lounge's is wrong: 16' × 12' written, 16' × 14' drawn) and a shaft to be left out",
+   "page": 38,
+   "rotate": 0,
+   "kind": "vector",
+   "scale": {
+    "expected": 9,
+    "read": 9,
+    "how": "note",
+    "state": "From note — not verified"
+   },
+   "seeds": [
+    {
+     "truthSft": 168,
+     "gotSft": 168,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 543,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    },
+    {
+     "truthSft": 80,
+     "gotSft": 80,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 525,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    },
+    {
+     "truthSft": 224,
+     "gotSft": 224,
+     "errPct": 0,
+     "iou": 1,
+     "ms": 584,
+     "flagged": false,
+     "err": "",
+     "leak": "",
+     "short": "",
+     "warn": "",
+     "holes": 0,
+     "note": "",
+     "tol": 1,
+     "iouMin": 0.97,
+     "expect": "area",
+     "verdict": "pass",
+     "must": false
+    }
+   ]
+  }
+ ]
+}
