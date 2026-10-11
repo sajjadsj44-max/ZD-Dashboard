@@ -9225,8 +9225,8 @@ async function locFetch(path, body, ms){
     if (!r.ok) { let m = ""; try { m = (await r.json()).error || ""; } catch (e) {} throw Object.assign(new Error("Ollama: " + (m || "HTTP " + r.status)), {code: r.status === 404 ? "nomodel" : "http"}); }
     return await r.json();
   } catch (e) {
-    if (e.code) throw e;
-    if (e.name === "AbortError") throw Object.assign(new Error("Ollama did not answer in time at " + locUrl()), {code: "timeout"});
+    if (typeof e.code === "string") throw e;
+    if (e.name === "AbortError") throw Object.assign(new Error("Ollama did not answer in time at " + locUrl() + " — on a computer without a graphics card a long prompt can take minutes; see ⚙ Engine → setup for a faster setup or a smaller model"), {code: "timeout"});
     throw Object.assign(new Error("No local AI at " + locUrl() + " — Ollama is not running, or it does not allow this site yet (OLLAMA_ORIGINS=" + location.origin + ", see ⚙ Engine → setup)"), {code: "offline"});
   } finally { clearTimeout(t); }
 }
@@ -9289,7 +9289,8 @@ async function locSetup(){
         macOS: <code>launchctl setenv OLLAMA_ORIGINS "${esc(org)}"</code>, then quit and reopen Ollama. Linux (systemd): <code>sudo systemctl edit ollama</code> → <code>[Service]</code> <code>Environment="OLLAMA_ORIGINS=${esc(org)}"</code>, then <code>sudo systemctl restart ollama</code>.</li>
       <li>Download a model that can call tools, e.g. <code>ollama pull qwen3:8b</code> — or one that can also see the drawing (vision + tools). Check the current names and sizes at ollama.com/library: models change often.</li>
       <li>Press <b>Test connection</b>, choose the model, Save. Chrome may ask to let this site reach devices on your local network — allow it.</li></ol>
-      <p class="small">Keep Ollama on this computer only (its default, 127.0.0.1): do not set OLLAMA_HOST=0.0.0.0, which would open it to your network. Stop it from the tray icon / <code>ollama stop &lt;model&gt;</code>; update by installing the new version.
+      <p class="small">Keep Ollama on this computer only (its default, 127.0.0.1): do not set OLLAMA_HOST=0.0.0.0, which would open it to your network. Stop it from the tray icon / <code>ollama stop &lt;model&gt;</code>; update by installing the new version.<br>
+      Slow answers (several minutes) on a laptop with Intel / AMD integrated graphics: Ollama ignores that graphics chip unless told — run <code>setx OLLAMA_IGPU_ENABLE 1</code> in PowerShell and restart Ollama (about 3–4× faster on an Intel laptop).
       Rule of thumb (4-bit models): about 0.6–0.7 GB of memory per billion parameters plus the context — a 4B model needs about 3–4 GB, an 8B model 6–8 GB; vision models more. Small models (under 4B) often call tools wrongly — the benchmark shows how each one does on this computer.<br>
       This computer, as the browser reports it: memory ${esc(String(hw.mem))} · ${esc(String(hw.cores))} processor threads · WebGPU ${hw.gpu ? "yes" : "no"}. The browser cannot see the graphics card's memory; Ollama uses it by itself when it can.</p></details>`;
   const pr = ask("AI engine — local AI (free, offline)", body, "Save", () => ({eng: (document.querySelector("input[name=leEng]:checked") || {}).value || "auto", url: $("leUrl").value.trim(), model: $("leModel").value, ctx: Math.max(2048, +$("leCtx").value || 16384)}), "leUrl");
@@ -9334,7 +9335,7 @@ function locHist(){ try { const h = JSON.parse(pref(locHistKey()) || "[]"); retu
 function locHistPut(h){ try { pref(locHistKey(), JSON.stringify(h.slice(-24))); } catch (e) {} }   // text only — no pictures, no tool traffic
 function locCtx(){ return +(pref("zdTakeoffLocalCtx") || 16384); }
 async function locChat(messages, tools, opts){
-  const t0 = performance.now(), call = ctx => locFetch("/api/chat", Object.assign({model: locModel(), messages, tools, stream: false, keep_alive: "15m", options: {temperature: 0.2, num_ctx: ctx}}, opts || {}), 300000);
+  const t0 = performance.now(), call = ctx => locFetch("/api/chat", Object.assign({model: locModel(), messages, tools, stream: false, keep_alive: "15m", options: {temperature: 0.2, num_ctx: ctx}}, locCan("thinking") ? {think: false} : {}, opts || {}), 600000);
   let r;
   try { r = await call(locCtx()); }
   catch (e) {   // the prompt (instructions + tools + drawing) is bigger than the context: retry once with room for it, and keep that size
