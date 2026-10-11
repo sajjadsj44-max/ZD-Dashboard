@@ -9,7 +9,7 @@
      python3 -m http.server 8765 &            # from the repo root
      TK_LIBS=<dir with pdfjs-dist/ and exceljs/> node tools/test_takeoff_materials.js
 */
-const path = require("path");
+const path = require("path"), os = require("os");
 let pw; try { pw = require("playwright"); } catch (e) { pw = require("/opt/node22/lib/node_modules/playwright"); }
 const {makePdf} = require("./takeoff_fixture.js");
 const URL = process.env.TK_URL || "http://127.0.0.1:8765/takeoff/", LIBS = process.env.TK_LIBS || "";
@@ -21,7 +21,7 @@ const BAG = 50 / 1440 / 0.028316846592;
 (async () => {
   if (!LIBS) { console.log("TK_LIBS must hold pdfjs-dist — see the header"); process.exit(2); }
   const browser = await pw.chromium.launch();
-  const ctx = await browser.newContext({viewport: {width: 1440, height: 900}}); await require("./zd_unlock")(ctx);
+  const ctx = await browser.newContext({viewport: {width: 1440, height: 900}, acceptDownloads: true}); await require("./zd_unlock")(ctx);
   await ctx.route(/cdn\.jsdelivr\.net/, r => {
     const u = r.request().url(), H = {"Access-Control-Allow-Origin": "*"};
     if (/pdf\.worker\.min\.mjs/.test(u)) return r.fulfill({path: path.join(LIBS, "pdfjs-dist/build/pdf.worker.min.mjs"), contentType: "text/javascript", headers: H});
@@ -51,8 +51,8 @@ const BAG = 50 / 1440 / 0.028316846592;
   const mat = id => T(id => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.id === id), r = Z.matCalc(c, Z.condTotals(c).net); return r && {err: r.err, basis: r.basis, kind: r.m.kind, mix: r.m.mix, rows: Object.fromEntries(r.rows.map(x => [x[0], x[1]]))}; }, id);
 
   console.log("materials from the condition's name");
-  // 8" block wall: V = 100 × 10 × 0.667, block 16 × 8 × 8 solid, 1:6
-  { const r = await mat("cB"), V = 100 * 10 * (8 / 12), bl = 16 / 12, bw = 8 / 12, bh = 8 / 12, j = 0.375 / 12, N = V / ((bl + j) * (bh + j) * (8 / 12)), wet = V - N * bl * bw * bh, dry = wet * 1.27;
+  // 8" block wall: V = 100 × 10 × 0.667, block 8" × 8" × 12" solid (the library's solid block), 1:6
+  { const r = await mat("cB"), V = 100 * 10 * (8 / 12), bl = 12 / 12, bw = 8 / 12, bh = 8 / 12, j = 0.375 / 12, N = V / ((bl + j) * (bh + j) * (8 / 12)), wet = V - N * bl * bw * bh, dry = wet * 1.27;
     ok(r && r.kind === "block" && r.mix === "1:6" && !r.err, '8" Block → block masonry 1:6 (read from the name)');
     ok(r.rows.Blocks === Math.ceil(N - 1e-9), `blocks: ${r.rows.Blocks} Nos (V ${V.toFixed(3)} cft / module)`);
     ok(near(r.rows["Dry mortar"], dry, 1e-6) && near(r.rows.Cement, dry / 7 / BAG, 1e-6) && near(r.rows.Sand, dry * 6 / 7, 1e-6), `mortar ${dry.toFixed(3)} cft dry → cement ${(dry / 7 / BAG).toFixed(2)} bags, sand ${(dry * 6 / 7).toFixed(3)} cft`);
@@ -75,10 +75,40 @@ const BAG = 50 / 1440 / 0.028316846592;
   ok(await T(() => zdTakeoff.P.proj.conds.find(c => c.id === "cB").mat.mix === "1:4"), "mix changed to 1:4 and kept on the condition");
   ok((await mat("cB")).mix === "1:4", "materials worked out again with 1:4");
   await page.fill('#props input[data-matk="wst"]', "5"); await page.dispatchEvent('#props input[data-matk="wst"]', "change"); await wait(200);
-  { const r = await mat("cB"), V = 100 * 10 * (8 / 12), bl = 16 / 12, bh = 8 / 12, j = 0.375 / 12, N = V / ((bl + j) * (bh + j) * (8 / 12));
+  { const r = await mat("cB"), V = 100 * 10 * (8 / 12), bl = 12 / 12, bh = 8 / 12, j = 0.375 / 12, N = V / ((bl + j) * (bh + j) * (8 / 12));
     ok(r.rows.Blocks === Math.ceil(N * 1.05 - 1e-9), "5 % waste added to the blocks"); }
   await T(() => { const c = zdTakeoff.P.proj.conds.find(c => c.id === "cB"); c.h = ""; });
   ok(/Set Height H/.test((await mat("cB")).err), "no height on a length condition → asks for H, nothing guessed");
+  await T(() => { const c = zdTakeoff.P.proj.conds.find(c => c.id === "cB"); c.h = 10; delete c.mat; zdTakeoff.refresh(); });
+
+  console.log("priced from the Cost Control rate library");
+  ok(await T(() => /open SAJ QSCOST/.test(document.getElementById("props").textContent)), "no library in this browser → says where the rates come from, no rate made up");
+  // a small test library (SAJ_QSCOST_v1, as the Rate Analysis app keeps it): resource rates with source and date, and one built-up item
+  await T(() => { localStorage.setItem("SAJ_QSCOST_v1", JSON.stringify({set: {}, rates: [
+      {code: "CEM", kind: "M", name: "Cement — OPC, 50 kg bag", unit: "Bag", rate: 1600, src: "TEST GRN 1, 01-Oct-2026", date: "2026-10-01", vs: "V"},
+      {code: "SAND-CH", kind: "M", name: "Sand — Chenab", unit: "Cft", rate: 80, src: "TEST GRN 2, 01-Oct-2026", date: "2026-10-01", vs: "V"},
+      {code: "CRSH-SG", kind: "M", name: "Crush — Sargodha", unit: "Cft", rate: 180, src: "TEST GRN 3, 01-Oct-2026", date: "2026-10-01", vs: "V"},
+      {code: "BLK-S8", kind: "M", name: "Solid block 8x8x12", unit: "Nos", rate: 200, src: "TEST GRN 4, 01-Oct-2026", date: "2026-10-01", vs: "V"}],
+    items: [{code: "RA-T1", desc: "Test slab", unit: "Sft", M: [{qty: 1, rate: 100}], L: [{qty: 1, rate: 50}], P: [{qty: 1, rate: 10}], wast: 5, acc: 0, trans: 0, oh: 10, prof: 10}]}));
+    const Z = zdTakeoff; Z.P.proj.conds.find(c => c.id === "cS").ra = "RA-T1"; Z.S.cond = "cB"; Z.S.sel = null; });
+  await page.waitForTimeout(3200); await T(() => zdTakeoff.refresh()); await wait(200);
+  { const r = await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.id === "cB"), m = Z.matCalc(c, Z.condTotals(c).net), p = Z.matPriced(m); return {tot: p.tot, miss: p.miss, rows: p.rows.map(x => [x.n, x.q, x.R.rate || 0, x.R.code || ""])}; });
+    const blk = r.rows.find(x => x[0] === "Blocks"), cem = r.rows.find(x => x[0] === "Cement"), snd = r.rows.find(x => x[0] === "Sand");
+    ok(blk && blk[2] === 200 && blk[3] === "BLK-S8" && cem[2] === 1600 && snd[2] === 80, '8" solid block priced from BLK-S8, cement from CEM, sand from SAND-CH');
+    ok(near(r.tot, blk[1] * 200 + cem[1] * 1600 + snd[1] * 80, 1e-6) && r.miss === 0, `material cost ${r.tot.toFixed(2)} PKR = Σ qty × library rate`); }
+  ok(await T(() => { const t = document.getElementById("props").textContent; return /Material cost PKR/.test(t) && /BLK-S8, 01-Oct-2026/.test(t); }), "Properties: rate, library code and date on each row, and the material cost");
+  await T(() => { const c = zdTakeoff.P.proj.conds.find(c => c.id === "cB"); c.mat = {kind: "block", mix: "1:6", bs: "16x8x8s"}; });
+  ok(await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.id === "cB"); return /no library item/.test(Z.matPriced(Z.matCalc(c, Z.condTotals(c).net)).rows.find(x => x.n === "Blocks").R.na); }), "a block size the library does not carry is left unpriced, not priced as another size");
+  await T(() => { delete zdTakeoff.P.proj.conds.find(c => c.id === "cB").mat; });
+
+  console.log("bill: material / labour / equipment split");
+  await T(() => { zdTakeoff.S.billSplit = true; zdTakeoff.S.billView = true; });
+  { const l = await T(() => { const L = zdTakeoff.billLines().find(x => x.c.id === "cS" && x.kind === "cond"); return {rate: L.rate, comp: L.comp, qty: L.qty}; });
+    ok(near(l.rate, 198, 1e-9) && l.comp && near(l.comp.mat, 105, 1e-9) && near(l.comp.lab, 50, 1e-9) && near(l.comp.eqp, 10, 1e-9) && near(l.comp.oth, 33, 1e-9), "RA rate 198 = material 105 (incl. 5 % waste) + labour 50 + equipment 10 + OH & profit 33"); }
+  await T(() => { document.getElementById("vBill").click(); zdTakeoff.refresh(); }); await wait(200);
+  ok(await T(() => { const t = document.querySelector("#bill table.split"); return !!t && /M 21,000\.00/.test(t.textContent) && /L 10,000\.00/.test(t.textContent) && /E 2,000\.00/.test(t.textContent); }), "bill table shows Material 21,000.00 and Labour 10,000.00 for the 200 Sft slab");
+  { const tx = await T(() => { const Z = zdTakeoff, M = Z.matSummary(); return M.tot.map(x => x.n + "|" + (x.R.rate || 0)).join(";"); });
+    ok(/Cement — OPC, 50 kg bag\|1600/.test(tx) && /Crush — Sargodha\|180/.test(tx), "whole-takeoff materials summary totals each library item"); }
 
   console.log("compact list and By page tree");
   await T(() => { zdTakeoff.S.condView = "tree"; zdTakeoff.refresh(); }); await wait(200);
@@ -98,8 +128,18 @@ const BAG = 50 / 1440 / 0.028316846592;
   await page.click('#condList [data-cview="cards"]'); await wait(150);
   ok((await page.locator("#condList .cond").count()) === 6, "Cards: the cards as before");
   await page.click('#condList [data-cview="tree"]'); await wait(150);
+
+  console.log("Excel");
+  { await T(() => zdTakeoff.refresh()); await page.click("#bExport"); await wait(); const [d] = await Promise.all([page.waitForEvent("download", {timeout: 30000}), page.click("#exXls")]);
+    const f = path.join(os.tmpdir(), "tkm_" + d.suggestedFilename()); await d.saveAs(f); const ExcelJS = require(path.join(LIBS, "exceljs")), wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(f);
+    const bl = wb.getWorksheet("Bill"), ms = wb.getWorksheet("Materials"); let slab = null; bl.eachRow(r => { if (/RCC Slab/.test(String(r.getCell(3).value))) slab = r; });
+    ok(bl && bl.getRow(1).getCell(11).value === "Material PKR" && bl.getRow(1).getCell(12).value === "Labour PKR" && slab && near(slab.getCell(11).value.result, 21000, 1e-6) && /E\d+\*105/.test(slab.getCell(11).value.formula), "Excel Bill: Material / Labour / Equipment / OH columns, as formulas (slab material = qty × 105)");
+    let cem = null; if (ms) ms.eachRow(r => { if (/Cement — OPC/.test(String(r.getCell(1).value))) cem = r; });
+    ok(ms && cem && cem.getCell(4).value === 1600 && /B\d+\*D\d+/.test(cem.getCell(5).value.formula) && /TEST GRN 1/.test(String(cem.getCell(7).value)), "Excel Materials sheet: cement with its library rate, formula and source"); }
   if (process.env.TK_SHOTS) { await T(() => { zdTakeoff.S.cond = "cP"; zdTakeoff.S.sel = null; zdTakeoff.refresh(); }); await wait(300); await page.screenshot({path: path.join(process.env.TK_SHOTS, "takeoff-materials.png")});
-    await T(() => { const b = document.getElementById("propsBox"); b.style.maxHeight = "80%"; }); await wait(100); await page.locator("#propsBox").screenshot({path: path.join(process.env.TK_SHOTS, "takeoff-materials-props.png")}); }
+    await T(() => { const b = document.getElementById("propsBox"); b.style.maxHeight = "80%"; }); await wait(100); await page.locator("#propsBox").screenshot({path: path.join(process.env.TK_SHOTS, "takeoff-materials-props.png")});
+    await T(() => { zdTakeoff.S.cond = "cB"; zdTakeoff.refresh(); document.getElementById("props").scrollTop = 9999; }); await wait(150); await page.locator("#propsBox").screenshot({path: path.join(process.env.TK_SHOTS, "takeoff-materials-props2.png")});
+    await page.locator("#bill").screenshot({path: path.join(process.env.TK_SHOTS, "takeoff-bill-split.png")}); }
   ok(errors.length === 0, "no page errors" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();
   console.log(`\n${passes} passed, ${fails} failed`); process.exit(fails ? 1 : 0);

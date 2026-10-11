@@ -692,7 +692,9 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 .cic.area::before{content:"";position:absolute;inset:1px 1px;border:1.5px solid var(--cc);background:color-mix(in srgb,var(--cc) 30%,transparent)}
 .cic.count::before{content:"";position:absolute;left:4px;top:3px;width:6px;height:6px;border-radius:50%;background:#d22}
 table.mattbl{width:100%;border-collapse:collapse;font-size:12px}table.mattbl td{padding:2px 4px;border-bottom:1px solid #eef1f5}table.mattbl td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--navy)}table.mattbl td:last-child{width:34px;color:var(--muted);font-size:11px}
-.matset{flex-wrap:wrap;gap:4px;margin-bottom:4px}.matset .fg{min-width:80px;flex:1}
+table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl .warn{color:#b45309}table.mattbl td:first-child{white-space:normal}table.mattbl td.n{white-space:nowrap}table.mattbl td.n small{font-weight:400;color:var(--muted);font-size:10px}table.mattbl td.amt{width:auto;color:var(--navy);font-size:12px;font-weight:600}table.mattbl tr.tot td{border-top:1.5px solid #cfd8e3;font-weight:600}
+.matset{flex-wrap:wrap;gap:4px;margin-bottom:4px}
+.msplit{display:flex;flex-wrap:wrap;gap:2px 10px;font-variant-numeric:tabular-nums}.msplit span{white-space:nowrap}.matset .fg{min-width:80px;flex:1}
 .propsbox{max-height:40%}
 </style>
 </head>
@@ -1098,7 +1100,7 @@ table.mattbl{width:100%;border-collapse:collapse;font-size:12px}table.mattbl td{
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-11a"></script>
+<script type="module" src="takeoff.js?v=2026-10-11b"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with

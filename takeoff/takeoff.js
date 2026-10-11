@@ -2147,8 +2147,22 @@ function condTotals(c){
 const MAT_BAG_CFT = 50 / 1440 / 0.028316846592, MAT_J = 0.375 / 12, MAT_SRC = "Material Calculator convention factors, 25-Sep-2026";
 const MAT_KINDS = [["none", "None"], ["brick", "Brick masonry"], ["block", "Block masonry"], ["plaster", "Plaster"], ["screed", "Screed / mortar bed"], ["concrete", "Concrete (PCC / RCC)"]];
 const MAT_MIXES = {brick: ["1:3", "1:4", "1:5", "1:6"], block: ["1:3", "1:4", "1:5", "1:6"], plaster: ["1:2", "1:3", "1:4", "1:5", "1:6"], screed: ["1:2", "1:3", "1:4", "1:5", "1:6"], concrete: ["1:1.5:3", "1:2:4", "1:3:6", "1:4:8"]};
-const MAT_BLOCKS = [["auto", "Auto (from wall T)"], ["16x4x8s", '4" × 8" × 16" solid'], ["16x4x8h", '4" × 8" × 16" hollow'], ["12x4x8s", '4" × 8" × 12" solid'], ["12x4x8h", '4" × 8" × 12" hollow'],
-  ["16x8x8s", '8" × 8" × 16" solid'], ["16x8x8h", '8" × 8" × 16" hollow'], ["12x8x8s", '8" × 8" × 12" solid'], ["12x8x8h", '8" × 8" × 12" hollow']];
+const MAT_BLOCKS = [["auto", "Auto (from wall T)"], ["12x4x8s", '4" × 8" × 12" solid'], ["16x4x8h", '4" × 8" × 16" hollow'], ["12x6x8s", '6" × 8" × 12" solid'], ["16x6x8h", '6" × 8" × 16" hollow'],
+  ["12x8x8s", '8" × 8" × 12" solid'], ["16x8x8h", '8" × 8" × 16" hollow'], ["16x4x8s", '4" × 8" × 16" solid'], ["12x4x8h", '4" × 8" × 12" hollow'], ["16x8x8s", '8" × 8" × 16" solid'], ["12x8x8h", '8" × 8" × 12" hollow']];
+/* the Cost Control (SAJ QSCOST Rate Analysis) resource codes each material is priced from — the rate, unit, source and date are
+   read from that library in this browser, never typed here. Blocks: the library's solid blocks are 12" long, its hollow ones 16". */
+const MAT_SANDS = [["SAND-CH", "Chenab sand"], ["SAND-RV", "Ravi sand"], ["SAND-LP", "Lawrencepur sand"]], MAT_CRUSH = [["CRSH-SG", "Sargodha crush"], ["CRSH-MG", "Margalla crush"]], MAT_BRICKS = [["BRK-1", "1st class brick"], ["BRK-2", "2nd class brick"]];
+const MAT_BLK_CODE = {"12x4x8s": "BLK-S4", "12x6x8s": "BLK-S6", "12x8x8s": "BLK-S8", "16x4x8h": "BLK-H4", "16x6x8h": "BLK-H6", "16x8x8h": "BLK-H8"};
+const MAT_UNIT = {bags: "bag", cft: "cft", Nos: "nos"};
+/* rate of one material row from the library: {rate, src, date, vs} or {na} — a unit that does not match, or no rate, is not used */
+function matRate(code, unit){
+  const L = raLib(); if (!L.o) return {na: "rates: open SAJ QSCOST → Rate Analysis in this browser once"};
+  if (!code) return {na: "no library item for this size"};
+  const r = L.rates.get(code); if (!r) return {na: code + " is not in the Rate Analysis library"};
+  if (normU(r.unit) !== MAT_UNIT[unit]) return {na: code + " is priced per " + r.unit};
+  if (!(raNum(r.rate) > 0)) return {na: code + " has no rate in the library"};
+  return {rate: raNum(r.rate), code, src: r.src || "", date: r.date || "", vs: r.vs || "", name: r.name || code, unit: r.unit};
+}
 /* the wall / slab thickness in inches written in a condition's name: 8" Block, 4"" Block, 4½" wall, 9 inch brick */
 function matNameIn(c){ const m = vulgar(normQ(c.name || "")).match(/(\d+(?:\.\d+)?)(?:\s+(\d)\/(\d))?\s*(?:"|''|in\b|inch)/i); return m ? +m[1] + (m[2] ? m[2] / m[3] : 0) : 0; }
 function matGuess(c){
@@ -2174,8 +2188,8 @@ function matCalc(c, Q){
   const out = {m, rows: [], basis: "", err: ""}, H = +c.h || 0, wst = 1 + (+m.wst || 0) / 100, u = c.unit;
   const parts = String(m.mix || "").split(":").map(Number); if (parts.some(x => !(x > 0))) { out.err = "Mix " + m.mix + " is not valid"; return out; }
   const sum = parts.reduce((a, x) => a + x, 0), mixRows = dry => { const cem = dry * parts[0] / sum, bags = cem / MAT_BAG_CFT;
-    out.rows.push(["Cement", bags, "bags", f3(cem) + " cft · " + fq(bags * 50, "kg") + " kg (50 kg bag = " + f3(MAT_BAG_CFT) + " cft)"], ["Sand", dry * parts[1] / sum, "cft", "dry × " + parts[1] + " / " + sum]);
-    if (parts[2]) out.rows.push(["Crush (coarse aggregate)", dry * parts[2] / sum, "cft", "dry × " + parts[2] + " / " + sum]); };
+    out.rows.push(["Cement", bags, "bags", f3(cem) + " cft · " + fq(bags * 50, "kg") + " kg (50 kg bag = " + f3(MAT_BAG_CFT) + " cft)", "CEM"], ["Sand", dry * parts[1] / sum, "cft", "dry × " + parts[1] + " / " + sum, m.sand || "SAND-CH"]);
+    if (parts[2]) out.rows.push(["Crush (coarse aggregate)", dry * parts[2] / sum, "cft", "dry × " + parts[2] + " / " + sum, m.crush || "CRSH-SG"]); };
   if (Q <= 0) { out.err = "No net quantity measured yet"; return out; }
   if (m.kind === "plaster" || m.kind === "screed") {   // area × thickness
     const t = (+m.tin || 0) / 12, faces = +c.faces || 1; if (!(t > 0)) { out.err = "Set the " + m.kind + " thickness"; return out; }
@@ -2195,34 +2209,50 @@ function matCalc(c, Q){
   out.basis = u === "cft" ? f3(V) + " cft" : u === "Sft" ? f3(Q) + " Sft × T " + f3(T) + " = " + f3(V) + " cft" : f3(Q) + " ft × H " + f3(H) + " × T " + f3(T) + " = " + f3(V) + " cft";
   if (!c.t && tIn) out.basis += ' (T ' + tIn + '" from the name)';
   if (m.kind === "concrete") { const dry = V * 1.54 * wst; out.rows.push(["Concrete", V, "cft", ""], ["Dry volume", dry, "cft", "V × 1.54" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out; }
-  let N, wet, unit;
-  if (m.kind === "brick") { const l = 9 / 12, w = 4.5 / 12, h = 3 / 12; N = V / ((l + MAT_J) * (w + MAT_J) * (h + MAT_J)); wet = V - N * l * w * h; unit = "Bricks"; }
+  let N, wet, unit, code;
+  if (m.kind === "brick") { code = m.brk || "BRK-1"; const l = 9 / 12, w = 4.5 / 12, h = 3 / 12; N = V / ((l + MAT_J) * (w + MAT_J) * (h + MAT_J)); wet = V - N * l * w * h; unit = "Bricks"; }
   else {
-    const ti = T * 12, code = m.bs && m.bs !== "auto" ? m.bs : "16x" + (ti >= 7.5 ? 8 : ti >= 5.5 ? 6 : 4) + "x8" + (/hollow/i.test(c.name || "") ? "h" : "s");
-    const [bl, bw, bh] = code.split("x").map(x => parseFloat(x) / 12), hol = /h$/.test(code), j = MAT_J;
+    const ti = T * 12, sz = m.bs && m.bs !== "auto" ? m.bs : ((h => (h ? "16x" : "12x") + (ti >= 7.5 ? 8 : ti >= 5.5 ? 6 : 4) + "x8" + (h ? "h" : "s"))(/hollow/i.test(c.name || ""))); code = MAT_BLK_CODE[sz] || "";
+    const [bl, bw, bh] = sz.split("x").map(x => parseFloat(x) / 12), hol = /h$/.test(sz), j = MAT_J;
     const k = Math.max(1, Math.floor(T / bw + 0.05)); N = V / ((bl + j) * (bh + j) * T / k); wet = V - N * bl * bw * bh;
     if (hol) { const jm = N * ((bl + j) * (bh + j) - bl * bh) * bw, fs = 1.25 / 12; wet = Math.max(0, jm * 2 * fs / bw + (wet - jm)); }
     unit = "Blocks"; out.basis += " · block " + r3(bw * 12) + '" × ' + r3(bh * 12) + '" × ' + r3(bl * 12) + '" ' + (hol ? "hollow" : "solid") + (k > 1 ? ", " + k + " leaves" : "");
   }
   if (wet < 0) { out.err = unit + " fill more than the wall volume — check thickness T"; return out; }
   const dry = wet * 1.27 * wst;
-  out.rows.push([unit, Math.ceil(N * wst - 1e-9), "Nos", fq(N * wst / V, "") + " per cft"], ["Wet mortar", wet, "cft", "V − N × unit volume"], ["Dry mortar", dry, "cft", "wet × 1.27" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry);
+  out.rows.push([unit, Math.ceil(N * wst - 1e-9), "Nos", fq(N * wst / V, "") + " per cft", code], ["Wet mortar", wet, "cft", "V − N × unit volume"], ["Dry mortar", dry, "cft", "wet × 1.27" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry);
   return out;
 }
 /* the Materials section of the Properties box: the condition's (or one measurement's) materials, and its settings */
+/* the materials of a result priced from the library: rows [{n, q, u, note, code, R (matRate)}], total of the priced rows, unpriced count */
+function matPriced(r){
+  const rows = (r && !r.err ? r.rows : []).filter(x => x[4] !== undefined).map(x => ({n: x[0], q: x[1], u: x[2], note: x[3], code: x[4], R: matRate(x[4], x[2])}));
+  return {rows, tot: rows.reduce((a, x) => a + (x.R.rate ? x.q * x.R.rate : 0), 0), miss: rows.filter(x => !x.R.rate).length};
+}
+const matQ = (q, u) => u === "Nos" ? fq(q, "Nos") : u === "bags" ? f2(q) : f3(q);
+/* the Materials section of the Properties box: the condition's (or one measurement's) materials, priced from Cost Control, and its settings */
 function matHtml(c, Q, own){
   const m = matOf(c), r = matCalc(c, Q), mixes = MAT_MIXES[m.kind] || [];
   const sel = (k, opts, v) => `<select data-matk="${k}" style="min-width:0">${opts.map(o => { const [a, b] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(a)}"${String(v) === String(a) ? " selected" : ""}>${esc(b)}</option>`; }).join("")}</select>`;
+  const mortar = m.kind !== "none";
   const set = own ? "" : `<div class="row matset"><div class="fg"><label>Material</label>${sel("kind", MAT_KINDS, m.kind)}</div>
     ${mixes.length ? `<div class="fg"><label>Mix</label>${sel("mix", mixes.includes(m.mix) ? mixes : mixes.concat([m.mix]), m.mix)}</div>` : ""}
     ${m.kind === "plaster" || m.kind === "screed" ? `<div class="fg"><label>Thickness in</label><input type="number" min="0" step="0.125" data-matk="tin" value="${+m.tin || 0}"></div>` : ""}
     ${m.kind === "block" ? `<div class="fg"><label>Block</label>${sel("bs", MAT_BLOCKS, m.bs || "auto")}</div>` : ""}
-    ${m.kind !== "none" ? `<div class="fg"><label>Waste %</label><input type="number" min="0" max="50" step="0.5" data-matk="wst" value="${+m.wst || 0}"></div>` : ""}</div>`;
+    ${m.kind === "brick" ? `<div class="fg"><label>Brick</label>${sel("brk", MAT_BRICKS, m.brk || "BRK-1")}</div>` : ""}
+    ${mortar ? `<div class="fg"><label>Sand</label>${sel("sand", MAT_SANDS, m.sand || "SAND-CH")}</div>` : ""}
+    ${m.kind === "concrete" ? `<div class="fg"><label>Crush</label>${sel("crush", MAT_CRUSH, m.crush || "CRSH-SG")}</div>` : ""}
+    ${mortar ? `<div class="fg"><label>Waste %</label><input type="number" min="0" max="50" step="0.5" data-matk="wst" value="${+m.wst || 0}"></div>` : ""}</div>`;
   if (!r) return own ? "" : `<div class="psec">Materials</div>${set}<div class="small">Pick a material (brick, block, plaster, concrete...) to see cement, sand and crush.</div>`;
-  const body = r.err ? `<div class="small warn" style="color:var(--red,#c0392b)">${esc(r.err)}</div>`
-    : `<div class="dimstr" style="margin:2px 0 4px">${esc(r.basis)}</div><table class="mattbl">${r.rows.map(x => `<tr title="${esc(x[3])}"><td>${esc(x[0])}</td><td class="n">${x[2] === "Nos" ? fq(x[1], "Nos") : x[2] === "bags" ? f2(x[1]) : f3(x[1])}</td><td>${esc(x[2])}</td></tr>`).join("")}</table>`;
+  let body;
+  if (r.err) body = `<div class="small warn" style="color:var(--red,#c0392b)">${esc(r.err)}</div>`;
+  else { const pr = matPriced(r), info = r.rows.filter(x => x[4] === undefined);
+    body = `<div class="dimstr" style="margin:2px 0 4px">${esc(r.basis)}</div><table class="mattbl">${info.map(x => `<tr title="${esc(x[3])}"><td>${esc(x[0])}</td><td class="n">${matQ(x[1], x[2])} <small>${esc(x[2])}</small></td><td></td></tr>`).join("")}
+      ${pr.rows.map(x => `<tr title="${esc(x.note + (x.R.rate ? "\n" + x.R.code + " — " + x.R.name + ": " + x.R.src : ""))}"><td>${esc(x.n)}<div class="mr">${x.R.rate ? "@ " + f2(x.R.rate) + " / " + esc(x.R.unit) + " · " + esc(x.R.code) + ", " + esc(dmy(x.R.date)) + (x.R.vs === "A" ? ' · <b class="warn">ASSUMPTION</b>' : "") : '<span class="warn">' + esc(x.R.na) + "</span>"}</div></td>
+        <td class="n">${matQ(x.q, x.u)} <small>${esc(x.u)}</small></td><td class="n amt">${x.R.rate ? f2(x.q * x.R.rate) : "—"}</td></tr>`).join("")}
+      ${pr.rows.length ? `<tr class="tot"><td colspan="2">Material cost PKR${pr.miss ? ` <span class="warn">(${pr.miss} not priced)</span>` : ""}${Q > 0 && pr.tot ? `<div class="mr">${f2(pr.tot / Q)} per ${esc(c.unit)}</div>` : ""}</td><td class="n amt">${pr.tot ? f2(pr.tot) : "—"}</td></tr>` : ""}</table>`; }
   return `<div class="psec">Materials${own ? " — this measurement" : ""}</div><div class="small" style="margin:-2px 0 4px">${esc(MAT_KINDS.find(x => x[0] === m.kind)[1])} ${esc(m.mix || "")}${m.guessed && !own ? " · picked from the condition name — change it below" : ""}</div>${set}${body}
-    ${own ? "" : `<div class="small" style="margin-top:3px">${esc(MAT_SRC)} — dry factor 1.27 mortar / 1.54 concrete, 3/8" joints. Quantities only; no rates.</div>`}`;
+    ${own ? "" : `<div class="small" style="margin-top:3px">${esc(MAT_SRC)} — dry factor 1.27 mortar / 1.54 concrete, 3/8" joints. Rates: Cost Control rate library (SAJ QSCOST → Rate Analysis) in this browser, with each rate's source and date; material only — no labour.</div>`}`;
 }
 /* ------------------------------------------------------------------ assemblies and the bill
    A condition's measured quantity drives derived items by formula (PlanSwift-style assemblies), each with a rate.
@@ -2295,29 +2325,56 @@ function billLines(only){   // [{c, kind:"cond"|"asm", a, name, unit, qty, rate,
 const rateOk = l => !l.na && (!(l.rate > 0) || !!(l.src && l.date));
 const rateNote = l => l.na ? '<span style="color:var(--red)">' + esc(l.na) + "</span>" : !rateOk(l) ? '<span style="color:var(--red)">rate: ASSUMPTION — no dated source</span>'
   : l.rate > 0 ? (l.ra ? "RA " + esc(l.ra) + (l.cached ? " (last read " + esc(dmy(l.date)) + ")" : "") + (l.assumed ? ' · <span style="color:var(--amber)">' + l.assumed + " assumed row" + (l.assumed > 1 ? "s" : "") + "</span>" : "") : "rate: " + esc(l.src) + ", " + esc(dmy(l.date))) : "rate not set";
+/* a bill line's cost split per unit: material (incl. wastage), labour, equipment / plant, and OH, profit, access and transport —
+   from its Rate Analysis built-up rate; a typed rate has no split */
+const compOf = l => l.comp && l.rate > 0 ? l.comp : null;
 function renderBill(){
   const el = $("bill"); if (!P.proj) { el.innerHTML = ""; return; }
-  const bar = `<div class="billbar"><label class="small">Group <select id="billGrp"><option value="">— none —</option><option value="floor"${S.billGrp === "floor" ? " selected" : ""}>by building / floor</option><option value="file"${S.billGrp === "file" ? " selected" : ""}>by drawing (PDF)</option><option value="sheet"${S.billGrp === "sheet" ? " selected" : ""}>by sheet / page</option></select></label><span style="flex:1"></span>
-    <button class="btn sm" data-bact="open" title="Door and window marks with their sizes">Opening schedule</button><button class="btn sm" data-bact="rev" title="Old revision against new: quantity and cost variance">Revision compare</button></div>`;
+  const money = v => v ? f2(v) : "—", sp = S.billSplit = S.billSplit == null ? pref("tkBillSplit") === "1" : S.billSplit, nc = 4;
+  const splitLn = a => `<div class="ds msplit"><span title="Material incl. wastage">M ${money(a[0])}</span><span>L ${money(a[1])}</span><span title="Plant / equipment">E ${money(a[2])}</span><span title="Access, transport, overheads and profit">OH&amp;P ${money(a[3])}</span></div>`;
+  const bar = `<div class="billbar"><label class="small">Group <select id="billGrp"><option value="">— none —</option><option value="floor"${S.billGrp === "floor" ? " selected" : ""}>by building / floor</option><option value="file"${S.billGrp === "file" ? " selected" : ""}>by drawing (PDF)</option><option value="sheet"${S.billGrp === "sheet" ? " selected" : ""}>by sheet / page</option></select></label>
+    <label class="small pk" title="Split every amount into material, labour, equipment and OH / profit — from each line's Rate Analysis built-up rate"><input type="checkbox" id="billSplit"${sp ? " checked" : ""}> M / L / E split</label><span style="flex:1"></span>
+    <button class="btn sm" data-bact="mat" title="Cement, sand, crush, bricks and blocks for the whole takeoff, priced from the Cost Control rate library">Materials</button><button class="btn sm" data-bact="open" title="Door and window marks with their sizes">Opening schedule</button><button class="btn sm" data-bact="rev" title="Old revision against new: quantity and cost variance">Revision compare</button></div>`;
   const groups = S.billGrp === "floor" ? floorGroups() : S.billGrp === "file" ? P.proj.files.map(f => ({name: f.name.replace(/\.pdf$/i, ""), only: it => it.file === f.id}))   // Forma inventory: group by document
     : S.billGrp === "sheet" ? allPages().map(o => { const sh = (P.proj.sheets || {})[o.key] || {}; return {name: [sh.no, sh.title, o.f.name.replace(/\.pdf$/i, "") + " p." + o.i].filter(Boolean).join(" · "), only: it => it.file === o.f.id && it.page === o.i}; }) : [{name: "", only: null}];
-  let all = 0, any = false, h = "";
+  let all = 0, any = false, h = ""; const AC = [0, 0, 0, 0];
   groups.forEach(g => {
     const L = billLines(g.only); if (!L.length) return; any = true;
-    let tot = 0, n = 0;
-    if (g.name) h += `<tr class="grp"><td colspan="4">${esc(g.name)}</td></tr>`;
+    let tot = 0, n = 0; const GC = [0, 0, 0, 0];
+    if (g.name) h += `<tr class="grp"><td colspan="${nc}">${esc(g.name)}</td></tr>`;
     L.forEach(l => {
-      const amt = l.qty * l.rate; tot += amt;
+      const amt = l.qty * l.rate, cp = compOf(l), ca = cp ? [cp.mat, cp.lab, cp.eqp, cp.oth].map(v => v * l.qty) : null; tot += amt; if (ca) ca.forEach((v, i) => { GC[i] += v; });
       h += `<tr class="${l.kind === "cond" ? "ch2" : "it"}"><td>${l.kind === "asm" ? "↳ " : `${++n}. <span class="sw" style="background:${l.c.color}"></span>`}${l.boq ? `<span class="boq">${esc(l.boq)}</span> ` : ""}${esc(l.name)}${l.kind === "cond" ? ` <button class="rn" data-asm="${esc(l.c.id)}" title="Items this condition drives, and rates">&#9881; Assembly</button>` : ""}
-        <div class="ds">${l.kind === "asm" ? (l.err ? '<span style="color:var(--red)">' + esc(l.err) + "</span>" : "= " + esc(asmLabel(l))) : "measured"} · ${rateNote(l)}</div></td>
+        <div class="ds">${l.kind === "asm" ? (l.err ? '<span style="color:var(--red)">' + esc(l.err) + "</span>" : "= " + esc(asmLabel(l))) : "measured"} · ${rateNote(l)}${sp && l.rate > 0 && !cp ? " · typed rate — no split" : ""}</div>${sp && ca ? splitLn(ca) : ""}</td>
         <td class="n">${fq(l.qty, l.unit)}<div class="ds">${esc(l.unit)}</div></td><td class="n">${l.rate ? f2(l.rate) : "—"}</td><td class="n">${l.rate ? f2(amt) : "—"}</td></tr>`;
     });
-    all += tot;
-    h += `<tr class="tot"><td>Total${g.name ? " " + esc(g.name) : ""}</td><td></td><td></td><td class="n">${f2(tot)}</td></tr>`;
+    all += tot; GC.forEach((v, i) => { AC[i] += v; });
+    h += `<tr class="tot"><td>Total${g.name ? " " + esc(g.name) : ""}${sp ? splitLn(GC) : ""}</td><td></td><td></td><td class="n">${f2(tot)}</td></tr>`;
   });
   if (!any) { el.innerHTML = bar + '<div class="empty">The bill lists every condition with its quantity, plus the items each one drives (open a condition’s <b>Assembly</b> — e.g. floor tiles from the floor area, skirting from its perimeter less doors, PD). Rates are typed with their source and date, or linked to a Rate Analysis code.</div>'; return; }
-  if (groups.length > 1) h += `<tr class="tot"><td>Grand total</td><td></td><td></td><td class="n">${f2(all)}</td></tr>`;
-  el.innerHTML = bar + '<table class="sh bill"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount PKR</th></tr></thead><tbody>' + h + "</tbody></table>";
+  if (groups.length > 1) h += `<tr class="tot"><td>Grand total${sp ? splitLn(AC) : ""}</td><td></td><td></td><td class="n">${f2(all)}</td></tr>`;
+  el.innerHTML = bar + `<table class="sh bill${sp ? " split" : ""}"><thead><tr><th>Item${sp ? ' <span class="small" style="font-weight:400;text-transform:none">· M material, L labour, E equipment, OH&amp;P</span>' : ""}</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount PKR</th></tr></thead><tbody>` + h + "</tbody></table>";
+}
+/* the takeoff's materials: every condition's cement, sand, crush, bricks and blocks, totalled per library item and priced from it */
+function matSummary(){
+  const per = [], tot = new Map();
+  P.proj.conds.forEach(c => { const t = condTotals(c); if (!(t.net > 0)) return; const r = matCalc(c, t.net); if (!r) return;
+    const pr = matPriced(r); per.push({c, r, pr});
+    pr.rows.forEach(x => { const k = x.code || x.n + " (" + x.u + ")"; const o = tot.get(k) || {n: x.R.rate ? x.R.name : x.n, u: x.u, q: 0, R: x.R}; o.q += x.q; tot.set(k, o); }); });
+  return {per, tot: [...tot.values()]};
+}
+function matDialog(){
+  const M = matSummary();
+  if (!M.per.length) return ask("Materials", '<p>No condition has materials yet. Select a condition and pick its material (brick, block, plaster, concrete...) under <b>Properties → Materials</b> — it is read from the name when it can be (8" Block, Wall Plaster, RCC Slab).</p>', "OK");
+  const T = M.tot.reduce((a, x) => a + (x.R.rate ? x.q * x.R.rate : 0), 0), miss = M.tot.filter(x => !x.R.rate).length;
+  const body = `<p class="small">Cement, sand, crush, bricks and blocks for the measured quantities (Material Calculator formulas), priced from the Cost Control rate library in this browser — material only; labour and plant are in each item's Rate Analysis rate.</p>
+    <table class="sh"><thead><tr><th>Material</th><th class="n">Qty</th><th>Unit</th><th class="n">Rate PKR</th><th class="n">Amount PKR</th><th>Source</th></tr></thead><tbody>
+    ${M.tot.map(x => `<tr><td>${esc(x.n)}</td><td class="n">${matQ(x.q, x.u)}</td><td>${esc(x.u)}</td><td class="n">${x.R.rate ? f2(x.R.rate) : "—"}</td><td class="n">${x.R.rate ? f2(x.q * x.R.rate) : "—"}</td><td class="small">${x.R.rate ? esc(x.R.code + " · " + x.R.src) : '<span style="color:var(--red)">' + esc(x.R.na) + "</span>"}</td></tr>`).join("")}
+    <tr class="tot"><td colspan="4">Total material${miss ? ` (${miss} not priced)` : ""}</td><td class="n">${f2(T)}</td><td></td></tr></tbody></table>
+    <h4 style="margin:12px 0 4px">By condition</h4><table class="sh"><thead><tr><th>Condition</th><th class="n">Qty</th><th>Material</th><th class="n">Cement bags</th><th class="n">Sand cft</th><th class="n">Crush cft</th><th class="n">Bricks / blocks</th><th class="n">Material PKR</th></tr></thead><tbody>
+    ${M.per.map(o => { const g = n => { const x = o.pr.rows.find(y => y.n.startsWith(n)); return x ? matQ(x.q, x.u) : ""; };
+      return `<tr><td>${esc(o.c.name)}</td><td class="n">${fq(condTotals(o.c).net, o.c.unit)} ${esc(o.c.unit)}</td><td>${o.r.err ? '<span style="color:var(--red)">' + esc(o.r.err) + "</span>" : esc(MAT_KINDS.find(k => k[0] === o.r.m.kind)[1] + " " + (o.r.m.mix || ""))}</td><td class="n">${g("Cement")}</td><td class="n">${g("Sand")}</td><td class="n">${g("Crush")}</td><td class="n">${g("Bricks") || g("Blocks")}</td><td class="n">${o.pr.tot ? f2(o.pr.tot) : "—"}</td></tr>`; }).join("")}</tbody></table>`;
+  return ask("Materials — whole takeoff", body, "Close");
 }
 function floorGroups(){   // one group per building / floor found, plus the measurements with no floor
   const keyL = it => { const L = locOf(it); return [L.bldg, L.floor].filter(Boolean).join(" · "); }, names = [...new Set(P.proj.items.map(keyL))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
@@ -5210,14 +5267,29 @@ async function exportExcel(){
     }
     await ws.protect("", {selectLockedCells: true, selectUnlockedCells: true, formatColumns: true});
     const bl = wb.addWorksheet("Bill");
-    bl.columns = [{header: "S.No", width: 6}, {header: "BOQ code", width: 13}, {header: "Item", width: 46}, {header: "Formula", width: 18}, {header: "Qty", width: 13}, {header: "Unit", width: 8}, {header: "Rate PKR", width: 13}, {header: "Amount PKR", width: 15}, {header: "RA code", width: 13}, {header: "Rate source / date", width: 60}];
+    bl.columns = [{header: "S.No", width: 6}, {header: "BOQ code", width: 13}, {header: "Item", width: 46}, {header: "Formula", width: 18}, {header: "Qty", width: 13}, {header: "Unit", width: 8}, {header: "Rate PKR", width: 13}, {header: "Amount PKR", width: 15}, {header: "RA code", width: 13}, {header: "Rate source / date", width: 60}, {header: "Material PKR", width: 15}, {header: "Labour PKR", width: 14}, {header: "Equipment PKR", width: 14}, {header: "OH, profit & other PKR", width: 16}];
     bl.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; bl.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
     let bn = 0, br = 2; const BL = billLines();
     BL.forEach(l => { const r = bl.addRow([l.kind === "cond" ? ++bn : "", l.boq || "", (l.kind === "asm" ? "   " : "") + l.name, l.kind === "asm" ? asmLabel(l) : "measured", +l.qty.toFixed(3), l.unit, l.rate || 0, {formula: `E${br}*G${br}`, result: l.qty * (l.rate || 0)}, l.ra || "",
         l.na ? l.na : l.rate ? (rateOk(l) ? l.src + (l.ra ? "" : ", " + dmy(l.date)) : "ASSUMPTION — no dated source") : "rate not set"]);
       r.getCell(5).numFmt = qFmt(l.unit); r.getCell(7).numFmt = "#,##0.00"; r.getCell(8).numFmt = "#,##0.00"; r.getCell(5).fill = GREEN; r.getCell(7).fill = BLUE; r.getCell(8).fill = GREEN;
+      const cp = compOf(l); if (cp) [cp.mat, cp.lab, cp.eqp, cp.oth].forEach((v, k) => { const cl = r.getCell(11 + k); cl.value = {formula: `E${br}*${+v.toFixed(4)}`, result: l.qty * v}; cl.numFmt = "#,##0.00"; });   // split of the Rate Analysis rate
       if (l.kind === "cond") r.font = {bold: true}; if (!rateOk(l) || !(l.rate > 0)) r.getCell(10).fill = YELLOW; br++; });
-    const bt = bl.addRow(["", "", "Total", "", "", "", "", {formula: `SUM(H2:H${br - 1})`, result: BL.reduce((a, l) => a + l.qty * (l.rate || 0), 0)}]); bt.font = {bold: true}; bt.getCell(8).numFmt = "#,##0.00"; bt.eachCell(c2 => { c2.fill = GREY; });
+    const bt = bl.addRow(["", "", "Total", "", "", "", "", {formula: `SUM(H2:H${br - 1})`, result: BL.reduce((a, l) => a + l.qty * (l.rate || 0), 0)}]); bt.font = {bold: true}; bt.getCell(8).numFmt = "#,##0.00";
+    ["K", "L", "M", "N"].forEach((L1, k) => { const cl = bt.getCell(11 + k); cl.value = {formula: `SUM(${L1}2:${L1}${br - 1})`, result: BL.reduce((a, l) => { const cp = compOf(l); return a + (cp ? l.qty * [cp.mat, cp.lab, cp.eqp, cp.oth][k] : 0); }, 0)}; cl.numFmt = "#,##0.00"; }); bt.eachCell(c2 => { c2.fill = GREY; });
+    const MS = matSummary();
+    if (MS.per.length) {   // the takeoff's materials, priced from the Cost Control rate library
+      const ms = wb.addWorksheet("Materials");
+      ms.columns = [{header: "Material", width: 40}, {header: "Qty", width: 13}, {header: "Unit", width: 8}, {header: "Rate PKR", width: 12}, {header: "Amount PKR", width: 15}, {header: "Library code", width: 12}, {header: "Rate source / date", width: 70}];
+      ms.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; ms.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
+      MS.tot.forEach(x => { const n = ms.rowCount + 1, r = ms.addRow([x.n, +x.q.toFixed(3), x.u, x.R.rate || 0, {formula: `B${n}*D${n}`, result: x.q * (x.R.rate || 0)}, x.R.code || "", x.R.rate ? x.R.src + (x.R.date ? " (" + dmy(x.R.date) + ")" : "") : x.R.na]);
+        r.getCell(2).numFmt = "#,##0.000"; r.getCell(4).numFmt = "#,##0.00"; r.getCell(5).numFmt = "#,##0.00"; if (!x.R.rate || x.R.vs === "A") r.getCell(7).fill = YELLOW; });
+      const mt = ms.addRow(["Total material", "", "", "", {formula: `SUM(E2:E${ms.rowCount})`, result: MS.tot.reduce((a, x) => a + x.q * (x.R.rate || 0), 0)}]); mt.font = {bold: true}; mt.getCell(5).numFmt = "#,##0.00"; mt.eachCell(c2 => { c2.fill = GREY; });
+      ms.addRow([]); const h2 = ms.addRow(["By condition", "Qty", "Unit", "Material", "Basis"]); h2.font = {bold: true};
+      MS.per.forEach(o => { const t = condTotals(o.c); ms.addRow([o.c.name, +t.net.toFixed(3), o.c.unit, o.r.err ? o.r.err : MAT_KINDS.find(k => k[0] === o.r.m.kind)[1] + " " + (o.r.m.mix || ""), o.r.basis || ""]);
+        o.pr.rows.forEach(x => { const r = ms.addRow(["   " + x.n, +x.q.toFixed(3), x.u, x.R.rate || "", x.R.rate ? x.q * x.R.rate : ""]); r.getCell(2).numFmt = "#,##0.000"; r.getCell(5).numFmt = "#,##0.00"; }); });
+      ms.addRow([]); ms.addRow([MAT_SRC + " — dry factor 1.27 mortar / 1.54 concrete, 50 kg bag = " + f3(MAT_BAG_CFT) + " cft, 3/8\" joints. Material only."]);
+    }
     const lc = wb.addWorksheet("By location");
     lc.columns = [{header: "Building / floor", width: 26}, {header: "BOQ code", width: 13}, {header: "Item", width: 46}, {header: "Qty", width: 13}, {header: "Unit", width: 8}, {header: "Rate PKR", width: 13}, {header: "Amount PKR", width: 15}];
     lc.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; lc.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
@@ -6590,7 +6662,7 @@ function raPrice(code){
   const H = ((L.o.set || {}).profOnOh ? sub + G : sub) * raNum(it.prof) / 100;
   const live = rows.filter(r => raNum(r.qty) !== 0 && !r.opt);
   const dates = live.map(r => (rec(r) || {}).date).filter(Boolean).sort();
-  return {code: it.code || it.id, desc: it.desc || "", unit: it.unit || "", rate: sub + G + H, M: A, L: C, Pl: D, oh: G, prof: H,
+  return {code: it.code || it.id, desc: it.desc || "", unit: it.unit || "", rate: sub + G + H, M: A, L: C, Pl: D, oh: G, prof: H, B, acc: raNum(it.acc), trans: raNum(it.trans),
           gaps: live.filter(r => rr(r) === 0 && r.mode !== "lump").length, assumed: live.filter(r => (r.ref ? (rec(r) || {}).vs || "A" : r.rate ? "V" : "A") === "A").length, d0: dates[0] || "", d1: dates[dates.length - 1] || ""};
 }
 const normU = u => { u = String(u || "").trim().toLowerCase().replace(/\.$/, ""); return u === "rft" || u === "ft" || u === "rm" ? "ft" : u === "no" || u === "nos" || u === "each" || u === "nr" ? "nos" : u === "kgs" ? "kg" : u; };
@@ -6604,8 +6676,9 @@ function rateOf(o, unit){
   if (normU(r.unit) !== normU(unit)) return {rate: 0, ra, na: `RATE NOT AVAILABLE — ${ra} is priced per ${r.unit}, this line is in ${unit}`};
   if (r.gaps) return {rate: 0, ra, na: `RATE NOT AVAILABLE — ${ra} has ${r.gaps} unrated row${r.gaps > 1 ? "s" : ""} in Rate Analysis`};
   const out = {rate: r.rate, ra, unit: r.unit, date: today(), src: `ZD Rate Analysis ${r.code}, ${dmy(today())} — built-up rate (material ${f2(r.M)} + labour ${f2(r.L)} + plant ${f2(r.Pl)} + OH ${f2(r.oh)} + profit ${f2(r.prof)})${r.d1 ? "; resource rates dated " + dmy(r.d0) + " to " + dmy(r.d1) : ""}${r.assumed ? "; " + r.assumed + " row" + (r.assumed > 1 ? "s" : "") + " ASSUMPTION — no dated source" : ""}`, assumed: r.assumed};
-  const cache = {code: ra, rate: out.rate, unit: r.unit, date: out.date, src: out.src};
-  if (!o.raCache || o.raCache.rate !== cache.rate || o.raCache.src !== cache.src) { o.raCache = cache; save(); }
+  out.comp = {mat: r.M + r.B, lab: r.L, eqp: r.Pl, oth: r.acc + r.trans + r.oh + r.prof};   // per unit: material incl. wastage, labour, plant, the rest
+  const cache = {code: ra, rate: out.rate, unit: r.unit, date: out.date, src: out.src, comp: out.comp};
+  if (!o.raCache || o.raCache.rate !== cache.rate || o.raCache.src !== cache.src || !o.raCache.comp) { o.raCache = cache; save(); }
   return out;
 }
 
@@ -7813,8 +7886,8 @@ function wire(){
   const view = b => { S.billView = b; $("sheet").style.display = b ? "none" : ""; $("bill").style.display = b ? "" : "none"; $("vSheet").classList.toggle("on", !b); $("vBill").classList.toggle("on", b); if (b) renderBill(); };
   $("vSheet").onclick = () => view(false); $("vBill").onclick = () => view(true);
   $("bill").addEventListener("click", e => { const a = e.target.closest("[data-asm]"); if (a) return asmDialog(cond(a.dataset.asm));
-    const b = e.target.closest("[data-bact]"); if (b) return b.dataset.bact === "open" ? openingsDialog() : revCompareDialog(); });
-  $("bill").addEventListener("change", e => { if (e.target.id === "billGrp") { S.billGrp = e.target.value; renderBill(); } });
+    const b = e.target.closest("[data-bact]"); if (b) return b.dataset.bact === "open" ? openingsDialog() : b.dataset.bact === "mat" ? matDialog() : revCompareDialog(); });
+  $("bill").addEventListener("change", e => { if (e.target.id === "billGrp") { S.billGrp = e.target.value; renderBill(); } if (e.target.id === "billSplit") { S.billSplit = e.target.checked; pref("tkBillSplit", S.billSplit ? "1" : "0"); renderBill(); } });
   $("bSheet").onclick = () => P.proj && sheetInfoDialog();
   $("qaBar").addEventListener("click", e => {
     const f = e.target.closest("[data-qf]"); if (f) { S.qaFilter = S.qaFilter === f.dataset.qf ? "" : f.dataset.qf; renderSheet(); renderQaBar(); return; }
@@ -10787,7 +10860,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {matCalc, matOf, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
