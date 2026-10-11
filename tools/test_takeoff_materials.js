@@ -129,6 +129,26 @@ const BAG = 50 / 1440 / 0.028316846592;
   ok((await page.locator("#condList .cond").count()) === 6, "Cards: the cards as before");
   await page.click('#condList [data-cview="tree"]'); await wait(150);
 
+  console.log("export legend");
+  const leg = o => T(o => { const Z = zdTakeoff, b = Z.S.base, svg = Z.pageOverlaySvg(Z.S.fileId, Z.S.pageNo, 1, b.width, b.height, Object.assign({legend: "tr", lsz: "m", meas: true, lbl: false, mk: false}, o));
+    const d = new DOMParser().parseFromString(svg, "image/svg+xml"), tx = [...d.querySelectorAll("text")].map(t => t.textContent), rc = [...d.querySelectorAll("rect")].find(r => r.getAttribute("fill") === "rgba(255,255,255,.93)");
+    return {tx, w: rc ? +rc.getAttribute("width") : 0}; }, o);
+  { const names = ['8" Block', "Wall Plaster", "RCC Slab", '9" Brick wall', "Door D-1"];
+    const order = tx => names.slice().sort((a, b) => tx.indexOf(a) - tx.indexOf(b));
+    let r = await leg({lord: "list"}); ok(names.every(n => r.tx.includes(n)) && JSON.stringify(order(r.tx)) === JSON.stringify(names), "legend in condition list order");
+    r = await leg({lord: "name"}); ok(order(r.tx)[0] === '8" Block' && order(r.tx)[1] === '9" Brick wall' && order(r.tx)[4] === "Wall Plaster", "legend by name A → Z");
+    r = await leg({lord: "qty"}); ok(order(r.tx)[0] === "Wall Plaster" && order(r.tx)[1] === '9" Brick wall' && order(r.tx)[4] === "Door D-1", "legend by quantity, largest first (1,000 Sft, 750 cft, 200, 100, 2)");
+    r = await leg({lcols: ["qty", "unit"]}); ok(r.tx.includes("1,000.000") && r.tx.includes("Sft") && !r.tx.includes("PKR") && !r.tx.includes("BOQ"), "Quantity and Unit columns, no amount");
+    r = await leg({lcols: ["qty", "unit", "amt"]}); ok(r.tx.includes("PKR") && r.tx.includes("39,600.00") && r.tx.filter(t => t === "—").length === 4, "Amount column: 200 Sft × RA rate 198 = 39,600.00; conditions with no rate show —, nothing made up");
+    r = await leg({lcols: []}); ok(!r.tx.includes("1,000.000") && !r.tx.includes("Item"), "no columns ticked: names only");
+    r = await leg({lq: false}); ok(!r.tx.includes("1,000.000"), "older setting 'no quantities' still honoured");
+    r = await leg({lw: 420}); ok(near(r.w, 420, 0.5), "legend width set to 420 pt");
+    const r2 = await leg({lw: 150}); ok(near(r2.w, 150, 0.5) && r2.tx.some(t => /…$/.test(t)), "a narrow legend shortens long names with …, never overflows"); }
+  if (process.env.TK_SHOTS) { await T(() => { const Z = zdTakeoff, b = Z.S.base, d = document.createElement("div"); d.id = "legShot"; d.style.cssText = "position:fixed;left:0;top:0;z-index:99999;background:#fff;width:" + b.width + "px;height:" + b.height + "px";
+      d.innerHTML = Z.pageOverlaySvg(Z.S.fileId, Z.S.pageNo, 1, b.width, b.height, {legend: "tr", lsz: "m", meas: true, lbl: false, mk: false, lord: "qty", lcols: ["boq", "qty", "unit", "amt"], lw: 330}).replace(/^<svg/, '<svg width="' + b.width + '" height="' + b.height + '"'); document.body.appendChild(d); });
+    await page.locator("#legShot").screenshot({path: path.join(process.env.TK_SHOTS, "takeoff-legend.png")}); await T(() => document.getElementById("legShot").remove()); }
+  ok(await T(() => { const w = zdTakeoff.legendWidths(["symbol", "description", "qty"], 0.5); return Math.abs(w[1] - 0.5) < 1e-9 && Math.abs(w[0] + w[1] + w[2] - 1) < 0.002; }), "legend markup: description width share kept, other columns share the rest");
+
   console.log("Excel");
   { await T(() => zdTakeoff.refresh()); await page.click("#bExport"); await wait(); const [d] = await Promise.all([page.waitForEvent("download", {timeout: 30000}), page.click("#exXls")]);
     const f = path.join(os.tmpdir(), "tkm_" + d.suggestedFilename()); await d.saveAs(f); const ExcelJS = require(path.join(LIBS, "exceljs")), wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(f);
