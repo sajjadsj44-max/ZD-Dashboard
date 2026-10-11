@@ -1094,7 +1094,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
 <div id="ctx" role="menu" aria-label="Actions"></div>
 <aside id="aiPanel" aria-label="Claude assistant">
   <div class="aih"><b>&#10022; Claude</b><span class="small">reads the drawing, measures rooms</span><span class="sp"></span>
-    <button class="btn sm" id="aiEngBtn" title="AI engine: local AI on this computer (free, offline), Claude, or the built-in rule agent — setup, health check, benchmark">&#9881; Engine</button><button class="btn sm" id="aiRulesBtn" title="Agent instructions — the working rules the AI follows (teach one in the chat: remember …)">Rules</button><button class="btn sm" id="aiNew" title="Start a new conversation">New</button><button class="btn sm" id="aiKeyBtn" title="API key">Key</button><button class="btn sm" id="aiClose" title="Close">&times;</button></div>
+    <button class="btn sm" id="aiEngBtn" title="AI engine: local AI on this computer (free, offline), Claude, or the built-in rule agent — setup, health check, benchmark">&#9881; Engine</button><button class="btn sm" id="aiKbBtn" title="Project knowledge — add specifications / schedules and search them, the PDFs' text and the help, offline">Knowledge</button><button class="btn sm" id="aiKpiBtn" title="KPIs — Auto area and agent performance from recorded test results and this browser's log">KPIs</button><button class="btn sm" id="aiRulesBtn" title="Agent instructions — the working rules the AI follows (teach one in the chat: remember …)">Rules</button><button class="btn sm" id="aiNew" title="Start a new conversation">New</button><button class="btn sm" id="aiKeyBtn" title="API key">Key</button><button class="btn sm" id="aiClose" title="Close">&times;</button></div>
   <div id="aiKeyRow"><input type="text" class="secret" id="aiKey" placeholder="Anthropic API key (sk-ant-…)" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"><button class="btn sm pri" id="aiKeySave">Save</button>
     <div class="small">Your own key, from console.anthropic.com. Kept in this browser only and sent only to api.anthropic.com. Each request is billed to your Anthropic account.</div></div>
   <div id="aiEngLine" class="small" style="padding:4px 12px;border-bottom:1px solid var(--line)"></div>
@@ -1110,7 +1110,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-11i"></script>
+<script type="module" src="takeoff.js?v=2026-10-11j"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with

@@ -668,6 +668,16 @@ list moved to `dashboards/`; every dashboard keeps its own address. `tools/test_
   “Show the outline before adding it”: Accept (Enter) / Tighter gap / Wider gap / Cancel (Esc).
   Tests: `tools/test_takeoff_localai.js` (with the stand-in `tools/mock_ollama.js`). Report:
   `docs/takeoff-autoarea-agent-localai-2026-10-11.md`.
+- **Agent runs Auto area** (`auto_area_page`): scale checked first, every named room traced, shafts / ducts / voids left
+  out (and deducted when inside a room), checked against written sizes and existing areas, previewed dashed until you
+  accept (`accept_preview` / `discard_preview`); `validate_takeoff`; subtotals by floor / room / page.
+- **Project knowledge** (agent panel → Knowledge): offline keyword search over the help, the PDFs' text, rules,
+  measurements and documents you add (specs, schedules — .txt / .md / .csv / PDF), cited by file + page, measurement id or
+  document. **KPIs** (agent panel): Auto-area accuracy from the recorded drawing suite, your own Auto-area and agent use,
+  local-AI status — from recorded results only (local log, export / clear).
+- **Drawing test suite**: `node tools/takeoff_drawings.js out.pdf` writes 38 test pages (36 drawing conditions) with known
+  reference outlines; `tools/test_takeoff_drawings.js [--write]` runs Auto area on each (area error, IoU, flagged, time)
+  and saves `takeoff/kpi/drawing-tests.json` for the KPI dashboard. Agent workflow: `tools/test_takeoff_agentflow.js`.
 
 - **Private by design**: a PDF opens in the viewer's browser and is stored with the takeoff in that browser's
   IndexedDB — nothing is uploaded and nothing is committed here. Projects move between computers as

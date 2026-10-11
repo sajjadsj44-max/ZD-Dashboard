@@ -15,12 +15,22 @@ function reply(body){
   if (last.role === "tool") {   // after a tool ran: say what it returned (from the result itself — no numbers of its own)
     let j = {}; try { j = JSON.parse(last.content); } catch (e) {}
     if (j.error) return {role: "assistant", content: "The tool failed: " + j.error};
+    if (j.rooms) return {role: "assistant", content: "Rooms: " + j.rooms.map(r => r.name + " " + r.status + (r.net_sft != null ? " " + r.net_sft + " Sft" : "")).join("; ") + (j.previewed ? " — " + j.previewed + " shown for review, nothing added" : " — added " + j.added)};
+    if (j.added && Array.isArray(j.added)) return {role: "assistant", content: "Added: " + j.added.map(a => a.name + " (" + a.id + ")").join(", ")};
+    if (j.groups) return {role: "assistant", content: "Groups: " + j.groups.map(g => (g.room || g.floor || g.page) + " " + g.net + " " + g.unit).join("; ")};
+    if (j.need_review) return {role: "assistant", content: "Review: " + j.need_review.length + " to check, " + j.duplicates.length + " duplicates"};
+    if (j.results) return {role: "assistant", content: j.results.length ? "Found in " + j.results.map(r => r.ref).join("; ") : "Nothing found."};
     if (j.totals) return {role: "assistant", content: "Totals: " + j.totals.map(t => t.condition + " " + t.net + " " + t.unit).join("; ")};
     if (j.rows) return {role: "assistant", content: "Calculation: " + j.rows.map(r => r.dims + " = " + r.qty + " " + r.unit).join("; ")};
     if (j.undone) return {role: "assistant", content: "Undone: " + j.undone};
     if (j.project) return {role: "assistant", content: "Project " + j.project + " has " + j.conditions.length + " conditions."};
     return {role: "assistant", content: "Done."};
   }
+  if (/accept/.test(q)) return call("accept_preview", {});
+  if (/all (the )?rooms|every room/.test(q)) return call("auto_area_page", {exclude: /shaft/.test(q) ? ["SHAFT"] : [], review: !/now|without review/.test(q)});
+  if (/group(ed)? by (room|floor|page)/.test(q)) return call("quantity_totals", {scope: "page", group_by: q.match(/by (room|floor|page)/)[1]});
+  if (/check|validate/.test(q)) return call("validate_takeoff", {scope: "page"});
+  if (/search|what does|spec/.test(q)) return call("search_knowledge", {query: q.replace(/^.*?(search( for)?|what does)\s*/, "")});
   if (/bad args/.test(q)) return call("count_tags", {});
   if (/json in text/.test(q)) return {role: "assistant", content: 'Sure. {"name": "get_project_context", "arguments": {}}'};
   if (/total/.test(q)) return call("quantity_totals", {scope: "page"});

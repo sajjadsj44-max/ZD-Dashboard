@@ -1453,9 +1453,19 @@ function jambLines(ids, k, gapFt){
 }
 /* room names (BEDROOM, BATH…) written in the window, as pixel masks: a space that has its own name is never taken
    into another room as a recess or pocket */
+/* shafts, ducts, lift wells, voids: not rooms to stop at, but holes in the floor round them — kept out of the pocket rule and
+   deducted (Auto area records them as cut-outs of the room) */
+const VOID_RX = /\b(SHAFT|DUCT|VOID|LIFT|O\.?T\.?S|OPEN\s+TO\s+SKY|CUT\s*-?\s*OUT|LIGHT\s*WELL|STAIR\s*WELL)\b/i;
+function voidMask(x0, y0, W, H, px){
+  const m = new Uint8Array(W * H), T = S.texts[S.key] || []; let n = 0;
+  textLines(T).forEach(l => { if (l.tag || !VOID_RX.test(l.s) || l.s.length > 32) return; n++;
+    const kk = hereScale([l.x, l.y]) || 9, x = Math.round((l.x + l.w / 2 - x0) / px), y = Math.round((l.y - l.h / 2 - y0) / px), r = Math.max(2, Math.round(Math.max(l.h / 2, l.w / 2 + 0.3 * kk, 0.75 * kk) / px));   // wider than the text itself: the text is ink, the open floor round it marks the pocket
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) m[yy * W + xx] = 1; } });
+  m.n = n; m.names = textLines(T).filter(l => !l.tag && VOID_RX.test(l.s) && l.s.length <= 32); return m;
+}
 function labelMask(x0, y0, W, H, px, own){   // own: the name of the room being measured (not a reason to stop)
   const m = new Uint8Array(W * H), T = S.texts[S.key] || [];
-  textLines(T).forEach(l => { if (l.tag || !ROOM_RX.test(l.s) || l.s.length > 32) return;
+  textLines(T).forEach(l => { if (l.tag || !ROOM_RX.test(l.s) || l.s.length > 32 || VOID_RX.test(l.s)) return;
     if (own && dist(own, [l.x + l.w / 2, l.y - l.h / 2]) < Math.max(2, l.h)) return;
     const x = Math.round((l.x + l.w / 2 - x0) / px), y = Math.round((l.y - l.h / 2 - y0) / px), r = Math.max(2, Math.round(l.h / px / 2));
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) m[yy * W + xx] = 1; } });
@@ -1798,7 +1808,7 @@ async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
   };
   // small separate marks go first: letters, stipple dots, dashed door swings — and the dashes of dashed lines, unless they
   // run on in a straight row (a dashed boundary of an open area): those rows are joined into one solid line and kept
-  const small = []; await breathe();
+  const small = [], dashM = new Uint8Array(N); await breathe();
   comps(m, (c, w, h) => { if (Math.max(w, h) < minPx) small.push({c, x0: c.reduce((a, i) => Math.min(a, i % W), W), y0: c.reduce((a, i) => Math.min(a, (i - i % W) / W), H), w, h}); });
   if (dashBound) {
     const G = 0.8 * kft / px, L = 2 * kft / px, keep = new Set();
@@ -1816,12 +1826,13 @@ async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
         run.forEach(r => keep.add(r.d));
         const c = Math.round(run.reduce((s2, r) => s2 + r.c, 0) / run.length), t = Math.max(1, Math.round(run.reduce((s2, r) => s2 + r.t, 0) / run.length / 2));
         for (let a = Math.floor(run[0].a); a <= Math.ceil(run[run.length - 1].b); a++) for (let o2 = -t; o2 <= t; o2++) {
-          const x = dir === "H" ? a : c + o2, y = dir === "H" ? c + o2 : a; if (x >= 0 && y >= 0 && x < W && y < H) m[y * W + x] = 1; }
+          const x = dir === "H" ? a : c + o2, y = dir === "H" ? c + o2 : a; if (x >= 0 && y >= 0 && x < W && y < H) { m[y * W + x] = 1; dashM[y * W + x] = 1; } }
       }
     }
     small.forEach(d => { if (!keep.has(d)) d.c.forEach(i => { m[i] = 0; }); });
     keep.forEach(d => d.c.forEach(i => { m[i] = 1; }));
   } else small.forEach(d => d.c.forEach(i => { m[i] = 0; }));
+  const raw = m.slice();   // the cleaned ink before it is thickened: a drawn line's own width is measured on it
   // then ink closer than ~0.4 ft fuses (hatching into a solid wall, so no fill runs between its strokes), 1 px thicker
   // so an 8-neighbour step cannot slip between diagonal pixels
   await breathe();
@@ -1837,7 +1848,7 @@ async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
   // the room but must not split its core when openings are closed
   await breathe(); const big = new Uint8Array(N), bigPx = 8 * kft / px;
   comps(thin, (c, w, h) => { if (Math.max(w, h) >= bigPx) c.forEach(i => { big[i] = 1; }); });
-  return {thin, big};
+  return {thin, big, dash: dashM, raw};
 }
 function widen(m, W, H, r){   // every ink pixel widened to a disc of radius r px
   const N = W * H, f = new Float32Array(N), out = new Uint8Array(N), r2 = r * r;
@@ -1851,7 +1862,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
   if (!k) return {err: "Set the page scale first (K) — the door gap and wall offsets are in feet."};
   const o = Object.assign(autoOpt(), over || {}), img = o.src !== "vector";
   if (!img && !g.segs.length) return {err: "This page has no vector lines — switch Auto area settings (⚙) to ‘walls from the drawing image’."};
-  for (const [half, pxFt] of [[45, 0.06], [110, 0.14]]) {
+  for (const [half, pxFt] of [[45, 0.06], [110, 0.14], [240, 0.3]]) {
     const px = pxFt * k, W = Math.ceil(2 * half * k / px), H = W, x0 = seed[0] - half * k, y0 = seed[1] - half * k;
     const bf = o.layers ? segRoleFilter(g, BOUND) : null, ocb = o.layers && bf ? await boundCfg(S.fileId) : null;   // the PDF's wall / door / window / column / railing layers only
     const ids = barrierIds(g, segsIn(g, x0, y0, x0 + W * px, y0 + H * px).filter(i => !bf || bf(i)), k, o);
@@ -1902,7 +1913,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
         done.forEach(it => { ctx.beginPath(); it.pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath(); ctx.fill(); });
         const d = ctx.getImageData(0, 0, W, H).data; for (let i = 0; i < N; i++) if (d[i * 4 + 3] > 128) { thin[i] = 1; bar[i] = 1; } } }
     if (o.show) S.autoShow = {key: S.key, x0, y0, px, W, H, url: maskUrl(thin, W, H)};
-    await breathe(); const named = labelMask(x0, y0, W, H, px, o.own);
+    await breathe(); const named = labelMask(x0, y0, W, H, px, o.own), vm = voidMask(x0, y0, W, H, px), keepOut = vm.n ? named.map((v, i) => v || vm[i]) : named;
     // the click in a space narrower than the door gap (a passage, a corridor as wide as a door): its width and length here
     const csx = Math.floor((seed[0] - x0) / px), csy = Math.floor((seed[1] - y0) / px); let passage = null;
     if (csx > 0 && csy > 0 && csx < W - 1 && csy < H - 1 && !thin[csy * W + csx] && bar[csy * W + csx]) {
@@ -1943,7 +1954,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
       m = A.m;
     }
     await breathe();
-    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) { await breathe(); fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2, named); } await breathe(); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
+    if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) { await breathe(); fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2, keepOut); } await breathe(); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
     let partial = false;
     if (passage) { let n = 0; if (passage.horiz) { for (let x = 0; x < W; x++) if (m[csy * W + x]) n++; } else for (let y = 0; y < H; y++) if (m[y * W + csx]) n++;
       partial = n * px / k < 0.6 * passage.along; }   // the outline takes in less than 60 % of the passage's length: a piece by a doorway, not the passage
@@ -1959,9 +1970,77 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
       for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const u = xx + dx, v = yy + dy; if (u >= 0 && v >= 0 && u < W && v < H && thin[v * W + u]) return true; } return false; }, px, o.gap));
     if (sq && !ids.length) Q = cleanPoly(pushSides(Q, inkPx, px, k));
     if (Q.length < 3 || polyArea(Q) < 1e-6) return {err: "No closed space found at that point.", passage};
-    return {pts: Q, rect: !!sq, passage, partial};
+    if (!ids.length) Q = cleanPoly(inkCentre(Q, x0, y0, W, H, px, k, img ? ink.raw : thin));   // a scan: to the middle of the wall line, as on a vector page
+    // holes: a shaft / duct / void inside the room (its label inside, the room all round it) — deducted, not floor
+    const holes = [];
+    if (vm.n) { const mN = m.reduce((a, v) => a + v, 0), sIdx = csy * W + csx, inkT = img ? ink.thin : thin;
+      for (const l of vm.names) {   // the closed space round each void label, inside its own lines: the shaft's inside
+        const lx = Math.round((l.x + l.w / 2 - x0) / px), ly = Math.round((l.y - l.h / 2 - y0) / px); if (lx < 1 || ly < 1 || lx >= W - 1 || ly >= H - 1 || !m[ly * W + lx]) continue;
+        let s0 = -1; for (let r = 0; r < 40 && s0 < 0; r++) for (let dy = -r; dy <= r && s0 < 0; dy++) for (let dx = -r; dx <= r && s0 < 0; dx++) { const x = lx + dx, y = ly + dy; if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && !inkT[y * W + x] && !named[y * W + x]) s0 = y * W + x; }
+        if (s0 < 0) continue;
+        const R = new Uint8Array(N), st = new Int32Array(N); let top = 0, cnt = 0, open = false; R[s0] = 1; st[top++] = s0;
+        while (top) { const i = st[--top], x = i % W, y = (i - x) / W; if (++cnt > 0.6 * mN || i === sIdx || x === 0 || y === 0 || x === W - 1 || y === H - 1) { open = true; break; }
+          for (const j of [i - 1, i + 1, i - W, i + W]) if (!R[j] && !inkT[j] && Math.abs(j % W - x) <= 1) { R[j] = 1; st[top++] = j; } }
+        if (open || cnt < (k / px) ** 2) continue;
+        const lp = outerLoop(R, W, H); if (!lp || lp.length < 4) continue;
+        let Hq = dpClosed(lp.map(q => [x0 + q[0] * px, y0 + q[1] * px]), 1.6 * px);
+        Hq = cleanPoly(ids.length ? outerFace(snapPoly(Hq, ids.map(i => g.segs[i]), Math.max(4 * px, 0.35 * k), k, 0, px), g, k) : offsetPoly(Hq, px));
+        if (Hq.length >= 3 && polyArea(Hq) > 1e-6 && Hq.every(q => pointInPoly(q, Q)) && !holes.some(h => pointInPoly(Hq[0], h.pts))) holes.push({pts: Hq, name: l.s.trim()});
+      } }
+    // warnings: the outline is not clearly the room — the user is told, never a wrong area that looks right
+    let warn = "";
+    if (img && ink.dash) { let on = 0, all = 0; for (let i = 0; i < Q.length; i++) { const a = Q[i], b = Q[(i + 1) % Q.length], L = dist(a, b), n = Math.max(2, Math.ceil(L / (0.5 * k))); let e = 0;
+        for (let j = 1; j < n; j++) { const q = [a[0] + (b[0] - a[0]) * j / n, a[1] + (b[1] - a[1]) * j / n]; let hit = false;
+          for (let dy = -3; dy <= 3 && !hit; dy++) for (let dx = -3; dx <= 3 && !hit; dx++) { const u = Math.round((q[0] - x0) / px) + dx, v = Math.round((q[1] - y0) / px) + dy; if (u >= 0 && v >= 0 && u < W && v < H && ink.dash[v * W + u]) hit = true; }
+          if (hit) e++; }
+        all++; if (L > 1.5 * k && e / (n - 1) > 0.6) on++; }
+      if (on) warn = "bounded on " + (on === 1 ? "one side" : on + " sides") + " by a dashed line — a grid line or an open edge? Check the outline"; }
+    if (!warn && g.segs.length && ids.length) { const sup = lineSupport(Q, g, k); if (sup < 0.75) warn = "only " + Math.round(sup * 100) + " % of the outline follows the drawing's lines — something (text, a watermark, a gap) may have broken a wall; check it"; }
+    return {pts: Q, rect: !!sq, passage, partial, holes, warn};
   }
   return {err: "The space leaks — an opening wider than the door gap (" + f3(autoOpt().gap) + " ft) joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it."};
+}
+/* a scan has no vector lines to snap to: the trace stops at the inside edge of the ink. Each side is moved out to the middle of
+   the line it lies against (half the line's width, measured across it), as a vector outline lies on the line itself. Solid
+   (poché) walls — ink much wider than a drawn line — are left as traced: their face is the ink's edge. */
+function inkCentre(Q, x0, y0, W, H, px, k, ink){
+  const at = (x, y) => { const u = Math.round((x - x0) / px), v = Math.round((y - y0) / px); return u >= 0 && v >= 0 && u < W && v < H && !!ink[v * W + u]; };
+  let sa = 0; for (let i = 0; i < Q.length; i++) { const p = Q[i], q = Q[(i + 1) % Q.length]; sa += p[0] * q[1] - q[0] * p[1]; }
+  const cw = sa > 0 ? 1 : -1, ws = [];
+  for (let i = 0; i < Q.length; i++) { const a = Q[i], b = Q[(i + 1) % Q.length], L = dist(a, b); if (L < 1.5 * k) continue;
+    const nx = cw * (b[1] - a[1]) / L, ny = -cw * (b[0] - a[0]) / L;   // outward
+    for (const f of [0.3, 0.5, 0.7]) { const p = [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; let t = -2 * px;
+      while (t < 4 * px && !at(p[0] + nx * t, p[1] + ny * t)) t += px / 4; if (t >= 4 * px) continue;
+      const t0 = t; while (t < t0 + 0.6 * k && at(p[0] + nx * t, p[1] + ny * t)) t += px / 4; ws.push({w: t - t0, s: t0}); } }
+  if (ws.length < 4) return Q;
+  ws.sort((p, q) => p.w - q.w); const w = ws[Math.floor(ws.length / 2)].w, s0 = ws.map(o => o.s).sort((p, q) => p - q)[Math.floor(ws.length / 2)];
+  if (w > 0.25 * k) return Q;   // solid walls: the ink's edge is the face
+  return offsetPoly(Q, s0 + w / 2);
+}
+/* a shaft's inside, moved out to its walls' outer face: the drawing's line parallel to each side, 0.2–1.6 ft further out
+   (the same distance all round — the median of the sides that have one); none found: the inside as traced */
+function outerFace(Q, g, k){
+  let sa = 0; for (let i = 0; i < Q.length; i++) { const p = Q[i], q = Q[(i + 1) % Q.length]; sa += p[0] * q[1] - q[0] * p[1]; }
+  const cw = sa > 0 ? 1 : -1, ds = [];
+  for (let i = 0; i < Q.length; i++) { const a = Q[i], b = Q[(i + 1) % Q.length], L = dist(a, b); if (L < 1.5 * k) continue;
+    const u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L], n = [cw * u[1], -cw * u[0]], mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], R = 1.7 * k;
+    let best = null;
+    segsIn(g, mid[0] - R - L / 2, mid[1] - R - L / 2, mid[0] + R + L / 2, mid[1] + R + L / 2).forEach(si => { const s = g.segs[si], sl = Math.hypot(s[2] - s[0], s[3] - s[1]); if (sl < 0.5 * k) return;
+      if (Math.abs((s[2] - s[0]) / sl * u[1] - (s[3] - s[1]) / sl * u[0]) > 0.05) return;   // not parallel
+      const d = (s[0] - mid[0]) * n[0] + (s[1] - mid[1]) * n[1]; if (d < 0.2 * k || d > 1.6 * k) return;
+      const t0 = (s[0] - mid[0]) * u[0] + (s[1] - mid[1]) * u[1], t1 = (s[2] - mid[0]) * u[0] + (s[3] - mid[1]) * u[1]; if (Math.max(t0, t1) < -L / 4 || Math.min(t0, t1) > L / 4) return;
+      if (best == null || d < best) best = d; });
+    if (best != null) ds.push(best); }
+  if (!ds.length) return Q;
+  ds.sort((p, q) => p - q); return offsetPoly(Q, ds[Math.floor(ds.length / 2)]);
+}
+/* how much of an outline lies on the drawing's own lines (vector pages): sampled every half foot */
+function lineSupport(Q, g, k){
+  const r = Math.max(0.3 * k, 1.5); let on = 0, n = 0;
+  for (let i = 0; i < Q.length; i++) { const a = Q[i], b = Q[(i + 1) % Q.length], L = dist(a, b), m = Math.max(1, Math.ceil(L / (0.5 * k)));
+    for (let j = 0; j < m; j++) { const p = [a[0] + (b[0] - a[0]) * (j + 0.5) / m, a[1] + (b[1] - a[1]) * (j + 0.5) / m]; n++;
+      if (segsIn(g, p[0] - r, p[1] - r, p[0] + r, p[1] + r).some(si => { const s = g.segs[si]; return distSeg(p, [s[0], s[1]], [s[2], s[3]]) <= r; })) on++; } }
+  return n ? on / n : 1;
 }
 /* the inside of walls drawn as two lines with nothing between them: without this, the empty strip between a wall's faces
    is an enclosed space next to the room and the pocket rule would add it (the room would run to the wall's far face).
@@ -2000,8 +2079,8 @@ async function autoAt(p){
   busy("Finding the room…"); S.autoBusy = true;
   const key = S.key;
   await new Promise(r => setTimeout(r, 20));
-  let res; try { res = await autoRoomGuarded(p); } catch (e) { res = {err: "Auto area failed: " + (e.message || e)}; }
-  busy(""); S.autoBusy = false;
+  const t0 = performance.now(); let res; try { res = await autoRoomGuarded(p); } catch (e) { res = {err: "Auto area failed: " + (e.message || e)}; }
+  busy(""); S.autoBusy = false; kpiLog("auto", {ms: Math.round(performance.now() - t0), err: !!res.err, flag: !!(res.leak || res.short || res.warn), holes: (res.holes || []).length});
   if (S.key !== key || !cond(c.id)) return toast("The page changed while the room was traced — nothing added; click again", 4000);   // never a room of one page put on another
   if (res.err) return toast(res.err, 6000);
   if (autoOpt().confirm) {   // "show me the boundary before it is added": accept, trace again with a tighter / wider door gap, or cancel
@@ -2018,23 +2097,26 @@ async function autoAt(p){
   }
   const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "", kk = hereScale(p);
   const det = {how: "auto", src: autoOpt().src === "vector" ? "vector lines" : "drawing image", gap: +(res.gap || autoOpt().gap), note: res.note || "",
-    flag: res.leak ? "leaks — " + res.leak : res.short ? res.short : res.rect ? "" : "not square — check the outline", a0: kk ? +(polyArea(res.pts) / kk / kk).toFixed(4) : null, pts0: res.pts.map(q => q.slice()), at: new Date().toISOString()};
-  mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm, det}); });
+    flag: res.leak ? "leaks — " + res.leak : res.short ? res.short : res.warn ? res.warn : res.rect || (res.holes || []).length ? "" : "not square — check the outline", a0: kk ? +(polyArea(res.pts) / kk / kk).toFixed(4) : null, pts0: res.pts.map(q => q.slice()), at: new Date().toISOString(),
+    holes: (res.holes || []).map(h => ({name: h.name, a: kk ? +(polyArea(h.pts) / kk / kk).toFixed(4) : null}))};
+  mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm, det});
+    (res.holes || []).forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, label: h.name + " (void in " + (nm || "room") + ")", det: {how: "auto-void", of: id, src: det.src, gap: det.gap, pts0: h.pts.map(q => q.slice()), a0: kk ? +(polyArea(h.pts) / kk / kk).toFixed(4) : null, at: det.at, flag: ""}})); }, "Auto area");
   S.sel = id; draw(); renderSheet();
   const k = hereScale(p);
   if (res.short && !res.leak) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — " + res.short + ".", 9000);
   if (res.leak) { if (!autoOpt().show) { P.proj.auto = Object.assign({}, P.proj.auto || {}, {show: true}); save(); }
     return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
-  toast((nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
+  if (res.warn) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — " + res.warn + ".", 9000);
+  toast((nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + ((res.holes || []).length ? " less " + res.holes.map(h => h.name + " " + fq(polyArea(h.pts) / k / k)).join(", ") + " Sft (deducted)" : "") + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
 }
 /* Preview before adding (Auto area settings ⚙ "Show the outline before adding it", or the agent rule "show me the boundary
    before accepting"): the outline is drawn dashed orange with its area; Accept (Enter), Tighter / Wider door gap, Cancel (Esc) */
 function autoPreview(res, p){
   return new Promise(done => {
     const k = hereScale(p), a = k ? fq(polyArea(res.pts) / k / k) + " Sft" : "", nm = roomNameAt(res.pts) || "Room";
-    S.autoPrev = {pts: res.pts, key: S.key}; draw();
+    S.autoPrev = {pts: res.pts, holes: res.holes || [], key: S.key}; draw();
     let bar = $("autoPrevBar"); if (!bar) { bar = document.createElement("div"); bar.id = "autoPrevBar"; document.body.appendChild(bar); }
-    bar.innerHTML = `<b>${esc(nm)} — ${esc(a)}</b><span class="small">${esc([res.note, res.leak ? "⚠ leaks: " + res.leak : res.short ? "⚠ " + res.short : res.rect ? "" : "not square"].filter(Boolean).join(" · ") || "door gap " + f3(res.gap || autoOpt().gap) + " ft")}</span>
+    bar.innerHTML = `<b>${esc(nm)} — ${esc(a)}</b><span class="small">${esc([res.note, (res.holes || []).length ? res.holes.length + " void" + (res.holes.length > 1 ? "s" : "") + " deducted (" + res.holes.map(h => h.name).join(", ") + ")" : "", res.leak ? "⚠ leaks: " + res.leak : res.short ? "⚠ " + res.short : res.warn ? "⚠ " + res.warn : res.rect ? "" : "not square"].filter(Boolean).join(" · ") || "door gap " + f3(res.gap || autoOpt().gap) + " ft")}</span>
       <button class="btn pri sm" data-ap="ok">Accept <kbd>Enter</kbd></button><button class="btn sm" data-ap="tight" title="Trace again closing only narrower openings — when the outline ran out through a gap that is not a door">Tighter gap</button><button class="btn sm" data-ap="wide" title="Trace again closing wider openings — when the outline leaked into the next room">Wider gap</button><button class="btn sm" data-ap="">Cancel <kbd>Esc</kbd></button>`;
     bar.classList.add("on");
     const end = v => { bar.classList.remove("on"); S.autoPrev = null; document.removeEventListener("keydown", key, true); bar.onclick = null; draw(); done(v); };
@@ -2075,10 +2157,12 @@ async function autoRoomGuarded(p){
   let F = null; try { F = await drawingFacts(S.fileId, S.pageNo); } catch (e) {}
   if (!F || !F.rooms.length) return first;
   const k = hereScale(p), o = autoOpt();
-  const judge = r => { const inn = F.rooms.filter(m => pointInPoly([m.x + m.w / 2, m.y - m.h / 2], r.pts)), a = polyArea(r.pts) / k / k;
-    const own = inn.length === 1 ? inn[0] : null, big = own && own.sft && a > own.sft * 1.25;
-    return {n: inn.length, bad: inn.length > 1 || big, names: inn.map(m => m.name), a}; };
-  let j = judge(first); if (!j.bad) return first;
+  const judge = r => { const inn = F.rooms.filter(m => !VOID_RX.test(m.name) && pointInPoly([m.x + m.w / 2, m.y - m.h / 2], r.pts)), a = (polyArea(r.pts) - (r.holes || []).reduce((s2, h) => s2 + polyArea(h.pts), 0)) / k / k;
+    const own = inn.length === 1 ? inn[0] : null, big = own && own.sft && a > own.sft * 1.25, small = own && own.sft && a < own.sft * 0.9;
+    return {n: inn.length, bad: inn.length > 1 || big, small, own, names: inn.map(m => m.name), a}; };
+  let j = judge(first);
+  if (!j.bad && j.small && !first.short) first.short = "smaller than the size written in it (" + j.own.size + " = " + fq(j.own.sft) + " Sft, traced " + fq(j.a) + " Sft) — furniture or fittings in the wall pen may cut it: Pick a wall (⚙) or adjust the outline";
+  if (!j.bad) return first;
   let best = {res: first, j};
   for (const over of [{dashBound: true}, {dashBound: true, gap: o.gap * 1.5}, {dashBound: true, gap: o.gap * 2, pocket: Math.max(o.pocket || 0, 1.5)}, {dashBound: true, gap: o.gap * 3, pocket: Math.max(o.pocket || 0, 2)}]) {
     busy("Room leaked into " + j.names.filter(Boolean).slice(0, 3).join(", ") + " — closing wider gaps…"); await new Promise(r => setTimeout(r, 10));
@@ -3245,7 +3329,12 @@ function drawNow(){
   const c = S.cond ? cond(S.cond) : null, cur = S.cursor;
   let live = "";
   if (S.tool === "stretch" && S.str && cur) dyn.push(...stretchPreview(cur));
-  if (S.autoPrev && S.autoPrev.key === S.key) dyn.push(`<polygon points="${S.autoPrev.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="#e8a33d" fill-opacity=".18" stroke="#c77700" stroke-width="2.5" stroke-dasharray="8 5"/>`);
+  if (S.autoPrev && S.autoPrev.key === S.key) { dyn.push(`<polygon points="${S.autoPrev.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="#e8a33d" fill-opacity=".18" stroke="#c77700" stroke-width="2.5" stroke-dasharray="8 5"/>`);
+    (S.autoPrev.holes || []).forEach(h => dyn.push(`<polygon points="${h.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="#fff" fill-opacity=".6" stroke="#b42318" stroke-width="2" stroke-dasharray="4 3"/>`)); }
+  if (S.agentPrev && S.agentPrev.key === S.key) S.agentPrev.cand.forEach(x => { const Q = x.pts.map(toScr), cx = Q.reduce((a, q) => a + q[0], 0) / Q.length, cy = Q.reduce((a, q) => a + q[1], 0) / Q.length;
+    dyn.push(`<polygon points="${Q.map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="${x.flag ? "#d97706" : "#e8a33d"}" fill-opacity=".16" stroke="${x.flag ? "#b42318" : "#c77700"}" stroke-width="2.2" stroke-dasharray="8 5"/>`);
+    x.holes.forEach(h => dyn.push(`<polygon points="${h.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="#fff" fill-opacity=".6" stroke="#b42318" stroke-width="1.5" stroke-dasharray="4 3"/>`));
+    dyn.push(`<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="#7a4a00" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(x.name)}${x.flag ? " ⚠" : ""} — review</text>`); });
   { const di = S.detShow && S.sel && P.proj.items.find(i => i.id === S.sel); if (di && di.det && di.det.pts0 && onPage(di)) dyn.push(`<polygon points="${di.det.pts0.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="none" stroke="#6b7d92" stroke-width="2" stroke-dasharray="4 4"/>`); }
   if ((S.tool === "fillet" || S.tool === "chamfer") && S.fc.first) { const f = S.fc.first, a = toScr(f.it.pts[f.i]), b = toScr(f.it.pts[f.i + 1]); dyn.push(`<path d="M${a[0].toFixed(1)} ${a[1].toFixed(1)}L${b[0].toFixed(1)} ${b[1].toFixed(1)}" stroke="#ff2d55" stroke-width="4" opacity=".7" stroke-linecap="round"/>`); }
   { const kk = hereScale(S.draft[0] || cur); if (kk) k = kk; }
@@ -7561,7 +7650,7 @@ function paletteCmds(){
   add("Undo", undoAny, "Edit", "Ctrl+Z"); add("Redo", redoAny, "Edit", "Ctrl+Y");
   add("Find text on the drawings", () => { $("findIn").focus(); $("findIn").select(); }, "View", "Ctrl+F");
   add("Set scale", scaleDialog, "Page", "K"); add("Keyboard shortcuts", keysDialog, "Help");
-  add("AI engine — local AI (free, offline) setup and benchmark", locSetup, "AI"); add("Agent instructions — the working rules the AI follows", rulesDialog, "AI");
+  add("AI engine — local AI (free, offline) setup and benchmark", locSetup, "AI"); add("KPIs — Auto area and agent performance (from recorded results)", kpiDialog, "AI"); add("Project knowledge — documents and offline search", kbDialog, "AI"); add("Agent instructions — the working rules the AI follows", rulesDialog, "AI");
   add("Invert selection", invertSel, "Select", "Ctrl+I"); add("Quick select… (by condition, kind, markup type, check state)", quickSelect, "Select"); add("Deselect all", clearSel, "Select", "Esc");
     add("New condition", () => editCond(null), "Condition"); add("All projects", showStart, "Project");
   document.querySelectorAll("header button[id], #viewPop button[id], #qaBar button, aside button[id], .panel button[id]").forEach(b => btn(b, b.closest("#viewPop") ? "View" : b.closest("#qaBar") ? "Check" : "Button"));
@@ -8221,7 +8310,7 @@ function wire(){
   $("aiKeyBtn").onclick = () => aiShowKey($("aiKeyRow").style.display === "none");
   secretField($("aiKey"));
   $("aiKeySave").onclick = () => { const v = secretVal($("aiKey")).trim(); pref("zdTakeoffApiKey", v); AI.client = null; aiShowKey(!v); aiLog("bot", v ? "Key saved in this browser." : "Key removed."); };
-  $("aiEngBtn").onclick = () => locSetup(); $("aiRulesBtn").onclick = () => rulesDialog();
+  $("aiEngBtn").onclick = () => locSetup(); $("aiRulesBtn").onclick = () => rulesDialog(); $("aiKpiBtn").onclick = () => kpiDialog(); $("aiKbBtn").onclick = () => kbDialog();
   $("aiNew").onclick = () => { if (AI.stop) AI.stop.abort(); AI.plan = []; AI.history = []; pref(locHistKey(), ""); AI.view = null; $("aiLog").innerHTML = ""; aiToggle(true); };
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
@@ -8582,7 +8671,11 @@ function aiAreaCond(){
   return c;
 }
 async function aiRunTool(b){
+  const out = await aiRunTool0(b); kpiLog("tool", {name: b.name, ok: !!(out && out.ok)}); return out;
+}
+async function aiRunTool0(b){
   { const t2 = await aiRunTool2(b); if (t2) return t2; }   // project questions, totals, explain, undo, rules: no picture or scale needed
+  { const t3 = await aiRunTool3(b); if (t3) return t3; }   // Auto area over the page, review, validation, knowledge search
   const V = AI.view, k = curScale(), inp = b.input || {};
   if (!V || V.key !== S.key) return {err: "The page changed — ask the user to press ‘Read this view’ again."};
   if (!k) return {err: "The page scale is not set; ask the user to set it (K) first."};
@@ -8590,9 +8683,12 @@ async function aiRunTool(b){
   const add = (name, pts) => { const c = aiAreaCond(), id = uid("I"); mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(name || "").slice(0, 60)}); }); return id; };
   if (b.name === "trace_room") {
     const x = +inp.x, y = +inp.y; if (!(x >= 0 && y >= 0 && x <= V.W && y <= V.H)) return {err: "Point is outside the image."};
-    const res = await autoRoom(aiToBase(V, x, y)); if (res.err) return {err: res.err};
-    const nm = inp.name || roomNameAt(res.pts), id = add(nm, res.pts);
-    return {ok: {id, name: nm, area_sft: +(polyArea(res.pts) / k / k).toFixed(2), squared: res.rect, outline_px: res.pts.map(p => aiToPx(V, p))}};
+    const res = await autoRoomGuarded(aiToBase(V, x, y)); if (res.err) return {err: res.err};
+    const nm = inp.name || roomNameAt(res.pts), id = add(nm, res.pts), c0 = aiAreaCond();
+    if ((res.holes || []).length) mutate(() => res.holes.forEach(h => P.proj.items.push({id: uid("I"), cond: c0.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, ai: true, label: h.name + " (void in " + (nm || "room") + ")"})));
+    const net = (polyArea(res.pts) - (res.holes || []).reduce((a, h) => a + polyArea(h.pts), 0)) / k / k;
+    return {ok: {id, name: nm, area_sft: +(polyArea(res.pts) / k / k).toFixed(2), voids_deducted: (res.holes || []).map(h => ({name: h.name, sft: +(polyArea(h.pts) / k / k).toFixed(2)})), net_sft: +net.toFixed(2), squared: res.rect,
+      warning: res.leak ? "leaks — " + res.leak : res.short || res.warn || null, outline_px: res.pts.map(p => aiToPx(V, p))}};
   }
   if (b.name === "draw_area") {
     let pts = (Array.isArray(inp.points) ? inp.points : []).filter(p => p && isFinite(+p.x) && isFinite(+p.y)).map(p => aiToBase(V, +p.x, +p.y));
@@ -8660,13 +8756,13 @@ async function aiSend(text, fresh){
   { const t = await ruleTeach(text); if (t === true) return; if (typeof t === "string") text = t.slice(5); }   // "remember: …" — a working rule, asked where to keep it
   if (!S.page) return aiLog("err", "Open a PDF page first.");
   const eng = aiEngine();
-  if (eng === "rules") return agentCmd(text);
+  if (eng === "rules") { const t0 = performance.now(), r = await agentCmd(text); kpiLog("agent", {route: "rules", ms: Math.round(performance.now() - t0)}); return r; }
   if (eng === "local" || (eng === "auto" && locModel())) return aiSendLocal(text);   // local AI: never handed to a cloud service
   let client;
   try { client = await aiClient(); } catch (e) { aiLog("err", esc(e.message) + " Answering with the free agent instead."); return agentCmd(text); }
   if (!client) { const smp = await aiSampler(); return smp ? aiSendPlan(smp, text) : agentCmd(text); }   // no API key: Claude through claude.ai, else the free rule-based agent
   AI.busy = true; $("aiSend").disabled = true; $("aiRead").disabled = true;
-  aiLog("user", esc(text));
+  aiLog("user", esc(text)); const tC = performance.now();
   const wait = aiLog("wait", "Claude is reading the drawing…");
   let replied = false, free = false;   // free: the paid route failed before Claude did anything — the free agent answers instead
   try {
@@ -8706,7 +8802,7 @@ async function aiSend(text, fresh){
     // keep the conversation valid: drop a trailing user turn the API never answered
     while (AI.history.length && AI.history[AI.history.length - 1].role === "user" && !(AI.history[AI.history.length - 1].content || []).some(x => x.type === "tool_result")) AI.history.pop();
   }
-  wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
+  wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh(); kpiLog("agent", {route: "claude", ms: Math.round(performance.now() - tC)});
   if (free) await agentCmd(text, true);
 }
 /* ------------------------------------------------------------------ agent instructions (the user's working rules)
@@ -8786,7 +8882,7 @@ const AI_TOOLS2 = [
   {name: "get_project_context", description: "The open project: its PDFs and pages, the page on screen (sheet number / title, scale and whether it is verified), every condition with its unit and total, how many measurements need review, the selected measurement and the user's active rules. Call it first for any question about the project.",
    input_schema: {type: "object", properties: {}}},
   {name: "quantity_totals", description: "Quantities by condition from the measurement sheet (the source of truth): gross, deductions and net with the unit, for this page or the whole project. Use it to answer 'how much', 'total', 'summary' questions — never estimate a quantity yourself.",
-   input_schema: {type: "object", properties: {scope: {type: "string", enum: ["page", "project"], description: "page (default) or project"}, condition: {type: "string", description: "Only this condition (name, optional)"}}}},
+   input_schema: {type: "object", properties: {scope: {type: "string", enum: ["page", "project"], description: "page (default) or project"}, condition: {type: "string", description: "Only this condition (name, optional)"}, group_by: {type: "string", enum: ["condition", "floor", "page", "room"], description: "Subtotals by condition (default), floor, page or room"}}}},
   {name: "explain_measurement", description: "How one measurement's quantity is worked out: each sheet row as Nos × L × W × H = quantity with its unit, deductions as their own rows, and how it was made (Auto area: method, door gap, detected vs current area, warnings). Give its id, or leave it out for the selected one.",
    input_schema: {type: "object", properties: {id: {type: "string", description: "Measurement id (from list_measured); empty = the selected measurement"}}}},
   {name: "undo_last", description: "Undo the last change to the takeoff (the same as Ctrl+Z). Returns what was undone.",
@@ -8796,7 +8892,7 @@ const AI_TOOLS2 = [
   {name: "list_instructions", description: "The user's saved working rules with their scope and whether they are on.",
    input_schema: {type: "object", properties: {}}}
 ];
-const AI_TOOLS_ALL = () => AI_TOOLS.concat(AI_TOOLS2);
+const AI_TOOLS_ALL = () => AI_TOOLS.concat(AI_TOOLS2, AI_TOOLS3);
 function qtyOf(it){ const k = itemScale(it); return k ? rowsOf(it, k).reduce((a, r) => a + r.qty, 0) : null; }
 async function aiRunTool2(b){   // the tools that need no picture and no page scale (null: not one of them)
   const inp = b.input || {};
@@ -8816,7 +8912,13 @@ async function aiRunTool2(b){   // the tools that need no picture and no page sc
     if (!cs.length) return {err: "No condition matches “" + inp.condition + "”."};
     const rows = cs.map(c => { let g = 0, d = 0, n = 0, un = 0; P.proj.items.filter(i => i.cond === c.id && (!pg || (i.file === S.fileId && i.page === S.pageNo))).forEach(it => { const k = itemScale(it); if (!k) { un++; return; } n++; rowsOf(it, k).forEach(r => { if (r.sign > 0) g += r.qty; else d -= r.qty; }); });
       return {condition: c.name, unit: c.unit, gross: +g.toFixed(3), deductions: +d.toFixed(3), net: +(g - d).toFixed(3), measurements: n, left_out_no_scale: un}; }).filter(r => r.measurements || r.left_out_no_scale);
-    return {ok: {scope: pg ? "page " + (S.page ? pageName({file: S.fileId, page: S.pageNo}) : "") : "project", totals: rows}};
+    let groups;
+    if (inp.group_by && inp.group_by !== "condition") { const G = new Map();
+      P.proj.items.filter(i => cs.some(c => c.id === i.cond) && (!pg || (i.file === S.fileId && i.page === S.pageNo))).forEach(it => { const k2 = itemScale(it); if (!k2) return; const c = cond(it.cond), L = locOf(it);
+        const key = (inp.group_by === "floor" ? L.floor || "(no floor set)" : inp.group_by === "page" ? pageName(it) : it.label || L.room || "(no name)") + " | " + c.name + " | " + c.unit;
+        G.set(key, (G.get(key) || 0) + rowsOf(it, k2).reduce((a, r) => a + r.qty, 0)); });
+      groups = [...G].map(([kk, q]) => { const [g, cn, u] = kk.split(" | "); return {[inp.group_by]: g, condition: cn, unit: u, net: +q.toFixed(3)}; }).sort((a, b) => String(a[inp.group_by]).localeCompare(String(b[inp.group_by]), undefined, {numeric: true})); }
+    return {ok: {scope: pg ? "page " + (S.page ? pageName({file: S.fileId, page: S.pageNo}) : "") : "project", totals: rows, groups}};
   }
   if (b.name === "explain_measurement") {
     if (!P.proj) return {err: "No project is open."};
@@ -8868,7 +8970,7 @@ async function locHealth(){   // -> LOC: ready | offline | blocked | nomodel | n
     else { if (!LOC.caps[m]) { try { const sh = await locFetch("/api/show", {model: m}, 8000); LOC.caps[m] = sh.capabilities || []; } catch (e) { LOC.caps[m] = []; } }
       LOC.st = "ready"; LOC.msg = m + " ready" + (LOC.caps[m].length ? " · " + LOC.caps[m].join(", ") : "") + " · Ollama " + LOC.ver; }
   } catch (e) { LOC.st = e.code === "blocked" ? "blocked" : "offline"; LOC.msg = e.message; }
-  LOC.checked = Date.now(); locLine(); return LOC;
+  LOC.checked = Date.now(); locLine(); kpiLog("local-health", {st: LOC.st}); return LOC;
 }
 const locCan = cap => (LOC.caps[locModel()] || []).includes(cap);
 function locLine(){
@@ -8950,7 +9052,7 @@ function locHist(){ try { const h = JSON.parse(pref(locHistKey()) || "[]"); retu
 function locHistPut(h){ try { pref(locHistKey(), JSON.stringify(h.slice(-24))); } catch (e) {} }   // text only — no pictures, no tool traffic
 async function locChat(messages, tools, opts){
   const t0 = performance.now(), r = await locFetch("/api/chat", Object.assign({model: locModel(), messages, tools, stream: false, keep_alive: "15m", options: {temperature: 0.2, num_ctx: +(pref("zdTakeoffLocalCtx") || 8192)}}, opts || {}), 300000);
-  r._ms = performance.now() - t0; return r;
+  r._ms = performance.now() - t0; if (r.load_duration > 2e8) r._load = r.load_duration / 1e6; return r;
 }
 async function aiSendLocal(text){
   if (AI.busy || !P.proj) return;
@@ -8969,7 +9071,7 @@ async function aiSendLocal(text){
     const msgs = [{role: "system", content: AI_SYSTEM + LOC_SYS + rulesPrompt()}, ...locHist(), user];
     let final = "";
     for (let turn = 0; turn < 10; turn++) {
-      const r = await locChat(msgs, toOllamaTools(tools)); met.turns++; met.ms += r._ms; met.tok += r.eval_count || 0; met.evalNs += r.eval_duration || 0;
+      const r = await locChat(msgs, toOllamaTools(tools)); met.turns++; met.ms += r._ms; if (r._load) met.load = r._load; met.tok += r.eval_count || 0; met.evalNs += r.eval_duration || 0;
       const msg = r.message || {}, {calls, inText} = locCalls(msg), said = String(msg.content || "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
       msgs.push({role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls});
       if (said && !inText) { aiLog("bot", aiText(said)); final = said; }
@@ -8988,9 +9090,10 @@ async function aiSendLocal(text){
     const tps = met.evalNs ? met.tok / (met.evalNs / 1e9) : 0;
     aiLog("meta", `local · ${esc(locModel())} · ${(met.ms / 1000).toFixed(1)} s · ${tps ? tps.toFixed(1) + " tokens/s" : "—"} · ${met.calls} tool call${met.calls === 1 ? "" : "s"}${met.bad ? " (" + met.bad + " rejected)" : ""} · nothing sent to the internet`);
     AI.locMet = Object.assign({at: new Date().toISOString(), model: locModel(), tps}, met);
+    kpiLog("agent", {route: "local", ms: Math.round(met.ms), calls: met.calls, bad: met.bad, turns: met.turns, load: met.load || 0, tps: +tps.toFixed(1)});
   } catch (e) { fallback = e; }
   wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
-  if (fallback) { aiLog("err", esc(fallback.message || String(fallback)) + " — answered by the <b>built-in rule agent</b> instead (offline; nothing sent to a cloud service)."); await agentCmd(text, true); }
+  if (fallback) { kpiLog("agent", {route: "rules", fallback: true}); aiLog("err", esc(fallback.message || String(fallback)) + " — answered by the <b>built-in rule agent</b> instead (offline; nothing sent to a cloud service)."); await agentCmd(text, true); }
 }
 /* benchmark: the same three tasks for each installed model — does it pick the right tool with valid arguments, how long it
    takes, how fast it writes. Nothing is changed on the drawing: the tools are offered but not run. Kept in this browser. */
@@ -9021,6 +9124,210 @@ async function locBenchmark(say){
 function benchTable(R){
   const med = a => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
   return `<table class="mattbl"><tr><td><b>Model</b></td><td class="n"><b>Right tool</b></td><td class="n"><b>Valid args</b></td><td class="n"><b>Median reply</b></td><td class="n"><b>Tokens/s</b></td></tr>${R.map(r => `<tr><td>${esc(r.model)}${r.err ? ` <span class="warn">${esc(r.err)}</span>` : ""}</td><td class="n">${r.right}/${r.n}</td><td class="n">${r.valid}/${r.n}</td><td class="n">${med(r.ms) != null ? (med(r.ms) / 1000).toFixed(1) + " s" : "—"}</td><td class="n">${med(r.tps) != null ? med(r.tps).toFixed(1) : "—"}</td></tr>`).join("")}</table><div class="small">Measured on this computer${R[0] ? ", " + esc(dmy(R[0].at)) : ""}. Right tool: the model chose the tool the task needs; valid args: and filled it correctly.</div>`;
+}
+/* ------------------------------------------------------------------ KPI log (this browser only)
+   Numbers about what the app did — Auto area runs, agent replies, tool calls, local-AI checks — kept in this browser for the
+   KPI dashboard. No drawing content, no text of the conversation, nothing sent anywhere. View, export or clear it in KPIs. */
+const KPI_KEY = "zdTakeoffKpi";
+function kpiLog(e, o){ try { const L = JSON.parse(pref(KPI_KEY) || "[]"); L.push(Object.assign({t: new Date().toISOString(), e, on: navigator.onLine}, o || {})); pref(KPI_KEY, JSON.stringify(L.slice(-3000))); } catch (er) {} }
+function kpiAll(){ try { const L = JSON.parse(pref(KPI_KEY) || "[]"); return Array.isArray(L) ? L : []; } catch (e) { return []; } }
+const pctl = (a, p) => { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.floor(p * b.length))]; };
+const kpiPct = (n, d) => d ? (100 * n / d).toFixed(1) + " %" : "Insufficient data";
+let KPI_SUITE = null;
+async function kpiSuite(){   // the drawing test suite's recorded results (tools/test_takeoff_drawings.js --write), shipped with the app
+  if (KPI_SUITE) return KPI_SUITE;
+  try { const r = await fetch("kpi/drawing-tests.json", {cache: "no-cache"}); if (r.ok) KPI_SUITE = await r.json(); } catch (e) {}
+  return KPI_SUITE;
+}
+async function kpiDialog(){
+  const L = kpiAll(), A = L.filter(x => x.e === "auto"), G = L.filter(x => x.e === "agent"), TL = L.filter(x => x.e === "tool"), H = L.filter(x => x.e === "local-health"), suite = await kpiSuite();
+  const row = (k, v, note) => `<tr><td>${k}</td><td class="n">${v}</td>${note != null ? `<td class="small">${note}</td>` : "<td></td>"}</tr>`, nt = '<span class="small" style="color:var(--muted)">Not tested</span>';
+  const tbl = rows => `<table class="mattbl" style="margin:4px 0 10px">${rows.join("")}</table>`;
+  let sHtml = '<p class="small">Not tested — no recorded results shipped with this version.</p>';
+  if (suite && suite.cases) {
+    const S2 = suite.cases.flatMap(c => c.seeds.map(s => Object.assign({cat: c.cat, id: c.id, kind: c.kind}, s))), V = v => S2.filter(s => s.verdict === v).length, J = S2.filter(s => s.expect === "area");
+    const e = J.filter(s => s.errPct != null).map(s => Math.abs(s.errPct)), io = J.filter(s => s.iou != null).map(s => s.iou), neg = S2.filter(s => s.expect === "none");
+    const cats = [...new Set(suite.cases.map(c => c.cat))], byCat = cats.map(c => { const x = J.filter(s => s.cat === c); return x.length ? `<tr><td>${esc(c)}</td><td class="n">${x.filter(s => s.verdict === "pass").length}/${x.length}</td><td class="small">${x.map(s => s.verdict + (s.errPct != null ? " " + (s.errPct >= 0 ? "+" : "") + s.errPct.toFixed(2) + " %" : "")).join(", ")}</td></tr>` : ""; }).join("");
+    const cnt = suite.cases.filter(c => c.counts), cOk = cnt.reduce((a, c) => a + Object.entries(c.counts.expected).filter(([t, n]) => (c.counts.got[t.toUpperCase()] || 0) === n).length, 0), cN = cnt.reduce((a, c) => a + Object.keys(c.counts.expected).length, 0);
+    sHtml = `<p class="small">Recorded ${esc(dmy(suite.at))}${suite.commit ? " · commit " + esc(suite.commit) : ""} · ${esc(suite.browser || "")} · ${esc(suite.settings || "")} · generated test drawings with known reference outlines (${esc(suite.suite)}).</p>` + tbl([
+      row("Test cases (seed points) / pages / drawing conditions", S2.length + " / " + suite.cases.length + " / " + cats.length),
+      row("Boundary found and within tolerance", kpiPct(V("pass"), J.length), V("pass") + " of " + J.length + " with a verified reference"),
+      row("Wrong but flagged (error / warning to the user)", V("flagged") + "", "the user is told to check or draw it"),
+      row("Silent misses (wrong area, no warning)", V("silent-miss") + "", "the failure that matters most"),
+      row("Negative cases refused (no valid room → asks for manual input)", neg.length ? V("neg-pass") + " / " + neg.length : nt),
+      row("Area error |%| — median / mean / worst", e.length ? pctl(e, 0.5).toFixed(2) + " / " + (e.reduce((a, v) => a + v, 0) / e.length).toFixed(2) + " / " + Math.max(...e).toFixed(2) : nt, "all judged seeds, flagged ones included"),
+      row("Outline IoU against the reference — median / worst", io.length ? pctl(io, 0.5).toFixed(3) + " / " + Math.min(...io).toFixed(3) : nt, "IoU measures the shape, area error the quantity"),
+      row("Processing time per room — median / 90th percentile", pctl(S2.map(s => s.ms), 0.5) + " / " + pctl(S2.map(s => s.ms), 0.9) + " ms"),
+      row("Exploratory (no verified reference)", V("explore") + "", "recorded, not judged"),
+      row("Tag counts correct", cN ? cOk + " / " + cN : nt)]) + `<details><summary class="small">By drawing condition</summary><table class="mattbl">${byCat}</table></details>`;
+  }
+  // Auto area in this browser, and the outlines of this project
+  const dets = P.proj ? P.proj.items.filter(i => i.det && i.det.how === "auto") : [], ed = dets.filter(detEdited).length, ms = A.map(x => x.ms).filter(Boolean);
+  const uHtml = tbl([
+    row("Auto area runs (this browser)", A.length || nt),
+    row("Outline found (no error)", kpiPct(A.filter(x => !x.err).length, A.length)),
+    row("Found but flagged for checking", kpiPct(A.filter(x => x.flag).length, A.filter(x => !x.err).length)),
+    row("Processing time — median / 90th percentile", ms.length ? pctl(ms, 0.5) + " / " + pctl(ms, 0.9) + " ms" : "Insufficient data"),
+    row("This project: Auto-area outlines kept", dets.length || nt),
+    row("…accepted without correction / corrected by the user", dets.length ? kpiPct(dets.length - ed, dets.length) + " / " + kpiPct(ed, dets.length) : "Insufficient data"),
+    row("…voids deducted", dets.reduce((a, d) => a + ((d.det.holes || []).length), 0) || "0")]);
+  // the agent
+  const byR = r => G.filter(x => x.route === r).length, gms = G.map(x => x.ms).filter(Boolean), tOk = TL.filter(x => x.ok).length, bad = G.reduce((a, x) => a + (x.bad || 0), 0), calls = G.reduce((a, x) => a + (x.calls || 0), 0);
+  const bench = (() => { try { return JSON.parse(pref("zdTakeoffBench") || "[]"); } catch (er) { return []; } })();
+  const gHtml = tbl([
+    row("Messages answered — local AI / Claude / built-in rule agent", G.length ? byR("local") + " / " + byR("claude") + " / " + byR("rules") : nt),
+    row("Tool calls run / succeeded", TL.length ? TL.length + " / " + kpiPct(tOk, TL.length) : nt, "a tool that ran and returned a result"),
+    row("Tool calls rejected (invalid arguments, not run)", calls ? bad + " of " + calls : "Insufficient data"),
+    row("Reply time — median / 90th percentile", gms.length ? (pctl(gms, 0.5) / 1000).toFixed(1) + " / " + (pctl(gms, 0.9) / 1000).toFixed(1) + " s" : "Insufficient data"),
+    row("Local AI unavailable → answered by the rule agent", G.filter(x => x.fallback).length + ""),
+    row("Requests to an external AI service", byR("claude") + "", "Claude route only, when you chose it; the local route sends nothing out"),
+    row("Local-AI replies with the browser offline", G.filter(x => x.route === "local" && x.on === false).length + "")]) +
+    (bench.length ? '<p class="small"><b>Model benchmark on this computer</b> (⚙ Engine):</p>' + benchTable(bench) : '<p class="small">Model benchmark: Not tested — run it in ⚙ Engine.</p>') +
+    '<p class="small">The agent\'s plumbing is tested in tools/test_takeoff_localai.js against a stand-in Ollama (scripted replies) — that proves the app runs tools, validates arguments and never fabricates a result, not how well any model understands. A fluent answer is not proof that a takeoff step succeeded: the tool lines in the chat are.</p>';
+  const h = H[H.length - 1], lms = L.filter(x => x.e === "agent" && x.load).map(x => x.load);
+  const yHtml = tbl([
+    row("Local AI status", esc(LOC.msg || "not checked"), h ? "last checked " + esc(dmy(h.t)) : ""),
+    row("Model loading time — last / median", lms.length ? (lms[lms.length - 1] / 1000).toFixed(1) + " / " + (pctl(lms, 0.5) / 1000).toFixed(1) + " s" : "Insufficient data"),
+    row("Memory in use", "Not measurable here", "the browser reports at most 8 GB; Ollama manages the model's memory"),
+    row("Page errors recorded", L.filter(x => x.e === "error").length + ""),
+    row("Browser now", navigator.onLine ? "online" : "offline")]);
+  await ask("KPIs — Auto area and the takeoff agent", `<div class="wide"></div><p class="small">Every figure comes from recorded results: the drawing test suite shipped with this version, and what this browser has logged (numbers only — no drawing content, nothing sent anywhere). “Not tested” / “Insufficient data” where there is no evidence.</p>
+    <h4>Auto area — drawing test suite</h4>${sHtml}<h4>Auto area — your use</h4>${uHtml}<h4>Takeoff agent</h4>${gHtml}<h4>System</h4>${yHtml}
+    <div class="row" style="gap:6px"><button type="button" class="btn sm" id="kpiExp">Export the log (JSON)</button><button type="button" class="btn sm dng" id="kpiClr">Clear the log</button><span class="small">${L.length} entries</span></div>`, null);
+}
+document.addEventListener("click", e => {
+  if (e.target.id === "kpiClr") { pref(KPI_KEY, ""); toast("KPI log cleared", 1500); $("dlgCancel").click(); }
+  if (e.target.id === "kpiExp") { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(kpiAll(), null, 1)], {type: "application/json"})); a.download = "zd-takeoff-kpi-log.json"; a.click(); }
+});
+window.addEventListener("error", e => { if (!/ResizeObserver/.test(String(e.message))) kpiLog("error", {m: String(e.message || "").slice(0, 80)}); });
+
+/* ------------------------------------------------------------------ local knowledge: search, offline
+   A keyword index (BM25) built in this browser over: the app's own help (every tool's tooltip and the keys list), the PDFs'
+   text page by page, sheet numbers and titles, the user's rules, the measurements (id, name, condition, quantity, page) and
+   documents the user adds to the project (specifications, schedules, notes — text, CSV, Markdown or PDF). Results carry
+   their source — file and page, measurement id, document name — and are extracted text, not interpretation. Nothing leaves
+   the browser. (A local embedding model could rank by meaning; keyword search needs no model and works for codes, tags and
+   item names, which is most of a takeoff.) */
+const KB_STOP = new Set("a an the of and or to in on at for by with is are be this that it as from what which how many much do does i me my we our you your all any".split(" "));
+const kbTok = t => String(t || "").toLowerCase().replace(/(\d)'-(\d)/g, "$1ft$2").split(/[^a-z0-9.]+/).map(w => w.replace(/^\.+|\.+$/g, "")).filter(w => w && !KB_STOP.has(w));
+function kbChunks(text, size){ const out = [], s = String(text || "").replace(/\s+/g, " ").trim(); for (let i = 0; i < s.length; i += size - 60) out.push(s.slice(i, i + size)); return out.filter(x => x.trim().length > 2); }
+async function kbDocs(want){   // [{src, ref, text}]
+  const D = [], W = want || {};
+  if (!W.only || W.only.includes("help")) {
+    document.querySelectorAll("button[title], [data-tool][title], .rtab[title]").forEach(b => { const t = (b.textContent || "").replace(/\s+/g, " ").trim(), ti = b.title || ""; if (ti.length > 12) D.push({src: "help", ref: "Help: " + (t || ti.split(/ — |: /)[0]).slice(0, 40), text: (t ? t + " — " : "") + ti}); });
+    D.push({src: "help", ref: "Help: Auto area", text: "Auto area: click inside a room to trace it from its walls. Settings ⚙: find walls from the drawing image or vector lines, close gaps (door openings) up to a width, ignore furniture narrower than, ignore small marks, dashed lines as walls, use the PDF's wall layers, show the detected walls, show the outline before adding it (Accept, Tighter gap, Wider gap, Cancel). Shafts, ducts and voids labelled inside a room are deducted. Leaks, short traces, dashed sides and outlines that do not follow the drawing's lines are flagged for checking. Fence draws a line that closes a leak."});
+    D.push({src: "help", ref: "Help: gross and net", text: "Gross area is the whole measured outline; net area is gross less deductions (cut-outs, voids, shafts, openings). The measurement sheet shows deductions as their own rows (Ded.), so net = gross − deductions. Each row is Nos × L × W × H in decimal feet."});
+  }
+  if (!P.proj) return D;
+  if (!W.only || W.only.includes("drawings")) for (const f of P.proj.files) for (let pg = 1; pg <= (f.pages || 1); pg++) {
+    let T = S.texts[keyOf(f.id, pg)]; if (!T && W.read !== false) { try { T = await pageTexts(f.id, pg); } catch (e) { T = null; } }
+    if (!T) continue; const txt = textLines(T).map(l => l.s).join(" · "), sh = (P.proj.sheets || {})[keyOf(f.id, pg)] || {};
+    kbChunks(txt, 420).forEach(ch => D.push({src: "drawing", ref: f.name + " p." + pg + (sh.no ? " (" + sh.no + ")" : ""), file: f.id, page: pg, text: ch}));
+    if (sh.no || sh.title) D.push({src: "drawing", ref: f.name + " p." + pg, file: f.id, page: pg, text: "Sheet " + (sh.no || "") + " " + (sh.title || "")});
+  }
+  if (!W.only || W.only.includes("rules")) rulesActive().forEach(r => D.push({src: "rule", ref: "Rule (" + RULE_SCOPES[r.scope] + ")", text: r.text}));
+  if (!W.only || W.only.includes("measurements")) P.proj.items.forEach(it => { const c = cond(it.cond) || {}, q = qtyOf(it), L = locOf(it);
+    D.push({src: "measurement", ref: "Measurement " + it.id, id: it.id, text: [it.label, c.name, c.boq, q != null ? q.toFixed(3) + " " + c.unit : "no scale", pageName(it), L.floor, L.zone, it.kind === "ded" ? "deduction" : "", it.qa === "checked" ? "checked accepted" : "not checked", it.det ? "auto area" : "", it.ai ? "AI" : ""].filter(Boolean).join(" · ")}); });
+  if (!W.only || W.only.includes("documents")) (P.proj.kb || []).forEach(d => kbChunks(d.text, 520).forEach((ch, i) => D.push({src: "document", ref: d.name + " §" + (i + 1), doc: d.id, text: ch})));
+  return D;
+}
+async function kbSearch(q, opt){
+  const D = await kbDocs(opt), qt = [...new Set(kbTok(q))]; if (!qt.length) return [];
+  const toks = D.map(d => kbTok(d.ref + " " + d.text)), N = D.length, avg = toks.reduce((a, t) => a + t.length, 0) / Math.max(1, N), df = {};
+  qt.forEach(w => { df[w] = toks.filter(t => t.includes(w)).length; });
+  const k1 = 1.4, b = 0.75;
+  return D.map((d, i) => { const t = toks[i]; let s = 0; qt.forEach(w => { const f = t.filter(x => x === w).length; if (!f) return; const idf = Math.log(1 + (N - df[w] + 0.5) / (df[w] + 0.5)); s += idf * f * (k1 + 1) / (f + k1 * (1 - b + b * t.length / avg)); }); return {d, s}; })
+    .filter(o => o.s > 0).sort((a, b2) => b2.s - a.s).slice(0, (opt && opt.k) || 6).map(o => ({source: o.d.src, ref: o.d.ref, id: o.d.id, file: o.d.file, page: o.d.page, excerpt: o.d.text.slice(0, 360), score: +o.s.toFixed(2)}));
+}
+async function kbDialog(){
+  if (!P.proj) return toast("Open a project first", 2000);
+  const docs = () => (P.proj.kb || []).map(d => `<div class="row" style="gap:6px;align-items:center"><span style="flex:1">${esc(d.name)} <span class="small">${(d.text.length / 1000).toFixed(1)} k characters · ${esc(dmy(d.at))}</span></span><button type="button" class="btn sm dng" data-kbdel="${esc(d.id)}">Remove</button></div>`).join("") || '<div class="small">No documents yet.</div>';
+  const pr = ask("Project knowledge (offline search)", `<div class="wide"></div><p class="small">The agent searches these with <b>search_knowledge</b> and names its source: the app's help, the PDFs' text (page by page), sheet titles, your rules, the measurements, and documents you add here — specifications, schedules, notes (.txt, .md, .csv or a PDF's text). Kept with this project in this browser; nothing is uploaded.</p>
+    <div id="kbDocs">${docs()}</div><div class="row" style="gap:6px;margin-top:6px"><input type="file" id="kbIn" accept=".txt,.md,.csv,.json,.pdf,text/plain,application/pdf" multiple></div>
+    <div class="row" style="gap:6px;margin-top:10px"><input type="search" id="kbQ" placeholder="Try a search, e.g. D1 door size, plaster thickness, BED ROOM" style="flex:1"><button type="button" class="btn sm" id="kbGo">Search</button></div><div id="kbOut" class="small" style="margin-top:6px"></div>`, null, null, "kbQ");
+  const B = $("dlgB");
+  B.onclick = async e => { const d = e.target.closest("[data-kbdel]"); if (d) { P.proj.kb = (P.proj.kb || []).filter(x => x.id !== d.dataset.kbdel); save(); $("kbDocs").innerHTML = docs(); }
+    if (e.target.id === "kbGo") { const R = await kbSearch($("kbQ").value, {k: 8}); $("kbOut").innerHTML = R.length ? R.map(r => `<div style="margin:4px 0"><b>${esc(r.ref)}</b> <span class="tag">${esc(r.source)}</span><br>${esc(r.excerpt)}</div>`).join("") : "Nothing found."; } };
+  $("kbIn").onchange = async e => { for (const f of e.target.files) { let text = "";
+      try { if (/\.pdf$/i.test(f.name)) { const lib = await loadPdfjs(), d = await lib.getDocument({data: new Uint8Array(await f.arrayBuffer())}).promise; for (let i = 1; i <= d.numPages; i++) { const tc = await (await d.getPage(i)).getTextContent(); text += "\n[p." + i + "] " + tc.items.map(x => x.str).join(" "); } }
+        else text = await f.text(); } catch (er) { toast(f.name + ": could not be read — " + (er.message || er), 5000); continue; }
+      text = text.slice(0, 2e6); P.proj.kb = (P.proj.kb || []).concat([{id: uid("K"), name: f.name, text, at: new Date().toISOString()}]); }
+    save(); $("kbDocs").innerHTML = docs(); e.target.value = ""; };
+  await pr;
+}
+
+/* ------------------------------------------------------------------ the agent runs Auto area over a page (Phase 5)
+   One deterministic pipeline the language model calls: scale checked first (asks to calibrate when missing or doubtful),
+   every named room on the page found from the drawing's text, shafts / ducts / voids and any names the user excludes left
+   out, each room traced by Auto area, checked (closed, not crossing itself, not on top of a room already measured, its
+   written size), quantities from the sheet engine. With review on, nothing is added: the outlines are shown dashed for the
+   user to accept or discard; otherwise they are added marked AI (to check) with their detection record. */
+const AI_TOOLS3 = [
+  {name: "auto_area_page", description: "Run Auto area over every room named on this page (the deterministic engine, not a guess): checks the scale first, leaves out shafts / ducts / voids and the names in exclude, traces each room, validates it (closed, no self-crossing, no duplicate of an existing area, compared with its written size) and flags uncertain ones. review=true (default) only previews the outlines for the user to accept — use it when the user wants to review before saving. Returns each room's status and quantities.",
+   input_schema: {type: "object", properties: {names: {type: "array", items: {type: "string"}, description: "Only these rooms (empty = all named rooms)"}, exclude: {type: "array", items: {type: "string"}, description: "Room names or words to leave out (e.g. SHAFT, BALCONY)"}, review: {type: "boolean", description: "true: preview only, the user accepts; false: add them now (marked AI, to check)"}, gap_ft: {type: "number", description: "Door gap to close, ft (default: the Auto area setting); smaller = tighter boundaries"}}}},
+  {name: "accept_preview", description: "Add the previewed Auto-area outlines (from auto_area_page with review) to the takeoff: all, or only the names given.",
+   input_schema: {type: "object", properties: {names: {type: "array", items: {type: "string"}}}}},
+  {name: "discard_preview", description: "Throw away the previewed outlines without adding anything.", input_schema: {type: "object", properties: {}}},
+  {name: "validate_takeoff", description: "Check the takeoff on this page (or project): duplicates, outlines crossing themselves, measurements without a scale, items needing review (AI / flagged Auto area / copied). Returns the problems with measurement ids.",
+   input_schema: {type: "object", properties: {scope: {type: "string", enum: ["page", "project"]}}}},
+  {name: "search_knowledge", description: "Search the project's local knowledge: the app's help, the PDFs' text page by page, sheet titles, the user's rules, measurements and documents the user added (specs, schedules). Returns excerpts with their source (file + page, measurement id, document). Quote the source in your answer; say clearly what is extracted text and what is your interpretation.",
+   input_schema: {type: "object", required: ["query"], properties: {query: {type: "string"}, sources: {type: "array", items: {type: "string", enum: ["help", "drawings", "rules", "measurements", "documents"]}}}}}
+];
+async function autoAreaPage(inp){
+  const k = curScale();
+  if (!k) return {err: "This page has no scale. Ask the user to set it (K: two points and a known length) or confirm the scale note — nothing was measured."};
+  if (scaleDoubt()) return {err: "The page scale is doubtful (the drawing measures " + scaleDoubt().label + ", not the note). Ask the user to verify it first — nothing was measured."};
+  const F = await drawingFacts(S.fileId, S.pageNo); if (!F || !F.rooms.length) return {err: "No room names found in this page's text (a scan has none). Ask the user to click rooms with Auto area, or to name the rooms — nothing was measured."};
+  const want = (inp.names || []).map(x => String(x).toUpperCase().trim()).filter(Boolean), ex = (inp.exclude || []).map(x => String(x).toUpperCase().trim()).filter(Boolean);
+  const out = [], cand = [], c = aiAreaCond(), existing = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.kind === "shape" && (cond(i.cond) || {}).type === "area");
+  for (const r of F.rooms) {
+    const nm = r.name.trim(), up = nm.toUpperCase();
+    if (want.length && !want.some(w => up.includes(w))) continue;
+    if (VOID_RX.test(nm) || ex.some(w => up.includes(w))) { out.push({name: nm, status: "excluded", why: VOID_RX.test(nm) ? "shaft / duct / void — not floor" : "excluded by the user"}); continue; }
+    const seed = [r.x + r.w / 2, r.y - r.h / 2];
+    if (existing.some(i => pointInPoly(seed, i.pts))) { out.push({name: nm, status: "skipped", why: "already measured here"}); continue; }
+    const t0 = performance.now(); let res; try { res = inp.gap_ft > 0 ? await autoRoom(seed, {gap: +inp.gap_ft}) : await autoRoomGuarded(seed); } catch (e) { res = {err: e.message || String(e)}; }
+    kpiLog("auto", {ms: Math.round(performance.now() - t0), err: !!res.err, flag: !!(res.leak || res.short || res.warn), agent: true});
+    if (res.err) { out.push({name: nm, status: "failed", why: res.err}); continue; }
+    const net = (polyArea(res.pts) - (res.holes || []).reduce((a, h) => a + polyArea(h.pts), 0)) / k / k;
+    const issues = [];
+    if (res.pts.length < 3) issues.push("not closed"); if (selfCross(res.pts)) issues.push("crosses itself");
+    if (existing.concat(cand.map(x => ({pts: x.pts}))).some(i => overlapSft(i.pts, res.pts, k) > 1)) issues.push("overlaps an area already measured");
+    if (r.sft && Math.abs(net - r.sft) / r.sft > 0.05) issues.push("differs from its written size " + r.size + " (" + fq(r.sft) + " Sft) by " + (100 * (net - r.sft) / r.sft).toFixed(1) + " %");
+    const flag = [res.leak ? "leaks — " + res.leak : "", res.short || "", res.warn || ""].concat(issues).filter(Boolean).join("; ");
+    cand.push({name: nm, pts: res.pts, holes: res.holes || [], flag, gap: inp.gap_ft || autoOpt().gap, note: res.note || ""});
+    out.push({name: nm, status: flag ? "flagged" : "ok", net_sft: +net.toFixed(2), written_sft: r.sft || null, voids_deducted: (res.holes || []).map(h => h.name), flag: flag || null});
+  }
+  if (!cand.length) return {ok: {rooms: out, added: 0, note: "No outline was created."}};
+  if (inp.review !== false) { AI.pending = {key: S.key, cand}; S.agentPrev = {key: S.key, cand}; draw();
+    return {ok: {rooms: out, previewed: cand.length, added: 0, note: "Shown dashed on the drawing for review — nothing added yet. Call accept_preview (all or some names) or discard_preview."}}; }
+  const ids = autoAreaAdd(cand, c);
+  return {ok: {rooms: out.map(o => Object.assign(o, {id: ids[o.name] || undefined})), added: Object.keys(ids).length, totals_now: condTotals(c).net.toFixed(3) + " " + c.unit + " in " + c.name}};
+}
+function autoAreaAdd(cand, c){
+  const ids = {}, k = curScale(), at = new Date().toISOString();
+  mutate(() => cand.forEach(x => { const id = uid("I"); ids[x.name] = id;
+    P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: x.pts, nos: 1, ai: true, label: x.name.slice(0, 60),
+      det: {how: "auto", src: (autoOpt().src === "vector" ? "vector lines" : "drawing image") + " (agent)", gap: +x.gap, note: x.note, flag: x.flag, a0: +(polyArea(x.pts) / k / k).toFixed(4), pts0: x.pts.map(q => q.slice()), at, holes: x.holes.map(h => ({name: h.name, a: +(polyArea(h.pts) / k / k).toFixed(4)}))}});
+    x.holes.forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, ai: true, label: h.name + " (void in " + x.name + ")"})); }), "Agent: Auto area");
+  refresh(); return ids;
+}
+async function aiRunTool3(b){
+  const inp = b.input || {};
+  if (b.name === "auto_area_page") { if (!P.proj || !S.page) return {err: "Open a PDF page first."}; busy("Auto area over the page…"); try { return await autoAreaPage(inp); } finally { busy(""); } }
+  if (b.name === "accept_preview") { const p = AI.pending; if (!p || p.key !== S.key) return {err: "Nothing is waiting for review on this page."};
+    const want = (inp.names || []).map(x => String(x).toUpperCase()), pick = p.cand.filter(x => !want.length || want.some(w => x.name.toUpperCase().includes(w)));
+    if (!pick.length) return {err: "None of the previewed rooms match those names."};
+    const ids = autoAreaAdd(pick, aiAreaCond()); p.cand = p.cand.filter(x => !pick.includes(x)); if (!p.cand.length) { AI.pending = null; S.agentPrev = null; } else S.agentPrev = {key: p.key, cand: p.cand}; draw();
+    return {ok: {added: Object.entries(ids).map(([name, id]) => ({name, id})), still_waiting: p.cand.map(x => x.name)}}; }
+  if (b.name === "discard_preview") { const n = AI.pending ? AI.pending.cand.length : 0; AI.pending = null; S.agentPrev = null; draw(); return {ok: {discarded: n}}; }
+  if (b.name === "validate_takeoff") { if (!P.proj) return {err: "No project is open."};
+    const pg = inp.scope !== "project", here = i => !pg || (i.file === S.fileId && i.page === S.pageNo), its = P.proj.items.filter(here);
+    return {ok: {measurements: its.length, duplicates: dupFind().filter(d => here(d.a)).map(d => d.count ? {condition: d.c.name, count_markers_on_top_of_each_other: d.n} : {condition: d.c.name, ids: [d.a.id, d.b.id]}),
+      self_crossing: its.filter(crossed).map(i => i.id), no_scale: its.filter(i => !itemScale(i)).map(i => i.id),
+      need_review: its.filter(needsReview).map(i => ({id: i.id, name: i.label || "", why: i.det && i.det.flag ? i.det.flag : i.ai ? "AI / agent — not checked" : i.copied ? "copied" : "revision"}))}}; }
+  if (b.name === "search_knowledge") { const R = await kbSearch(String(inp.query || ""), {only: Array.isArray(inp.sources) && inp.sources.length ? inp.sources : null, k: 6}); return {ok: {results: R, note: R.length ? "Extracted text with its source — cite the ref." : "Nothing found in the local knowledge."}}; }
+  return null;
 }
 /* the claude.ai route: when this page is opened as a Claude artifact, Claude runs on the viewer's own Claude plan through
    the artifact's `sample` capability — no API key. Same tools as above; each message sends a fresh picture of the view
@@ -11513,7 +11820,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
