@@ -674,6 +674,25 @@ table.sh td.n:not(:last-child),table.sh th.n:not(:last-child){white-space:normal
 table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 #sheet,#bill{overflow-x:hidden}
 .cond .q{font-size:12px}.cond .nm b{font-size:12.5px}
+/* compact condition rows and the By page tree (PlanSwift-style) */
+.cview{display:flex;gap:2px;margin:0 2px 6px;background:var(--pg2,#eef2f7);border-radius:6px;padding:2px}.cview button{flex:1;border:0;background:none;font-size:11px;padding:3px 4px;border-radius:5px;color:#5b6b80;cursor:pointer}.cview button.on{background:#fff;color:var(--navy);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.ctree{font-size:12px}
+.ctr{display:flex;align-items:center;gap:5px;padding:3px 4px;cursor:pointer;user-select:none;color:var(--navy);white-space:nowrap;overflow:hidden}.ctr b{overflow:hidden;text-overflow:ellipsis;font-size:12px}.ctr .small{margin-left:auto;font-size:10.5px;color:var(--muted);flex:none}.ctr .car{color:#8a98ac;width:10px;flex:none}
+.ctr.root{background:#eef3fb;border-radius:4px;margin-top:3px}.ctr.pg b{color:#2b4fb8}.ctr.pg.cur{background:#f1f6ff}.ctr .ed{border:0;background:none;color:#8a98ac;cursor:pointer;padding:0 3px;flex:none}
+.crow{display:flex;align-items:center;gap:5px;height:22px;padding-right:2px;border-bottom:1px solid #f0f3f7;cursor:pointer;font-size:12px}
+.crow:hover{background:#f4f7fc}.crow.on{background:#dbe7fb;box-shadow:inset 3px 0 0 var(--blue)}.crow.off .cn,.crow.off .cq{opacity:.45}
+.crow input[type=checkbox]{margin:0;width:12px;height:12px;flex:none;display:none}.crow:hover input[type=checkbox],.crow input[type=checkbox]:checked,.ticking .crow input[type=checkbox]{display:block}
+.crow .ed.pen{display:none}.crow:hover .ed.pen{display:block}.crow:hover .cq{max-width:none}
+.crow .cn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--navy)}
+.crow .cq{font-variant-numeric:tabular-nums;color:#1d3fc4;font-weight:600;text-align:right;white-space:nowrap}.crow .cu{width:22px;flex:none;font-size:10px;color:var(--muted)}.crow .cn{min-width:40px}
+.crow .sw{width:13px;height:13px;border-radius:2px;flex:none;border:1px solid rgba(0,0,0,.2);padding:0;cursor:pointer}
+.crow .ed{border:0;background:none;color:#8a98ac;cursor:pointer;font-size:12px;padding:0 2px;flex:none}.crow .bulb.out{filter:grayscale(1);opacity:.35}
+.cic{flex:none;width:14px;height:12px;position:relative;display:inline-block}
+.cic.linear::before{content:"";position:absolute;left:1px;right:1px;top:5px;height:2px;background:var(--cc);transform:rotate(-30deg)}
+.cic.area::before{content:"";position:absolute;inset:1px 1px;border:1.5px solid var(--cc);background:color-mix(in srgb,var(--cc) 30%,transparent)}
+.cic.count::before{content:"";position:absolute;left:4px;top:3px;width:6px;height:6px;border-radius:50%;background:#d22}
+table.mattbl{width:100%;border-collapse:collapse;font-size:12px}table.mattbl td{padding:2px 4px;border-bottom:1px solid #eef1f5}table.mattbl td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--navy)}table.mattbl td:last-child{width:34px;color:var(--muted);font-size:11px}
+.matset{flex-wrap:wrap;gap:4px;margin-bottom:4px}.matset .fg{min-width:80px;flex:1}
 .propsbox{max-height:40%}
 </style>
 </head>
@@ -1079,7 +1098,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-10a"></script>
+<script type="module" src="takeoff.js?v=2026-10-11a"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with

@@ -2137,6 +2137,93 @@ function condTotals(c){
   out.net = out.gross - out.ded;
   return out;
 }
+/* ------------------------------------------------------------------ materials: cement, sand, crush, bricks, blocks
+   The formulas and convention factors of SAJJAD QSCALCULATOR (sajjadsj44-max.github.io/Material-Calculator, reference data
+   rev 25-Sep-2026) and the dashboard's Rate Analysis: dry-volume factor 1.27 for mortar and plaster, 1.54 for concrete;
+   cement bag 50 kg ÷ 1440 kg/m³ (IS 875-1) = 1.226 cft; mortar joint 3/8". Brick 9 × 4½ × 3 in: N = V / (l+j)(w+j)(h+j),
+   wet mortar = V − N·lwh. Block l × w × h: leaves k = floor(t / w), N = V / ((l+j)(h+j)·t / k), wet mortar = V − N·lwh
+   (hollow: joint mortar on the two face shells only, s = 1¼"). Plaster / screed: dry = A × t × 1.27. Wastage 0 % unless set.
+   A condition keeps its choice in c.mat; with none set it is read from the name (8" Block, Wall Plaster, RCC slab...). */
+const MAT_BAG_CFT = 50 / 1440 / 0.028316846592, MAT_J = 0.375 / 12, MAT_SRC = "Material Calculator convention factors, 25-Sep-2026";
+const MAT_KINDS = [["none", "None"], ["brick", "Brick masonry"], ["block", "Block masonry"], ["plaster", "Plaster"], ["screed", "Screed / mortar bed"], ["concrete", "Concrete (PCC / RCC)"]];
+const MAT_MIXES = {brick: ["1:3", "1:4", "1:5", "1:6"], block: ["1:3", "1:4", "1:5", "1:6"], plaster: ["1:2", "1:3", "1:4", "1:5", "1:6"], screed: ["1:2", "1:3", "1:4", "1:5", "1:6"], concrete: ["1:1.5:3", "1:2:4", "1:3:6", "1:4:8"]};
+const MAT_BLOCKS = [["auto", "Auto (from wall T)"], ["16x4x8s", '4" × 8" × 16" solid'], ["16x4x8h", '4" × 8" × 16" hollow'], ["12x4x8s", '4" × 8" × 12" solid'], ["12x4x8h", '4" × 8" × 12" hollow'],
+  ["16x8x8s", '8" × 8" × 16" solid'], ["16x8x8h", '8" × 8" × 16" hollow'], ["12x8x8s", '8" × 8" × 12" solid'], ["12x8x8h", '8" × 8" × 12" hollow']];
+/* the wall / slab thickness in inches written in a condition's name: 8" Block, 4"" Block, 4½" wall, 9 inch brick */
+function matNameIn(c){ const m = vulgar(normQ(c.name || "")).match(/(\d+(?:\.\d+)?)(?:\s+(\d)\/(\d))?\s*(?:"|''|in\b|inch)/i); return m ? +m[1] + (m[2] ? m[2] / m[3] : 0) : 0; }
+function matGuess(c){
+  const n = String(c.name || "").toLowerCase();
+  if (c.type === "count" || /door|window|frame|shutter|wardrobe|cabin|railing|fixture/.test(n)) return {kind: "none"};
+  if (/plaster|render/.test(n)) return {kind: "plaster", mix: "1:4", tin: 0.5};
+  if (/block|hollow/.test(n)) return {kind: "block", mix: "1:6", bs: "auto"};
+  if (/brick|masonry|\beent\b/.test(n)) return {kind: "brick", mix: "1:4"};
+  if (/screed|mortar bed|floor bed/.test(n)) return {kind: "screed", mix: "1:4", tin: 1.5};
+  if (/\bpcc\b|lean|blinding/.test(n)) return {kind: "concrete", mix: "1:4:8"};
+  if (/rcc|concrete|slab|beam|column|footing|lintel|raft|plinth/.test(n)) return {kind: "concrete", mix: "1:2:4"};
+  return {kind: "none"};
+}
+function matOf(c){
+  const g = matGuess(c), m = c.mat && c.mat.kind ? c.mat : null;
+  if (!m) return Object.assign({wst: 0, guessed: true}, g);
+  const d = {brick: {mix: "1:4"}, block: {mix: "1:6", bs: "auto"}, plaster: {mix: "1:4", tin: 0.5}, screed: {mix: "1:4", tin: 1.5}, concrete: {mix: "1:2:4"}}[m.kind] || {};
+  return Object.assign({wst: 0}, d, m);
+}
+/* materials for a net quantity Q of condition c (Q in the condition's unit) → {basis, rows: [[name, value, unit, note]], err} */
+function matCalc(c, Q){
+  const m = matOf(c); if (m.kind === "none") return null;
+  const out = {m, rows: [], basis: "", err: ""}, H = +c.h || 0, wst = 1 + (+m.wst || 0) / 100, u = c.unit;
+  const parts = String(m.mix || "").split(":").map(Number); if (parts.some(x => !(x > 0))) { out.err = "Mix " + m.mix + " is not valid"; return out; }
+  const sum = parts.reduce((a, x) => a + x, 0), mixRows = dry => { const cem = dry * parts[0] / sum, bags = cem / MAT_BAG_CFT;
+    out.rows.push(["Cement", bags, "bags", f3(cem) + " cft · " + fq(bags * 50, "kg") + " kg (50 kg bag = " + f3(MAT_BAG_CFT) + " cft)"], ["Sand", dry * parts[1] / sum, "cft", "dry × " + parts[1] + " / " + sum]);
+    if (parts[2]) out.rows.push(["Crush (coarse aggregate)", dry * parts[2] / sum, "cft", "dry × " + parts[2] + " / " + sum]); };
+  if (Q <= 0) { out.err = "No net quantity measured yet"; return out; }
+  if (m.kind === "plaster" || m.kind === "screed") {   // area × thickness
+    const t = (+m.tin || 0) / 12, faces = +c.faces || 1; if (!(t > 0)) { out.err = "Set the " + m.kind + " thickness"; return out; }
+    let A = u === "Sft" ? Q : u === "ft" ? (H > 0 ? Q * H * faces : NaN) : NaN;
+    if (isNaN(A)) { out.err = u === "ft" ? "Set Height H on the condition (Edit) — plaster area = L × H" : "Plaster is taken from an area (Sft) or a length (ft) with H, not " + u; return out; }
+    const wet = A * t, dry = wet * 1.27 * wst;
+    out.basis = (u === "ft" ? f3(Q) + " ft × H " + f3(H) + (faces > 1 ? " × " + faces + " faces" : "") + " = " : "") + f3(A) + " Sft × " + f3(+m.tin) + '" (' + f3(t) + " ft)";
+    out.rows.push(["Area", A, "Sft", ""], ["Wet mortar", wet, "cft", "A × t"], ["Dry mortar", dry, "cft", "wet × 1.27" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out;
+  }
+  // masonry and concrete: a volume
+  const tIn = m.kind === "concrete" ? 0 : matNameIn(c), T = +c.t || tIn / 12;
+  let V = NaN;
+  if (u === "cft") V = Q;
+  else if (u === "Sft") V = T > 0 ? Q * T : NaN;
+  else if (u === "ft") V = T > 0 && H > 0 ? Q * H * T : NaN;
+  if (isNaN(V)) { out.err = u === "ft" ? "Set Height H" + (T > 0 ? "" : " and thickness T") + " on the condition (Edit) — volume = L × H × T" : "Set thickness T on the condition (Edit) — volume = area × T"; return out; }
+  out.basis = u === "cft" ? f3(V) + " cft" : u === "Sft" ? f3(Q) + " Sft × T " + f3(T) + " = " + f3(V) + " cft" : f3(Q) + " ft × H " + f3(H) + " × T " + f3(T) + " = " + f3(V) + " cft";
+  if (!c.t && tIn) out.basis += ' (T ' + tIn + '" from the name)';
+  if (m.kind === "concrete") { const dry = V * 1.54 * wst; out.rows.push(["Concrete", V, "cft", ""], ["Dry volume", dry, "cft", "V × 1.54" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out; }
+  let N, wet, unit;
+  if (m.kind === "brick") { const l = 9 / 12, w = 4.5 / 12, h = 3 / 12; N = V / ((l + MAT_J) * (w + MAT_J) * (h + MAT_J)); wet = V - N * l * w * h; unit = "Bricks"; }
+  else {
+    const ti = T * 12, code = m.bs && m.bs !== "auto" ? m.bs : "16x" + (ti >= 7.5 ? 8 : ti >= 5.5 ? 6 : 4) + "x8" + (/hollow/i.test(c.name || "") ? "h" : "s");
+    const [bl, bw, bh] = code.split("x").map(x => parseFloat(x) / 12), hol = /h$/.test(code), j = MAT_J;
+    const k = Math.max(1, Math.floor(T / bw + 0.05)); N = V / ((bl + j) * (bh + j) * T / k); wet = V - N * bl * bw * bh;
+    if (hol) { const jm = N * ((bl + j) * (bh + j) - bl * bh) * bw, fs = 1.25 / 12; wet = Math.max(0, jm * 2 * fs / bw + (wet - jm)); }
+    unit = "Blocks"; out.basis += " · block " + r3(bw * 12) + '" × ' + r3(bh * 12) + '" × ' + r3(bl * 12) + '" ' + (hol ? "hollow" : "solid") + (k > 1 ? ", " + k + " leaves" : "");
+  }
+  if (wet < 0) { out.err = unit + " fill more than the wall volume — check thickness T"; return out; }
+  const dry = wet * 1.27 * wst;
+  out.rows.push([unit, Math.ceil(N * wst - 1e-9), "Nos", fq(N * wst / V, "") + " per cft"], ["Wet mortar", wet, "cft", "V − N × unit volume"], ["Dry mortar", dry, "cft", "wet × 1.27" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry);
+  return out;
+}
+/* the Materials section of the Properties box: the condition's (or one measurement's) materials, and its settings */
+function matHtml(c, Q, own){
+  const m = matOf(c), r = matCalc(c, Q), mixes = MAT_MIXES[m.kind] || [];
+  const sel = (k, opts, v) => `<select data-matk="${k}" style="min-width:0">${opts.map(o => { const [a, b] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(a)}"${String(v) === String(a) ? " selected" : ""}>${esc(b)}</option>`; }).join("")}</select>`;
+  const set = own ? "" : `<div class="row matset"><div class="fg"><label>Material</label>${sel("kind", MAT_KINDS, m.kind)}</div>
+    ${mixes.length ? `<div class="fg"><label>Mix</label>${sel("mix", mixes.includes(m.mix) ? mixes : mixes.concat([m.mix]), m.mix)}</div>` : ""}
+    ${m.kind === "plaster" || m.kind === "screed" ? `<div class="fg"><label>Thickness in</label><input type="number" min="0" step="0.125" data-matk="tin" value="${+m.tin || 0}"></div>` : ""}
+    ${m.kind === "block" ? `<div class="fg"><label>Block</label>${sel("bs", MAT_BLOCKS, m.bs || "auto")}</div>` : ""}
+    ${m.kind !== "none" ? `<div class="fg"><label>Waste %</label><input type="number" min="0" max="50" step="0.5" data-matk="wst" value="${+m.wst || 0}"></div>` : ""}</div>`;
+  if (!r) return own ? "" : `<div class="psec">Materials</div>${set}<div class="small">Pick a material (brick, block, plaster, concrete...) to see cement, sand and crush.</div>`;
+  const body = r.err ? `<div class="small warn" style="color:var(--red,#c0392b)">${esc(r.err)}</div>`
+    : `<div class="dimstr" style="margin:2px 0 4px">${esc(r.basis)}</div><table class="mattbl">${r.rows.map(x => `<tr title="${esc(x[3])}"><td>${esc(x[0])}</td><td class="n">${x[2] === "Nos" ? fq(x[1], "Nos") : x[2] === "bags" ? f2(x[1]) : f3(x[1])}</td><td>${esc(x[2])}</td></tr>`).join("")}</table>`;
+  return `<div class="psec">Materials${own ? " — this measurement" : ""}</div><div class="small" style="margin:-2px 0 4px">${esc(MAT_KINDS.find(x => x[0] === m.kind)[1])} ${esc(m.mix || "")}${m.guessed && !own ? " · picked from the condition name — change it below" : ""}</div>${set}${body}
+    ${own ? "" : `<div class="small" style="margin-top:3px">${esc(MAT_SRC)} — dry factor 1.27 mortar / 1.54 concrete, 3/8" joints. Quantities only; no rates.</div>`}`;
+}
 /* ------------------------------------------------------------------ assemblies and the bill
    A condition's measured quantity drives derived items by formula (PlanSwift-style assemblies), each with a rate.
    Variables: Q net quantity in the condition's unit · A net plan area Sft · P perimeter ft of its areas · PD that
@@ -3287,7 +3374,42 @@ function renderConds(){
   const cardOf = c => { const i = P.proj.conds.indexOf(c), t = condTotals(c), its = P.proj.items.filter(x => x.cond === c.id), ck = its.filter(x => x.qa === "checked").length;
     return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}${its.length ? (ck ? ` · ${ck}/${its.length} checked<i class="pbar" title="${ck} of ${its.length} checked"><i style="width:${Math.round(100 * ck / its.length)}%"></i></i>` : "") : " · no measurements yet"}</span></div>
       <div class="q">${fq(t.net, c.unit)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; };
-  L.innerHTML = bar + (shown.length ? "" : '<div class="empty">No condition matches this filter.</div>') + order.map(o => (hasG ? gHead(o) : "") + (hasG && grpOff.has(o.g) ? "" : o.m.map(cardOf).join(""))).join("");
+  const vw = condView(), vbar = `<div class="cview" title="How the conditions are listed">${[["tree", "By page", "PlanSwift-style tree: every page with the conditions measured on it and that page's quantity"], ["list", "Compact", "One thin row per condition"], ["cards", "Cards", "Cards with check progress"]].map(([k, n, t]) => `<button data-cview="${k}" class="${vw === k ? "on" : ""}" title="${t}">${n}</button>`).join("")}</div>`;
+  const body = !shown.length ? '<div class="empty">No condition matches this filter.</div>' : vw === "tree" ? condTreeHtml(shown)
+    : order.map(o => (hasG ? gHead(o) : "") + (hasG && grpOff.has(o.g) ? "" : o.m.map(c => vw === "list" ? condRowHtml(c, condTotals(c).net, 0) : cardOf(c)).join(""))).join("");
+  L.innerHTML = bar + vbar + (vw === "list" ? '<div class="ctree' + (S.condSel.size ? " ticking" : "") + '">' + body + "</div>" : body);
+}
+/* the compact (PlanSwift-style) condition list: one thin row per condition — type icon, name, quantity, unit, colour, bulb.
+   In the By page tree a row carries that page's quantity and opens that page when clicked. */
+function condView(){ const v = S.condView || pref("tkCondView") || "tree"; return ["tree", "list", "cards"].includes(v) ? v : "tree"; }
+function condRowHtml(c, q, lvl, pg){
+  const its = P.proj.items.filter(x => x.cond === c.id), ck = its.filter(x => x.qa === "checked").length, ty = c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count";
+  return `<div class="crow${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"${pg ? ` data-cpg="${esc(pg)}"` : ""} style="padding-left:${4 + 10 * lvl}px" title="${esc(c.name)} — ${ty}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""} · ${its.length} measurement${its.length === 1 ? "" : "s"}${its.length ? ", " + ck + " checked" : ""}${pg ? "\nClick: this condition on this page" : ""}">
+    <input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several"><i class="cic ${c.type}" style="--cc:${esc(c.color)}"></i><span class="cn">${esc(c.name)}</span>
+    <span class="cq">${fq(q, c.unit)}</span><span class="cu">${esc(c.unit)}</span><button class="sw" style="background:${esc(c.color)}" title="Change colour" data-color="${esc(c.id)}"></button>
+    <button class="ed eye bulb${c.hidden ? " out" : ""}" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">&#128161;</button><button class="ed pen" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`;
+}
+function condTreeHtml(shown){
+  const ids = new Set(shown.map(c => c.id)), per = new Map(), used = new Set(), off = S.condGrpOff;
+  P.proj.items.forEach(it => { if (!ids.has(it.cond)) return; const pk = keyOf(it.file, it.page); used.add(it.cond); if (!per.has(pk)) per.set(pk, new Map());
+    const m = per.get(pk), k = itemScale(it), q = k ? rowsOf(it, k).reduce((a, r) => a + r.qty, 0) : 0; m.set(it.cond, (m.get(it.cond) || 0) + q); });
+  let h = "";
+  P.proj.files.forEach(f => {
+    const pages = []; for (let i = 1; i <= f.pages; i++) { const pk = keyOf(f.id, i); if (per.has(pk) || pk === S.key) pages.push(i); }
+    if (!pages.length) return; const fk = "f:" + f.id;
+    h += `<div class="ctr root" data-cgrp="${esc(fk)}"><span class="car">${off.has(fk) ? "&#9656;" : "&#9662;"}</span>&#128193; <b>${esc(f.name.replace(/\.(pdf|dwg|dxf)$/i, ""))}</b><span class="small">[${f.pages} page${f.pages === 1 ? "" : "s"}]</span></div>`;
+    if (off.has(fk)) return;
+    pages.forEach(i => { const pk = keyOf(f.id, i), sh = (P.proj.sheets || {})[pk] || {}, m = per.get(pk) || new Map(), gk = "p:" + pk;
+      const nm = [sh.no, sh.title || sh.floor].filter(Boolean).join(" — ") || "Page " + i;
+      h += `<div class="ctr pg${pk === S.key ? " cur" : ""}" data-cgrp="${esc(gk)}" style="padding-left:16px" title="Click to fold / unfold · double-click to open this page"><span class="car">${off.has(gk) ? "&#9656;" : "&#9662;"}</span><b>${esc(nm)}</b><span class="small">p.${i} · ${m.size}</span><button class="ed" data-cgo="${esc(pk)}" title="Open this page">&#8599;</button></div>`;
+      if (off.has(gk)) return;
+      h += shown.filter(c => m.has(c.id)).map(c => condRowHtml(c, m.get(c.id), 2, pk)).join("") || '<div class="small" style="padding:2px 0 4px 44px">nothing measured on this page yet</div>';
+    });
+  });
+  const un = shown.filter(c => !used.has(c.id));
+  if (un.length) { h += `<div class="ctr root" data-cgrp="unused"><span class="car">${off.has("unused") ? "&#9656;" : "&#9662;"}</span><b>Not measured yet</b><span class="small">${un.length}</span></div>`;
+    if (!off.has("unused")) h += un.map(c => condRowHtml(c, 0, 1)).join(""); }
+  return '<div class="ctree' + (S.condSel.size ? " ticking" : "") + '">' + h + "</div>";
 }
 /* search and sort of the measurement sheet: every word typed must appear in the item, its condition, BOQ code, page, room or unit;
    sorting only reorders the lines inside each condition — the totals are always the whole condition's */
@@ -3362,6 +3484,7 @@ function condDetailHtml(c){
     ${dl([["Measured as", tp], ["Unit", c.unit], c.h ? ["Height H", f3(+c.h) + " ft"] : null, c.t ? ["Thickness T", f3(+c.t) + " ft"] : null, c.faces > 1 ? ["Faces", String(c.faces)] : null,
       +c.dedMin ? ["Deduct over", f2(+c.dedMin)] : null, ["BOQ code", c.boq || "not set", c.boq ? "" : "warn"], c.ra ? ["Rate Analysis", c.ra] : null, rateLine(c), r.src ? ["Rate source", r.src + (r.date ? ", " + r.date : "")] : null,
       c.asm && c.asm.length ? ["Assembly lines", String(c.asm.length)] : null])}
+    ${matHtml(c, t.net)}
     <div class="psec">Takeoff</div>
     ${dl([["Measurements", String(its.length)], ["Pages used", String(pages.size)], ["Checked", ck + " of " + its.length, its.length && ck === its.length ? "ok" : ""], t.noScale ? ["No scale", t.noScale + " measurement" + (t.noScale > 1 ? "s" : ""), "warn"] : null])}
     <div class="small" style="margin-top:6px">Click a measurement to see its own details. Press <kbd>A</kbd> / <kbd>R</kbd> / <kbd>C</kbd> to measure with this condition.</div>`;
@@ -3380,7 +3503,7 @@ function itemDetailHtml(it, c, k){
       c.h ? ["Height H", f3(+c.h) + " ft"] : null, c.t ? ["Thickness T", f3(+c.t) + " ft"] : null, ["BOQ code", c.boq || "not set", c.boq ? "" : "warn"], rateLine(c),
       ["Scale", sc ? (sc.verified ? "verified" : sc.how === "inherited" ? "inherited — not checked" : "not verified") : "not set", sc && sc.verified ? "ok" : "warn"],
       it.locked ? ["Locked", "yes"] : null, it.ai ? ["Made by", "AI assistant"] : null, it.copied ? ["Copied from", keyName(it.copied.from)] : null, it.qa === "checked" ? ["Checked", (it.qaBy || "") + (it.qaAt ? ", " + dmy(it.qaAt) : "")] : null])}
-    `;
+    ${k && it.kind === "shape" ? matHtml(c, net, true) : ""}`;
 }
 function renderProps(){
   $("bDel").disabled = !(S.sel || S.selMark || S.multi.size);
@@ -6080,7 +6203,8 @@ function ribbonInit(){
   $("propsHead").addEventListener("click", () => $("propsBox").classList.toggle("min"));
   /* left panel: filter and type tabs of the condition list */
   $("pageStrip").addEventListener("click", e => { const t = e.target.closest("[data-pg]"); if (!t) return; const [f, p2] = t.dataset.pg.split("|"); gotoPage(f, +p2); });
-  $("condList").addEventListener("click", e => { const g = e.target.closest("[data-cgrp]"); if (!g) return; const k = g.dataset.cgrp; if (S.condGrpOff.has(k)) S.condGrpOff.delete(k); else S.condGrpOff.add(k); renderConds(); });
+  $("condList").addEventListener("dblclick", e => { const g = e.target.closest(".ctr.pg[data-cgrp]"); if (!g) return; const [f, p] = g.dataset.cgrp.slice(2).split(":"); gotoPage(f, +p); });
+  $("condList").addEventListener("click", e => { const g = e.target.closest("[data-cgrp]"); if (!g || e.target.closest("[data-cgo]")) return; const k = g.dataset.cgrp; if (S.condGrpOff.has(k)) S.condGrpOff.delete(k); else S.condGrpOff.add(k); renderConds(); });
   $("condQ").addEventListener("input", e => { S.condQ = e.target.value; renderConds(); });
   $("condTypes").addEventListener("click", e => { const b = e.target.closest("[data-cty]"); if (!b) return; S.condTy = b.dataset.cty; renderConds(); });
   /* right panel footer and the takeoff-agent bar at the bottom */
@@ -7774,6 +7898,8 @@ function wire(){
   });
   $("projectSearch").addEventListener("input", () => showStart());  $("condList").addEventListener("click", e => {
     if (e.target.id === "bFirstCond") return editCond(null);
+    const cv = e.target.closest("[data-cview]"); if (cv) { S.condView = cv.dataset.cview; pref("tkCondView", S.condView); renderConds(); return; }
+    const go = e.target.closest("[data-cgo]"); if (go) { const [f, p] = go.dataset.cgo.split(":"); gotoPage(f, +p); return; }
     const ed = e.target.closest("[data-edit]"); if (ed) return editCond(cond(ed.dataset.edit));
     const ck = e.target.closest("[data-ck]"); if (ck) { if (ck.checked) S.condSel.add(ck.dataset.ck); else S.condSel.delete(ck.dataset.ck); renderConds(); return; }
     const cka = e.target.closest("[data-cka]"); if (cka) { S.condSel = cka.checked ? new Set(P.proj.conds.map(c => c.id)) : new Set(); renderConds(); return; }
@@ -7787,6 +7913,7 @@ function wire(){
     const ey = e.target.closest("[data-eye]"); if (ey) { const c = cond(ey.dataset.eye); c.hidden = !c.hidden; if (c.hidden && S.sel && P.proj.items.some(i => i.id === S.sel && i.cond === c.id)) S.sel = null; save(); refresh(); return; }
     const co = e.target.closest("[data-color]"); if (co) return colorPop(co, cond(co.dataset.color));
     const c = e.target.closest("[data-cond]"); if (!c) return;
+    if (c.dataset.cpg && c.dataset.cpg !== S.key) { const [f, p] = c.dataset.cpg.split(":"); gotoPage(f, +p); }   // a row of the By page tree: that page
     S.cond = c.dataset.cond; S.sel = null; const ct = cond(S.cond).type;
     setTool(S.tool === "select" || S.tool === "pan" || S.tool === "measure" || S.tool === "cal" || (S.tool === "count" && ct !== "count") || (S.tool === "auto" && ct !== "area") ? (ct === "count" ? "count" : "draw") : S.tool); refresh();
   });
@@ -7805,6 +7932,10 @@ function wire(){
   $("props").addEventListener("change", e => {
     const mk = e.target.dataset.mprop && (P.proj.marks || []).find(m => m.id === S.selMark);
     if (mk) { mkPropSet(mk, e.target.dataset.mprop, e.target); return; }
+    const mt = e.target.dataset.matk, mc = mt && cond(S.cond);   // the condition's material settings (Materials section)
+    if (mc) { mutate(() => { const m = Object.assign({}, matOf(mc)); delete m.guessed; const v = e.target.value;
+      if (mt === "kind") { mc.mat = {kind: v}; return; }
+      m[mt] = mt === "tin" || mt === "wst" ? Math.max(0, Math.min(mt === "wst" ? 50 : 24, +v || 0)) : v; mc.mat = m; }); return; }
     const it = P.proj.items.find(i => i.id === S.sel), f = e.target.dataset.prop; if (!it || !f) return;
     if (f === "qa") return setQa([it], e.target.value);
     mutate(() => {
@@ -10656,7 +10787,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {matCalc, matOf, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
