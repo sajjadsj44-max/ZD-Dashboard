@@ -112,6 +112,32 @@ const BAG = 50 / 1440 / 0.028316846592;
   ok(await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.id === "cB"); return /no library item/.test(Z.matPriced(Z.matCalc(c, Z.condTotals(c).net)).rows.find(x => x.n === "Blocks").R.na); }), "a block size the library does not carry is left unpriced, not priced as another size");
   await T(() => { delete zdTakeoff.P.proj.conds.find(c => c.id === "cB").mat; });
 
+  console.log("BOQ item picker in New condition");
+  await T(() => { const o = JSON.parse(localStorage.getItem("SAJ_QSCOST_v1")); o.items.push(
+      {code: "CIV-MAS-008", cat: "Civil / Structural", sub: "Masonry", desc: '8" thick solid block masonry in cement sand mortar 1:6', unit: "Cft", M: [{qty: 1, rate: 300}], L: [{qty: 1, rate: 100}], P: [], wast: 0, acc: 0, trans: 0, oh: 0, prof: 0},
+      {code: "FIN-PLS-001", cat: "Finishing", sub: "Plaster", desc: 'Cement sand plaster 1:4, 1/2" thick on walls', unit: "Sft", M: [{qty: 1, rate: 40}], L: [{qty: 1, rate: 30}], P: [], wast: 0, acc: 0, trans: 0, oh: 0, prof: 0},
+      {code: "FIN-TIL-001", cat: "Finishing", sub: "Flooring", desc: "Porcelain floor tiles 24x24 on screed", unit: "Sft", M: [{qty: 1, rate: 500}], L: [], P: [], wast: 0, acc: 0, trans: 0, oh: 0, prof: 0});
+    localStorage.setItem("SAJ_QSCOST_v1", JSON.stringify(o)); });
+  await page.waitForTimeout(3100);
+  await page.click("#bNewCond"); await wait(200);
+  await page.fill("#cName", '8" Block wall'); await page.dispatchEvent("#cName", "input"); await wait(150);
+  ok((await page.inputValue("#cRa")) === "CIV-MAS-008" && (await page.inputValue("#cBoq")) === "CIV-MAS-008" && /auto-picked/.test(await page.textContent("#cRaInfo")) && /PKR 400\.00 \/ Cft/.test(await page.textContent("#cRaInfo")),
+    'typing "8" Block wall" auto-picks CIV-MAS-008 with its Rate Analysis rate PKR 400.00 / Cft');
+  ok((await page.inputValue("#cType")) === "linear" && (await page.inputValue("#cUnit")) === "cft", "a block wall item in cft is taken off as a Length run in cft (L × H × T)");
+  ok((await page.inputValue("#cT")) === "0.667", 'T filled from the 8" in the name: 0.667 ft');
+  if (process.env.TK_SHOTS) await page.locator(".dlg").screenshot({path: path.join(process.env.TK_SHOTS, "takeoff-boq-picker.png")});
+  ok((await page.locator("#cBoqL .boqr").count()) >= 1 && /suggested/.test(await page.textContent("#cBoqHint")), "the matching BOQ items are listed under the search box");
+  await page.fill("#cBoqQ", "plaster"); await page.dispatchEvent("#cBoqQ", "input"); await wait(100);
+  ok((await page.locator("#cBoqL .boqr").count()) === 1 && /FIN-PLS-001/.test(await page.textContent("#cBoqL")) && /70\.00/.test(await page.textContent("#cBoqL")), "search “plaster” lists FIN-PLS-001 with its rate 70.00");
+  await page.click('#cBoqL [data-boqpick="FIN-PLS-001"]'); await wait(150);
+  ok((await page.inputValue("#cRa")) === "FIN-PLS-001" && (await page.inputValue("#cBoq")) === "FIN-PLS-001" && (await page.inputValue("#cUnit")) === "Sft" && !/auto-picked/.test(await page.textContent("#cRaInfo")), "clicking an item picks it: RA and BOQ codes, unit Sft");
+  await page.fill("#cBoqQ", ""); await page.fill("#cName", "Bedroom flooring"); await page.dispatchEvent("#cName", "input"); await wait(100);
+  ok((await page.inputValue("#cRa")) === "FIN-PLS-001", "an item picked by hand is not replaced when the name changes");
+  await page.fill("#cH", "10"); await page.click("#dlgOk"); await wait(250);
+  ok(await T(() => { const c = zdTakeoff.P.proj.conds.find(x => x.name === "Bedroom flooring"); return c && c.ra === "FIN-PLS-001" && c.boq === "FIN-PLS-001" && c.unit === "Sft"; }), "the condition is created with the BOQ item, and its rate comes from Rate Analysis");
+  ok(await T(() => { const M = zdTakeoff.boqMatches("tiles", "Sft", true); return M.length && M[0].it.code === "FIN-TIL-001"; }) && await T(() => zdTakeoff.boqMatches("zzz qq", "Sft", true).length === 0), "matching: tiles → FIN-TIL-001; nothing in common → no suggestion");
+  await T(() => { const P = zdTakeoff.P.proj; P.conds = P.conds.filter(c => c.name !== "Bedroom flooring"); zdTakeoff.S.cond = "cB"; zdTakeoff.refresh(); });
+
   console.log("bill: material / labour / equipment split");
   await T(() => { zdTakeoff.S.billSplit = true; zdTakeoff.S.billView = true; });
   { const l = await T(() => { const L = zdTakeoff.billLines().find(x => x.c.id === "cS" && x.kind === "cond"); return {rate: L.rate, comp: L.comp, qty: L.qty}; });

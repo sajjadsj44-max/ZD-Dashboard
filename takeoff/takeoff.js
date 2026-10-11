@@ -5091,6 +5091,21 @@ async function defaultsDialog(){
   mutate(() => { if (v.applyC) P.proj.conds.forEach(c => { c.color = v.condColor; c.sw = v.condWidth; }); if (v.applyMk) (P.proj.marks || []).forEach(m => { m.color = m.type === "dimension" ? v.dimColor : m.type === "hilite" ? v.hiliteColor : v.markColor; m.width = m.type === "dimension" ? v.dimWidth : v.markWidth; if (m.type === "dimension") { m.size = v.dimSize; m.arrow = v.dimArrow; m.offset = v.dimOffset; } if (m.type === "hilite") m.opacity = v.hiliteOpacity; }); });
   toast("Professional defaults saved" + (v.applyMk || v.applyC ? " and applied" : ""), 2500);
 }
+/* library items ranked for a name (or a search): words and sizes in common with the item's code, description and category,
+   a little extra for the same unit; sug: suggestions from a name (weaker matches dropped). [{it, p (raPrice), score 0..1}] */
+const boqWords = t => String(t || "").toLowerCase().replace(/(\d+(?:\.\d+)?)\s*(?:"|''|in\b|inch)/g, " $1in ").replace(/[^a-z0-9.]+/g, " ").split(" ").filter(w => w.length > 1 || /\d/.test(w));
+const BOQ_SYN = {rcc: ["concrete", "reinforced"], pcc: ["concrete", "plain"], plaster: ["plaster", "render"], block: ["block", "blockwork"], brick: ["brick", "brickwork"], tile: ["tile", "tiles", "tiling"], paint: ["paint", "painting", "emulsion"], slab: ["slab"]};
+function boqMatches(q, unit, sug){
+  const L = raLib(); if (!L.o) return [];
+  const W = [...new Set(boqWords(q))]; if (!W.length) return sug ? [] : [...L.items.values()].map(it => ({it, p: raPrice(it.code || it.id), score: 0}));
+  const out = [];
+  L.items.forEach(it => { const hay = " " + boqWords([it.code, it.id, it.desc, it.sub, it.cat, it.qs].join(" ")).join(" ") + " ";
+    let hit = 0; W.forEach(w => { if (hay.includes(" " + w + " ") || (w.length > 3 && hay.includes(" " + w)) || (BOQ_SYN[w] || []).some(x => hay.includes(" " + x))) hit++; });
+    if (!hit) return; const score = hit / W.length + (unit && normU(it.unit) === normU(unit) ? 0.1 : 0);
+    if (sug && score < 0.5) return; out.push({it, score}); });
+  out.sort((a, b) => b.score - a.score || String(a.it.code).localeCompare(String(b.it.code), undefined, {numeric: true}));
+  return out.slice(0, 60).map(o => Object.assign(o, {p: raPrice(o.it.code || o.it.id)}));
+}
 async function editCond(c){
   const isNew = !c, used = c && P.proj.items.some(i => i.cond === c.id);
   const dflt = toolDefaults();
@@ -5105,8 +5120,10 @@ async function editCond(c){
      <div class="fg"><label>Faces</label><input type="number" id="cF" min="1" max="2" step="1" value="${+d.faces || 1}"></div>
      <div class="fg"><label>Deduct openings / voids over</label><input type="text" id="cD" value="${f2(+d.dedMin || 0)}"></div>
      <div class="fg w2"><label>Group (folder in the conditions list, e.g. Exterior working)</label><input type="text" id="cGrp" list="dlGrp" value="${esc(d.group || "")}" placeholder="none" autocomplete="off"><datalist id="dlGrp">${[...new Set(P.proj.conds.map(x => x.group).filter(Boolean))].map(g => `<option value="${esc(g)}">`).join("")}</datalist></div>
+     <div class="fg w2 boqpk"><label>BOQ item — from the Cost Control rate library <span class="small" id="cBoqHint"></span></label>
+       <input type="search" id="cBoqQ" placeholder="Search code or description — e.g. block 8, plaster, RCC slab" autocomplete="off"><div class="boql" id="cBoqL"></div></div>
      <div class="fg"><label>BOQ / WBS code</label><input type="text" id="cBoq" value="${esc(d.boq || "")}" placeholder="e.g. CW-01-009"></div>
-     <div class="fg"><label>Rate Analysis code</label><input type="text" id="cRa" value="${esc(d.ra || "")}" list="dlRa" placeholder="e.g. CIV-MAS-001" autocomplete="off"><datalist id="dlRa">${raLib().o ? [...raLib().items.values()].map(i => `<option value="${esc(i.code || i.id)}">${esc((i.qs || i.sub || "") + " — " + String(i.desc || "").slice(0, 60) + " (" + i.unit + ")")}</option>`).join("") : ""}</datalist></div>
+     <div class="fg"><label>Rate Analysis code</label><input type="text" id="cRa" value="${esc(d.ra || "")}" placeholder="e.g. CIV-MAS-001" autocomplete="off"></div>
      <div class="fg w2 small" id="cRaInfo"></div>
      <div class="fg cntonly"><label>Count symbol</label><select id="cSym">${Object.entries(SYMS).map(([k2, v2]) => `<option value="${k2}"${(d.sym || "circle") === k2 ? " selected" : ""}>${v2}</option>`).join("")}</select></div>
      <div class="fg cntonly"><label>Caption</label><select id="cCap"><option value="seq"${(d.cap || "seq") === "seq" ? " selected" : ""}>Number 1, 2, 3…</option><option value="name"${d.cap === "name" ? " selected" : ""}>Condition name</option><option value="text"${d.cap === "text" ? " selected" : ""}>Custom label</option><option value="none"${d.cap === "none" ? " selected" : ""}>None</option></select></div>
@@ -5124,10 +5141,39 @@ async function editCond(c){
     return {name, type, unit, h: H || "", t: T || "", faces: Math.max(1, Math.min(2, +$("cF").value || 1)), dedMin: Math.max(0, parseFloat($("cD").value) || 0), color: $("cC").value,
       sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value, group: $("cGrp").value.trim().slice(0, 60), boq: $("cBoq").value.trim(), ra: $("cRa").value.trim().toUpperCase()};
   }, "cName");
+  const pk = {auto: false, boqAuto: false, nameAuto: false};
   const raInfo = () => { const code = $("cRa").value.trim(); if (!code) { $("cRaInfo").innerHTML = raLib().o ? "Link a Rate Analysis item to take its built-up rate (or type the rate in the bill’s Assembly)." : "Rate Analysis library not found in this browser — open SAJ QSCOST → Rate Analysis on this site once to link codes."; return; }
     const r = rateOf({ra: code.toUpperCase()}, $("cUnit").value), p = raPrice(code);
-    $("cRaInfo").innerHTML = r.na ? `<span style="color:var(--red)">${esc(r.na)}</span>` : `<b>${esc(p.code)}</b> — ${esc(String(p.desc).slice(0, 110))} · <b>PKR ${f2(r.rate)} / ${esc(p.unit)}</b>${r.assumed ? ` · <span style="color:var(--amber)">${r.assumed} assumed row(s)</span>` : ""}`; };
-  $("cRa").addEventListener("input", raInfo); $("cUnit").addEventListener("change", raInfo); raInfo();
+    $("cRaInfo").innerHTML = "<div>" + (pk.auto ? '<span class="tag a" title="Picked by itself from the name — click another item to change, or clear the RA code">auto-picked</span> ' : "") + (r.na ? `<span style="color:var(--red)">${esc(r.na)}</span>` : `<b>${esc(p.code)}</b> — ${esc(String(p.desc).slice(0, 110))} · <b>PKR ${f2(r.rate)} / ${esc(p.unit)}</b> — rate taken from Rate Analysis${r.assumed ? ` · <span style="color:var(--amber)">${r.assumed} assumed row(s)</span>` : ""}`) + "</div>"; };
+  $("cRa").addEventListener("input", () => { pk.auto = false; raInfo(); pkDraw(); }); $("cUnit").addEventListener("change", () => { raInfo(); pkDraw(); }); raInfo();
+  /* the BOQ item picker: library items ranked by the name typed (or filtered by the search), with their built-up rate; a click
+     fills the RA code (so the rate follows it), the BOQ code if empty, the name if empty, and a fitting unit. A new condition
+     takes the best match by itself when it is a clear one — marked auto-picked, and dropped again if the name changes away. */
+  const pkUnit = it => { const u = normU(it.unit); return u === "ft" ? ["linear", "ft"] : u === "nos" ? ["count", "Nos"] : u === "sft" ? [$("cType").value === "linear" ? "linear" : "area", "Sft"] : u === "cft" ? [/wall|block|brick|masonry|partition/i.test([it.desc, it.sub, $("cName").value].join(" ")) ? "linear" : $("cType").value === "count" ? "area" : $("cType").value, "cft"] : null; };   // walls are taken off as runs (L × H × T)
+  const pkFill = (code, auto) => { const L = raLib(), it = L.items.get(String(code).toUpperCase()); if (!it) return;
+    $("cRa").value = it.code || it.id; pk.auto = !!auto;
+    if (!$("cBoq").value.trim() || pk.boqAuto) { $("cBoq").value = it.code || it.id; pk.boqAuto = true; }
+    if (!$("cName").value.trim()) { $("cName").value = String(it.desc || "").slice(0, 80); pk.nameAuto = true; }
+    const tu = pkUnit(it); if (tu && !used) { if ($("cType").value !== tu[0]) { $("cType").value = tu[0]; $("cType").dispatchEvent(new Event("change", {bubbles: true})); }
+      $("cUnit").innerHTML = UNITS[tu[0]].map(u => `<option${u === tu[1] ? " selected" : ""}>${u}</option>`).join("");
+      if (tu[1] === "cft" && !$("cT").value.trim()) { const ti = matNameIn({name: $("cName").value}) || matNameIn({name: it.desc}); if (ti) $("cT").value = f3(ti / 12); } }   // 8" in the name → T 0.667
+    raInfo(); pkDraw(); };
+  const pkDraw = () => { const L = raLib(), el = $("cBoqL"); if (!el) return;
+    if (!L.o) { el.innerHTML = '<div class="small" style="padding:6px">Rate library not in this browser — open SAJ QSCOST → Rate Analysis on this site once; then BOQ items and their rates are listed here.</div>'; $("cBoqHint").textContent = ""; return; }
+    const q = $("cBoqQ").value.trim(), list = boqMatches(q || $("cName").value, $("cUnit").value, !q), cur = $("cRa").value.trim().toUpperCase();
+    $("cBoqHint").textContent = q ? list.length + " found" : list.length ? "suggested from the name" : "type a name or search";
+    el.innerHTML = list.slice(0, 40).map(o => { const r = o.p.err ? null : o.p, ok = r && !r.gaps, same = normU(o.it.unit) === normU($("cUnit").value);
+      return `<div class="boqr${String(o.it.code || o.it.id).toUpperCase() === cur ? " on" : ""}" data-boqpick="${esc(o.it.code || o.it.id)}" title="${esc(o.it.desc || "")}"><b>${esc(o.it.code || o.it.id)}</b><span class="bd">${esc(String(o.it.desc || "").slice(0, 90))}</span><span class="bu${same ? "" : " x"}">${esc(o.it.unit || "")}</span><span class="br">${ok ? f2(r.rate) : '<i>no rate</i>'}</span></div>`; }).join("")
+      || '<div class="small" style="padding:6px">No library item matches — type the BOQ code and rate yourself, or add the item in Rate Analysis.</div>'; };
+  $("cBoqL").addEventListener("click", e => { const r = e.target.closest("[data-boqpick]"); if (r) pkFill(r.dataset.boqpick, false); });
+  $("cBoqQ").addEventListener("input", pkDraw);
+  $("cBoq").addEventListener("input", () => { pk.boqAuto = false; });
+  const pkAuto = () => { if (!isNew || (!pk.auto && $("cRa").value.trim())) return pkDraw();   // only a new condition, and never over a code the user chose
+    const m = boqMatches($("cName").value, $("cUnit").value, true)[0];
+    if (m && m.score >= 0.6) pkFill(m.it.code || m.it.id, true); else if (pk.auto) { $("cRa").value = ""; if (pk.boqAuto) $("cBoq").value = ""; pk.auto = false; raInfo(); pkDraw(); } else pkDraw(); };
+  $("cName").addEventListener("input", () => { pk.nameAuto = false; pkAuto(); }); $("cType").addEventListener("change", pkDraw);
+  document.getElementById("cPre") && $("cPre").addEventListener("change", () => setTimeout(pkAuto, 0));
+  pkDraw();
   const showCnt = () => document.querySelectorAll(".dlg .cntonly").forEach(el => { el.style.display = $("cType").value === "count" ? "" : "none"; });
   showCnt(); $("cType").addEventListener("change", showCnt);
   let del = false;
@@ -10917,7 +10963,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {boqMatches, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
