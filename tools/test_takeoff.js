@@ -568,7 +568,9 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
     return zdTakeoff.tagsOf([{s: "D", x: 700, y: 200, w: 4, h: 5, r}, {s: "2", x: 700 + 4.5 * c, y: 200 + 4.5 * s, w: 4, h: 5, r}]).plan.D2.map(p => Math.hypot(p[0] - e[0], p[1] - e[1])); });
   ok(turned.length === 1 && turned[0] < 0.01, "a turned two-piece tag's marker sits at its middle, turned with it (" + turned.map(v => v.toFixed(3)) + " pt off)");
   await T(() => { const S = zdTakeoff.S; window.__old3 = S.texts[S.key]; S.texts[S.key] = [{s: "D2", x: 600, y: 300, w: 8, h: 6}, {s: "D2", x: 700, y: 330, w: 8, h: 6}, {s: "D2", x: 650, y: 400, w: 8, h: 6}, {s: "D2'", x: 600, y: 450, w: 10, h: 6}, {s: "D2'", x: 700, y: 480, w: 10, h: 6}]; });
-  const c1 = await T(() => zdTakeoff.agentCount("d2")), c2 = await T(() => zdTakeoff.agentCmd("count D2 and D2'"));
+  const c1 = await T(() => zdTakeoff.agentCount("d2")), c2p = T(() => zdTakeoff.agentCmd("count D2 and D2'"));   // a typed command asks where first: the whole page
+  await page.waitForFunction(() => /Where —/.test((document.querySelector(".dlg") || {}).textContent || "") && document.getElementById("dlgBack").classList.contains("on"), null, {timeout: 5000});
+  await page.check('input[name="arW"][value="all"]'); await page.click("#dlgOk"); const c2 = await c2p;
   ok(c1 && c1.counts && c1.counts.D2 === 3 && !c1.counts["D2'"] && c1.others && c1.others["D2'"] === 2 && /Not in this count: D2' 2 Nos/.test(await page.innerText("#aiLog")), "count D2 → 3 Nos; D2' is another mark (its own schedule size): not counted, but said (D2' 2 Nos) → " + JSON.stringify(c1));
   ok(c2 && c2.counts && c2.counts.D2 === 3 && c2.counts["D2'"] === 2, "count D2 and D2' → both marks counted → " + JSON.stringify(c2 && c2.counts));
   await T(() => { zdTakeoff.S.texts[zdTakeoff.S.key] = window.__old3; });

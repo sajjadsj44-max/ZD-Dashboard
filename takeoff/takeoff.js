@@ -317,7 +317,7 @@ function mutate(fn, label){
 /* the shape being drawn keeps its own history in steps: a click is one step, an arc (many points) is one step, so
    Ctrl+Z / Backspace take back the last click or the whole arc and Ctrl+Y puts it back. With nothing being drawn,
    Ctrl+Z / Ctrl+Y step through the project history. */
-const DRAFT_TOOLS = ["draw", "ded", "measure", "fence", "rect", "open", "cal", "circle", "vp", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref",
+const DRAFT_TOOLS = ["draw", "ded", "measure", "fence", "area", "rect", "open", "cal", "circle", "vp", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref",
   "mk_polyline", "mk_polygon", "mk_line", "mk_box", "mk_ellipse", "mk_link", "mk_redact", "mk_erase", "mk_callout", "mk_text", "mk_stamp", "mk_image"];
 function draftPush(pts, arc){
   if (!S.draftSteps || S.draftSteps.reduce((a, n) => a + n, 0) !== S.draft.length) S.draftSteps = S.draft.map(() => 1);
@@ -2460,6 +2460,7 @@ function setTool(t){
   if (t === "open" && c && !(c.type === "linear")) { toast("Openings are deducted from a wall (length) condition"); t = "draw"; }
   if (t === "ded" && c && c.type === "count") { toast("Counts have no deductions — select a point and press Delete"); t = "draw"; }
   if (t === "stamp" && !S.clip) { toast("Copy something first (Ctrl+C) — then click each place for a copy"); t = "select"; }
+  if (t !== "area" && S.areaWait) { const w = S.areaWait; S.areaWait = null; w(false); }   // leaving the box tool cancels the area pick
   if (t !== "auto") S.pickWall = false;
   if (t !== "open") S.openMark = null;
   if (t !== "draw") S.resume = null;
@@ -2494,6 +2495,7 @@ function hint(){
     lasso: "Lasso: drag round the objects to select (touching counts) · Shift adds to the selection.", pan: "Drag to pan; scroll to zoom.",
     draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." + drawing : c.type === "linear" ? (S.resume ? "Continuing the run — click on; Enter, double-click or right-click to finish." : "Click along the run; Enter, double-click or right-click to finish.") + drawing : "Click each item to count it; Esc when done.",
     fence: "Draw a line across the opening where Auto area leaks (click points; double-click, right-click or Enter to finish). It counts as a wall for Auto area only.", vsearch: "Box one symbol (two corners) — every matching symbol is counted.", note: "Click where the note goes, then type it.", cloud: "Click two opposite corners of the area to cloud.", arrow: "Click the tail, then the head of the arrow.", hilite: "Click two opposite corners to highlight.",
+    area: "Box the takeoff area: click two opposite corners around the part of the drawing to take off. Esc cancels.",
     rect: "Click two opposite corners — or one corner, then type L x W (e.g. 12 x 14) and Enter.", circle: "Click the centre, then a point on the edge.", vp: "Click two opposite corners of the detail drawn at another scale.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.", ded: (c && c.type === "area" ? "Draw the void / cut-out to deduct; Enter to close." : "Draw the length to deduct; Enter to finish.") + drawing,
     open: schOf(S.openMark) ? "Placing " + schOf(S.openMark).mark + " (" + f3(schOf(S.openMark).w) + " × " + f3(schOf(S.openMark).h) + ") — click both sides of each opening. Esc stops." : "Click both sides of the opening, then enter its height or pick its schedule mark.",
     typref: S.typ ? (S.key === S.typ.src ? "Typical copy: click reference point " + (S.typ.a.length + 1) + " of 2 on this (source) sheet." : "Typical copy: click the same reference point " + (S.typ.b.length + 1) + " of 2 on this sheet.") : "", measure: "Click points; double-click, right-click or Enter ends a measurement (it stays on screen). Esc clears. Nothing is saved." + drawing,
@@ -2586,6 +2588,7 @@ function onDown(e){
   }
   if (S.tool === "open" || S.tool === "cal" || S.tool === "circle" || S.tool === "vp") { draftPush([p]); if (S.draft.length === 2) finish(S.draft.slice()); draftBtns(); draw(); }
   if (S.tool === "note") return addMark("note", [p]);
+  if (S.tool === "area") { draftPush([toBase(sp[0], sp[1])]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); areaBoxed([Math.min(d[0][0], d[1][0]), Math.min(d[0][1], d[1][1]), Math.max(d[0][0], d[1][0]), Math.max(d[0][1], d[1][1])]); } return; }
   if (S.tool === "vsearch") { draftPush([toBase(sp[0], sp[1])]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); findSimilar([Math.min(d[0][0], d[1][0]), Math.min(d[0][1], d[1][1]), Math.max(d[0][0], d[1][0]), Math.max(d[0][1], d[1][1])]); } draftBtns(); draw(); return; }
   if (S.tool === "cloud" || S.tool === "arrow" || S.tool === "dimension" || S.tool === "hilite") { draftPush([p]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); addMark(S.tool, d); } draftBtns(); draw(); }
 }
@@ -3093,6 +3096,9 @@ function drawNow(){
       else h.push(`<${c && c.type === "area" || it.shape === "circle" ? "polygon" : "polyline"} points="${ptsS(Q)}" fill="${c && c.type === "area" ? "rgba(123,92,224,.10)" : "none"}" stroke="#7b5ce0" stroke-width="2" stroke-dasharray="7 4"/>`); });
     (S.key === T.src ? T.a : T.b).forEach((p, i) => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="9" fill="rgba(255,45,85,.15)" stroke="#ff2d55" stroke-width="2"/><text x="${(q[0] + 12).toFixed(1)}" y="${(q[1] - 10).toFixed(1)}" font-size="13" font-weight="700" fill="#ff2d55" stroke="#fff" stroke-width="3" paint-order="stroke">${i + 1}</text>`); });
   }
+  if (S.tool === "area" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(255,122,0,.07)" stroke="#ff7a00" stroke-width="2" stroke-dasharray="8 4"/>`); }
+  { const ar = areaOf(); if (ar && S.tool !== "area") { const a = toScr([ar[0], ar[1]]), b = toScr([ar[2], ar[3]]), x = Math.min(a[0], b[0]), y = Math.min(a[1], b[1]);
+    dyn.push(`<rect x="${x}" y="${y}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="none" stroke="#ff7a00" stroke-width="2" stroke-dasharray="8 4" pointer-events="none"/><text x="${x + 4}" y="${y - 6}" font-size="12" font-weight="700" fill="#ff7a00" stroke="#fff" stroke-width="3" paint-order="stroke" pointer-events="none">Takeoff area</text>`); } }
   if (S.tool === "vsearch" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(42,120,214,.08)" stroke="#2a78d6" stroke-width="1.5" stroke-dasharray="4 3"/>`); }
   if (mkIsTool(S.tool)) dyn.push(mkDraftSvg());
   if (S.tool === "stamp" && S.clip) dyn.push(stampGhostSvg());
@@ -4002,6 +4008,72 @@ function matchInk(I, W, H, T, tw, th, thr){
   }
   return out;
 }
+/* ------------------------------------------------------------------ takeoff area
+   Before the takeoff agent, auto area of every room, counting tags or Find similar runs, it asks where: a part of the page
+   boxed now (or the box already drawn) or the whole page. The box stays on the page (dashed orange) until the whole page is
+   chosen; only what is found inside it is kept — rooms and tags by their position, wall runs cut at its edge. */
+function areaOf(key){ const a = S.area; return a && a.key === (key || S.key) ? a.r : null; }
+const inArea = (r, p) => p[0] >= r[0] - 1e-6 && p[0] <= r[2] + 1e-6 && p[1] >= r[1] - 1e-6 && p[1] <= r[3] + 1e-6;
+function areaBoxed(r){ if (r[2] - r[0] < 2 || r[3] - r[1] < 2) return toast("Box a larger area — click two opposite corners", 3000);
+  S.area = {key: S.key, r}; const w = S.areaWait; S.areaWait = null; setTool(S.areaPrev || "select"); S.areaPrev = null; draw(); if (w) w(r); }
+function boxArea(){ return new Promise(res => { if (S.areaWait) S.areaWait(false); S.areaPrev = S.tool === "area" ? "select" : S.tool; setTool("area"); S.areaWait = res; toast("Box the takeoff area: click two opposite corners (Esc cancels)", 6000); }); }
+/* where to work -> a box [x0,y0,x1,y1] in page points, null for the whole page, false when cancelled */
+async function askArea(what){
+  if (!S.page) return null;
+  let v; const cur = areaOf(), opt = (v, t, on) => `<label class="pk" style="display:block;margin:4px 0"><input type="radio" name="arW" value="${v}"${on ? " checked" : ""}> ${t}</label>`;
+  v = await ask("Where — " + what, `<p>Take off a part of this drawing, or all of it?</p><div style="margin-top:8px">${cur ? opt("cur", "<b>The takeoff area already boxed</b> <span class=\"small\">(dashed orange)</span>", true) : ""}${opt("box", "<b>Box an area now</b> — click two opposite corners on the drawing", !cur)}${opt("all", "The whole page", false)}</div>
+    <p class="small" style="margin-top:8px">Only what is found inside the box is kept: rooms and tags by their place, wall runs cut at its edge. The box stays shown until you choose the whole page.</p>`, "Next", () => ({w: (document.querySelector('input[name="arW"]:checked') || {}).value || "all"}));   // (a string back would read as an error)
+  if (!v) return false;
+  v = v.w;
+  if (v === "all") { if (S.area && S.area.key === S.key) { S.area = null; draw(); } return null; }
+  if (v === "cur" && cur) return cur;
+  return boxArea();
+}
+function areaSnap(){ const m = new Map(); P.proj.items.forEach(i => m.set(i.id, i.pts.length)); return m; }
+function clipSeg(a, b, r){   // Liang–Barsky: the part of a→b inside r, or null
+  let t0 = 0, t1 = 1; const dx = b[0] - a[0], dy = b[1] - a[1];
+  for (const [p, q] of [[-dx, a[0] - r[0]], [dx, r[2] - a[0]], [-dy, a[1] - r[1]], [dy, r[3] - a[1]]]) {
+    if (Math.abs(p) < 1e-12) { if (q < 0) return null; continue; }
+    const t = q / p; if (p < 0) { if (t > t1) return null; if (t > t0) t0 = t; } else { if (t < t0) return null; if (t < t1) t1 = t; } }
+  return t1 - t0 < 1e-9 ? null : [[a[0] + t0 * dx, a[1] + t0 * dy], [a[0] + t1 * dx, a[1] + t1 * dy]];
+}
+function clipRun(pts, r){   // a polyline cut to r -> its pieces inside
+  const out = []; let cur = null;
+  for (let i = 1; i < pts.length; i++) { const s2 = clipSeg(pts[i - 1], pts[i], r);
+    if (!s2) { cur = null; continue; }
+    if (cur && dist(cur[cur.length - 1], s2[0]) < 1e-6) cur.push(s2[1]); else { cur = [s2[0], s2[1]]; out.push(cur); }
+    if (dist(s2[1], pts[i]) > 1e-6) cur = null; }
+  return out.filter(q => q.length >= 2 && polyLen(q) > 0.5);
+}
+/* keep only what a run added inside r on page key (snap: item id -> its point count before) -> how many were left out */
+function areaClip(snap, r, key){
+  let left = 0; const out = [];
+  P.proj.items.forEach(it => {
+    if (keyOf(it.file, it.page) !== key) { out.push(it); return; }
+    const was = snap.get(it.id), c = cond(it.cond);
+    if (!c) { out.push(it); return; }
+    if (was !== undefined) {   // there before: only count points it gained are checked
+      if (c.type === "count" && it.pts.length > was) { const add = it.pts.slice(was), keep = add.filter(p => inArea(r, p)); left += add.length - keep.length; it.pts = it.pts.slice(0, was).concat(keep); }
+      out.push(it); return; }
+    if (c.type === "count") { const keep = it.pts.filter(p => inArea(r, p)); left += it.pts.length - keep.length; if (keep.length) { it.pts = keep; out.push(it); } return; }
+    if (c.type === "linear" && it.kind !== "open" && it.shape !== "circle") {
+      if (it.pts.every(p => inArea(r, p))) { out.push(it); return; }
+      const pcs = clipRun(it.pts, r); if (!pcs.length) { left++; return; }
+      pcs.forEach((q, n) => { const o = n ? Object.assign(JSON.parse(JSON.stringify(it)), {id: uid("I")}) : it; o.pts = q; delete o.arcs; out.push(o); }); return; }
+    const P0 = itemPoly(it), ctr = P0.length ? [P0.reduce((a, p) => a + p[0], 0) / P0.length, P0.reduce((a, p) => a + p[1], 0) / P0.length] : it.pts[0];
+    if (ctr && inArea(r, ctr)) out.push(it); else left++;
+  });
+  P.proj.items = out; return left;
+}
+/* ask where, then run fn; with a box, everything fn adds on this page outside it is taken out again — all one undo step */
+async function areaThen(what, fn){
+  const r = await askArea(what); if (r === false) return {error: "cancelled"};
+  if (!r) return fn();
+  const key = S.key, snap = areaSnap(); let res, left = 0;
+  await asOneStep(what, async () => { res = await fn(); if (keyOf(S.fileId, S.pageNo) === key) left = areaClip(snap, r, key); });
+  refresh(); if (left) toast(left + " found outside the takeoff area — left out", 4000);
+  return res;
+}
 /* Find similar: the boxed symbol is looked for on this page, every page of this PDF, or every PDF of the project; what
    is found is shown as a list of small pictures, weakest match first, to tick or untick — only the ticked ones are counted */
 async function findSimilar(rect){
@@ -4009,11 +4081,15 @@ async function findSimilar(rect){
   const c = cond(S.cond);
   const nPdf = P.proj.files.length;
   const v = await ask("Find similar — " + esc(c.name), `<p>Every symbol that looks like the one you boxed is found and shown to you first — untick any wrong ones, and only the ticked ones are counted into <b>${esc(c.name)}</b>.</p>
-    <div class="grid" style="margin-top:10px"><div class="fg"><label>Search</label><select id="vsWhere"><option value="page">This page</option><option value="pdf">Every page of this PDF</option>${nPdf > 1 ? `<option value="all">Every PDF of the project (${nPdf})</option>` : ""}</select></div>
+    <div class="grid" style="margin-top:10px"><div class="fg"><label>Search</label><select id="vsWhere">${areaOf() ? '<option value="cur" selected>Inside the takeoff area (boxed)</option>' : ""}<option value="area"${areaOf() ? "" : " selected"}>An area of this page — box it next</option><option value="page">This whole page</option><option value="pdf">Every page of this PDF</option>${nPdf > 1 ? `<option value="all">Every PDF of the project (${nPdf})</option>` : ""}</select></div>
     <div class="fg"><label>Match</label><select id="vsThr"><option value="0.9">Strict (90%)</option><option value="0.82" selected>Normal (82%)</option><option value="0.72">Loose (72%)</option></select></div>
     <div class="fg w2"><label><input type="checkbox" id="vsRot" style="width:auto" checked> Also find it turned 90°, 180°, 270°</label></div></div>`, "Find",
     () => ({where: $("vsWhere").value, thr: +$("vsThr").value, rot: $("vsRot").checked}));
   if (!v) { setTool("count"); return; }
+  let area = null;
+  if (v.where === "cur") area = areaOf();
+  else if (v.where === "area") { area = await boxArea(); if (!area) { setTool("count"); return toast("Search cancelled"); } }
+  if (area) v.where = "page";
   const longSym = Math.max(rect[2] - rect[0], rect[3] - rect[1]); if (longSym < 1) return;
   const sc = Math.max(0.5, Math.min(6, 30 / longSym, 7000 / Math.max(S.base.width, S.base.height)));
   busy("Reading the symbol…"); await new Promise(r => setTimeout(r, 20));
@@ -4047,6 +4123,7 @@ async function findSimilar(rect){
       hits.forEach(q => { if (!keep.some(k2 => Math.hypot(k2.x - q.x, k2.y - q.y) < 0.6 * Math.max(k2.r, q.r))) keep.push(q); });
       const it = P.proj.items.find(i => i.cond === c.id && i.file === f.id && i.page === pn && i.kind === "shape"), near = Math.max(4, longSym * 0.5);
       keep.forEach(q => { const pt = [q.x / sc, q.y / sc]; if (it && it.pts.some(p2 => dist(p2, pt) < near)) return;   // already counted
+        if (area && !inArea(area, pt)) return;   // outside the takeoff area
         cands.push({f, pn, pt, F: q.F, img: inkThumb(ink, q.x, q.y, q.r)}); });
     }
   } catch (e) { busy(""); toast("Search failed: " + (e.message || e), 5000); setTool("count"); return; }
@@ -8178,6 +8255,7 @@ function wire(){
     if (e.key === "Escape" && S.typed) { S.typed = ""; draw(); return; }
     if (e.key === "Escape" && S.mkd) { S.mkd = null; draftClear(); draw(); return; }
     if (e.key === "Escape" && S.drag && (S.drag.vertex != null || S.drag.move || S.drag.mh != null)) { cancelDrag(); return; }
+    if (e.key === "Escape" && S.tool === "area") { const pv = S.areaPrev || "select"; S.areaPrev = null; setTool(pv); toast("Takeoff area not boxed — nothing run"); return; }   // (leaving the tool cancels the wait)
     if (e.key === "Escape" && S.tool === "match") { setTool("select"); return; }
     if (e.key === "Escape" && S.tool === "stretch" && S.str && S.str.stage) { S.str = null; hint(); draw(); return; }
     if (e.key === "Escape" && (S.tool === "fillet" || S.tool === "chamfer") && (S.fc.first || S.cedF)) { S.fc.first = null; S.cedF = null; hint(); draw(); return; }
@@ -8870,12 +8948,12 @@ async function agentStep(text){
     if (/measure|area|trace/.test(t) && scope !== "page" && !/apartment|appartment|\bapt\b|unit|flat/.test(t)) {   // rooms on every page: the full takeoff with only its rooms
       const w = t.replace(/\b(measure|auto|area|areas|trace|all|every|each|the|rooms?|of|floor|please|on|in|this|pages?|sheets?|pdfs?|project|drawings?|whole|set)\b/g, " ").replace(/\s+/g, " ").trim();
       return fullTakeoff({scope, rooms: true, filter: w}); }
-    if (/measure|area|trace/.test(t)) { const w = t.replace(/\b(measure|auto|area|areas|trace|all|every|each|the|rooms?|of|floor|please|on|this|page)\b/g, " ").trim(); return agentMeasure(w); }
+    if (/measure|area|trace/.test(t)) { const w = t.replace(/\b(measure|auto|area|areas|trace|all|every|each|the|rooms?|of|floor|please|on|this|page)\b/g, " ").trim(); return areaThen("auto area of the rooms", () => agentMeasure(w)); }
     if (/count|tag/.test(t)) {
       if (/swing/.test(t)) return agentSwings();
       let w = t.replace(/\b(on|in|of|the|this|whole|every|each|all|pages?|sheets?|pdfs?|project|drawings?|set)\b/g, " ").replace(/\b(count|tags?|please|marks?)\b/g, " ").trim();
       if (/\b(doors?|windows?|vent\w*)\b.*\b(and|&|\+)\b/.test(w)) w = "all";   // "count doors and windows": every tag
-      return agentCount(w, scope); }
+      return scope === "page" ? areaThen("count tags", () => agentCount(w, scope)) : agentCount(w, scope); }
     let um = /(?:apartment|appartment|apt|unit|flat)\s*(?:no\.?|#)?\s*([0-9]{1,4}[a-z]?)/.exec(t) || /^\s*(?:measure\s+)?([0-9]{2,4}[a-z]?)\s*$/.exec(t);
     if (um) return agentUnit(um[1]);
     if (/apartment|unit|flat/.test(t)) return unitDialog();
@@ -8991,7 +9069,7 @@ async function agentDetails(){
     ${tasks.length ? `<div style="margin-top:8px"><b>Tasks</b> — give one to the agent:</div>` + tasks.map(([id, l2]) => `<div style="display:flex;gap:6px;align-items:center;margin-top:4px"><span style="flex:1">☐ ${esc(l2)}</span><button class="btn sm pri" data-task="${esc(id)}">Do it</button></div>`).join("") : ""}`);
   d.addEventListener("click", e => { const b = e.target.closest("[data-task]"); if (!b) return; const id = b.dataset.task; b.disabled = true; b.textContent = "Done ✓";
     b.parentElement.firstElementChild.textContent = b.parentElement.firstElementChild.textContent.replace("☐", "☑");
-    if (id === "full") fullTakeoffDialog("page"); else if (id === "measure") agentMeasure(""); else if (id === "schedule") agentSchedule(); else if (id.startsWith("count:")) agentCount(id.slice(6).toLowerCase()); });
+    if (id === "full") fullTakeoffDialog("page"); else if (id === "measure") areaThen("auto area of the rooms", () => agentMeasure("")); else if (id === "schedule") agentSchedule(); else if (id.startsWith("count:")) areaThen("count tags", () => agentCount(id.slice(6).toLowerCase())); });
 }
 const sameRoom = (a, b) => !!a && !!b && a.name === b.name && Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;   // one label, whichever list it came from
 async function agentMeasure(filter, only, opt){   // only: these rooms (an apartment), whatever the view; opt.quiet: no lines in the panel (the full takeoff reports)
@@ -9003,9 +9081,12 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
   let rooms = F.rooms.filter(r => !words.length || words.some(w => r.name.toLowerCase().replace(/\s+/g, "").includes(w.replace(/\s+/g, ""))));
   if (!rooms.length && words.length) rooms = F.rooms.filter(r => words.some(w => nameLike(r.name, w)));   // "bedrom", "kitchn": a slip of the keyboard is still the room
   const vr = viewRect(), zoomed = (vr[2] - vr[0]) * (vr[3] - vr[1]) < 0.6 * S.base.width * S.base.height, all = rooms.length;
-  if (only) rooms = only; else if (zoomed) rooms = rooms.filter(r => { const x = r.x + r.w / 2, y = r.y - r.h / 2; return x >= vr[0] && x <= vr[2] && y >= vr[1] && y <= vr[3]; });
-  if (!only && zoomed && all && !rooms.length) { say("err", "No room names in the part on screen — pan to the rooms, or zoom out (Fit) for the whole page."); return {error: "no rooms in the view"}; }
-  if (!only && zoomed && rooms.length < all) say("bot", `Measuring the <b>${rooms.length}</b> rooms on screen (of ${all} on the page) — press <b>Fit</b> first for all of them.`);
+  const ar = !only && areaOf();
+  if (only) rooms = only; else if (ar) rooms = rooms.filter(r => inArea(ar, [r.x + r.w / 2, r.y - r.h / 2])); else if (zoomed) rooms = rooms.filter(r => { const x = r.x + r.w / 2, y = r.y - r.h / 2; return x >= vr[0] && x <= vr[2] && y >= vr[1] && y <= vr[3]; });
+  if (ar && all && !rooms.length) { say("err", "No room names inside the takeoff area — box a larger area, or choose the whole page."); return {error: "no rooms in the takeoff area"}; }
+  if (ar && rooms.length < all) say("bot", `Measuring the <b>${rooms.length}</b> rooms inside the takeoff area (of ${all} on the page).`);
+  if (!only && !ar && zoomed && all && !rooms.length) { say("err", "No room names in the part on screen — pan to the rooms, or zoom out (Fit) for the whole page."); return {error: "no rooms in the view"}; }
+  if (!only && !ar && zoomed && rooms.length < all) say("bot", `Measuring the <b>${rooms.length}</b> rooms on screen (of ${all} on the page) — press <b>Fit</b> first for all of them.`);
   if (!rooms.length) { say("err", F.rooms.length ? "No room name on this page matches “" + esc(filter) + "”." : "I found no room names in this page's text."); return {error: F.rooms.length ? "no room matches " + filter + "; rooms on the page: " + F.rooms.map(r => r.name).join(", ") : "no room names in the page text (scanned?) — use trace_room / draw_area"}; }
   const done = new Set(P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo).map(i => (i.label || "").toLowerCase()));
   const c = aiAreaCond(), got = [], res = []; let ok = 0, chk = 0, same2 = 0;
@@ -9331,8 +9412,8 @@ async function wallsDialog(){
       if (!(T > 0.15 && T < 3)) return "Choose or type the wall thickness"; const H = $("wlH").value.trim() ? parseFt($("wlH").value) : 0, B = parseFt($("wlB").value || "0");
       if (isNaN(H) || isNaN(B)) return "Height and bridge are decimal feet"; return {t: T, cond: $("wlC").value || null, h: H, bridge: B, page: $("wlP").checked}; });
   if (!v) return;
-  busy("Finding walls…"); await new Promise(r => setTimeout(r, 20));
-  const r = wallsAgent(v); busy("");
+  const r = await areaThen("walls", async () => { busy("Finding walls…"); await new Promise(r2 => setTimeout(r2, 20)); try { return wallsAgent(areaOf() ? Object.assign(v, {page: true}) : v); } finally { busy(""); } });   // with a box: the whole page, cut to it
+  if (r.error === "cancelled") return;
   if (r.error) return aiLog("err", esc(r.error));
   aiLog("tool", `<b>${esc(r.condition)}</b>: ${r.runs} run${r.runs > 1 ? "s" : ""}, <b>${f3(r.total_length_ft)} ft</b> centre line${r.unit !== "ft" ? " → see the sheet for " + esc(r.unit) : ""}`);
   aiLog("bot", "Check the runs on the drawing (they are marked AI). Deduct doors and windows with the <b>Opening</b> tool (O)." + (r.needs_height ? " Give the condition its height H (✎) to get cft." : ""));
@@ -9394,7 +9475,9 @@ async function fullTakeoffDialog(scope){
       if (isNaN(H) || isNaN(DH)) return "Heights are in feet, e.g. 10.5 or 10'-6\"";
       if (o.fin && !(H > 0)) return "Give the room height H for the finishes (or untick Finishes)";
       return Object.assign(o, {H, DH}); });
-  if (v) return fullTakeoff(v);
+  if (!v) return;
+  if (v.scope !== "page") return fullTakeoff(v);
+  return areaThen("full takeoff", () => fullTakeoff(Object.assign(v, {area: areaOf()})));
 }
 async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, filter} -> {pages: [one report per page], ms}
   if (!P.proj || !S.page) return {error: "no page open"};
@@ -9413,7 +9496,7 @@ async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, 
       if (scaleDoubt()) { R.skip = "scale doubtful — the written room sizes measure " + scaleDoubt().label + "; settle it on the scale chip"; continue; }
       if (o.rooms) {
         const F = await drawingFacts(S.fileId, S.pageNo), have = P.proj.items.filter(i => onPage(i) && i.kind === "shape" && (cond(i.cond) || {}).type === "area");
-        const want = F.rooms.filter(r => roomWanted(r, words)), todo = want.filter(r => !have.some(i => pointInPoly([r.x + r.w / 2, r.y - r.h / 2], itemPoly(i))));
+        const want = F.rooms.filter(r => roomWanted(r, words)), todo = want.filter(r => !have.some(i => pointInPoly([r.x + r.w / 2, r.y - r.h / 2], itemPoly(i))) && (!o.area || inArea(o.area, [r.x + r.w / 2, r.y - r.h / 2])));
         R.rooms = {named: want.length, had: want.length - todo.length, ok: 0, chk: [], bad: [], sft: 0};
         if (todo.length) {
           if (roomC && cond(roomC)) S.cond = roomC;
@@ -10963,7 +11046,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {boqMatches, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
