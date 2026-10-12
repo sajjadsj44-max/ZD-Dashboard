@@ -10344,13 +10344,14 @@ function facePairs(G, dMin, dMax, minOv, fn){   // every two lines of one direct
   const L = G.L.slice().sort((a, b) => a.o - b.o);
   for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length && L[j].o - L[i].o <= dMax; j++) {
     const d = L[j].o - L[i].o; if (d < dMin) continue;
-    const t0 = Math.max(L[i].t0, L[j].t0), t1 = Math.min(L[i].t1, L[j].t1); if (t1 - t0 >= minOv) fn(d, (L[i].o + L[j].o) / 2, t0, t1);
+    const t0 = Math.max(L[i].t0, L[j].t0), t1 = Math.min(L[i].t1, L[j].t1); if (t1 - t0 >= minOv) fn(d, (L[i].o + L[j].o) / 2, t0, t1, L[i], L[j]);
   }
 }
 function wallLineIds(rect, k){   // the drawing's lines in rect less door swings and leaves (a leaf open against a wall is not a thin wall)
   const g = S.geo[S.key]; if (!g || !g.segs.length) return null;
   const wf = segRoleFilter(g, new Set(["wall"]));   // the PDF's wall layers, when it has them: no furniture, fixtures or hatch
-  const ids = (rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i)).filter(i => !wf || wf(i)), door = doorSymbols(g, ids, k);
+  const off = rect ? null : layerOffIx(g);   // (the whole page: still not the layers switched off — segsIn leaves them out of a box)
+  const ids = (rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i)).filter(i => (!wf || wf(i)) && (!off || !off.has(g.segs[i][7]))), door = doorSymbols(g, ids, k);
   const out = ids.filter(i => !door.has(i)); out.doorLines = door.lines || []; return out;   // (the doorways too: the walls agent gives a doorway between a thin and a thick wall to the thin one)
 }
 function wallThicknesses(rect){   // the wall thicknesses drawn here, most wall length first: [{t ft, len ft}]
@@ -10368,7 +10369,7 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
      a corridor's partition — then the two pieces are separate walls with a room or passage between them */
   const crossed = (g, o, ta, tb, longOnly) => { const u = g.u, n = g.n, hw = 0.4 * T * k, P = (t, oo) => [u[0] * t + n[0] * oo, u[1] * t + n[1] * oo], a = P(ta, o - hw), b = P(tb, o + hw), c2 = P(ta, o + hw), d2 = P(tb, o - hw);
     const xs = [a[0], b[0], c2[0], d2[0]], ys = [a[1], b[1], c2[1], d2[1]];
-    return segsIn(gg, Math.min(...xs) - 1, Math.min(...ys) - 1, Math.max(...xs) + 1, Math.max(...ys) + 1).some(i => { const s2 = gg.segs[i]; if (s2[4] & 9) return false;
+    return segsIn(gg, Math.min(...xs) - 1, Math.min(...ys) - 1, Math.max(...xs) + 1, Math.max(...ys) + 1).some(i => { const s2 = gg.segs[i]; if (s2[4] & 11) return false;   // (not a dashed line: a unit's centre line, a duct's axis, a hidden beam runs through walls)
       const t1 = u[0] * s2[0] + u[1] * s2[1], o1 = n[0] * s2[0] + n[1] * s2[1], t2 = u[0] * s2[2] + u[1] * s2[3], o2 = n[0] * s2[2] + n[1] * s2[3];
       if (Math.min(o1, o2) > o - hw || Math.max(o1, o2) < o + hw) return false;   // must cross the whole band
       if (longOnly && Math.abs(o2 - o1) <= T * k + 0.8 * k) return false;   // (a window: its jambs and mullions cross the band and stop)
@@ -10376,6 +10377,17 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
       if (longOnly) return false;
       // at the gap's end, a line running on well past a face is a column's (or a wider block's) edge, not a jamb's end cap
       return Math.abs(tc - (tc - ta < tb - tc ? ta : tb)) <= 0.1 * k && (Math.min(o1, o2) < o - T * k / 2 - 0.3 * k || Math.max(o1, o2) > o + T * k / 2 + 0.3 * k); }); };
+  /* a wall of another thickness running through this one (a + junction): its faces leave the gap's four corners, two on
+     each side. Not an opening — bridging it would count the crossing square in both walls. (A door's leaf leaves one
+     corner, a jamb's cap crosses the band, a window's frame runs along it). Only a thicker wall: the square is the thicker
+     wall's (a thinner one crossing is bridged, as before; one as thick is cut at the + junction below) */
+  const throughWall = (g, o, ta, tb) => { if (tb - ta <= T * k + tol) return false; const u = g.u, n = g.n, h = T * k / 2, e = 0.1 * k, P = (t, oo) => [u[0] * t + n[0] * oo, u[1] * t + n[1] * oo];
+    const cs = [[ta, -1], [ta, 1], [tb, -1], [tb, 1]], hit = cs.map(() => false), xs = [P(ta, o - h - 1), P(tb, o + h + 1)];
+    segsIn(gg, Math.min(xs[0][0], xs[1][0]) - 2 * k, Math.min(xs[0][1], xs[1][1]) - 2 * k, Math.max(xs[0][0], xs[1][0]) + 2 * k, Math.max(xs[0][1], xs[1][1]) + 2 * k).forEach(i => { const q = gg.segs[i]; if (q[4] & 11) return;
+      const E = [[q[0], q[1]], [q[2], q[3]]].map(p => [u[0] * p[0] + u[1] * p[1], n[0] * p[0] + n[1] * p[1]]);
+      cs.forEach(([t, sg], j) => { if (hit[j]) return; [0, 1].forEach(z => { const A = E[z], B = E[1 - z];
+        if (Math.abs(A[0] - t) <= e && Math.abs(A[1] - (o + sg * h)) <= e && (B[1] - A[1]) * sg >= 0.4 * k && Math.abs(B[0] - A[0]) <= 0.5 * Math.abs(B[1] - A[1])) hit[j] = true; }); }); });
+    return hit.every(Boolean); };
   /* a window (or a glazed screen) drawn in the wall: lines along the wall at both its faces (and its glass between) fill the
      gap — the opening is part of the wall run whatever its length (deducted as an opening), as long as no cross wall runs through it */
   const near = (g, lo, hi, fn) => { if (!g._Lo) { g._Lo = g.L.slice().sort((a, b) => a.o - b.o); g._os = g._Lo.map(l => l.o); }   // the lines of g with lo <= o <= hi
@@ -10400,16 +10412,33 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
   const cornerEnd = (g, o, te, sg) => { const u = g.u, n = g.n, hw = T * k / 2 - tol, far = T * k + tol, P = (t, oo) => [u[0] * t + n[0] * oo, u[1] * t + n[1] * oo];
     const Q = [P(te - sg * 0.1 * k, o - T * k), P(te - sg * 0.1 * k, o + T * k), P(te + sg * far, o - T * k), P(te + sg * far, o + T * k)], xs = Q.map(q => q[0]), ys = Q.map(q => q[1]);
     let e = Infinity;   // the first line across the whole band, square to it, ahead of the end
-    segsIn(gg, Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)).forEach(i => { const s2 = gg.segs[i]; if (s2[4] & 9) return;
+    segsIn(gg, Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)).forEach(i => { const s2 = gg.segs[i]; if (s2[4] & 11) return;
       const t1 = u[0] * s2[0] + u[1] * s2[1], o1 = n[0] * s2[0] + n[1] * s2[1], t2 = u[0] * s2[2] + u[1] * s2[3], o2 = n[0] * s2[2] + n[1] * s2[3];
       if (Math.abs(t2 - t1) > 0.3 * Math.abs(o2 - o1) || Math.min(o1, o2) > o - hw || Math.max(o1, o2) < o + hw) return;
       const d = (t1 + (t2 - t1) * (o - o1) / ((o2 - o1) || 1e-9) - te) * sg; if (d >= -0.05 * k && d < e) e = d; });
     if (!(e > 0.05 * k && e <= far)) return te;
     const a = Math.min(te, te + sg * e) + 0.05 * k, b = Math.max(te, te + sg * e) - 0.05 * k, on = s => g.L.some(l => Math.abs(l.o - (o + s * T * k / 2)) <= tol && l.t0 <= a && l.t1 >= b);
     return on(1) !== on(-1) ? te + sg * e : te; };
+  /* a window at a wall's end — between a wall and a corner, or a cross wall's face — has no wall piece beyond it to be
+     bridged to: on the drawing's window / glazing layers, three or more lines of one length, the outer two this wall's
+     thickness apart (frame at both faces, glass between), in line with a wall of this thickness at an end, are the wall's
+     own run (deducted as an opening like any other window) */
+  const winQ = [], wr = segRoleFilter(gg, new Set(["opening", "glass"]));
+  if (wr) { const off = layerOffIx(gg);
+    gg.segs.forEach((q, i) => { if ((q[4] & 11) || !wr(i) || (off && off.has(q[7]))) return;
+      if (rect && !((q[0] + q[2]) / 2 >= rect[0] && (q[0] + q[2]) / 2 <= rect[2] && (q[1] + q[3]) / 2 >= rect[1] && (q[1] + q[3]) / 2 <= rect[3])) return;
+      if (Math.hypot(q[2] - q[0], q[3] - q[1]) >= 0.8 * k) winQ.push(q); }); }
+  const winRuns = (g, C) => { if (!winQ.length || !C.length) return;
+    const W = winQ.filter(q => Math.abs(g.u[0] * (q[3] - q[1]) - g.u[1] * (q[2] - q[0])) / Math.hypot(q[2] - q[0], q[3] - q[1]) < 0.009).map(q => { const t1 = g.u[0] * q[0] + g.u[1] * q[1], t2 = g.u[0] * q[2] + g.u[1] * q[3];
+      return {o: (g.n[0] * (q[0] + q[2]) + g.n[1] * (q[1] + q[3])) / 2, t0: Math.min(t1, t2), t1: Math.max(t1, t2)}; }).sort((a, b) => a.o - b.o), same = (x, y) => Math.abs(x.t0 - y.t0) <= 0.1 * k && Math.abs(x.t1 - y.t1) <= 0.1 * k;
+    for (let i = 0; i < W.length; i++) for (let j = i + 1; j < W.length && W[j].o - W[i].o <= T * k + tol; j++) {
+      const A = W[i], B = W[j]; if (Math.abs(B.o - A.o - T * k) > tol || !same(A, B)) continue;
+      if (!W.some(M => M.o > A.o + 0.03 * k && M.o < B.o - 0.03 * k && same(M, A))) continue;   // the glass between
+      const o = (A.o + B.o) / 2, t0 = Math.max(A.t0, B.t0), t1 = Math.min(A.t1, B.t1);
+      if (C.some(c => Math.abs(c.o - o) <= 0.12 * k && (Math.abs(c.t1 - t0) <= 0.15 * k || Math.abs(c.t0 - t1) <= 0.15 * k))) C.push({o, t0, t1}); } };
   G.forEach(g => {
     const C = [];   // centre lines of this direction
-    facePairs(g, T * k - tol, T * k + tol, 0.2 * k, (d, o, t0, t1) => {
+    facePairs(g, T * k - tol, T * k + tol, 0.2 * k, (d, o, t0, t1, F1, F2) => {
       // a third line of this direction between the two faces over half their length: not a wall's two faces (a window's
       // glass beside a bed, a cupboard against a wall) — a wall's hollow is empty but for its windows
       // (counted: lines that run on past the pair at both ends — a window's glass lines stop within its wall, and a door's
@@ -10417,16 +10446,26 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
       const iv = []; near(g, o - d / 2 + 0.04 * k, o + d / 2 - 0.04 * k, l => { if (l.o > o - d / 2 + 0.04 * k && l.o < o + d / 2 - 0.04 * k && l.t0 < t0 - 0.5 * k && l.t1 > t1 + 0.5 * k) { const a = Math.max(t0, l.t0), b = Math.min(t1, l.t1); if (b > a) iv.push([a, b]); } });
       iv.sort((a, b) => a[0] - b[0]); let inside = 0, e = -Infinity; iv.forEach(([a, b]) => { if (b > e) { inside += b - Math.max(a, e); e = b; } });
       if (inside > 0.5 * (t1 - t0)) return;
+      // slats — a wardrobe's hangers drawn as thin boxes, its frame drawn double: each of the two "faces" has a twin line
+      // beside it (within 0.12 ft) of the same length. A short wall's face has no such twin
+      if (F1 && t1 - t0 < 2.5 * k) { const twin = F => { let hit = false;
+          near(g, F.o - 0.12 * k, F.o + 0.12 * k, l => { const e = Math.abs(l.o - F.o); if (e > 0.015 * k && e <= 0.12 * k && Math.abs(l.t0 - F.t0) <= 0.12 * k && Math.abs(l.t1 - F.t1) <= 0.12 * k) { hit = true; return false; } });
+          return hit; };
+        if (twin(F1) && twin(F2)) return; }
       // a comb — wardrobe hangers, shelves, stair treads, tile or hatch lines: three or more more lines of this direction
-      // beside the pair (within 1.5 ft, clear of a face's finish line) over most of its length — not a wall's two faces
-      let comb = 0; const len = t1 - t0;
-      near(g, o - 1.5 * k, o + 1.5 * k, l => { const off = Math.abs(l.o - o); if (off <= d / 2 + 0.15 * k) return; if (Math.min(t1, l.t1) - Math.max(t0, l.t0) >= 0.6 * len && ++comb >= 3) return false; });
-      if (comb < 3) C.push({o, t0, t1}); });
+      // beside the pair (within 1.5 ft, clear of a face's finish line) over most of its length — not a wall's two faces.
+      // But face lines running on well past the comb (0.75 ft or more at an end) are a wall's: the pier between two doors,
+      // the wall behind a wardrobe — the hangers stop at the wardrobe's ends, the wall does not
+      let comb = 0, c0 = Infinity, c1 = -Infinity; const len = t1 - t0;
+      near(g, o - 1.5 * k, o + 1.5 * k, l => { const off = Math.abs(l.o - o); if (off <= d / 2 + 0.15 * k) return; if (Math.min(t1, l.t1) - Math.max(t0, l.t0) >= 0.6 * len) { comb++; c0 = Math.min(c0, l.t0); c1 = Math.max(c1, l.t1); } });
+      if (comb >= 3 && !(F1 && [F1, F2].every(F => F.t0 < c0 - 0.75 * k || F.t1 > c1 + 0.75 * k))) return;   // (both faces: a wardrobe's back beside a wall's face stops with the wardrobe)
+      C.push({o, t0, t1}); });
+    winRuns(g, C);
     C.sort((a, b) => a.o - b.o);
     const lines = []; C.forEach(c => { const l = lines[lines.length - 1]; if (l && c.o - l.o <= 0.12 * k) { l.iv.push([c.t0, c.t1]); l.o = (l.o * l.n + c.o) / (l.n + 1); l.n++; } else lines.push({o: c.o, n: 1, iv: [[c.t0, c.t1]]}); });
     lines.forEach(l => {
       l.iv.sort((a, b) => a[0] - b[0]); const m = [];
-      l.iv.forEach(v => { const q = m[m.length - 1]; if (q && (v[0] - q[1] <= 0.1 * k || (v[0] - q[1] <= bridge && !crossed(g, l.o, q[1], v[0])) || (v[0] - q[1] <= 25 * k && windowIn(g, l.o, q[1], v[0])))) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
+      l.iv.forEach(v => { const q = m[m.length - 1]; if (q && (v[0] - q[1] <= 0.1 * k || (v[0] - q[1] <= bridge && !crossed(g, l.o, q[1], v[0]) && !throughWall(g, l.o, q[1], v[0])) || (v[0] - q[1] <= 25 * k && windowIn(g, l.o, q[1], v[0])))) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
       m.forEach(v => { if (v[1] - v[0] < 0.2 * k) return; const short = v[1] - v[0] < 0.6 * k, loose = v[1] - v[0] < 2 * k; if (!short) v = [cornerEnd(g, l.o, v[0], -1), cornerEnd(g, l.o, v[1], 1)];
         runs.push({u: g.u, n: g.n, short, loose, a: [g.u[0] * v[0] + g.n[0] * l.o, g.u[1] * v[0] + g.n[1] * l.o], b: [g.u[0] * v[1] + g.n[0] * l.o, g.u[1] * v[1] + g.n[1] * l.o]}); });
     });
@@ -10457,25 +10496,32 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
       const P = [R.u[0] * ts + R.n[0] * o, R.u[1] * ts + R.n[1] * o]; if (E === R.a) R.a = P; else R.b = P;
       R.short = false; R.loose = false; }); });
   const reach = 0.65 * T * k + 0.05 * k;
+  /* walls meet square or at an angle (a plan's rotated wing, a splayed corner): two runs 25° or more apart can meet; the
+     reach to where their centre lines cross grows as 1 / sin of the angle (an end at the other's face lies further from it) */
+  const sinOf = (A, B) => Math.abs(A.u[0] * B.u[1] - A.u[1] * B.u[0]), SIN = 0.42;
   /* a short piece (under 0.6 ft) is a wall only when it stands square off a longer wall — a nib at a door jamb, the
      return at a corner beside a door: one of its ends at the other's centre line (a T) or at its end (an L). Loose short
      pairs (hatching, ticks, a frame) are dropped. */
-  const attached = A => runs.some(B => { if (B === A || B.short || Math.abs(A.u[0] * B.u[0] + A.u[1] * B.u[1]) > 0.2) return false;
-    const X = segXInf(A.a, A.b, B.a, B.b); return !!X && Math.min(dist(A.a, X), dist(A.b, X)) <= reach && distSeg(X, B.a, B.b) <= reach; });
+  const attached = A => runs.some(B => { const sn = B === A || B.short ? 0 : sinOf(A, B); if (sn < SIN) return false;
+    const X = segXInf(A.a, A.b, B.a, B.b); return !!X && Math.min(dist(A.a, X), dist(A.b, X)) <= reach / sn && distSeg(X, B.a, B.b) <= reach / sn; });
   /* …and a piece under 2 ft must at least meet a wall's face (of any thickness) at an end: a line square to it with a parallel
      line 0.3–1.6 ft off — two hanger strokes in a wardrobe end at its frame, which has no such partner */
-  const atFace = A => [A.a, A.b].some(E => G.some(gp => { if (Math.abs(gp.u[0] * A.u[0] + gp.u[1] * A.u[1]) > 0.2) return false;
+  const atFace = A => [A.a, A.b].some(E => G.some(gp => { if (sinOf(A, gp) < SIN) return false;
     const oE = gp.n[0] * E[0] + gp.n[1] * E[1], tE = gp.u[0] * E[0] + gp.u[1] * E[1]; let hit = false;
     near(gp, oE - reach, oE + reach, l => { if (tE < l.t0 - reach || tE > l.t1 + reach) return;
       near(gp, l.o - 1.6 * k, l.o + 1.6 * k, l2 => { const d = Math.abs(l2.o - l.o); if (d >= 0.3 * k && d <= 1.6 * k && tE >= l2.t0 - reach && tE <= l2.t1 + reach) { hit = true; return false; } });
       if (hit) return false; });
     return hit; }));
-  for (let i = runs.length - 1; i >= 0; i--) if ((runs[i].short && !attached(runs[i])) || (runs[i].loose && !runs[i].short && !attached(runs[i]) && !atFace(runs[i]))) runs.splice(i, 1);
+  /* …and lies the way the plan's walls run: 8 ft or more of longer runs in its direction. Hangers drawn slanting in a
+     wardrobe, a symbol's ticks, are at odd angles; a wall stub follows the walls (of a rotated wing too) */
+  const dirLen = new Map(); runs.forEach(r => { if (!r.loose) dirLen.set(r.u, (dirLen.get(r.u) || 0) + dist(r.a, r.b)); });
+  const onGrid = A => (dirLen.get(A.u) || 0) >= 8 * k;
+  for (let i = runs.length - 1; i >= 0; i--) if ((runs[i].loose && !onGrid(runs[i])) || (runs[i].short && !attached(runs[i])) || (runs[i].loose && !runs[i].short && !attached(runs[i]) && !atFace(runs[i]))) runs.splice(i, 1);
   // L corners: two runs ending within ~T/2 of where their centre lines cross are both taken to that point
   for (let i = 0; i < runs.length; i++) for (let j = i + 1; j < runs.length; j++) {
-    const A = runs[i], B = runs[j]; if (Math.abs(A.u[0] * B.u[0] + A.u[1] * B.u[1]) > 0.2) continue;
-    const X = segXInf(A.a, A.b, B.a, B.b); if (!X) continue;
-    const ea = dist(A.a, X) <= reach ? "a" : dist(A.b, X) <= reach ? "b" : null, eb = dist(B.a, X) <= reach ? "a" : dist(B.b, X) <= reach ? "b" : null;
+    const A = runs[i], B = runs[j], sn = sinOf(A, B); if (sn < SIN) continue;
+    const X = segXInf(A.a, A.b, B.a, B.b); if (!X) continue; const rc = reach / sn;
+    const ea = dist(A.a, X) <= rc ? "a" : dist(A.b, X) <= rc ? "b" : null, eb = dist(B.a, X) <= rc ? "a" : dist(B.b, X) <= rc ? "b" : null;
     if (ea && eb) { A[ea] = X.slice(); B[eb] = X.slice(); }
   }
   /* + junctions: two runs crossing in their middles — the longer goes through, the shorter is cut at its faces, so the
@@ -12185,7 +12231,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
