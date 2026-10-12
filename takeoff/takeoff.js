@@ -4699,7 +4699,13 @@ function cloudPath(a, b, r){   // scalloped rectangle between screen points a an
   const side = (p, q) => { const L = dist(p, q), n = Math.max(1, Math.round(L / (2 * r))), out = []; for (let i = 1; i <= n; i++) { const t = i / n; out.push(`A ${(L / n / 2).toFixed(1)} ${(L / n / 2).toFixed(1)} 0 0 1 ${(p[0] + (q[0] - p[0]) * t).toFixed(1)} ${(p[1] + (q[1] - p[1]) * t).toFixed(1)}`); } return out.join(" "); };
   return `M ${x0} ${y0} ` + side([x0, y0], [x1, y0]) + " " + side([x1, y0], [x1, y1]) + " " + side([x1, y1], [x0, y1]) + " " + side([x0, y1], [x0, y0]) + " Z";
 }
-function markSvg(m, T, z){   // T: base -> screen; z: px per screen unit (1 on screen)
+const MK_NOBLEND = new Set(["link", "attach", "redact", "fence", "legend"]);
+function mkBlend(m){   // Multiply: set on the markup, else the highlights' default
+  if (!m || MK_NOBLEND.has(m.type)) return false;
+  return m.blend ? m.blend === "multiply" : m.type === "hilite" || (m.type === "pen" && !!m.hl);
+}
+function markSvg(m, T, z){ const out = markSvg1(m, T, z); return out && mkBlend(m) ? `<g data-blend="multiply" style="mix-blend-mode:multiply">${out}</g>` : out; }
+function markSvg1(m, T, z){   // T: base -> screen; z: px per screen unit (1 on screen)
   const sel = m.id === S.selMark || S.multi.has(m.id);
   if (sel && m.locked && z === 1) { const q = T(m.pts[0]); return markSvg0(m, T, z) + lockBadge([q[0] - 10, q[1] - 14]); }
   return markSvg0(m, T, z);
@@ -4789,7 +4795,7 @@ const MK_STYLE0 = {
   box: {color: "#d03b3b", width: 2, dash: "solid", fill: "", fillOp: 0.15, hatch: null, op: 1},
   ellipse: {color: "#d03b3b", width: 2, dash: "solid", fill: "", fillOp: 0.15, hatch: null, op: 1},
   pen: {color: "#d03b3b", width: 2, op: 1},
-  hpen: {color: "#ffd400", width: 9, op: 0.4},
+  hpen: {color: "#ffd400", width: 9, op: 0.4, blend: "multiply"},
   stamp: {color: "#1e8e5a", op: 0.92},
   image: {color: "#0b0b0b", width: 0, op: 1},
   link: {color: "#2a78d6"},
@@ -4797,7 +4803,7 @@ const MK_STYLE0 = {
   redact: {fill: "#000000"},
   erase: {fill: "#ffffff"}
 };
-const MK_STYLE_KEYS = ["color", "width", "fill", "fillOp", "fs", "font", "bold", "align", "dash", "a0", "a1", "hatch", "op"];
+const MK_STYLE_KEYS = ["color", "width", "fill", "fillOp", "fs", "font", "bold", "align", "dash", "a0", "a1", "hatch", "op", "blend"];
 function mkClean(o){   // a markup's style fields, checked (a project or Tool Chest file can come from anywhere)
   const r = {}, col = v => typeof v === "string" && HEXCOL.test(v), n = (v, lo, hi) => { v = +v; return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : null; };
   o = o && typeof o === "object" ? o : {};
@@ -4808,6 +4814,7 @@ function mkClean(o){   // a markup's style fields, checked (a project or Tool Ch
   if (o.bold != null) r.bold = !!o.bold;
   if (["left", "center", "right"].indexOf(o.align) >= 0) r.align = o.align;
   if (MK_DASH[o.dash]) r.dash = o.dash;
+  if (o.blend === "multiply" || o.blend === "normal") r.blend = o.blend;
   ["a0", "a1"].forEach(k => { if (MK_ENDS[o[k]]) r[k] = o[k]; });
   if (o.hatch === null) r.hatch = null;
   else if (o.hatch && typeof o.hatch === "object" && HATCHES[o.hatch.p]) { const h = o.hatch; r.hatch = {p: h.p, sp: n(h.sp, 0.5, 500) || 6, lw: n(h.lw, 0.2, 12) || 0.8}; if (h.p === "custom") { r.hatch.ang = n(h.ang, -360, 360) || 0; r.hatch.x = !!h.x; } if (col(h.col)) r.hatch.col = h.col; }
@@ -5220,7 +5227,8 @@ function mkPropsHtml(mk){
     ${strokeT ? fg("Line width", num("width", mk.width == null ? 2 : +mk.width, t === "text" || t === "callout" ? 0 : 1, 24, 0.5)) : t === "pen" && mk.hl ? fg("Width (pt)", num("width", +mk.width || 9, 1, 200, 1)) : ""}
     ${dashT ? fg("Line style", sel("dash", mk.dash || "solid", MK_DASH)) : ""}
     ${nu && t !== "link" && t !== "attach" && t !== "redact" ? fg("Opacity", num("op", mk.op == null ? 1 : +mk.op, 0.05, 1, 0.05)) : ""}
-    ${t === "hilite" ? fg("Opacity", num("opacity", +mk.opacity || .38, 0.05, 1, 0.05)) : ""}</div>`);
+    ${t === "hilite" ? fg("Opacity", num("opacity", +mk.opacity || .38, 0.05, 1, 0.05)) : ""}
+    ${MK_NOBLEND.has(t) ? "" : fg("Blend mode", `<span title="Multiply: the markup darkens what is under it, so the drawing's lines show through (as Bluebeam's highlight)">${sel("blend", mkBlend(mk) ? "multiply" : "normal", {normal: "Normal", multiply: "Multiply — lines show through"})}</span>`)}</div>`);
   if (t === "dimension") rows.push(`<div class="row">${fg("Text size", num("size", +mk.size || 13, 8, 48, 1))}${fg("Arrow size", num("arrow", +mk.arrow || 10, 5, 40, 1))}${fg("Offset", num("offset", +mk.offset || 24, 0, 500, 1))}</div>`);
   if (fillT) rows.push(`<div class="row">${fg("Fill", `<span style="display:flex;gap:6px;align-items:center">${colIn("fill", mk.fill, "#ffffff")}<label style="font-weight:400;white-space:nowrap"><input type="checkbox" data-mprop="nofill" style="width:auto"${mk.fill ? "" : " checked"}> none</label></span>`)}
     ${fg("Fill opacity", num("fillOp", mk.fillOp == null ? 0.15 : +mk.fillOp, 0, 1, 0.05))}
@@ -6012,7 +6020,16 @@ function pageOverlaySvg0(file, page, sc, W, H, legend){
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${h.join("")}</svg>`;
 }
-async function svgOnto(ctx, svg){ const img = new Image(); img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); await img.decode(); ctx.drawImage(img, 0, 0); }
+async function svgImg(ctx, svg, op){ const img = new Image(); img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); await img.decode(); ctx.save(); ctx.globalCompositeOperation = op || "source-over"; ctx.drawImage(img, 0, 0); ctx.restore(); }
+function svgBlendSplit(svg){   // -> [the overlay without its Multiply markups, only those markups] (null when there are none)
+  if (svg.indexOf('data-blend="multiply"') < 0) return null;
+  const doc = new DOMParser().parseFromString(svg, "image/svg+xml"), root = doc.documentElement; if (root.nodeName !== "svg") return null;
+  const ser = new XMLSerializer(), a = root.cloneNode(true), b = root.cloneNode(true);
+  a.querySelectorAll('[data-blend="multiply"]').forEach(g => g.setAttribute("display", "none"));
+  b.setAttribute("visibility", "hidden"); b.querySelectorAll('[data-blend="multiply"]').forEach(g => { g.setAttribute("visibility", "visible"); g.removeAttribute("style"); });
+  return [ser.serializeToString(a), ser.serializeToString(b)];
+}
+async function svgOnto(ctx, svg){ const two = svgBlendSplit(svg); if (!two) return svgImg(ctx, svg); await svgImg(ctx, two[0]); await svgImg(ctx, two[1], "multiply"); }
 async function exportPng(){
   if (!S.page) return;
   busy("Rendering marked-up page…");
@@ -12193,8 +12210,10 @@ async function plotPdf(o){
     const cs = Math.min(200 / 72 * lo.s, 6000 / Math.max(win[2] - win[0], win[3] - win[1])), W = Math.max(1, Math.ceil((win[2] - win[0]) * cs)), H = Math.max(1, Math.ceil((win[3] - win[1]) * cs));
     await mkAssetsFor(f, p); const full = pageOverlaySvg(f, p, cs, Math.ceil(S.base.width * cs), Math.ceil(S.base.height * cs), {legend: "none", stamp: false}), inner = full.replace(/^<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
     const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
-    await svgOnto(cv.getContext("2d"), `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${(win[0] * cs).toFixed(2)} ${(win[1] * cs).toFixed(2)} ${W} ${H}">${inner}</svg>`);
-    page.drawImage(await out.embedPng(await blobBuf(cv, "image/png")), {x: lo.x, y: lo.y, width: lo.pw, height: lo.ph}); cv.width = 0;
+    const svgW = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${(win[0] * cs).toFixed(2)} ${(win[1] * cs).toFixed(2)} ${W} ${H}">${inner}</svg>`, two = svgBlendSplit(svgW);
+    for (const [k, sv] of (two || [svgW]).entries()) { const c2 = cv.getContext("2d"); c2.clearRect(0, 0, W, H); await svgImg(c2, sv);
+      page.drawImage(await out.embedPng(await blobBuf(cv, "image/png")), Object.assign({x: lo.x, y: lo.y, width: lo.pw, height: lo.ph}, k ? {blendMode: Lb.BlendMode.Multiply} : {})); }
+    cv.width = 0;
   }
   const ink = Lb.rgb(0.12, 0.17, 0.23);
   if (o.legend) {   // the conditions measured on this sheet, with their quantities
@@ -12231,7 +12250,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
