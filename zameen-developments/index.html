@@ -8112,25 +8112,76 @@ window.zdCalc={open:showCalc,search:searchAll,calcs:function(){ return allCalcs(
 </script>
 
 <script>
-/* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
-   Back / Forward. Nothing is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password
-   field, so no browser or password manager offers to save or fill it. While locked, the page behind can't be reached by mouse,
-   keyboard or screen reader. */
+/* ZD Dashboard start screen + lock. The page opens on a start screen that picks what to open: the complete Dashboard, the PDF
+   Takeoff, or one module on its own (Payments, Change Management, Calculator) — ?app=all|pay|cm|calc. A module opened on its own
+   shows only that module (the other modules' buttons and screens are hidden). Payments has its own password; everything else
+   shares the dashboards' password.
+   The password is asked every time a page is opened, and again when the browser brings a page back with Back / Forward. Nothing
+   is remembered (no unlock flag in this tab or in the browser), and the field is not a browser password field, so no browser or
+   password manager offers to save or fill it. While locked, the page behind can't be reached by mouse, keyboard or screen reader. */
 (function () {
   try { sessionStorage.removeItem('zd-dashboard-unlocked'); } catch (e) {}   // an unlock remembered by an earlier version: forgotten
+  var APPS = {
+    all:  {pw: 'sa',  name: 'ZD Dashboard'},
+    pay:  {pw: '123', name: 'Payments',          btn: 'tabPAY',  app: 'appPAY',  nav: 'navgroup-pay'},
+    cm:   {pw: 'sa',  name: 'Change Management', btn: 'tabCM',   app: 'appCM',   nav: 'navgroup-cm'},
+    calc: {pw: 'sa',  name: 'Calculator',        btn: 'modCalc', app: 'appCALC', nav: 'navgroup-calc'}
+  };
+  var CARDS = [
+    ['all', 'Dashboard', 'Everything: overview, Change Management, Payments, QS Cost Control, Feasibility, Admin, Calculator', '<rect x="3" y="3" width="7.5" height="9" rx="2"/><rect x="13.5" y="3" width="7.5" height="5.5" rx="2"/><rect x="13.5" y="11.5" width="7.5" height="9.5" rx="2"/><rect x="3" y="15" width="7.5" height="6" rx="2"/>'],
+    ['takeoff', 'PDF Takeoff', 'Measure quantities from PDF and CAD drawings', '<path d="M3.5 3.5v17h17z"/><path d="M7.5 16.5v-4l4 4z"/>'],
+    ['pay', 'Payments', 'Payment dashboard, bill register and payment history only', '<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19"/><path d="M6.5 15h4"/>'],
+    ['cm', 'Change Management', 'RFI &amp; design change register and its analysis only', '<path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11v-1a4 4 0 0 1 4-4h13"/><path d="M7 21.5 3.5 18 7 14.5"/><path d="M20.5 13v1a4 4 0 0 1-4 4h-13"/>'],
+    ['calc', 'Calculator', 'QS calculators, unit converter and section database only', '<rect x="4.5" y="2.5" width="15" height="19" rx="2.5"/><rect x="7.5" y="5.5" width="9" height="4" rx="1"/><path stroke-width="2.6" d="M8.5 13.5h.01M12 13.5h.01M15.5 13.5h.01M8.5 17.5h.01M12 17.5h.01M15.5 17.5h.01"/>']
+  ];
+  var mode = (function () { try { return new URLSearchParams(location.search).get('app'); } catch (e) { return null; } }());
+  if (!APPS[mode]) mode = null;
   var dots = !!(window.CSS && CSS.supports && CSS.supports('-webkit-text-security', 'disc'));
   var style = document.createElement('style');
-  style.textContent = '.zd-locked > :not(#zd-lock){filter:blur(5px);pointer-events:none;user-select:none}.zd-lock{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:20px;background:rgba(15,41,66,.72)}.zd-lock-card{width:min(100%,360px);padding:28px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.25);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a}.zd-lock-card .mark{width:40px;height:40px;border:2px solid #0f2942;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;margin-bottom:16px;color:#0f2942}.zd-lock-card h2{color:#0f2942;font-size:21px;margin:0 0 6px}.zd-lock-card p{color:#6b7d92;margin:0 0 18px}.zd-lock-card label{display:block;color:#0f2942;font-size:12px;font-weight:600;margin-bottom:6px}.zd-lock-card input{width:100%;padding:11px 12px;border:1px solid #dde5ee;border-radius:7px;font:inherit;margin-bottom:12px;box-sizing:border-box;-webkit-text-security:disc}.zd-lock-card button{width:100%;border:0;border-radius:7px;padding:11px;background:#2b7de9;color:#fff;font:inherit;font-weight:700;cursor:pointer}.zd-lock-error{margin-top:10px;color:#b42318;font-size:12px}.zd-lock-note{margin-top:12px;color:#6b7d92;font-size:11.5px}';
+  style.textContent = '.zd-locked > :not(#zd-lock):not(#zd-start){filter:blur(5px);pointer-events:none;user-select:none}.zd-lock{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:20px;background:rgba(15,41,66,.72)}.zd-lock-card{width:min(100%,360px);padding:28px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.25);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a}.zd-lock-card .mark{width:40px;height:40px;border:2px solid #0f2942;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;margin-bottom:16px;color:#0f2942}.zd-lock-card h2{color:#0f2942;font-size:21px;margin:0 0 6px}.zd-lock-card p{color:#6b7d92;margin:0 0 18px}.zd-lock-card label{display:block;color:#0f2942;font-size:12px;font-weight:600;margin-bottom:6px}.zd-lock-card input{width:100%;padding:11px 12px;border:1px solid #dde5ee;border-radius:7px;font:inherit;margin-bottom:12px;box-sizing:border-box;-webkit-text-security:disc}.zd-lock-card button{width:100%;border:0;border-radius:7px;padding:11px;background:#2b7de9;color:#fff;font:inherit;font-weight:700;cursor:pointer}.zd-lock-error{margin-top:10px;color:#b42318;font-size:12px}.zd-lock-note{margin-top:12px;color:#6b7d92;font-size:11.5px}.zd-lock-back{display:inline-block;margin-top:12px;color:#2b7de9;font-size:12.5px;text-decoration:none}.zd-lock-back:hover{text-decoration:underline}'
+    + '.zd-start{position:fixed;inset:0;z-index:99999;overflow:auto;padding:40px 16px;background:linear-gradient(160deg,#0f2942,#17375e 60%,#1d4a7a);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a;box-sizing:border-box}.zd-start-in{max-width:980px;margin:0 auto}.zd-start-hd{display:flex;align-items:center;gap:14px;color:#fff;margin-bottom:28px}.zd-start-hd .mark{width:46px;height:46px;border:2px solid #fff;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;flex:none}.zd-start-hd h1{font-size:24px;margin:0 0 2px;font-weight:700}.zd-start-hd p{margin:0;color:#b9cbe0}.zd-start-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}.zd-start-card{box-sizing:border-box;width:100%;margin:0;justify-self:stretch;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;padding:22px;border:0;border-radius:14px;background:#fff;color:inherit;font:inherit;cursor:pointer;box-shadow:0 10px 30px rgba(0,0,0,.2);transition:transform .12s,box-shadow .12s}.zd-start-card:hover,.zd-start-card:focus-visible{transform:translateY(-2px);box-shadow:0 16px 38px rgba(0,0,0,.3);outline:none}.zd-start-card:focus-visible{box-shadow:0 0 0 3px #7fb3f5,0 16px 38px rgba(0,0,0,.3)}.zd-start-card .ic{width:42px;height:42px;border-radius:10px;background:#e8f0fb;color:#2b7de9;display:flex;align-items:center;justify-content:center}.zd-start-card .ic svg{width:24px;height:24px}.zd-start-card b{font-size:17px;color:#0f2942}.zd-start-card span.d{color:#6b7d92;font-size:13px;line-height:1.45}.zd-start-card.main{grid-column:1/-1;background:#fff}.zd-start-card.main .ic{background:#0f2942;color:#fff}.zd-start-ft{margin-top:26px;color:#b9cbe0;font-size:12px}'
+    + 'body[data-zd-app] .zd-solo-off{display:none!important}.modbtn.zd-home{text-decoration:none}';
   document.head.appendChild(style);
+
+  function cover(el) {   // shows el over the page; returns what to call to take it away again
+    var inert = [];
+    Array.prototype.forEach.call(document.body.children, function (c) { if (!c.inert && c.tagName !== 'SCRIPT') { c.inert = true; inert.push(c); } });
+    document.body.appendChild(el);
+    document.body.classList.add('zd-locked');
+    return function () { el.remove(); document.body.classList.remove('zd-locked'); inert.forEach(function (c) { c.inert = false; }); };
+  }
+
+  function homeUrl() { return location.pathname; }
+
+  /* one module on its own: only its button, sidebar group and screen are left; the rest are hidden for as long as the page is open */
+  function applyMode(m) {
+    var a = APPS[m];
+    document.title = m === 'all' ? 'Zameen Developments — ZD Dashboard' : 'ZD ' + a.name;
+    var side = document.getElementById('mainSidebar'), first = side && side.querySelector('.modbtn');
+    if (first && !document.getElementById('zdHome')) {   // back to the start screen
+      var h = document.createElement('a');
+      h.className = 'modbtn zd-home'; h.id = 'zdHome'; h.href = homeUrl(); h.title = 'Back to the start screen';
+      h.innerHTML = '<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/></svg></span> Start screen';
+      first.parentNode.insertBefore(h, first);
+    }
+    if (m === 'all') return;
+    document.body.setAttribute('data-zd-app', m);
+    var keep = [a.btn, a.app, a.nav, 'zdHome'];
+    ['modExec', 'tabCM', 'tabPAY', 'tabRA', 'tabFEAS', 'modAdmin', 'modCalc', 'modTakeoff', 'globalSearchWrap',
+     'appEXEC', 'appADMIN', 'appCM', 'appPAY', 'appRA', 'appFEAS', 'appCALC'].forEach(function (id) {
+      var e = document.getElementById(id); if (e && keep.indexOf(id) < 0) e.classList.add('zd-solo-off');
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.navgroup'), function (g) { if (g.id !== a.nav) g.classList.add('zd-solo-off'); });
+    var b = document.getElementById(a.btn); if (b) b.click();
+  }
+
   function lockNow() {
-    if (document.getElementById('zd-lock')) return;
-    var lock = document.createElement('div'), secret = '', inert = [];
+    if (document.getElementById('zd-lock') || !mode) return;
+    var a = APPS[mode], lock = document.createElement('div'), secret = '';
     lock.id = 'zd-lock';
     lock.className = 'zd-lock';
-    lock.innerHTML = '<div class="zd-lock-card" role="dialog" aria-modal="true" aria-labelledby="zd-lock-title"><div class="mark">ZD</div><h2 id="zd-lock-title">ZD Dashboard</h2><p>Enter the password to continue.</p><label for="zd-lock-input">Password</label><input id="zd-lock-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"><button type="button">Unlock</button><div class="zd-lock-error" role="alert" hidden>Incorrect password.</div><div class="zd-lock-note">Never saved in this browser &mdash; asked each time a page is opened.</div></div>';
-    Array.prototype.forEach.call(document.body.children, function (el) { if (!el.inert && el.tagName !== 'SCRIPT') { el.inert = true; inert.push(el); } });
-    document.body.appendChild(lock);
-    document.body.classList.add('zd-locked');
+    lock.innerHTML = '<div class="zd-lock-card" role="dialog" aria-modal="true" aria-labelledby="zd-lock-title"><div class="mark">ZD</div><h2 id="zd-lock-title">' + a.name + '</h2><p>Enter the password to continue.</p><label for="zd-lock-input">Password</label><input id="zd-lock-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"><button type="button">Unlock</button><div class="zd-lock-error" role="alert" hidden>Incorrect password.</div><div class="zd-lock-note">Never saved in this browser &mdash; asked each time a page is opened.</div><a class="zd-lock-back" href="' + homeUrl() + '">&larr; Start screen</a></div>';
+    var uncover = cover(lock);
     var input = lock.querySelector('input'), button = lock.querySelector('button'), error = lock.querySelector('.zd-lock-error');
     ['copy', 'cut', 'dragstart'].forEach(function (t) { input.addEventListener(t, function (e) { e.preventDefault(); }); });
     function keep(e) {   // a browser that cannot draw the field as dots: dots are typed and the characters kept aside
@@ -8144,18 +8195,35 @@ window.zdCalc={open:showCalc,search:searchAll,calcs:function(){ return allCalcs(
     input.addEventListener('input', keep);
     input.addEventListener('compositionend', keep);
     function unlock() {
-      var ok = (dots ? input.value : secret) === '123';
+      var ok = (dots ? input.value : secret) === a.pw;
       input.value = ''; secret = '';
-      if (ok) {
-        lock.remove(); document.body.classList.remove('zd-locked');
-        inert.forEach(function (el) { el.inert = false; }); inert = [];
-      } else { error.hidden = false; input.focus(); }
+      if (ok) uncover(); else { error.hidden = false; input.focus(); }
     }
     button.addEventListener('click', unlock);
     input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); unlock(); } });
     input.focus();
   }
-  lockNow();
+
+  function start() {
+    var el = document.createElement('div');
+    el.id = 'zd-start'; el.className = 'zd-start';
+    el.innerHTML = '<div class="zd-start-in" role="dialog" aria-modal="true" aria-labelledby="zd-start-title"><div class="zd-start-hd"><div class="mark">ZD</div><div><h1 id="zd-start-title">Zameen Developments</h1><p>QS Cost Control System &mdash; choose what to open</p></div></div><div class="zd-start-grid">'
+      + CARDS.map(function (c) {
+        return '<button type="button" class="zd-start-card' + (c[0] === 'all' ? ' main' : '') + '" data-zd-pick="' + c[0] + '"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + c[3] + '</svg></span><b>' + c[1] + '</b><span class="d">' + c[2] + '</span></button>';
+      }).join('')
+      + '</div><div class="zd-start-ft">The password is asked after you choose, every time &mdash; never saved in this browser.</div></div>';
+    var uncover = cover(el);
+    el.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-zd-pick]'); if (!b) return;
+      var m = b.getAttribute('data-zd-pick');
+      if (m === 'takeoff') { location.href = '../takeoff/'; return; }
+      try { history.replaceState(null, '', homeUrl() + '?app=' + m + location.hash); } catch (er) {}
+      mode = m; uncover(); applyMode(m); lockNow();
+    });
+    var f = el.querySelector('.zd-start-card'); if (f) f.focus();
+  }
+
+  if (mode) { applyMode(mode); lockNow(); } else start();
   window.addEventListener('load', function () { var i = document.getElementById('zd-lock-input'); if (i) i.focus(); });
   window.addEventListener('pageshow', function (e) { if (e.persisted) lockNow(); });   // back from the browser's page cache: asked again
 }());

@@ -9,7 +9,8 @@
 */
 const {chromium} = require("playwright");
 const fs = require("fs"), os = require("os"), path = require("path");
-const BASE = process.env.ZD_URL || "http://127.0.0.1:8765/", LIBS = process.env.TK_LIBS || "", PAGES = ["dashboards/", "takeoff/", "drawing-tracker/", "zameen-developments/"];
+const BASE = process.env.ZD_URL || "http://127.0.0.1:8765/", LIBS = process.env.TK_LIBS || "", PAGES = [["dashboards/", "sa"], ["takeoff/", "sa"], ["drawing-tracker/", "sa"], ["zameen-developments/?app=all", "sa"],
+  ["zameen-developments/?app=pay", "123"], ["zameen-developments/?app=cm", "sa"], ["zameen-developments/?app=calc", "sa"]];
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else fail++; console.log((c ? "  ok   " : "  FAIL ") + m); };
 const LOCKISH = /lock|pass|pw|unlock|secret/i;
@@ -17,8 +18,8 @@ const LOCKISH = /lock|pass|pw|unlock|secret/i;
 (async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({viewport: {width: 1280, height: 860}});
-  for (const p of PAGES) {
-    console.log(p);
+  for (const [p, PW] of PAGES) {
+    console.log(p + "  (password " + PW + ")");
     const page = await ctx.newPage(), errs = [];
     page.on("pageerror", e => errs.push(String(e)));
     await page.goto(BASE + p, {waitUntil: "load"});
@@ -36,7 +37,10 @@ const LOCKISH = /lock|pass|pw|unlock|secret/i;
     await page.fill("#zd-lock-input", "999"); await page.press("#zd-lock-input", "Enter");
     ok(await page.isVisible("#zd-lock") && await page.isVisible(".zd-lock-error"), "a wrong password is refused");
     ok(await page.inputValue("#zd-lock-input") === "", "the field is emptied after each try");
-    await page.fill("#zd-lock-input", "123"); await page.click("#zd-lock button");
+    const other = PW === "123" ? "sa" : "123";
+    await page.fill("#zd-lock-input", other); await page.press("#zd-lock-input", "Enter");
+    ok(await page.isVisible("#zd-lock"), "the other password (" + other + ") is refused here");
+    await page.fill("#zd-lock-input", PW); await page.click("#zd-lock button");
     ok(!(await page.$("#zd-lock")) && !(await page.evaluate(() => document.body.classList.contains("zd-locked") || [...document.body.children].some(e => e.inert))), "the right password unlocks the page");
     const kept = await page.evaluate(re => { const r = new RegExp(re, "i"); return [...Object.keys(sessionStorage), ...Object.keys(localStorage), document.cookie].filter(k => k && r.test(k)); }, LOCKISH.source);
     ok(kept.length === 0, "nothing remembered in session storage, local storage or cookies" + (kept.length ? ": " + kept.join(", ") : ""));
@@ -56,16 +60,65 @@ const LOCKISH = /lock|pass|pw|unlock|secret/i;
   await ctx2.addInitScript(() => { const s = CSS.supports.bind(CSS); CSS.supports = (a, b) => /text-security/.test(String(a)) ? false : s(a, b); });
   const page = await ctx2.newPage();
   await page.goto(BASE + "dashboards/", {waitUntil: "load"});
-  await page.click("#zd-lock-input"); await page.keyboard.type("1245");
+  await page.click("#zd-lock-input"); await page.keyboard.type("sxyz");
   ok(await page.inputValue("#zd-lock-input") === "••••", "the field shows dots, not the characters");
-  await page.keyboard.press("Backspace"); await page.keyboard.press("Backspace"); await page.keyboard.type("3");
-  ok(await page.inputValue("#zd-lock-input") === "•••", "deleting and typing again keeps the right count");
-  await page.keyboard.press("Home"); await page.keyboard.press("Delete"); await page.keyboard.type("1");
+  await page.keyboard.press("Backspace"); await page.keyboard.press("Backspace"); await page.keyboard.press("Backspace"); await page.keyboard.type("a");
+  ok(await page.inputValue("#zd-lock-input") === "••", "deleting and typing again keeps the right count");
+  await page.keyboard.press("Home"); await page.keyboard.press("Delete"); await page.keyboard.type("s");
   await page.keyboard.press("Enter");
-  ok(!(await page.$("#zd-lock")), "the password typed behind the dots unlocks (123)");
+  ok(!(await page.$("#zd-lock")), "the password typed behind the dots unlocks (sa)");
   await page.reload({waitUntil: "load"});
-  await page.click("#zd-lock-input"); await page.keyboard.type("12"); await page.keyboard.press("Enter");
+  await page.click("#zd-lock-input"); await page.keyboard.type("s"); await page.keyboard.press("Enter");
   ok(await page.isVisible(".zd-lock-error"), "a wrong one is still refused");
+
+  // Zameen Developments' start screen: pick the complete Dashboard, the PDF Takeoff, or one module on its own (its own password)
+  console.log("Zameen Developments start screen");
+  const sctx = await browser.newContext({viewport: {width: 1280, height: 860}}), sp = await sctx.newPage(), serrs = [];
+  sp.on("pageerror", e => serrs.push(String(e)));
+  const startUp = async () => { await sp.goto(BASE + "zameen-developments/", {waitUntil: "load"}); return sp.isVisible("#zd-start"); };
+  const shown = ids => sp.evaluate(ids => ids.filter(id => { const e = document.getElementById(id); return !!e && e.getClientRects().length > 0; }), ids);
+  const APPS = ["appEXEC", "appADMIN", "appCM", "appPAY", "appRA", "appFEAS", "appCALC"];
+  ok(await startUp(), "the page opens on the start screen");
+  const picks = await sp.$$eval("#zd-start [data-zd-pick]", b => b.map(x => x.dataset.zdPick + ":" + x.querySelector("b").textContent));
+  ok(picks.join() === "all:Dashboard,takeoff:PDF Takeoff,pay:Payments,cm:Change Management,calc:Calculator", "five choices: " + picks.join(", "));
+  ok(!(await sp.$("#zd-lock")) && await sp.evaluate(() => [...document.body.children].filter(e => e.id !== "zd-start" && e.tagName !== "SCRIPT" && e.tagName !== "STYLE").every(e => e.inert)), "nothing behind it can be reached yet, and no password is asked before choosing");
+  const solo = async (pick, pw, btn, app, title) => {
+    ok(await startUp(), pick + ": back on the start screen");
+    await sp.click('#zd-start [data-zd-pick="' + pick + '"]');
+    ok(!(await sp.$("#zd-start")) && await sp.isVisible("#zd-lock") && new URL(sp.url()).search === "?app=" + pick, pick + ": asks for its password (" + sp.url().replace(BASE, "") + ")");
+    ok(await sp.textContent("#zd-lock-title") === title, pick + ": the lock names " + title);
+    for (const w of ["sa", "123"].filter(x => x !== pw)) { await sp.fill("#zd-lock-input", w); await sp.press("#zd-lock-input", "Enter"); ok(await sp.isVisible("#zd-lock"), pick + ": " + w + " is refused"); }
+    await sp.fill("#zd-lock-input", pw); await sp.press("#zd-lock-input", "Enter");
+    ok(!(await sp.$("#zd-lock")), pick + ": " + pw + " unlocks");
+    await sp.waitForTimeout(300);
+    const mods = await sp.$$eval("#mainSidebar .modbtn", b => b.filter(e => e.getClientRects().length).map(e => e.id));
+    if (btn) {
+      ok(mods.join() === "zdHome," + btn, pick + ": only its own module button (and Start screen) in the sidebar: " + mods.join());
+      ok((await shown(APPS)).join() === app, pick + ": only its own screen is shown: " + (await shown(APPS)).join());
+      const groups = await sp.$$eval(".navgroup", g => g.filter(e => e.getClientRects().length).map(e => e.id));
+      ok(groups.every(g => g === "navgroup-" + pick) && !(await shown(["globalSearchWrap"])).length, pick + ": no other module's menu, no all-modules search: " + groups.join());
+      await sp.evaluate(() => { ["modExec", "tabCM", "tabPAY", "tabRA", "modAdmin", "modCalc"].forEach(id => { const e = document.getElementById(id); if (e) e.click(); }); });
+      await sp.waitForTimeout(200);
+      const after = await shown(APPS);
+      ok(after.every(a => a === app), pick + ": another module can't be brought up (even by its hidden button): " + after.join());
+    } else {
+      ok(["modExec", "tabCM", "tabPAY", "tabRA", "tabFEAS", "modAdmin", "modCalc", "modTakeoff"].every(id => mods.includes(id)), "all: every module is there: " + mods.join());
+    }
+    ok(await sp.$eval("#zdHome", a => a.href) === BASE + "zameen-developments/", pick + ": a Start screen button goes back to the start screen");
+  };
+  await solo("all", "sa", null, null, "ZD Dashboard");
+  await solo("pay", "123", "tabPAY", "appPAY", "Payments");
+  await solo("cm", "sa", "tabCM", "appCM", "Change Management");
+  await solo("calc", "sa", "modCalc", "appCALC", "Calculator");
+  await sp.goto(BASE + "zameen-developments/?app=pay", {waitUntil: "load"});
+  ok(await sp.isVisible("#zd-lock") && !(await sp.$("#zd-start")) && await sp.textContent("#zd-lock-title") === "Payments", "?app=pay opens straight on the Payments password");
+  await sp.goto(BASE + "zameen-developments/?app=nonsense", {waitUntil: "load"});
+  ok(await sp.isVisible("#zd-start"), "an unknown ?app= shows the start screen");
+  await startUp();
+  await Promise.all([sp.waitForURL(/\/takeoff\/$/, {timeout: 10000}), sp.click('#zd-start [data-zd-pick="takeoff"]')]);
+  ok(/\/takeoff\/$/.test(sp.url()), "PDF Takeoff opens the takeoff page");
+  ok(serrs.length === 0, "no page errors" + (serrs.length ? ": " + serrs[0] : ""));
+  await sctx.close();
 
   // PDF Takeoff: a PDF locked with an open password — asked when it is opened, never kept (in the browser or an exported project)
   console.log("a PDF locked with an open password (PDF Takeoff)");

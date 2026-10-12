@@ -1156,7 +1156,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
     input.addEventListener('input', keep);
     input.addEventListener('compositionend', keep);
     function unlock() {
-      var ok = (dots ? input.value : secret) === '123';
+      var ok = (dots ? input.value : secret) === 'sa';
       input.value = ''; secret = '';
       if (ok) {
         lock.remove(); document.body.classList.remove('zd-locked');
