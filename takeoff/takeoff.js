@@ -9047,7 +9047,7 @@ async function aiSend(text, fresh){
   if (!S.page) return aiLog("err", "Open a PDF page first.");
   const eng = aiEngine();
   if (eng === "rules") { const t0 = performance.now(), r = await agentCmd(text); kpiLog("agent", {route: "rules", ms: Math.round(performance.now() - t0)}); return r; }
-  if (eng === "local" || (eng === "auto" && locModel())) return aiSendLocal(text);   // local AI: never handed to a cloud service
+  if (eng === "cc" || eng === "local" || (eng === "auto" && locModel())) return aiSendLocal(text);   // local AI: never handed to a cloud service
   let client;
   try { client = await aiClient(); } catch (e) { aiLog("err", esc(e.message) + " Answering with the free agent instead."); return agentCmd(text); }
   if (!client) { const smp = await aiSampler(); return smp ? aiSendPlan(smp, text) : agentCmd(text); }   // no API key: Claude through claude.ai, else the free rule-based agent
@@ -9234,19 +9234,28 @@ async function aiRunTool2(b){   // the tools that need no picture and no page sc
    reached, the built-in rule agent answers (also offline) and says so. Ollama only lets this site in when it is started
    with OLLAMA_ORIGINS naming this site (setup in ⚙ Engine). */
 const LOC = {st: "unknown", msg: "", models: [], caps: {}, ver: "", checked: 0};
-const locUrl = () => (pref("zdTakeoffLocalUrl") || "http://127.0.0.1:11434").replace(/\/+$/, "");
-const locModel = () => pref("zdTakeoffLocalModel") || "";
+/* Claude Code engine: the same loop, answered by Claude through the Claude Code helper on this computer (tools/claude-bridge.js,
+   port 11435) — the user's Claude plan, no API key; online. The helper speaks Ollama's API, so everything below serves both. */
+const CC_URL = "http://127.0.0.1:11435", CC_MODELS = {"claude-code:sonnet": "Sonnet — best balance", "claude-code:opus": "Opus — most capable, slower", "claude-code:haiku": "Haiku — fastest"};
+const ccOn = () => aiEngine() === "cc";
+const ccModel = () => CC_MODELS[pref("zdTakeoffCcModel")] ? pref("zdTakeoffCcModel") : "claude-code:sonnet";
+const locUrl = () => ccOn() ? CC_URL : (pref("zdTakeoffLocalUrl") || "http://127.0.0.1:11434").replace(/\/+$/, "");
+const locModel = () => ccOn() ? ccModel() : pref("zdTakeoffLocalModel") || "";
 const aiEngine = () => pref("zdTakeoffAiEngine") || "auto";
+const locVer = () => (ccOn() ? "" : "Ollama ") + LOC.ver;
+const CC_DOWN = () => "The Claude Code helper is not running at " + CC_URL + " — double-click “Start Claude helper” on your desktop and keep its window open (⚙ Engine → Claude Code → setup)";
 async function locFetch(path, body, ms){
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms || 4000);
   try {
     const r = await fetch(locUrl() + path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body), signal: ctl.signal} : {signal: ctl.signal});
-    if (r.status === 403) throw Object.assign(new Error("Ollama refused this site (403) — start it with OLLAMA_ORIGINS=" + location.origin + " (⚙ Engine → setup)"), {code: "blocked"});
-    if (!r.ok) { let m = ""; try { m = (await r.json()).error || ""; } catch (e) {} throw Object.assign(new Error("Ollama: " + (m || "HTTP " + r.status)), {code: r.status === 404 ? "nomodel" : "http"}); }
+    if (r.status === 403) throw Object.assign(new Error(ccOn() ? "The Claude Code helper refused this site (403) — it only accepts " + location.origin + "; update the helper" : "Ollama refused this site (403) — start it with OLLAMA_ORIGINS=" + location.origin + " (⚙ Engine → setup)"), {code: "blocked"});
+    if (!r.ok) { let m = ""; try { m = (await r.json()).error || ""; } catch (e) {} throw Object.assign(new Error((ccOn() ? "" : "Ollama: ") + (m || "HTTP " + r.status)), {code: r.status === 404 ? "nomodel" : "http"}); }
     return await r.json();
   } catch (e) {
     if (typeof e.code === "string") throw e;
+    if (e.name === "AbortError" && ccOn()) throw Object.assign(new Error("Claude Code did not answer in time"), {code: "timeout"});
     if (e.name === "AbortError") throw Object.assign(new Error("Ollama did not answer in time at " + locUrl() + " — on a computer without a graphics card a long prompt can take minutes; see ⚙ Engine → setup for a faster setup or a smaller model"), {code: "timeout"});
+    if (ccOn()) throw Object.assign(new Error(CC_DOWN()), {code: "offline"});
     throw Object.assign(new Error("No local AI at " + locUrl() + " — Ollama is not running, or it does not allow this site yet (OLLAMA_ORIGINS=" + location.origin + ", see ⚙ Engine → setup)"), {code: "offline"});
   } finally { clearTimeout(t); }
 }
@@ -9255,10 +9264,10 @@ async function locHealth(){   // -> LOC: ready | offline | blocked | nomodel | n
     const v = await locFetch("/api/version"); LOC.ver = v.version || "";
     const tags = await locFetch("/api/tags"); LOC.models = (tags.models || []).map(m => ({name: m.name || m.model, size: m.size || 0, params: (m.details || {}).parameter_size || "", quant: (m.details || {}).quantization_level || "", family: (m.details || {}).family || ""}));
     const m = locModel();
-    if (!m) { LOC.st = "none"; LOC.msg = LOC.models.length ? "Ollama " + LOC.ver + " is running — choose a model" : "Ollama " + LOC.ver + " is running but has no models — ollama pull a model"; }
-    else if (!LOC.models.some(x => x.name === m || x.name === m + ":latest")) { LOC.st = "nomodel"; LOC.msg = "Model " + m + " is not installed — run: ollama pull " + m; }
+    if (!m) { LOC.st = "none"; LOC.msg = LOC.models.length ? locVer() + " is running — choose a model" : locVer() + " is running but has no models — ollama pull a model"; }
+    else if (!LOC.models.some(x => x.name === m || x.name === m + ":latest")) { LOC.st = "nomodel"; LOC.msg = ccOn() ? "The helper is running but cannot find Claude Code — install it and sign in (run: claude in a terminal), then restart the helper" : "Model " + m + " is not installed — run: ollama pull " + m; }
     else { if (!LOC.caps[m]) { try { const sh = await locFetch("/api/show", {model: m}, 8000); LOC.caps[m] = sh.capabilities || []; } catch (e) { LOC.caps[m] = []; } }
-      LOC.st = "ready"; LOC.msg = m + " ready" + (LOC.caps[m].length ? " · " + LOC.caps[m].join(", ") : "") + " · Ollama " + LOC.ver; }
+      LOC.st = "ready"; LOC.msg = m + " ready" + (LOC.caps[m].length ? " · " + LOC.caps[m].join(", ") : "") + " · " + locVer(); }
   } catch (e) { LOC.st = e.code === "blocked" ? "blocked" : "offline"; LOC.msg = e.message; if (e.code === "offline") await locWhy(); }
   LOC.checked = Date.now(); locLine(); kpiLog("local-health", {st: LOC.st}); return LOC;
 }
@@ -9267,6 +9276,7 @@ async function locHealth(){   // -> LOC: ready | offline | blocked | nomodel | n
    when even that fails, Ollama is not running, or the browser's local-network permission for this site is blocked */
 async function locWhy(){
   let lna = ""; try { const q = await navigator.permissions.query({name: "local-network-access"}); lna = q.state; } catch (e) {}
+  if (ccOn() && lna !== "denied") { LOC.why = "down"; LOC.msg = CC_DOWN(); return; }
   let up = false; try { const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 3000); await fetch(locUrl() + "/api/version", {mode: "no-cors", signal: ctl.signal}); clearTimeout(t); up = true; } catch (e) {}
   if (up) { LOC.st = "blocked"; LOC.why = "origins"; LOC.msg = "Ollama IS running at " + locUrl() + ", but it does not allow this site yet. Set OLLAMA_ORIGINS=" + location.origin + " (Windows: run the setx line below in PowerShell), then QUIT Ollama from the tray icon and start it again, then Test connection."; }
   else if (lna === "denied") { LOC.st = "blocked"; LOC.why = "lna"; LOC.msg = "The browser blocked this site from reaching programs on this computer (local network access). Click the icon left of the address bar → Site settings → Local network access → Allow, reload, then Test connection."; }
@@ -9276,7 +9286,7 @@ const locCan = cap => (LOC.caps[locModel()] || []).includes(cap);
 function locLine(){
   const el = $("aiEngLine"); if (!el) return;
   const e = aiEngine(), dot = {ready: "#1e8e5a", none: "#c77700", nomodel: "#c77700", offline: "#b42318", blocked: "#b42318", unknown: "#6b7d92"}[LOC.st];
-  const route = e === "rules" ? "Built-in rule agent (offline)" : e === "claude" ? "Claude (your API key / claude.ai — online)" : e === "local" || locModel() ? "Local AI — " + (locModel() || "no model chosen") : "Auto — Claude if a key is set, else the built-in rule agent";
+  const route = e === "cc" ? "Claude Code — " + (CC_MODELS[locModel()] || locModel()).replace(/ —.*/, "") + " (your Claude plan, via this PC)" : e === "rules" ? "Built-in rule agent (offline)" : e === "claude" ? "Claude (your API key / claude.ai — online)" : e === "local" || locModel() ? "Local AI — " + (locModel() || "no model chosen") : "Auto — Claude if a key is set, else the built-in rule agent";
   el.innerHTML = `<span style="color:${dot}">●</span> <b>${esc(route)}</b>${e !== "rules" && e !== "claude" && (e === "local" || locModel()) ? " · " + esc(LOC.msg || "not checked yet") : ""} · ${navigator.onLine ? "online" : "offline"}`;
 }
 function hwInfo(){   // what the browser tells about this computer (memory is rounded and capped at 8 GB by the browser)
@@ -9293,15 +9303,24 @@ async function locSetup(){
     <div><b class="small">Which AI answers the takeoff agent</b>
       ${radio("auto", "Auto", "local AI when a model is chosen below; otherwise Claude if you set a key, else the built-in rule agent")}
       ${radio("local", "Local AI only", "free and offline — never sends anything to the internet; if the local model cannot be reached the built-in rule agent answers")}
+      ${radio("cc", "Claude Code", "Claude through Claude Code on this PC (as in VS Code) — your Claude plan, no API key; online. Needs the helper running")}
       ${radio("claude", "Claude", "your Anthropic API key or claude.ai — online, billed / plan-limited")}
       ${radio("rules", "Built-in rule agent only", "offline, no model at all: the ⚡ agents and typed commands")}</div>
+    <div class="row" style="gap:8px;margin-top:8px"><div class="fg" style="flex:2"><label>Claude Code model</label><select id="leCcModel">${Object.entries(CC_MODELS).map(([k2, t]) => `<option value="${k2}"${k2 === ccModel() ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
+      <div class="fg" style="flex:3"><label>&nbsp;</label><span class="small">helper at ${CC_URL} — choose <b>Claude Code</b> above, then Test connection</span></div></div>
     <div class="row" style="gap:8px;margin-top:8px"><div class="fg" style="flex:2"><label>Ollama address (this computer)</label><input type="text" id="leUrl" value="${esc(locUrl())}"></div>
       <div class="fg" style="flex:2"><label>Model</label><select id="leModel"><option value="">— choose —</option>${opts}</select></div>
       <div class="fg"><label>Context (tokens)</label><input type="number" id="leCtx" min="2048" step="1024" value="${locCtx()}"></div></div>
     <p class="small" id="leSt" style="margin:4px 0"><b>Status:</b> ${esc(LOC.msg)}</p>
     <div class="row" style="gap:6px"><button type="button" class="btn sm" id="leTest">Test connection</button><a class="btn sm" id="leOpen" href="${esc(locUrl())}" target="_blank" rel="noopener" title="Should show “Ollama is running” — if it does not open, Ollama is not running">Open ${esc(locUrl())}</a><button type="button" class="btn sm" id="leBench"${LOC.models.length ? "" : " disabled"}>Benchmark installed models</button></div>
     <div id="leBenchOut" class="small" style="margin-top:6px">${bench.length ? benchTable(bench) : ""}</div>
-    <details style="margin-top:10px"${LOC.st === "ready" ? "" : " open"}><summary><b>Set up the free local AI (one time)</b></summary><ol class="small" style="margin:6px 0 0 18px;line-height:1.6">
+    <details style="margin-top:10px"${e === "cc" && LOC.st !== "ready" ? " open" : ""}><summary><b>Set up Claude Code as the engine (one time)</b></summary><ol class="small" style="margin:6px 0 0 18px;line-height:1.6">
+      <li><b>Claude Code</b> installed on this PC and signed in to your Claude plan — the Claude panel in VS Code, or run <code>claude</code> once in a terminal.</li>
+      <li><b>Node.js</b> installed (nodejs.org).</li>
+      <li>Start the helper: double-click <b>Start Claude helper</b> on your desktop — or from the ZD-Dashboard folder run <code>node tools/claude-bridge.js</code>. Keep its window open while you use the agent; close it to stop.</li>
+      <li>Choose <b>Claude Code</b> above, pick a model, <b>Test connection</b>, Save. The browser may ask to let this site reach devices on your local network — allow it.</li></ol>
+      <p class="small">What is sent: your question, the agent's instructions and tool list, the tool results and a picture of the current view go to Anthropic through Claude Code — online, counted against your Claude plan's usage limits. The takeoff tools still run here in the page. The helper listens on this computer only and only accepts this site; through it Claude cannot run commands or open other files.</p></details>
+    <details style="margin-top:6px"${e !== "cc" && LOC.st !== "ready" ? " open" : ""}><summary><b>Set up the free local AI (one time)</b></summary><ol class="small" style="margin:6px 0 0 18px;line-height:1.6">
       <li>Install <b>Ollama</b> from ollama.com (Windows, macOS, Linux).</li>
       <li>Let this site talk to it: set the environment variable <code>OLLAMA_ORIGINS=${esc(org)}</code><br>
         <b>Windows</b> (easiest): open PowerShell and run <code id="leSetx">setx OLLAMA_ORIGINS "${esc(org)}"</code> <button type="button" class="btn sm" id="leCopy">Copy</button>, then right-click the Ollama icon in the tray → <b>Quit Ollama</b>, and start Ollama again from the Start menu (it only reads the setting when it starts).
@@ -9313,13 +9332,17 @@ async function locSetup(){
       Slow answers (several minutes) on a laptop with Intel / AMD integrated graphics: Ollama ignores that graphics chip unless told — run <code>setx OLLAMA_IGPU_ENABLE 1</code> in PowerShell and restart Ollama (about 3–4× faster on an Intel laptop).
       Rule of thumb (4-bit models): about 0.6–0.7 GB of memory per billion parameters plus the context — a 4B model needs about 3–4 GB, an 8B model 6–8 GB; vision models more. Small models (under 4B) often call tools wrongly — the benchmark shows how each one does on this computer.<br>
       This computer, as the browser reports it: memory ${esc(String(hw.mem))} · ${esc(String(hw.cores))} processor threads · WebGPU ${hw.gpu ? "yes" : "no"}. The browser cannot see the graphics card's memory; Ollama uses it by itself when it can.</p></details>`;
-  const pr = ask("AI engine — local AI (free, offline)", body, "Save", () => ({eng: (document.querySelector("input[name=leEng]:checked") || {}).value || "auto", url: $("leUrl").value.trim(), model: $("leModel").value, ctx: Math.max(2048, +$("leCtx").value || 16384)}), "leUrl");
-  $("leTest").onclick = async () => { pref("zdTakeoffLocalUrl", $("leUrl").value.trim()); const m0 = locModel(); pref("zdTakeoffLocalModel", $("leModel").value || m0); $("leSt").innerHTML = "<b>Status:</b> checking…"; await locHealth(); pref("zdTakeoffLocalModel", m0);
+  const pr = ask("AI engine", body, "Save", () => ({eng: (document.querySelector("input[name=leEng]:checked") || {}).value || "auto", url: $("leUrl").value.trim(), model: $("leModel").value, ctx: Math.max(2048, +$("leCtx").value || 16384), cc: $("leCcModel").value}), "leUrl");
+  $("leTest").onclick = async () => { const e0 = pref("zdTakeoffAiEngine"), cc0 = pref("zdTakeoffCcModel"), ccT = ((document.querySelector("input[name=leEng]:checked") || {}).value) === "cc";
+    if (ccT) { pref("zdTakeoffAiEngine", "cc"); pref("zdTakeoffCcModel", $("leCcModel").value); }
+    else if (e0 === "cc") pref("zdTakeoffAiEngine", "");
+    pref("zdTakeoffLocalUrl", $("leUrl").value.trim()); const m0 = pref("zdTakeoffLocalModel") || ""; if (!ccT) pref("zdTakeoffLocalModel", $("leModel").value || m0); $("leSt").innerHTML = "<b>Status:</b> checking…"; await locHealth(); pref("zdTakeoffLocalModel", m0);
+    const ccModels = ccT; pref("zdTakeoffAiEngine", e0 || ""); pref("zdTakeoffCcModel", cc0 || ""); if (ccModels) { $("leSt").innerHTML = "<b>Status:</b> " + esc(LOC.msg); return; }
     $("leSt").innerHTML = "<b>Status:</b> " + esc(LOC.msg); $("leOpen").href = locUrl(); $("leOpen").textContent = "Open " + locUrl(); const sel = $("leModel"), keep = sel.value; sel.innerHTML = '<option value="">— choose —</option>' + LOC.models.map(m => `<option value="${esc(m.name)}">${esc(m.name)}${m.params ? " · " + esc(m.params) : ""}</option>`).join(""); sel.value = keep; $("leBench").disabled = !LOC.models.length; };
   $("leCopy").onclick = async () => { try { await navigator.clipboard.writeText($("leSetx").textContent); toast("Copied — paste it in PowerShell", 2000); } catch (e) { toast("Select the line and copy it", 2500); } };
   $("leBench").onclick = async () => { const out = $("leBenchOut"); out.textContent = "Running… (each model is loaded in turn — the first answer of a model includes its loading time)"; const res = await locBenchmark(t => { out.textContent = t; }); out.innerHTML = benchTable(res); };
   const v = await pr; if (!v) return locLine();
-  pref("zdTakeoffAiEngine", v.eng === "auto" ? "" : v.eng); pref("zdTakeoffLocalUrl", v.url && v.url !== "http://127.0.0.1:11434" ? v.url : ""); pref("zdTakeoffLocalModel", v.model); pref("zdTakeoffLocalCtx", String(v.ctx));
+  pref("zdTakeoffAiEngine", v.eng === "auto" ? "" : v.eng); pref("zdTakeoffLocalUrl", v.url && v.url !== "http://127.0.0.1:11434" ? v.url : ""); pref("zdTakeoffLocalModel", v.model); pref("zdTakeoffLocalCtx", String(v.ctx)); pref("zdTakeoffCcModel", v.cc && v.cc !== "claude-code:sonnet" ? v.cc : "");
   await locHealth(); toast("AI engine saved — " + (LOC.st === "ready" ? LOC.msg : aiEngine()), 3000);
 }
 function toOllamaTools(L){ return L.map(t => ({type: "function", function: {name: t.name, description: t.description, parameters: t.input_schema}})); }
@@ -9344,6 +9367,11 @@ function locCalls(msg){   // tool calls from a reply: the proper field, else a J
   if (m && names.has(m[1])) { try { const j = JSON.parse(m[0]); const a = j.arguments || j.parameters || j.input || {}; return {calls: [{name: j.name, args: typeof a === "string" ? JSON.parse(a) : a}], inText: true}; } catch (e) {} }
   return {calls: [], inText: false};
 }
+const CC_SYS = `\n\nYOU RUN AS CLAUDE through Claude Code on the user's computer (their own Claude plan). Rules for you:
+- Use the tools for everything about the drawing and the takeoff; every quantity you state must come from a tool result (quantity_totals, explain_measurement, list_measured or a measuring tool). Never estimate, round up or invent a quantity, a rate or a size.
+- For questions about the project call get_project_context first. For "how much / total" call quantity_totals. For "show the calculation" call explain_measurement.
+- If a tool returns an error, say what failed and what the user can do. Never say something was measured, saved or deleted unless a tool result says so.
+- Keep replies short: what you did, the quantities (from the tools), what needs the user's check.`;
 const LOC_SYS = `\n\nYOU RUN LOCALLY AND OFFLINE on the user's computer (a small open model). Rules for you:
 - Use the tools for everything about the drawing and the takeoff; every quantity you state must come from a tool result (quantity_totals, explain_measurement, list_measured or a measuring tool). Never estimate, round up or invent a quantity, a rate or a size.
 - For questions about the project call get_project_context first. For "how much / total" call quantity_totals. For "show the calculation" call explain_measurement.
@@ -9372,7 +9400,7 @@ async function aiSendLocal(text){
   if (!S.page) return aiLog("err", "Open a PDF page first.");
   AI.busy = true; $("aiSend").disabled = true; $("aiRead").disabled = true;
   aiLog("user", esc(text));
-  const wait = aiLog("wait", "Local AI (" + esc(locModel()) + ") is working… <span class=\"small\">first answer after loading the model can take a while</span>");
+  const wait = aiLog("wait", ccOn() ? "Claude (" + esc(locModel().replace("claude-code:", "")) + ", through Claude Code) is working… <span class=\"small\">each step takes a few seconds</span>" : "Local AI (" + esc(locModel()) + ") is working… <span class=\"small\">first answer after loading the model can take a while</span>");
   const met = {ms: 0, tok: 0, evalNs: 0, calls: 0, bad: 0, turns: 0};
   let fallback = null;
   try {
@@ -9381,7 +9409,7 @@ async function aiSendLocal(text){
     AI.view = await aiSnapshot(locCan("vision") ? 1150000 : 0);
     const tools = AI_TOOLS_ALL(), user = {role: "user", content: aiContext(AI.view) + "\n\n" + text};
     if (locCan("vision")) user.images = [AI.view.data];
-    const msgs = [{role: "system", content: AI_SYSTEM + LOC_SYS + rulesPrompt()}, ...locHist(), user];
+    const msgs = [{role: "system", content: AI_SYSTEM + (ccOn() ? CC_SYS : LOC_SYS) + rulesPrompt()}, ...locHist(), user];
     let final = "";
     for (let turn = 0; turn < 10; turn++) {
       const r = await locChat(msgs, toOllamaTools(tools)); met.turns++; met.ms += r._ms; if (r._load) met.load = r._load; met.tok += r.eval_count || 0; met.evalNs += r.eval_duration || 0;
@@ -9401,9 +9429,10 @@ async function aiSendLocal(text){
     }
     locHistPut(locHist().concat([{role: "user", content: text}, {role: "assistant", content: final || "(done with tools)"}]));
     const tps = met.evalNs ? met.tok / (met.evalNs / 1e9) : 0;
-    aiLog("meta", `local · ${esc(locModel())} · ${(met.ms / 1000).toFixed(1)} s · ${tps ? tps.toFixed(1) + " tokens/s" : "—"} · ${met.calls} tool call${met.calls === 1 ? "" : "s"}${met.bad ? " (" + met.bad + " rejected)" : ""} · nothing sent to the internet`);
+    aiLog("meta", ccOn() ? `Claude Code · ${esc(locModel().replace("claude-code:", ""))} · ${(met.ms / 1000).toFixed(1)} s · ${met.calls} tool call${met.calls === 1 ? "" : "s"}${met.bad ? " (" + met.bad + " rejected)" : ""} · sent to Anthropic on your Claude plan`
+      : `local · ${esc(locModel())} · ${(met.ms / 1000).toFixed(1)} s · ${tps ? tps.toFixed(1) + " tokens/s" : "—"} · ${met.calls} tool call${met.calls === 1 ? "" : "s"}${met.bad ? " (" + met.bad + " rejected)" : ""} · nothing sent to the internet`);
     AI.locMet = Object.assign({at: new Date().toISOString(), model: locModel(), tps}, met);
-    kpiLog("agent", {route: "local", ms: Math.round(met.ms), calls: met.calls, bad: met.bad, turns: met.turns, load: met.load || 0, tps: +tps.toFixed(1)});
+    kpiLog("agent", {route: ccOn() ? "claude-code" : "local", ms: Math.round(met.ms), calls: met.calls, bad: met.bad, turns: met.turns, load: met.load || 0, tps: +tps.toFixed(1)});
   } catch (e) { fallback = e; }
   wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
   if (fallback) { kpiLog("agent", {route: "rules", fallback: true}); aiLog("err", esc(fallback.message || String(fallback)) + " — answered by the <b>built-in rule agent</b> instead (offline; nothing sent to a cloud service)."); await agentCmd(text, true); }
