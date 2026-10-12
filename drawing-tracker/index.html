@@ -390,7 +390,7 @@ footer .wrap{max-width:1180px;margin:0 auto}
     input.addEventListener('input', keep);
     input.addEventListener('compositionend', keep);
     function unlock() {
-      var ok = (dots ? input.value : secret) === '123';
+      var ok = (dots ? input.value : secret) === 'sa';
       input.value = ''; secret = '';
       if (ok) {
         lock.remove(); document.body.classList.remove('zd-locked');

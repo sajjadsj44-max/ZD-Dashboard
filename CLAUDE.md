@@ -40,5 +40,8 @@
   as dots), so no browser or password manager offers to save or fill it.
 - The same for any password an app asks for (e.g. a locked PDF's open
   password): ask each time, never keep it — not in the browser, not in exports.
+- Passwords: `123` for Payments on its own (`zameen-developments/?app=pay`), `sa` for everything else
+  (the complete Dashboard `?app=all`, `?app=cm`, `?app=calc`, PDF Takeoff, Drawing Tracker, the dashboards list).
+  `zameen-developments/` with no `?app=` opens the start screen that picks one of them.
 - Browser tests type the password in with `tools/zd_unlock.js`;
   `tools/test_lock.js` checks the lock on every page.
