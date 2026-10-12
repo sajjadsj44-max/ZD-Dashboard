@@ -3401,12 +3401,14 @@ const AP_UNITS = {ft: "Feet  12.500 ft", ftin: "Feet-inches  12'-6\"", in: "Inch
 const AP_FONTS = ["Segoe UI", "Helvetica", "Arial", "Arial Narrow", "Calibri", "Verdana", "Tahoma", "Trebuchet MS", "Times New Roman", "Georgia", "Courier New", "Consolas"];
 const AP_LPOS = {center: "Centre", above: "Above", below: "Below", left: "Left", right: "Right", none: "No label"};
 const AP_SYMS = {circle: "Circle", square: "Square", triangle: "Triangle", diamond: "Diamond", hexagon: "Hexagon", star: "Star", check: "Check ✓", cross: "Cross ✕", plus: "Plus +", dot: "Dot", pin: "Pin"};
+const AP_BLEND = {normal: "Normal", multiply: "Multiply — lines show through"};   // Bluebeam's blend mode: Multiply darkens what is under it
+const apBlendG = (a, svg) => a.blend === "multiply" && svg ? `<g data-blend="multiply" style="mix-blend-mode:multiply">${svg}</g>` : svg;
 const AP_FRAC = {0: "1\"", 2: "1/2\"", 4: "1/4\"", 8: "1/8\"", 16: "1/16\""};
 function apBase(c){   // what a condition looks like with nothing set: the look the app has always had
   const area = c && c.type === "area", cnt = c && c.type === "count";
   return {col: "", lineOp: area || cnt ? 100 : 85, dash: "solid", sw: +(c && c.sw) || (area ? 1.6 : cnt ? 2.5 : 3), swU: "px", h0: "none", h1: "none", hs: 1,
     fill: "", fillOp: cnt ? 30 : 22, hatch: "none", hcol: "", hsp: 8, units: "ft", dec: 3, frac: 8, font: "Segoe UI", fsz: 11.5, fcol: "#0b0b0b", fb: false, fi: false, fu: false,
-    lpos: "center", lbg: true, lbgCol: "#ffffff", lbgOp: 88, lbd: false, seg: "auto", vtx: false, csz: ({s: 7, m: 10, l: 14})[c && c.sz] || 10};
+    lpos: "center", lbg: true, lbgCol: "#ffffff", lbgOp: 88, lbd: false, seg: "auto", vtx: false, csz: ({s: 7, m: 10, l: 14})[c && c.sz] || 10, blend: "normal"};
 }
 function apOf(c, it){   // the appearance a measurement is drawn with: its condition's, then its own
   const a = Object.assign(apBase(c), c && c.ap || {}, it && it.ap || {});
@@ -3516,6 +3518,7 @@ function measSvg(it, c, o){
   out.push(`<${closed ? "polygon" : "polyline"} points="${ps}" fill="none" stroke="${esc(col)}" stroke-width="${w.toFixed(2)}" stroke-opacity="${op}" stroke-linejoin="round" stroke-linecap="${a.dash === "dot" ? "round" : area ? "butt" : "round"}"${dash ? ` stroke-dasharray="${dash}"` : ""}/>`);
   if (!closed && scr.length >= 2) { const n = scr.length; out.push(apHead(a.h0, scr[0], scr[1], w0, esc(col), op, a.hs), apHead(a.h1, scr[n - 1], scr[n - 2], w0, esc(col), op, a.hs)); }
   if (a.vtx) (it.shape === "circle" ? [] : it.pts.map(T)).forEach(q => out.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(Math.max(2.2, w0 * 0.9)).toFixed(1)}" fill="#fff" stroke="${esc(col)}" stroke-width="${(1.2 * z).toFixed(2)}"/>`));
+  if (a.blend === "multiply" && out.length) out.splice(0, out.length, apBlendG(a, out.join("")));
   const k = o.k;
   if (k && o.lbl && a.lpos !== "none") {
     const big = area ? polyArea(scr) > 2500 * z * z : polyLen(scr) > 60 * z;
@@ -3535,7 +3538,7 @@ function apEditorHtml(c, a, o){   // o {totals: [[name, text]], scope, dialog}
   const sel = (f, O, v, w) => `<select data-ap="${f}"${w ? ` style="width:${w}px"` : ""}>${apOpts(O, v)}</select>`, colr = (f, v, title) => `<input type="color" data-ap="${f}" value="${apHex(v)}" title="${title}">`;
   const tog = (f, v, txt, title, st) => `<button type="button" class="aptg${v ? " on" : ""}" data-ap="${f}" data-on="${v ? 1 : 0}" title="${title}"${st ? ` style="${st}"` : ""}>${txt}</button>`;
   const rows = [];
-  rows.push(`<div class="apr"><span class="aph">Line</span>${F("Colour", colr("col", a.col, "Line colour"))}${F("Opacity %", num("lineOp", +a.lineOp, 5, 100, 5))}${F("Style", sel("dash", AP_DASH, a.dash, 132))}${F("Width", num("sw", +a.sw, 0.25, 24, 0.25) + sel("swU", {px: "px on screen", pt: "pt on paper"}, a.swU, 100))}</div>`);
+  rows.push(`<div class="apr"><span class="aph">Line</span>${F("Colour", colr("col", a.col, "Line colour"))}${F("Opacity %", num("lineOp", +a.lineOp, 5, 100, 5))}${F("Style", sel("dash", AP_DASH, a.dash, 132))}${F("Width", num("sw", +a.sw, 0.25, 24, 0.25) + sel("swU", {px: "px on screen", pt: "pt on paper"}, a.swU, 100))}${F("Blend mode", sel("blend", AP_BLEND, a.blend === "multiply" ? "multiply" : "normal", 200))}</div>`);
   if (t === "linear") rows.push(`<div class="apr"><span class="aph">Ends</span>${F("Start", sel("h0", AP_HEADS, a.h0, 118))}${F("End", sel("h1", AP_HEADS, a.h1, 118))}${F("Size ×", num("hs", +a.hs, 0.5, 4, 0.25))}</div>`);
   if (t === "area") rows.push(`<div class="apr"><span class="aph">Fill</span>${F("Colour", colr("fill", a.fill, "Fill colour"))}${F("Opacity %", num("fillOp", +a.fillOp, 0, 100, 5))}${F("Hatch", sel("hatch", AP_HATCH, a.hatch, 124))}${F("Hatch colour", colr("hcol", a.hcol, "Hatch colour"))}${F("Spacing", num("hsp", +a.hsp, 3, 40, 1, 50))}</div>`);
   if (t === "count") rows.push(`<div class="apr"><span class="aph">Symbol</span>${o.dialog ? "" : F("Shape", sel("sym", AP_SYMS, c.sym || "circle", 110))}${F("Size px", num("csz", +a.csz, 4, 40, 1))}${F("Fill %", num("fillOp", +a.fillOp, 0, 100, 5))}${o.dialog ? "" : F("Caption", sel("cap", {seq: "1, 2, 3…", name: "Condition name", text: "Custom text", none: "None"}, c.cap || "seq", 116))}${F("Font", sel("font", Object.fromEntries(AP_FONTS.map(f => [f, f])), a.font, 120))}${F("Size", num("fsz", +a.fsz, 6, 48, 0.5, 52))}</div>`);
@@ -4109,7 +4112,7 @@ function countSvg(c, pts, T, z, selIdx){
       out.push(inside ? `<text x="${x}" y="${y + 4 * z * r / (10 * z)}" text-anchor="middle" font-family="${fam}" font-size="${(Math.min(fsz + 0.5, r / z * 1.15) * z).toFixed(1)}" font-weight="700" fill="${esc(a.fcol || "#0b0b0b")}">${esc(t)}</text>`
         : `<text x="${x + r + 3 * z}" y="${y + 4 * z}" font-family="${fam}" font-size="${(fsz * z).toFixed(1)}" font-weight="700"${a.fi ? ' font-style="italic"' : ""} fill="${col}" stroke="#fff" stroke-width="${3 * z}" paint-order="stroke">${esc(t)}</text>`); }
   });
-  return out.join("");
+  return apBlendG(a, out.join(""));
 }
 
 /* ------------------------------------------------------------------ editing: points, segments, break / gap / join, convert

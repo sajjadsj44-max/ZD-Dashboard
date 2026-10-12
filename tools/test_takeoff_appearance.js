@@ -67,6 +67,12 @@ const ok = (c, m) => { if (c) { pass++; console.log("  ✓ " + m); } else { fail
   await setAp("font", "Georgia"); await setAp("fsz", 15); await page.click('#props .apbar [data-ap="fb"]'); await wait(150); await setAp("fcol", "#c0392b");
   h = await ov(); ok(/font-family="Georgia,Arial,sans-serif" font-size="15\.0" font-weight="700"[^>]*fill="#c0392b"/.test(h), "label font Georgia 15, bold, red");
   await setAp("lpos", "above"); c = await cnd("Floor tiles"); ok(c.ap.lpos === "above", "label placed above");
+  ok(await T(() => document.querySelector('#props .apbar [data-ap="blend"]').value === "normal"), "Blend mode shows, Normal to start");
+  await setAp("blend", "multiply"); c = await cnd("Floor tiles"); h = await ov();
+  ok(c.ap.blend === "multiply", "Blend mode Multiply kept on the condition (Bluebeam: the drawing's lines show through the fill)");
+  ok(await T(() => { const g = document.querySelector('#ov g[data-blend="multiply"]'); return !!g && getComputedStyle(g).mixBlendMode === "multiply" && !!g.querySelector('polygon[fill-opacity="0.40"]') && !g.querySelector(".aplbl") && !!document.querySelector("#ov .aplbl"); }), "the fill and outline blend; the label is drawn normally on top");
+  ok(await T(() => !!zdTakeoff.svgBlendSplit(zdTakeoff.pageOverlaySvg(zdTakeoff.S.fileId, zdTakeoff.S.pageNo, 1, 800, 600, {legend: "none"}))), "exports put the Multiply measurement in the Multiply layer");
+  await setAp("blend", "normal"); c = await cnd("Floor tiles"); ok(!("blend" in c.ap) && !/data-blend/.test(await ov()), "back to Normal: nothing stored, no blend group");
   await shot("area");
 
   console.log("a length condition");
