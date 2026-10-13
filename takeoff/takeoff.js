@@ -5700,6 +5700,19 @@ const PRESETS = [
   {name: "Skirting", type: "linear", unit: "ft"},
   {name: "Doors", type: "count", unit: "Nos"},
   {name: "Windows", type: "count", unit: "Nos"},
+  // the user's own items, as named in 1,396 measured Bluebeam drawings (most used first): areas in Sft, wall finishes as
+  // length × height (Sft), runs in ft, block work in cft (H: floor to floor less the slab, e.g. 12 − 0.625 = 11.375 ft)
+  {name: "Floor tile", type: "area", unit: "Sft", dedMin: 1.0}, {name: "Bath floor tile", type: "area", unit: "Sft", dedMin: 1.0}, {name: "Balcony tile", type: "area", unit: "Sft", dedMin: 1.0},
+  {name: "Ceiling paint", type: "area", unit: "Sft", dedMin: 1.0}, {name: "Wardrobe ceiling", type: "area", unit: "Sft"}, {name: "Balcony ceiling", type: "area", unit: "Sft"},
+  {name: "Plain gypsum ceiling", type: "area", unit: "Sft", dedMin: 1.0}, {name: "POP ceiling", type: "area", unit: "Sft", dedMin: 1.0}, {name: "Waterproofing", type: "area", unit: "Sft"},
+  {name: "PCC — state thickness", type: "area", unit: "cft", dedMin: 0.5, needT: true}, {name: "Travertine / marble", type: "area", unit: "Sft"},
+  {name: "Wall paint", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true}, {name: "Wall plaster", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true},
+  {name: "WR wall plaster", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true}, {name: "Wall tile", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true},
+  {name: "Weather shield (external paint)", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true}, {name: "Texture paint", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true},
+  {name: "Vertical ceiling (bulkhead drop)", type: "linear", unit: "Sft", faces: 1, needH: true},
+  {name: "Window sill", type: "linear", unit: "ft"}, {name: "Balcony sill", type: "linear", unit: "ft"}, {name: "Rubbing", type: "linear", unit: "ft"}, {name: "MS railing", type: "linear", unit: "ft"}, {name: "Wooden molding", type: "linear", unit: "ft"},
+  {name: 'Block masonry 4"x8"x12"', type: "linear", unit: "cft", t: 0.33, dedMin: 1.0, needH: true}, {name: 'Block masonry 8"x8"x12" (internal)', type: "linear", unit: "cft", t: 0.67, dedMin: 1.0, needH: true},
+  {name: 'Block masonry 8"x8"x16" (external)', type: "linear", unit: "cft", t: 0.67, dedMin: 1.0, needH: true},
   {name: "Custom area", type: "area", unit: "Sft"}, {name: "Custom length", type: "linear", unit: "ft"}, {name: "Custom count", type: "count", unit: "Nos"}
 ];
 async function defaultsDialog(){
