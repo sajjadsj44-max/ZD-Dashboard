@@ -5706,13 +5706,14 @@ const PRESETS = [
   {name: "Ceiling paint", type: "area", unit: "Sft", dedMin: 1.0}, {name: "Wardrobe ceiling", type: "area", unit: "Sft"}, {name: "Balcony ceiling", type: "area", unit: "Sft"},
   {name: "Plain gypsum ceiling", type: "area", unit: "Sft", dedMin: 1.0}, {name: "POP ceiling", type: "area", unit: "Sft", dedMin: 1.0}, {name: "Waterproofing", type: "area", unit: "Sft"},
   {name: "PCC — state thickness", type: "area", unit: "cft", dedMin: 0.5, needT: true}, {name: "Travertine / marble", type: "area", unit: "Sft"},
-  {name: "Wall paint", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true}, {name: "Wall plaster", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true},
-  {name: "WR wall plaster", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true}, {name: "Wall tile", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true},
+  {name: "Wall paint", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true, hHint: "10.25", hWhy: "85 of your wall-paint marks"}, {name: "Wall plaster", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true, hHint: "10.25", hWhy: "your plaster working sheet"},
+  {name: "WR wall plaster", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true, hHint: "10.25", hWhy: "your plaster working sheet"}, {name: "Wall tile", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true},
   {name: "Weather shield (external paint)", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true}, {name: "Texture paint", type: "linear", unit: "Sft", faces: 1, dedMin: 1.0, needH: true},
-  {name: "Vertical ceiling (bulkhead drop)", type: "linear", unit: "Sft", faces: 1, needH: true},
+  {name: "Vertical ceiling (bulkhead drop)", type: "linear", unit: "Sft", faces: 1, needH: true, hHint: "0.83 – 4.5", hWhy: "your vertical-ceiling marks — the drop varies, take it from the ceiling section"},
+  {name: "Skirting (Sft, 0.46 ft high)", type: "linear", unit: "Sft", faces: 1, needH: true, hHint: "0.46", hWhy: "your tile bills (perimeter × 0.46, less 2.5 per bath door, 4.83 per room door)"},
   {name: "Window sill", type: "linear", unit: "ft"}, {name: "Balcony sill", type: "linear", unit: "ft"}, {name: "Rubbing", type: "linear", unit: "ft"}, {name: "MS railing", type: "linear", unit: "ft"}, {name: "Wooden molding", type: "linear", unit: "ft"},
-  {name: 'Block masonry 4"x8"x12"', type: "linear", unit: "cft", t: 0.33, dedMin: 1.0, needH: true}, {name: 'Block masonry 8"x8"x12" (internal)', type: "linear", unit: "cft", t: 0.67, dedMin: 1.0, needH: true},
-  {name: 'Block masonry 8"x8"x16" (external)', type: "linear", unit: "cft", t: 0.67, dedMin: 1.0, needH: true},
+  {name: 'Block masonry 4"x8"x12"', type: "linear", unit: "cft", t: 0.33, dedMin: 1.0, needH: true, hHint: "11.375", hWhy: "your block working sheet (12 ft floor to floor − 7½\" slab)"}, {name: 'Block masonry 8"x8"x12" (internal)', type: "linear", unit: "cft", t: 0.67, dedMin: 1.0, needH: true, hHint: "11.375", hWhy: "your block working sheet (12 ft floor to floor − 7½\" slab)"},
+  {name: 'Block masonry 8"x8"x16" (external)', type: "linear", unit: "cft", t: 0.67, dedMin: 1.0, needH: true, hHint: "11.375", hWhy: "your block working sheet (12 ft floor to floor − 7½\" slab)"},
   {name: "Custom area", type: "area", unit: "Sft"}, {name: "Custom length", type: "linear", unit: "ft"}, {name: "Custom count", type: "count", unit: "Nos"}
 ];
 async function defaultsDialog(){
@@ -5848,7 +5849,8 @@ document.addEventListener("change", e => {   // dialog: preset and type change
     const p = PRESETS[+e.target.value];
     $("cName").value = p.name; $("cType").value = p.type; $("cUnit").innerHTML = UNITS[p.type].map(u => `<option${u === p.unit ? " selected" : ""}>${u}</option>`).join("");
     $("cT").value = p.t ? f3(p.t) : ""; $("cF").value = p.faces || 1; $("cD").value = f2(p.dedMin || 0);   // H is the project's, never the preset's: left as typed
-    $("dlgErr").textContent = p.needH && !$("cH").value.trim() ? "Enter the height H (floor to ceiling / slab soffit) — it is not assumed." : p.needT ? "Enter the thickness T — it is not assumed." : "";
+    $("cH").placeholder = p.hHint ? "usually " + p.hHint : "walls: floor to ceiling";
+    $("dlgErr").textContent = p.needH && !$("cH").value.trim() ? (p.hHint ? "Enter the height H — usually " + p.hHint + " ft in " + p.hWhy + "; check it for this project (it is not assumed)." : "Enter the height H (floor to ceiling / slab soffit) — it is not assumed.") : p.needT ? "Enter the thickness T — it is not assumed." : "";
   }
   if (e.target.id === "cType") $("cUnit").innerHTML = UNITS[e.target.value].map(u => `<option>${u}</option>`).join("");
 });
