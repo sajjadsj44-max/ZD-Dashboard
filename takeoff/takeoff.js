@@ -1459,15 +1459,15 @@ const VOID_RX = /\b(SHAFT|DUCT|VOID|LIFT|O\.?T\.?S|OPEN\s+TO\s+SKY|CUT\s*-?\s*OU
 function voidMask(x0, y0, W, H, px){
   const m = new Uint8Array(W * H), T = S.texts[S.key] || []; let n = 0;
   textLines(T).forEach(l => { if (l.tag || !VOID_RX.test(l.s) || l.s.length > 32) return; n++;
-    const kk = hereScale([l.x, l.y]) || 9, x = Math.round((l.x + l.w / 2 - x0) / px), y = Math.round((l.y - l.h / 2 - y0) / px), r = Math.max(2, Math.round(Math.max(l.h / 2, l.w / 2 + 0.3 * kk, 0.75 * kk) / px));   // wider than the text itself: the text is ink, the open floor round it marks the pocket
+    const kk = hereScale([l.x, l.y]) || 9, x = Math.round((l.cx - x0) / px), y = Math.round((l.cy - y0) / px), r = Math.max(2, Math.round(Math.max(l.h / 2, l.w / 2 + 0.3 * kk, 0.75 * kk) / px));   // wider than the text itself: the text is ink, the open floor round it marks the pocket
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) m[yy * W + xx] = 1; } });
   m.n = n; m.names = textLines(T).filter(l => !l.tag && VOID_RX.test(l.s) && l.s.length <= 32); return m;
 }
 function labelMask(x0, y0, W, H, px, own){   // own: the name of the room being measured (not a reason to stop)
   const m = new Uint8Array(W * H), T = S.texts[S.key] || [];
   textLines(T).forEach(l => { if (l.tag || !ROOM_RX.test(l.s) || l.s.length > 32 || VOID_RX.test(l.s)) return;
-    if (own && dist(own, [l.x + l.w / 2, l.y - l.h / 2]) < Math.max(2, l.h)) return;
-    const x = Math.round((l.x + l.w / 2 - x0) / px), y = Math.round((l.y - l.h / 2 - y0) / px), r = Math.max(2, Math.round(l.h / px / 2));
+    if (own && dist(own, [l.cx, l.cy]) < Math.max(2, l.h)) return;
+    const x = Math.round((l.cx - x0) / px), y = Math.round((l.cy - y0) / px), r = Math.max(2, Math.round(l.h / px / 2));
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) m[yy * W + xx] = 1; } });
   return m;
 }
@@ -1600,8 +1600,8 @@ function swingMask(lines, x0, y0, W, H, px){   // the door swings' closing lines
 }
 const WET_RX = /\b(BATH|TOILET|W\.?C|WASH\s*ROOM|POWDER|SHOWER|ENSUITE)\b/i;
 function annexJoin(m, thin, doorM, W, H, px, k, x0, y0){
-  const TL = textLines(S.texts[S.key] || []), names = TL.filter(l => !l.tag && l.s.length <= 32 && (ROOM_RX.test(l.s) || VOID_RX.test(l.s))).map(l => [Math.round((l.x + l.w / 2 - x0) / px), Math.round((l.y - l.h / 2 - y0) / px)]);
-  const wet = TL.some(l => { if (l.tag || !WET_RX.test(l.s) || l.s.length > 32) return false; const x = Math.round((l.x + l.w / 2 - x0) / px), y = Math.round((l.y - l.h / 2 - y0) / px);
+  const TL = textLines(S.texts[S.key] || []), names = TL.filter(l => !l.tag && l.s.length <= 32 && (ROOM_RX.test(l.s) || VOID_RX.test(l.s))).map(l => [Math.round((l.cx - x0) / px), Math.round((l.cy - y0) / px)]);
+  const wet = TL.some(l => { if (l.tag || !WET_RX.test(l.s) || l.s.length > 32) return false; const x = Math.round((l.cx - x0) / px), y = Math.round((l.cy - y0) / px);
     const rx = Math.max(3, Math.ceil(l.w / 2 / px)), ry = Math.max(3, Math.ceil(l.h / px));   // (the name's own ink is not floor: look round it)
     for (let dy = -ry; dy <= ry; dy++) for (let dx = -rx; dx <= rx; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H && m[yy * W + xx]) return true; } return false; });
   const fpx = k / px, dMax = 0.5 * fpx + 1.5, thinSep = 0.2 * fpx, maxWet = 35 * fpx * fpx, maxPass = 45 * fpx * fpx, minPx = 3 * fpx * fpx; let joined = 0;
@@ -1730,7 +1730,7 @@ function squareUp(Q, tol, gap, maxD, k){   // near-rectilinear outline -> rectil
    the wall's thickness, leaving a tab (out and back) or a step (the face jumps out and carries on). A tab up to 1 ft deep
    and 3 ft wide, or a step up to 0.75 ft, is cut back to the room's face when that face is a drawn line (ink along at
    least 30% of it) or the bite is under 1.5 Sft. Only bites outward (that add area) are cut. */
-function deTab(Q, k, inkAt, px, gap){
+function deTab(Q, k, inkAt, px, gap, keepBay){   // keepBay: a doorway's bay is kept (the floor runs to the door, as a QS takes the tiles)
   const ink = (a, b) => { const L = dist(a, b), n = Math.max(2, Math.ceil(L / px)); let h = 0; for (let i = 0; i <= n; i++) if (inkAt(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n)) h++; return h / (n + 1); };
   const ok = (cut, rem) => rem > 0 && rem <= 4 * k * k && (rem <= 1.5 * k * k || ink(cut[0], cut[1]) >= 0.3);
   const dir = (a, b) => { const d = [b[0] - a[0], b[1] - a[1]], l = Math.hypot(d[0], d[1]) || 1; return [d[0] / l, d[1] / l]; };
@@ -1748,7 +1748,7 @@ function deTab(Q, k, inkAt, px, gap){
           if (l1 <= k && l3 <= k && l2 <= 3 * k && ok([b, e], rem)) { Q = Q2; done = true; continue; }
           // a doorway: the tab's far side crosses open space (where the gap was closed) and its two sides run along the
           // jambs — the opening is closed on the room's face of the wall, whatever its width up to the door gap
-          if (gap && l1 <= 1.25 * k && l3 <= 1.25 * k && l2 <= (gap + 0.5) * k && rem > 0 && rem <= (gap + 0.5) * 1.25 * k * k
+          if (gap && !keepBay && l1 <= 1.25 * k && l3 <= 1.25 * k && l2 <= (gap + 0.5) * k && rem > 0 && rem <= (gap + 0.5) * 1.25 * k * k
             && ink([c[0] + (d[0] - c[0]) * 0.15, c[1] + (d[1] - c[1]) * 0.15], [c[0] + (d[0] - c[0]) * 0.85, c[1] + (d[1] - c[1]) * 0.85]) < 0.15   // (its ends pass the jambs' corners)
             && ink(b, c) >= 0.5 && ink(d, e) >= 0.5) { Q = Q2; done = true; continue; } } }
       // step: a→b along, b→c short jog, c→d along the same way
@@ -2042,7 +2042,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
     const inkPx = (x, y) => { const u = Math.round((x - x0) / px), v = Math.round((y - y0) / px); return u >= 0 && v >= 0 && u < W && v < H && !!thin[v * W + u]; };
     if (sq && !ids.length) Q = cleanPoly(pushSides(Q, inkPx, px, k));   // (before the tabs: a doorway's two jambs then line up)
     if (sq) Q = cleanPoly(deTab(Q, k, (x, y) => { const xx = Math.round((x - x0) / px), yy = Math.round((y - y0) / px);
-      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const u = xx + dx, v = yy + dy; if (u >= 0 && v >= 0 && u < W && v < H && thin[v * W + u]) return true; } return false; }, px, o.gap));
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const u = xx + dx, v = yy + dy; if (u >= 0 && v >= 0 && u < W && v < H && thin[v * W + u]) return true; } return false; }, px, o.gap, o.thresh !== false));
     if (sq && !ids.length) Q = cleanPoly(pushSides(Q, inkPx, px, k));
     if (Q.length < 3 || polyArea(Q) < 1e-6) return {err: "No closed space found at that point.", passage};
     if (!ids.length) Q = cleanPoly(inkCentre(Q, x0, y0, W, H, px, k, img ? ink.raw : thin));   // a scan: to the middle of the wall line, as on a vector page
@@ -2232,7 +2232,7 @@ async function autoRoomGuarded(p){
   let F = null; try { F = await drawingFacts(S.fileId, S.pageNo); } catch (e) {}
   if (!F || !F.rooms.length) return first;
   const k = hereScale(p), o = autoOpt();
-  const judge = r => { const inn = F.rooms.filter(m => !VOID_RX.test(m.name) && pointInPoly([m.x + m.w / 2, m.y - m.h / 2], r.pts)), a = (polyArea(r.pts) - (r.holes || []).reduce((s2, h) => s2 + polyArea(h.pts), 0)) / k / k;
+  const judge = r => { const inn = F.rooms.filter(m => !VOID_RX.test(m.name) && pointInPoly([m.cx != null ? m.cx : m.x + m.w / 2, m.cy != null ? m.cy : m.y - m.h / 2], r.pts)), a = (polyArea(r.pts) - (r.holes || []).reduce((s2, h) => s2 + polyArea(h.pts), 0)) / k / k;
     const own = inn.length === 1 ? inn[0] : null, big = own && own.sft && a > own.sft * 1.25, small = own && own.sft && a < own.sft * 0.9;
     return {n: inn.length, bad: inn.length > 1 || big, small, own, names: inn.map(m => m.name), a}; };
   let j = judge(first);
@@ -2526,7 +2526,7 @@ function billLines(only){   // [{c, kind:"cond"|"asm", a, name, unit, qty, rate,
 }
 const rateOk = l => !l.na && (!(l.rate > 0) || !!(l.src && l.date));
 const rateNote = l => l.na ? '<span style="color:var(--red)">' + esc(l.na) + "</span>" : !rateOk(l) ? '<span style="color:var(--red)">rate: ASSUMPTION — no dated source</span>'
-  : l.rate > 0 ? (l.ra ? "RA " + esc(l.ra) + (l.cached ? " (last read " + esc(dmy(l.date)) + ")" : "") + (l.assumed ? ' · <span style="color:var(--amber)">' + l.assumed + " assumed row" + (l.assumed > 1 ? "s" : "") + "</span>" : "") : "rate: " + esc(l.src) + ", " + esc(dmy(l.date))) : "rate not set";
+  : l.rate > 0 ? (l.ra ? "RA " + esc(l.ra) + (l.cached ? " (last read " + esc(dmy(l.date)) + ")" : "") + (l.assumed ? ' · <span style="color:var(--amber)">' + (Math.round(+l.assumed) || 0) + " assumed row" + (+l.assumed > 1 ? "s" : "") + "</span>" : "") : "rate: " + esc(l.src) + ", " + esc(dmy(l.date))) : "rate not set";
 /* a bill line's cost split per unit: material (incl. wastage), labour, equipment / plant, and OH, profit, access and transport —
    from its Rate Analysis built-up rate; a typed rate has no split */
 const compOf = l => l.comp && l.rate > 0 ? l.comp : null;
@@ -2591,7 +2591,7 @@ const ASM_BUILTIN = [
 async function asmDialog(c){
   const rows = JSON.parse(JSON.stringify(c.asm || [])), vars = condVars(c);
   const row = (a, n) => `<tr data-r="${n}"><td><input type="text" data-k="name" value="${esc(a.name || "")}" placeholder="e.g. Floor tiles"></td><td><input type="text" data-k="unit" value="${esc(a.unit || "")}" style="width:52px" placeholder="Sft"></td>
-    <td><input type="text" data-k="f" value="${esc(a.f || "")}" placeholder="A*1.05"></td><td><input type="number" data-k="w" value="${a.w || ""}" min="0" max="100" step="any" style="width:56px" placeholder="0"></td><td><input type="text" data-k="boq" value="${esc(a.boq || "")}" style="width:78px" placeholder="BOQ code"></td><td><input type="text" data-k="ra" value="${esc(a.ra || "")}" style="width:92px" placeholder="RA code" list="dlRa2"></td><td><input type="number" data-k="rate" value="${a.rate || ""}" style="width:80px" placeholder="0"></td>
+    <td><input type="text" data-k="f" value="${esc(a.f || "")}" placeholder="A*1.05"></td><td><input type="number" data-k="w" value="${esc(a.w || "")}" min="0" max="100" step="any" style="width:56px" placeholder="0"></td><td><input type="text" data-k="boq" value="${esc(a.boq || "")}" style="width:78px" placeholder="BOQ code"></td><td><input type="text" data-k="ra" value="${esc(a.ra || "")}" style="width:92px" placeholder="RA code" list="dlRa2"></td><td><input type="number" data-k="rate" value="${esc(a.rate || "")}" style="width:80px" placeholder="0"></td>
     <td><input type="text" data-k="src" value="${esc(a.src || "")}" placeholder="source"></td><td><input type="date" data-k="date" value="${esc(a.date || "")}"></td><td><button class="btn sm dng" data-del="${n}" type="button">&times;</button></td></tr>`;
   const cr = rateOf(c, c.unit);
   const body = () => `<p class="small">Now: Q = ${fq(vars.Q, c.unit)} ${esc(c.unit)}${c.type === "area" ? ` · A = ${fq(vars.A)} Sft · P = ${f3(vars.P)} ft · PD = ${f3(vars.PD)} ft (P less ${f3(vars.D)} ft of doors)` : ""}${c.type === "linear" ? ` · L = ${f3(vars.L)} ft` : ""} · N = ${vars.N}${vars.H ? " · H = " + f3(vars.H) : ""}${vars.T ? " · T = " + f3(vars.T) : ""}.
@@ -9706,6 +9706,19 @@ const AI_TOOLS3 = [
   {name: "search_knowledge", description: "Search the project's local knowledge: the app's help, the PDFs' text page by page, sheet titles, the user's rules, measurements and documents the user added (specs, schedules). Returns excerpts with their source (file + page, measurement id, document). Quote the source in your answer; say clearly what is extracted text and what is your interpretation.",
    input_schema: {type: "object", required: ["query"], properties: {query: {type: "string"}, sources: {type: "array", items: {type: "string", enum: ["help", "drawings", "rules", "measurements", "documents"]}}}}}
 ];
+/* which named spaces an area item takes, as measured by hand in the user's tile bills: floor tile leaves out the wet rooms
+   (taken as bath / wash floor tile), balconies (balcony tile), wardrobes, stairs, lifts and the electric room (plain "Floor area":
+   every room); a bath floor tile item
+   takes the wet rooms only; a balcony item the balconies and terraces only. Other items: every room. */
+const WET_NAME = /\b(BATH|TOILET|W\.?C|WASH|POWDER|PWD|SHOWER|S\.\s*BATH)\b/i, BAL_NAME = /\b(BALCONY|TERRACE|VERANDAH?)\b/i;
+function houseRule(c){
+  const n = String((c && c.name) || "");
+  if (/bath|wash|wet|toilet|w\.?r\b/i.test(n) && /tile|floor/i.test(n)) return {take: up => WET_NAME.test(up), why: "not a wet room — " + n + " takes baths / toilets only"};
+  if (/balcony|terrace/i.test(n)) return {take: up => BAL_NAME.test(up), why: n + " takes balconies / terraces only"};
+  if (/tile|marble|travertine|granite|stone/i.test(n)) return {take: up => !WET_NAME.test(up) && !BAL_NAME.test(up) && !/\bWARD(ROBE)?\b|\bSTAIR|\bLIFT\b(?!\s*AREA|\s*LOBBY)|ELECTRIC|\bDUCT\b|SHAFT/i.test(up),
+    why: "left out of " + n + " (as in your tile bills: baths are bath floor tile, balconies balcony tile; wardrobes, stairs, lifts, electric room not tiled)"};
+  return null;
+}
 async function autoAreaPage(inp){
   const k = curScale();
   if (!k) return {err: "This page has no scale. Ask the user to set it (K: two points and a known length) or confirm the scale note — nothing was measured."};
@@ -9713,11 +9726,13 @@ async function autoAreaPage(inp){
   const F = await drawingFacts(S.fileId, S.pageNo); if (!F || !F.rooms.length) return {err: "No room names found in this page's text (a scan has none). Ask the user to click rooms with Auto area, or to name the rooms — nothing was measured."};
   const want = (inp.names || []).map(x => String(x).toUpperCase().trim()).filter(Boolean), ex = (inp.exclude || []).map(x => String(x).toUpperCase().trim()).filter(Boolean);
   const out = [], cand = [], c = aiAreaCond(), existing = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.kind === "shape" && (cond(i.cond) || {}).type === "area");
+  const house = inp.house === false ? null : houseRule(c);   // the QS house rule for this item (floor tile, bath floor tile, balcony tile…)
   for (const r of F.rooms) {
     const nm = r.name.trim(), up = nm.toUpperCase();
     if (want.length && !want.some(w => up.includes(w))) continue;
     if (VOID_RX.test(nm) || ex.some(w => up.includes(w))) { out.push({name: nm, status: "excluded", why: VOID_RX.test(nm) ? "shaft / duct / void — not floor" : "excluded by the user"}); continue; }
-    const seed = [r.x + r.w / 2, r.y - r.h / 2];
+    if (house && !want.length && !house.take(up)) { out.push({name: nm, status: "excluded", why: house.why}); continue; }
+    const seed = [r.cx != null ? r.cx : r.x + r.w / 2, r.cy != null ? r.cy : r.y - r.h / 2];
     if (existing.some(i => pointInPoly(seed, i.pts))) { out.push({name: nm, status: "skipped", why: "already measured here"}); continue; }
     const t0 = performance.now(); let res; try { res = inp.gap_ft > 0 ? await autoRoom(seed, {gap: +inp.gap_ft}) : await autoRoomGuarded(seed); } catch (e) { res = {err: e.message || String(e)}; }
     kpiLog("auto", {ms: Math.round(performance.now() - t0), err: !!res.err, flag: !!(res.leak || res.short || res.warn), agent: true});
@@ -9894,7 +9909,7 @@ function aiToggle(on){
 /* ------------------------------------------------------------------ free drawing agent (no API key)
    Reads the PDF's own text: room names with their written sizes, door / window tags, levels, scale, unit types, stairs.
    Tasks: measure every room (auto area seeded at its name, checked against the written size), count tags, schedule. */
-const ROOM_RX = /\b(MASTER\s+)?(BED\s*ROOM|BED|LOUNGE|LIVING|DRAWING|DINING|FAMILY|TV|KITCHEN|KIT|PANTRY|BATH|TOILET|W\.?C|POWDER|WASH|DRESS(ING)?|WARDROBE|W\.?I\.?C|STORE|LAUNDRY|UTILITY|SERVANT|MAID|DRIVER|GUARD|LOBBY|FOYER|ENTRANCE|PASSAGE|CORRIDOR|GALLERY|BALCONY|TERRACE|VERANDAH?|PORCH|LAWN|GARAGE|PARKING|STUDY|OFFICE|PRAYER|GYM|HALL|RECEPTION|STAIR(CASE|S)?|LIFT|LOBBY|DUCT|SHAFT|ELECTRIC(AL)?\s+ROOM|PLANT|SHOP|ROOM)\b/i;
+const ROOM_RX = /\b(MASTER\s+)?(BED\s*ROOM|BED|LOUNGE|LIVING|DRAWING|DINING|FAMILY|TV|KITCHEN|KIT|PANTRY|BATH|TOILET|W\.?C|POWDER|WASH|DRESS(ING)?|WARDROBE|WARD\.?|W\.?I\.?C|STORE|LAUNDRY|UTILITY|SERVANT|MAID|DRIVER|GUARD|LOBBY|FOYER|ENTRANCE|PASSAGE|CORRIDOR|GALLERY|BALCONY|TERRACE|VERANDAH?|PORCH|LAWN|GARAGE|PARKING|STUDY|OFFICE|PRAYER|GYM|HALL|RECEPTION|STAIR(CASE|S)?|LIFT|LOBBY|DUCT|SHAFT|ELECTRIC(AL)?\s+ROOM|PLANT|SHOP|ROOM)\b/i;
 const SIZE_RX = /(\d+(?:\.\d+)?\s*'\s*-?\s*(?:\d+(?:\.\d+)?)?(?:\s*\d\/\d)?\s*(?:"|'')?)\s*[xX×*]\s*(\d+(?:\.\d+)?\s*'\s*-?\s*(?:\d+(?:\.\d+)?)?(?:\s*\d\/\d)?\s*(?:"|'')?)/;
 /* door / window / ventilator tags, every way they are written: D1, D-1, D.01, D 1A, D1', DR-1, DOOR 1, SD2, FD1, FRD1,
    MD1, GD1, AD1, DD1, RS1 (rolling shutter), W1, WN-2, WIN 3, WINDOW 4, KW1, TW1, BW1, CW1, SW1, FW1, AW1, SKY1, V1,
@@ -10090,9 +10105,10 @@ function textLines(T){   // pdf text pieces -> lines {s, x, y, w, h, parts}
   t.forEach(p => {
     const L = TAG_RX.test(p.s.trim().replace(/\s+/g, "")) ? null : out.find(l => !l.tag && Math.abs(l.y - p.y) < 0.45 * Math.max(l.h, p.h) && p.x - (l.x + l.w) < 1.6 * l.h && p.x - (l.x + l.w) > -0.3 * l.h);
     if (L) { L.s += (p.x - (L.x + L.w) > 0.25 * L.h && !/\s$/.test(L.s) ? " " : "") + p.s; L.w = Math.max(L.w, p.x + p.w - L.x); L.parts.push(p); }
-    else out.push({s: p.s, x: p.x, y: p.y, w: p.w || p.s.length * p.h * 0.55, h: p.h, parts: [p], tag: TAG_RX.test(p.s.trim().replace(/\s+/g, ""))});   // a door / window tag stays on its own
+    else out.push({s: p.s, x: p.x, y: p.y, w: p.w || p.s.length * p.h * 0.55, h: p.h, r: p.r || 0, parts: [p], tag: TAG_RX.test(p.s.trim().replace(/\s+/g, ""))});   // a door / window tag stays on its own
   });
-  out.forEach(l => { l.s = l.s.replace(/½/g, " 1/2").replace(/¼/g, " 1/4").replace(/¾/g, " 3/4").replace(/⅛/g, " 1/8").replace(/\s+/g, " ").trim(); });   // 13'-5½" is 13'-5 1/2"
+  out.forEach(l => { const c = Math.cos(l.r || 0), sn = Math.sin(l.r || 0); l.cx = l.x + c * l.w / 2 + sn * l.h / 2; l.cy = l.y + sn * l.w / 2 - c * l.h / 2;   // the text's centre — along its own direction (a label written up the page too)
+    l.s = l.s.replace(/½/g, " 1/2").replace(/¼/g, " 1/4").replace(/¾/g, " 3/4").replace(/⅛/g, " 1/8").replace(/\s+/g, " ").trim(); });   // 13'-5½" is 13'-5 1/2"
   return out;
 }
 async function drawingFacts(fileId, pageNo){
@@ -10111,10 +10127,10 @@ async function drawingFacts(fileId, pageNo){
       const cx = l.x + l.w / 2;
       const near = sizes.filter(z => !used.has(z) && Math.abs(z.l.x + z.l.w / 2 - cx) < Math.max(3 * l.h, l.w) && z.l.y > l.y - 0.2 * l.h && z.l.y - l.y < 3.2 * l.h).sort((a, b) => a.l.y - b.l.y)[0];
       if (near) used.add(near);
-      rooms.push({name: l.s, x: l.x, y: l.y, w: l.w, h: l.h, size: near ? near.txt : "", sft: near ? near.a : 0, sizeY: near ? near.l.y : null});
+      rooms.push({name: l.s, x: l.x, y: l.y, w: l.w, h: l.h, cx: l.cx, cy: l.cy, size: near ? near.txt : "", sft: near ? near.a : 0, sizeY: near ? near.l.y : null});
     } else if (ROOM_RX.test(l.s) && SIZE_RX.test(l.s)) {   // name and size on one line
       const z = sizes.find(o => o.l === l); used.add(z);
-      rooms.push({name: l.s.replace(SIZE_RX, "").trim(), x: l.x, y: l.y, w: l.w, h: l.h, size: z.txt, sft: z.a, sizeY: null});
+      rooms.push({name: l.s.replace(SIZE_RX, "").trim(), x: l.x, y: l.y, w: l.w, h: l.h, cx: l.cx, cy: l.cy, size: z.txt, sft: z.a, sizeY: null});
     }
   });
   const uniq = []; rooms.forEach(r => { if (!uniq.some(q => q.name === r.name && Math.abs(q.x - r.x) < 1.5 * r.h && Math.abs(q.y - r.y) < 1.5 * r.h)) uniq.push(r); });   // the same name drawn twice (bold) is one room
@@ -10288,6 +10304,9 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
   const words = filter.toLowerCase().split(/\s+/).filter(Boolean).map(w => w.replace(/s$/, ""));
   let rooms = F.rooms.filter(r => !words.length || words.some(w => r.name.toLowerCase().replace(/\s+/g, "").includes(w.replace(/\s+/g, ""))));
   if (!rooms.length && words.length) rooms = F.rooms.filter(r => words.some(w => nameLike(r.name, w)));   // "bedrom", "kitchn": a slip of the keyboard is still the room
+  { const house = !words.length && !(opt && opt.house === false) ? houseRule(aiAreaCond()) : null;   // the QS house rule of the item being measured
+    if (house) { const out = rooms.filter(r => !house.take(r.name.toUpperCase())); if (out.length && out.length < rooms.length) { rooms = rooms.filter(r => house.take(r.name.toUpperCase()));
+      say("bot", `<span class="small">${out.length} space${out.length > 1 ? "s" : ""} ${esc(house.why)}: ${[...new Set(out.map(r => r.name))].slice(0, 8).map(esc).join(", ")}${out.length > 8 ? "…" : ""}. Name them to measure them anyway.</span>`); } } }
   const vr = viewRect(), zoomed = (vr[2] - vr[0]) * (vr[3] - vr[1]) < 0.6 * S.base.width * S.base.height, all = rooms.length;
   const ar = !only && areaOf();
   if (only) rooms = only; else if (ar) rooms = rooms.filter(r => inArea(ar, [r.x + r.w / 2, r.y - r.h / 2])); else if (zoomed) rooms = rooms.filter(r => { const x = r.x + r.w / 2, y = r.y - r.h / 2; return x >= vr[0] && x <= vr[2] && y >= vr[1] && y <= vr[3]; });
@@ -12530,7 +12549,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),

@@ -16,6 +16,19 @@ never committed. The rules are tested on hand-written drawings in `tools/test_ta
 | Door thresholds of the doors opening into the room are included up to the far wall face | not yet — the outline stops at the door line (about 2 % per room) |
 | Skirting = room perimeter × 0.46 ft, less 2.5 ft per bath door (D3) and 4.83 ft per room door + jambs (D1) | the perimeter is on every area; count the D1 / D3 tags with the Doors / windows agent for the deductions |
 
+### Apartment floor tile (Zameen Quadrangle, "Floor Area as per Drawing", 10 floors, 698 polygons)
+
+| By hand | Auto area / agent |
+|---|---|
+| Baths are never in floor tile — they are bath / wash floor tile | **new:** a *Floor tile* item's "measure all rooms" leaves wet rooms out; a *Bath floor tile* item takes them only |
+| Balconies are their own polygons (balcony tile) | left out of floor tile; a *Balcony tile* item takes balconies / terraces only |
+| Wardrobes are left out; the passage beside them to the balcony door is in | **fixed:** labels written up the page (WARD., WARDROBE) are placed where they are drawn, so the wardrobe stays out and the passage is no longer rejected as "taking in the wardrobe" |
+| The floor runs to the door, into the door's bay | **new:** a doorway's bay is kept (setting `thresh`, on by default) |
+| Lounge + kitchen as one polygon (open kitchen), bedroom + dress as one | measured as two outlines — the total is the same |
+| Door thresholds as small separate pieces (5–12 Sft) | not automatic — the bay rule above takes part of them into the room |
+
+4th & 5th floor, single rooms: −11 % → −7.7 % against the hand polygons; no change on the Mall-35 checks.
+
 ## Ceiling / paint
 
 | By hand | Auto area |
