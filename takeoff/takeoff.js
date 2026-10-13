@@ -2526,7 +2526,7 @@ function billLines(only){   // [{c, kind:"cond"|"asm", a, name, unit, qty, rate,
 }
 const rateOk = l => !l.na && (!(l.rate > 0) || !!(l.src && l.date));
 const rateNote = l => l.na ? '<span style="color:var(--red)">' + esc(l.na) + "</span>" : !rateOk(l) ? '<span style="color:var(--red)">rate: ASSUMPTION — no dated source</span>'
-  : l.rate > 0 ? (l.ra ? "RA " + esc(l.ra) + (l.cached ? " (last read " + esc(dmy(l.date)) + ")" : "") + (l.assumed ? ' · <span style="color:var(--amber)">' + l.assumed + " assumed row" + (l.assumed > 1 ? "s" : "") + "</span>" : "") : "rate: " + esc(l.src) + ", " + esc(dmy(l.date))) : "rate not set";
+  : l.rate > 0 ? (l.ra ? "RA " + esc(l.ra) + (l.cached ? " (last read " + esc(dmy(l.date)) + ")" : "") + (l.assumed ? ' · <span style="color:var(--amber)">' + (Math.round(+l.assumed) || 0) + " assumed row" + (+l.assumed > 1 ? "s" : "") + "</span>" : "") : "rate: " + esc(l.src) + ", " + esc(dmy(l.date))) : "rate not set";
 /* a bill line's cost split per unit: material (incl. wastage), labour, equipment / plant, and OH, profit, access and transport —
    from its Rate Analysis built-up rate; a typed rate has no split */
 const compOf = l => l.comp && l.rate > 0 ? l.comp : null;
@@ -2591,7 +2591,7 @@ const ASM_BUILTIN = [
 async function asmDialog(c){
   const rows = JSON.parse(JSON.stringify(c.asm || [])), vars = condVars(c);
   const row = (a, n) => `<tr data-r="${n}"><td><input type="text" data-k="name" value="${esc(a.name || "")}" placeholder="e.g. Floor tiles"></td><td><input type="text" data-k="unit" value="${esc(a.unit || "")}" style="width:52px" placeholder="Sft"></td>
-    <td><input type="text" data-k="f" value="${esc(a.f || "")}" placeholder="A*1.05"></td><td><input type="number" data-k="w" value="${a.w || ""}" min="0" max="100" step="any" style="width:56px" placeholder="0"></td><td><input type="text" data-k="boq" value="${esc(a.boq || "")}" style="width:78px" placeholder="BOQ code"></td><td><input type="text" data-k="ra" value="${esc(a.ra || "")}" style="width:92px" placeholder="RA code" list="dlRa2"></td><td><input type="number" data-k="rate" value="${a.rate || ""}" style="width:80px" placeholder="0"></td>
+    <td><input type="text" data-k="f" value="${esc(a.f || "")}" placeholder="A*1.05"></td><td><input type="number" data-k="w" value="${esc(a.w || "")}" min="0" max="100" step="any" style="width:56px" placeholder="0"></td><td><input type="text" data-k="boq" value="${esc(a.boq || "")}" style="width:78px" placeholder="BOQ code"></td><td><input type="text" data-k="ra" value="${esc(a.ra || "")}" style="width:92px" placeholder="RA code" list="dlRa2"></td><td><input type="number" data-k="rate" value="${esc(a.rate || "")}" style="width:80px" placeholder="0"></td>
     <td><input type="text" data-k="src" value="${esc(a.src || "")}" placeholder="source"></td><td><input type="date" data-k="date" value="${esc(a.date || "")}"></td><td><button class="btn sm dng" data-del="${n}" type="button">&times;</button></td></tr>`;
   const cr = rateOf(c, c.unit);
   const body = () => `<p class="small">Now: Q = ${fq(vars.Q, c.unit)} ${esc(c.unit)}${c.type === "area" ? ` · A = ${fq(vars.A)} Sft · P = ${f3(vars.P)} ft · PD = ${f3(vars.PD)} ft (P less ${f3(vars.D)} ft of doors)` : ""}${c.type === "linear" ? ` · L = ${f3(vars.L)} ft` : ""} · N = ${vars.N}${vars.H ? " · H = " + f3(vars.H) : ""}${vars.T ? " · T = " + f3(vars.T) : ""}.
