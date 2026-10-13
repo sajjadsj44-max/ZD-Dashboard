@@ -53,6 +53,11 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   ok(res.empty.a != null && res.empty.a < 42, "an empty space behind the partition (a cupboard) is left out (got " + (res.empty.a || 0).toFixed(2) + ")");
   ok(res.duct.a != null && res.duct.a < 42, "a space with DUCT written in it is left out (got " + (res.duct.a || 0).toFixed(2) + ")");
 
+  // the house rule of the item: floor tile leaves out baths / balconies / wardrobes, a bath floor item takes baths only
+  const hr = await T(() => { const H = zdTakeoff.houseRule, t = (c, n) => { const r = H({name: c}); return r ? r.take(n) : true; };
+    return [t("Floor tile", "BEDROOM"), t("Floor tile", "BATH"), t("Floor tile", "BALCONY WIDE"), t("Floor tile", "WARD."), t("Floor tile", "LIFT AREA"), t("Floor tile", "LIFT"),
+      t("Bath floor tile", "BATH"), t("Bath floor tile", "KITCHEN"), t("Balcony tile", "BALCONY"), t("Balcony tile", "LOUNGE"), t("Ceiling plaster", "BATH")]; });
+  ok(JSON.stringify(hr) === JSON.stringify([true, false, false, false, true, false, true, false, true, false, true]), "house rules: floor tile skips baths, balconies, wardrobes, lift shafts (not the lift area); bath floor tile takes baths only; balcony tile balconies only; other items every room (" + hr.join(",") + ")");
   console.log("🧱 Block masonry (p.2)");
   await goto(2);
   const B = FX.BLOCK;
