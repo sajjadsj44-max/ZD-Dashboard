@@ -69,6 +69,17 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   const sheet = await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.name === 'Block masonry 4"x8"x12"'), it = Z.P.proj.items.find(i => i.cond === c.id && i.kind === "open");
     return it ? Z.rowsOf(it, Z.P.proj.scales[it.file + ":" + it.page].ptPerFt).map(x => [x.nos, x.L, x.W, x.H, x.qty]) : null; });
   ok(sheet && sheet[0][1] === 3.5 && sheet[0][2] === 0.33 && sheet[0][3] === 7, "the door's sheet row is Nos × width × wall thickness × door height (" + JSON.stringify(sheet) + ")");
+  const btns = await T(() => { const Z = zdTakeoff, it = Z.P.proj.items.find(i => i.blockAuto && i.kind === "shape"); Z.S.sel = it.id; Z.renderProps();
+    return [...document.querySelectorAll('[data-act="blockFix"]')].map(b => b.textContent); });
+  ok(btns.length === 2, "a selected run shows “Wrong block?” buttons for the other two blocks (" + btns.join(", ") + ")");
+  // correcting a run: the internal 8" wall moved to 8"x8"x16" — kept when the agent runs again
+  const fix = await T(b => { const Z = zdTakeoff, P = Z.P.proj, ci = P.conds.find(c => c.blockKey === "8i"), ce = P.conds.find(c => c.blockKey === "8e");
+    const it = P.items.find(i => i.blockAuto && i.kind === "shape" && i.cond === ci.id); if (!it) return null; Z.blockFix(it.id, "8e");
+    const after = P.items.filter(i => i.cond === ci.id && i.kind === "shape").length, moved = P.items.find(i => i.id === it.id).cond === ce.id;
+    const r2 = Z.blockMasonryAgent({floor: 12, slab: 7.5, beamD: 21, beam: {"4": 0, "8i": 0, "8e": 0}, tags: {}, page: true}), row = n => r2.rows.find(x => x.type.includes(n));
+    return {moved, after, ext2: row('8"x8"x16"').run_ft, int2: row('8"x8"x12"').run_ft, learnt: (P.blockLearn || []).length}; }, B);
+  ok(fix && fix.moved && fix.after === 0, "Wrong block? → 8\"x8\"x16\" moves the internal run off 8\"x8\"x12\" (" + JSON.stringify(fix) + ")");
+  ok(fix && fix.int2 === 0 && Math.abs(fix.ext2 - (B.ext + B.int)) <= 0.08 * (B.ext + B.int), "…and the agent run again keeps the correction (8\"x8\"x16\" " + (fix && fix.ext2) + " ft, 8\"x8\"x12\" " + (fix && fix.int2) + " ft)");
   // the dialog: the tags on the page listed with the house sizes prefilled
   if (await page.isVisible("#agBlock")) await page.click("#agBlock"); else await T(() => { zdTakeoff.blockMasonryDialog(); });   // (not awaited: it waits for the dialog)
   await page.waitForSelector('[data-bmw="D2"]', {timeout: 8000}).catch(() => {});
