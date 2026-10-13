@@ -678,6 +678,24 @@ function fit(pn = ACT){
 }
 /* line weights off: every stroke drawn 1 device pixel wide, whatever the PDF says (as Bluebeam's toggle) */
 const LW = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "lineWidth");
+/* faint hairlines made legible when zoomed out (Bluebeam / Acrobat "enhance thin lines"): drawings printed with Microsoft Print
+   to PDF and the like turn every CAD line into a filled sliver a quarter point wide — on a big sheet seen whole, each line is a
+   fraction of a screen pixel and comes out as a pale grey wash. The picture (never the PDF, its lines or any quantity) is
+   given its dark ink back: every pixel takes the darkest of itself and its four neighbours (a hairline becomes about two pixels
+   wide at half strength), then the pale greys are pulled darker. Only below the zoom where a sliver is still under a pixel; off in dark mode. */
+function boostInk(ctx, w, h, ptPx){
+  if (!S.boost || !(ptPx < 1.6) || w * h > 2.6e7) return;
+  let im; try { im = ctx.getImageData(0, 0, w, h); } catch (e) { return; }
+  const d = im.data, src = new Uint8ClampedArray(d), row = w * 4, g = new Uint8ClampedArray(256), gam = ptPx < 0.8 ? 1.8 : 1.4;
+  for (let v = 0; v < 256; v++) g[v] = v >= 250 ? v : Math.round(255 * Math.pow(v / 255, gam));
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * row + x * 4;
+    for (let c = 0; c < 3; c++) { let m = src[i + c];
+      if (x > 0 && src[i - 4 + c] < m) m = src[i - 4 + c]; if (x < w - 1 && src[i + 4 + c] < m) m = src[i + 4 + c];
+      if (y > 0 && src[i - row + c] < m) m = src[i - row + c]; if (y < h - 1 && src[i + row + c] < m) m = src[i + row + c];
+      d[i + c] = g[(src[i + c] + m) >> 1]; } }   // half way to the darkest neighbour: a hairline gains weight, text keeps its shape
+  ctx.putImageData(im, 0, 0);
+}
+function setBoost(on){ S.boost = on; const b = $("bBoost"); if (b) { b.classList.toggle("on", on); b.title = on ? "Faint lines are enhanced when zoomed out (the picture only — never the PDF or a quantity) — click to show the page as drawn" : "Faint lines are shown as drawn — click to enhance them when zoomed out"; } pref("zdTakeoffBoost", on ? "1" : "0"); renderAll(); }
 function thinLines(ctx){
   if (!S.thin) return ctx;
   const stroke = ctx.stroke;
@@ -798,6 +816,7 @@ async function renderLow(pn = ACT){   // drawn off screen, then shown only if th
   const ctx = inkCtx(thinLines(off.getContext("2d")), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, off.width, off.height); try { await sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vp})).promise; } catch (e) {}
   if (pn.page !== page) return;
+  if (!darkNow(fileId, pn.sess.proj)) boostInk(off.getContext("2d"), off.width, off.height, sc * (pn.view ? Math.min(1, pn.view.s / sc) : 1));
   await overlayCmp(ctx, off.width, off.height, sc, 0, 0, pn);
   if (pn.page !== page) return;
   const c = pn.el.low; c.width = off.width; c.height = off.height; c.getContext("2d").drawImage(off, 0, 0);
@@ -818,6 +837,7 @@ function renderHi(now, pn = ACT){
     pn.renderTask = task;
     try { await task.promise; } catch (e) { return; }
     if (pn.renderTask !== task) return;
+    if (!darkNow(fileId, pn.sess.proj)) boostInk(off.getContext("2d"), w, h, v.s * dpr);
     await overlayCmp(ctx, w, h, v.s * dpr, v.tx * dpr, v.ty * dpr, pn);
     if (pn.renderTask !== task) return;
     pn.renderTask = null;
@@ -12546,7 +12566,7 @@ function ocFix(Lb, out, fids){
 /* ------------------------------------------------------------------ start */
 (async function init(){
   loadLbl(); loadLegend(); wire(); wirePanels(); setLblOn(S.lbl.on); setLegendOn(S.legendOn); iconize(); wsApply();
-  { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
+  { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1"); S.boost = pref("zdTakeoffBoost") !== "0"; { const b = $("bBoost"); if (b) { b.classList.toggle("on", S.boost); b.onclick = () => setBoost(!S.boost); } }
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   window.zdTakeoff = {houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,

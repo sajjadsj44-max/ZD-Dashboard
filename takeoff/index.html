@@ -1027,6 +1027,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
       <span class="vh">Drawing</span>
       <span class="dimw"><button class="btn sm tg2" id="bDim" title="Dimmer — fade the drawing so the takeoff stands out">&#9728; Dimmer</button><input type="range" id="dimPct" min="0" max="90" step="5" value="50" title="Dimming %"><span id="dimLbl">0%</span></span>
       <button class="btn sm tg2" id="bLw" title="Line weights are on — click to draw every line thin">&#9472; Line weights</button>
+      <button class="btn sm tg2 on" id="bBoost" title="Faint lines are enhanced when zoomed out (the picture only — never the PDF or a quantity) — click to show the page as drawn">&#9681; Faint lines</button>
       <span class="vh">Background</span>
       <span class="seg"><button class="btn sm tg2" id="bBg_auto" title="Black for AutoCAD drawings, as AutoCAD's model space; white for PDFs">Auto</button><button class="btn sm tg2" id="bBg_black" title="Black, as AutoCAD's model space — colour 7 white, colours as AutoCAD shows them">&#9632; Black</button><button class="btn sm tg2" id="bBg_white" title="White paper">&#9633; White</button></span>
       <button class="btn sm tg2" id="bMono" title="Monochrome — every line in one ink">&#9680; Monochrome</button>
@@ -1121,7 +1122,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-14c"></script>
+<script type="module" src="takeoff.js?v=2026-10-14d"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
