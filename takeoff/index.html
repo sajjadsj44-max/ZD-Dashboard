@@ -495,6 +495,9 @@ header .btn.sm{border-radius:8px}
 .tool.tgl.on,.rtabs .tool.on{background:var(--blue);border-color:var(--blue);color:#fff}
 .rtabs .tg{color:#3c4c60}
 @container stg (max-width:1000px){.rrow .tool .tl,.rrow .tool kbd,.rtabs .tool .tl{display:none}.rrow .tool{min-width:36px;padding:7px}.rrow #bMk.on .tl{display:inline}.rg{padding:0 6px}}
+/* tools reachable by keyboard and finger: a visible focus ring, and touch targets big enough on tablets */
+.tool:focus-visible,.btn:focus-visible,.rtab:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+@media (pointer:coarse){.rrow .tool{min-width:46px;min-height:46px;padding:8px 6px 5px}.rtab{padding:12px 14px}.tool{min-height:34px}}
 
 /* grid: the app fills what is left under the ribbon; the agent bar sits at the very bottom */
 .app{flex:1 1 0;height:auto;min-height:0;grid-template-columns:300px minmax(0,1fr) 460px;gap:0}
@@ -1123,7 +1126,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-14g"></script>
+<script type="module" src="takeoff.js?v=2026-10-15a"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
