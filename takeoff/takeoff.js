@@ -1505,7 +1505,7 @@ function barrierIds(g, ids, k, o){
     if (Math.hypot(s[2] - s[0], s[3] - s[1]) < minL) return false;
     if (wall) { const st = (g.styles[s[6]] || "|0").split("|"); if (st[0] !== wall.col || +st[1] < 0.9 * wall.w) return false; }
     return true; });
-  out.doors = (door.lines || []).concat(jambLines(out, k, o.gap)); out.doorIds = [...door].concat(ids.filter(i => cloud.has(i)));
+  out.swings = door.lines || []; out.doors = out.swings.concat(jambLines(out, k, o.gap)); out.doorIds = [...door].concat(ids.filter(i => cloud.has(i)));
   out.hatch = ids.filter(i => hat.has(i)).map(i => { const s = g.segs[i], L = Math.hypot(s[2] - s[0], s[3] - s[1]), e = Math.min(0.2 * k, L / 4) / L, dx = (s[2] - s[0]) * e, dy = (s[3] - s[1]) * e; return [s[0] + dx, s[1] + dy, s[2] - dx, s[3] - dy]; });   // erased from the picture short of their ends, so the wall they touch stays whole
   return out;
 }
@@ -1578,6 +1578,77 @@ function fillPocketsWin(m, ink, W, H, wallPx, maxPx, minTouch, minPx, named){
   // the room's own ink inside it (furniture outlines, text) is part of the floor too
   for (let i = 0; i < N; i++) if (!m[i] && ink[i]) { const x = i % W; let n = 0;
     if (x > 0 && m[i - 1]) n++; if (x < W - 1 && m[i + 1]) n++; if (i >= W && m[i - W]) n++; if (i + W < N && m[i + W]) n++; if (n >= 3) m[i] = 1; }
+}
+/* spaces next to the room that belong to it, as a QS measures them by hand (learned from marked-up Bluebeam takeoffs):
+   - behind a single thin line (a threshold or a floor-finish line, not a door): an unnamed closed space 2'-9" wide or more and
+     under 45 Sft — the room's own entry passage or lobby. A wardrobe recess (under 2'-9" deep) stays out.
+   - behind a thin line or a partition no thicker than 4½" (a shower kerb or screen drawn as a wall), in a wet room (BATH, TOILET, W.C., WASH,
+     POWDER): a small closed space with a fitting drawn in it (the floor trap, the shower) — the shower; the floor, its tiles
+     and the ceiling run over the partition.
+   Never across a door (its closing line), never a duct or a named room, never a space open to anything else. -> how many joined */
+function compWidth(comp, W){   // a pixel set's widest inscribed circle, as a diameter in pixels
+  let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1; comp.forEach(i => { const x = i % W, y = (i - x) / W; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; });
+  const w = x1 - x0 + 3, h = y1 - y0 + 3, f = new Float32Array(w * h); comp.forEach(i => { const x = i % W, y = (i - x) / W; f[(y - y0 + 1) * w + (x - x0 + 1)] = 1e20; });
+  edt2(f, w, h); let m = 0; for (let i = 0; i < f.length; i++) if (f[i] > m && f[i] < 1e19) m = f[i]; return 2 * Math.sqrt(m);
+}
+function swingMask(lines, x0, y0, W, H, px){   // the door swings' closing lines (hinge to leaf end), 3 px wide -> mask, or null
+  if (!lines || !lines.length) return null;
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d", {willReadFrequently: true});
+  ctx.setTransform(1 / px, 0, 0, 1 / px, -x0 / px, -y0 / px); ctx.lineWidth = 3 * px; ctx.lineCap = "round"; ctx.strokeStyle = "#000"; ctx.beginPath();
+  lines.forEach(q => { ctx.moveTo(q[0], q[1]); ctx.lineTo(q[2], q[3]); }); ctx.stroke();
+  const d = ctx.getImageData(0, 0, W, H).data, b = new Uint8Array(W * H); for (let i = 0; i < b.length; i++) b[i] = d[i * 4 + 3] > 24 ? 1 : 0; return b;
+}
+const WET_RX = /\b(BATH|TOILET|W\.?C|WASH\s*ROOM|POWDER|SHOWER|ENSUITE)\b/i;
+function annexJoin(m, thin, doorM, W, H, px, k, x0, y0){
+  const TL = textLines(S.texts[S.key] || []), names = TL.filter(l => !l.tag && l.s.length <= 32 && (ROOM_RX.test(l.s) || VOID_RX.test(l.s))).map(l => [Math.round((l.x + l.w / 2 - x0) / px), Math.round((l.y - l.h / 2 - y0) / px)]);
+  const wet = TL.some(l => { if (l.tag || !WET_RX.test(l.s) || l.s.length > 32) return false; const x = Math.round((l.x + l.w / 2 - x0) / px), y = Math.round((l.y - l.h / 2 - y0) / px);
+    const rx = Math.max(3, Math.ceil(l.w / 2 / px)), ry = Math.max(3, Math.ceil(l.h / px));   // (the name's own ink is not floor: look round it)
+    for (let dy = -ry; dy <= ry; dy++) for (let dx = -rx; dx <= rx; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H && m[yy * W + xx]) return true; } return false; });
+  const fpx = k / px, dMax = 0.5 * fpx + 1.5, thinSep = 0.2 * fpx, maxWet = 35 * fpx * fpx, maxPass = 45 * fpx * fpx, minPx = 3 * fpx * fpx; let joined = 0;
+  let cx0 = W, cy0 = H, cx1 = -1, cy1 = -1; for (let i = 0; i < m.length; i++) if (m[i]) { const x = i % W, y = (i - x) / W; if (x < cx0) cx0 = x; if (x > cx1) cx1 = x; if (y < cy0) cy0 = y; if (y > cy1) cy1 = y; }
+  const pad = Math.ceil(10 * fpx), full = cx0 - pad <= 0 && cy0 - pad <= 0 && cx1 + pad >= W - 1 && cy1 + pad >= H - 1, ox0 = full ? 0 : Math.max(0, cx0 - pad), oy0 = full ? 0 : Math.max(0, cy0 - pad);   // (cropRun's window origin)
+  cropRun(m, W, H, pad, [thin, doorM], (mm, w, h, [ink, dm]) => {
+    const N = w * h, f = new Float32Array(N); for (let i = 0; i < N; i++) f[i] = mm[i] ? 0 : 1e20; edt2(f, w, h);
+    const nm = new Uint8Array(N); names.forEach(([x, y]) => { const xx = x - ox0, yy = y - oy0; if (xx >= 0 && yy >= 0 && xx < w && yy < h) nm[yy * w + xx] = 1; });
+    const d2 = dMax * dMax, seen = new Uint8Array(N), st = new Int32Array(N), add = new Uint8Array(N);
+    for (let i0 = 0; i0 < N; i0++) {
+      if (mm[i0] || ink[i0] || seen[i0] || f[i0] > d2) continue;
+      const comp = []; let top = 0, open = false, ax = w, ay = h, bx = -1, by = -1, sep = 1e20; seen[i0] = 1; st[top++] = i0;
+      while (top) { const i = st[--top], x = i % w, y = (i - x) / w; comp.push(i); if (comp.length > maxPass || x === 0 || y === 0 || x === w - 1 || y === h - 1) { open = true; break; }
+        if (x < ax) ax = x; if (x > bx) bx = x; if (y < ay) ay = y; if (y > by) by = y; if (f[i] < sep) sep = f[i];
+        for (const j of [i - 1, i + 1, i - w, i + w]) if (!mm[j] && !ink[j] && !seen[j]) { seen[j] = 1; st[top++] = j; } }
+      if (open || comp.length < minPx || comp.some(i => nm[i])) continue;
+      sep = Math.sqrt(sep);
+      // across a door (its closing line): the next room or passage, not this one
+      if (dm && comp.some(i => f[i] <= (sep + 2.5) ** 2 && (() => { const x = i % w, y = (i - x) / w; for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < w && yy < h && dm[yy * w + xx]) return true; } return false; })())) continue;
+      if (sep < thinSep && !wet) {   // behind a single thin line: the room's own passage or lobby, wide enough not to be a wardrobe recess
+        const c = new Float32Array(N); comp.forEach(i => { c[i] = 1e20; }); edt2(c, w, h); let r2 = 0; comp.forEach(i => { if (c[i] > r2) r2 = c[i]; });
+        if (2 * Math.sqrt(r2) < 2.75 * fpx) continue;
+      } else {   // a wet room's shower (behind a thin line or a partition), with a fitting drawn in it
+        if (!wet || comp.length > maxWet) continue;
+        const bw = bx - ax + 3, bh = by - ay + 3, ox = ax - 1, oy = ay - 1, reach = new Uint8Array(bw * bh), q = [];
+        const inkAt = (x, y) => { const X = x + ox, Y = y + oy; return X >= 0 && Y >= 0 && X < w && Y < h && !!ink[Y * w + X] && !mm[Y * w + X]; };
+        for (let x = 0; x < bw; x++) for (const y of [0, bh - 1]) if (inkAt(x, y) && !reach[y * bw + x]) { reach[y * bw + x] = 1; q.push(y * bw + x); }
+        for (let y = 0; y < bh; y++) for (const x of [0, bw - 1]) if (inkAt(x, y) && !reach[y * bw + x]) { reach[y * bw + x] = 1; q.push(y * bw + x); }
+        while (q.length) { const i = q.pop(), x = i % bw, y = (i - x) / bw; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const xx = x + dx, yy = y + dy;
+          if (xx >= 0 && yy >= 0 && xx < bw && yy < bh && !reach[yy * bw + xx] && inkAt(xx, yy)) { reach[yy * bw + xx] = 1; q.push(yy * bw + xx); } } }
+        let island = 0; for (let y = 1; y < bh - 1; y++) for (let x = 1; x < bw - 1; x++) if (inkAt(x, y) && !reach[y * bw + x]) island++;
+        if (island < 4) {   // a vector page: a fitting drawn against the wall — curves or short strokes in the space (a floor trap), or an SH tag
+          const e = 0.15 * k, X0 = x0 + (ox0 + ax) * px + e, Y0 = y0 + (oy0 + ay) * px + e, X1 = x0 + (ox0 + bx + 1) * px - e, Y1 = y0 + (oy0 + by + 1) * px - e;
+          const g = S.geo[S.key], inBox = (x, y) => x >= X0 && x <= X1 && y >= Y0 && y <= Y1;
+          const fit = g && X1 > X0 && Y1 > Y0 ? segsIn(g, X0, Y0, X1, Y1).filter(i => { const q2 = g.segs[i]; return inBox(q2[0], q2[1]) && inBox(q2[2], q2[3]) && ((q2[4] & 1) || Math.hypot(q2[2] - q2[0], q2[3] - q2[1]) < 0.6 * k); }).length : 0;
+          const sh = TL.some(l => /^\s*(SH\.?|SHOWER|F\.?T\.?|N\.?T\.?)\s*$/i.test(l.s) && inBox(l.x + l.w / 2, l.y - l.h / 2));
+          if (fit < 3 && !sh) continue; }
+      }
+      comp.forEach(i => { add[i] = 1; }); joined++;
+    }
+    if (!joined) return;
+    const g = new Float32Array(N); for (let i = 0; i < N; i++) g[i] = add[i] ? 0 : 1e20; edt2(g, w, h);
+    for (let i = 0; i < N; i++) if (add[i] || (ink[i] && f[i] <= d2 && g[i] <= d2)) mm[i] = 1;   // the space, and the line or partition between it and the room
+    for (let pass = 0; pass < 2; pass++) for (let i = 0; i < N; i++) if (!mm[i] && ink[i] && g[i] <= 9 * fpx * fpx) {   // its fittings (ink inside it)
+      const x = i % w; let n = 0; if (x > 0 && mm[i - 1]) n++; if (x < w - 1 && mm[i + 1]) n++; if (i >= w && mm[i - w]) n++; if (i + w < N && mm[i + w]) n++; if (n >= 3) mm[i] = 1; }
+  });
+  return joined;
 }
 function outerLoop(m, W, H){   // boundary of the mask along pixel edges, region on the right; the largest outer loop, in pixel corners
   const N = W + 1, nx = new Map();
@@ -1941,11 +2012,14 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
         const seen = new Uint8Array(N), st = new Int32Array(N);
         for (let i0 = 0; i0 < N; i0++) {
           if (!A.m[i0] || m[i0] || seen[i0]) continue;
-          const comp = []; let top = 0, room = false; seen[i0] = 1; st[top++] = i0;
+          const comp = []; let top = 0, room = false, edge = false; seen[i0] = 1; st[top++] = i0;
           while (top) { const i = st[--top], x = i % W, y = (i - x) / W; comp.push(i);
-            if (!bar[i] || x === 0 || y === 0 || x === W - 1 || y === H - 1) room = true;
+            if (x === 0 || y === 0 || x === W - 1 || y === H - 1) edge = room = true; else if (!bar[i]) room = true;
             for (const j of [i - 1, i + 1, i - W, i + W]) if (j >= 0 && j < N && A.m[j] && !m[j] && !seen[j] && Math.abs(j % W - x) <= 1) { seen[j] = 1; st[top++] = j; } }
-          if (!room && !comp.some(i => named[i])) comp.forEach(i => { m[i] = 1; });
+          if (comp.some(i => named[i])) continue;
+          // a closed space no wider than 4'-6" and under 60 Sft with no name — the room's own entry passage, shut off by its door
+          // (as a QS takes it: the floor, the tiles, the ceiling run to the door): part of the room, even when wider than the gap
+          if (!room || (!edge && comp.length <= 60 * (k / px) ** 2 && compWidth(comp, W) <= 4.5 * k / px)) comp.forEach(i => { m[i] = 1; });
         }
       }
     } else {   // narrower than the gap all over (a passage): the thin-line fill alone, if it stays closed
@@ -1955,6 +2029,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
     }
     await breathe();
     if (o.pocket > 0) { for (let pass = 0; pass < 2; pass++) { await breathe(); fillPockets(m, thin, W, H, Math.max(1.5, o.pocket / 2 + 0.5) * k / px, (o.pocket * k / px) ** 2 * 1.2, k / px, 2 * (k / px) ** 2, keepOut); } await breathe(); closeMask(m, W, H, Math.min(o.pocket, 3) * k / px / 2); }
+    const wetN = o.annex === false ? 0 : annexJoin(m, thin, swingMask(ids.swings, x0, y0, W, H, px), W, H, px, k, x0, y0);   // the room's passage behind a threshold line, a bath's shower behind its partition
     let partial = false;
     if (passage) { let n = 0; if (passage.horiz) { for (let x = 0; x < W; x++) if (m[csy * W + x]) n++; } else for (let y = 0; y < H; y++) if (m[y * W + csx]) n++;
       partial = n * px / k < 0.6 * passage.along; }   // the outline takes in less than 60 % of the passage's length: a piece by a doorway, not the passage
@@ -1996,7 +2071,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
         all++; if (L > 1.5 * k && e / (n - 1) > 0.6) on++; }
       if (on) warn = "bounded on " + (on === 1 ? "one side" : on + " sides") + " by a dashed line — a grid line or an open edge? Check the outline"; }
     if (!warn && g.segs.length && ids.length) { const sup = lineSupport(Q, g, k); if (sup < 0.75) warn = "only " + Math.round(sup * 100) + " % of the outline follows the drawing's lines — something (text, a watermark, a gap) may have broken a wall; check it"; }
-    return {pts: Q, rect: !!sq, passage, partial, holes, warn};
+    return {pts: Q, rect: !!sq, passage, partial, holes, warn, wet: wetN};
   }
   return {err: "The space leaks — an opening wider than the door gap (" + f3(autoOpt().gap) + " ft) joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it."};
 }
@@ -8604,7 +8679,7 @@ function wire(){
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
   $("aiDetails").onclick = () => agentCmd("drawing details");
-  $("agRooms").onclick = () => agentCmd("measure all rooms"); $("agUnit").onclick = () => unitDialog(); $("agWalls").onclick = () => wallsDialog(); $("agTags").onclick = () => doorWinDialog();
+  $("agRooms").onclick = () => agentCmd("measure all rooms"); $("agUnit").onclick = () => unitDialog(); $("agWalls").onclick = () => wallsDialog(); if ($("agBlock")) $("agBlock").onclick = () => blockMasonryDialog(); $("agTags").onclick = () => doorWinDialog();
   $("agFull").onclick = () => fullTakeoffDialog(); $("agFin").onclick = () => finishesDialog(); $("agCheck").onclick = () => P.proj && agentCheck("all");
   $("aiRead").onclick = () => aiSend($("aiIn").value.trim() || "Measure the floor area of every room in this view.", true).then(() => { $("aiIn").value = ""; });
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
@@ -10073,6 +10148,7 @@ async function agentStep(text){
     let um = /(?:apartment|appartment|apt|unit|flat)\s*(?:no\.?|#)?\s*([0-9]{1,4}[a-z]?)/.exec(t) || /^\s*(?:measure\s+)?([0-9]{2,4}[a-z]?)\s*$/.exec(t);
     if (um) return agentUnit(um[1]);
     if (/apartment|unit|flat/.test(t)) return unitDialog();
+    if (/block\s*(work|masonry)|masonry\s*block|\bblocks?\b/.test(t)) return blockMasonryDialog();
     if (/wall|masonry|brick|block\s*work/.test(t)) return agentWallsCmd(t);
     if (/schedule|list|table|export|csv/.test(t)) return agentSchedule();
     if (/detail|read|what|info|summary|overview/.test(t)) return agentDetails();
@@ -10653,6 +10729,136 @@ async function wallsDialog(){
   aiLog("bot", "Check the runs on the drawing (they are marked AI). Deduct doors and windows with the <b>Opening</b> tool (O)." + (r.needs_height ? " Give the condition its height H (✎) to get cft." : ""));
 }
 document.addEventListener("change", e => { if (e.target.id === "wlT") $("wlT2").style.display = e.target.value ? "none" : ""; });
+/* ------------------------------------------------------------------ 🧱 block masonry, the QS way (learned from a marked-up
+   Bluebeam block-work takeoff and its working sheet): every wall run on its centre line, by block —
+     4" walls → Block masonry 4"x8"x12" · 8" walls with outside, a balcony, a courtyard or an open-to-sky / look-below void
+     on one side → Block masonry 8"x8"x16" (external) · other 8" walls → Block masonry 8"x8"x12" (internal);
+   runs carry on through door and window openings (each deducted as its own row: Nos × width × wall thickness × height) and stop
+   at columns and RCC walls (concrete hatch in the wall's band); balcony parapets (outside on both sides) are left out.
+   Wall height = floor to floor less the slab. Beams over the walls are deducted as rows of their own (length × the beam's depth
+   below the slab). Blocks = net cft × 0.9 ÷ block volume (0.33 × 0.67 × 1, 0.67 × 0.67 × 1, 0.67 × 0.67 × 1.33 ft). */
+const BLOCK_TYPES = [{key: "4", name: 'Block masonry 4"x8"x12"', t: 0.33, vol: 0.33 * 0.67 * 1}, {key: "8i", name: 'Block masonry 8"x8"x12"', t: 0.67, vol: 0.67 * 0.67 * 1},
+  {key: "8e", name: 'Block masonry 8"x8"x16"', t: 0.67, vol: 0.67 * 0.67 * 1.33}];
+const BLOCK_OUT_RX = /\b(BALCONY|OPEN\s+TO\s+SKY|LOOK\s+BELOW|VOID|COURT\s*YARD|TERRACE|SET\s*BACK|LAWN|SKY\s*LIGHT|DOUBLE\s+HEIGHT)\b/i;
+const BLOCK_ROOM_RX = /\b(BED\s*ROOM|LOUNGE|KITCHEN|BATH|DINING|STORE|LOBBY|HALL|ROOM|DRESS|LAUNDRY|PASSAGE|CORRIDOR|STAIR|LIFT|OFFICE|SHOP)\b/i;
+function blockRuns(rect){   // -> [{type: "4" | "8i" | "8e", t, a, b}] on this page (or in rect), centre-line pieces
+  const k = curScale(), g = S.geo[S.key]; if (!k || !g || !g.segs.length) return null;
+  const th = wallThicknesses(rect).filter(w => w.len > 10 && w.t >= 0.25 && w.t <= 0.85).map(w => w.t);
+  const runs = []; th.forEach(t => (findWalls(t, rect, 6) || []).forEach(r => runs.push({t, a: r.a, b: r.b})));
+  if (!runs.length) return [];
+  const vb = S.base || {width: 0, height: 0}, px = 0.25 * k;
+  let X0 = 0, Y0 = 0, X1 = vb.width, Y1 = vb.height; if (rect) { X0 = rect[0]; Y0 = rect[1]; X1 = rect[2]; Y1 = rect[3]; }
+  const W = Math.max(8, Math.ceil((X1 - X0) / px)), H = Math.max(8, Math.ceil((Y1 - Y0) / px));
+  // the walls as barriers (each run lengthened 1.5 ft at both ends: corners and columns close), the open spaces between them as regions
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const c = cv.getContext("2d", {willReadFrequently: true});
+  c.setTransform(1 / px, 0, 0, 1 / px, -X0 / px, -Y0 / px); c.lineCap = "square"; c.strokeStyle = "#000";
+  runs.forEach(r => { const L = dist(r.a, r.b) || 1, ux = (r.b[0] - r.a[0]) / L, uy = (r.b[1] - r.a[1]) / L, e = 1.5 * k;
+    c.lineWidth = r.t * k + 0.3 * k; c.beginPath(); c.moveTo(r.a[0] - ux * e, r.a[1] - uy * e); c.lineTo(r.b[0] + ux * e, r.b[1] + uy * e); c.stroke(); });
+  const im = c.getImageData(0, 0, W, H).data, N = W * H, bar = new Uint8Array(N); for (let i = 0; i < N; i++) bar[i] = im[i * 4 + 3] > 40 ? 1 : 0;
+  const reg = new Int32Array(N).fill(-1), info = [], st = new Int32Array(N);
+  for (let i0 = 0; i0 < N; i0++) { if (bar[i0] || reg[i0] >= 0) continue; const id = info.length, o = {n: 0, edge: false, x0: W, y0: H, x1: 0, y1: 0, rooms: 0}; info.push(o); let top = 0; st[top++] = i0; reg[i0] = id;
+    while (top) { const i = st[--top], x = i % W, y = (i - x) / W; o.n++; if (x < o.x0) o.x0 = x; if (x > o.x1) o.x1 = x; if (y < o.y0) o.y0 = y; if (y > o.y1) o.y1 = y; if (x === 0 || y === 0 || x === W - 1 || y === H - 1) o.edge = true;
+      for (const j of [i - 1, i + 1, i - W, i + W]) if (j >= 0 && j < N && !bar[j] && reg[j] < 0 && Math.abs(j % W - x) <= 1) { reg[j] = id; st[top++] = j; } } }
+  const at = (x, y) => { const u = Math.floor((x - X0) / px), v = Math.floor((y - Y0) / px); return u < 0 || v < 0 || u >= W || v >= H ? -2 : bar[v * W + u] ? -1 : reg[v * W + u]; };
+  const lines = textLines(S.texts[S.key] || []), outL = lines.filter(l => !l.tag && BLOCK_OUT_RX.test(l.s));
+  outL.forEach(l => { const r = at(l.x + l.w / 2, l.y - l.h / 2); if (r >= 0) info[r].out = true; });
+  lines.forEach(l => { if (!l.tag && BLOCK_ROOM_RX.test(l.s)) { const r = at(l.x + l.w / 2, l.y - l.h / 2); if (r >= 0) info[r].rooms++; } });
+  g.segs.forEach(q => { const L = Math.hypot(q[2] - q[0], q[3] - q[1]); if (L < 15 * k) return; const an = Math.abs(Math.atan2(q[3] - q[1], q[2] - q[0])) % (Math.PI / 2); if (an < 0.3 || an > 1.27) return;   // a slab opening's cross
+    const r = at((q[0] + q[2]) / 2, (q[1] + q[3]) / 2); if (r >= 0) info[r].diag = (info[r].diag || 0) + 1; });
+  let bx0 = W, by0 = H, bx1 = 0, by1 = 0; info.forEach(o => { if (o.edge) return; bx0 = Math.min(bx0, o.x0); by0 = Math.min(by0, o.y0); bx1 = Math.max(bx1, o.x1); by1 = Math.max(by1, o.y1); });
+  info.forEach(o => { const bw = o.x1 - o.x0 + 1, bh = o.y1 - o.y0 + 1, strip = !o.rooms && (bw >= 0.35 * (bx1 - bx0) || bh >= 0.35 * (by1 - by0)) && (o.n < 0.3 * bw * bh || Math.max(bw, bh) >= 6 * Math.min(bw, bh));
+    o.outside = o.edge || !!o.out || (o.diag || 0) >= 2 || strip; });
+  const blocked = (P, Q) => { const L2 = dist(P, Q), n2 = Math.max(2, Math.ceil(L2 / (0.25 * k))); let hit = 0;
+    for (let j = 2; j < n2 - 1; j++) { if (at(P[0] + (Q[0] - P[0]) * j / n2, P[1] + (Q[1] - P[1]) * j / n2) === -1) { if (++hit > 2) return true; } else hit = 0; } return false; };
+  const out = [];
+  runs.forEach(r => {
+    const L = dist(r.a, r.b), ux = (r.b[0] - r.a[0]) / L, uy = (r.b[1] - r.a[1]) / L, nx = -uy, ny = ux;
+    // each side, sampled every 2 ft: walking out from the face, the first open space decides — and a narrow strip (a balcony)
+    // behind a thin barrier (its parapet), with outside beyond it within 6 ft, is outside too
+    const side = (P, sg) => { let state = 0, b0 = 0;
+      for (let d = r.t / 2 + 0.3; d <= 7.5; d += 0.25) { const q = at(P[0] + sg * nx * d * k, P[1] + sg * ny * d * k); if (q === -2) return 1;
+        if (q >= 0 && info[q].n >= 100) { if (info[q].outside) return 1; if (state === 0) state = 1; if (state === 2) return 0; }
+        else if (state === 1 && q === -1) { if (d > 6) return 0; state = 2; b0 = d; }
+        if (state === 2 && q === -1 && d - b0 > 1.2) return 0; }
+      return 0; };
+    const lab = sg => outL.some(l => { const cc = [l.x + l.w / 2, l.y - l.h / 2], dx = cc[0] - r.a[0], dy = cc[1] - r.a[1], t = dx * ux + dy * uy, o = (dx * nx + dy * ny) * sg;
+      if (t < -k || t > L + k || o < r.t * k / 2 || o > 8 * k) return false; const tt = Math.min(Math.max(t, 0), L); return !blocked([r.a[0] + ux * tt + sg * nx * (r.t / 2 + 0.3) * k, r.a[1] + uy * tt + sg * ny * (r.t / 2 + 0.3) * k], cc); });
+    let o1 = 0, o2 = 0, n = 0, h = Math.min(0.5 * k, L / 2);
+    for (let t = h; t <= L - h + 1e-6 && n < 300; t += 2 * k) { n++; const P = [r.a[0] + ux * t, r.a[1] + uy * t]; o1 += side(P, 1); o2 += side(P, -1); }
+    if (lab(1)) o1 = n; if (lab(-1)) o2 = n;
+    const ext = Math.max(o1, o2) / Math.max(1, n), both = Math.min(o1, o2) / Math.max(1, n);
+    if (both >= 0.5) return;   // outside on both sides: a parapet or a screen wall, not block work
+    const type = r.t < 0.5 ? "4" : ext >= 0.25 ? "8e" : "8i";
+    // concrete hatch (specks under 0.12 ft) in the wall's band, in 0.5 ft slots: a column or an RCC wall — the run is cut there
+    const hw = r.t * k / 2 - 0.04 * k, ns = Math.max(1, Math.round(L / (0.5 * k))), sl = new Uint16Array(ns);
+    segsIn(g, Math.min(r.a[0], r.b[0]) - r.t * k, Math.min(r.a[1], r.b[1]) - r.t * k, Math.max(r.a[0], r.b[0]) + r.t * k, Math.max(r.a[1], r.b[1]) + r.t * k).forEach(i => { const q = g.segs[i];
+      if (Math.hypot(q[2] - q[0], q[3] - q[1]) / k >= 0.12) return; const dx = q[0] - r.a[0], dy = q[1] - r.a[1], t = dx * ux + dy * uy, o = dx * nx + dy * ny, o2b = (q[2] - r.a[0]) * nx + (q[3] - r.a[1]) * ny;
+      if (Math.abs(o) >= hw || Math.abs(o2b) >= hw || t <= 0 || t >= L) return; sl[Math.min(ns - 1, Math.floor(t / L * ns))]++; });
+    for (let i = 0; i < ns;) { if (sl[i] >= 2) { i++; continue; } let j = i; while (j < ns && sl[j] < 2) j++;
+      const f0 = i / ns, f1 = j / ns, a = [r.a[0] + (r.b[0] - r.a[0]) * f0, r.a[1] + (r.b[1] - r.a[1]) * f0], b = [r.a[0] + (r.b[0] - r.a[0]) * f1, r.a[1] + (r.b[1] - r.a[1]) * f1];
+      if (dist(a, b) >= 0.5 * k) out.push({type, t: r.t, a, b}); i = j; }
+  });
+  return out;
+}
+const BLOCK_DOOR_DEF = {D1: [4, 7], D1A: [4.17, 7], D2: [3.5, 7], D3: [3, 7], D4: [2.5, 7]};   // the sizes in the user's own working sheet — prefilled, to check
+function blockMasonryAgent(o){
+  const k = curScale(); if (!k) return {error: "Set the page scale first (K)."};
+  if (scaleDoubt()) return {error: "The page scale is doubtful — the drawing measures " + scaleDoubt().label + ", not the note. Settle it first (scale chip)."};
+  if (!S.geo[S.key] || !S.geo[S.key].segs.length) return {error: "This page has no vector lines (scanned?) — walls cannot be found from face lines."};
+  const rect = o.page ? null : viewRect(), pieces = blockRuns(rect);
+  if (!pieces || !pieces.length) return {error: "No 4\" or 8\" walls found " + (o.page ? "on this page" : "in this view") + "."};
+  const H = r3(o.floor - o.slab / 12), conds = {};
+  BLOCK_TYPES.forEach(b => { let c = P.proj.conds.find(x => x.type === "linear" && x.name === b.name);
+    if (!c) c = {id: uid("C"), name: b.name, type: "linear", unit: "cft", color: COLORS[(P.proj.conds.length + 3) % COLORS.length], faces: 1, dedMin: 0};
+    Object.assign(c, {unit: "cft", t: b.t, h: H, agentWall: true, blockKey: b.key}); conds[b.key] = c; });
+  const ids = Object.values(conds).map(c => c.id), inR = it => !rect || it.pts.every(q => q[0] >= rect[0] && q[0] <= rect[2] && q[1] >= rect[1] && q[1] <= rect[3]);
+  const sum = {};
+  mutate(() => {
+    Object.values(conds).forEach(c => { if (!P.proj.conds.includes(c)) P.proj.conds.push(c); });
+    P.proj.items = P.proj.items.filter(i => !(i.blockAuto && ids.includes(i.cond) && i.file === S.fileId && i.page === S.pageNo && inR(i)));
+    BLOCK_TYPES.forEach(b => chainRuns(pieces.filter(p => p.type === b.key), 0.05 * k).forEach((pts, n) => {
+      P.proj.items.push({id: uid("I"), cond: conds[b.key].id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, wallAuto: true, blockAuto: true, label: (b.key === "8e" ? "External wall " : b.key === "8i" ? "Internal wall " : "Partition ") + (n + 1)});
+      sum[b.key] = (sum[b.key] || 0) + polyLen(pts) / k; }));
+    // openings: each door / window / ventilator tag on its nearest wall run (within 6 ft), at the run, as wide as its size
+    const tags = o.tags || {};
+    Object.entries(tags).forEach(([mark, sz]) => { if (!(sz.w > 0 && sz.h > 0)) return; const sch = (P.proj.openings || []).find(x => x.mark.toUpperCase() === mark.toUpperCase());
+      (sz.at || []).forEach(p => { let best = null;
+        pieces.forEach(q => { const d = distSeg(p, q.a, q.b); if (d <= 6 * k && (!best || d < best.d)) best = {d, q}; });
+        if (!best) return; const q = best.q, L = dist(q.a, q.b), u = [(q.b[0] - q.a[0]) / L, (q.b[1] - q.a[1]) / L], t = Math.max(0, Math.min(L, (p[0] - q.a[0]) * u[0] + (p[1] - q.a[1]) * u[1])), hw = sz.w * k / 2;
+        P.proj.items.push({id: uid("I"), cond: conds[q.type].id, file: S.fileId, page: S.pageNo, kind: "open", pts: [[q.a[0] + u[0] * (t - hw), q.a[1] + u[1] * (t - hw)], [q.a[0] + u[0] * (t + hw), q.a[1] + u[1] * (t + hw)]], nos: 1, ai: true, blockAuto: true, label: "d/d of " + mark, ow: sz.w, oh: sz.h, sch: sch ? sch.id : undefined}); }); });
+    // beams over the walls: a row each, length × depth below the slab (from the beam plan — given, not found)
+    BLOCK_TYPES.forEach(b => { const L = +((o.beam || {})[b.key]) || 0; if (!(L > 0) || !(o.beamD > o.slab)) return; const q = pieces.find(p => p.type === b.key); if (!q) return;
+      P.proj.items.push({id: uid("I"), cond: conds[b.key].id, file: S.fileId, page: S.pageNo, kind: "open", pts: [q.a.slice(), [q.a[0] + (q.b[0] - q.a[0]) * 0.01, q.a[1] + (q.b[1] - q.a[1]) * 0.01]], nos: 1, ai: true, blockAuto: true, label: "Beam D/d", ow: r3(L), oh: r3((o.beamD - o.slab) / 12)}); });
+  });
+  refresh();
+  const rows = BLOCK_TYPES.map(b => { const c = conds[b.key], T = condTotals(c); return {type: b.name, run_ft: +(sum[b.key] || 0).toFixed(1), gross_cft: +T.gross.toFixed(2), ded_cft: +T.ded.toFixed(2), net_cft: +T.net.toFixed(2), blocks: Math.round(T.net * 0.9 / b.vol)}; });
+  return {height_ft: H, rows};
+}
+async function blockMasonryDialog(){
+  if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
+  if (!curScale()) return aiLog("err", "Set the page scale first (K).");
+  const res = await scanTags("page"), plan = (res[0] && res[0].T.plan) || {}, sched = (res[0] && res[0].T.sched) || {};
+  const marks = Object.keys(plan).filter(m => /^(D|W|V|SD|FD|RS|KW|BW)\d/i.test(m)).sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+  const size = m => { const s = (P.proj.openings || []).find(x => x.mark.toUpperCase() === m) || sched[m]; if (s && +s.w && +s.h) return [+s.w, +s.h, "schedule"];
+    const d = BLOCK_DOOR_DEF[m]; if (d) return [d[0], d[1], "your sheet"]; return /^V/.test(m) ? [2, 5, "your sheet"] : /^W/.test(m) ? ["", 8.5, ""] : ["", 7, ""]; };
+  const v = await ask("🧱 Block masonry", `<p>Every 4" and 8" wall on its centre line, by block: 4" → <b>4"×8"×12"</b>, 8" with outside / a balcony / a courtyard on one side → <b>8"×8"×16"</b>, other 8" → <b>8"×8"×12"</b>. Runs carry on through openings (deducted below), stop at columns and RCC walls; parapets are left out. Each run is marked AI — check it and move any wrong one to the right block (✎ condition).</p>
+    <div class="grid" style="margin-top:8px"><div class="fg"><label>Floor to floor (ft)</label><input type="text" id="bmF" value="12"></div><div class="fg"><label>Slab thickness (in)</label><input type="text" id="bmS" value="7.5"></div>
+      <div class="fg"><label>Beam depth (in, with the slab)</label><input type="text" id="bmBD" value="21"></div><div class="fg"><label>Beams over 4" walls (ft)</label><input type="text" id="bmB4" value="0"></div>
+      <div class="fg"><label>Beams over 8" internal (ft)</label><input type="text" id="bmB8i" value="0"></div><div class="fg"><label>Beams over 8" external (ft)</label><input type="text" id="bmB8e" value="0"></div>
+      <div class="fg w2"><label>Openings deducted (width × height, ft) — ${marks.length} marks on this page; blank width = not deducted</label>
+        <div style="max-height:220px;overflow:auto">${marks.map(m => { const [w, h, src] = size(m); return `<div class="row" style="gap:6px;align-items:center;margin:2px 0"><b style="width:56px">${esc(m)}</b><span class="small" style="width:58px">${plan[m].length} Nos</span><input type="text" data-bmw="${esc(m)}" value="${w}" style="width:70px"> × <input type="text" data-bmh="${esc(m)}" value="${h}" style="width:70px"><span class="small">${src ? "from " + src + " — check" : ""}</span></div>`; }).join("") || '<span class="small">No door / window tags found on this page.</span>'}</div></div>
+      <div class="fg w2"><label><input type="checkbox" id="bmP" style="width:auto" checked> Whole page (not only the part on screen)</label></div></div>
+    <p class="small">Wall height = floor to floor − slab. Blocks = net cft × 0.9 ÷ block volume. A wardrobe pad or other additions: add them as their own rows.</p>`,
+    () => { const F = parseFt($("bmF").value), Sl = +$("bmS").value, BD = +$("bmBD").value; if (!(F > 0) || !(Sl >= 0)) return "Give the floor height (ft) and slab (in)";
+      const tags = {}; marks.forEach(m => { const w = parseFloat(document.querySelector(`[data-bmw="${m}"]`).value), h = parseFloat(document.querySelector(`[data-bmh="${m}"]`).value); tags[m] = {w, h, at: plan[m]}; });
+      return {floor: F, slab: Sl, beamD: BD || 0, beam: {"4": parseFt($("bmB4").value || "0") || 0, "8i": parseFt($("bmB8i").value || "0") || 0, "8e": parseFt($("bmB8e").value || "0") || 0}, tags, page: $("bmP").checked}; });
+  if (!v) return;
+  busy("Finding block walls…"); await new Promise(r => setTimeout(r, 20));
+  let r; try { r = blockMasonryAgent(v); } finally { busy(""); }
+  if (r.error) return aiLog("err", esc(r.error));
+  aiLog("tool", `<b>Block masonry</b> — wall height ${f3(r.height_ft)} ft<br>` + r.rows.map(x => `${esc(x.type)}: ${f3(x.run_ft)} ft run · ${f3(x.gross_cft)} − ${f3(x.ded_cft)} = <b>${f3(x.net_cft)} cft</b> · <b>${x.blocks.toLocaleString()} blocks</b>`).join("<br>"));
+  aiLog("bot", "Runs and openings are marked AI. Check the external / internal split on the drawing (red-flag any run on the wrong block and move it with ✎), and the opening sizes on the sheet.");
+}
 /* ------------------------------------------------------------------ free agents II: ⚡ full takeoff · 🎨 finishes · ✅ check.
    Still no API key, no cost, nothing sent anywhere. The full takeoff chains the agents above over this page, a PDF or
    the whole project and reports once; the finishes agent puts each room's wall finish and skirting on the sheet in the
@@ -12282,7 +12488,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1");
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
