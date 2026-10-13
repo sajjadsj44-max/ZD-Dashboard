@@ -288,17 +288,53 @@ function migrate(p, rep){
    closing the tab is not lost. The project is taken when the change is made, not when the timer fires. */
 let saveT = null, savePr = null;
 const TAB = uid("T");
-function save(){ if (!P.proj) return; S.ver = (S.ver || 0) + 1; P.proj.updated = new Date().toISOString(); savePr = P.proj; clearTimeout(saveT); saveT = setTimeout(flushSave, 300); saveSay("wait"); }
-function flushSave(){
-  clearTimeout(saveT); saveT = null; const pr = savePr; savePr = null;
-  if (!pr || !DB) return Promise.resolve(false);
-  return dbPut("projects", pr).then(() => { tabSay({t: "saved", id: pr.id, at: pr.updated}); if (!savePr && P.proj === pr) saveSay("ok", pr.updated); return true; })
-    .catch(e => { toast("Could not save: " + e.message, 5000); if (P.proj === pr) saveSay("bad", e.message); return false; });
+/* what this tab last read from or wrote to storage, per project: a stored copy newer than this was written by ANOTHER
+   tab or window, and is backed up before this tab writes over it — two windows can no longer silently lose each other's work */
+const SAVED_AT = new Map();
+const SAVE_ERR = new Map();     // project id -> why its last write failed (the copy itself waits in SAVE_PEND)
+const SAVE_PEND = new Map();    // project id -> copy whose write failed, retried on every later flush
+const SAVE_FLIGHT = new Map();  // project id -> a checked flush still before its write ({pr, done}) — grabbed if the page starts closing
+const BAK_LAST = new Map();     // project id -> when a newer other-tab copy was last backed up: one per 5 min, or dual editing would churn the backups
+function save(){ if (!P.proj) return; S.ver = (S.ver || 0) + 1; P.proj.updated = new Date().toISOString(); savePr = P.proj; clearTimeout(saveT); saveT = setTimeout(flushSave, 300); saveShow(P.proj); }
+function flushOne(pr, fast){
+  const write = () => { const fl = SAVE_FLIGHT.get(pr.id); if (fl && fl.pr === pr) SAVE_FLIGHT.delete(pr.id);
+    return dbPut("projects", pr)
+      .then(() => { SAVED_AT.set(pr.id, pr.updated); SAVE_ERR.delete(pr.id); if (SAVE_PEND.get(pr.id) === pr) SAVE_PEND.delete(pr.id);
+        tabSay({t: "saved", id: pr.id, at: pr.updated}); if (P.proj) saveShow(P.proj); return true; })
+      .catch(e => { SAVE_ERR.set(pr.id, e.message); SAVE_PEND.set(pr.id, pr);   // kept per project, so Ctrl+S, the 10-minute timer and closing the page try again
+        toast("Could not save: " + e.message, 5000); if (P.proj) saveShow(P.proj); return false; });
+  };
+  const base = SAVED_AT.get(pr.id);
+  if (fast === true || !base) return write();   // fast: the page is closing — no time for a read before the write
+  const fl = {pr, done: false};
+  SAVE_FLIGHT.set(pr.id, fl);
+  return fl.promise = dbGet("projects", pr.id).then(db => {
+    if (fl.done) return true;   // the page began closing mid-read and flushSave(true) already wrote this copy
+    if (db && db.updated && db.updated > base && db.updated !== pr.updated && Date.now() - (BAK_LAST.get(pr.id) || 0) > 300000) {
+      BAK_LAST.set(pr.id, Date.now());
+      return backupNow("by another tab or window, kept before this one wrote over it", db).catch(() => {})
+        .then(() => { toast("This project was also changed in another tab or window — that version is kept under Project → Backups", 6000); return write(); });
+    }
+    return write();
+  }).catch(write);
+}
+function flushSave(fast){
+  clearTimeout(saveT); saveT = null; let pr = savePr; savePr = null;
+  if (!DB) return Promise.resolve(false);
+  if (fast === true) SAVE_FLIGHT.forEach(fl => { if (!fl.done) { fl.done = true; if (!pr || fl.pr !== pr) flushOne(fl.pr, true); } });   // reads in flight: the closing page writes their copies NOW
+  SAVE_PEND.forEach((pp, id) => { if (!pr || id !== pr.id) flushOne(pp, fast); });   // failed earlier writes retried
+  if (!pr) { const fl = P.proj && SAVE_FLIGHT.get(P.proj.id); return fl && fl.promise ? fl.promise : Promise.resolve(false); }   // await covers a write still parked behind its read
+  return flushOne(pr, fast);
+}
+/* the badge tells the truth for the project on screen: NOT SAVED while its last write failed, Saving… while one is pending */
+function saveShow(pr){
+  if (SAVE_ERR.has(pr.id)) saveSay("bad", SAVE_ERR.get(pr.id));
+  else if ((savePr && savePr.id === pr.id) || SAVE_FLIGHT.has(pr.id) || SAVE_PEND.has(pr.id)) saveSay("wait");
+  else saveSay("ok", pr.updated);
 }
 /* the save state next to the project name: "Saved 14:32" · "Saving…" · "NOT SAVED" (stays until a save works) */
 function saveSay(st, x){
   const el = $("saveSt"); if (!el) return;
-  if (st === "wait" && el.classList.contains("bad")) return;
   el.className = "savest " + st;
   const t = iso => { const d = new Date(iso); return isNaN(d) ? "" : String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
   el.textContent = st === "ok" ? "✓ Saved " + t(x) : st === "wait" ? "Saving…" : st === "bad" ? "⚠ NOT SAVED" : "";
@@ -315,8 +351,9 @@ const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "
 function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 /* every change goes through mutate(): the project before it is kept for Ctrl+Z (200 steps), with a name for the
    undo / redo buttons ("Undo: Move 3 measurements") */
+let MUT_SRC = null;   // "tap" while a touch tap's own synchronous commit runs, so a pinch can take back exactly that and nothing else
 function mutate(fn, label){
-  S.undo.push({js: snapshot(), label: label || ""});
+  S.undo.push({js: snapshot(), label: label || "", src: MUT_SRC});
   let tot = 0; S.undo.forEach(e => { tot += undoEntry(e).js.length; });   // 200 steps, fewer (20 at least) for a big project: about 80 MB of history at most
   while (S.undo.length > 200 || (S.undo.length > 20 && tot > 40e6)) tot -= undoEntry(S.undo.shift()).js.length;
   S.redo = []; S.draftRedo = [];
@@ -392,6 +429,7 @@ async function openProject(id){
     const rep = [];
     if ((+pr.v || 1) < SCHEMA) { const from = migrate(pr, rep); await dbPut("projects", pr); toast("Project upgraded from file version " + from + " to " + SCHEMA, 3000); } else migrate(pr, rep);
     if (rep.length) setTimeout(() => toast("The stored project had damaged entries, repaired: " + rep.slice(0, 2).join(" · ") + (rep.length > 2 ? " · …" : ""), 8000), 400);
+    SAVED_AT.set(pr.id, pr.updated);   // the stored copy this tab starts from
     if (PANES.some(p => p !== ACT && p.sess === ACT.sess)) ACT.sess = mkSess(null);   // this window leaves the project it shared with the other one
     P.proj = pr; S.undo = []; S.redo = []; S.sel = null; S.multi.clear(); S.selMark = null; S.otherTab = "";
     S.pgSel = new Set(); S.pgLast = null; S.pgQ = ""; S.pgF = ""; S.condSel = new Set();
@@ -402,7 +440,7 @@ async function openProject(id){
   S.cond = twin ? S.cond : (pr.conds[0] || {}).id || null;
   localStorage.setItem("zdTakeoffLast", pr.id);
   $("start").classList.remove("on");
-  $("projName").value = pr.name; saveSay("ok", pr.updated);
+  $("projName").value = pr.name; saveShow(pr);
   buildPageSel();
   const first = pr.last && pr.last.file && pr.files.some(f => f.id === pr.last.file) ? pr.last : pr.files[0] ? {file: pr.files[0].id, page: 1} : null;
   if (first) await gotoPage(first.file, first.page || 1); else showDrop(true);
@@ -2817,7 +2855,19 @@ function onDown(e){
   if (e.pointerType === "touch") {
     S.touches = S.touches || {}; S.touches[e.pointerId] = sp;
     const ids = Object.keys(S.touches);
-    if (ids.length === 2) { if (S.lp) { clearTimeout(S.lp.t); S.lp = null; } const a = S.touches[ids[0]], b = S.touches[ids[1]]; S.pinch = {d: dist(a, b), c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], v: Object.assign({}, S.view)}; S.drag = null; S.press = null; return; }
+    if (ids.length === 2) { if (S.lp) { clearTimeout(S.lp.t); S.lp = null; }
+      const t1 = S.t1; S.t1 = null;
+      if (t1) {   // the first finger of this pinch already acted as a tool tap (a count, a vertex, a box) — taken back, the user meant to zoom
+        const top = S.undo[S.undo.length - 1];
+        if (top && top !== t1.top && top.src === "tap") undo();   // only the tap's own commit, never history that was merely trimmed or landed meanwhile
+        S.draft = t1.d; S.draftSteps = t1.ds; S.draftArcs = t1.da; S.draftRedo = []; S.arcMid = t1.am; S.arcMode = t1.amode;
+        if (!t1.box) S.box = null; if (!t1.lasso) S.lasso = null; if (!t1.zbox) S.zbox = null;
+        if (S.tool === "measure") S.measure = S.draft.slice();
+        draftBtns(); draw();
+      }
+      const a = S.touches[ids[0]], b = S.touches[ids[1]]; S.pinch = {d: dist(a, b), c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], v: Object.assign({}, S.view)}; S.drag = null; S.press = null; return; }
+    if (ids.length === 1) { S.t1 = {top: S.undo[S.undo.length - 1] || null, d: S.draft.slice(), ds: (S.draftSteps || []).slice(), da: (S.draftArcs || []).slice(), am: S.arcMid, amode: S.arcMode, box: !!S.box, lasso: !!S.lasso, zbox: !!S.zbox};   // what this tap changes, so a pinch's second finger can take it back
+      MUT_SRC = "tap"; Promise.resolve().then(() => { MUT_SRC = null; }); }   // only commits made synchronously by THIS tap are marked
     if (ids.length === 1 && !S.draft.length && (S.tool === "select" || S.tool === "pan")) { const cx = e.clientX, cy = e.clientY;   // touch: press and hold for the right-click menu (tablets)
       S.lp = {sp, t: setTimeout(() => { if (!S.lp) return; S.lp.fired = true; cancelDrag0(); ctxOpen(sp, {clientX: cx, clientY: cy}); }, 550)}; }
   }
@@ -4238,7 +4288,7 @@ function countSvg(c, pts, T, z, selIdx){
     else if (sym === "star") { const H = []; for (let j = 0; j < 10; j++) { const R = j % 2 ? r * 0.45 : r, t = -Math.PI / 2 + Math.PI / 5 * j; H.push([x + R * Math.cos(t), y + R * Math.sin(t)]); } out.push(`<path d="M${H.map(v => v[0].toFixed(1) + " " + v[1].toFixed(1)).join("L")}Z" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}" stroke-linejoin="round"/>`); }
     else if (sym === "plus") out.push(`<path d="M${x - r} ${y}H${x + r}M${x} ${y - r}V${y + r}" stroke="${col}" stroke-opacity="${lop}" stroke-width="${w + z}" stroke-linecap="round"/>`);
     else if (sym === "pin") out.push(`<path d="M${x} ${y}L${x - r * 0.55} ${y - r * 1.1}A${r * 0.62} ${r * 0.62} 0 1 1 ${x + r * 0.55} ${y - r * 1.1}Z" fill="${col}" ${fo} stroke="${col}" stroke-width="${w * 0.8}"/>`);
-    if (sym === "check") out.push(`<path d="M${x - r} ${y}L${x - r * 0.3} ${y + r * 0.7}L${x + r} ${y - r * 0.8}" fill="none" stroke="${col}" stroke-width="${w + z}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    else if (sym === "check") out.push(`<path d="M${x - r} ${y}L${x - r * 0.3} ${y + r * 0.7}L${x + r} ${y - r * 0.8}" fill="none" stroke="${col}" stroke-width="${w + z}" stroke-linecap="round" stroke-linejoin="round"/>`);
     else if (sym === "square") out.push(`<rect x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}"/>`);
     else if (sym === "triangle") out.push(`<path d="M${x} ${y - r}L${x + r} ${y + r * 0.8}L${x - r} ${y + r * 0.8}Z" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}"/>`);
     else if (sym === "diamond") out.push(`<path d="M${x} ${y - r}L${x + r} ${y}L${x} ${y + r}L${x - r} ${y}Z" fill="${col}" ${fo} stroke="${col}" stroke-width="${w}"/>`);
@@ -5743,7 +5793,9 @@ function ask(title, body, okLabel, read, focusId){
     const done = v => { if (ask.cur === done) ask.cur = null; $("dlgBack").classList.remove("on"); document.removeEventListener("keydown", key, true); res(v); };
     ask.cur = done;
     const ok = () => { const v = read ? read() : true; if (typeof v === "string") { $("dlgErr").textContent = v; return; } done(v); };
-    const key = e => { if (e.key === "Escape") { e.stopPropagation(); done(null); } else if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); e.stopPropagation(); ok(); } };
+    const key = e => { if (e.key === "Escape") { e.stopPropagation(); done(null); } else if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); e.stopPropagation();
+      const b = e.target.closest && e.target.closest("button");   // Enter with Cancel focused cancels (Tab to Cancel + Enter must not confirm a delete); from anywhere else it confirms, as before
+      if (b && b.id === "dlgCancel") done(null); else ok(); } };
     document.addEventListener("keydown", key, true);
     $("dlgCancel").onclick = () => done(null);
     if ($("dlgOk")) $("dlgOk").onclick = ok;
@@ -7665,16 +7717,17 @@ async function backupsDialog(pid){
     if (!ok) return backupsDialog(pid);
     if (P.proj && P.proj.id === pid) { savePr = P.proj; await flushSave(); }
     const cur = await dbGet("projects", pid); if (cur) await backupNow("before restore", cur);
-    old.id = pid; migrate(old); old.updated = new Date().toISOString(); await dbPut("projects", old);
+    old.id = pid; migrate(old); old.updated = new Date().toISOString(); await dbPut("projects", old); SAVED_AT.set(pid, old.updated);
+    PANES.forEach(p => { if (p.sess && p.sess.proj && p.sess.proj.id === pid) { p.sess.proj = old; p.sess.undo = []; p.sess.redo = []; } });   // a pane still holding the pre-restore copy would write it back over the restore on its next save — and its old undo steps would too
     if (P.proj && P.proj.id === pid) await openProject(pid); else showStart();
     toast("Restored the backup of " + fmt(bk.at), 4000);
   });
 }
 setInterval(() => { if (P.proj && document.visibilityState !== "hidden") { savePr = P.proj; flushSave().then(ok => ok && backupNow("every 10 min")).catch(() => {}); } }, 600000);
 /* leaving or hiding the page writes the pending change at once (the 300 ms timer would not run) */
-window.addEventListener("pagehide", () => { flushSave(); });
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave(); });
-window.addEventListener("beforeunload", () => { flushSave(); });
+window.addEventListener("pagehide", () => { flushSave(true); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave(); });   // a hidden tab keeps running: the checked save completes there
+window.addEventListener("beforeunload", () => { flushSave(true); });
 
 /* ------------------------------------------------------------------ project import: lossless, then validated */
 async function importProject(text, pre){
@@ -8404,7 +8457,7 @@ function activate(pn, quiet){
   if (!pn || pn === ACT || !PANES.includes(pn)) return;
   const old = ACT;
   if (old.sess !== pn.sess || old.key !== pn.key) { draftClear(); S.measure = null; S.measures = []; S.resume = null; S.gap = null; S.typ = null; }   // a shape begun on another sheet is not carried over
-  S.drag = null; S.lasso = null; S.box = null; S.zbox = null; S.press = null; S.mkd = null; S.hover = null; S.snap = null; S.cursor = null; S.cursorScr = null; S.pinch = null;
+  S.drag = null; S.lasso = null; S.box = null; S.zbox = null; S.press = null; S.mkd = null; S.hover = null; S.snap = null; S.cursor = null; S.cursorScr = null; S.pinch = null; S.t1 = null; S.touches = null;   // a touch gesture never spans panes: fingers down on another pane must not replay here
   if (old.sess !== pn.sess) flushSave();   // the project being left keeps its last change
   PANE_IDS.forEach(id => { if (old.el[id]) old.el[id].id = id + "__" + old.n; });
   ACT = pn; PANE_IDS.forEach(id => { if (pn.el[id]) pn.el[id].id = id; });
@@ -8415,7 +8468,7 @@ function paneUi(old){   // the panels and the bar follow the window worked in
   const pr = P.proj;
   $("projName").value = pr ? pr.name : "";
   if (pr) {
-    saveSay("ok", pr.updated); buildPageSel(); localStorage.setItem("zdTakeoffLast", pr.id);
+    saveShow(pr); buildPageSel(); localStorage.setItem("zdTakeoffLast", pr.id);
     if (!S.cond || !cond(S.cond)) S.cond = (pr.conds[0] || {}).id || null;
     if (!S.cond && ["draw", "rect", "ded", "open", "auto", "circle", "polygon"].indexOf(S.tool) >= 0) { S.tool = "select"; document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === "select")); }
     stageCls(); hint();
@@ -8819,7 +8872,9 @@ function wire(){
     if (o.dataset.dup) { const pr = await dbGet("projects", o.dataset.dup); const cp = Object.assign(JSON.parse(JSON.stringify(pr)), {id: uid("P"), name: pr.name + " (copy)", updated: new Date().toISOString()}); await dbPut("projects", cp); return showStart(); }
     if (o.dataset.del) { const pr = await dbGet("projects", o.dataset.del); const ok = await ask("Delete project", `<p>Delete <b>${esc(pr.name)}</b> with its ${pr.items.length} measurements and stored PDFs? This cannot be undone.</p>`, "Delete");
       if (!ok) return; const others = (await dbAll("projects")).filter(x => x.id !== pr.id), keep = new Set(others.flatMap(x => x.files.map(f => f.id)));
-      for (const f of pr.files) if (!keep.has(f.id)) await dbDel("pdfs", f.id); await dbDel("projects", pr.id); await mkAssetsCleanup((pr.marks || []).flatMap(mkAids)); { const g = SPLIT.on && PANES.find(p => p.sess.proj && p.sess.proj.id === pr.id); if (g) splitClose(g); else if (P.proj && P.proj.id === pr.id) P.proj = null; } showStart(); }
+      for (const f of pr.files) if (!keep.has(f.id)) await dbDel("pdfs", f.id); await dbDel("projects", pr.id); await mkAssetsCleanup((pr.marks || []).flatMap(mkAids));
+      if (savePr && savePr.id === pr.id) savePr = null; SAVE_PEND.delete(pr.id); SAVE_ERR.delete(pr.id); SAVE_FLIGHT.delete(pr.id); SAVED_AT.delete(pr.id);   // a retry kept from a failed save must not re-create the deleted project
+      { const g = SPLIT.on && PANES.find(p => p.sess.proj && p.sess.proj.id === pr.id); if (g) splitClose(g); else if (P.proj && P.proj.id === pr.id) P.proj = null; } showStart(); }
   });
   $("projectSearch").addEventListener("input", () => showStart());  $("condList").addEventListener("click", e => {
     if (e.target.id === "bFirstCond") return editCond(null);
