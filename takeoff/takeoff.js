@@ -6104,7 +6104,7 @@ function pageOverlaySvg0(file, page, sc, W, H, legend){
     if (it.kind === "open") { const a = T(it.pts[0]), b = T(it.pts[1]); h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${4 * z}" stroke-linecap="round"/>`); return; }
     h.push(measSvg(it, c, {T, z, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false}));
   });
-  if (o.mk !== false) (P.proj.marks || []).filter(m => m.file === file && m.page === page && m.type !== "fence" && (!mkHidden(m) || m.type === "redact")).forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
+  (P.proj.marks || []).filter(m => m.file === file && m.page === page && (m.type === "redact" || (o.mk !== false && m.type !== "fence" && !mkHidden(m)))).forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
   const sh = (P.proj.sheets || {})[keyOf(file, page)] || {}, lz = z * ({s: 0.8, m: 1, l: 1.3}[o.lsz] || 1), pos = o.legend || "none";
   if (pos !== "none") h.push(expLegendSvg(o, pos, tot, file, page, sh, W, H, z, lz, ox));
   if (o.stamp) {   // project · sheet · page · date, along the bottom of the drawing
