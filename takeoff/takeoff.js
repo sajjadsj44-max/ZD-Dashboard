@@ -686,16 +686,27 @@ const LW = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "
 function boostInk(ctx, w, h, ptPx){
   if (!S.boost || !(ptPx < 1.6) || w * h > 2.6e7) return;
   let im; try { im = ctx.getImageData(0, 0, w, h); } catch (e) { return; }
-  const d = im.data, src = new Uint8ClampedArray(d), row = w * 4, g = new Uint8ClampedArray(256), gam = ptPx < 0.8 ? 1.8 : 1.4;
+  const d = im.data, src = new Uint8ClampedArray(d), row = w * 4, g = new Uint8ClampedArray(256), gam = ptPx < 0.8 ? 1.5 : 1.3, full = false;
   for (let v = 0; v < 256; v++) g[v] = v >= 250 ? v : Math.round(255 * Math.pow(v / 255, gam));
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * row + x * 4;
     for (let c = 0; c < 3; c++) { let m = src[i + c];
       if (x > 0 && src[i - 4 + c] < m) m = src[i - 4 + c]; if (x < w - 1 && src[i + 4 + c] < m) m = src[i + 4 + c];
       if (y > 0 && src[i - row + c] < m) m = src[i - row + c]; if (y < h - 1 && src[i + row + c] < m) m = src[i + row + c];
-      d[i + c] = g[(src[i + c] + m) >> 1]; } }   // half way to the darkest neighbour: a hairline gains weight, text keeps its shape
+      d[i + c] = g[full ? m : (src[i + c] + m) >> 1]; } }   // to (or half way to) the darkest neighbour: a hairline gains weight
   ctx.putImageData(im, 0, 0);
 }
-function setBoost(on){ S.boost = on; const b = $("bBoost"); if (b) { b.classList.toggle("on", on); b.title = on ? "Faint lines are enhanced when zoomed out (the picture only — never the PDF or a quantity) — click to show the page as drawn" : "Faint lines are shown as drawn — click to enhance them when zoomed out"; } pref("zdTakeoffBoost", on ? "1" : "0"); renderAll(); }
+function setBoost(on){ S.boost = on; const rb = document.querySelector('#tools [data-px="bBoost"]'); if (rb) rb.classList.toggle("on", on); const b = $("bBoost"); if (b) { b.classList.toggle("on", on); b.title = on ? "Faint lines are enhanced when zoomed out (the picture only — never the PDF or a quantity) — click to show the page as drawn" : "Faint lines are shown as drawn — click to enhance them when zoomed out"; } pref("zdTakeoffBoost", on ? "1" : "0"); renderAll(); }
+/* hairlines kept visible when zoomed out (Faint lines): while the page is drawn, a stroke is never thinner than 1 screen pixel
+   and no dash or gap of a dash pattern under 1.5 pixels (a dotted rebar line or hidden line otherwise fades to grey). The
+   PDF, its lines, snapping and every quantity are untouched — only the picture. */
+function boldLines(ctx, on){
+  if (!on) return ctx;
+  const stroke = ctx.stroke, setDash = ctx.setLineDash;
+  const dev = c => { const m = c.getTransform(); return Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1; };
+  ctx.setLineDash = function(a){ const s = dev(this); return setDash.call(this, Array.isArray(a) && a.length && a.every(v => v * s < 1.5) ? a.map(v => 1.5 / s) : a); };   // (dashes kept dashes, never under 1.5 px)
+  ctx.stroke = function(){ const s = dev(this), w = LW.get.call(this), min = 1 / s; if (!(w >= min)) LW.set.call(this, min); return stroke.apply(this, arguments); };
+  return ctx;
+}
 function thinLines(ctx){
   if (!S.thin) return ctx;
   const stroke = ctx.stroke;
@@ -813,7 +824,7 @@ async function renderLow(pn = ACT){   // drawn off screen, then shown only if th
   const page = pn.page, fileId = pn.fileId, longSide = Math.max(pn.base.width, pn.base.height), sc = Math.min(3, 3000 / longSide);
   const vp = page.getViewport({scale: sc}), off = document.createElement("canvas");
   off.width = Math.ceil(vp.width); off.height = Math.ceil(vp.height);
-  const ctx = inkCtx(thinLines(off.getContext("2d")), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
+  const ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, off.width, off.height); try { await sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vp})).promise; } catch (e) {}
   if (pn.page !== page) return;
   if (!darkNow(fileId, pn.sess.proj)) boostInk(off.getContext("2d"), off.width, off.height, sc * (pn.view ? Math.min(1, pn.view.s / sc) : 1));
@@ -832,7 +843,7 @@ function renderHi(now, pn = ACT){
     const st = pn.el.stage, dpr = Math.min(window.devicePixelRatio || 1, 2), c = pn.el.hi, v = Object.assign({}, pn.view), fileId = pn.fileId;
     const w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
     const off = document.createElement("canvas"); off.width = w; off.height = h;
-    const ctx = inkCtx(thinLines(off.getContext("2d")), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
+    const ptPx = v.s * dpr, ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && ptPx < 1.6 && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
     const task = sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: page.getViewport({scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}));
     pn.renderTask = task;
     try { await task.promise; } catch (e) { return; }
