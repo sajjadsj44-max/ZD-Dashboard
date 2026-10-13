@@ -139,8 +139,16 @@ function openDB(){
 function tx(store, mode, fn){
   return new Promise((ok, bad) => { const t = DB.transaction(store, mode), s = t.objectStore(store); const r = fn(s); t.oncomplete = () => ok(r && r.result); t.onerror = () => bad(t.error); t.onabort = () => bad(t.error); });
 }
-const dbPut = (store, v, k) => tx(store, "readwrite", s => k === undefined ? s.put(v) : s.put(v, k));
-const dbGet = (store, k) => tx(store, "readonly", s => s.get(k));
+/* a big PDF (over 64 MB — a 235 MB Print-to-PDF set) is stored with its bytes as a Blob: the browser keeps a Blob outside the
+   record, while one record may not pass about 133 MB ("The serialized keys and/or value are too large"). Read back, it is an
+   ArrayBuffer again, so nothing else changes. */
+const BIG_REC = 64 * 1024 * 1024;
+const recOut = v => { if (!v || typeof v !== "object" || Array.isArray(v)) return v; let o = v;
+  for (const f of ["data", "src"]) if (v[f] && v[f].byteLength > BIG_REC && !(v[f] instanceof Blob)) { if (o === v) o = Object.assign({}, v); o[f] = new Blob([v[f]]); o.blobs = (o.blobs || []).concat(f); }
+  return o; };
+const recIn = async v => { if (v && v.blobs) for (const f of v.blobs) if (v[f] instanceof Blob) v[f] = await v[f].arrayBuffer(); if (v && v.blobs) delete v.blobs; return v; };
+const dbPut = (store, v, k) => { const w = store === "pdfs" ? recOut(v) : v; return tx(store, "readwrite", s => k === undefined ? s.put(w) : s.put(w, k)); };
+const dbGet = (store, k) => tx(store, "readonly", s => s.get(k)).then(v => store === "pdfs" ? recIn(v) : v);
 const dbDel = (store, k) => tx(store, "readwrite", s => s.delete(k));
 const dbAll = store => tx(store, "readonly", s => s.getAll());
 
@@ -686,16 +694,27 @@ const LW = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "
 function boostInk(ctx, w, h, ptPx){
   if (!S.boost || !(ptPx < 1.6) || w * h > 2.6e7) return;
   let im; try { im = ctx.getImageData(0, 0, w, h); } catch (e) { return; }
-  const d = im.data, src = new Uint8ClampedArray(d), row = w * 4, g = new Uint8ClampedArray(256), gam = ptPx < 0.8 ? 1.8 : 1.4;
+  const d = im.data, src = new Uint8ClampedArray(d), row = w * 4, g = new Uint8ClampedArray(256), gam = ptPx < 0.8 ? 1.5 : 1.3, full = false;
   for (let v = 0; v < 256; v++) g[v] = v >= 250 ? v : Math.round(255 * Math.pow(v / 255, gam));
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * row + x * 4;
     for (let c = 0; c < 3; c++) { let m = src[i + c];
       if (x > 0 && src[i - 4 + c] < m) m = src[i - 4 + c]; if (x < w - 1 && src[i + 4 + c] < m) m = src[i + 4 + c];
       if (y > 0 && src[i - row + c] < m) m = src[i - row + c]; if (y < h - 1 && src[i + row + c] < m) m = src[i + row + c];
-      d[i + c] = g[(src[i + c] + m) >> 1]; } }   // half way to the darkest neighbour: a hairline gains weight, text keeps its shape
+      d[i + c] = g[full ? m : (src[i + c] + m) >> 1]; } }   // to (or half way to) the darkest neighbour: a hairline gains weight
   ctx.putImageData(im, 0, 0);
 }
-function setBoost(on){ S.boost = on; const b = $("bBoost"); if (b) { b.classList.toggle("on", on); b.title = on ? "Faint lines are enhanced when zoomed out (the picture only — never the PDF or a quantity) — click to show the page as drawn" : "Faint lines are shown as drawn — click to enhance them when zoomed out"; } pref("zdTakeoffBoost", on ? "1" : "0"); renderAll(); }
+function setBoost(on){ S.boost = on; const rb = document.querySelector('#tools [data-px="bBoost"]'); if (rb) rb.classList.toggle("on", on); const b = $("bBoost"); if (b) { b.classList.toggle("on", on); b.title = on ? "Faint lines are enhanced when zoomed out (the picture only — never the PDF or a quantity) — click to show the page as drawn" : "Faint lines are shown as drawn — click to enhance them when zoomed out"; } pref("zdTakeoffBoost", on ? "1" : "0"); renderAll(); }
+/* hairlines kept visible when zoomed out (Faint lines): while the page is drawn, a stroke is never thinner than 1 screen pixel
+   and no dash or gap of a dash pattern under 1.5 pixels (a dotted rebar line or hidden line otherwise fades to grey). The
+   PDF, its lines, snapping and every quantity are untouched — only the picture. */
+function boldLines(ctx, on){
+  if (!on) return ctx;
+  const stroke = ctx.stroke, setDash = ctx.setLineDash;
+  const dev = c => { const m = c.getTransform(); return Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1; };
+  ctx.setLineDash = function(a){ const s = dev(this); return setDash.call(this, Array.isArray(a) && a.length && a.every(v => v * s < 1.5) ? a.map(v => 1.5 / s) : a); };   // (dashes kept dashes, never under 1.5 px)
+  ctx.stroke = function(){ const s = dev(this), w = LW.get.call(this), min = 1 / s; if (!(w >= min)) LW.set.call(this, min); return stroke.apply(this, arguments); };
+  return ctx;
+}
 function thinLines(ctx){
   if (!S.thin) return ctx;
   const stroke = ctx.stroke;
@@ -813,7 +832,7 @@ async function renderLow(pn = ACT){   // drawn off screen, then shown only if th
   const page = pn.page, fileId = pn.fileId, longSide = Math.max(pn.base.width, pn.base.height), sc = Math.min(3, 3000 / longSide);
   const vp = page.getViewport({scale: sc}), off = document.createElement("canvas");
   off.width = Math.ceil(vp.width); off.height = Math.ceil(vp.height);
-  const ctx = inkCtx(thinLines(off.getContext("2d")), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
+  const ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, off.width, off.height); try { await sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vp})).promise; } catch (e) {}
   if (pn.page !== page) return;
   if (!darkNow(fileId, pn.sess.proj)) boostInk(off.getContext("2d"), off.width, off.height, sc * (pn.view ? Math.min(1, pn.view.s / sc) : 1));
@@ -832,7 +851,7 @@ function renderHi(now, pn = ACT){
     const st = pn.el.stage, dpr = Math.min(window.devicePixelRatio || 1, 2), c = pn.el.hi, v = Object.assign({}, pn.view), fileId = pn.fileId;
     const w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
     const off = document.createElement("canvas"); off.width = w; off.height = h;
-    const ctx = inkCtx(thinLines(off.getContext("2d")), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
+    const ptPx = v.s * dpr, ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && ptPx < 1.6 && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
     const task = sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: page.getViewport({scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}));
     pn.renderTask = task;
     try { await task.promise; } catch (e) { return; }
@@ -1209,7 +1228,7 @@ function snapAt(q, ex){   // ex(item, i): points of the drawing's own takeoff to
     const c = g.cell, x0 = Math.floor((q[0] - r) / c), x1 = Math.floor((q[0] + r) / c), y0 = Math.floor((q[1] - r) / c), y1 = Math.floor((q[1] + r) / c), ids = new Set();
     for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) (g.grid.get(x + "," + y) || []).forEach(i => ids.add(i));
     const near = [];
-    ids.forEach(i => { const s = g.segs[i], a = [s[0], s[1]], b = [s[2], s[3]]; if (distSeg(q, a, b) <= r) near.push([a, b, i]); });
+    ids.forEach(i => { const s = g.segs[i], a = [s[0], s[1]], b = [s[2], s[3]]; if (!(s[4] & 8) && distSeg(q, a, b) <= r) near.push([a, b, i]); });   // (not a clip path: never drawn — a picture's strip edges, a viewport's frame)
     const K = snapKinds(), from = S.drag ? null : S.draft[S.draft.length - 1];
     if (K.endpoint) near.forEach(([a, b]) => { take(a, "endpoint", 1); take(b, "endpoint", 1); });
     if (K.intersection && near.length < 80) for (let i = 0; i < near.length; i++) for (let j = i + 1; j < near.length; j++) { const x = segX(near[i][0], near[i][1], near[j][0], near[j][1]); if (x) take(x, "intersection", 1); }
@@ -1224,6 +1243,30 @@ function snapAt(q, ex){   // ex(item, i): points of the drawing's own takeoff to
     }
   }
   if ($("snapOn").checked && g && g.segs.length && snapKinds().center) curveCentres(g).forEach(o => take(o.c, "centre", 2.2));   // the centre of an arc or circle: the cursor is near the centre, not the curve
+  if (!best && $("snapOn").checked) best = inkSnap(q, r);   // a drawing stored as a picture (scan, Print to PDF): its own ink
+  return best;
+}
+/* snapping on a drawing stored as a picture — a scan, or a Print-to-PDF sheet whose plan is image strips: no vector lines, so the
+   ink on screen is read round the cursor. Rows and columns mostly dark over 6 px or more (gaps allowed) are a picture's lines: where a
+   horizontal and a vertical one cross is a corner (snapped first), else the cursor goes onto the nearest one. The point found is
+   on the page (as any snap), read from the sharp redraw at the current zoom. */
+function inkSnap(q, r){
+  const rd = S.rendered, cv = $("hi"); if (!rd || !cv || !cv.width || cv.style.display === "none") return null;
+  const dpr = rd.dpr || 1, cx = (q[0] * rd.s + rd.tx) * dpr, cy = (q[1] * rd.s + rd.ty) * dpr, R = Math.round(SNAP_PX * dpr), N = 2 * R + 1;
+  const x0 = Math.round(cx) - R, y0 = Math.round(cy) - R; if (x0 < 0 || y0 < 0 || x0 + N > cv.width || y0 + N > cv.height) return null;
+  let d; try { d = cv.getContext("2d").getImageData(x0, y0, N, N).data; } catch (e) { return null; }
+  const dark = new Uint8Array(N * N); let n = 0;
+  for (let i = 0; i < N * N; i++) { const l = 0.3 * d[i * 4] + 0.59 * d[i * 4 + 1] + 0.11 * d[i * 4 + 2]; if (d[i * 4 + 3] > 100 && l < 205) { dark[i] = 1; n++; } }   // (grey too: a picture's thin lines are anti-aliased)
+  if (n < 6 || n > 0.6 * N * N) return null;   // nothing there — or a solid fill / text block, not a line
+  const L = Math.max(6, Math.round(0.45 * N)), need = Math.ceil(0.7 * L), rows = [], cols = [];   // a line: 70 % of any L pixels in a row (or column) dark — gaps of a dotted or broken picture line allowed
+  const lineAt = get => { let c = 0; for (let t = 0; t < N; t++) { c += get(t); if (t >= L) c -= get(t - L); if (t >= L - 1 && c >= need) return true; } return false; };
+  for (let y = 0; y < N; y++) if (lineAt(x => dark[y * N + x])) rows.push(y);
+  for (let x = 0; x < N; x++) if (lineAt(y => dark[y * N + x])) cols.push(x);
+  const centres = a => { const out = []; for (let i = 0; i < a.length;) { let j = i; while (j + 1 < a.length && a[j + 1] === a[j] + 1) j++; out.push((a[i] + a[j]) / 2); i = j + 1; } return out; };
+  const H = centres(rows), V = centres(cols), toPage = (x, y) => [((x0 + x + 0.5) / dpr - rd.tx) / rd.s, ((y0 + y + 0.5) / dpr - rd.ty) / rd.s];
+  let best = null; const take = (p, type, pri) => { const dd = dist(p, q); if (dd <= r && (!best || pri < best.pri || (pri === best.pri && dd < best.d))) best = {p, type, pri, d: dd}; };
+  H.forEach(y => V.forEach(x => take(toPage(x, y), "picture corner", 1)));
+  if (!best) { H.forEach(y => take(toPage(cx - x0 - 0.5, y), "on picture line", 3)); V.forEach(x => take(toPage(x, cy - y0 - 0.5), "on picture line", 3)); }
   return best;
 }
 /* the curve a short segment belongs to: neighbouring segments drawn as one curve (same sub-path, curve flag, ends meeting). Curves are
@@ -12569,7 +12612,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1"); S.boost = pref("zdTakeoffBoost") !== "0"; { const b = $("bBoost"); if (b) { b.classList.toggle("on", S.boost); b.onclick = () => setBoost(!S.boost); } }
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),

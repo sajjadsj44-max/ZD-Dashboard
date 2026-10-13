@@ -907,6 +907,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
           <button class="tool" data-px="bBg_auto" title="Background: Auto — black for AutoCAD drawings, white for PDFs"><svg class="ic"><use href="#i-bgauto"/></svg><span class="tl">BG auto</span></button>
           <button class="tool" data-px="bBg_black" title="Background: Black, as AutoCAD's model space"><svg class="ic"><use href="#i-bgblack"/></svg><span class="tl">BG black</span></button>
           <button class="tool" data-px="bBg_white" title="Background: White paper"><svg class="ic"><use href="#i-bgwhite"/></svg><span class="tl">BG white</span></button>
+          <button class="tool" data-px="bBoost" title="Faint lines — make thin, faint lines dark and readable when zoomed out (the picture only)"><svg class="ic"><use href="#i-bgauto"/></svg><span class="tl">Faint lines</span></button>
           <button class="tool" data-px="bMono" title="Monochrome — every line in one ink"><svg class="ic"><use href="#i-explode"/></svg><span class="tl">Monochrome</span></button>
           <button class="tool" data-px="bPdfBw" title="PDF-style black and white — white working area with all CAD lines black"><svg class="ic"><use href="#i-circle"/></svg><span class="tl">PDF B/W</span></button>
           <button class="tool" data-px="bLayers" title="The PDF's own CAD layers"><svg class="ic"><use href="#i-front"/></svg><span class="tl">PDF layers</span></button>
@@ -1122,7 +1123,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-14d"></script>
+<script type="module" src="takeoff.js?v=2026-10-14g"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
