@@ -139,8 +139,16 @@ function openDB(){
 function tx(store, mode, fn){
   return new Promise((ok, bad) => { const t = DB.transaction(store, mode), s = t.objectStore(store); const r = fn(s); t.oncomplete = () => ok(r && r.result); t.onerror = () => bad(t.error); t.onabort = () => bad(t.error); });
 }
-const dbPut = (store, v, k) => tx(store, "readwrite", s => k === undefined ? s.put(v) : s.put(v, k));
-const dbGet = (store, k) => tx(store, "readonly", s => s.get(k));
+/* a big PDF (over 64 MB — a 235 MB Print-to-PDF set) is stored with its bytes as a Blob: the browser keeps a Blob outside the
+   record, while one record may not pass about 133 MB ("The serialized keys and/or value are too large"). Read back, it is an
+   ArrayBuffer again, so nothing else changes. */
+const BIG_REC = 64 * 1024 * 1024;
+const recOut = v => { if (!v || typeof v !== "object" || Array.isArray(v)) return v; let o = v;
+  for (const f of ["data", "src"]) if (v[f] && v[f].byteLength > BIG_REC && !(v[f] instanceof Blob)) { if (o === v) o = Object.assign({}, v); o[f] = new Blob([v[f]]); o.blobs = (o.blobs || []).concat(f); }
+  return o; };
+const recIn = async v => { if (v && v.blobs) for (const f of v.blobs) if (v[f] instanceof Blob) v[f] = await v[f].arrayBuffer(); if (v && v.blobs) delete v.blobs; return v; };
+const dbPut = (store, v, k) => { const w = store === "pdfs" ? recOut(v) : v; return tx(store, "readwrite", s => k === undefined ? s.put(w) : s.put(w, k)); };
+const dbGet = (store, k) => tx(store, "readonly", s => s.get(k)).then(v => store === "pdfs" ? recIn(v) : v);
 const dbDel = (store, k) => tx(store, "readwrite", s => s.delete(k));
 const dbAll = store => tx(store, "readonly", s => s.getAll());
 
