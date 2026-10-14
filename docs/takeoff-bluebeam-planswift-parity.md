@@ -343,3 +343,13 @@ Bluebeam's).
 The PDF's own drawing of its markups is then switched off for that PDF, so nothing shows twice and its lines are not snap
 targets (palette: *Bluebeam: show / hide the PDF's own markups*). Importing again brings only markups not imported before
 (by their id); Ctrl+Z takes the whole import back.
+
+## Square up, window scan, recover (2026-10-14)
+
+| Feature | Where | What it does |
+|---|---|---|
+| **Square up to walls** | Auto area setting (on by default) · right-click an area outline | Every Auto area outline is snapped onto the drawing's wall faces: wobbles and jagged door closings become straight lines on the wall line, slanted jambs right-angled corners (a face is carried across an opening up to 4.5 ft). Kept only when the area changes under 8 % and the outline does not cross itself; otherwise the trace is left as it was. `squareToWalls`; `tools/test_takeoff_autoarea.js` covers the trace it wraps. |
+| **Auto area: every room in a window** | command palette, with a page open | For plans with no room names (DWG exports): the barrier lines inside a picked window are rastered, every enclosed pocket is a room, each is traced with Auto area from its widest point and added at once (one scan at a time; aborted if the page changes under it). The toast says what was skipped: too small or narrow, over 3,000 Sft, overlapping a neighbour, already measured; spaces narrower than the door gap are not scanned — click those. An outline far bigger than its enclosed space is flagged as a likely leak. `autoAreaWindow`, `rasterRooms`. |
+| **Recover a deleted project** | Start screen button (shown when a deleted project has backups) · command palette | A deleted project's last 10 backups stay in the browser; the dialog lists them by project with the last backup time and measurement count, **Restore** brings the project back (its drawings must be added again with + PDF — they are checked against the ones measured on), **Delete backups** clears a group. `recoverDialog`. |
+
+Also: `tools/test_takeoff_markup.js` placed its hyperlink box below the 842 × 595 pt fixture page, so it timed out at the hyperlink step on every run; it now draws on the sheet and the whole suite runs (80 checks).

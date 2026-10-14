@@ -174,7 +174,7 @@ function png(w, h, px){   // a small RGBA PNG, px(x, y) -> [r, g, b, a]
   await T(() => zdTakeoff.setTool("select")); await wait(100); await shot("sheet");
 
   console.log("hyperlink · attachment · redaction");
-  await tool("mk_link"); await dragAt(100, 650, 220, 690);
+  await tool("mk_link"); await dragAt(100, 500, 220, 540);   // on the sheet (842 x 595 pt): y = 650 was below the page and below the stage, so nothing was drawn
   await page.fill("#lkU", "example.com/spec"); await page.fill("#lkX", "Spec section 3"); await page.click("#dlgOk"); await wait(150);
   m = await last(); ok(m && m.type === "link" && m.link.url === "https://example.com/spec", "hyperlink to a web address (https:// added)");
   const linkId = m.id;
