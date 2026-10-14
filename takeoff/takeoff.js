@@ -8221,6 +8221,10 @@ function paletteCmds(){
   Object.entries(MK_TOOL_NAMES).forEach(([t, n]) => add("Markup: " + n, () => setTool(t), "Tool"));
   add("Markups list — filter, statuses, replies, summaries (Alt+L)", () => mlToggle(true), "View");
   add("Next unchecked measurement", nextUnchecked, "Check");
+  if (S.page) add("Auto area: every room in a window…", async () => { const w = await pickWindow("Auto area: click one corner of the area to scan, then the opposite corner"); if (!w) return;
+    busy("Auto area: finding the rooms…"); try { const r = await autoAreaWindow(w); if (r.err) { toast(r.err, 6000); return; } const sk = r.skipped;
+      toast("Auto area: " + r.added + " room" + (r.added === 1 ? "" : "s") + ", " + fq(r.sft) + " Sft added to " + (r.cond || "—") + (sk.failed ? " — " + sk.failed + " could not be traced" : "") + (sk.existing ? " — " + sk.existing + " already measured" : "") + (!r.added && !sk.failed ? " — no closed room found in the window" : ""), 7000); }
+    catch (e) { toast("Auto area: " + (e.message || e), 6000); } finally { busy(""); } }, "Tool");
   add("Check before export (errors and warnings)", exportMenu, "Check");
   add("Excel measurement sheet", exportExcel, "Export"); add("CSV", exportCsv, "Export");
   if (S.page) add("DXF (AutoCAD) — this page's takeoff as drawing layers", exportDxf, "Export");
@@ -9977,13 +9981,63 @@ async function autoAreaPage(inp){
   const ids = autoAreaAdd(cand, c);
   return {ok: {rooms: out.map(o => Object.assign(o, {id: ids[o.name] || undefined})), added: Object.keys(ids).length, totals_now: condTotals(c).net.toFixed(3) + " " + c.unit + " in " + c.name}};
 }
-function autoAreaAdd(cand, c){
+function autoAreaAdd(cand, c, src){   // src: what found them (default: the agent, by the Auto area source)
   const ids = {}, k = curScale(), at = new Date().toISOString();
   mutate(() => cand.forEach(x => { const id = uid("I"); ids[x.name] = id;
     P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: x.pts, nos: 1, ai: true, label: x.name.slice(0, 60),
-      det: {how: "auto", src: (autoOpt().src === "vector" ? "vector lines" : "drawing image") + " (agent)", gap: +x.gap, note: x.note, flag: x.flag, a0: +(polyArea(x.pts) / k / k).toFixed(4), pts0: x.pts.map(q => q.slice()), at, holes: x.holes.map(h => ({name: h.name, a: +(polyArea(h.pts) / k / k).toFixed(4)}))}});
+      det: {how: "auto", src: src || (autoOpt().src === "vector" ? "vector lines" : "drawing image") + " (agent)", gap: +x.gap, note: x.note, flag: x.flag, a0: +(polyArea(x.pts) / k / k).toFixed(4), pts0: x.pts.map(q => q.slice()), at, holes: x.holes.map(h => ({name: h.name, a: +(polyArea(h.pts) / k / k).toFixed(4)}))}});
     x.holes.forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, ai: true, label: h.name + " (void in " + x.name + ")"})); }), "Agent: Auto area");
   refresh(); return ids;
+}
+function rasterRooms(bar, W, H, px, k, thin, grow){   // the rooms in a barrier raster -> [{x, y, n, sft, dmax, edge, skip}]: a room is a free 4-connected pocket of bar (lines widened to the door gap, so doorways are shut), grown back out up to grow pixels through thin (the bare lines) to its walls; x, y its widest pixel (the seed for autoRoom), skip why it is no room (null: it is one)
+  thin = thin || bar; grow = grow || 0; const N = W * H, INF = 1 << 29, d = new Int32Array(N), lab = new Int32Array(N), st = new Int32Array(N), out = [];
+  for (let i = 0; i < N; i++) d[i] = thin[i] ? 0 : INF;   // d: 3-4 chamfer distance to the nearest line, two passes (÷ 3 = pixels)
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x; if (!d[i]) continue; let v = d[i];
+    if (x) v = Math.min(v, d[i - 1] + 3); if (y) { v = Math.min(v, d[i - W] + 3); if (x) v = Math.min(v, d[i - W - 1] + 4); if (x < W - 1) v = Math.min(v, d[i - W + 1] + 4); } d[i] = v; }
+  for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--) { const i = y * W + x; if (!d[i]) continue; let v = d[i];
+    if (x < W - 1) v = Math.min(v, d[i + 1] + 3); if (y < H - 1) { v = Math.min(v, d[i + W] + 3); if (x < W - 1) v = Math.min(v, d[i + W + 1] + 4); if (x) v = Math.min(v, d[i + W - 1] + 4); } d[i] = v; }
+  const nb = (i, x, y, f) => { if (x > 0) f(i - 1); if (x < W - 1) f(i + 1); if (y > 0) f(i - W); if (y < H - 1) f(i + W); };
+  let top = 0;
+  for (let s = 0; s < N; s++) { if (bar[s] || lab[s]) continue; const id = out.length + 1; lab[s] = id; st[top++] = s;   // the cores: an iterative flood fill, each pixel pushed once
+    while (top) { const i = st[--top], x = i % W; nb(i, x, (i - x) / W, j => { if (!lab[j] && !bar[j]) { lab[j] = id; st[top++] = j; } }); }
+    out.push({x: 0, y: 0, n: 0, sft: 0, dmax: 0, edge: false, skip: null, best: -1}); }
+  let head = 0; top = 0; for (let i = 0; i < N; i++) if (lab[i]) st[top++] = i;   // grown out to the walls: a breadth-first wave from every core at once, grow layers deep — a corridor narrower than the gap is taken in only that far
+  for (let layer = 0; layer < grow && head < top; layer++) { const end = top;
+    while (head < end) { const i = st[head++], x = i % W, id = lab[i]; nb(i, x, (i - x) / W, j => { if (!lab[j] && !thin[j]) { lab[j] = id; st[top++] = j; } }); } }
+  for (let i = 0; i < N; i++) { const id = lab[i]; if (!id) continue; const r = out[id - 1], x = i % W, y = (i - x) / W; r.n++; if (x === 0 || y === 0 || x === W - 1 || y === H - 1) r.edge = true; if (d[i] > r.best) { r.best = d[i]; r.x = x; r.y = y; } }
+  out.forEach(r => { r.sft = +(r.n * px * px / k / k).toFixed(2); r.dmax = +(r.best / 3 * px / k).toFixed(2); delete r.best;   // dmax ft: half the width at the widest point
+    r.skip = r.edge ? "edge" : r.sft < 12 ? "small" : r.sft > 3000 ? "large" : r.dmax < 1.5 ? "thin" : null; });
+  return out;
+}
+async function autoAreaWindow(win, o){   // every room in a window (a DWG plan with no room names) -> {added, sft, cond, skipped} or {err}: the barrier raster's pockets are the rooms, each traced with autoRoomGuarded from its widest point and added at once
+  const k = curScale(); if (!k) return {err: "Set the page scale first (K) — rooms are found in feet."};
+  const g = S.geo[S.key]; if (!g || !g.segs.length) return {err: "This page has no vector lines — Auto area over a window reads the drawing's lines."};
+  o = Object.assign(autoOpt(), o || {});
+  const x0 = Math.min(win[0], win[2]), y0 = Math.min(win[1], win[3]), x1 = Math.max(win[0], win[2]), y1 = Math.max(win[1], win[3]);
+  let px = 0.3 * k; while ((x1 - x0) / px > 3000 || (y1 - y0) / px > 3000) px *= 1.5;   // a big window: coarser pixels, the canvas stays ≤ 3000 × 3000
+  const W = Math.max(2, Math.ceil((x1 - x0) / px)), H = Math.max(2, Math.ceil((y1 - y0) / px));
+  const bf = o.layers ? segRoleFilter(g, BOUND) : null;   // the PDF's wall / door / window / column / railing layers only, as autoRoom
+  const ids = barrierIds(g, segsIn(g, x0, y0, x1, y1).filter(i => !bf || bf(i)), k, o);
+  const raster = lw => { const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d", {willReadFrequently: true});   // barrier lines and door openings stroked lw (pt) wide -> 1 = blocked
+    ctx.setTransform(1 / px, 0, 0, 1 / px, -x0 / px, -y0 / px); ctx.lineWidth = lw; ctx.lineCap = "round"; ctx.strokeStyle = "#000"; ctx.beginPath();
+    ids.forEach(i => { const s = g.segs[i]; ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); }); ids.doors.forEach(s => { ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); }); ctx.stroke();
+    const im = ctx.getImageData(0, 0, W, H).data, b = new Uint8Array(W * H); for (let i = 0; i < b.length; i++) b[i] = im[i * 4 + 3] > 24 ? 1 : 0; return b; };
+  busy("Auto area: finding the rooms…"); await new Promise(r => setTimeout(r));
+  const rooms = rasterRooms(raster(Math.max(o.gap * k, 2 * px)), W, H, px, k, raster(2 * px), Math.ceil(o.gap * k / px / 2) + 2), todo = rooms.filter(r => !r.skip);
+  const skipped = {edge: 0, small: 0, large: 0, thin: 0, existing: 0, failed: 0}; rooms.forEach(r => { if (r.skip) skipped[r.skip]++; });
+  const existing = P.proj.items.filter(it => it.file === S.fileId && it.page === S.pageNo && it.kind === "shape" && it.shape !== "circle" && (cond(it.cond) || {}).type === "area");
+  let rn = 0; P.proj.items.forEach(it => { const m = /^Room (\d+)$/.exec(it.label || ""); if (m && it.file === S.fileId && it.page === S.pageNo) rn = Math.max(rn, +m[1]); });   // Room n carries on from the page's last
+  const cand = [];
+  for (let n = 0; n < todo.length; n++) { const r = todo[n], seed = [x0 + (r.x + 0.5) * px, y0 + (r.y + 0.5) * px];
+    if (existing.some(it => pointInPoly(seed, it.pts)) || cand.some(x => pointInPoly(seed, x.pts))) { skipped.existing++; continue; }
+    busy("Auto area: " + (n + 1) + " of " + todo.length + " rooms…"); if (n % 10 === 9) await new Promise(r2 => setTimeout(r2));
+    let res; try { res = await autoRoomGuarded(seed); } catch (e) { res = {err: e.message || String(e)}; }
+    if (res.err || !res.pts || res.pts.length < 3) { skipped.failed++; continue; }
+    cand.push({name: "Room " + (++rn), pts: res.pts, holes: res.holes || [], flag: [res.leak ? "leaks — " + res.leak : "", res.short || "", res.warn || ""].filter(Boolean).join("; "), gap: o.gap, note: res.note || ""}); }
+  if (!cand.length) return {added: 0, sft: 0, cond: null, skipped};
+  const c = aiAreaCond();   // the current condition when it is an area, else the first area condition (or a new Floor area)
+  autoAreaAdd(cand, c, "window scan");
+  return {added: cand.length, sft: +cand.reduce((s, x) => s + (polyArea(x.pts) - x.holes.reduce((a, h) => a + polyArea(h.pts), 0)) / k / k, 0).toFixed(2), cond: c.name, skipped};
 }
 async function aiRunTool3(b){
   const inp = b.input || {};
@@ -12778,7 +12832,7 @@ function ocFix(Lb, out, fids){
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
-    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel};   // for tests and the console
+    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
