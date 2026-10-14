@@ -3694,7 +3694,7 @@ function apLabelPt(scr, area, a, z){   // where the label goes: in the shape / b
 /* a measurement (area or run) as SVG: o {T page -> screen, z sizes, sp page pt -> screen px, sel, k, lbl (labels on), seg (segment lengths on), small} */
 function measSvg(it, c, o){
   const a = apOf(c, it), T = o.T, z = o.z || 1, sp = o.sp || 1, ded = it.kind === "ded", poly = itemPoly(it), scr = poly.map(T), area = c.type === "area", closed = area || it.shape === "circle";
-  const col = ded ? "#d03b3b" : a.col, op = Math.max(0.05, Math.min(1, (+a.lineOp || 100) / 100)), w0 = a.swU === "pt" ? +a.sw * sp : +a.sw * z, w = Math.max(0.5, o.sel ? w0 + (area ? 1.4 : 2) * z : w0);
+  const wz = o.wz || 1, col = ded ? "#d03b3b" : a.col, op = Math.max(0.05, Math.min(1, (+a.lineOp || 100) / 100)), w0 = (a.swU === "pt" ? +a.sw * sp : +a.sw * z) * wz, w = Math.max(0.5, o.sel ? w0 + (area ? 1.4 : 2) * z : w0);
   const dash = ded && a.dash === "solid" ? `${7 * z} ${4 * z}` : apDash(a.dash, w), ps = scr.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" "), out = [];
   if (area) {
     if (ded) out.push(`<polygon points="${ps}" fill="${o.screen ? "url(#hatch)" : "#d03b3b"}" fill-opacity="${o.screen ? 1 : 0.14}" stroke="none"/>`);
@@ -4256,7 +4256,7 @@ function renderProps(){
     <div class="fg"><label>Nos (×)</label><input type="number" min="1" step="1" data-prop="nos" value="${+it.nos || 1}"></div>
     ${it.kind === "open" ? `<div class="fg"><label>Width ft</label><input type="text" data-prop="ow" value="${it.ow ? f3(it.ow) : ""}" placeholder="${k ? f3(dist(it.pts[0], it.pts[1]) / k) : ""}"></div><div class="fg"><label>Height ft</label><input type="text" data-prop="oh" value="${f3(+it.oh || 0)}"></div>` : ""}
     ${c.type !== "count" && it.kind !== "open" ? `<div class="fg"><label>Measured as</label><select data-prop="kind"><option value="shape"${it.kind === "shape" ? " selected" : ""}>Add</option><option value="ded"${it.kind === "ded" ? " selected" : ""}>Deduct</option></select></div>` : ""}
-    <div class="fg"><label>Condition</label><select data-prop="cond">${P.proj.conds.filter(x => x.type === c.type).map(x => `<option value="${esc(x.id)}"${x.id === it.cond ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div><div class="fg"><label>Condition colour</label><input type="color" data-prop="color" value="${/^#[0-9a-f]{6}$/i.test(c.color) ? c.color : "#2a78d6"}" style="height:30px;padding:0"></div><div class="fg"><label>Line weight</label><input type="number" min="1" max="12" step="1" data-prop="sw" value="${+c.sw || 2}"></div>
+    <div class="fg"><label>Condition</label><select data-prop="cond">${P.proj.conds.filter(x => x.type === c.type).map(x => `<option value="${esc(x.id)}"${x.id === it.cond ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div><div class="fg"><label>Condition colour</label><input type="color" data-prop="color" value="${/^#[0-9a-f]{6}$/i.test(c.color) ? c.color : "#2a78d6"}" style="height:30px;padding:0"></div><div class="fg"><label>Line weight</label><input type="number" min="0.25" max="24" step="0.25" data-prop="sw" value="${+c.sw || 2}"></div>
     <button class="btn dng" data-act="delItem"${it.locked ? " disabled" : ""}>Delete</button></div>
     <div class="row" style="margin-top:6px;gap:4px">${it.locked ? '<span class="tag a">&#128274; locked</span>' : ""}<button class="btn sm" data-act="lock" title="Ctrl+Shift+L">${it.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn sm" data-act="dup" title="Ctrl+D">Duplicate</button>
       ${isRun(it) ? '<button class="btn sm" data-act="brk" title="Break tool (B): click where to cut the run">&#9986; Break…</button>' : ""}${S.selPt >= 0 && (c.type === "count" || editPts(it)) ? '<button class="btn sm dng" data-act="delPoint">Remove point ' + (S.selPt + 1) + "</button>" : ""}
@@ -5834,14 +5834,14 @@ const PRESETS = [
 async function defaultsDialog(){
   const d = toolDefaults();
   const v = await ask("Professional takeoff defaults", `<p class="small">These defaults are used for new conditions, measurements, markups and dimensions. Existing objects are unchanged unless you select one of the apply options.</p>
-    <div class="grid"><div class="fg"><label>Measurement colour</label><input type="color" id="dfCond" value="${d.condColor}"></div><div class="fg"><label>Measurement line weight</label><input type="number" id="dfCondW" min="1" max="12" value="${d.condWidth}"></div>
-    <div class="fg"><label>Markup colour</label><input type="color" id="dfMark" value="${d.markColor}"></div><div class="fg"><label>Markup line weight</label><input type="number" id="dfMarkW" min="1" max="12" value="${d.markWidth}"></div>
-    <div class="fg"><label>Dimension colour</label><input type="color" id="dfDim" value="${d.dimColor}"></div><div class="fg"><label>Dimension line weight</label><input type="number" id="dfDimW" min="1" max="12" value="${d.dimWidth}"></div>
+    <div class="grid"><div class="fg"><label>Measurement colour</label><input type="color" id="dfCond" value="${d.condColor}"></div><div class="fg"><label>Measurement line weight</label><input type="number" id="dfCondW" min="0.25" max="12" step="0.25" value="${d.condWidth}"></div>
+    <div class="fg"><label>Markup colour</label><input type="color" id="dfMark" value="${d.markColor}"></div><div class="fg"><label>Markup line weight</label><input type="number" id="dfMarkW" min="0.25" max="12" step="0.25" value="${d.markWidth}"></div>
+    <div class="fg"><label>Dimension colour</label><input type="color" id="dfDim" value="${d.dimColor}"></div><div class="fg"><label>Dimension line weight</label><input type="number" id="dfDimW" min="0.25" max="12" step="0.25" value="${d.dimWidth}"></div>
     <div class="fg"><label>Dimension text size</label><input type="number" id="dfDimS" min="8" max="48" value="${d.dimSize}"></div><div class="fg"><label>Dimension arrow size</label><input type="number" id="dfDimA" min="5" max="40" value="${d.dimArrow}"></div>
     <div class="fg"><label>Dimension offset</label><input type="number" id="dfDimO" min="0" max="500" value="${d.dimOffset}"></div><div class="fg"><label>Highlight colour</label><input type="color" id="dfHi" value="${d.hiliteColor}"></div>
     <div class="fg"><label>Highlight opacity</label><input type="number" id="dfHiO" min="0.05" max="1" step="0.05" value="${d.hiliteOpacity}"></div></div>
     <div class="row" style="margin-top:10px"><label class="pk"><input type="checkbox" id="dfApplyMk"> Apply markup defaults to existing markups</label><label class="pk"><input type="checkbox" id="dfApplyC"> Apply measurement colour / weight to all existing conditions</label></div>`, "Save defaults", () => ({
-      condColor: $("dfCond").value, condWidth: Math.max(1, Math.min(12, +$("dfCondW").value || 2)), markColor: $("dfMark").value, markWidth: Math.max(1, Math.min(12, +$("dfMarkW").value || 2)), dimColor: $("dfDim").value, dimWidth: Math.max(1, Math.min(12, +$("dfDimW").value || 2)), dimSize: Math.max(8, Math.min(48, +$("dfDimS").value || 13)), dimArrow: Math.max(5, Math.min(40, +$("dfDimA").value || 10)), dimOffset: Math.max(0, Math.min(500, +$("dfDimO").value || 24)), hiliteColor: $("dfHi").value, hiliteOpacity: Math.max(.05, Math.min(1, +$("dfHiO").value || .38)), applyMk: $("dfApplyMk").checked, applyC: $("dfApplyC").checked
+      condColor: $("dfCond").value, condWidth: Math.max(0.25, Math.min(12, +$("dfCondW").value || 2)), markColor: $("dfMark").value, markWidth: Math.max(0.25, Math.min(12, +$("dfMarkW").value || 2)), dimColor: $("dfDim").value, dimWidth: Math.max(0.25, Math.min(12, +$("dfDimW").value || 2)), dimSize: Math.max(8, Math.min(48, +$("dfDimS").value || 13)), dimArrow: Math.max(5, Math.min(40, +$("dfDimA").value || 10)), dimOffset: Math.max(0, Math.min(500, +$("dfDimO").value || 24)), hiliteColor: $("dfHi").value, hiliteOpacity: Math.max(.05, Math.min(1, +$("dfHiO").value || .38)), applyMk: $("dfApplyMk").checked, applyC: $("dfApplyC").checked
     }));
   if (!v) return;
   const d2 = Object.assign({}, v); delete d2.applyMk; delete d2.applyC; saveToolDefaults(d2);
@@ -6207,7 +6207,7 @@ function expLegendSvg(o, pos, tot, file, page, sh, W, H, z, lz, ox){
 function pageOverlaySvg(file, page, sc, W, H, legend){ const ex0 = S.mkExport; S.mkExport = true; try { return pageOverlaySvg0(file, page, sc, W, H, legend); } finally { S.mkExport = ex0; } }
 function pageOverlaySvg0(file, page, sc, W, H, legend){
   const o = legend && typeof legend === "object" ? legend : {legend: legend ? "tl" : "none"}, ox = +o.ox || 0, lblOn = o.lbl == null ? S.lbl.on : !!o.lbl;
-  const T = p => [p[0] * sc + ox, p[1] * sc], z = Math.max(1, sc / 1.6), h = [];
+  const T = p => [p[0] * sc + ox, p[1] * sc], z = o.z > 0 ? o.z : Math.max(1, sc / 1.6), wz = o.wz > 0 ? o.wz : 1, h = [];
   const ps = P => P.map(p => T(p).map(v => v.toFixed(1)).join(",")).join(" ");
   const tot = {}, shown = it => o.conds ? o.conds.has(it.cond) : !hiddenItem(it);
   if (ox) h.push(`<rect x="0" y="0" width="${ox.toFixed(1)}" height="${H}" fill="#fff"/><line x1="${ox.toFixed(1)}" y1="0" x2="${ox.toFixed(1)}" y2="${H}" stroke="#9fb0c6" stroke-width="${z}"/>`);
@@ -6216,8 +6216,8 @@ function pageOverlaySvg0(file, page, sc, W, H, legend){
     const k = itemScale(it), rows = k ? rowsOf(it, k) : [], q = rows.reduce((a, r) => a + r.qty, 0), col = c.color, ded = it.kind === "ded";
     tot[c.id] = (tot[c.id] || 0) + q;
     if (c.type === "count") { h.push(countSvg(c, it.pts, T, z, -1)); return; }
-    if (it.kind === "open") { const a = T(it.pts[0]), b = T(it.pts[1]); h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${4 * z}" stroke-linecap="round"/>`); return; }
-    h.push(measSvg(it, c, {T, z, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false}));
+    if (it.kind === "open") { const a = T(it.pts[0]), b = T(it.pts[1]); h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${4 * z * wz}" stroke-linecap="round"/>`); return; }
+    h.push(measSvg(it, c, {T, z, wz, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false}));
   });
   (P.proj.marks || []).filter(m => m.file === file && m.page === page && (m.type === "redact" || (o.mk !== false && m.type !== "fence" && !mkHidden(m)))).forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
   const sh = (P.proj.sheets || {})[keyOf(file, page)] || {}, lz = z * ({s: 0.8, m: 1, l: 1.3}[o.lsz] || 1), pos = o.legend || "none";
@@ -8926,7 +8926,7 @@ function wire(){
       else if (f === "ow" || f === "oh") { const v = e.target.value.trim() ? parseFt(e.target.value) : 0; if (!isNaN(v)) it[f] = v; }
       else if (f === "doorW") { const s = e.target.value.trim(); if (!s) delete it.doorW; else { const v = s.split("+").reduce((a, x) => a + parseFt(x), 0); if (!isNaN(v) && v >= 0) it.doorW = r3(v); } }
       else if (f === "color") { const c = cond(it.cond); if (c && HEXCOL.test(e.target.value)) c.color = e.target.value; }
-      else if (f === "sw") { const c = cond(it.cond); if (c) c.sw = Math.max(1, Math.min(12, +e.target.value || 2)); }
+      else if (f === "sw") { const c = cond(it.cond); if (c) c.sw = Math.max(0.25, Math.min(24, +e.target.value || 2)); }
       else if (f === "sch") { const s = schOf(e.target.value); if (s) { it.sch = s.id; it.label = s.mark; } else delete it.sch; }
       else if (LOC_KEYS.includes(f)) { const v = e.target.value.trim(); if (v) it[f] = v; else delete it[f]; }
       else it[f] = e.target.value;
@@ -12507,7 +12507,10 @@ const PLOT_SC = [[1, "1:1"], [2, "1:2"], [5, "1:5"], [10, "1:10"], [20, "1:20"],
   [300, "1:300"], [400, "1:400"], [500, "1:500"], [1000, "1:1000"], [12, "1\" = 1'-0\""], [16, "3/4\" = 1'-0\""], [24, "1/2\" = 1'-0\""], [32, "3/8\" = 1'-0\""], [48, "1/4\" = 1'-0\""], [64, "3/16\" = 1'-0\""],
   [96, "1/8\" = 1'-0\""], [128, "3/32\" = 1'-0\""], [192, "1/16\" = 1'-0\""], [120, "1\" = 10'"], [240, "1\" = 20'"], [360, "1\" = 30'"], [480, "1\" = 40'"], [600, "1\" = 50'"]];
 function plotPref(){ let o = null; try { o = JSON.parse(pref("zdTakeoffPlot") || "null"); } catch (e) { o = null; }
-  return Object.assign({area: "display", paper: "A3", orient: "auto", scale: "fit", style: "color", lw: true, tk: true, legend: true, stamp: true, center: true, np: true}, o && typeof o === "object" ? o : {}); }
+  return Object.assign({area: "display", paper: "A3", orient: "auto", scale: "fit", style: "color", lw: true, tk: true, tlw: "thin", legend: true, stamp: true, center: true, np: true}, o && typeof o === "object" ? o : {}); }
+/* the takeoff's lines on paper: paper points per screen pixel of a measurement's width (a 1.6 px area outline plots 0.48 pt at
+   "thin"); "screen" keeps them as wide as the zoomed-in screen shows them. Text and count symbols keep their own size. */
+const PLOT_TLW = {hair: ["Hairline", 0.1], fine: ["Fine", 0.18], thin: ["Thin", 0.3], medium: ["Medium", 0.5], thick: ["Thick", 1], screen: ["As on screen (wide)", 0]};
 function plotWin(o){   // the part of the page plotted, page points [x0, y0, x1, y1]
   const W = S.base.width, H = S.base.height, m = (cadMeta(S.fileId) || {}).map;
   if (o.area === "window" && o.win) return o.win.slice();
@@ -12578,6 +12581,7 @@ function plotAsk(o){
     <div class="fg"><label>Paper size</label><select id="plPaper">${PAPERS.map(p => opt(p[0], p[0] + " (" + p[1] + " × " + p[2] + " mm)", o.paper)).join("")}</select></div>
     <div class="fg"><label>Orientation</label><select id="plOr">${[["auto", "Auto — as the window"], ["landscape", "Landscape"], ["portrait", "Portrait"]].map(([v, t]) => opt(v, t, o.orient)).join("")}</select></div>
     <div class="fg"><label>Plot scale</label><select id="plSc">${opt("fit", "Fit to paper", o.scale)}${k > 0 ? PLOT_SC.map(([v, t]) => opt(v, t, o.scale)).join("") : ""}</select>${k > 0 ? "" : '<span class="small">Set the page\'s scale (K) to plot at a true scale</span>'}</div>
+    <div class="fg"><label>Takeoff lines on paper</label><select id="plTw">${Object.entries(PLOT_TLW).map(([v, [t, f]]) => opt(v, t + (f ? " — " + (1.6 * f).toFixed(2) + " pt area outline" : ""), o.tlw || "thin")).join("")}</select></div>
     <div class="fg"><label>Plot style</label><select id="plSt">${[["color", "As drawn — colours"], ["mono", "Monochrome — all black"], ["gray", "Grayscale"]].map(([v, t]) => opt(v, t, o.style)).join("")}</select></div>
     <div class="fg w2"><label>Plot options</label><label class="pk"><input type="checkbox" id="plLw"${o.lw ? " checked" : ""}> Plot lineweights</label><label class="pk"><input type="checkbox" id="plTk"${o.tk ? " checked" : ""}> The takeoff on top (measurements, labels, markups)</label>
       <label class="pk"><input type="checkbox" id="plLg"${o.legend ? " checked" : ""}> Legend — the conditions on this sheet and their quantities</label><label class="pk"><input type="checkbox" id="plTi"${o.stamp ? " checked" : ""}> Title line — project, sheet, scale, date</label>
@@ -12585,7 +12589,7 @@ function plotAsk(o){
     <div class="plprev"><canvas id="plPrev" width="300" height="300"></canvas><span class="small" id="plInfo"></span></div></div>
     <p class="small" style="margin-top:6px">A vector PDF: <b>Print</b> opens the browser's print dialog with it (choose the printer, or Save as PDF there); <b>Save PDF</b> downloads it. ${cad ? "The drawing is plotted from its own lines, so monochrome and grayscale are exact." : "Monochrome is plotted as a 200 DPI picture of the page."}</p>`;
   const read = () => ({area: (document.querySelector('#dlgB input[name="plA"]:checked') || {}).value || "display", paper: $("plPaper").value, orient: $("plOr").value, scale: $("plSc").value, style: $("plSt").value,
-    lw: $("plLw").checked, tk: $("plTk").checked, legend: $("plLg").checked, stamp: $("plTi").checked, center: $("plCe").checked, np: $("plNp") ? $("plNp").checked : o.np});
+    lw: $("plLw").checked, tk: $("plTk").checked, tlw: $("plTw").value, legend: $("plLg").checked, stamp: $("plTi").checked, center: $("plCe").checked, np: $("plNp") ? $("plNp").checked : o.np});
   let go = "print", pick = false, snap = null;
   const p = ask("Plot — " + pageName({file: S.fileId, page: S.pageNo}), body, "Print", () => { const v = read(); if (v.area === "window" && !o.win) return "Pick the window first (Pick window <)"; return v; });
   const sv = document.createElement("button"); sv.className = "btn"; sv.textContent = "Save PDF"; sv.onclick = () => { go = "pdf"; $("dlgOk").click(); }; $("dlgOk").before(sv);
@@ -12625,7 +12629,8 @@ async function plotPdf(o){
   }
   if (o.tk) {   // the takeoff over the window, as a transparent picture at about 200 DPI
     const cs = Math.min(200 / 72 * lo.s, 6000 / Math.max(win[2] - win[0], win[3] - win[1])), W = Math.max(1, Math.ceil((win[2] - win[0]) * cs)), H = Math.max(1, Math.ceil((win[3] - win[1]) * cs));
-    await mkAssetsFor(f, p); const full = pageOverlaySvg(f, p, cs, Math.ceil(S.base.width * cs), Math.ceil(S.base.height * cs), {legend: "none", stamp: false}), inner = full.replace(/^<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
+    const pz = cs / lo.s * 0.6, tw = (PLOT_TLW[o.tlw] || PLOT_TLW.thin)[1];   // labels and symbols: 0.6 pt on paper per screen px (an 11.5 px label prints 6.9 pt); lines: as chosen
+    await mkAssetsFor(f, p); const full = pageOverlaySvg(f, p, cs, Math.ceil(S.base.width * cs), Math.ceil(S.base.height * cs), tw ? {legend: "none", stamp: false, z: pz, wz: tw / 0.6} : {legend: "none", stamp: false}), inner = full.replace(/^<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
     const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
     const svgW = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${(win[0] * cs).toFixed(2)} ${(win[1] * cs).toFixed(2)} ${W} ${H}">${inner}</svg>`, two = svgBlendSplit(svgW);
     for (const [k, sv] of (two || [svgW]).entries()) { const c2 = cv.getContext("2d"); c2.clearRect(0, 0, W, H); await svgImg(c2, sv);
