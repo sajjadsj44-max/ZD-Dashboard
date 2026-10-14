@@ -457,6 +457,9 @@ async function showStart(){
     list.map(p => `<tr><td><a class="plink" data-open="${esc(p.id)}" title="Open project">${esc(p.name)}</a></td><td>${p.files.length}</td><td>${p.items.length}</td><td>${dmy(p.updated)}</td>
       <td style="text-align:right;white-space:nowrap"><button class="btn sm" data-edit="${esc(p.id)}">Edit</button> <button class="btn sm" data-bak="${esc(p.id)}">Backups</button> <button class="btn sm" data-dup="${esc(p.id)}">Duplicate</button> <button class="btn sm dng" data-del="${esc(p.id)}">Delete</button></td></tr>`).join("") + "</tbody></table>"
     : (q ? '<div class="empty">No projects match your search.</div>' : '<div class="empty">No projects yet — start one with <b>+ New project</b>, then drop a PDF drawing on it.</div>');
+  const orphan = (await backupPids().catch(() => [])).some(pid => !all.some(p => p.id === pid));   // a deleted project left its backups behind: offer them
+  let rb = $("bRecover"); if (!rb) { rb = document.createElement("button"); rb.id = "bRecover"; rb.className = "btn"; rb.textContent = "Recover a deleted project…"; rb.title = "Bring back a project deleted from this browser, from the backups it left behind"; rb.onclick = () => recoverDialog(); $("bImport").before(rb); }
+  rb.style.display = orphan ? "" : "none";
   $("start").classList.add("on");
 }
 
@@ -7723,6 +7726,40 @@ async function backupsDialog(pid){
     toast("Restored the backup of " + fmt(bk.at), 4000);
   });
 }
+/* a deleted project's backups outlive it: Delete removes its row and its PDFs, the "backups" store keeps its last copies. They are
+   listed here, one row per deleted project, and the newest copy comes back as a project — without its PDFs, which went with the
+   project, so the drawing is added again with + PDF (checked against the one it was measured on, as after an import) */
+function backupPids(){   // every pid with a backup, from the index alone: a backup holds a whole project, not loaded just to count
+  return new Promise((ok, bad) => { const out = [], t = DB.transaction("backups", "readonly"), rq = t.objectStore("backups").index("pid").openKeyCursor(null, "nextunique");
+    rq.onsuccess = () => { const c = rq.result; if (c) { out.push(c.key); c.continue(); } }; t.oncomplete = () => ok(out); t.onerror = () => bad(t.error); t.onabort = () => bad(t.error); });
+}
+async function orphanBackups(){   // backups whose project is gone, grouped by pid: [[newest, …], …], the group with the newest backup first
+  const have = new Set(await tx("projects", "readonly", s => s.getAllKeys())), G = {};
+  for (const b of await dbAll("backups")) if (!have.has(b.pid)) (G[b.pid] = G[b.pid] || []).push(b);
+  return Object.values(G).map(l => l.sort((a, b) => b.at.localeCompare(a.at))).sort((a, b) => b[0].at.localeCompare(a[0].at));
+}
+async function recoverDialog(){
+  let groups; try { groups = await orphanBackups(); } catch (e) { return toast("Could not read the backups: " + e.message, 5000); }
+  const fmt = iso => dmy(iso) + " " + String(iso || "").slice(11, 16), fresh = () => { if ($("start").classList.contains("on")) showStart(); };   // the start screen's Recover button follows what is left
+  ask("Recover a deleted project", `<p class="small">Projects deleted from this browser whose backups are still here (the last ${BAK_KEEP} copies of each). Restore brings the newest copy back as a project — its PDFs went with the project, so add the drawing again with <b>+ PDF</b>.</p>
+    ${groups.length ? `<table class="sh" style="margin-top:8px"><thead><tr><th>Project</th><th>Last backup</th><th class="n">Measurements</th><th class="n">Backups</th><th></th></tr></thead><tbody>${groups.map(g => `<tr><td>${esc(g[0].name)}</td><td>${esc(fmt(g[0].at))}</td><td class="n">${g[0].n}</td><td class="n">${g.length}</td><td class="n" style="white-space:nowrap"><button class="btn sm pri" data-recov="${esc(g[0].pid)}">Restore</button> <button class="btn sm dng" data-drop="${esc(g[0].pid)}">Delete backups</button></td></tr>`).join("")}</tbody></table>` : '<p style="margin-top:8px">No deleted project has a backup here.</p>'}`, "");
+  $("dlgCancel").textContent = "Close";
+  $("dlgB").querySelectorAll("[data-recov]").forEach(b => b.onclick = async () => {
+    const bk = groups.find(g => g[0].pid === b.dataset.recov)[0]; let old;
+    try { old = JSON.parse(bk.data); if (!old || typeof old !== "object" || Array.isArray(old)) throw new Error("not a project"); } catch (e) { return toast("This backup cannot be read: " + e.message, 5000); }
+    migrate(old); old.id = (await dbGet("projects", bk.pid)) ? uid("P") : bk.pid;   // its own id back, unless a project has taken it since
+    old.updated = new Date().toISOString(); await dbPut("projects", old);
+    if (ask.cur) ask.cur(null);
+    await openProject(old.id);
+    toast("Restored " + old.name + " from its backup of " + fmt(bk.at) + " — add its drawing again with + PDF (it is checked against the drawing measured on)", 7000);
+  });
+  $("dlgB").querySelectorAll("[data-drop]").forEach(b => b.onclick = async () => {
+    const g = groups.find(x => x[0].pid === b.dataset.drop);
+    const ok = await ask("Delete these backups?", `<p>Delete the ${g.length} backup${g.length > 1 ? "s" : ""} of <b>${esc(g[0].name)}</b>? The project cannot be recovered after this.</p>`, "Delete");
+    if (ok) { for (const x of g) await dbDel("backups", x.id); toast("Backups of " + g[0].name + " deleted", 2500); fresh(); }
+    recoverDialog();
+  });
+}
 setInterval(() => { if (P.proj && document.visibilityState !== "hidden") { savePr = P.proj; flushSave().then(ok => ok && backupNow("every 10 min")).catch(() => {}); } }, 600000);
 /* leaving or hiding the page writes the pending change at once (the 300 ms timer would not run) */
 window.addEventListener("pagehide", () => { flushSave(true); });
@@ -8105,7 +8142,7 @@ function paletteCmds(){
     add(t, () => b.click(), g, k);
   };
   if (!P.proj) {
-    add("New project", () => $("bNewProj").click(), "Project"); add("Import project (.json or .zdtakeoff)", () => $("impIn").click(), "Project"); add("Full screen", fullScreen, "View");
+    add("New project", () => $("bNewProj").click(), "Project"); add("Import project (.json or .zdtakeoff)", () => $("impIn").click(), "Project"); add("Recover a deleted project (from its backups)", recoverDialog, "Project"); add("Full screen", fullScreen, "View");
     return L;
   }
   document.querySelectorAll("#tools [data-tool]").forEach(b => btn(b, "Tool"));
@@ -12671,7 +12708,7 @@ function ocFix(Lb, out, fids){
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
-    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary};   // for tests and the console
+    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
