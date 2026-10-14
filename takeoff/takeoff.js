@@ -103,6 +103,61 @@ function rectilinear(P0, tol){
   }
   return out.filter(r => r.L > tol && r.W > tol);
 }
+/* a closed outline (page pt, y down) squared onto the drawing's wall faces: Auto area comes out jagged at door openings and with
+   slanted jambs on corridors. Each point is snapped onto the nearest wall-face line in the two directions of the local wall grid (a face
+   carried 4.5 ft past its ends, across a door opening), the ring cleaned, short slanted edges made right-angled. The input unchanged when
+   there are no walls, the result crosses itself or its area moves more than 8 % (then the trace was right and the walls are not) */
+function squareToWalls(pts, k, g){
+  if (!k || !g || !g.segs || !g.segs.length || !pts || pts.length < 3) return pts;
+  const SNAP = 1.1 * k, EXT = 4.5 * k, MAXCHG = 0.08, Q = Math.PI / 2, D = Math.PI / 180, dot = (q, e) => q[0] * e[0] + q[1] * e[1];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; pts.forEach(p => { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); });
+  const m = 6 * k, o = autoOpt(), bf = o.layers ? segRoleFilter(g, BOUND) : null;   // the barriers Auto area uses, in the outline's box grown 6 ft
+  const box = g.grid && g.grid.size ? segsIn(g, x0 - m, y0 - m, x1 + m, y1 + m) : g.segs.map((s, i) => i).filter(i => { const s = g.segs[i]; return Math.max(s[0], s[2]) >= x0 - m && Math.min(s[0], s[2]) <= x1 + m && Math.max(s[1], s[3]) >= y0 - m && Math.min(s[1], s[3]) <= y1 + m; });   // no grid (a page not indexed, a test): every line scanned
+  const W = []; barrierIds(g, box.filter(i => !bf || bf(i)), k, o).forEach(i => { const s = g.segs[i], L = Math.hypot(s[2] - s[0], s[3] - s[1]); if ((s[4] & 8) || L < 0.3 * k) return; W.push({a: [s[0], s[1]], b: [s[2], s[3]], L, th: ((Math.atan2(s[3] - s[1], s[2] - s[0]) % Q) + Q) % Q}); });
+  if (!W.length) return pts;
+  const near = (p, r) => W.filter(w => distSeg(p, w.a, w.b) <= r), dAng = (a, b) => { const d = Math.abs(a - b); return Math.min(d, Q - d); };
+  const frame = p => {   // the local wall grid's angle (mod 90°) from the walls within 5 ft, weighted by length, ½° bins merged within 1°
+    const h = new Map(); near(p, 5 * k).forEach(w => { const b = (Math.round(w.th / D * 2) / 2) % 90; h.set(b, (h.get(b) || 0) + w.L); });
+    if (!h.size) return null; let best = null, bv = -1;
+    h.forEach((v, b) => { let s = 0; h.forEach((v2, b2) => { const d = Math.abs(b2 - b); if (Math.min(d, 90 - d) <= 1) s += v2; }); if (s > bv) { bv = s; best = b; } });
+    return best * D; };
+  const axes = th => [[Math.cos(th), Math.sin(th)], [-Math.sin(th), Math.cos(th)]];
+  const snap = p => {   // p onto the nearest wall-face line in each of the two grid directions (within SNAP); a face carried EXT past its ends
+    const th = frame(p); if (th == null) return p;
+    const [e1, e2] = axes(th); let u = dot(p, e1), w = dot(p, e2), bu = null, bw = null;
+    near(p, SNAP + EXT).forEach(s => { if (dAng(s.th, th) > 1.5 * D) return;
+      const u1 = dot(s.a, e1), w1 = dot(s.a, e2), u2 = dot(s.b, e1), w2 = dot(s.b, e2);
+      if (Math.abs(w1 - w2) < Math.abs(u1 - u2)) { const wl = (w1 + w2) / 2; if (Math.min(u1, u2) - EXT <= u && u <= Math.max(u1, u2) + EXT && Math.abs(wl - w) <= SNAP && (bw == null || Math.abs(wl - w) < Math.abs(bw - w))) bw = wl; }   // runs along e1: a line w = const
+      else { const ul = (u1 + u2) / 2; if (Math.min(w1, w2) - EXT <= w && w <= Math.max(w1, w2) + EXT && Math.abs(ul - u) <= SNAP && (bu == null || Math.abs(ul - u) < Math.abs(bu - u))) bu = ul; } });
+    if (bu != null) u = bu; if (bw != null) w = bw;
+    return [u * e1[0] + w * e2[0], u * e1[1] + w * e2[1]]; };
+  const clean = P => {   // drop a point on its predecessor (0.05 ft), collinear with its neighbours, or a spike (turns straight back)
+    let ch = true; while (ch && P.length > 3) { ch = false;
+      for (let i = 0; i < P.length; i++) { const a = P[(i + P.length - 1) % P.length], b = P[i], c = P[(i + 1) % P.length], ab = dist(a, b), bc = dist(b, c);
+        const cr = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]), dp = (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]);
+        if (ab < 0.05 * k || Math.abs(cr) <= 0.01 * ab * bc || (dp < 0 && Math.abs(cr) <= 0.1 * ab * bc)) { P.splice(i, 1); ch = true; break; } } }
+    return P; };
+  const wallDist = c => near(c, 2 * k).reduce((d, w) => Math.min(d, distSeg(c, w.a, w.b)), Infinity);
+  const corners = P => {   // a short slanted edge (a jamb drawn askew, a step in the trace) -> its right-angle corner, the one nearer a wall
+    const out = [];
+    for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; out.push(a);
+      const th = frame(a); if (th == null) continue;
+      const [e1, e2] = axes(th), d = [b[0] - a[0], b[1] - a[1]], du = dot(d, e1), dw = dot(d, e2), au = Math.abs(du), aw = Math.abs(dw);
+      if (au <= 0.05 * k || aw <= 0.05 * k || Math.hypot(d[0], d[1]) >= 2 * k || Math.min(au, aw) / Math.max(au, aw) <= 0.08) continue;
+      const c1 = [a[0] + du * e1[0], a[1] + du * e1[1]], c2 = [a[0] + dw * e2[0], a[1] + dw * e2[1]];
+      out.push(wallDist(c1) <= wallDist(c2) ? c1 : c2); }
+    return out; };
+  const simplify = (P0, tol) => {   // Douglas–Peucker on the closed ring, split at the point farthest from P0[0]
+    const n = P0.length; if (n < 4) return P0.slice();
+    let far = 1; for (let i = 2; i < n; i++) if (dist(P0[0], P0[i]) > dist(P0[0], P0[far])) far = i;
+    const keep = new Set([0, far]), rec = (i0, i1) => { let md = tol, mi = -1; for (let i = i0 + 1; i < i1; i++) { const d = distSeg(P0[i], P0[i0], P0[i1 % n]); if (d > md) { md = d; mi = i; } } if (mi >= 0) { keep.add(mi); rec(i0, mi); rec(mi, i1); } };
+    rec(0, far); rec(far, n);
+    return P0.filter((p, i) => keep.has(i)); };
+  const P0 = pts.map(p => [p[0], p[1]]), A0 = polyArea(P0); if (!(A0 > 0)) return pts;
+  let P = clean(simplify(P0, 0.2 * k).map(snap)); P = clean(corners(P));
+  if (P.length < 3 || selfCross(P) || Math.abs(polyArea(P) - A0) / A0 > MAXCHG) return pts;
+  return P;
+}
 /* simple polygon -> triangles, each {base, height} so area = 0.5 × base × height (ear clipping) */
 function triangles(P){
   const pts = P.slice(); let s = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) s += (pts[j][0] - pts[i][0]) * (pts[j][1] + pts[i][1]);
@@ -1436,7 +1491,7 @@ async function typeDialog(){
    (the room's core). The core is grown back out over the thin lines to the wall faces, pockets narrower than the
    furniture setting are filled (furniture against a wall), and the outline is traced, squared up when the room is
    rectilinear (the bulge through a door opening is dropped there) and snapped onto the wall lines. */
-const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false, layers: true, confirm: false};
+const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false, layers: true, confirm: false, square: true};
 const autoOpt = () => Object.assign({}, AUTO_DEF, (P.proj && P.proj.auto) || {});
 function segsIn(g, x0, y0, x1, y1){   // lines in a box — not those on PDF layers switched off
   const c = g.cell, ids = new Set(), off = layerOffIx(g);
@@ -2315,7 +2370,7 @@ function detHtml(it, k){   // the properties panel line for an outline found by 
 }
 /* Leak guard: a room's outline must not swallow another room's name, nor grow far past its own written size.
    When it does, trace again closing wider gaps and dashed lines, and keep the first clean outline. */
-async function autoRoomGuarded(p){
+async function autoRoomRetried(p){   // the trace retried with wider gaps / dashed walls when it fails or leaks
   let first = await autoRoom(p);
   // a passage about as narrow as the door gap (a 4 ft corridor, gap 4 ft): traced again closing openings just under its width
   // (doorways on it close, it does not), when the first trace failed or took in only a piece of it
@@ -2353,6 +2408,11 @@ async function autoRoomGuarded(p){
   best.res.leak = best.j.n > 1 ? "takes in " + best.j.names.join(" + ") : "much bigger than its written size";
   return best.res;
 }
+async function autoRoomGuarded(p){   // the retried trace, its outline (and holes) squared onto the wall faces when the setting is on
+  const r = await autoRoomRetried(p); if (r.err || !autoOpt().square) return r;
+  const k = hereScale(p), g = S.geo[S.key]; if (!k || !g || !g.segs || !g.segs.length) return r;
+  r.pts = squareToWalls(r.pts, k, g); (r.holes || []).forEach(h => { if (h.pts) h.pts = squareToWalls(h.pts, k, g); }); return r;
+}
 async function autoSettings(){
   const o = autoOpt();
   const v = await ask("Auto area settings", `<div class="grid">
@@ -2366,12 +2426,13 @@ async function autoSettings(){
     <div class="fg w2"><label><input type="checkbox" id="aoDoor" style="width:auto"${o.skipDoors ? " checked" : ""}> Ignore door swings and door leaves</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDash" style="width:auto"${o.dashBound ? " checked" : ""}> Straight dashed lines bound a room (e.g. an open dress / wardrobe area) — untick if dashed lines on your drawings are beams overhead</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoShow" style="width:auto"${o.show ? " checked" : ""}> Show the detected walls (pink) after each auto area — to see why a room leaks</label></div>
-    <div class="fg w2"><label><input type="checkbox" id="aoConfirm" style="width:auto"${o.confirm ? " checked" : ""}> Show the outline before adding it — Accept, trace again with a tighter / wider door gap, or Cancel</label></div></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoConfirm" style="width:auto"${o.confirm ? " checked" : ""}> Show the outline before adding it — Accept, trace again with a tighter / wider door gap, or Cancel</label></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoSquare" style="width:auto"${o.square ? " checked" : ""}> Square the outline up to the wall faces (jagged door openings and slanted jambs straightened — needs the PDF's vector lines)</label></div></div>
     <p class="small" style="margin-top:10px">If furniture or fixtures are drawn in the same pen as the walls, <b>Pick a wall</b> so only lines of that colour and weight bound the room.</p>`, "Save", () => {
       const gap = parseFt($("aoGap").value), pocket = parseFt($("aoPk").value || "0"), minLen = parseFt($("aoMin").value || "0");
       if (!(gap > 0.2 && gap < 30)) return "Close gaps: a width in ft, e.g. 4";
       if (isNaN(pocket) || isNaN(minLen)) return "Enter decimal feet";
-      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, layers: $("aoLay").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked, confirm: $("aoConfirm").checked}; }, "aoGap");
+      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, layers: $("aoLay").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked, confirm: $("aoConfirm").checked, square: $("aoSquare").checked}; }, "aoGap");
   if (v) { P.proj.auto = Object.assign({}, P.proj.auto || {}, v); if (!v.show) S.autoShow = null; save(); draw(); toast("Auto area settings saved"); }
 }
 document.addEventListener("click", e => {   // auto-area dialog: pick / clear the wall pen
@@ -3024,6 +3085,14 @@ const objById = id => P.proj.items.find(i => i.id === id) || (P.proj.marks || []
 const onPage = o => o && o.file === S.fileId && o.page === S.pageNo;
 const pageItems = () => S.hideMk ? [] : P.proj.items.filter(i => onPage(i) && !hiddenItem(i));
 const pageMarks = () => S.hideMk ? [] : (P.proj.marks || []).filter(m => onPage(m) && !mkHidden(m));
+function squareUpSel(){   // right-click → Square up to walls: the selected area outline snapped onto the drawing's wall faces
+  const it = selOne(), c = it && cond(it.cond), k = it && itemScale(it), g = S.geo[S.key];
+  if (!it || !c || c.type !== "area" || it.kind === "open" || it.shape === "circle" || !it.pts || it.pts.length < 3) return toast("Select one area outline first");
+  if (it.locked) return toast("Unlock the outline first"); if (!k) return toast("Set the page scale first (K)"); if (!g || !g.segs || !g.segs.length) return toast("No vector lines on this page — Square up needs a CAD-exported PDF");
+  const pts = squareToWalls(it.pts, k, g); if (pts === it.pts) return toast("Could not square this outline to the walls — no wall faces near it, or its area would change more than 8 %", 4000);
+  mutate(() => { it.pts = pts; qaMoved(it); }, "Square up to walls");
+  toast("Squared up to the walls: " + fq(polyArea(pts) / k / k) + " Sft, " + pts.length + " corners");
+}
 function selOne(){ if (S.multi.size || !S.sel) return null; const it = P.proj.items.find(i => i.id === S.sel); return it && onPage(it) && !hiddenItem(it) ? it : null; }
 function setSel(ids, pt){
   S.multi.clear(); S.sel = null; S.selMark = null; S.selPt = -1;
@@ -8365,6 +8434,7 @@ function ctxItem(hi, sp, q, e){
     L.push({t: "Close the run (back to its start)", fn: () => closeRun(it), dis: it.locked || it.pts.length < 3});
   }
   if (!many && it.kind !== "open" && c.type !== "count") L.push({t: "Offset…", fn: () => offsetDialog(it)});
+  if (!many && c.type === "area" && it.kind !== "open" && it.shape !== "circle") L.push({t: "Square up to walls", fn: () => squareUpSel(), dis: it.locked || !(S.geo[S.key] && S.geo[S.key].segs.length)});
   if (runs.length >= 2) L.push({t: "Join " + runs.length + " runs into one", fn: () => joinRuns(new Set(runs.map(r => r.id))), dis: lk});
   if (!many && c.type === "area" && it.kind === "shape") L.push({t: "Add a cut-out / deduction", k: "D", fn: () => { S.cond = c.id; setTool("ded"); }});
   if (!many && c.type === "area" && it.kind === "shape") { const under = cutTargets(it); if (under.length) L.push({t: "Cut out of the area" + (under.length > 1 ? "s" : "") + " it overlaps (" + under.slice(0, 2).map(u => u.label || (cond(u.cond) || {}).name).join(", ") + (under.length > 2 ? ", …" : "") + ")", fn: () => cutOutOf(it, under), dis: it.locked}); }
@@ -12708,7 +12778,7 @@ function ocFix(Lb, out, fids){
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
-    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids};   // for tests and the console
+    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
