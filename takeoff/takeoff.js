@@ -2323,7 +2323,7 @@ async function autoAt(p){
       if (ans === "ok") break;
       const g0 = res.gap || autoOpt().gap, g2 = ans === "tight" ? Math.max(0.5, g0 * 0.75) : Math.min(29, g0 * 1.5);
       busy("Tracing again — openings closed up to " + f3(g2) + " ft…"); S.autoBusy = true; await new Promise(r => setTimeout(r, 20));
-      let r2; try { r2 = await autoRoom(p, {gap: g2}); } catch (e) { r2 = {err: e.message || String(e)}; }
+      let r2; try { r2 = squareTrace(await autoRoom(p, {gap: g2}), p); } catch (e) { r2 = {err: e.message || String(e)}; }   // (squared like the first outline)
       busy(""); S.autoBusy = false;
       if (S.key !== key) return toast("The page changed — nothing added", 3000);
       if (r2.err) toast("With openings up to " + f3(g2) + " ft: " + r2.err + " — the last outline is kept", 5000); else { r2.gap = g2; r2.note = "openings closed up to " + f3(g2) + " ft"; res = r2; }
@@ -2408,11 +2408,12 @@ async function autoRoomRetried(p){   // the trace retried with wider gaps / dash
   best.res.leak = best.j.n > 1 ? "takes in " + best.j.names.join(" + ") : "much bigger than its written size";
   return best.res;
 }
-async function autoRoomGuarded(p){   // the retried trace, its outline (and holes) squared onto the wall faces when the setting is on
-  const r = await autoRoomRetried(p); if (r.err || !autoOpt().square) return r;
+function squareTrace(r, p){   // a trace's outline (and holes) squared onto the wall faces when the setting is on
+  if (!r || r.err || !r.pts || !autoOpt().square) return r;
   const k = hereScale(p), g = S.geo[S.key]; if (!k || !g || !g.segs || !g.segs.length) return r;
   r.pts = squareToWalls(r.pts, k, g); (r.holes || []).forEach(h => { if (h.pts) h.pts = squareToWalls(h.pts, k, g); }); return r;
 }
+async function autoRoomGuarded(p){ return squareTrace(await autoRoomRetried(p), p); }   // the retried trace, squared
 async function autoSettings(){
   const o = autoOpt();
   const v = await ask("Auto area settings", `<div class="grid">
@@ -3085,12 +3086,13 @@ const objById = id => P.proj.items.find(i => i.id === id) || (P.proj.marks || []
 const onPage = o => o && o.file === S.fileId && o.page === S.pageNo;
 const pageItems = () => S.hideMk ? [] : P.proj.items.filter(i => onPage(i) && !hiddenItem(i));
 const pageMarks = () => S.hideMk ? [] : (P.proj.marks || []).filter(m => onPage(m) && !mkHidden(m));
-function squareUpSel(){   // right-click → Square up to walls: the selected area outline snapped onto the drawing's wall faces
-  const it = selOne(), c = it && cond(it.cond), k = it && itemScale(it), g = S.geo[S.key];
+function squareUpSel(it0){   // right-click → Square up to walls: the area outline snapped onto the drawing's wall faces
+  const it = it0 && P.proj.items.includes(it0) ? it0 : selOne(), c = it && cond(it.cond), k = it && itemScale(it), g = S.geo[S.key];
   if (!it || !c || c.type !== "area" || it.kind === "open" || it.shape === "circle" || !it.pts || it.pts.length < 3) return toast("Select one area outline first");
   if (it.locked) return toast("Unlock the outline first"); if (!k) return toast("Set the page scale first (K)"); if (!g || !g.segs || !g.segs.length) return toast("No vector lines on this page — Square up needs a CAD-exported PDF");
   const pts = squareToWalls(it.pts, k, g); if (pts === it.pts) return toast("Could not square this outline to the walls — no wall faces near it, or its area would change more than 8 %", 4000);
-  mutate(() => { it.pts = pts; qaMoved(it); }, "Square up to walls");
+  if (pts.length === it.pts.length && pts.every((q, i) => dist(q, it.pts[i]) < 0.01)) return toast("Already square to the walls");   // (no empty undo step)
+  mutate(() => { it.pts = pts; delete it.arcs; qaMoved(it); }, "Square up to walls");   // arcs index the old points: gone, as Offset does
   toast("Squared up to the walls: " + fq(polyArea(pts) / k / k) + " Sft, " + pts.length + " corners");
 }
 function selOne(){ if (S.multi.size || !S.sel) return null; const it = P.proj.items.find(i => i.id === S.sel); return it && onPage(it) && !hiddenItem(it) ? it : null; }
@@ -8223,7 +8225,8 @@ function paletteCmds(){
   add("Next unchecked measurement", nextUnchecked, "Check");
   if (S.page) add("Auto area: every room in a window…", async () => { const w = await pickWindow("Auto area: click one corner of the area to scan, then the opposite corner"); if (!w) return;
     busy("Auto area: finding the rooms…"); try { const r = await autoAreaWindow(w); if (r.err) { toast(r.err, 6000); return; } const sk = r.skipped;
-      toast("Auto area: " + r.added + " room" + (r.added === 1 ? "" : "s") + ", " + fq(r.sft) + " Sft added to " + (r.cond || "—") + (sk.failed ? " — " + sk.failed + " could not be traced" : "") + (sk.existing ? " — " + sk.existing + " already measured" : "") + (!r.added && !sk.failed ? " — no closed room found in the window" : ""), 7000); }
+      const more = [sk.failed ? sk.failed + " could not be traced" : "", r.flagged ? r.flagged + " to check (flagged)" : "", sk.existing ? sk.existing + " already measured" : "", sk.overlap ? sk.overlap + " ran into a neighbour (left out)" : "", sk.large ? sk.large + " over 3,000 Sft (click those)" : "", sk.small + sk.thin ? (sk.small + sk.thin) + " under 12 Sft or narrower than 3 ft" : ""].filter(Boolean);
+      toast("Auto area: " + r.added + " room" + (r.added === 1 ? "" : "s") + ", " + fq(r.sft) + " Sft added to " + (r.cond || "—") + (more.length ? " — " + more.join(", ") : "") + (!r.added && !sk.failed ? " — no closed room found in the window" : "") + " · spaces narrower than the door gap (" + f3(r.gap) + " ft) are not scanned: click those", 10000); }
     catch (e) { toast("Auto area: " + (e.message || e), 6000); } finally { busy(""); } }, "Tool");
   add("Check before export (errors and warnings)", exportMenu, "Check");
   add("Excel measurement sheet", exportExcel, "Export"); add("CSV", exportCsv, "Export");
@@ -8438,7 +8441,7 @@ function ctxItem(hi, sp, q, e){
     L.push({t: "Close the run (back to its start)", fn: () => closeRun(it), dis: it.locked || it.pts.length < 3});
   }
   if (!many && it.kind !== "open" && c.type !== "count") L.push({t: "Offset…", fn: () => offsetDialog(it)});
-  if (!many && c.type === "area" && it.kind !== "open" && it.shape !== "circle") L.push({t: "Square up to walls", fn: () => squareUpSel(), dis: it.locked || !(S.geo[S.key] && S.geo[S.key].segs.length)});
+  if (!many && c.type === "area" && it.kind !== "open" && it.shape !== "circle") L.push({t: "Square up to walls", fn: () => squareUpSel(it), dis: it.locked || !(S.geo[S.key] && S.geo[S.key].segs.length)});
   if (runs.length >= 2) L.push({t: "Join " + runs.length + " runs into one", fn: () => joinRuns(new Set(runs.map(r => r.id))), dis: lk});
   if (!many && c.type === "area" && it.kind === "shape") L.push({t: "Add a cut-out / deduction", k: "D", fn: () => { S.cond = c.id; setTool("ded"); }});
   if (!many && c.type === "area" && it.kind === "shape") { const under = cutTargets(it); if (under.length) L.push({t: "Cut out of the area" + (under.length > 1 ? "s" : "") + " it overlaps (" + under.slice(0, 2).map(u => u.label || (cond(u.cond) || {}).name).join(", ") + (under.length > 2 ? ", …" : "") + ")", fn: () => cutOutOf(it, under), dis: it.locked}); }
@@ -8981,7 +8984,7 @@ function wire(){
     }
     if (o.dataset.bak) return backupsDialog(o.dataset.bak);
     if (o.dataset.dup) { const pr = await dbGet("projects", o.dataset.dup); const cp = Object.assign(JSON.parse(JSON.stringify(pr)), {id: uid("P"), name: pr.name + " (copy)", updated: new Date().toISOString()}); await dbPut("projects", cp); return showStart(); }
-    if (o.dataset.del) { const pr = await dbGet("projects", o.dataset.del); const ok = await ask("Delete project", `<p>Delete <b>${esc(pr.name)}</b> with its ${pr.items.length} measurements and stored PDFs? This cannot be undone.</p>`, "Delete");
+    if (o.dataset.del) { const pr = await dbGet("projects", o.dataset.del); const ok = await ask("Delete project", `<p>Delete <b>${esc(pr.name)}</b> with its ${pr.items.length} measurements and stored PDFs? Its drawings are removed from this browser; the project itself can be brought back from its last backups (Start → Recover a deleted project…) — the drawings then have to be added again.</p>`, "Delete");
       if (!ok) return; const others = (await dbAll("projects")).filter(x => x.id !== pr.id), keep = new Set(others.flatMap(x => x.files.map(f => f.id)));
       for (const f of pr.files) if (!keep.has(f.id)) await dbDel("pdfs", f.id); await dbDel("projects", pr.id); await mkAssetsCleanup((pr.marks || []).flatMap(mkAids));
       if (savePr && savePr.id === pr.id) savePr = null; SAVE_PEND.delete(pr.id); SAVE_ERR.delete(pr.id); SAVE_FLIGHT.delete(pr.id); SAVED_AT.delete(pr.id);   // a retry kept from a failed save must not re-create the deleted project
@@ -10009,12 +10012,18 @@ function rasterRooms(bar, W, H, px, k, thin, grow){   // the rooms in a barrier 
     r.skip = r.edge ? "edge" : r.sft < 12 ? "small" : r.sft > 3000 ? "large" : r.dmax < 1.5 ? "thin" : null; });
   return out;
 }
-async function autoAreaWindow(win, o){   // every room in a window (a DWG plan with no room names) -> {added, sft, cond, skipped} or {err}: the barrier raster's pockets are the rooms, each traced with autoRoomGuarded from its widest point and added at once
+async function autoAreaWindow(win, o){   // every room in a window (a DWG plan with no room names) -> {added, sft, cond, skipped} or {err}; one scan at a time, as a single Auto area click
+  if (S.autoBusy) return {err: "Still tracing the last room — try again in a moment."};
+  S.autoBusy = true; try { return await autoAreaWindow0(win, o); } finally { S.autoBusy = false; busy(""); }
+}
+async function autoAreaWindow0(win, o){   // the barrier raster's pockets are the rooms, each traced with autoRoomGuarded from its widest point and added at once
   const k = curScale(); if (!k) return {err: "Set the page scale first (K) — rooms are found in feet."};
   const g = S.geo[S.key]; if (!g || !g.segs.length) return {err: "This page has no vector lines — Auto area over a window reads the drawing's lines."};
   o = Object.assign(autoOpt(), o || {});
+  const key = S.key, pane = ACT, left = () => S.key !== key || ACT !== pane;   // the page (or window) changed under a long scan: never a room of one page put on another
+  const LEFT = {err: "The page changed while the rooms were traced — nothing added; scan again"};
   const x0 = Math.min(win[0], win[2]), y0 = Math.min(win[1], win[3]), x1 = Math.max(win[0], win[2]), y1 = Math.max(win[1], win[3]);
-  let px = 0.3 * k; while ((x1 - x0) / px > 3000 || (y1 - y0) / px > 3000) px *= 1.5;   // a big window: coarser pixels, the canvas stays ≤ 3000 × 3000
+  let px = 0.3 * k; while ((x1 - x0) / px > 2000 || (y1 - y0) / px > 2000) px *= 1.5;   // a big window: coarser pixels, the raster stays ≤ 2000 × 2000 (the seeds need about 1 ft)
   const W = Math.max(2, Math.ceil((x1 - x0) / px)), H = Math.max(2, Math.ceil((y1 - y0) / px));
   const bf = o.layers ? segRoleFilter(g, BOUND) : null;   // the PDF's wall / door / window / column / railing layers only, as autoRoom
   const ids = barrierIds(g, segsIn(g, x0, y0, x1, y1).filter(i => !bf || bf(i)), k, o);
@@ -10024,20 +10033,27 @@ async function autoAreaWindow(win, o){   // every room in a window (a DWG plan w
     const im = ctx.getImageData(0, 0, W, H).data, b = new Uint8Array(W * H); for (let i = 0; i < b.length; i++) b[i] = im[i * 4 + 3] > 24 ? 1 : 0; return b; };
   busy("Auto area: finding the rooms…"); await new Promise(r => setTimeout(r));
   const rooms = rasterRooms(raster(Math.max(o.gap * k, 2 * px)), W, H, px, k, raster(2 * px), Math.ceil(o.gap * k / px / 2) + 2), todo = rooms.filter(r => !r.skip);
-  const skipped = {edge: 0, small: 0, large: 0, thin: 0, existing: 0, failed: 0}; rooms.forEach(r => { if (r.skip) skipped[r.skip]++; });
+  const skipped = {edge: 0, small: 0, large: 0, thin: 0, existing: 0, overlap: 0, failed: 0}; rooms.forEach(r => { if (r.skip) skipped[r.skip]++; });
   const existing = P.proj.items.filter(it => it.file === S.fileId && it.page === S.pageNo && it.kind === "shape" && it.shape !== "circle" && (cond(it.cond) || {}).type === "area");
   let rn = 0; P.proj.items.forEach(it => { const m = /^Room (\d+)$/.exec(it.label || ""); if (m && it.file === S.fileId && it.page === S.pageNo) rn = Math.max(rn, +m[1]); });   // Room n carries on from the page's last
   const cand = [];
   for (let n = 0; n < todo.length; n++) { const r = todo[n], seed = [x0 + (r.x + 0.5) * px, y0 + (r.y + 0.5) * px];
     if (existing.some(it => pointInPoly(seed, it.pts)) || cand.some(x => pointInPoly(seed, x.pts))) { skipped.existing++; continue; }
     busy("Auto area: " + (n + 1) + " of " + todo.length + " rooms…"); if (n % 10 === 9) await new Promise(r2 => setTimeout(r2));
-    let res; try { res = await autoRoomGuarded(seed); } catch (e) { res = {err: e.message || String(e)}; }
+    if (left()) return LEFT;
+    const t0 = performance.now(); let res; try { res = await autoRoomGuarded(seed); } catch (e) { res = {err: e.message || String(e)}; }
+    kpiLog("auto", {ms: Math.round(performance.now() - t0), err: !!res.err, flag: !!(res.leak || res.short || res.warn), holes: (res.holes || []).length, win: true});
     if (res.err || !res.pts || res.pts.length < 3) { skipped.failed++; continue; }
-    cand.push({name: "Room " + (++rn), pts: res.pts, holes: res.holes || [], flag: [res.leak ? "leaks — " + res.leak : "", res.short || "", res.warn || ""].filter(Boolean).join("; "), gap: o.gap, note: res.note || ""}); }
-  if (!cand.length) return {added: 0, sft: 0, cond: null, skipped};
+    if (left()) return LEFT;
+    if (existing.some(it => overlapSft(it.pts, res.pts, k) > 1) || cand.some(x => overlapSft(x.pts, res.pts, k) > 1)) { skipped.overlap++; continue; }   // ran into a neighbour already measured (a leak through an opening): not counted twice
+    const kk = hereScale(seed) || k, a = (polyArea(res.pts) - (res.holes || []).reduce((s2, h) => s2 + polyArea(h.pts), 0)) / kk / kk;
+    const big = r.sft > 20 && a > 1.6 * r.sft ? "much bigger than its enclosed space (" + fq(r.sft) + " Sft) — leaked through an opening?" : "";   // (no room names on a DWG: the leak judge cannot run, the pocket size can)
+    cand.push({name: "Room " + (++rn), pts: res.pts, holes: res.holes || [], flag: [res.leak ? "leaks — " + res.leak : "", big, res.short || "", res.warn || ""].filter(Boolean).join("; "), gap: o.gap, note: res.note || "", sft: a}); }
+  if (!cand.length) return {added: 0, sft: 0, cond: null, skipped, gap: o.gap};
+  if (left()) return LEFT;
   const c = aiAreaCond();   // the current condition when it is an area, else the first area condition (or a new Floor area)
   autoAreaAdd(cand, c, "window scan");
-  return {added: cand.length, sft: +cand.reduce((s, x) => s + (polyArea(x.pts) - x.holes.reduce((a, h) => a + polyArea(h.pts), 0)) / k / k, 0).toFixed(2), cond: c.name, skipped};
+  return {added: cand.length, sft: +cand.reduce((s2, x) => s2 + x.sft, 0).toFixed(2), cond: c.name, skipped, gap: o.gap, flagged: cand.filter(x => x.flag).length};
 }
 async function aiRunTool3(b){
   const inp = b.input || {};
