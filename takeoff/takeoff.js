@@ -103,6 +103,61 @@ function rectilinear(P0, tol){
   }
   return out.filter(r => r.L > tol && r.W > tol);
 }
+/* a closed outline (page pt, y down) squared onto the drawing's wall faces: Auto area comes out jagged at door openings and with
+   slanted jambs on corridors. Each point is snapped onto the nearest wall-face line in the two directions of the local wall grid (a face
+   carried 4.5 ft past its ends, across a door opening), the ring cleaned, short slanted edges made right-angled. The input unchanged when
+   there are no walls, the result crosses itself or its area moves more than 8 % (then the trace was right and the walls are not) */
+function squareToWalls(pts, k, g){
+  if (!k || !g || !g.segs || !g.segs.length || !pts || pts.length < 3) return pts;
+  const SNAP = 1.1 * k, EXT = 4.5 * k, MAXCHG = 0.08, Q = Math.PI / 2, D = Math.PI / 180, dot = (q, e) => q[0] * e[0] + q[1] * e[1];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; pts.forEach(p => { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); });
+  const m = 6 * k, o = autoOpt(), bf = o.layers ? segRoleFilter(g, BOUND) : null;   // the barriers Auto area uses, in the outline's box grown 6 ft
+  const box = g.grid && g.grid.size ? segsIn(g, x0 - m, y0 - m, x1 + m, y1 + m) : g.segs.map((s, i) => i).filter(i => { const s = g.segs[i]; return Math.max(s[0], s[2]) >= x0 - m && Math.min(s[0], s[2]) <= x1 + m && Math.max(s[1], s[3]) >= y0 - m && Math.min(s[1], s[3]) <= y1 + m; });   // no grid (a page not indexed, a test): every line scanned
+  const W = []; barrierIds(g, box.filter(i => !bf || bf(i)), k, o).forEach(i => { const s = g.segs[i], L = Math.hypot(s[2] - s[0], s[3] - s[1]); if ((s[4] & 8) || L < 0.3 * k) return; W.push({a: [s[0], s[1]], b: [s[2], s[3]], L, th: ((Math.atan2(s[3] - s[1], s[2] - s[0]) % Q) + Q) % Q}); });
+  if (!W.length) return pts;
+  const near = (p, r) => W.filter(w => distSeg(p, w.a, w.b) <= r), dAng = (a, b) => { const d = Math.abs(a - b); return Math.min(d, Q - d); };
+  const frame = p => {   // the local wall grid's angle (mod 90°) from the walls within 5 ft, weighted by length, ½° bins merged within 1°
+    const h = new Map(); near(p, 5 * k).forEach(w => { const b = (Math.round(w.th / D * 2) / 2) % 90; h.set(b, (h.get(b) || 0) + w.L); });
+    if (!h.size) return null; let best = null, bv = -1;
+    h.forEach((v, b) => { let s = 0; h.forEach((v2, b2) => { const d = Math.abs(b2 - b); if (Math.min(d, 90 - d) <= 1) s += v2; }); if (s > bv) { bv = s; best = b; } });
+    return best * D; };
+  const axes = th => [[Math.cos(th), Math.sin(th)], [-Math.sin(th), Math.cos(th)]];
+  const snap = p => {   // p onto the nearest wall-face line in each of the two grid directions (within SNAP); a face carried EXT past its ends
+    const th = frame(p); if (th == null) return p;
+    const [e1, e2] = axes(th); let u = dot(p, e1), w = dot(p, e2), bu = null, bw = null;
+    near(p, SNAP + EXT).forEach(s => { if (dAng(s.th, th) > 1.5 * D) return;
+      const u1 = dot(s.a, e1), w1 = dot(s.a, e2), u2 = dot(s.b, e1), w2 = dot(s.b, e2);
+      if (Math.abs(w1 - w2) < Math.abs(u1 - u2)) { const wl = (w1 + w2) / 2; if (Math.min(u1, u2) - EXT <= u && u <= Math.max(u1, u2) + EXT && Math.abs(wl - w) <= SNAP && (bw == null || Math.abs(wl - w) < Math.abs(bw - w))) bw = wl; }   // runs along e1: a line w = const
+      else { const ul = (u1 + u2) / 2; if (Math.min(w1, w2) - EXT <= w && w <= Math.max(w1, w2) + EXT && Math.abs(ul - u) <= SNAP && (bu == null || Math.abs(ul - u) < Math.abs(bu - u))) bu = ul; } });
+    if (bu != null) u = bu; if (bw != null) w = bw;
+    return [u * e1[0] + w * e2[0], u * e1[1] + w * e2[1]]; };
+  const clean = P => {   // drop a point on its predecessor (0.05 ft), collinear with its neighbours, or a spike (turns straight back)
+    let ch = true; while (ch && P.length > 3) { ch = false;
+      for (let i = 0; i < P.length; i++) { const a = P[(i + P.length - 1) % P.length], b = P[i], c = P[(i + 1) % P.length], ab = dist(a, b), bc = dist(b, c);
+        const cr = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]), dp = (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]);
+        if (ab < 0.05 * k || Math.abs(cr) <= 0.01 * ab * bc || (dp < 0 && Math.abs(cr) <= 0.1 * ab * bc)) { P.splice(i, 1); ch = true; break; } } }
+    return P; };
+  const wallDist = c => near(c, 2 * k).reduce((d, w) => Math.min(d, distSeg(c, w.a, w.b)), Infinity);
+  const corners = P => {   // a short slanted edge (a jamb drawn askew, a step in the trace) -> its right-angle corner, the one nearer a wall
+    const out = [];
+    for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; out.push(a);
+      const th = frame(a); if (th == null) continue;
+      const [e1, e2] = axes(th), d = [b[0] - a[0], b[1] - a[1]], du = dot(d, e1), dw = dot(d, e2), au = Math.abs(du), aw = Math.abs(dw);
+      if (au <= 0.05 * k || aw <= 0.05 * k || Math.hypot(d[0], d[1]) >= 2 * k || Math.min(au, aw) / Math.max(au, aw) <= 0.08) continue;
+      const c1 = [a[0] + du * e1[0], a[1] + du * e1[1]], c2 = [a[0] + dw * e2[0], a[1] + dw * e2[1]];
+      out.push(wallDist(c1) <= wallDist(c2) ? c1 : c2); }
+    return out; };
+  const simplify = (P0, tol) => {   // Douglas–Peucker on the closed ring, split at the point farthest from P0[0]
+    const n = P0.length; if (n < 4) return P0.slice();
+    let far = 1; for (let i = 2; i < n; i++) if (dist(P0[0], P0[i]) > dist(P0[0], P0[far])) far = i;
+    const keep = new Set([0, far]), rec = (i0, i1) => { let md = tol, mi = -1; for (let i = i0 + 1; i < i1; i++) { const d = distSeg(P0[i], P0[i0], P0[i1 % n]); if (d > md) { md = d; mi = i; } } if (mi >= 0) { keep.add(mi); rec(i0, mi); rec(mi, i1); } };
+    rec(0, far); rec(far, n);
+    return P0.filter((p, i) => keep.has(i)); };
+  const P0 = pts.map(p => [p[0], p[1]]), A0 = polyArea(P0); if (!(A0 > 0)) return pts;
+  let P = clean(simplify(P0, 0.2 * k).map(snap)); P = clean(corners(P));
+  if (P.length < 3 || selfCross(P) || Math.abs(polyArea(P) - A0) / A0 > MAXCHG) return pts;
+  return P;
+}
 /* simple polygon -> triangles, each {base, height} so area = 0.5 × base × height (ear clipping) */
 function triangles(P){
   const pts = P.slice(); let s = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) s += (pts[j][0] - pts[i][0]) * (pts[j][1] + pts[i][1]);
@@ -457,6 +512,9 @@ async function showStart(){
     list.map(p => `<tr><td><a class="plink" data-open="${esc(p.id)}" title="Open project">${esc(p.name)}</a></td><td>${p.files.length}</td><td>${p.items.length}</td><td>${dmy(p.updated)}</td>
       <td style="text-align:right;white-space:nowrap"><button class="btn sm" data-edit="${esc(p.id)}">Edit</button> <button class="btn sm" data-bak="${esc(p.id)}">Backups</button> <button class="btn sm" data-dup="${esc(p.id)}">Duplicate</button> <button class="btn sm dng" data-del="${esc(p.id)}">Delete</button></td></tr>`).join("") + "</tbody></table>"
     : (q ? '<div class="empty">No projects match your search.</div>' : '<div class="empty">No projects yet — start one with <b>+ New project</b>, then drop a PDF drawing on it.</div>');
+  const orphan = (await backupPids().catch(() => [])).some(pid => !all.some(p => p.id === pid));   // a deleted project left its backups behind: offer them
+  let rb = $("bRecover"); if (!rb) { rb = document.createElement("button"); rb.id = "bRecover"; rb.className = "btn"; rb.textContent = "Recover a deleted project…"; rb.title = "Bring back a project deleted from this browser, from the backups it left behind"; rb.onclick = () => recoverDialog(); $("bImport").before(rb); }
+  rb.style.display = orphan ? "" : "none";
   $("start").classList.add("on");
 }
 
@@ -1433,7 +1491,7 @@ async function typeDialog(){
    (the room's core). The core is grown back out over the thin lines to the wall faces, pockets narrower than the
    furniture setting are filled (furniture against a wall), and the outline is traced, squared up when the room is
    rectilinear (the bulge through a door opening is dropped there) and snapped onto the wall lines. */
-const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false, layers: true, confirm: false};
+const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false, layers: true, confirm: false, square: true};
 const autoOpt = () => Object.assign({}, AUTO_DEF, (P.proj && P.proj.auto) || {});
 function segsIn(g, x0, y0, x1, y1){   // lines in a box — not those on PDF layers switched off
   const c = g.cell, ids = new Set(), off = layerOffIx(g);
@@ -2265,7 +2323,7 @@ async function autoAt(p){
       if (ans === "ok") break;
       const g0 = res.gap || autoOpt().gap, g2 = ans === "tight" ? Math.max(0.5, g0 * 0.75) : Math.min(29, g0 * 1.5);
       busy("Tracing again — openings closed up to " + f3(g2) + " ft…"); S.autoBusy = true; await new Promise(r => setTimeout(r, 20));
-      let r2; try { r2 = await autoRoom(p, {gap: g2}); } catch (e) { r2 = {err: e.message || String(e)}; }
+      let r2; try { r2 = squareTrace(await autoRoom(p, {gap: g2}), p); } catch (e) { r2 = {err: e.message || String(e)}; }   // (squared like the first outline)
       busy(""); S.autoBusy = false;
       if (S.key !== key) return toast("The page changed — nothing added", 3000);
       if (r2.err) toast("With openings up to " + f3(g2) + " ft: " + r2.err + " — the last outline is kept", 5000); else { r2.gap = g2; r2.note = "openings closed up to " + f3(g2) + " ft"; res = r2; }
@@ -2312,7 +2370,7 @@ function detHtml(it, k){   // the properties panel line for an outline found by 
 }
 /* Leak guard: a room's outline must not swallow another room's name, nor grow far past its own written size.
    When it does, trace again closing wider gaps and dashed lines, and keep the first clean outline. */
-async function autoRoomGuarded(p){
+async function autoRoomRetried(p){   // the trace retried with wider gaps / dashed walls when it fails or leaks
   let first = await autoRoom(p);
   // a passage about as narrow as the door gap (a 4 ft corridor, gap 4 ft): traced again closing openings just under its width
   // (doorways on it close, it does not), when the first trace failed or took in only a piece of it
@@ -2350,6 +2408,12 @@ async function autoRoomGuarded(p){
   best.res.leak = best.j.n > 1 ? "takes in " + best.j.names.join(" + ") : "much bigger than its written size";
   return best.res;
 }
+function squareTrace(r, p){   // a trace's outline (and holes) squared onto the wall faces when the setting is on
+  if (!r || r.err || !r.pts || !autoOpt().square) return r;
+  const k = hereScale(p), g = S.geo[S.key]; if (!k || !g || !g.segs || !g.segs.length) return r;
+  r.pts = squareToWalls(r.pts, k, g); (r.holes || []).forEach(h => { if (h.pts) h.pts = squareToWalls(h.pts, k, g); }); return r;
+}
+async function autoRoomGuarded(p){ return squareTrace(await autoRoomRetried(p), p); }   // the retried trace, squared
 async function autoSettings(){
   const o = autoOpt();
   const v = await ask("Auto area settings", `<div class="grid">
@@ -2363,12 +2427,13 @@ async function autoSettings(){
     <div class="fg w2"><label><input type="checkbox" id="aoDoor" style="width:auto"${o.skipDoors ? " checked" : ""}> Ignore door swings and door leaves</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDash" style="width:auto"${o.dashBound ? " checked" : ""}> Straight dashed lines bound a room (e.g. an open dress / wardrobe area) — untick if dashed lines on your drawings are beams overhead</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoShow" style="width:auto"${o.show ? " checked" : ""}> Show the detected walls (pink) after each auto area — to see why a room leaks</label></div>
-    <div class="fg w2"><label><input type="checkbox" id="aoConfirm" style="width:auto"${o.confirm ? " checked" : ""}> Show the outline before adding it — Accept, trace again with a tighter / wider door gap, or Cancel</label></div></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoConfirm" style="width:auto"${o.confirm ? " checked" : ""}> Show the outline before adding it — Accept, trace again with a tighter / wider door gap, or Cancel</label></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoSquare" style="width:auto"${o.square ? " checked" : ""}> Square the outline up to the wall faces (jagged door openings and slanted jambs straightened — needs the PDF's vector lines)</label></div></div>
     <p class="small" style="margin-top:10px">If furniture or fixtures are drawn in the same pen as the walls, <b>Pick a wall</b> so only lines of that colour and weight bound the room.</p>`, "Save", () => {
       const gap = parseFt($("aoGap").value), pocket = parseFt($("aoPk").value || "0"), minLen = parseFt($("aoMin").value || "0");
       if (!(gap > 0.2 && gap < 30)) return "Close gaps: a width in ft, e.g. 4";
       if (isNaN(pocket) || isNaN(minLen)) return "Enter decimal feet";
-      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, layers: $("aoLay").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked, confirm: $("aoConfirm").checked}; }, "aoGap");
+      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, layers: $("aoLay").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked, confirm: $("aoConfirm").checked, square: $("aoSquare").checked}; }, "aoGap");
   if (v) { P.proj.auto = Object.assign({}, P.proj.auto || {}, v); if (!v.show) S.autoShow = null; save(); draw(); toast("Auto area settings saved"); }
 }
 document.addEventListener("click", e => {   // auto-area dialog: pick / clear the wall pen
@@ -3021,6 +3086,15 @@ const objById = id => P.proj.items.find(i => i.id === id) || (P.proj.marks || []
 const onPage = o => o && o.file === S.fileId && o.page === S.pageNo;
 const pageItems = () => S.hideMk ? [] : P.proj.items.filter(i => onPage(i) && !hiddenItem(i));
 const pageMarks = () => S.hideMk ? [] : (P.proj.marks || []).filter(m => onPage(m) && !mkHidden(m));
+function squareUpSel(it0){   // right-click → Square up to walls: the area outline snapped onto the drawing's wall faces
+  const it = it0 && P.proj.items.includes(it0) ? it0 : selOne(), c = it && cond(it.cond), k = it && itemScale(it), g = S.geo[S.key];
+  if (!it || !c || c.type !== "area" || it.kind === "open" || it.shape === "circle" || !it.pts || it.pts.length < 3) return toast("Select one area outline first");
+  if (it.locked) return toast("Unlock the outline first"); if (!k) return toast("Set the page scale first (K)"); if (!g || !g.segs || !g.segs.length) return toast("No vector lines on this page — Square up needs a CAD-exported PDF");
+  const pts = squareToWalls(it.pts, k, g); if (pts === it.pts) return toast("Could not square this outline to the walls — no wall faces near it, or its area would change more than 8 %", 4000);
+  if (pts.length === it.pts.length && pts.every((q, i) => dist(q, it.pts[i]) < 0.01)) return toast("Already square to the walls");   // (no empty undo step)
+  mutate(() => { it.pts = pts; delete it.arcs; qaMoved(it); }, "Square up to walls");   // arcs index the old points: gone, as Offset does
+  toast("Squared up to the walls: " + fq(polyArea(pts) / k / k) + " Sft, " + pts.length + " corners");
+}
 function selOne(){ if (S.multi.size || !S.sel) return null; const it = P.proj.items.find(i => i.id === S.sel); return it && onPage(it) && !hiddenItem(it) ? it : null; }
 function setSel(ids, pt){
   S.multi.clear(); S.sel = null; S.selMark = null; S.selPt = -1;
@@ -7723,6 +7797,40 @@ async function backupsDialog(pid){
     toast("Restored the backup of " + fmt(bk.at), 4000);
   });
 }
+/* a deleted project's backups outlive it: Delete removes its row and its PDFs, the "backups" store keeps its last copies. They are
+   listed here, one row per deleted project, and the newest copy comes back as a project — without its PDFs, which went with the
+   project, so the drawing is added again with + PDF (checked against the one it was measured on, as after an import) */
+function backupPids(){   // every pid with a backup, from the index alone: a backup holds a whole project, not loaded just to count
+  return new Promise((ok, bad) => { const out = [], t = DB.transaction("backups", "readonly"), rq = t.objectStore("backups").index("pid").openKeyCursor(null, "nextunique");
+    rq.onsuccess = () => { const c = rq.result; if (c) { out.push(c.key); c.continue(); } }; t.oncomplete = () => ok(out); t.onerror = () => bad(t.error); t.onabort = () => bad(t.error); });
+}
+async function orphanBackups(){   // backups whose project is gone, grouped by pid: [[newest, …], …], the group with the newest backup first
+  const have = new Set(await tx("projects", "readonly", s => s.getAllKeys())), G = {};
+  for (const b of await dbAll("backups")) if (!have.has(b.pid)) (G[b.pid] = G[b.pid] || []).push(b);
+  return Object.values(G).map(l => l.sort((a, b) => b.at.localeCompare(a.at))).sort((a, b) => b[0].at.localeCompare(a[0].at));
+}
+async function recoverDialog(){
+  let groups; try { groups = await orphanBackups(); } catch (e) { return toast("Could not read the backups: " + e.message, 5000); }
+  const fmt = iso => dmy(iso) + " " + String(iso || "").slice(11, 16), fresh = () => { if ($("start").classList.contains("on")) showStart(); };   // the start screen's Recover button follows what is left
+  ask("Recover a deleted project", `<p class="small">Projects deleted from this browser whose backups are still here (the last ${BAK_KEEP} copies of each). Restore brings the newest copy back as a project — its PDFs went with the project, so add the drawing again with <b>+ PDF</b>.</p>
+    ${groups.length ? `<table class="sh" style="margin-top:8px"><thead><tr><th>Project</th><th>Last backup</th><th class="n">Measurements</th><th class="n">Backups</th><th></th></tr></thead><tbody>${groups.map(g => `<tr><td>${esc(g[0].name)}</td><td>${esc(fmt(g[0].at))}</td><td class="n">${g[0].n}</td><td class="n">${g.length}</td><td class="n" style="white-space:nowrap"><button class="btn sm pri" data-recov="${esc(g[0].pid)}">Restore</button> <button class="btn sm dng" data-drop="${esc(g[0].pid)}">Delete backups</button></td></tr>`).join("")}</tbody></table>` : '<p style="margin-top:8px">No deleted project has a backup here.</p>'}`, "");
+  $("dlgCancel").textContent = "Close";
+  $("dlgB").querySelectorAll("[data-recov]").forEach(b => b.onclick = async () => {
+    const bk = groups.find(g => g[0].pid === b.dataset.recov)[0]; let old;
+    try { old = JSON.parse(bk.data); if (!old || typeof old !== "object" || Array.isArray(old)) throw new Error("not a project"); } catch (e) { return toast("This backup cannot be read: " + e.message, 5000); }
+    migrate(old); old.id = (await dbGet("projects", bk.pid)) ? uid("P") : bk.pid;   // its own id back, unless a project has taken it since
+    old.updated = new Date().toISOString(); await dbPut("projects", old);
+    if (ask.cur) ask.cur(null);
+    await openProject(old.id);
+    toast("Restored " + old.name + " from its backup of " + fmt(bk.at) + " — add its drawing again with + PDF (it is checked against the drawing measured on)", 7000);
+  });
+  $("dlgB").querySelectorAll("[data-drop]").forEach(b => b.onclick = async () => {
+    const g = groups.find(x => x[0].pid === b.dataset.drop);
+    const ok = await ask("Delete these backups?", `<p>Delete the ${g.length} backup${g.length > 1 ? "s" : ""} of <b>${esc(g[0].name)}</b>? The project cannot be recovered after this.</p>`, "Delete");
+    if (ok) { for (const x of g) await dbDel("backups", x.id); toast("Backups of " + g[0].name + " deleted", 2500); fresh(); }
+    recoverDialog();
+  });
+}
 setInterval(() => { if (P.proj && document.visibilityState !== "hidden") { savePr = P.proj; flushSave().then(ok => ok && backupNow("every 10 min")).catch(() => {}); } }, 600000);
 /* leaving or hiding the page writes the pending change at once (the 300 ms timer would not run) */
 window.addEventListener("pagehide", () => { flushSave(true); });
@@ -8105,7 +8213,7 @@ function paletteCmds(){
     add(t, () => b.click(), g, k);
   };
   if (!P.proj) {
-    add("New project", () => $("bNewProj").click(), "Project"); add("Import project (.json or .zdtakeoff)", () => $("impIn").click(), "Project"); add("Full screen", fullScreen, "View");
+    add("New project", () => $("bNewProj").click(), "Project"); add("Import project (.json or .zdtakeoff)", () => $("impIn").click(), "Project"); add("Recover a deleted project (from its backups)", recoverDialog, "Project"); add("Full screen", fullScreen, "View");
     return L;
   }
   document.querySelectorAll("#tools [data-tool]").forEach(b => btn(b, "Tool"));
@@ -8115,6 +8223,11 @@ function paletteCmds(){
   Object.entries(MK_TOOL_NAMES).forEach(([t, n]) => add("Markup: " + n, () => setTool(t), "Tool"));
   add("Markups list — filter, statuses, replies, summaries (Alt+L)", () => mlToggle(true), "View");
   add("Next unchecked measurement", nextUnchecked, "Check");
+  if (S.page) add("Auto area: every room in a window…", async () => { const w = await pickWindow("Auto area: click one corner of the area to scan, then the opposite corner"); if (!w) return;
+    busy("Auto area: finding the rooms…"); try { const r = await autoAreaWindow(w); if (r.err) { toast(r.err, 6000); return; } const sk = r.skipped;
+      const more = [sk.failed ? sk.failed + " could not be traced" : "", r.flagged ? r.flagged + " to check (flagged)" : "", sk.existing ? sk.existing + " already measured" : "", sk.overlap ? sk.overlap + " ran into a neighbour (left out)" : "", sk.large ? sk.large + " over 3,000 Sft (click those)" : "", sk.small + sk.thin ? (sk.small + sk.thin) + " under 12 Sft or narrower than 3 ft" : ""].filter(Boolean);
+      toast("Auto area: " + r.added + " room" + (r.added === 1 ? "" : "s") + ", " + fq(r.sft) + " Sft added to " + (r.cond || "—") + (more.length ? " — " + more.join(", ") : "") + (!r.added && !sk.failed ? " — no closed room found in the window" : "") + " · spaces narrower than the door gap (" + f3(r.gap) + " ft) are not scanned: click those", 10000); }
+    catch (e) { toast("Auto area: " + (e.message || e), 6000); } finally { busy(""); } }, "Tool");
   add("Check before export (errors and warnings)", exportMenu, "Check");
   add("Excel measurement sheet", exportExcel, "Export"); add("CSV", exportCsv, "Export");
   if (S.page) add("DXF (AutoCAD) — this page's takeoff as drawing layers", exportDxf, "Export");
@@ -8328,6 +8441,7 @@ function ctxItem(hi, sp, q, e){
     L.push({t: "Close the run (back to its start)", fn: () => closeRun(it), dis: it.locked || it.pts.length < 3});
   }
   if (!many && it.kind !== "open" && c.type !== "count") L.push({t: "Offset…", fn: () => offsetDialog(it)});
+  if (!many && c.type === "area" && it.kind !== "open" && it.shape !== "circle") L.push({t: "Square up to walls", fn: () => squareUpSel(it), dis: it.locked || !(S.geo[S.key] && S.geo[S.key].segs.length)});
   if (runs.length >= 2) L.push({t: "Join " + runs.length + " runs into one", fn: () => joinRuns(new Set(runs.map(r => r.id))), dis: lk});
   if (!many && c.type === "area" && it.kind === "shape") L.push({t: "Add a cut-out / deduction", k: "D", fn: () => { S.cond = c.id; setTool("ded"); }});
   if (!many && c.type === "area" && it.kind === "shape") { const under = cutTargets(it); if (under.length) L.push({t: "Cut out of the area" + (under.length > 1 ? "s" : "") + " it overlaps (" + under.slice(0, 2).map(u => u.label || (cond(u.cond) || {}).name).join(", ") + (under.length > 2 ? ", …" : "") + ")", fn: () => cutOutOf(it, under), dis: it.locked}); }
@@ -8870,7 +8984,7 @@ function wire(){
     }
     if (o.dataset.bak) return backupsDialog(o.dataset.bak);
     if (o.dataset.dup) { const pr = await dbGet("projects", o.dataset.dup); const cp = Object.assign(JSON.parse(JSON.stringify(pr)), {id: uid("P"), name: pr.name + " (copy)", updated: new Date().toISOString()}); await dbPut("projects", cp); return showStart(); }
-    if (o.dataset.del) { const pr = await dbGet("projects", o.dataset.del); const ok = await ask("Delete project", `<p>Delete <b>${esc(pr.name)}</b> with its ${pr.items.length} measurements and stored PDFs? This cannot be undone.</p>`, "Delete");
+    if (o.dataset.del) { const pr = await dbGet("projects", o.dataset.del); const ok = await ask("Delete project", `<p>Delete <b>${esc(pr.name)}</b> with its ${pr.items.length} measurements and stored PDFs? Its drawings are removed from this browser; the project itself can be brought back from its last backups (Start → Recover a deleted project…) — the drawings then have to be added again.</p>`, "Delete");
       if (!ok) return; const others = (await dbAll("projects")).filter(x => x.id !== pr.id), keep = new Set(others.flatMap(x => x.files.map(f => f.id)));
       for (const f of pr.files) if (!keep.has(f.id)) await dbDel("pdfs", f.id); await dbDel("projects", pr.id); await mkAssetsCleanup((pr.marks || []).flatMap(mkAids));
       if (savePr && savePr.id === pr.id) savePr = null; SAVE_PEND.delete(pr.id); SAVE_ERR.delete(pr.id); SAVE_FLIGHT.delete(pr.id); SAVED_AT.delete(pr.id);   // a retry kept from a failed save must not re-create the deleted project
@@ -9870,13 +9984,76 @@ async function autoAreaPage(inp){
   const ids = autoAreaAdd(cand, c);
   return {ok: {rooms: out.map(o => Object.assign(o, {id: ids[o.name] || undefined})), added: Object.keys(ids).length, totals_now: condTotals(c).net.toFixed(3) + " " + c.unit + " in " + c.name}};
 }
-function autoAreaAdd(cand, c){
+function autoAreaAdd(cand, c, src){   // src: what found them (default: the agent, by the Auto area source)
   const ids = {}, k = curScale(), at = new Date().toISOString();
   mutate(() => cand.forEach(x => { const id = uid("I"); ids[x.name] = id;
     P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: x.pts, nos: 1, ai: true, label: x.name.slice(0, 60),
-      det: {how: "auto", src: (autoOpt().src === "vector" ? "vector lines" : "drawing image") + " (agent)", gap: +x.gap, note: x.note, flag: x.flag, a0: +(polyArea(x.pts) / k / k).toFixed(4), pts0: x.pts.map(q => q.slice()), at, holes: x.holes.map(h => ({name: h.name, a: +(polyArea(h.pts) / k / k).toFixed(4)}))}});
+      det: {how: "auto", src: src || (autoOpt().src === "vector" ? "vector lines" : "drawing image") + " (agent)", gap: +x.gap, note: x.note, flag: x.flag, a0: +(polyArea(x.pts) / k / k).toFixed(4), pts0: x.pts.map(q => q.slice()), at, holes: x.holes.map(h => ({name: h.name, a: +(polyArea(h.pts) / k / k).toFixed(4)}))}});
     x.holes.forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, ai: true, label: h.name + " (void in " + x.name + ")"})); }), "Agent: Auto area");
   refresh(); return ids;
+}
+function rasterRooms(bar, W, H, px, k, thin, grow){   // the rooms in a barrier raster -> [{x, y, n, sft, dmax, edge, skip}]: a room is a free 4-connected pocket of bar (lines widened to the door gap, so doorways are shut), grown back out up to grow pixels through thin (the bare lines) to its walls; x, y its widest pixel (the seed for autoRoom), skip why it is no room (null: it is one)
+  thin = thin || bar; grow = grow || 0; const N = W * H, INF = 1 << 29, d = new Int32Array(N), lab = new Int32Array(N), st = new Int32Array(N), out = [];
+  for (let i = 0; i < N; i++) d[i] = thin[i] ? 0 : INF;   // d: 3-4 chamfer distance to the nearest line, two passes (÷ 3 = pixels)
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x; if (!d[i]) continue; let v = d[i];
+    if (x) v = Math.min(v, d[i - 1] + 3); if (y) { v = Math.min(v, d[i - W] + 3); if (x) v = Math.min(v, d[i - W - 1] + 4); if (x < W - 1) v = Math.min(v, d[i - W + 1] + 4); } d[i] = v; }
+  for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--) { const i = y * W + x; if (!d[i]) continue; let v = d[i];
+    if (x < W - 1) v = Math.min(v, d[i + 1] + 3); if (y < H - 1) { v = Math.min(v, d[i + W] + 3); if (x < W - 1) v = Math.min(v, d[i + W + 1] + 4); if (x) v = Math.min(v, d[i + W - 1] + 4); } d[i] = v; }
+  const nb = (i, x, y, f) => { if (x > 0) f(i - 1); if (x < W - 1) f(i + 1); if (y > 0) f(i - W); if (y < H - 1) f(i + W); };
+  let top = 0;
+  for (let s = 0; s < N; s++) { if (bar[s] || lab[s]) continue; const id = out.length + 1; lab[s] = id; st[top++] = s;   // the cores: an iterative flood fill, each pixel pushed once
+    while (top) { const i = st[--top], x = i % W; nb(i, x, (i - x) / W, j => { if (!lab[j] && !bar[j]) { lab[j] = id; st[top++] = j; } }); }
+    out.push({x: 0, y: 0, n: 0, sft: 0, dmax: 0, edge: false, skip: null, best: -1}); }
+  let head = 0; top = 0; for (let i = 0; i < N; i++) if (lab[i]) st[top++] = i;   // grown out to the walls: a breadth-first wave from every core at once, grow layers deep — a corridor narrower than the gap is taken in only that far
+  for (let layer = 0; layer < grow && head < top; layer++) { const end = top;
+    while (head < end) { const i = st[head++], x = i % W, id = lab[i]; nb(i, x, (i - x) / W, j => { if (!lab[j] && !thin[j]) { lab[j] = id; st[top++] = j; } }); } }
+  for (let i = 0; i < N; i++) { const id = lab[i]; if (!id) continue; const r = out[id - 1], x = i % W, y = (i - x) / W; r.n++; if (x === 0 || y === 0 || x === W - 1 || y === H - 1) r.edge = true; if (d[i] > r.best) { r.best = d[i]; r.x = x; r.y = y; } }
+  out.forEach(r => { r.sft = +(r.n * px * px / k / k).toFixed(2); r.dmax = +(r.best / 3 * px / k).toFixed(2); delete r.best;   // dmax ft: half the width at the widest point
+    r.skip = r.edge ? "edge" : r.sft < 12 ? "small" : r.sft > 3000 ? "large" : r.dmax < 1.5 ? "thin" : null; });
+  return out;
+}
+async function autoAreaWindow(win, o){   // every room in a window (a DWG plan with no room names) -> {added, sft, cond, skipped} or {err}; one scan at a time, as a single Auto area click
+  if (S.autoBusy) return {err: "Still tracing the last room — try again in a moment."};
+  S.autoBusy = true; try { return await autoAreaWindow0(win, o); } finally { S.autoBusy = false; busy(""); }
+}
+async function autoAreaWindow0(win, o){   // the barrier raster's pockets are the rooms, each traced with autoRoomGuarded from its widest point and added at once
+  const k = curScale(); if (!k) return {err: "Set the page scale first (K) — rooms are found in feet."};
+  const g = S.geo[S.key]; if (!g || !g.segs.length) return {err: "This page has no vector lines — Auto area over a window reads the drawing's lines."};
+  o = Object.assign(autoOpt(), o || {});
+  const key = S.key, pane = ACT, left = () => S.key !== key || ACT !== pane;   // the page (or window) changed under a long scan: never a room of one page put on another
+  const LEFT = {err: "The page changed while the rooms were traced — nothing added; scan again"};
+  const x0 = Math.min(win[0], win[2]), y0 = Math.min(win[1], win[3]), x1 = Math.max(win[0], win[2]), y1 = Math.max(win[1], win[3]);
+  let px = 0.3 * k; while ((x1 - x0) / px > 2000 || (y1 - y0) / px > 2000) px *= 1.5;   // a big window: coarser pixels, the raster stays ≤ 2000 × 2000 (the seeds need about 1 ft)
+  const W = Math.max(2, Math.ceil((x1 - x0) / px)), H = Math.max(2, Math.ceil((y1 - y0) / px));
+  const bf = o.layers ? segRoleFilter(g, BOUND) : null;   // the PDF's wall / door / window / column / railing layers only, as autoRoom
+  const ids = barrierIds(g, segsIn(g, x0, y0, x1, y1).filter(i => !bf || bf(i)), k, o);
+  const raster = lw => { const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d", {willReadFrequently: true});   // barrier lines and door openings stroked lw (pt) wide -> 1 = blocked
+    ctx.setTransform(1 / px, 0, 0, 1 / px, -x0 / px, -y0 / px); ctx.lineWidth = lw; ctx.lineCap = "round"; ctx.strokeStyle = "#000"; ctx.beginPath();
+    ids.forEach(i => { const s = g.segs[i]; ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); }); ids.doors.forEach(s => { ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); }); ctx.stroke();
+    const im = ctx.getImageData(0, 0, W, H).data, b = new Uint8Array(W * H); for (let i = 0; i < b.length; i++) b[i] = im[i * 4 + 3] > 24 ? 1 : 0; return b; };
+  busy("Auto area: finding the rooms…"); await new Promise(r => setTimeout(r));
+  const rooms = rasterRooms(raster(Math.max(o.gap * k, 2 * px)), W, H, px, k, raster(2 * px), Math.ceil(o.gap * k / px / 2) + 2), todo = rooms.filter(r => !r.skip);
+  const skipped = {edge: 0, small: 0, large: 0, thin: 0, existing: 0, overlap: 0, failed: 0}; rooms.forEach(r => { if (r.skip) skipped[r.skip]++; });
+  const existing = P.proj.items.filter(it => it.file === S.fileId && it.page === S.pageNo && it.kind === "shape" && it.shape !== "circle" && (cond(it.cond) || {}).type === "area");
+  let rn = 0; P.proj.items.forEach(it => { const m = /^Room (\d+)$/.exec(it.label || ""); if (m && it.file === S.fileId && it.page === S.pageNo) rn = Math.max(rn, +m[1]); });   // Room n carries on from the page's last
+  const cand = [];
+  for (let n = 0; n < todo.length; n++) { const r = todo[n], seed = [x0 + (r.x + 0.5) * px, y0 + (r.y + 0.5) * px];
+    if (existing.some(it => pointInPoly(seed, it.pts)) || cand.some(x => pointInPoly(seed, x.pts))) { skipped.existing++; continue; }
+    busy("Auto area: " + (n + 1) + " of " + todo.length + " rooms…"); if (n % 10 === 9) await new Promise(r2 => setTimeout(r2));
+    if (left()) return LEFT;
+    const t0 = performance.now(); let res; try { res = await autoRoomGuarded(seed); } catch (e) { res = {err: e.message || String(e)}; }
+    kpiLog("auto", {ms: Math.round(performance.now() - t0), err: !!res.err, flag: !!(res.leak || res.short || res.warn), holes: (res.holes || []).length, win: true});
+    if (res.err || !res.pts || res.pts.length < 3) { skipped.failed++; continue; }
+    if (left()) return LEFT;
+    if (existing.some(it => overlapSft(it.pts, res.pts, k) > 1) || cand.some(x => overlapSft(x.pts, res.pts, k) > 1)) { skipped.overlap++; continue; }   // ran into a neighbour already measured (a leak through an opening): not counted twice
+    const kk = hereScale(seed) || k, a = (polyArea(res.pts) - (res.holes || []).reduce((s2, h) => s2 + polyArea(h.pts), 0)) / kk / kk;
+    const big = r.sft > 20 && a > 1.6 * r.sft ? "much bigger than its enclosed space (" + fq(r.sft) + " Sft) — leaked through an opening?" : "";   // (no room names on a DWG: the leak judge cannot run, the pocket size can)
+    cand.push({name: "Room " + (++rn), pts: res.pts, holes: res.holes || [], flag: [res.leak ? "leaks — " + res.leak : "", big, res.short || "", res.warn || ""].filter(Boolean).join("; "), gap: o.gap, note: res.note || "", sft: a}); }
+  if (!cand.length) return {added: 0, sft: 0, cond: null, skipped, gap: o.gap};
+  if (left()) return LEFT;
+  const c = aiAreaCond();   // the current condition when it is an area, else the first area condition (or a new Floor area)
+  autoAreaAdd(cand, c, "window scan");
+  return {added: cand.length, sft: +cand.reduce((s2, x) => s2 + x.sft, 0).toFixed(2), cond: c.name, skipped, gap: o.gap, flagged: cand.filter(x => x.flag).length};
 }
 async function aiRunTool3(b){
   const inp = b.input || {};
@@ -12671,7 +12848,7 @@ function ocFix(Lb, out, fids){
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
-    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary};   // for tests and the console
+    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
