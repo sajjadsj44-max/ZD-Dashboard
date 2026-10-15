@@ -14021,6 +14021,24 @@ function plotPref(){ let o = null; try { o = JSON.parse(pref("zdTakeoffPlot") ||
 const PLOT_TLW = {hair: ["Hairline", 0.1], fine: ["Fine", 0.18], thin: ["Thin", 0.3], medium: ["Medium", 0.5], thick: ["Thick", 1], screen: ["As on screen (wide)", 0]};
 /* labels and count symbols on paper: paper points per screen pixel (an 11.5 px label prints 4.6 / 6.9 / 10.4 pt); Off leaves the labels out */
 const PLOT_LBL = {off: ["Off", 0], small: ["Small", 0.4], normal: ["Normal", 0.6], large: ["Large", 0.9]};
+/* the plot as a picture: the plot's own PDF drawn at the chosen DPI (the takeoff on top built at that DPI too, so labels stay sharp); a
+   sheet too big for one picture (the browser's canvas: 16,000 px a side, about 100 million pixels) is drawn at the most that fits */
+const PLOT_DPI = [150, 200, 300, 400, 600], PNG_SIDE = 16000, PNG_AREA = 100e6;
+function plotPngDpi(o, lo){ const want = +o.dpi || 300, k = want / 72, W = lo.PW * k, H = lo.PH * k, f = Math.min(1, PNG_SIDE / Math.max(W, H), Math.sqrt(PNG_AREA / (W * H))); return Math.max(36, Math.floor(want * f)); }
+async function plotPng(o){
+  const lo = plotLayout(o, plotWin(o)), dpi = plotPngDpi(o, lo), name = fileBase() + "_plot_" + String(pageName({file: S.fileId, page: S.pageNo})).replace(/[^A-Za-z0-9]+/g, "_").slice(0, 40) + "_" + dpi + "dpi.png";
+  busy("Plotting the picture at " + dpi + " DPI…"); let d = null, cv = null;
+  try {
+    const bytes = await plotPdf(Object.assign({}, o, {ovDpi: dpi})), lib = await loadPdfjs(); d = (await openPdfData(lib, bytes, name)).d;
+    const pg = await d.getPage(1), vp = pg.getViewport({scale: dpi / 72}); cv = document.createElement("canvas"); cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+    const x = cv.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, cv.width, cv.height);
+    await pg.render({canvasContext: x, viewport: vp}).promise;
+    const blob = await new Promise((ok, bad) => cv.toBlob(b => b ? ok(b) : bad(new Error("the picture is too big for this browser — choose a lower DPI")), "image/png"));
+    saveBlob(blob, name);
+    toast("Saved " + name + " — " + cv.width + " × " + cv.height + " px" + (dpi < (+o.dpi || 300) ? " (" + dpi + " DPI: the most that fits one picture at this paper size)" : ""), 6000);
+  } catch (e) { toast("PNG failed: " + (e.message || e), 6000); }
+  finally { if (cv) cv.width = cv.height = 0; if (d) try { d.destroy(); } catch (e) {} busy(""); }
+}
 function plotTkOpts(o, cs, s){   // pageOverlaySvg's options for the takeoff on paper (cs: overlay px per page pt, s: paper pt per page pt)
   const lf = (PLOT_LBL[o.plbl] || PLOT_LBL.normal)[1] || 0.6, tw = (PLOT_TLW[o.tlw] || PLOT_TLW.thin)[1];   // lines keep their own weight whatever the label size (wz is per z)
   return Object.assign({legend: "none", stamp: false}, tw ? {z: cs / s * lf, wz: tw / lf} : {}, o.plbl === "off" ? {lbl: false} : {});
@@ -14084,6 +14102,7 @@ async function plotDialog(){
     const keep = Object.assign({}, o); delete keep.win; if (keep.area === "window") keep.area = "display"; pref("zdTakeoffPlot", JSON.stringify(keep));
     if (r.pick) { const w = await pickWindow("Plot window: click one corner, then the opposite corner (or drag a box) — Esc to go back"); if (w) { o.win = w; o.area = "window"; S.plotWin = w; } continue; }
     S.plotWin = o.win || null;
+    if (r.go === "png") return plotPng(o);
     if (r.go === "preview" || prevAlways()) { if (await plotShow(o) === "back") continue; return; }   // Back: the settings again, as they were
     return plotRun(o, r.go);
   }
@@ -14094,8 +14113,8 @@ async function plotShow(o){   // the plot's own PDF in the preview, then printed
   busy("Plotting…"); let bytes = null;
   try { bytes = await plotPdf(o); } catch (e) { toast("Plot failed: " + (e.message || e), 6000); }
   busy(""); if (!bytes) return null;
-  const a = await pdfPreview({docs: [bytes], title: "Plot preview — " + pageName({file: S.fileId, page: S.pageNo}), info: plotInfo(o), back: true});
-  if (a === "print" || a === "pdf") await plotRun(o, a, bytes);
+  const a = await pdfPreview({docs: [bytes], title: "Plot preview — " + pageName({file: S.fileId, page: S.pageNo}), info: plotInfo(o), back: true, png: true});
+  if (a === "print" || a === "pdf") await plotRun(o, a, bytes); else if (a === "png") await plotPng(o);
   return a;
 }
 function plotAsk(o){
@@ -14109,17 +14128,19 @@ function plotAsk(o){
     <div class="fg"><label>Plot scale</label><select id="plSc">${opt("fit", "Fit to paper", o.scale)}${k > 0 ? PLOT_SC.map(([v, t]) => opt(v, t, o.scale)).join("") : ""}</select>${k > 0 ? "" : '<span class="small">Set the page\'s scale (K) to plot at a true scale</span>'}</div>
     <div class="fg"><label>Takeoff lines on paper</label><select id="plTw">${Object.entries(PLOT_TLW).map(([v, [t, f]]) => opt(v, t + (f ? " — " + (1.6 * f).toFixed(2) + " pt area outline" : ""), o.tlw || "thin")).join("")}</select></div>
     <div class="fg"><label>Labels on paper</label><select id="plLb" title="The size of the takeoff's labels and count symbols on the paper — smaller on a crowded plan">${Object.entries(PLOT_LBL).map(([v, [t, f]]) => opt(v, t + (f ? " — " + (11.5 * f).toFixed(1) + " pt text" : " — no labels"), o.plbl || "normal")).join("")}</select></div>
+    <div class="fg"><label>PNG resolution</label><select id="plDpi" title="For Save PNG: dots per inch on the paper — 300 is print quality">${PLOT_DPI.map(v => opt(v, v + " DPI" + (v === 300 ? " — print quality" : v === 150 ? " — screen" : ""), +o.dpi || 300)).join("")}</select></div>
     <div class="fg"><label>Plot style</label><select id="plSt">${[["color", "As drawn — colours"], ["mono", "Monochrome — all black"], ["gray", "Grayscale"]].map(([v, t]) => opt(v, t, o.style)).join("")}</select></div>
     <div class="fg w2"><label>Plot options</label><label class="pk"><input type="checkbox" id="plLw"${o.lw ? " checked" : ""}> Plot lineweights</label><label class="pk"><input type="checkbox" id="plTk"${o.tk ? " checked" : ""}> The takeoff on top (measurements, labels, markups)</label>
       <label class="pk"><input type="checkbox" id="plLg"${o.legend ? " checked" : ""}> Legend — the conditions on this sheet and their quantities</label><label class="pk"><input type="checkbox" id="plTi"${o.stamp ? " checked" : ""}> Title line — project, sheet, scale, date</label>
       <label class="pk"><input type="checkbox" id="plCe"${o.center ? " checked" : ""}> Centre the plot</label><label class="pk"><input type="checkbox" id="plPv"${prevAlways() ? " checked" : ""}> Always preview before Print / Save PDF</label>${cad ? `<label class="pk"><input type="checkbox" id="plNp"${o.np ? " checked" : ""}> Leave out layers not set to plot (Defpoints…)</label>` : ""}</div></div>
     <div class="plprev"><canvas id="plPrev" width="300" height="300"></canvas><span class="small" id="plInfo"></span></div></div>
-    <p class="small" style="margin-top:6px">A vector PDF: <b>Preview</b> shows that PDF itself, as it will print; <b>Print</b> opens the browser's print dialog with it (choose the printer, or Save as PDF there); <b>Save PDF</b> downloads it. ${cad ? "The drawing is plotted from its own lines, so monochrome and grayscale are exact." : "Monochrome is plotted as a 200 DPI picture of the page."}</p>`;
+    <p class="small" style="margin-top:6px">A vector PDF: <b>Preview</b> shows that PDF itself, as it will print; <b>Print</b> opens the browser's print dialog with it (choose the printer, or Save as PDF there); <b>Save PDF</b> downloads it; <b>Save PNG</b> saves it as a picture at the PNG resolution. ${cad ? "The drawing is plotted from its own lines, so monochrome and grayscale are exact." : "Monochrome is plotted as a 200 DPI picture of the page."}</p>`;
   const read = () => ({area: (document.querySelector('#dlgB input[name="plA"]:checked') || {}).value || "display", paper: $("plPaper").value, orient: $("plOr").value, scale: $("plSc").value, style: $("plSt").value,
-    lw: $("plLw").checked, tk: $("plTk").checked, tlw: $("plTw").value, plbl: $("plLb").value, legend: $("plLg").checked, stamp: $("plTi").checked, center: $("plCe").checked, np: $("plNp") ? $("plNp").checked : o.np});
+    lw: $("plLw").checked, tk: $("plTk").checked, tlw: $("plTw").value, plbl: $("plLb").value, dpi: +$("plDpi").value, legend: $("plLg").checked, stamp: $("plTi").checked, center: $("plCe").checked, np: $("plNp") ? $("plNp").checked : o.np});
   let go = "print", pick = false, snap = null;
   const p = ask("Plot — " + pageName({file: S.fileId, page: S.pageNo}), body, "Print", () => { const v = read(); if (v.area === "window" && !o.win) return "Pick the window first (Pick window <)"; return v; });
   const sv = document.createElement("button"); sv.className = "btn"; sv.textContent = "Save PDF"; sv.onclick = () => { go = "pdf"; $("dlgOk").click(); }; $("dlgOk").before(sv);
+  const pn = document.createElement("button"); pn.className = "btn"; pn.id = "plPng"; pn.textContent = "Save PNG"; pn.title = "The plot as a high-quality picture at the PNG resolution chosen"; pn.onclick = () => { go = "png"; $("dlgOk").click(); }; sv.after(pn);
   const pb = document.createElement("button"); pb.className = "btn"; pb.id = "plPvGo"; pb.textContent = "Preview"; pb.title = "The plot as it will print, page by page, before it is printed or saved"; pb.onclick = () => { go = "preview"; $("dlgOk").click(); }; sv.before(pb);
   $("plPv").onchange = e => pref("zdTakeoffPrev", e.target.checked ? "" : "0");
   $("plPick").onclick = () => { pick = true; snap = read(); $("dlgCancel").click(); };
@@ -14157,7 +14178,7 @@ async function plotPdf(o){
     }
   }
   if (o.tk) {   // the takeoff over the window, as a transparent picture at about 200 DPI
-    const cs = Math.min(200 / 72 * lo.s, 6000 / Math.max(win[2] - win[0], win[3] - win[1])), W = Math.max(1, Math.ceil((win[2] - win[0]) * cs)), H = Math.max(1, Math.ceil((win[3] - win[1]) * cs));
+    const od = Math.max(200, +o.ovDpi || 0), cs = Math.min(od / 72 * lo.s, (od > 200 ? PNG_SIDE : 6000) / Math.max(win[2] - win[0], win[3] - win[1])), W = Math.max(1, Math.ceil((win[2] - win[0]) * cs)), H = Math.max(1, Math.ceil((win[3] - win[1]) * cs));
     await mkAssetsFor(f, p); const full = pageOverlaySvg(f, p, cs, Math.ceil(S.base.width * cs), Math.ceil(S.base.height * cs), plotTkOpts(o, cs, lo.s)), inner = full.replace(/^<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
     const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
     const svgW = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="${(win[0] * cs).toFixed(2)} ${(win[1] * cs).toFixed(2)} ${W} ${H}">${inner}</svg>`, two = svgBlendSplit(svgW);
@@ -14197,7 +14218,7 @@ function pdfPreview(o){   // o: {docs: [PDF bytes…] (one PDF, or a PDF per pag
     el.innerHTML = `<div class="pvh"><b>${esc(o.title || "Preview")}</b><span class="small" id="pvInfo">${esc(o.info || "")}</span><span class="sp"></span><button class="btn sm" id="pvPrev" title="Previous page (PgUp)">&#9664;</button><span class="small" id="pvPg">…</span><button class="btn sm" id="pvNext" title="Next page (PgDn)">&#9654;</button>
       <button class="btn sm" id="pvOut" title="Zoom out (− or the wheel)">&minus;</button><span class="small" id="pvZ"></span><button class="btn sm" id="pvIn" title="Zoom in (+ or the wheel)">+</button><button class="btn sm" id="pvFit" title="The whole page in the window (F)">Fit</button><button class="btn sm" id="pvX" title="Close — nothing printed or saved">&times;</button></div>
       <div class="pvs" id="pvS"><span class="pvl">Reading the PDF…</span></div><div class="pvf"><span class="small" id="pvSz"></span><label class="pk"><input type="checkbox" id="pvAlw"${prevAlways() ? " checked" : ""}> Always preview before Print / Save PDF</label><span class="sp"></span>
-      ${o.back ? '<button class="btn" id="pvBk" title="Back to the settings, as they were (Esc)">&#8592; Back</button>' : ""}<button class="btn" id="pvSave">${esc(o.saveLabel || "Save PDF")}</button><button class="btn pri" id="pvPrint">&#128424; Print</button></div>`;
+      ${o.back ? '<button class="btn" id="pvBk" title="Back to the settings, as they were (Esc)">&#8592; Back</button>' : ""}<button class="btn" id="pvSave">${esc(o.saveLabel || "Save PDF")}</button>${o.png ? '<button class="btn" id="pvPng" title="Save it as a high-quality picture">Save PNG</button>' : ""}<button class="btn pri" id="pvPrint">&#128424; Print</button></div>`;
     document.body.appendChild(el);
     const q = id => el.querySelector("#" + id), box = q("pvS"), pages = [], docs = [];
     let i = 0, z = 1, cv = null, task = null, gen = 0, tm = 0, closed = false;
@@ -14235,7 +14256,7 @@ function pdfPreview(o){   // o: {docs: [PDF bytes…] (one PDF, or a PDF per pag
     window.addEventListener("keydown", key, true); window.addEventListener("resize", show);
     box.addEventListener("wheel", e => { e.preventDefault(); zoom(e.deltaY < 0 ? 1.2 : 1 / 1.2, e); }, {passive: false});
     q("pvPrev").onclick = () => go(-1); q("pvNext").onclick = () => go(1); q("pvIn").onclick = () => zoom(1.25); q("pvOut").onclick = () => zoom(0.8); q("pvFit").onclick = () => { z = 1; show(); };
-    q("pvX").onclick = () => done(null); q("pvSave").onclick = () => done("pdf"); q("pvPrint").onclick = () => done("print"); if (q("pvBk")) q("pvBk").onclick = () => done("back");
+    q("pvX").onclick = () => done(null); q("pvSave").onclick = () => done("pdf"); if (q("pvPng")) q("pvPng").onclick = () => done("png"); q("pvPrint").onclick = () => done("print"); if (q("pvBk")) q("pvBk").onclick = () => done("back");
     q("pvAlw").onchange = e => pref("zdTakeoffPrev", e.target.checked ? "" : "0");
     (async () => {
       try { const lib = await loadPdfjs();
@@ -14292,7 +14313,7 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
   window.zdTakeoff = {bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
-    cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
+    cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
     mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
