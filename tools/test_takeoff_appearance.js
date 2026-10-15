@@ -88,6 +88,13 @@ const ok = (c, m) => { if (c) { pass++; console.log("  ✓ " + m); } else { fail
   const w2 = await T(() => { const m = /<polyline [^>]*stroke-width="([\d.]+)"[^>]*stroke-dasharray/.exec(document.getElementById("ov").innerHTML); return m ? +m[1] : 0; });
   ok(w1 > 0 && Math.abs(w2 / w1 - 2) < 0.05, "a width in pt on paper grows with the zoom (" + w1 + " → " + w2 + ")");
   await T(() => { const Z = zdTakeoff; Z.S.view.s /= 2; Z.applyView(); Z.refresh(); }); await wait(200);
+  const swNow = async () => T(() => { const m = /<polyline [^>]*stroke-width="([\d.]+)"[^>]*stroke-dasharray/.exec(document.getElementById("ov").innerHTML); return m ? +m[1] : -1; });
+  await setAp("sw", 0.1); c = await cnd("Skirting A");
+  ok(c.sw === 0.1 && await T(() => document.querySelector('#props .apbar [data-ap="sw"]').value === "0.1"), "a width of 0.1 is kept as typed (Bluebeam-style, no 0.25 floor) → " + c.sw);
+  await setAp("sw", 0); c = await cnd("Skirting A"); const wh = await swNow();
+  ok(c.sw === 0 && wh > 0, "a width of 0 is kept and still drawn as a hairline (" + wh + " px)");
+  await setAp("sw", ""); c = await cnd("Skirting A"); ok(c.sw === 0, "a blank width box leaves the width as it was");
+  await setAp("sw", 2); c = await cnd("Skirting A"); ok(c.sw === 2, "back to 2");
   const tl = await T(() => document.getElementById("props").textContent);
   ok(/Length/.test(tl) && /16\.667 ft/.test(tl) && /Segments/.test(tl), "totals of a length condition: 16.667 ft, segments (" + (/Length[^A-Z]*/.exec(tl) || [""])[0].slice(0, 40) + ")");
   await shot("length");
