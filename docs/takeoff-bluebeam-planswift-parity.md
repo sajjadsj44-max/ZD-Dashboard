@@ -157,7 +157,7 @@ markup-tools release (07-Oct-2026) · **✓** already in · **◐** partly · **
 | Multiply markups | ✓ array, place copies, copy to pages |
 | Assign markups to layers | ★ markup layers (Layers tab): hidden on the drawing and in exports |
 | Flatten PDF markups | ✓ every PDF / PNG / JPEG export |
-| Import PDF markups | → 4 |
+| Import PDF markups | ★ Bluebeam markups → conditions (14-Oct-2026, see below) |
 | Redact PDF content permanently | ★ redaction: the exported page is flattened, what is under the box is gone |
 | Translate markups | ◐ the Claude panel (API key) translates text on request |
 | Create and add dynamic stamps | ★ 16 standard stamps, your own text and picture stamps, `{name} {date} {time} {project} {sheet} {page}` |
@@ -322,6 +322,28 @@ function (`measSvg`), so what is set is what is printed. Covered by `tools/test_
 | — | segment lengths always / never / as View → Labels; vertex marks; count symbols (11, incl. star, hexagon, pin, plus), size, fill, caption font |
 | — | Copy / Paste appearance, Apply to all conditions of the type (colours kept), Set as default for new conditions, Reset; every change one Ctrl+Z step |
 
+## Bluebeam markups → conditions (2026-10-14)
+
+A PDF marked up in Bluebeam Revu is read when it is added (**+ PDF**), or later with **+ PDF ▾ → Bluebeam markups → conditions**
+(or the command palette). Covered by `tools/test_takeoff_bluebeam.js`; checked on the QS's own Bluebeam takeoffs (block work,
+floor tile with cut-outs, skirting, plaster on a turned elevation, room areas with door counts — 339 quantities, all equal to
+Bluebeam's).
+
+| Bluebeam | ZD Takeoff |
+|---|---|
+| Area (PolygonDimension), with cut-outs | an area item of the condition named by its **Subject**; each cut-out a deduction ("cutout in 401") |
+| Length (PolyLineDimension, LineDimension), perimeter | a run of a linear (ft) condition; a perimeter as a closed run |
+| Count (PolygonCount markers) | one count of the page, a point at the middle of each marker; Bluebeam's symbol (check, circle, square…) |
+| Subject, Label, colours, fill opacity, line width, blend, caption colour / bold | condition name, the item's label, the condition's colour and appearance (width in pt on paper) |
+| Scale of the measurements (/Measure) | the page's scale ("from the PDF", not verified) unless one was set by calibrating |
+| Quantity written by Bluebeam (Contents, "127.26 sf") | each measurement compared with it; the report lists any that differ |
+| Text box, rectangle, ellipse, line, polyline, polygon, pen | this app's markups, with text, author, subject and style |
+| Legend stamp, sticky notes, links | not brought in (the app has its own legend) |
+
+The PDF's own drawing of its markups is then switched off for that PDF, so nothing shows twice and its lines are not snap
+targets (palette: *Bluebeam: show / hide the PDF's own markups*). Importing again brings only markups not imported before
+(by their id); Ctrl+Z takes the whole import back.
+
 ## Square up, window scan, recover (2026-10-14)
 
 | Feature | Where | What it does |
@@ -331,3 +353,27 @@ function (`measSvg`), so what is set is what is printed. Covered by `tools/test_
 | **Recover a deleted project** | Start screen button (shown when a deleted project has backups) · command palette | A deleted project's last 10 backups stay in the browser; the dialog lists them by project with the last backup time and measurement count, **Restore** brings the project back (its drawings must be added again with + PDF — they are checked against the ones measured on), **Delete backups** clears a group. `recoverDialog`. |
 
 Also: `tools/test_takeoff_markup.js` placed its hyperlink box below the 842 × 595 pt fixture page, so it timed out at the hyperlink step on every run; it now draws on the sheet and the whole suite runs (80 checks).
+
+## Takeoff v2 — measuring, checking, reports, pages (2026-10-16)
+
+| Feature | Where | What it does |
+|---|---|---|
+| **Slope / pitch** | condition dialog (Slope), Properties (per measurement) | 4:12, 33 % or 18.4°; areas and runs measured on plan are multiplied by √(1 + p²), shown on the sheet ("× slope 1.1180") and in Excel as a live factor column (Qty = PRODUCT(D:G, L)). Counts, openings and rises are never sloped. |
+| **Rise / drop** | Properties of a run | A vertical length added once to the run as its own row (pipe / duct risers). |
+| **Angle, Radius** | Measure group, Shift+M (Angle) | Temporary readings like Measure: ∠ in degrees; R, Ø, circumference, area. Circles show R · Ø in captions and Properties. |
+| **Custom columns** | fx beside + New, palette | Project formulas over Q A P N H T and other columns (e.g. Tiles = Q / 4 * 1.05, Boxes = ceil(Tiles / 10)), shown per condition, exported to Excel as live formulas. |
+| **Apply to pages / typical floors** | right-click a condition, palette | Copies the selection or a condition's measurements to ticked pages (all, same sheet size, sheets named Typical), keeping real size across scales; already-present copies are skipped. |
+| **Overlaps** | Review → Overlaps, export check | Areas counted twice (same condition, or two floor finishes) after their deductions; Fix cuts the overlap out (never deletes across conditions; deletes only true duplicates with equal Nos). |
+| **Combine areas** | right-click a selection | Union of areas of one condition into one outline (holes become deductions); refused when Nos or slope differ. |
+| **Not measured** | Review → Not measured | Shades the spaces inside the walls that no area covers; click one (Auto area tool, or empty spot in Select) to measure it. |
+| **Name rooms by contents** | palette; window scan | Bath, Kitchen, Stair, Lift / Shaft, Balcony, Store or Room from the drawing's layers inside each outline. |
+| **Window scan, second pass** | Auto area: every room in a window | Also traces spaces narrower than the door gap and corridors open at their end (flagged), at the viewport's scale. |
+| **Import measurements into this project** | + PDF ▾, palette | Merges a .json / .zdtakeoff into the open project: drawings matched by fingerprint (and page turn), conditions by name, duplicates skipped, one Ctrl+Z. |
+| **Trash, Recover** | deleting a project, Start → Recover | A deleted project's drawings are kept 30 days; Recover brings the project back with them. Local times in Backups / Recover. |
+| **New version bar** | automatic | "A new version is ready — Reload"; does not reload while a save is failing. |
+| **Preview before print / PDF** | Plot, Export pages, marked-up PDFs | The exact PDF shown full-window (zoom, pages) before Print or Save; on by default. Plot: label size Off / Small / Normal / Large. |
+| **Report builder** | Export → Report… | Rows by condition, page, floor or condition then page; chosen columns; group and grand totals equal to the measurement sheet; Excel with SUM / SUMIFS, CSV. |
+| **Magnifier** | Shift+G | A 3× glass at the cursor while drawing and measuring. |
+| **Turn, order, hide, stitch pages** | Pages tab | Turn a page 90° (measurements turn with it), project page order and hidden pages, stitch 2–4 sheets into one PDF. |
+
+Fixed on the way: Auto area square-up left curved walls alone; scanned scale bars read 0.8 % short (picture snapping); a door-less opening bulged a corridor; the condition edit button was invisible to keyboard and tests; a watermark over walls leaked Auto area; the split-window test counted fills as outlines.

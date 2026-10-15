@@ -70,7 +70,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
   const lastItem = () => T(() => { const it = zdTakeoff.P.proj.items.slice(-1)[0]; return it ? JSON.parse(JSON.stringify(it)) : null; });
   const total = id => T(id => { const c = zdTakeoff.P.proj.conds.find(x => x.id === id || x.name === id); return c ? zdTakeoff.condTotals(c) : null; }, id);
   const dl = async (sel, open) => { if (open !== false) { await closeDlg(); await page.click("#bExport"); await wait(150); }
-    const [d] = await Promise.all([page.waitForEvent("download", {timeout: 30000}), page.click(sel)]); const p = path.join(tmp, d.suggestedFilename()); await d.saveAs(p); return p; };
+    const pv = /^#exPdf/.test(sel);   // the marked-up PDF opens the print preview first ("always preview", on by default): saved from there
+    const [d] = await Promise.all([page.waitForEvent("download", {timeout: 60000}), page.click(sel).then(() => pv ? page.click("#pvSave", {timeout: 60000}) : null)]); const p = path.join(tmp, d.suggestedFilename()); await d.saveAs(p); return p; };
   const shot = async n => { if (SHOTS) await page.screenshot({path: path.join(SHOTS, "qa-" + n + ".png")}); };
   const setScale = async (k, ptPerFt) => T(([k, v]) => { zdTakeoff.P.proj.scales[k] = {ptPerFt: v, how: "calibrated", text: "test", verified: true, at: new Date().toISOString()}; }, [k, ptPerFt]);
   const run = async (name, fn) => { section = name; console.log("\n" + name); try { await fn(); } catch (e) { ok(false, name + " — section stopped: " + String(e.message || e).split("\n")[0].slice(0, 300)); await closeDlg().catch(() => {}); }

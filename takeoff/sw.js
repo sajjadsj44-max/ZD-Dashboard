@@ -32,6 +32,7 @@ async function libFirst(req){
 self.addEventListener("fetch", e => {
   const req = e.request; if (req.method !== "GET") return;
   const u = new URL(req.url);
-  if (u.origin === self.location.origin) { if (u.pathname.startsWith(new URL("./", self.location).pathname)) e.respondWith(appFirstNet(req)); }
+  if (u.origin === self.location.origin) { if (u.searchParams.has("check")) return;   // the app's new-version check (index.html?check=…): straight to the network, never kept
+    if (u.pathname.startsWith(new URL("./", self.location).pathname)) e.respondWith(appFirstNet(req)); }
   else if (CDN.test(req.url)) e.respondWith(libFirst(req));
 });

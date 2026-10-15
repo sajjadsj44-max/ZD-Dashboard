@@ -45,7 +45,8 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   const info = () => T(() => ({n: zdTakeoff.PANES.length, act: zdTakeoff.PANES.indexOf(zdTakeoff.ACT), on: zdTakeoff.SPLIT.on, dir: zdTakeoff.SPLIT.dir,
     views: zdTakeoff.PANES.map(p => ({s: p.view.s, tx: p.view.tx, ty: p.view.ty, key: p.key, w: p.el.stage.clientWidth, h: p.el.stage.clientHeight, proj: p.sess.proj && p.sess.proj.name})),
     items: zdTakeoff.P.proj ? zdTakeoff.P.proj.items.length : -1, proj: zdTakeoff.P.proj && zdTakeoff.P.proj.name}));
-  const drawn = i => T(i => ({ov: zdTakeoff.PANES[i].el.ov.innerHTML.split("<polygon").length - 1, cv: zdTakeoff.PANES[i].el.hi.width > 4 || zdTakeoff.PANES[i].el.low.width > 4}), i);
+  // outlines drawn: distinct polygons (an area is drawn as a fill polygon and an outline polygon on the same points, since its appearance)
+  const drawn = i => T(i => ({ov: new Set([...zdTakeoff.PANES[i].el.ov.querySelectorAll("polygon")].map(e => e.getAttribute("points"))).size, cv: zdTakeoff.PANES[i].el.hi.width > 4 || zdTakeoff.PANES[i].el.low.width > 4}), i);
   const cx = async i => { const b = await T(i => { const r = zdTakeoff.PANES[i].el.stage.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }, i); return b; };
   const menu = async id => { if (!(await page.isVisible("#splitPop"))) await page.click("#bSplit"); await page.click(id); await wait(120); };
   // the sheet point (PDF points, y up) a given number of screen pixels from the centre of window i
@@ -245,6 +246,20 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   await page.keyboard.press("Control+s"); await wait(300);
   const saved = await T(async () => { const req = indexedDB.open("zdTakeoff"); const db = await new Promise(r => { req.onsuccess = () => r(req.result); }); const all = await new Promise(r => { const q = db.transaction("projects").objectStore("projects").getAll(); q.onsuccess = () => r(q.result); }); db.close(); return all.map(p => [p.name, p.items.length]).sort(); });
   ok(JSON.stringify(saved) === JSON.stringify([["Alpha", itemsA + 1], ["Beta", 2]]), "both projects saved in the browser, each with its own measurements " + JSON.stringify(saved));
+
+  console.log("a page turned in one project keeps its turn in its own window");
+  const kA = await T(() => zdTakeoff.PANES[1].key), bA0 = await T(() => [zdTakeoff.PANES[1].base.width, zdTakeoff.PANES[1].base.height]);
+  await T(k => zdTakeoff.rotatePage(k, 90), kA); await wait(1200);
+  const bA1 = await T(() => [zdTakeoff.PANES[1].base.width, zdTakeoff.PANES[1].base.height]);
+  ok(near(bA1[0], bA0[1], 0.5) && near(bA1[1], bA0[0], 0.5), `Alpha's page turned 90° in its window (${bA0.map(Math.round)} → ${bA1.map(Math.round)})`);
+  await clickPx(0, -120, 120); await page.keyboard.press("Escape");
+  ok((await info()).proj === "Beta", "Beta worked in again");
+  await T(() => { const pn = zdTakeoff.PANES[1]; return zdTakeoff.gotoPage(pn.fileId, pn.pageNo, pn); }); await wait(900);
+  const bA2 = await T(() => [zdTakeoff.PANES[1].base.width, zdTakeoff.PANES[1].base.height, zdTakeoff.PANES[1].el.low.width, zdTakeoff.PANES[1].el.low.height]);
+  ok(near(bA2[0], bA1[0], 0.5) && near(bA2[1], bA1[1], 0.5), "Alpha's window drawn again while Beta is worked in: still at Alpha's turn (not Beta's)" + ` [${bA2.slice(0, 2).map(Math.round)}]`);
+  ok((bA2[2] > bA2[3]) === (bA1[0] > bA1[1]), "…and its picture is drawn turned too");
+  const rs = await T(k => { const S = zdTakeoff.S, f = k.split(":")[0], had = !!S.geo[k], d = zdTakeoff.rotSync({files: [{id: f}], rot: {}}), gone = !S.geo[k]; zdTakeoff.rotSync(zdTakeoff.PANES[1].sess.proj); return {had, d, gone, at: S.rotAt[k]}; }, kA);
+  ok(rs.had && rs.d.includes(kA) && rs.gone && rs.at === 90, "the page's lines read at Alpha's turn are let go for a project that does not turn it (a duplicate) " + JSON.stringify(rs));
 
   console.log("the same project in both windows");
   await page.locator(".pane").nth(0).locator(".pproj").selectOption({label: "Alpha"});
