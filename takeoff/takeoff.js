@@ -4110,7 +4110,7 @@ const apBlendG = (a, svg) => a.blend === "multiply" && svg ? `<g data-blend="mul
 const AP_FRAC = {0: "1\"", 2: "1/2\"", 4: "1/4\"", 8: "1/8\"", 16: "1/16\""};
 function apBase(c){   // what a condition looks like with nothing set: the look the app has always had
   const area = c && c.type === "area", cnt = c && c.type === "count";
-  return {col: "", lineOp: area || cnt ? 100 : 85, dash: "solid", sw: +(c && c.sw) || (area ? 1.6 : cnt ? 2.5 : 3), swU: "px", h0: "none", h1: "none", hs: 1,
+  return {col: "", lineOp: area || cnt ? 100 : 85, dash: "solid", sw: swN(c && c.sw, area ? 1.6 : cnt ? 2.5 : 3), swU: "px", h0: "none", h1: "none", hs: 1,
     fill: "", fillOp: cnt ? 30 : 22, hatch: "none", hcol: "", hsp: 8, units: "ft", dec: 3, frac: 8, font: "Segoe UI", fsz: 11.5, fcol: "#0b0b0b", fb: false, fi: false, fu: false,
     lpos: "center", lbg: true, lbgCol: "#ffffff", lbgOp: 88, lbd: false, seg: "auto", vtx: false, csz: ({s: 7, m: 10, l: 14})[c && c.sz] || 10, blend: "normal"};
 }
@@ -4210,7 +4210,7 @@ function apLabelPt(scr, area, a, z){   // where the label goes: in the shape / b
 /* a measurement (area or run) as SVG: o {T page -> screen, z sizes, sp page pt -> screen px, sel, k, lbl (labels on), seg (segment lengths on), small} */
 function measSvg(it, c, o){
   const a = apOf(c, it), T = o.T, z = o.z || 1, sp = o.sp || 1, ded = it.kind === "ded", poly = itemPoly(it), scr = poly.map(T), area = c.type === "area", closed = area || it.shape === "circle";
-  const wz = o.wz || 1, col = ded ? "#d03b3b" : a.col, op = Math.max(0.05, Math.min(1, (+a.lineOp || 100) / 100)), w0 = (a.swU === "pt" ? +a.sw * sp : +a.sw * z) * wz, w = Math.max(0.5, o.sel ? w0 + (area ? 1.4 : 2) * z : w0);
+  const wz = o.wz || 1, col = ded ? "#d03b3b" : a.col, op = Math.max(0.05, Math.min(1, (+a.lineOp || 100) / 100)), w0 = (a.swU === "pt" ? +a.sw * sp : +a.sw * z) * wz, w = Math.max(hairPx(z), o.sel ? w0 + (area ? 1.4 : 2) * z : w0);
   const dash = ded && a.dash === "solid" ? `${7 * z} ${4 * z}` : apDash(a.dash, w), ps = scr.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" "), out = [];
   if (area) {
     if (ded) out.push(`<polygon points="${ps}" fill="${o.screen ? "url(#hatch)" : "#d03b3b"}" fill-opacity="${o.screen ? 1 : 0.14}" stroke="none"/>`);
@@ -4234,6 +4234,10 @@ function measSvg(it, c, o){
 }
 
 /* ---- the editor: the same controls in the condition dialog and in Properties */
+/* a line weight as typed: any value from 0 (hairline, as in Bluebeam) to 24; blank or not a number -> d */
+const swN = (v, d) => v === "" || v == null || !isFinite(+v) ? d : Math.max(0, Math.min(24, +v));
+/* the thinnest line the screen can show: one device pixel (a 0 or very thin weight never vanishes) */
+const hairPx = z => (z || 1) / Math.max(1, (typeof devicePixelRatio === "number" && devicePixelRatio) || 1);
 const apOpts = (O, v) => Object.entries(O).map(([k2, t]) => `<option value="${esc(k2)}"${String(v) === String(k2) ? " selected" : ""}>${esc(t)}</option>`).join("");
 const apHex = v => /^#[0-9a-f]{6}$/i.test(v || "") ? v : "#2a78d6";
 function apEditorHtml(c, a, o){   // o {totals: [[name, text]], scope, dialog}
@@ -4242,7 +4246,7 @@ function apEditorHtml(c, a, o){   // o {totals: [[name, text]], scope, dialog}
   const sel = (f, O, v, w) => `<select data-ap="${f}"${w ? ` style="width:${w}px"` : ""}>${apOpts(O, v)}</select>`, colr = (f, v, title) => `<input type="color" data-ap="${f}" value="${apHex(v)}" title="${title}">`;
   const tog = (f, v, txt, title, st) => `<button type="button" class="aptg${v ? " on" : ""}" data-ap="${f}" data-on="${v ? 1 : 0}" title="${title}"${st ? ` style="${st}"` : ""}>${txt}</button>`;
   const rows = [];
-  rows.push(`<div class="apr"><span class="aph">Line</span>${F("Colour", colr("col", a.col, "Line colour"))}${F("Opacity %", num("lineOp", +a.lineOp, 5, 100, 5))}${F("Style", sel("dash", AP_DASH, a.dash, 132))}${F("Width", num("sw", +a.sw, 0.25, 24, 0.25) + sel("swU", {px: "px on screen", pt: "pt on paper"}, a.swU, 100))}${F("Blend mode", sel("blend", AP_BLEND, a.blend === "multiply" ? "multiply" : "normal", 200))}</div>`);
+  rows.push(`<div class="apr"><span class="aph">Line</span>${F("Colour", colr("col", a.col, "Line colour"))}${F("Opacity %", num("lineOp", +a.lineOp, 5, 100, 5))}${F("Style", sel("dash", AP_DASH, a.dash, 132))}${F("Width", num("sw", +a.sw, 0, 24, 0.25).replace("<input", '<input title="Any weight from 0 to 24 — type e.g. 0.1; 0 draws a hairline"') + sel("swU", {px: "px on screen", pt: "pt on paper"}, a.swU, 100))}${F("Blend mode", sel("blend", AP_BLEND, a.blend === "multiply" ? "multiply" : "normal", 200))}</div>`);
   if (t === "linear") rows.push(`<div class="apr"><span class="aph">Ends</span>${F("Start", sel("h0", AP_HEADS, a.h0, 118))}${F("End", sel("h1", AP_HEADS, a.h1, 118))}${F("Size ×", num("hs", +a.hs, 0.5, 4, 0.25))}</div>`);
   if (t === "area") rows.push(`<div class="apr"><span class="aph">Fill</span>${F("Colour", colr("fill", a.fill, "Fill colour"))}${F("Opacity %", num("fillOp", +a.fillOp, 0, 100, 5))}${F("Hatch", sel("hatch", AP_HATCH, a.hatch, 124))}${F("Hatch colour", colr("hcol", a.hcol, "Hatch colour"))}${F("Spacing", num("hsp", +a.hsp, 3, 40, 1, 50))}</div>`);
   if (t === "count") rows.push(`<div class="apr"><span class="aph">Symbol</span>${o.dialog ? "" : F("Shape", sel("sym", AP_SYMS, c.sym || "circle", 110))}${F("Size px", num("csz", +a.csz, 4, 40, 1))}${F("Fill %", num("fillOp", +a.fillOp, 0, 100, 5))}${o.dialog ? "" : F("Caption", sel("cap", {seq: "1, 2, 3…", name: "Condition name", text: "Custom text", none: "None"}, c.cap || "seq", 116))}${F("Font", sel("font", Object.fromEntries(AP_FONTS.map(f => [f, f])), a.font, 120))}${F("Size", num("fsz", +a.fsz, 6, 48, 0.5, 52))}</div>`);
@@ -4307,7 +4311,7 @@ function itemTotalsList(it, c, k){   // one measurement's own totals, in its app
 /* the condition dialog: its appearance editor, kept in step with the colour swatches, with a live preview */
 function apFromDialog(type){
   const box = $("cAp"); if (!box) return {};
-  const v = apReadFrom(box), cnd = {type, color: $("cC").value, sw: v.sw}, out = {sw: Math.max(0.25, Math.min(24, +v.sw || 2))};
+  const v = apReadFrom(box), cnd = {type, color: $("cC").value, sw: v.sw}, out = {sw: swN(v.sw, 2)};
   if (type === "count" && v.sym) { out.sym = v.sym; if (v.cap) out.cap = v.cap; }
   const ap = apClean(Object.assign({}, cnd, {sw: out.sw}), Object.assign(v, {col: $("cC").value}));
   out.ap = Object.keys(ap).length ? ap : undefined;
@@ -4334,7 +4338,7 @@ function apSet(f, val){
   mutate(() => {
     if (own) { const tgt = it.ap; if (f === "col" || f === "sw") tgt[f] = val; else tgt[f] = val; return; }
     if (f === "col") { if (HEXCOL.test(val)) c.color = val; return; }
-    if (f === "sw") { c.sw = Math.max(0.25, Math.min(24, +val || 2)); return; }
+    if (f === "sw") { c.sw = swN(val, c.sw); return; }
     if (f === "sym" || f === "cap") { c[f] = val; return; }
     c.ap = Object.assign({}, c.ap || {}); c.ap[f] = val; const b = apBase(c); if (c.ap[f] === b[f]) delete c.ap[f]; if (!Object.keys(c.ap).length) delete c.ap;
   }, "Appearance");
@@ -4347,7 +4351,7 @@ function apAct(a){
     mutate(() => { if (it && it.ap) it.ap = v; else { if (v.sw != null) c.sw = v.sw; delete v.sw; c.ap = Object.keys(v).length ? v : undefined; if (!c.ap) delete c.ap; } }, "Paste appearance");
     return toast("Appearance pasted" + (S.apClip.type !== c.type ? " (from a " + S.apClip.type + " condition: what does not apply is ignored)" : ""), 2400); }
   if (a === "reset") { mutate(() => { if (it && it.ap) it.ap = {}; else delete c.ap; }, "Reset appearance"); return; }
-  if (a === "default") { const d = toolDefaults(), by = Object.assign({}, d.apBy || {}); by[c.type] = Object.assign({}, c.ap || {}); d.apBy = by; d.condWidth = +c.sw || d.condWidth; saveToolDefaults(d); return toast("New " + (c.type === "area" ? "area" : c.type === "linear" ? "length" : "count") + " conditions will start with this appearance", 2600); }
+  if (a === "default") { const d = toolDefaults(), by = Object.assign({}, d.apBy || {}); by[c.type] = Object.assign({}, c.ap || {}); d.apBy = by; d.condWidth = swN(c.sw, d.condWidth); saveToolDefaults(d); return toast("New " + (c.type === "area" ? "area" : c.type === "linear" ? "length" : "count") + " conditions will start with this appearance", 2600); }
   if (a === "all") { const L = P.proj.conds.filter(x => x.type === c.type && x !== c); if (!L.length) return toast("No other condition of this type", 2000);
     mutate(() => L.forEach(x => { x.ap = c.ap ? JSON.parse(JSON.stringify(c.ap)) : undefined; if (!x.ap) delete x.ap; x.sw = c.sw; }), "Appearance to all " + c.type + " conditions");
     return toast("Appearance applied to " + L.length + " other condition" + (L.length > 1 ? "s" : "") + " (their colours kept)", 2600); }
@@ -4832,7 +4836,7 @@ function renderProps(){
 function cntZ(){ const k = S.key && P.proj && P.proj.scales && P.proj.scales[S.key] && P.proj.scales[S.key].ptPerFt, ppf = (k || 9) * S.view.s; return Math.max(0.3, Math.min(1, ppf / 12)); }
 const SYMS = AP_SYMS;
 function countSvg(c, pts, T, z, selIdx){
-  const a = apOf(c), sym = c.sym || "circle", cap = c.cap || "seq", r = (+a.csz || 10) * z, col = esc(a.col), out = [], lop = Math.max(0.05, (+a.lineOp || 100) / 100), sw0 = (+a.sw || 2.5);
+  const a = apOf(c), sym = c.sym || "circle", cap = c.cap || "seq", r = (+a.csz || 10) * z, col = esc(a.col), out = [], lop = Math.max(0.05, (+a.lineOp || 100) / 100), sw0 = swN(a.sw, 2.5);
   const fam = esc(a.font || "Segoe UI") + ",Arial", fsz = (+a.fsz || 11.5) - 0.5;
   pts.forEach((p, i) => {
     const q = T(p), x = q[0], y = q[1], w = (i === selIdx ? sw0 + 1 : sw0) * z, fo = `fill-opacity="${((+a.fillOp || 0) / 100).toFixed(2)}" stroke-opacity="${lop}"`;
@@ -5492,16 +5496,16 @@ function markSvg0(m, T, z){
     return `<polyline points="${d}" fill="none" stroke="#ff7a00" stroke-width="${(sel ? 4 : 3) * z}" stroke-dasharray="${6 * z} ${3 * z}" stroke-linecap="round"/>`; }
   if (m.type === "dimension") {
     const p = m.pts[0], q = m.pts[1], dx = q[0] - p[0], dy = q[1] - p[1], len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
-    const off = (+m.offset || 24), a = T([p[0] + nx * off, p[1] + ny * off]), b = T([q[0] + nx * off, q[1] + ny * off]), e1 = T(p), e2 = T(q), w = Math.max(1, +m.width || 2) * z, fs = Math.max(8, +m.size || 13) * z, al = Math.max(5, +m.arrow || 10) * z;
+    const off = (+m.offset || 24), a = T([p[0] + nx * off, p[1] + ny * off]), b = T([q[0] + nx * off, q[1] + ny * off]), e1 = T(p), e2 = T(q), w = Math.max(hairPx(z), swN(m.width, 2) * z), fs = Math.max(8, +m.size || 13) * z, al = Math.max(5, +m.arrow || 10) * z;
     const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), arrow = (x, y, sign) => { const h1 = [x - sign * al * Math.cos(ang - .45), y - sign * al * Math.sin(ang - .45)], h2 = [x - sign * al * Math.cos(ang + .45), y - sign * al * Math.sin(ang + .45)]; return `<path d="M${h1[0]} ${h1[1]}L${x} ${y}L${h2[0]} ${h2[1]}" fill="none" stroke="${col}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"/>`; };
     const k = scaleAt(m.file, m.page, p), val = m.text || (k ? f3(dist(p, q) / k) : f3(dist(p, q)) + " pt"), mx = (a[0] + b[0]) / 2 - Math.sin(ang) * (fs * .65), my = (a[1] + b[1]) / 2 + Math.cos(ang) * (fs * .65);
     return `<g><line x1="${e1[0]}" y1="${e1[1]}" x2="${a[0]}" y2="${a[1]}" stroke="${col}" stroke-width="${w}"/><line x1="${e2[0]}" y1="${e2[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="${w}"/><line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="${w}"/>${arrow(a[0], a[1], -1)}${arrow(b[0], b[1], 1)}<text x="${mx}" y="${my}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="${col}" stroke="#fff" stroke-width="${Math.max(2, fs * .22)}" paint-order="stroke">${esc(val)}</text></g>`;
   }
   if (m.type === "hilite") { const a = T(m.pts[0]), b = T(m.pts[1]); return `<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="${m.color || "#ffe14d"}" fill-opacity="${Math.max(0.05, Math.min(1, +m.opacity || .38))}" stroke="${sel ? "#0b0b0b" : "none"}"/>`; }
-  if (m.type === "cloud") { const a = T(m.pts[0]), b = T(m.pts[1]); return `<path d="${cloudPath(a, b, 9 * z)}" fill="none" stroke="${col}" stroke-width="${(sel ? 3 : Math.max(1, +m.width || 2)) * z}"/>` + (m.text ? label([Math.max(a[0], b[0]), Math.min(a[1], b[1]) - 12 * z], m.text, col) : ""); }
+  if (m.type === "cloud") { const a = T(m.pts[0]), b = T(m.pts[1]); return `<path d="${cloudPath(a, b, 9 * z)}" fill="none" stroke="${col}" stroke-width="${sel ? 3 * z : Math.max(hairPx(z), swN(m.width, 2) * z)}"/>` + (m.text ? label([Math.max(a[0], b[0]), Math.min(a[1], b[1]) - 12 * z], m.text, col) : ""); }
   if (m.type === "arrow") { const a = T(m.pts[0]), b = T(m.pts[1]), ang = Math.atan2(b[1] - a[1], b[0] - a[0]), hl = 12 * z;
     const h1 = [b[0] - hl * Math.cos(ang - 0.4), b[1] - hl * Math.sin(ang - 0.4)], h2 = [b[0] - hl * Math.cos(ang + 0.4), b[1] - hl * Math.sin(ang + 0.4)];
-    return `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="${(sel ? 3 : Math.max(1, +m.width || 2)) * z}"/><path d="M${h1[0]} ${h1[1]}L${b[0]} ${b[1]}L${h2[0]} ${h2[1]}" fill="none" stroke="${col}" stroke-width="${(sel ? 3 : Math.max(1, +m.width || 2)) * z}"/>` + (m.text ? label([a[0], a[1] - 12 * z], m.text, col) : ""); }
+    return `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="${sel ? 3 * z : Math.max(hairPx(z), swN(m.width, 2) * z)}"/><path d="M${h1[0]} ${h1[1]}L${b[0]} ${b[1]}L${h2[0]} ${h2[1]}" fill="none" stroke="${col}" stroke-width="${sel ? 3 * z : Math.max(hairPx(z), swN(m.width, 2) * z)}"/>` + (m.text ? label([a[0], a[1] - 12 * z], m.text, col) : ""); }
   const q = T(m.pts[0]), t = m.text || "Note", w = Math.min(320, t.length * 6.6 + 14) * z;
   return `<g><rect x="${q[0]}" y="${q[1] - 11 * z}" width="${w}" height="${22 * z}" rx="${3 * z}" fill="#fffbe0" stroke="${sel ? "#0b0b0b" : col}" stroke-width="${1.5 * z}"/><text x="${q[0] + 7 * z}" y="${q[1] + 4 * z}" font-size="${12 * z}" font-weight="600" fill="#5b3b00">${esc(t.length > 48 ? t.slice(0, 47) + "…" : t)}</text></g>`;
 }
@@ -5520,7 +5524,7 @@ async function addMark(type, pts){
   let text = "";
   if (type === "dimension") {
     const d = toolDefaults();
-    const v = await ask("Dimension", `<div class="grid"><div class="fg"><label>Colour</label><input type="color" id="dimCol" value="${d.dimColor}"></div><div class="fg"><label>Line width (px)</label><input type="number" id="dimW" min="1" max="12" step="1" value="${d.dimWidth}"></div><div class="fg"><label>Text size (px)</label><input type="number" id="dimS" min="8" max="48" step="1" value="${d.dimSize}"></div><div class="fg"><label>Arrow size (px)</label><input type="number" id="dimA" min="5" max="40" step="1" value="${d.dimArrow}"></div><div class="fg"><label>Offset from measured line (pt)</label><input type="number" id="dimO" min="0" max="500" step="1" value="${d.dimOffset}"></div><div class="fg w2"><label>Label override (optional)</label><input type="text" id="dimT" placeholder="Leave blank for measured length"></div></div><p class="small">The default label uses the page scale. Increase text, line and arrow size for printed drawings.</p>`, "Add", () => ({color: $("dimCol").value, width: Math.max(1, Math.min(12, +$("dimW").value || 2)), size: Math.max(8, Math.min(48, +$("dimS").value || 13)), arrow: Math.max(5, Math.min(40, +$("dimA").value || 10)), offset: Math.max(0, Math.min(500, +$("dimO").value || 24)), t: $("dimT").value.trim()}));
+    const v = await ask("Dimension", `<div class="grid"><div class="fg"><label>Colour</label><input type="color" id="dimCol" value="${d.dimColor}"></div><div class="fg"><label>Line width (px)</label><input type="number" id="dimW" min="0" max="24" step="0.25" value="${d.dimWidth}"></div><div class="fg"><label>Text size (px)</label><input type="number" id="dimS" min="8" max="48" step="1" value="${d.dimSize}"></div><div class="fg"><label>Arrow size (px)</label><input type="number" id="dimA" min="5" max="40" step="1" value="${d.dimArrow}"></div><div class="fg"><label>Offset from measured line (pt)</label><input type="number" id="dimO" min="0" max="500" step="1" value="${d.dimOffset}"></div><div class="fg w2"><label>Label override (optional)</label><input type="text" id="dimT" placeholder="Leave blank for measured length"></div></div><p class="small">The default label uses the page scale. Increase text, line and arrow size for printed drawings.</p>`, "Add", () => ({color: $("dimCol").value, width: swN($("dimW").value, 2), size: Math.max(8, Math.min(48, +$("dimS").value || 13)), arrow: Math.max(5, Math.min(40, +$("dimA").value || 10)), offset: Math.max(0, Math.min(500, +$("dimO").value || 24)), t: $("dimT").value.trim()}));
     if (!v) { draw(); return; }
     const m = {id: uid("M"), type, file: S.fileId, page: S.pageNo, pts, text: v.t, color: v.color, width: v.width, size: v.size, arrow: v.arrow, offset: v.offset, at: new Date().toISOString()};
     mutate(() => { (P.proj.marks = P.proj.marks || []).push(m); });
@@ -5720,7 +5724,8 @@ function calloutKnee(r, tip, z, k, fs){ const left = tip[0] < (r[0] + r[2]) / 2,
 function mkSvg(m, T, z, sel){
   const k = Math.abs(T([1, 0])[0] - T([0, 0])[0]) || 1, ex = !!S.mkExport, col = m.color || "#d03b3b", op = m.op == null ? 1 : Math.max(0.05, Math.min(1, +m.op));
   const w = Math.max(0, m.width == null ? 2 : +m.width) * z, P = m.pts.map(T), dash = mkDash(m.dash, w);
-  const strokeA = w > 0 ? `stroke="${col}" stroke-width="${w.toFixed(2)}"${dash ? ` stroke-dasharray="${dash}"` : ""} stroke-linecap="round" stroke-linejoin="round"` : `stroke="none"`;
+  const ws = m.type === "line" || m.type === "polyline" ? Math.max(hairPx(z), w) : w;   // a 0-width line is a hairline (a 0-width box / text has no border)
+  const strokeA = ws > 0 ? `stroke="${col}" stroke-width="${Math.max(hairPx(z), ws).toFixed(2)}"${dash ? ` stroke-dasharray="${dash}"` : ""} stroke-linecap="round" stroke-linejoin="round"` : `stroke="none"`;
   const fillA = m.fill ? `fill="${m.fill}" fill-opacity="${m.fillOp == null ? 0.15 : Math.max(0, Math.min(1, +m.fillOp))}"` : `fill="none"`;
   const pid = m.hatch && m.hatch.p ? "mkp" + (++mkPatSeq) : "", defs = pid ? `<defs>${hatchDef(pid, m.hatch, m.hatch.col || col, k, z)}</defs>` : "";
   const shape = attrs => `<${attrs} ${fillA} ${strokeA}/>` + (pid ? `<${attrs} fill="url(#${pid})" stroke="none"/>` : "");
@@ -5736,7 +5741,7 @@ function mkSvg(m, T, z, sel){
       const Q = P.map(p => p.slice()), L = Math.max(8, 4.5 * Math.max(1, w)), trim = (i, j, kind) => { if (kind !== "arrow") return; const d = dist(Q[i], Q[j]); if (d > L) Q[i] = [Q[i][0] + (Q[j][0] - Q[i][0]) / d * L * .6, Q[i][1] + (Q[j][1] - Q[i][1]) / d * L * .6]; };
       if (Q.length < 2) break; trim(0, 1, m.a0); trim(Q.length - 1, Q.length - 2, m.a1);
       out = glow("M" + P.map(f1).join("L")) + `<path d="M${Q.map(f1).join("L")}" fill="none" ${strokeA}/>` + mkEnd(m.a0, P[0], P[1], Math.max(1, w), col) + mkEnd(m.a1, P[P.length - 1], P[P.length - 2], Math.max(1, w), col); break; }
-    case "pen": { const d = mkSmooth(P), pw = m.hl ? Math.max(1, (+m.width || 9) * k) : Math.max(0.5, w); out = glow(d) + `<path d="${d}" fill="none" stroke="${col}" stroke-width="${pw.toFixed(2)}" stroke-linecap="${m.hl ? "square" : "round"}" stroke-linejoin="round"/>`; break; }
+    case "pen": { const d = mkSmooth(P), pw = m.hl ? Math.max(1, (+m.width || 9) * k) : Math.max(hairPx(z), w); out = glow(d) + `<path d="${d}" fill="none" stroke="${col}" stroke-width="${pw.toFixed(2)}" stroke-linecap="${m.hl ? "square" : "round"}" stroke-linejoin="round"/>`; break; }
     case "text": case "callout": {
       const bi = m.type === "callout" ? 1 : 0, r = mkBox(P[bi], P[bi + 1]);
       if (m.type === "callout") { const {knee, foot} = calloutKnee(r, P[0], z, k, +m.fs || 10), lw = Math.max(1, w || z);
@@ -5998,7 +6003,7 @@ function mkPropsHtml(mk){
     ${textT ? fg("Text", `<textarea data-mprop="text" rows="2" style="width:100%;font:inherit;resize:vertical">${esc(mk.text)}</textarea>`, 3) : t === "stamp" ? fg("Stamp", `<input type="text" data-mprop="stamp.label" value="${esc((mk.stamp || {}).label || "")}">`, 2) + fg("Second line", `<input type="text" data-mprop="stamp.sub" value="${esc((mk.stamp || {}).sub || "")}">`, 2)
       : fg(t === "dimension" ? "Text / label" : t === "link" ? "Tooltip" : t === "redact" ? "Overlay text" : "Comment", `<input type="text" data-mprop="text" value="${esc(mk.text)}" placeholder="${t === "dimension" ? "Override the measured length" : ""}">`, 3)}
     ${t !== "redact" && t !== "link" && t !== "attach" && !(t === "stamp" && (mk.stamp || {}).aid) ? fg(textT ? "Text / line colour" : "Colour", colIn("color", mk.color, "#d03b3b")) : ""}
-    ${strokeT ? fg("Line width", num("width", mk.width == null ? 2 : +mk.width, t === "text" || t === "callout" ? 0 : 1, 24, 0.5)) : t === "pen" && mk.hl ? fg("Width (pt)", num("width", +mk.width || 9, 1, 200, 1)) : ""}
+    ${strokeT ? fg("Line width", num("width", mk.width == null ? 2 : +mk.width, 0, 24, 0.25)) : t === "pen" && mk.hl ? fg("Width (pt)", num("width", +mk.width || 9, 1, 200, 1)) : ""}
     ${dashT ? fg("Line style", sel("dash", mk.dash || "solid", MK_DASH)) : ""}
     ${nu && t !== "link" && t !== "attach" && t !== "redact" ? fg("Opacity", num("op", mk.op == null ? 1 : +mk.op, 0.05, 1, 0.05)) : ""}
     ${t === "hilite" ? fg("Opacity", num("opacity", +mk.opacity || .38, 0.05, 1, 0.05)) : ""}
@@ -6412,14 +6417,14 @@ const PRESETS = [
 async function defaultsDialog(){
   const d = toolDefaults();
   const v = await ask("Professional takeoff defaults", `<p class="small">These defaults are used for new conditions, measurements, markups and dimensions. Existing objects are unchanged unless you select one of the apply options.</p>
-    <div class="grid"><div class="fg"><label>Measurement colour</label><input type="color" id="dfCond" value="${d.condColor}"></div><div class="fg"><label>Measurement line weight</label><input type="number" id="dfCondW" min="0.25" max="12" step="0.25" value="${d.condWidth}"></div>
-    <div class="fg"><label>Markup colour</label><input type="color" id="dfMark" value="${d.markColor}"></div><div class="fg"><label>Markup line weight</label><input type="number" id="dfMarkW" min="0.25" max="12" step="0.25" value="${d.markWidth}"></div>
-    <div class="fg"><label>Dimension colour</label><input type="color" id="dfDim" value="${d.dimColor}"></div><div class="fg"><label>Dimension line weight</label><input type="number" id="dfDimW" min="0.25" max="12" step="0.25" value="${d.dimWidth}"></div>
+    <div class="grid"><div class="fg"><label>Measurement colour</label><input type="color" id="dfCond" value="${d.condColor}"></div><div class="fg"><label>Measurement line weight</label><input type="number" id="dfCondW" min="0" max="24" step="0.25" value="${d.condWidth}"></div>
+    <div class="fg"><label>Markup colour</label><input type="color" id="dfMark" value="${d.markColor}"></div><div class="fg"><label>Markup line weight</label><input type="number" id="dfMarkW" min="0" max="24" step="0.25" value="${d.markWidth}"></div>
+    <div class="fg"><label>Dimension colour</label><input type="color" id="dfDim" value="${d.dimColor}"></div><div class="fg"><label>Dimension line weight</label><input type="number" id="dfDimW" min="0" max="24" step="0.25" value="${d.dimWidth}"></div>
     <div class="fg"><label>Dimension text size</label><input type="number" id="dfDimS" min="8" max="48" value="${d.dimSize}"></div><div class="fg"><label>Dimension arrow size</label><input type="number" id="dfDimA" min="5" max="40" value="${d.dimArrow}"></div>
     <div class="fg"><label>Dimension offset</label><input type="number" id="dfDimO" min="0" max="500" value="${d.dimOffset}"></div><div class="fg"><label>Highlight colour</label><input type="color" id="dfHi" value="${d.hiliteColor}"></div>
     <div class="fg"><label>Highlight opacity</label><input type="number" id="dfHiO" min="0.05" max="1" step="0.05" value="${d.hiliteOpacity}"></div></div>
     <div class="row" style="margin-top:10px"><label class="pk"><input type="checkbox" id="dfApplyMk"> Apply markup defaults to existing markups</label><label class="pk"><input type="checkbox" id="dfApplyC"> Apply measurement colour / weight to all existing conditions</label></div>`, "Save defaults", () => ({
-      condColor: $("dfCond").value, condWidth: Math.max(0.25, Math.min(12, +$("dfCondW").value || 2)), markColor: $("dfMark").value, markWidth: Math.max(0.25, Math.min(12, +$("dfMarkW").value || 2)), dimColor: $("dfDim").value, dimWidth: Math.max(0.25, Math.min(12, +$("dfDimW").value || 2)), dimSize: Math.max(8, Math.min(48, +$("dfDimS").value || 13)), dimArrow: Math.max(5, Math.min(40, +$("dfDimA").value || 10)), dimOffset: Math.max(0, Math.min(500, +$("dfDimO").value || 24)), hiliteColor: $("dfHi").value, hiliteOpacity: Math.max(.05, Math.min(1, +$("dfHiO").value || .38)), applyMk: $("dfApplyMk").checked, applyC: $("dfApplyC").checked
+      condColor: $("dfCond").value, condWidth: swN($("dfCondW").value, 2), markColor: $("dfMark").value, markWidth: swN($("dfMarkW").value, 2), dimColor: $("dfDim").value, dimWidth: swN($("dfDimW").value, 2), dimSize: Math.max(8, Math.min(48, +$("dfDimS").value || 13)), dimArrow: Math.max(5, Math.min(40, +$("dfDimA").value || 10)), dimOffset: Math.max(0, Math.min(500, +$("dfDimO").value || 24)), hiliteColor: $("dfHi").value, hiliteOpacity: Math.max(.05, Math.min(1, +$("dfHiO").value || .38)), applyMk: $("dfApplyMk").checked, applyC: $("dfApplyC").checked
     }));
   if (!v) return;
   const d2 = Object.assign({}, v); delete d2.applyMk; delete d2.applyC; saveToolDefaults(d2);
@@ -9614,13 +9619,13 @@ function setDefaultsFromSelection(o){
   if (o && MK_TYPES.has(o.type)) { const kind = mkKindOf(o); saveMkStyle(kind, mkStyleOf(o)); toast((MK_TOOL_NAMES["mk_" + kind] || MARK_TOOLS[o.type]) + ": this style is the default for new ones", 2400); return; }
   const d = toolDefaults();
   if (o && o.type) {
-    if (o.type === "dimension") Object.assign(d, {dimColor: o.color || d.dimColor, dimWidth: +o.width || d.dimWidth, dimSize: +o.size || d.dimSize, dimArrow: +o.arrow || d.dimArrow, dimOffset: +o.offset || d.dimOffset});
+    if (o.type === "dimension") Object.assign(d, {dimColor: o.color || d.dimColor, dimWidth: swN(o.width, d.dimWidth), dimSize: +o.size || d.dimSize, dimArrow: +o.arrow || d.dimArrow, dimOffset: +o.offset || d.dimOffset});
     else if (o.type === "hilite") Object.assign(d, {hiliteColor: o.color || d.hiliteColor, hiliteOpacity: +o.opacity || d.hiliteOpacity});
-    else Object.assign(d, {markColor: o.color || d.markColor, markWidth: +o.width || d.markWidth});
+    else Object.assign(d, {markColor: o.color || d.markColor, markWidth: swN(o.width, d.markWidth)});
     saveToolDefaults(d); toast(MARK_TOOLS[o.type] + " saved as the default", 2200); return;
   }
   const c = o && o.cond ? cond(o.cond) : null;
-  if (c) { d.condColor = c.color || d.condColor; d.condWidth = +c.sw || d.condWidth; saveToolDefaults(d); toast("Measurement defaults saved from " + c.name, 2200); }
+  if (c) { d.condColor = c.color || d.condColor; d.condWidth = swN(c.sw, d.condWidth); saveToolDefaults(d); toast("Measurement defaults saved from " + c.name, 2200); }
 }
 
 function ctxMark(m){
@@ -10203,7 +10208,7 @@ function wire(){
       else if (f === "ow" || f === "oh") { const v = e.target.value.trim() ? parseFt(e.target.value) : 0; if (!isNaN(v)) it[f] = v; }
       else if (f === "doorW") { const s = e.target.value.trim(); if (!s) delete it.doorW; else { const v = s.split("+").reduce((a, x) => a + parseFt(x), 0); if (!isNaN(v) && v >= 0) it.doorW = r3(v); } }
       else if (f === "color") { const c = cond(it.cond); if (c && HEXCOL.test(e.target.value)) c.color = e.target.value; }
-      else if (f === "sw") { const c = cond(it.cond); if (c) c.sw = Math.max(0.25, Math.min(24, +e.target.value || 2)); }
+      else if (f === "sw") { const c = cond(it.cond); if (c) c.sw = swN(e.target.value, c.sw); }
       else if (f === "sch") { const s = schOf(e.target.value); if (s) { it.sch = s.id; it.label = s.mark; } else delete it.sch; }
       else if (LOC_KEYS.includes(f)) { const v = e.target.value.trim(); if (v) it[f] = v; else delete it[f]; }
       else it[f] = e.target.value;
@@ -13007,21 +13012,21 @@ function normalizeChestProfile(p){
   }
   if (p.kind === "markup" && MARK_PROFILE_TYPES.includes(p.type)) {
     const q = p.props || {}, d = toolDefaults();
-    const props = {color: color(q.color, p.type === "dimension" ? d.dimColor : p.type === "hilite" ? d.hiliteColor : d.markColor), width: num(q.width, d.markWidth, 1, 12)};
-    if (p.type === "dimension") Object.assign(props, {width: num(q.width, d.dimWidth, 1, 12), size: num(q.size, d.dimSize, 8, 48), arrow: num(q.arrow, d.dimArrow, 5, 40), offset: num(q.offset, d.dimOffset, 0, 500)});
+    const props = {color: color(q.color, p.type === "dimension" ? d.dimColor : p.type === "hilite" ? d.hiliteColor : d.markColor), width: num(q.width, d.markWidth, 0, 24)};
+    if (p.type === "dimension") Object.assign(props, {width: num(q.width, d.dimWidth, 0, 24), size: num(q.size, d.dimSize, 8, 48), arrow: num(q.arrow, d.dimArrow, 5, 40), offset: num(q.offset, d.dimOffset, 0, 500)});
     if (p.type === "hilite") props.opacity = num(q.opacity, d.hiliteOpacity, .05, 1);
     return Object.assign(common, {kind: "markup", type: p.type, props});
   }
   if (p.kind === "condition") {
     const q = p.condition || {}, type = ["area", "linear", "count"].includes(q.type) ? q.type : "area", units = UNITS[type], unit = units.includes(q.unit) ? q.unit : units[0];
-    const condition = {type, unit, color: color(q.color, toolDefaults().condColor), sw: num(q.sw, toolDefaults().condWidth, 1, 12), h: q.h === "" ? "" : num(q.h, 0, 0, 9999), t: q.t === "" ? "" : num(q.t, 0, 0, 9999), faces: Math.round(num(q.faces, 1, 1, 2)), dedMin: num(q.dedMin, 0, 0, 9999)};
+    const condition = {type, unit, color: color(q.color, toolDefaults().condColor), sw: num(q.sw, toolDefaults().condWidth, 0, 24), h: q.h === "" ? "" : num(q.h, 0, 0, 9999), t: q.t === "" ? "" : num(q.t, 0, 0, 9999), faces: Math.round(num(q.faces, 1, 1, 2)), dedMin: num(q.dedMin, 0, 0, 9999)};
     if (type === "count") { condition.sym = ["check", "circle", "square", "triangle", "diamond", "cross", "dot"].includes(q.sym) ? q.sym : "circle"; condition.cap = ["seq", "name", "text", "none"].includes(q.cap) ? q.cap : "seq"; condition.capText = String(q.capText || "").slice(0, 40); condition.sz = ["s", "m", "l"].includes(q.sz) ? q.sz : "m"; }
     return Object.assign(common, {kind: "condition", condition});
   }
   if (p.kind === "defaults") {
     const q = p.settings || {}, d = toolDefaults(), settings = Object.assign({}, d);
     ["condColor", "markColor", "dimColor", "hiliteColor"].forEach(k => settings[k] = color(q[k], d[k]));
-    ["condWidth", "markWidth", "dimWidth"].forEach(k => settings[k] = num(q[k], d[k], 1, 12));
+    ["condWidth", "markWidth", "dimWidth"].forEach(k => settings[k] = num(q[k], d[k], 0, 24));
     settings.dimSize = num(q.dimSize, d.dimSize, 8, 48); settings.dimArrow = num(q.dimArrow, d.dimArrow, 5, 40); settings.dimOffset = num(q.dimOffset, d.dimOffset, 0, 500); settings.hiliteOpacity = num(q.hiliteOpacity, d.hiliteOpacity, .05, 1);
     return Object.assign(common, {kind: "defaults", settings});
   }
@@ -13034,14 +13039,14 @@ function toolChestProfiles(){
   return list;
 }
 function storeToolChestProfiles(list){ pref(CHEST_KEY, JSON.stringify((list || []).map(normalizeChestProfile).filter(Boolean))); }
-function chestConditionSnapshot(c){ return {type: c.type, unit: c.unit, color: c.color, sw: +c.sw || 2, h: c.h || "", t: c.t || "", faces: +c.faces || 1, dedMin: +c.dedMin || 0, sym: c.sym || "circle", cap: c.cap || "seq", capText: c.capText || "", sz: c.sz || "m"}; }
+function chestConditionSnapshot(c){ return {type: c.type, unit: c.unit, color: c.color, sw: swN(c.sw, 2), h: c.h || "", t: c.t || "", faces: +c.faces || 1, dedMin: +c.dedMin || 0, sym: c.sym || "circle", cap: c.cap || "seq", capText: c.capText || "", sz: c.sz || "m"}; }
 function captureChestProfile(o, name){
   const d = toolDefaults(), n = String(name || "My tool").trim().slice(0, 60) || "My tool";
   if (o && MK_TYPES.has(o.type)) { const props = mkStyleOf(o); if (o.type === "stamp" && o.stamp) props.stamp = {label: o.stamp.label, color: o.color || "#1e8e5a", tpl: S.stampSel && S.stampSel.label === o.stamp.label ? S.stampSel.tpl || "" : STAMP_TPL};
     return {id: uid("TC"), name: n, kind: "markup", type: mkKindOf(o), props, favorite: false, created: new Date().toISOString()}; }
   if (o && MARK_PROFILE_TYPES.includes(o.type)) {
-    const props = {color: o.color || d.markColor, width: +o.width || d.markWidth};
-    if (o.type === "dimension") Object.assign(props, {color: o.color || d.dimColor, width: +o.width || d.dimWidth, size: +o.size || d.dimSize, arrow: +o.arrow || d.dimArrow, offset: +o.offset || d.dimOffset});
+    const props = {color: o.color || d.markColor, width: swN(o.width, d.markWidth)};
+    if (o.type === "dimension") Object.assign(props, {color: o.color || d.dimColor, width: swN(o.width, d.dimWidth), size: +o.size || d.dimSize, arrow: +o.arrow || d.dimArrow, offset: +o.offset || d.dimOffset});
     if (o.type === "hilite") Object.assign(props, {color: o.color || d.hiliteColor, opacity: +o.opacity || d.hiliteOpacity});
     return {id: uid("TC"), name: n, kind: "markup", type: o.type, props, favorite: false, created: new Date().toISOString()};
   }
@@ -13058,9 +13063,9 @@ function applyChestProfile(p){
   }
   if (p.kind === "markup") {
     const d = toolDefaults(), q = p.props || {};
-    if (p.type === "dimension") Object.assign(d, {dimColor: q.color || d.dimColor, dimWidth: +q.width || d.dimWidth, dimSize: +q.size || d.dimSize, dimArrow: +q.arrow || d.dimArrow, dimOffset: +q.offset || d.dimOffset});
+    if (p.type === "dimension") Object.assign(d, {dimColor: q.color || d.dimColor, dimWidth: swN(q.width, d.dimWidth), dimSize: +q.size || d.dimSize, dimArrow: +q.arrow || d.dimArrow, dimOffset: +q.offset || d.dimOffset});
     else if (p.type === "hilite") Object.assign(d, {hiliteColor: q.color || d.hiliteColor, hiliteOpacity: +q.opacity || d.hiliteOpacity});
-    else Object.assign(d, {markColor: q.color || d.markColor, markWidth: +q.width || d.markWidth});
+    else Object.assign(d, {markColor: q.color || d.markColor, markWidth: swN(q.width, d.markWidth)});
     saveToolDefaults(d); setTool(p.type); toast("Tool Chest: " + p.name + " — click the drawing to place", 3000); return;
   }
   if (!P.proj) return toast("Open a project before using a measurement profile");
