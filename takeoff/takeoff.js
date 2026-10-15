@@ -293,7 +293,7 @@ function migrate(p, rep){
   const pt = q => arr(q) && q.length >= 2 && isFinite(num(q[0])) && isFinite(num(q[1])) ? [num(q[0]), num(q[1])] : null;
   const pts = (P0, min) => { if (!arr(P0)) return null; const o = P0.map(pt); return o.every(Boolean) && o.length >= min ? o : null; };
   if (!arr(p.files)) p.files = []; if (!arr(p.conds)) p.conds = []; if (!arr(p.items)) p.items = []; if (!arr(p.marks)) p.marks = []; if (!arr(p.openings)) p.openings = [];
-  if (!obj(p.scales)) p.scales = {}; if (!obj(p.viewports)) p.viewports = {}; if (!obj(p.last)) p.last = {}; if (!obj(p.sheets)) p.sheets = {};
+  if (!obj(p.scales)) p.scales = {}; if (!obj(p.viewports)) p.viewports = {}; if (!obj(p.last)) p.last = {}; if (!obj(p.sheets)) p.sheets = {}; if (!obj(p.bbImp)) p.bbImp = {};
   if (typeof p.name !== "string") p.name = String(p.name == null ? "Untitled takeoff" : p.name);
   let n = p.files.length; p.files = p.files.filter(f => obj(f) && f.id != null); if (p.files.length < n) note((n - p.files.length) + " PDF entr" + (n - p.files.length > 1 ? "ies" : "y") + " without an id left out");
   p.files.forEach(f => { f.id = String(f.id); f.name = String(f.name == null ? f.id : f.name); f.pages = Math.max(1, Math.round(num(f.pages)) || 1); });
@@ -402,7 +402,7 @@ if (TABCH) TABCH.onmessage = e => { const m = e.data || {}; if (!P.proj || m.tab
   if (m.t === "open") tabSay({t: "here", id: P.proj.id});
   S.otherTab = m.t === "saved" ? "changed in another tab or window at " + String(m.at || "").slice(11, 16) : "also open in another tab or window";
   renderSheet(); };
-const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd"];
+const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd", "bbImp"];
 function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 /* every change goes through mutate(): the project before it is kept for Ctrl+Z (200 steps), with a name for the
    undo / redo buttons ("Undo: Move 3 measurements") */
@@ -457,7 +457,8 @@ function draftBtns(){
 }
 function undo(){ if (!S.undo.length) return; const e = undoEntry(S.undo.pop()); S.redo.push({js: snapshot(), label: e.label}); restore(e.js); toast("Undone" + (e.label ? ": " + e.label : ""), 1600); }
 function redo(){ if (!S.redo.length) return; const e = undoEntry(S.redo.pop()); S.undo.push({js: snapshot(), label: e.label}); restore(e.js); toast("Redone" + (e.label ? ": " + e.label : ""), 1600); }
-function restore(js){ const o = JSON.parse(js); UNDO_KEYS.forEach(k => { if (o[k] !== undefined) P.proj[k] = o[k]; }); migrate(P.proj);
+function restore(js){ const o = JSON.parse(js), bb0 = P.proj.bbImp || {}; UNDO_KEYS.forEach(k => { if (o[k] !== undefined) P.proj[k] = o[k]; }); migrate(P.proj);
+  bbRedraw(Object.keys(Object.assign({}, bb0, P.proj.bbImp)).filter(id => !!(bb0[id] || {}).off !== !!(P.proj.bbImp[id] || {}).off));   // a Bluebeam import taken back (or redone): the PDF's own markups shown again
   if (S.sel && !P.proj.items.some(i => i.id === S.sel)) { S.sel = null; S.selPt = -1; }
   const live = new Set(P.proj.items.map(i => i.id).concat((P.proj.marks || []).map(m => m.id))); [...S.multi].forEach(id => { if (!live.has(id)) S.multi.delete(id); });
   if (S.selMark && !live.has(S.selMark)) S.selMark = null;
@@ -658,6 +659,7 @@ async function addFiles(files){
       toast(how === "replace" ? f.name + " replaced — " + d.numPages + " page" + (d.numPages > 1 ? "s" : "") + " · check the measurements sit on the new drawing"
         : name + (name !== f.name ? " (added as a new drawing)" : how === "same" ? " (same drawing — re-attached)" : "") + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""), how === "new" && name === f.name ? 2600 : 5000);
       if (cad) setTimeout(() => toast(cadSay(name, cad.meta), 9000), 300);
+      else if (how !== "replace") await bbImport(meta.id, {auto: true}).catch(e => toast("Bluebeam markups could not be read: " + (e.message || e), 6000));   // markups taken in Bluebeam: brought in as conditions
     } catch (e) { const m = e && e.message || String(e); toast(/password/i.test(m) ? m : f.name + " could not be opened — " + m + (/Invalid PDF|empty/i.test(m) ? " (is it a PDF, and complete?)" : ""), 6000); }
     busy("");
   }
@@ -698,7 +700,8 @@ async function boundCfg(fileId){   // an optional-content config with only the r
   S.ocBound[fileId] = cfg; return cfg;
 }
 const ocOn = (cfg, id) => { const g = cfg && cfg.getGroup && cfg.getGroup(id); return !g || g.visible !== false; };   // (isVisible() wants a group object, not an id)
-const lay = fileId => S.ocgs && S.ocgs[fileId] ? {optionalContentConfigPromise: Promise.resolve(S.ocgs[fileId])} : {};
+const bbOffOf = fileId => [P.proj].concat(typeof PANES !== "undefined" ? PANES.map(p => p.sess && p.sess.proj) : []).some(pr => pr && pr.bbImp && pr.bbImp[fileId] && pr.bbImp[fileId].off);
+const lay = fileId => Object.assign(S.ocgs && S.ocgs[fileId] ? {optionalContentConfigPromise: Promise.resolve(S.ocgs[fileId])} : {}, bbOffOf(fileId) ? {annotationMode: 0} : {});   // (0: the PDF's own markups not drawn — imported from Bluebeam)
 async function loadLayers(fileId, proj = P.proj){
   S.ocgs = S.ocgs || {};
   if (S.ocgs[fileId] !== undefined) return S.ocgs[fileId];
@@ -995,7 +998,7 @@ async function indexPage(){
   if (!S.geo[key]) {
     busy("Reading drawing lines…");
     try {
-      const ops = await page.getOperatorList(), O = pdfjs.OPS, segs = [], stack = [], styles = [], styleIx = new Map();
+      const ops = await page.getOperatorList(bbOffOf(file) ? {annotationMode: 0} : {}), O = pdfjs.OPS, segs = [], stack = [], styles = [], styleIx = new Map();
       let ctm = base.transform.slice(), images = 0, lw = 1, dash = false, sCol = "0,0,0", fCol = "0,0,0", sp = 0, pend = -1, pendCtm = ctm, cur = null, start = null;
       const mc = [], layerIds = [], layerIx = new Map(); let lay0 = -1;   // PDF layers (optional content): the layer each line is drawn on
       const curLayer = () => { for (let j = mc.length - 1; j >= 0; j--) if (mc[j] >= 0) return mc[j]; return -1; };
@@ -1306,6 +1309,184 @@ function applyPdfScales(key, V){
   const add = vps.length && !(P.proj.viewports[key] || []).length;
   if (add) P.proj.viewports[key] = vps.map((v, i) => ({id: uid("V"), name: v.name || "PDF viewport " + (i + 1), r: v.r, ptPerFt: v.ptPerFt, text: v.label + " · saved in the PDF"}));
   return {main, vps: add ? vps.length : 0};
+}
+/* ------------------------------------------------------------------ Bluebeam markups → takeoff
+   A PDF marked up in Bluebeam Revu keeps its markups as PDF annotations. A measurement carries its intent (/IT: PolygonDimension
+   an area, PolyLineDimension / LineDimension a length, PolygonCount one marker of a count), the scale it was taken at (/Measure,
+   like the page's /VP), its subject (/Subj — the item's name in Bluebeam's Markups List and legend), label, colours and the
+   quantity Bluebeam showed (/Contents, e.g. "127.26 sf"). Each subject becomes a condition of that kind (one already in the
+   project with the same name and kind is used), each measurement an item on it — voids (/Cutouts) as deductions — and the other
+   markups (text boxes, rectangles, ellipses, lines, polylines, polygons, pen) this app's own markups, in Bluebeam's colours and
+   widths. The PDF's own drawing of its annotations is then switched off for that PDF, so nothing shows twice, and every quantity is
+   checked against Bluebeam's. What was imported (by /NM, so importing again brings only new ones) and whether the PDF's own markups
+   are hidden is kept in P.proj.bbImp[fileId] — a project key Ctrl+Z restores with the measurements. */
+const BB_MK = {FreeText: "text", Square: "box", Circle: "ellipse", Line: "line", PolyLine: "polyline", Polygon: "polygon", Ink: "pen"};
+const BB_SYM = {Checkmark: "check", Circle: "circle", Square: "square", Diamond: "diamond", Triangle: "triangle", Cross: "cross", Star: "star"};
+function bbKind(a){   // area | len | perim | count | a markup type | "" (not brought in)
+  const meas = a.ptPerFt > 0;
+  if (a.sub === "Polygon" && /Count/i.test(a.it)) return "count";
+  if (a.sub === "Polygon" && meas) return /Perimeter/i.test(a.it) ? "perim" : "area";
+  if ((a.sub === "PolyLine" || a.sub === "Line") && meas) return "len";
+  if ((a.sub === "Square" || a.sub === "Circle") && meas && /Dimension|Area/i.test(a.it)) return "area";
+  return BB_MK[a.sub] || "";
+}
+function bbRead(fileId){   // -> {pages: {pageNo: [annotation in PDF user space]}, n}; n 0 when the PDF has no markups
+  S.bbRd = S.bbRd || {};
+  return S.bbRd[fileId] = S.bbRd[fileId] || (async () => {
+    const out = {pages: {}, n: 0};
+    try {
+      const rec = await dbGet("pdfs", fileId); if (!rec || rec.src) return out;   // (an AutoCAD drawing has no markups)
+      const pd = await doc(fileId); let any = false;   // pdf.js has the PDF open already: a page with a markup on it, before reading the file again
+      for (let i = 1; i <= pd.numPages && !any; i++) any = (await (await pd.getPage(i)).getAnnotations()).some(x => /^(Polygon|PolyLine|Line|Square|Circle|FreeText|Ink)$/.test(x.subtype));
+      if (!any) return out;
+      const raw = new Uint8Array(rec.data.slice(0));
+      if (!bytesHave(raw, "/ObjStm") && (!bytesHave(raw, "/Annots") || !["/Subj", "/Measure", "/FreeText", "/PolyLine", "/Polygon", "/Square", "/Ink"].some(s => bytesHave(raw, s)))) return out;   // (in compressed object streams nothing shows as plain text)
+      const L = await loadPdfLib(), d = await L.PDFDocument.load(raw, {ignoreEncryption: true, updateMetadata: false, throwOnInvalidObject: false, parseSpeed: 1500});
+      const N = n => L.PDFName.of(n), num = o => o instanceof L.PDFNumber ? o.asNumber() : NaN, txt = o => { try { return o && o.decodeText ? o.decodeText() : ""; } catch (e) { return ""; } };
+      const nam = o => o instanceof L.PDFName ? String(o).replace(/^\//, "") : "", nums = o => o instanceof L.PDFArray ? Array.from({length: o.size()}, (_, i) => num(o.lookup(i))) : null;
+      const rgb = o => { const v = nums(o); if (!v || v.some(x => !isFinite(x))) return null; return v.length === 3 ? v : v.length === 1 ? [v[0], v[0], v[0]] : v.length === 4 ? [0, 1, 2].map(i => (1 - v[i]) * (1 - v[3])) : null; };
+      const scale = m => { if (!(m instanceof L.PDFDict)) return {}; const X = m.lookup(N("X")), f0 = X instanceof L.PDFArray && X.size() ? X.lookup(0) : null; if (!(f0 instanceof L.PDFDict)) return {};
+        const C = num(f0.lookup(N("C"))), U = txt(f0.lookup(N("U"))).trim().toLowerCase(), u = FT_PER.find(([re]) => re.test(U)); const k = C > 0 && u ? 1 / (C * u[1]) : 0;
+        return {ptPerFt: k > 0.01 && k < 900 ? k : 0, rl: txt(m.lookup(N("R"))).trim().replace(/^(.*?=\s*[\d.]+\s*(?:ft|in|mm|cm|m|yd|'|")).*$/i, "$1")}; };   // "0.59 in = 3 ft' in\"" (shown in ft-in) → "0.59 in = 3 ft"
+      d.getPages().forEach((pg, i) => {
+        const an = pg.node.lookup(N("Annots")); if (!(an instanceof L.PDFArray)) return;
+        const uu = pg.node.lookup(N("UserUnit")); if (uu && num(uu) !== 1) return;
+        const list = [];
+        for (let j = 0; j < an.size(); j++) {
+          const a = an.lookup(j); if (!(a instanceof L.PDFDict)) continue;
+          const sub = nam(a.lookup(N("Subtype"))); if (!/^(Polygon|PolyLine|Line|Square|Circle|FreeText|Ink|Stamp|Text|Caret|Highlight|FileAttachment|Sound)$/.test(sub)) continue;   // links, popups and form fields are not markups
+          if ((num(a.lookup(N("F"))) || 0) & 2) continue;   // hidden
+          let m = a.lookup(N("Measure")); if (!(m instanceof L.PDFDict)) m = a.lookup(N("BBMeasure"));
+          const bs = a.lookup(N("BS")), bd = a.lookup(N("Border")), oc = a.lookup(N("OC")), ink = a.lookup(N("InkList")), cut = a.lookup(N("Cutouts"));
+          const ds = txt(a.lookup(N("DS"))), dsCol = /color:\s*(#[0-9a-f]{6})/i.exec(ds), dsFs = /font:[^;]*?([\d.]+)pt/i.exec(ds);
+          const o = Object.assign({page: i + 1, nm: txt(a.lookup(N("NM"))).trim() || "p" + (i + 1) + "#" + j, sub, it: nam(a.lookup(N("IT"))), subj: txt(a.lookup(N("Subj"))).replace(/\s+/g, " ").trim(),
+            label: txt(a.lookup(N("Label"))).trim(), contents: txt(a.lookup(N("Contents"))), author: txt(a.lookup(N("T"))).trim(), c: rgb(a.lookup(N("C"))), ic: rgb(a.lookup(N("IC"))),
+            ca: num(a.lookup(N("CA"))), fop: num(a.lookup(N("FillOpacity"))), bw: bs instanceof L.PDFDict ? num(bs.lookup(N("W"))) : (nums(bd) || [])[2], dash: bs instanceof L.PDFDict && nam(bs.lookup(N("S"))) === "D",
+            rect: nums(a.lookup(N("Rect"))), v: nums(a.lookup(N("Vertices"))), l: nums(a.lookup(N("L"))), ink: ink instanceof L.PDFArray ? Array.from({length: ink.size()}, (_, q) => nums(ink.lookup(q))).filter(Boolean) : null,
+            cut: cut instanceof L.PDFArray ? Array.from({length: cut.size()}, (_, q) => nums(cut.lookup(q))).filter(x => x && x.length >= 6) : null,
+            bm: nam(a.lookup(N("BM"))) === "Multiply", cs: nam(a.lookup(N("CountStyle"))), tcol: dsCol ? dsCol[1].toLowerCase() : "", fs: dsFs ? +dsFs[1] : 0, bold: /font:[^;]*\bbold\b/i.test(ds),
+            layer: oc instanceof L.PDFDict ? txt(oc.lookup(N("Name"))).trim() : "", legend: !!a.lookup(N("BSILegend"))}, scale(m));
+          o.kind = bbKind(o); list.push(o);
+        }
+        if (list.length) { out.pages[i + 1] = list; out.n += list.length; }
+      });
+    } catch (e) { /* encrypted or unreadable — no markups read */ }
+    return out;
+  })();
+}
+const bbHex = c => c ? "#" + c.map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("") : "";
+const bbPct = v => isFinite(v) && v >= 0 && v <= 1 ? Math.round(v * 100) : null;
+function bbQty(s){   // the quantity Bluebeam wrote: {v, dec} from "127.26 sf", "L = 21.8 ft", "401\r43.04 sf", "12'-6\"", "28"
+  const t = String(s || "").split(/[\r\n]+/).map(x => x.trim()).filter(Boolean).pop() || "";
+  const fi = /(-?\d+)'\s*-?\s*(\d+(?:\.\d+)?)\s*(?:"|'')/.exec(t); if (fi && !/sf|sq|ft²|ft2/i.test(t)) return {v: +fi[1] + +fi[2] / 12, dec: 3};
+  const m = /(-?[\d,]*\.?\d+)\s*(sf|sq\.?\s*ft|ft²|ft2|ft|lf|')?\s*$/i.exec(t.replace(/^[A-Z]\s*=\s*/i, "")); if (!m) return null;
+  const n = m[1].replace(/,/g, ""); return {v: +n, dec: (n.split(".")[1] || "").length};
+}
+async function bbImport(fileId, o = {}){   // o.auto: right after the PDF was added (quiet when there is nothing to bring in)
+  if (!P.proj) return;
+  const f = P.proj.files.find(x => x.id === fileId); if (!f) return;
+  if (!o.auto) busy("Reading the markups in " + f.name + "…");
+  let R; try { R = await bbRead(fileId); } finally { if (!o.auto) busy(""); }
+  const done = new Set(((P.proj.bbImp || {})[fileId] || {}).nms || []), todo = [], skip = {};
+  Object.entries(R.pages).forEach(([pn, L]) => L.forEach(a => { if (done.has(a.nm)) return; if (a.kind && !a.legend) todo.push(a); else if (a.sub !== "Popup") { const w = a.legend ? "Legend" : a.sub === "Text" ? "Note" : a.sub; skip[w] = (skip[w] || 0) + 1; } }));
+  if (!P.proj.bbImp) P.proj.bbImp = {};   // (there before the import, so Ctrl+Z puts back "nothing imported")
+  if (!todo.length) { if (!o.auto) toast(R.n ? "No new Bluebeam markups in " + f.name + " — all already imported" : "No Bluebeam markups in " + f.name, 4000); return {n: 0}; }
+  const d = await doc(fileId), vps = {};
+  for (const pn of new Set(todo.map(a => a.page))) vps[pn] = (await d.getPage(+pn)).getViewport({scale: 1});
+  const meas = todo.filter(a => ["area", "len", "perim", "count"].includes(a.kind)), marks = todo.filter(a => !["area", "len", "perim", "count"].includes(a.kind));
+  const rep = [], made = {conds: 0, items: 0, marks: 0}, scaleSay = [], now = new Date().toISOString();
+  mutate(() => {
+    // the page's scale: the one most of its measurements were taken at (a scale set by calibrating is kept)
+    Object.keys(vps).forEach(pn => {
+      const ks = meas.filter(a => a.page === +pn && a.ptPerFt > 0).map(a => a.ptPerFt); if (!ks.length) return;
+      const cnt = new Map(); ks.forEach(k => { const r = +k.toPrecision(6); cnt.set(r, (cnt.get(r) || 0) + 1); });
+      const k = [...cnt.entries()].sort((x, y) => y[1] - x[1])[0][0], key = keyOf(fileId, +pn), sc = P.proj.scales[key], rl = (meas.find(a => a.page === +pn && Math.abs(a.ptPerFt - k) / k < 1e-4) || {}).rl || "";
+      if (!sc || (sc.how !== "calibrated" && Math.abs(sc.ptPerFt - k) / k > 0.002)) { P.proj.scales[key] = {ptPerFt: k, how: "pdf", text: rl || "1 ft = " + k.toFixed(4) + " pt", note: "scale the Bluebeam measurements were taken at", factor: 1, verified: false, at: now}; scaleSay.push("p." + pn + ": " + (rl || k.toFixed(3) + " pt/ft")); }
+    });
+    const condOf = (a, type) => {
+      const name = (a.subj || {area: "Area Measurement", linear: "Length Measurement", count: "Count Measurement"}[type]).slice(0, 80);
+      let c = P.proj.conds.find(x => x.type === type && x.name.trim().toLowerCase() === name.toLowerCase()); if (c) return c;
+      const line = bbHex(a.c), fill = bbHex(a.ic), col = (type === "linear" ? line || fill : fill || line) || COLORS[P.proj.conds.length % COLORS.length];
+      c = {id: uid("C"), name, type, unit: type === "area" ? "Sft" : type === "count" ? "Nos" : "ft", color: col, h: "", t: "", faces: 1, dedMin: 0, bb: true};
+      const ap = {blend: a.bm ? "multiply" : "normal", lbg: false, fb: a.bold};   // labels as Bluebeam's captions: its text colour, no box
+      if (a.tcol) ap.fcol = a.tcol;
+      if (type === "area" && bbPct(a.fop) != null) ap.fillOp = bbPct(a.fop);
+      if (type === "count") { c.sym = BB_SYM[a.cs] || "circle"; if (bbPct(a.ca) != null) ap.fillOp = bbPct(a.ca); }
+      else { if (a.bw > 0) { c.sw = +a.bw.toFixed(2); ap.swU = "pt"; } if (bbPct(a.ca) != null && bbPct(a.ca) < 100) ap.lineOp = bbPct(a.ca); if (a.dash) ap.dash = "dash"; }
+      c.ap = apClean(c, ap); if (!Object.keys(c.ap).length) delete c.ap;
+      P.proj.conds.push(c); made.conds++; return c;
+    };
+    meas.forEach(a => {
+      const vp = vps[a.page], q = (x, y) => vp.convertToViewportPoint(x, y), pairs = v => { const out = []; for (let i = 0; i + 1 < (v || []).length; i += 2) if (isFinite(v[i]) && isFinite(v[i + 1])) out.push(q(v[i], v[i + 1])); return out; };
+      const type = a.kind === "area" ? "area" : a.kind === "count" ? "count" : "linear", c = condOf(a, type), k = a.ptPerFt;
+      if (a.kind === "count") {
+        const P0 = pairs(a.v || []), r = a.rect && a.rect.length === 4 ? [q(a.rect[0], a.rect[1]), q(a.rect[2], a.rect[3])] : null, B = P0.length ? P0 : r; if (!B) return;
+        const xs = B.map(p => p[0]), ys = B.map(p => p[1]), pt = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+        let it = P.proj.items.find(i => i.cond === c.id && i.file === fileId && i.page === a.page && i.kind === "shape");
+        if (!it) { it = {id: uid("I"), cond: c.id, file: fileId, page: a.page, kind: "shape", pts: [], nos: 1, label: "", bb: "count"}; P.proj.items.push(it); made.items++; }
+        it.pts.push(pt); rep.push({a, c, it, mine: 1, n: 1}); return;
+      }
+      let pts = a.sub === "Line" ? pairs(a.l) : a.sub === "Square" || a.sub === "Circle" ? null : pairs(a.v);
+      if (!pts && a.rect) { const [x0, y0, x1, y1] = a.rect, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rx = Math.abs(x1 - x0) / 2, ry = Math.abs(y1 - y0) / 2;
+        pts = a.sub === "Square" ? pairs([x0, y0, x1, y0, x1, y1, x0, y1]) : pairs([].concat(...Array.from({length: 72}, (_, i) => [cx + rx * Math.cos(i * Math.PI / 36), cy + ry * Math.sin(i * Math.PI / 36)]))); }
+      if (!pts) return;
+      if (type === "area" && pts.length > 3 && dist(pts[0], pts[pts.length - 1]) < 0.01) pts.pop();
+      if (a.kind === "perim") pts.push(pts[0].slice());
+      if (type === "area" ? pts.length < 3 || polyArea(pts) < 1e-6 : pts.length < 2) return;
+      const it = {id: uid("I"), cond: c.id, file: fileId, page: a.page, kind: "shape", pts, nos: 1, label: a.label.slice(0, 120), bb: a.nm}; if (a.layer) it.bbLayer = a.layer;
+      P.proj.items.push(it); made.items++;
+      const holes = type === "area" ? (a.cut || []).map(pairs).filter(h => h.length >= 3 && polyArea(h) > 1e-6) : [];
+      holes.forEach(h => { P.proj.items.push({id: uid("I"), cond: c.id, file: fileId, page: a.page, kind: "ded", pts: h, nos: 1, label: "cutout" + (a.label ? " in " + a.label.slice(0, 80) : ""), bb: a.nm}); made.items++; });
+      const ks = scaleAt(fileId, a.page, pts[0]) || k, mine = type === "area" ? (polyArea(pts) - holes.reduce((s, h) => s + polyArea(h), 0)) / ks / ks : polyLen(pts, false) / ks;
+      rep.push({a, c, it, mine, k, ks});
+    });
+    marks.forEach(a => {
+      const vp = vps[a.page], q = (x, y) => vp.convertToViewportPoint(x, y), pairs = v => { const out = []; for (let i = 0; i + 1 < (v || []).length; i += 2) if (isFinite(v[i]) && isFinite(v[i + 1])) out.push(q(v[i], v[i + 1])); return out; };
+      const box = a.rect && a.rect.length === 4 ? (() => { const p = q(a.rect[0], a.rect[1]), r = q(a.rect[2], a.rect[3]); return [[Math.min(p[0], r[0]), Math.min(p[1], r[1])], [Math.max(p[0], r[0]), Math.max(p[1], r[1])]]; })() : null;
+      const base = (type, pts) => Object.assign({id: uid("M"), type, file: fileId, page: a.page, pts, text: "", subject: a.subj || MARK_TOOLS[type] || type, author: a.author, status: "", at: now, bb: a.nm}, JSON.parse(JSON.stringify(mkStyle(type))));
+      const line = bbHex(a.c), fill = bbHex(a.ic), add = m => { if (line) m.color = line; if (a.bw >= 0 && isFinite(a.bw)) m.width = Math.min(40, a.bw); if (bbPct(a.ca) != null) m.op = Math.max(0.05, a.ca); if (a.bm) m.blend = "multiply"; if (a.dash) m.dash = "dash"; P.proj.marks.push(m); made.marks++; };
+      P.proj.marks = P.proj.marks || [];
+      if (a.kind === "text" && box) { const m = base("text", box); m.text = a.contents.replace(/\r\n?/g, "\n"); m.color = a.tcol || line || m.color; m.fill = line || ""; m.fillOp = bbPct(a.fop) != null ? a.fop : line ? 1 : 0; m.width = a.bw > 0 ? a.bw : 0; if (a.fs > 0) m.fs = a.fs; P.proj.marks.push(m); made.marks++; return; }
+      if ((a.kind === "box" || a.kind === "ellipse") && box) { const m = base(a.kind, box); m.fill = fill; if (fill) m.fillOp = bbPct(a.fop) != null ? a.fop : 1; m.text = a.contents; return add(m); }
+      if (a.kind === "line") { const p = pairs(a.l); if (p.length === 2) { const m = base("line", p); m.text = a.contents; add(m); } return; }
+      if (a.kind === "polyline" || a.kind === "polygon") { const p = pairs(a.v); if (p.length >= (a.kind === "polygon" ? 3 : 2)) { const m = base(a.kind, p); if (a.kind === "polygon") { m.fill = fill; if (fill) m.fillOp = bbPct(a.fop) != null ? a.fop : 1; } m.text = a.contents; add(m); } return; }
+      if (a.kind === "pen") (a.ink || []).map(pairs).filter(p => p.length >= 2).forEach(p => add(base("pen", p)));
+    });
+    const was = (P.proj.bbImp || {})[fileId] || {};
+    P.proj.bbImp = Object.assign({}, P.proj.bbImp, {[fileId]: {at: now, nms: [...done, ...todo.map(a => a.nm)], off: !!(was.off || made.items || made.marks)}});   // the PDF's own drawing of its markups: now drawn by the takeoff
+  }, "Import Bluebeam markups");
+  await bbRedraw([fileId]);   // their lines are no longer snap targets, nor in the thumbnails or on the page
+  return bbReport(f, rep, made, skip, scaleSay, o);
+}
+function bbReport(f, rep, made, skip, scaleSay, o){
+  const by = new Map();
+  rep.forEach(r => { let g = by.get(r.c.id); if (!g) by.set(r.c.id, g = {c: r.c, n: 0, mine: 0, bb: 0, bbN: 0, bad: [], diff: 0});
+    if (r.c.type === "count") { g.n++; g.mine++; g.bb++; g.bbN++; return; }
+    g.n++; g.mine += r.mine; const b = bbQty(r.a.contents); if (b == null) return;
+    g.bb += b.v; g.bbN++; const tol = 0.5 * Math.pow(10, -Math.min(4, b.dec)) + 0.002 * Math.abs(b.v) + 0.001;
+    if (Math.abs(Math.abs(r.mine) - Math.abs(b.v)) > tol) g.bad.push((r.a.label ? r.a.label + ": " : "") + fq(r.mine, r.c.unit) + " here, " + r.a.contents.split(/[\r\n]+/).pop().trim() + " in Bluebeam" + (r.k && r.ks && Math.abs(r.k - r.ks) / r.k > 0.002 ? " (measured there at " + r.k.toFixed(3) + " pt/ft, here " + r.ks.toFixed(3) + ")" : "")); });
+  const G = [...by.values()], bad = G.reduce((s, g) => s + g.bad.length, 0), checked = G.reduce((s, g) => s + g.bbN, 0);
+  const sk = Object.entries(skip).map(([k, v]) => v + " " + k.toLowerCase() + (v > 1 ? "s" : "")).join(", ");
+  const row = g => `<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${esc(g.c.color)};margin-right:6px"></span>${esc(g.c.name)}</td><td>${esc(g.c.type)}</td><td class="n">${g.n}</td><td class="n">${fq(g.mine, g.c.unit)} ${esc(g.c.unit)}</td><td class="n">${g.c.type === "count" ? g.bb : g.bbN ? fq(g.bb, g.c.unit) : "—"}</td><td style="font-weight:700;color:${g.bad.length ? "var(--red)" : "var(--green)"}">${g.bad.length ? g.bad.length + " differ" : g.bbN ? "PASS" : "—"}</td></tr>${g.bad.length ? `<tr><td colspan="6" class="ds">${g.bad.slice(0, 8).map(esc).join("<br>")}${g.bad.length > 8 ? "<br>…" : ""}</td></tr>` : ""}`;
+  const head = (made.items ? made.items + " measurement" + (made.items > 1 ? "s" : "") : "") + (made.items && made.marks ? " and " : "") + (made.marks ? made.marks + " markup" + (made.marks > 1 ? "s" : "") : "");
+  toast("Bluebeam: " + (head || "nothing") + " imported from " + f.name + (made.conds ? " — " + made.conds + " new condition" + (made.conds > 1 ? "s" : "") : ""), 5000);
+  if (!G.length && !sk && o.auto) return {n: made.items + made.marks};
+  ask("Bluebeam markups imported — " + f.name, `<p>${head ? "<b>" + esc(head) + "</b> brought in as they were taken" : "Nothing new to bring in"}${made.conds ? ", " + made.conds + " new condition" + (made.conds > 1 ? "s" : "") + " named by their Bluebeam subject" : ""}. ${checked ? (bad ? `<b style="color:var(--red)">${bad} of ${checked}</b> quantities differ from Bluebeam's.` : `All ${checked} quantities match Bluebeam's.`) : ""}</p>
+    ${G.length ? `<table class="sh" style="margin-top:8px"><thead><tr><th>Condition</th><th>Kind</th><th class="n">Items</th><th class="n">Here</th><th class="n">Bluebeam</th><th>Check</th></tr></thead><tbody>${G.map(row).join("")}</tbody></table>` : ""}
+    ${scaleSay.length ? `<p class="small" style="margin-top:8px">Scale taken from the Bluebeam measurements — ${scaleSay.map(esc).join(" · ")} (not verified: check one known dimension).</p>` : ""}
+    ${sk ? `<p class="small" style="margin-top:6px">Not brought in: ${esc(sk)} — ${bbOffOf(f.id) ? "hidden with the PDF's own markups (palette: “Bluebeam: show the PDF's own markups”)" : "still drawn by the PDF"}.</p>` : ""}
+    <p class="small" style="margin-top:6px">Ctrl+Z takes the whole import back.</p>`, "");
+  $("dlgCancel").textContent = "Close";
+  return {n: made.items + made.marks, bad, checked};
+}
+function bbShowPdf(fileId, on){   // the PDF's own drawing of its markups, back on (or off again)
+  const r = P.proj && P.proj.bbImp && P.proj.bbImp[fileId]; if (!r) return;
+  r.off = !on; save(); return bbRedraw([fileId]);   // a view setting — not a step for Ctrl+Z
+}
+function bbRedraw(ids){   // the PDF's own markups switched on or off: its lines, thumbnails and the page drawn again
+  if (!ids.length) return Promise.resolve();
+  [S.geo, S.thumbs].forEach(x => x && Object.keys(x).forEach(k => { if (ids.includes(String(k).split(":")[0])) delete x[k]; }));
+  return ids.includes(S.fileId) ? gotoPage(S.fileId, S.pageNo) : Promise.resolve();
 }
 
 function cornerDeg(a, b, c){   // the angle at b between a and c, 0–180°
@@ -2014,7 +2195,7 @@ function snapToWalls(Q, g, ids, tol, k, slack, extra){   // rectilinear outline:
 async function inkMask(x0, y0, W, H, px, minPx, dashBound, kft, erase, ocb){
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  const rt = sliced(S.page.render({...(ocb ? {optionalContentConfigPromise: Promise.resolve(ocb)} : lay(S.fileId)), canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}));
+  const rt = sliced(S.page.render({...lay(S.fileId), ...(ocb ? {optionalContentConfigPromise: Promise.resolve(ocb)} : {}), canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -x0 / px, -y0 / px]}));
   await rt.promise; await breathe();
   const d = ctx.getImageData(0, 0, W, H).data, N = W * H, m = new Uint8Array(N);
   for (let i = 0; i < N; i++) m[i] = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) < 190 ? 1 : 0;
@@ -6661,6 +6842,7 @@ function importMenu(x, y){
     {t: "PDFs — choose pages, version set…", fn: () => $("impPdfIn").click()},
     {t: "A folder of PDFs…", fn: () => $("dirIn").click()},
     {t: "Photos / scans as pages (JPG, PNG)…", fn: () => $("imgIn").click()}, {sep: 1},
+    {t: "Bluebeam markups → conditions (this PDF)", fn: () => bbImport(S.fileId), dis: !P.proj || !S.fileId || !!cadMeta(S.fileId)},
     {t: "Read sheet info from the title blocks…", fn: () => autoSheetDialog(), dis: !P.proj || !P.proj.files.length},
     {t: "Read scanned pages (OCR)…", fn: () => ocrDialog(), dis: !P.proj || !P.proj.files.length}], x, y);
 }
@@ -8234,7 +8416,9 @@ function paletteCmds(){
   add("Cross-hair on / off — hair-lines across the whole window", () => setXh(!S.xh), "View", "Shift+C");
   if (S.page) { add("Marked-up page (.png)", exportPng, "Export"); add("Marked-up page (.pdf)", () => exportPdf(false), "Export"); }
   add("All project sheets (.pdf)", () => exportPdf(true), "Export"); add("Project (.json) — measurements only", exportJson, "Export");
-  add("Project + PDFs (.zdtakeoff) — to move to another computer", exportBundle, "Export"); add("Backups of this project", () => backupsDialog(), "Project");
+  add("Project + PDFs (.zdtakeoff) — to move to another computer", exportBundle, "Export");
+  if (S.page && !cadMeta(S.fileId)) { add("Bluebeam: import this PDF's markups — measurements become conditions", () => bbImport(S.fileId), "Page");
+    const bf = (P.proj.bbImp || {})[S.fileId]; if (bf && bf.off) add("Bluebeam: show the PDF's own markups (as printed by Bluebeam)", () => bbShowPdf(S.fileId, true), "View"); else if (bf) add("Bluebeam: hide the PDF's own markups", () => bbShowPdf(S.fileId, false), "View"); } add("Backups of this project", () => backupsDialog(), "Project");
   if (S.page) add("Plot / print — a window, the view or the page, at a scale", plotDialog, "Export", "Ctrl+P");
   if (S.page && cadMeta(S.fileId)) add("AutoCAD quantities — lengths, areas and blocks from the drawing", () => cadQtyDialog(), "Page");
   add("Background: black, as AutoCAD's model space", () => setBg("black"), "View"); add("Background: white", () => setBg("white"), "View"); add("Background: auto — black for AutoCAD drawings, white for PDFs", () => setBg("auto"), "View");
@@ -12849,7 +13033,7 @@ function ocFix(Lb, out, fids){
   { const dv = +pref("zdTakeoffDim") || 0; S.dimPct = dv > 1 ? dv : dv === 1 ? 50 : 50; setDim(dv > 0 ? S.dimPct : 0); } setThin(pref("zdTakeoffThin") === "1"); S.boost = pref("zdTakeoffBoost") !== "0"; { const b = $("bBoost"); if (b) { b.classList.toggle("on", S.boost); b.onclick = () => setBoost(!S.boost); } }
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
-  window.zdTakeoff = {inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),

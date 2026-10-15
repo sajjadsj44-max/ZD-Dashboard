@@ -157,7 +157,7 @@ markup-tools release (07-Oct-2026) · **✓** already in · **◐** partly · **
 | Multiply markups | ✓ array, place copies, copy to pages |
 | Assign markups to layers | ★ markup layers (Layers tab): hidden on the drawing and in exports |
 | Flatten PDF markups | ✓ every PDF / PNG / JPEG export |
-| Import PDF markups | → 4 |
+| Import PDF markups | ★ Bluebeam markups → conditions (14-Oct-2026, see below) |
 | Redact PDF content permanently | ★ redaction: the exported page is flattened, what is under the box is gone |
 | Translate markups | ◐ the Claude panel (API key) translates text on request |
 | Create and add dynamic stamps | ★ 16 standard stamps, your own text and picture stamps, `{name} {date} {time} {project} {sheet} {page}` |
@@ -321,6 +321,28 @@ function (`measSvg`), so what is set is what is printed. Covered by `tools/test_
 | Totals | Totals list in Properties: length / gross / deducted / wall area (× H) / volume / segments, area / perimeter / volume, count, quantity, measurements, pages without scale |
 | — | segment lengths always / never / as View → Labels; vertex marks; count symbols (11, incl. star, hexagon, pin, plus), size, fill, caption font |
 | — | Copy / Paste appearance, Apply to all conditions of the type (colours kept), Set as default for new conditions, Reset; every change one Ctrl+Z step |
+
+## Bluebeam markups → conditions (2026-10-14)
+
+A PDF marked up in Bluebeam Revu is read when it is added (**+ PDF**), or later with **+ PDF ▾ → Bluebeam markups → conditions**
+(or the command palette). Covered by `tools/test_takeoff_bluebeam.js`; checked on the QS's own Bluebeam takeoffs (block work,
+floor tile with cut-outs, skirting, plaster on a turned elevation, room areas with door counts — 339 quantities, all equal to
+Bluebeam's).
+
+| Bluebeam | ZD Takeoff |
+|---|---|
+| Area (PolygonDimension), with cut-outs | an area item of the condition named by its **Subject**; each cut-out a deduction ("cutout in 401") |
+| Length (PolyLineDimension, LineDimension), perimeter | a run of a linear (ft) condition; a perimeter as a closed run |
+| Count (PolygonCount markers) | one count of the page, a point at the middle of each marker; Bluebeam's symbol (check, circle, square…) |
+| Subject, Label, colours, fill opacity, line width, blend, caption colour / bold | condition name, the item's label, the condition's colour and appearance (width in pt on paper) |
+| Scale of the measurements (/Measure) | the page's scale ("from the PDF", not verified) unless one was set by calibrating |
+| Quantity written by Bluebeam (Contents, "127.26 sf") | each measurement compared with it; the report lists any that differ |
+| Text box, rectangle, ellipse, line, polyline, polygon, pen | this app's markups, with text, author, subject and style |
+| Legend stamp, sticky notes, links | not brought in (the app has its own legend) |
+
+The PDF's own drawing of its markups is then switched off for that PDF, so nothing shows twice and its lines are not snap
+targets (palette: *Bluebeam: show / hide the PDF's own markups*). Importing again brings only markups not imported before
+(by their id); Ctrl+Z takes the whole import back.
 
 ## Square up, window scan, recover (2026-10-14)
 
