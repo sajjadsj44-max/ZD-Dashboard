@@ -52,18 +52,18 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   await page.click('.navitem2[data-rvgo="pt"]');
   await page.waitForTimeout(500);
   ok(await page.isVisible("#rav-pt"), "sidebar entry opens Price Trends");
-  ok((await $(".pt-tabs button").count()) === 3, "three tabs");
+  ok((await $(".pt-tabs button").count()) === 4, "four tabs");
 
   console.log("price trend");
   const cem = await T(() => { const g = zdPriceTrends.group(), p = zdPriceTrends.points(); return {items: g.items.map(i => i.ix), out: g.out.map(i => i.unit), unit: g.unit, db: g.db && g.db.code, n: p.length, last: p.reduce((b, x) => !b || x.r.date > b.r.date ? x : b, null)}; });
   const cemN = grn.filter(i => cem.items.indexOf(i.ix) >= 0).reduce((s, i) => s + i.rc.length, 0);
   ok(cem.unit === "Bag" && cem.db === "CEM" && cem.n === cemN && cem.n > 50, `cement: ${cem.n} receipts per Bag, compared with CEM`);
-  ok(cem.out.indexOf("Pack") >= 0 && /Left out/.test(await $(".racard").innerText()), "items in another unit (Pack) are left out and listed");
-  ok(/Each read as one bag/.test(await $(".racard").innerText()), "the Each → bag reading is stated");
+  ok(cem.out.indexOf("Pack") >= 0 && /Left out/.test(await $(".racard").first().innerText()), "items in another unit (Pack) are left out and listed");
+  ok(/Each read as one bag/.test(await $(".racard").first().innerText()), "the Each → bag reading is stated");
   const tiles = await $(".rak").allInnerTexts();
   const cemDb = await T(() => RA.rates.find(r => r.code === "CEM"));
   ok(tiles[0].indexOf(cem.last.r.date.split("-").reverse().join("-").replace(/-(\d\d)-/, (m, mm) => "-" + ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+mm - 1] + "-")) >= 0, "latest-GRN tile shows the latest receipt date");
-  ok(tiles[2].indexOf(cemDb.rate.toLocaleString("en-PK", {minimumFractionDigits: 2})) >= 0, "Rate Database tile shows the CEM rate");
+  ok(tiles[4].indexOf(cemDb.rate.toLocaleString("en-PK", {minimumFractionDigits: 2})) >= 0, "Rate Database tile shows the CEM rate");
   ok((await $("#ptCanvas").count()) === 1, realChart ? "chart drawn (Chart.js)" : "chart canvas placed (Chart stubbed)");
 
   await $('[data-pt-f="g"]').selectOption("stl");
@@ -88,8 +88,77 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   ok(single.key === "item" + oneSame.ix && single.n === oneSame.rc.length, `single-item search plots that item (${single.n} receipts)`);
   await $('[data-pt-act="table"]').click();
   await page.waitForTimeout(250);
-  ok((await $("table.ratbl tbody tr").count()) === Math.min(500, single.n), "table view lists every receipt");
+  ok((await $(".racard").first().locator("table.ratbl").first().locator("tbody tr").count()) === Math.min(500, single.n), "table view lists every receipt");
   await $('[data-pt-act="table"]').click();
+  await page.waitForTimeout(250);
+
+  console.log("PBS, MRS & location comparison");
+  /* independent view of the PBS, KPK and Punjab MRS blocks */
+  const P = await T(() => JSON.parse(document.getElementById("raPbsData").textContent));
+  const L0 = P.months.length - 1, lhr = P.cities.indexOf("Lahore");
+  const pMean = (mi, i) => { const a = P.cities.map((c, k) => P.r[mi][k][i]).filter(v => v != null); return a.reduce((s, v) => s + v, 0) / a.length; };
+  await $('[data-pt-f="g"]').selectOption("cem");
+  await page.waitForTimeout(300);
+  const cs = await T(() => ({lhr: zdPriceTrends.pbsSeries("Lahore"), mean: zdPriceTrends.pbsSeries("mean")}));
+  ok(cs.lhr.length === P.months.length && cs.lhr[L0].y === P.r[L0][lhr][4], `cement: PBS Lahore line, ${P.months[L0]} = ${P.r[L0][lhr][4]} per bag`);
+  ok(Math.abs(cs.mean[L0].y - Math.round(pMean(L0, 4) * 100) / 100) < 0.006, "cement: PBS mean of the cities with a rate");
+  const kt = await $(".rak").allInnerTexts();
+  ok(/PBS LAHORE|PBS Lahore/i.test(kt[2]) && kt[2].indexOf(P.r[L0][lhr][4].toLocaleString("en-PK", {minimumFractionDigits: 2})) >= 0, "PBS Lahore tile");
+  const loc = await T(() => zdPriceTrends.locRows());
+  const gSites = loc.filter(r => r.src === "GRN" && !r.mean), gMean = loc.find(r => r.src === "GRN" && r.mean);
+  ok(gSites.length > 1 && Math.abs(gMean.rate - gSites.reduce((s, r) => s + r.rate, 0) / gSites.length) < 1e-6, `location table: mean of ${gSites.length} GRN sites`);
+  const pc = P.cities.filter((c, k) => P.r[L0][k][4] != null).length;
+  ok(loc.filter(r => r.src === "PBS" && !r.mean).length === pc && loc.find(r => r.src === "PBS" && r.mean).loc === "Mean of " + pc + " cities", `location table: ${pc} PBS cities and their mean`);
+  ok((await $("#ptLocTbl tbody tr").count()) === loc.length, "location table lists every location");
+  await $('[data-pt-f="locSrc"]').selectOption("PBS");
+  await $('[data-pt-f="locSort"]').selectOption("lo");
+  await page.waitForTimeout(300);
+  const lr = (await $("#ptLocTbl tbody tr td:nth-child(3)").allInnerTexts()).map(t => +t.replace(/,/g, ""));
+  ok(lr.length === pc + 1 && lr.every((v, i) => !i || v >= lr[i - 1]), "location filter (PBS) and sort low → high");
+  await $('[data-pt-f="locSrc"]').selectOption("");
+  await $('[data-pt-f="locSort"]').selectOption("src");
+  await $('[data-pt-f="g"]').selectOption("stl");
+  await page.waitForTimeout(300);
+  const K = await T(() => JSON.parse(document.getElementById("raKpkData").textContent));
+  const M = await T(() => JSON.parse(document.getElementById("raMrsData").textContent));
+  const k60 = K.items.find(a => a[0] === "06-08-b"), p60 = M.items.find(a => a[0] === 6 && String(a[1]) === "12" && a[2] === 3);
+  const sl = await T(() => ({s: zdPriceTrends.pbsSeries("Lahore"), loc: zdPriceTrends.locRows()}));
+  ok(Math.abs(sl.s[L0].y - P.r[L0][lhr][5] / 1000) < 0.006, "steel: PBS per tonne ÷ 1,000 = per Kg");
+  const kb = sl.loc.find(r => r.src === "KPK MRS" && /base/.test(r.loc)), pb = sl.loc.find(r => r.src === "Punjab MRS");
+  ok(kb && Math.abs(kb.rate - k60[5] / 100) < 0.006 && sl.loc.filter(r => r.src === "KPK MRS" && !r.mean).length === 1 + K.districts.filter(d => d[0].toLowerCase() !== K.base.toLowerCase()).length,
+     `steel: KPK 06-08-b ${k60[5]} per 100 Kg → ${kb && kb.rate}/Kg, every district`);
+  ok(pb && Math.abs(pb.rate - Math.round(p60[10] * p60[8] * 100) / 100) < 0.006, `steel: Punjab MRS grade 60 per Cwt → ${pb && pb.rate}/Kg`);
+  ok(/grade 40/.test(await $(".racard").first().innerText()) && /composite/.test(await $(".racard").first().innerText()), "steel: PBS grade and MRS composite stated");
+  await $('[data-pt-f="g"]').selectOption("mas");
+  await page.waitForTimeout(300);
+  ok((await $("#ptCanvas").count()) === 1 && await T(() => zdPriceTrends.points().length === 0), "PBS-only material (mason): chart of PBS lines, no receipts");
+  await $('[data-pt-f="pbs"]').selectOption("Karachi");
+  await page.waitForTimeout(300);
+  ok(await T(k => zdPriceTrends.pbsSeries("Karachi").length > 0 && zdPriceTrends.state.pbs === "Karachi", 0), "PBS city choice");
+  await $('[data-pt-f="pbs"]').selectOption("Lahore");
+  await $('[data-pt-f="g"]').selectOption("cem");
+  await page.waitForTimeout(300);
+
+  console.log("source comparison");
+  await $('[data-pt-tab="cmp"]').click();
+  await page.waitForTimeout(500);
+  const np = await T(() => zdPriceTrends.presets.length);
+  ok((await $("#ptCmpTbl tbody tr").count()) === np, `one row per material (${np})`);
+  const cr = await T(() => zdPriceTrends.cmpRows().map(o => ({id: o.p.id, pbs: o.pbs, mean: o.pbsMean, kpk: o.kpk && o.kpk.rate, last: o.last && o.last.y})));
+  const ccem = cr.find(o => o.id === "cem");
+  ok(ccem.pbs === P.r[L0][lhr][4] && ccem.last > 0, "cement row: GRN latest and PBS Lahore");
+  ok(cr.find(o => o.id === "stl").kpk > 0 && cr.find(o => o.id === "r4000").pbs == null, "steel has KPK MRS; ready-mix has no PBS rate");
+  await $('[data-pt-f="s_range"]').uncheck();
+  await page.waitForTimeout(300);
+  ok(!/PBS lowest city/.test(await $("#ptCmpTbl thead").innerText()), "column toggles");
+  await $('[data-pt-f="s_range"]').check();
+  await page.waitForTimeout(200);
+  const [dl] = await Promise.all([page.waitForEvent("download"), $('[data-pt-act="cmpCsv"]').click()]);
+  const ctext = fs.readFileSync(await dl.path(), "utf8");
+  ok(/Source \/ remarks/.test(ctext) && ctext.trim().split(/\r?\n/).length === np + 1, "comparison CSV: one line per material, with Source / remarks");
+  await $('[data-pt-go="stl"]').click();
+  await page.waitForTimeout(400);
+  ok(await T(() => zdPriceTrends.state.tab === "trend" && zdPriceTrends.state.g === "stl"), "clicking a material opens its trend");
 
   console.log("Rate DB vs latest GRN");
   await $('[data-pt-tab="grn"]').click();
@@ -144,7 +213,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
 
   console.log("layout");
   await page.setViewportSize({width: 390, height: 844});
-  for (const tab of ["trend", "grn", "stale"]) {
+  for (const tab of ["trend", "cmp", "grn", "stale"]) {
     await page.evaluate(t => document.querySelector(`#rav-pt [data-pt-tab="${t}"]`).click(), tab);
     await page.waitForTimeout(300);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

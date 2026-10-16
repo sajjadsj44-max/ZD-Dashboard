@@ -5786,7 +5786,14 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
 .pt-scale b{display:inline-block;width:22px;height:10px;border-radius:2px}
 .pt-small{font-size:10.5px;color:var(--muted)}
 .pt-note{font-size:11px;color:var(--pt-ink2);padding:8px 15px;border-top:1px solid var(--line);background:#fbfcfe;line-height:1.5}
-@media (max-width:720px){.pt-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.pt-chart{height:280px}}
+.pt-kpis.pt-k6{grid-template-columns:repeat(3,minmax(0,1fr))}
+.pt-chks{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
+.pt-chk{display:inline-flex;gap:5px;align-items:center;cursor:pointer;white-space:nowrap}
+.pt-chk input{width:auto}
+.pt-ln.pt-dash{height:0;background:none!important;border-top:2px dashed}
+.pt-ln.pt-dot2{height:0;background:none!important;border-top:2px dotted}
+.pt-means{display:flex;flex-wrap:wrap;gap:6px 18px;padding:9px 15px;font-size:11.5px;color:#3c4c60;border-bottom:1px solid var(--line);background:#fbfcfe}
+@media (max-width:720px){.pt-kpis,.pt-kpis.pt-k6{grid-template-columns:repeat(2,minmax(0,1fr))}.pt-chart{height:280px}}
 </style>
 <script>
 /* ---- Price Trends & Staleness (QS Cost Control)
@@ -5801,7 +5808,9 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
   "use strict";
   var MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   var V = {tab: "trend", g: "cem", item: null, site: "", period: "all", pick: {}, table: false,
-           thr: 10, show: "flag", q: "", sel: {}, kind: "", used: true, cell: null};
+           thr: 10, show: "flag", q: "", sel: {}, kind: "", used: true, cell: null,
+           pbs: "Lahore", pbsMean: true, mrs: true, locSrc: "", locSort: "src", cmpCity: "Lahore",
+           s_grn: true, s_pbs: true, s_mean: true, s_range: true, s_mrs: true, s_db: true};
   var CH = null;   // Chart.js instance
 
   function el(id){ return document.getElementById(id); }
@@ -5842,82 +5851,161 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
      line the receipts are compared with (only when units agree). mix: false = start with the most-received item
      only, because the items differ in size. conv / alias: unit handling, always stated on the page. */
   var CONC_X = /block|pipe|kerb|curb|paver|tile|admix|cover/i;
+  /* pbs: the PBS item (#raPbsData, see the PBS view) and its factor to each house unit, with the note shown on the page.
+     kpk / pun: a KPK / Punjab MRS item — a supply + labour composite, shown as a benchmark, never as a material price.
+     unit: the house unit when the material has no GRN item (PBS only). */
   var PRESETS = [
     {id: "cem", name: "Cement — OPC, per bag", inc: [/\bcement\b/i], exc: /solvent|white|tile|bond|epoxy|sheet|board|grout|bitumen|glu|pipe|seal|primer|chemical|mortar|additive|admix|fibre|fiber/i,
-     db: "CEM", mix: true, alias: {Nos: {to: "Bag", note: "GRN unit Each read as one bag"}}},
+     db: "CEM", mix: true, alias: {Nos: {to: "Bag", note: "GRN unit Each read as one bag"}},
+     pbs: {i: 4, f: {Bag: 1}, note: "PBS: cement (local), 50 kg bag"}},
     {id: "stl", name: "Steel — Grade 60 deformed bar, per kg", inc: [/steel|deformed|rebar/i, /g\s*-?\s*60|grade\s*-?\s*60/i], exc: /wire|binding|angle|channel|pipe|sheet|plate|bolt|nut|girder|beam|coupler|chair|mesh/i,
-     db: "STL60", mix: true, conv: {Ton: {to: "Kg", f: 0.001, note: "per Ton ÷ 1,000 = per Kg"}}},
-    {id: "crs", name: "Crush — Sargodha", inc: [/crush/i, /sargodha/i], db: "CRSH-SG", mix: true},
-    {id: "sch", name: "Sand — Chenab", inc: [/chenab/i, /sand/i], db: "SAND-CH", mix: true},
-    {id: "slp", name: "Sand — Lawrencepur", inc: [/lawr?[ae]n?ce?pur/i], db: "SAND-LP", mix: true},
-    {id: "sloc", name: "Sand — local", inc: [/local sand/i], db: null, mix: true},
+     db: "STL60", mix: true, conv: {Ton: {to: "Kg", f: 0.001, note: "per Ton ÷ 1,000 = per Kg"}},
+     pbs: {i: 5, f: {Kg: 0.001}, note: "PBS: 1/2\" M.S. bars grade 40, per tonne ÷ 1,000 — the GRN receipts are grade 60"},
+     kpk: {code: "06-08-b", f: {Kg: 0.01}}, pun: {ch: 6, no: "12", sub: 3}},
+    {id: "crs", name: "Crush — Sargodha", inc: [/crush/i, /sargodha/i], db: "CRSH-SG", mix: true,
+     pbs: {i: 2, f: {Cft: 0.01}, note: "PBS: bajri (rata), per truck of 100 Cft ÷ 100 — not Sargodha crush"}},
+    {id: "sch", name: "Sand — Chenab", inc: [/chenab/i, /sand/i], db: "SAND-CH", mix: true,
+     pbs: {i: 3, f: {Cft: 0.01}, note: "PBS: black pit sand, per truck of 100 Cft ÷ 100"}},
+    {id: "slp", name: "Sand — Lawrencepur", inc: [/lawr?[ae]n?ce?pur/i], db: "SAND-LP", mix: true,
+     pbs: {i: 3, f: {Cft: 0.01}, note: "PBS: black pit sand, per truck of 100 Cft ÷ 100 — not Lawrencepur sand"}},
+    {id: "sloc", name: "Sand — local", inc: [/local sand/i], db: null, mix: true,
+     pbs: {i: 3, f: {Cft: 0.01}, note: "PBS: black pit sand, per truck of 100 Cft ÷ 100"}},
     {id: "r4000", name: "Ready-mix concrete 4000 psi", inc: [/concrete/i, /4000\s*psi/i], exc: CONC_X, db: "RMC-4000", mix: true},
     {id: "r4500", name: "Ready-mix concrete 4500 psi", inc: [/concrete/i, /4500\s*psi/i], exc: CONC_X, db: "RMC-4500", mix: true},
     {id: "r6000", name: "Ready-mix concrete 6000 psi", inc: [/concrete/i, /6000\s*psi/i], exc: CONC_X, db: null, mix: true},
-    {id: "bsol", name: "Concrete block — solid", inc: [/block/i, /solid/i], exc: /wood|terminal/i, db: null, mix: false},
-    {id: "bhol", name: "Concrete block — hollow", inc: [/block/i, /hollow/i], exc: /wood|terminal/i, db: null, mix: false}
+    {id: "bsol", name: "Concrete block — solid", inc: [/block/i, /solid/i], exc: /wood|terminal/i, db: null, mix: false,
+     pbs: {i: 1, f: {Nos: 0.01}, note: "PBS: cement blocks 6\"x8\"x12\", per 100 ÷ 100 — check the GRN block size"}},
+    {id: "bhol", name: "Concrete block — hollow", inc: [/block/i, /hollow/i], exc: /wood|terminal/i, db: null, mix: false,
+     pbs: {i: 1, f: {Nos: 0.01}, note: "PBS: cement blocks 6\"x8\"x12\", per 100 ÷ 100 — check the GRN block size"}},
+    {id: "brk", name: "Bricks — per brick", inc: [/\bbricks?\b/i], exc: /tile|bats?\b|ballast|work|masonry|edge|paving|fly|cutter|wall|aac|fire/i, db: "BRK-1", mix: false,
+     pbs: {i: 0, f: {Nos: 0.001}, note: "PBS: bricks (new, first class), per 1,000 ÷ 1,000"}},
+    {id: "dsl", name: "Diesel (HSD) — per litre", inc: [/diesel/i], exc: /filter|kva|canopy|engine|pump|\boil\b|tank|pipe|hose/i, db: null, mix: true,
+     pbs: {i: 13, f: {Ltr: 1}, note: "PBS: high speed diesel, per litre"}},
+    {id: "enm", name: "Synthetic enamel — per gallon (3.64 ltr)", inc: [/enamel/i], exc: /back box|20\s*-?\s*ltr/i, db: null, mix: false,
+     alias: {Nos: {to: "Gallon", note: "GRN unit Each read as one 3.64 ltr tin"}},
+     pbs: {i: 6, f: {Gallon: 1}, note: "PBS: synthetic enamel (ICI), 3.64 ltr"}},
+    {id: "pet", name: "Petrol super — per litre (PBS only)", inc: null, unit: "Ltr", db: null, pbs: {i: 12, f: {Ltr: 1}, note: "PBS: petrol super, per litre"}},
+    {id: "mas", name: "Mason — per day (PBS only)", inc: null, unit: "Day", db: "L-PLMASON", pbs: {i: 8, f: {Day: 1}, note: "PBS: mason (raj), per day"}},
+    {id: "lab", name: "Labour (unskilled) — per day (PBS only)", inc: null, unit: "Day", db: "L-HELPER", pbs: {i: 9, f: {Day: 1}, note: "PBS: labour (unskilled), per day"}},
+    {id: "pnt", name: "Painter — per day (PBS only)", inc: null, unit: "Day", db: null, pbs: {i: 7, f: {Day: 1}, note: "PBS: painter, per day"}},
+    {id: "plm", name: "Plumber — per day (PBS only)", inc: null, unit: "Day", db: "L-PLUMB", pbs: {i: 10, f: {Day: 1}, note: "PBS: plumber, per day"}},
+    {id: "ele", name: "Electrician — per point (PBS only)", inc: null, unit: "Point", db: null, pbs: {i: 11, f: {Point: 1}, note: "PBS: electrician, per point"}}
   ];
   function preset(id){ return PRESETS.filter(function(p){ return p.id === id; })[0] || PRESETS[0]; }
   function hUnit(p, it){ var c = p.conv && p.conv[it.unit], a = p.alias && p.alias[it.unit]; return c ? c.to : a ? a.to : it.unit; }
   function hFac(p, it){ var c = p.conv && p.conv[it.unit]; return c ? c.f : 1; }
   /* the group on screen: {name, p, items (in the main unit), out (other units), unit, db} */
   function group(){
-    var Gd = grn(), p, items;
-    if (V.item != null && Gd.items[V.item]) {
-      var it = Gd.items[V.item];
-      p = {id: "item", name: it.site + " · " + it.desc, mix: true};
-      items = [it];
-    } else {
-      p = preset(V.g);
-      items = Gd.items.filter(function(it){ return it.rc.length && p.inc.every(function(rx){ return rx.test(it.desc); }) && !(p.exc && p.exc.test(it.desc)); });
-    }
+    var Gd = grn();
+    if (V.item != null && Gd.items[V.item]) { var it = Gd.items[V.item]; return groupFor({id: "item", name: it.site + " · " + it.desc, mix: true}, [it]); }
+    return groupFor(preset(V.g));
+  }
+  function groupFor(p, items){
+    var Gd = grn();
+    if (!items) items = p.inc ? Gd.items.filter(function(it){ return it.rc.length && p.inc.every(function(rx){ return rx.test(it.desc); }) && !(p.exc && p.exc.test(it.desc)); }) : [];
     var byU = {};
     items.forEach(function(it){ var u = hUnit(p, it); byU[u] = (byU[u] || 0) + it.rc.length; });
-    var unit = Object.keys(byU).sort(function(a, b){ return byU[b] - byU[a]; })[0] || "";
+    var unit = Object.keys(byU).sort(function(a, b){ return byU[b] - byU[a]; })[0] || p.unit || "";
     var main = items.filter(function(it){ return hUnit(p, it) === unit; }).sort(function(a, b){ return b.rc.length - a.rc.length; });
-    var key = p.id === "item" ? "item" + V.item : p.id;
+    var key = p.id === "item" ? "item" + items[0].ix : p.id;
     if (!V.pick[key]) { V.pick[key] = {}; main.forEach(function(it, i){ V.pick[key][it.ix] = p.mix || i === 0; }); }
     var x = p.db ? line(p.db) : null;
     return {key: key, p: p, items: main, out: items.filter(function(it){ return hUnit(p, it) !== unit; }), unit: unit, db: x && x.unit === unit ? x : null, dbOther: x && x.unit !== unit ? x : null};
   }
-  function points(g){
-    var from = V.period === "all" ? "" : (function(){ var d = new Date(); d.setMonth(d.getMonth() - +V.period); return d.toISOString().slice(0, 10); })();
-    var out = [];
+  function since(){ if (V.period === "all") return ""; var d = new Date(); d.setMonth(d.getMonth() - +V.period); return d.toISOString().slice(0, 10); }
+  /* receipts of the ticked items; all = every site and date (the comparisons), else the site / period filter */
+  function points(g, all){
+    var from = all ? "" : since(), out = [];
     g.items.forEach(function(it){
-      if (!V.pick[g.key][it.ix] || (V.site && it.site !== V.site)) return;
+      if (!V.pick[g.key][it.ix] || (!all && V.site && it.site !== V.site)) return;
       var f = hFac(g.p, it);
       it.rc.forEach(function(r){ if (!from || r.date >= from) out.push({x: ts(r.date), y: Math.round(r.rate * f * 100) / 100, it: it, r: r}); });
     });
-    return out.sort(function(a, b){ return a.x - b.x; });
+    return out.sort(function(a, b){ return a.x - b.x || a.r.date.localeCompare(b.r.date) || a.r.rcp.localeCompare(b.r.rcp); });
   }
   function monthly(pts){
     var m = {};
     pts.forEach(function(p){ var k = p.r.date.slice(0, 7); (m[k] = m[k] || []).push(p.y); });
     return Object.keys(m).sort().map(function(k){ return {k: k, x: ts(k + "-15"), y: median(m[k]), n: m[k].length}; });
   }
+  function mean(a){ return a.length ? a.reduce(function(s, v){ return s + v; }, 0) / a.length : null; }
+  function r2(v){ return Math.round(v * 100) / 100; }
+
+  /* ------------------------------------------------------------------ PBS and MRS benchmarks */
+  var PB = null, KP = null, PM = null;
+  function pbs(){
+    if (PB) return PB;
+    var raw = el("raPbsData"), d = null;
+    try { d = JSON.parse(raw ? raw.textContent : "null"); } catch (e) { d = null; }
+    PB = d && d.months ? d : {months: [], cities: [], items: [], r: [], provinces: [], files: []};
+    return PB;
+  }
+  function pml(m){ var p = String(m).split("-"); return MON[+p[1] - 1] + "-" + p[0]; }
+  function pbsF(g){ return g.p.pbs && g.p.pbs.f[g.unit] != null ? g.p.pbs.f[g.unit] : null; }
+  function pbsAt(mi, ci, i){ var x = PB.r[mi]; return x && x[ci] ? x[ci][i] : null; }
+  function pbsMean(mi, i){ var a = []; PB.cities.forEach(function(c, ci){ var v = pbsAt(mi, ci, i); if (v != null) a.push(v); }); return a.length ? {y: mean(a), n: a.length} : null; }
+  /* PBS months of the group's item in the house unit, for one city or "mean" (all cities with a rate); all = ignore the period */
+  function pbsSeries(g, city, all){
+    var d = pbs(), f = pbsF(g); if (f == null || !d.months.length) return [];
+    var i = g.p.pbs.i, ci = d.cities.indexOf(city), from = all ? "" : since();
+    return d.months.map(function(m, mi){
+      var v = city === "mean" ? (pbsMean(mi, i) || {}).y : ci >= 0 ? pbsAt(mi, ci, i) : null;
+      return v == null || (from && m + "-28" < from) ? null : {k: m, x: ts(m + "-15"), y: r2(v * f), pb: city === "mean" ? "PBS mean of cities" : "PBS " + city};
+    }).filter(Boolean);
+  }
+  function pbsNote(g){ return g.p.pbs ? (pbsF(g) == null ? "PBS is not in " + g.unit + " for this group — not compared" : g.p.pbs.note) : ""; }
+  function kpkRef(g){
+    var p = g.p; if (!p.kpk || p.kpk.f[g.unit] == null) return null;
+    if (!KP) { try { KP = JSON.parse(el("raKpkData").textContent); } catch (e) { KP = {items: []}; } }
+    var a = (KP.items || []).filter(function(x){ return x[0] === p.kpk.code; })[0]; if (!a || !a[5]) return null;
+    return {rate: r2(a[5] * p.kpk.f[g.unit]), raw: a[5], unit: a[3], code: a[0], desc: a[2], date: KP.notified, ed: KP.edition, base: KP.base, districts: KP.districts || []};
+  }
+  function punRef(g){
+    var p = g.p; if (!p.pun) return null;
+    if (!PM) { try { PM = JSON.parse(el("raMrsData").textContent); } catch (e) { PM = {items: []}; } }
+    var a = (PM.items || []).filter(function(x){ return x[0] === p.pun.ch && String(x[1]) === p.pun.no && x[2] === p.pun.sub; })[0];
+    var raw = a ? (a[10] != null ? a[10] : a[9]) : null; if (!a || a[7] !== g.unit || !raw) return null;
+    return {rate: r2(raw * a[8]), raw: raw, unit: a[6], code: "Ch. " + a[0] + " item " + a[1], desc: a[5], date: PM.from, ed: PM.edition, district: PM.district};
+  }
+  function cityOpts(sel, none){
+    var d = pbs();
+    return (none ? '<option value="">' + none + "</option>" : "") + (d.provinces || []).map(function(p){
+      return '<optgroup label="' + esc(p[0]) + '">' + p[1].map(function(c){ return "<option" + (sel === c ? " selected" : "") + ">" + esc(c) + "</option>"; }).join("") + "</optgroup>"; }).join("");
+  }
+  function vs(v, ref){ if (v == null || !ref) return ""; var d = (v / ref - 1) * 100; return '<span class="' + (d > 0.05 ? "pt-up" : d < -0.05 ? "pt-down" : "") + '">' + pct(d) + "</span>"; }
+  var C_PBS = "#0b7285", C_KPK = "#c2255c", C_PUN = "#8d5a2b";
 
   /* ------------------------------------------------------------------ 1. price trend */
   function tile(h, v, s){ return '<div class="rak"><h5>' + h + '</h5><div class="v">' + v + '</div><div class="s">' + s + "</div></div>"; }
+  function chk(f, on, txt){ return '<label class="pt-small pt-chk"><input type="checkbox" data-pt-f="' + f + '"' + (on ? " checked" : "") + "> " + txt + "</label>"; }
   function viewTrend(){
-    var Gd = grn(), g = group(), pts = points(g), mo = monthly(pts), u = g.unit;
+    var Gd = grn(), g = group(), pts = points(g), mo = monthly(pts), u = g.unit, P = pbs();
+    var ps = V.pbs ? pbsSeries(g, V.pbs) : [], pm = V.pbsMean ? pbsSeries(g, "mean") : [], kr = V.mrs ? kpkRef(g) : null, pr = V.mrs ? punRef(g) : null;
     var bar = '<div class="rabar">' +
       '<div class="fg"><label>Material</label><select data-pt-f="g">' + PRESETS.map(function(p){ return '<option value="' + p.id + '"' + (V.item == null && V.g === p.id ? " selected" : "") + ">" + esc(p.name) + "</option>"; }).join("") +
       (V.item != null ? '<option value="" selected>Single item (search)</option>' : "") + "</select></div>" +
       '<div class="fg"><label>…or any GRN item</label><input type="text" list="ptItems" data-pt-f="item" placeholder="type an item name" value="' + (V.item != null && Gd.items[V.item] ? esc(Gd.items[V.item].desc) : "") + '">' +
       '<datalist id="ptItems">' + Gd.items.filter(function(it){ return it.rc.length > 1; }).map(function(it){ return '<option value="' + esc(it.desc) + '">' + esc(it.site + " · " + it.unit + " · " + it.rc.length + " receipts") + "</option>"; }).join("") + "</datalist></div>" +
       '<div class="fg"><label>Site</label><select data-pt-f="site"><option value="">All sites</option>' + (Gd.meta ? Gd.meta.sites : []).map(function(s){ return "<option" + (V.site === s ? " selected" : "") + ">" + esc(s) + "</option>"; }).join("") + "</select></div>" +
-      '<div class="fg"><label>Period</label><select data-pt-f="period">' + [["all", "All receipts"], ["12", "Last 12 months"], ["24", "Last 24 months"], ["36", "Last 36 months"]].map(function(o){ return '<option value="' + o[0] + '"' + (V.period === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") + "</select></div></div>";
-    if (!Gd.items.length) return bar + '<div class="racard"><div class="bd"><div class="raempty">The GRN Price Register data is not in this page.</div></div></div>';
+      '<div class="fg"><label>Period</label><select data-pt-f="period">' + [["all", "All receipts"], ["12", "Last 12 months"], ["24", "Last 24 months"], ["36", "Last 36 months"]].map(function(o){ return '<option value="' + o[0] + '"' + (V.period === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") + "</select></div>" +
+      (P.months.length ? '<div class="fg"><label>Compare: PBS city</label><select data-pt-f="pbs">' + cityOpts(V.pbs, "(none)") + "</select></div>" +
+        '<div class="pt-chks">' + chk("pbsMean", V.pbsMean, "PBS mean of all " + P.cities.length + " cities") + chk("mrs", V.mrs, "KPK / Punjab MRS benchmark") + "</div>" : "") + "</div>";
+    if (!Gd.items.length && !P.months.length) return bar + '<div class="racard"><div class="bd"><div class="raempty">The GRN Price Register data is not in this page.</div></div></div>';
     var last = pts.length ? pts[pts.length - 1] : null;
-    pts.forEach(function(p){ if (last && (p.r.date > last.r.date || (p.r.date === last.r.date && p.r.rcp > last.r.rcp))) last = p; });
     var lm = mo[mo.length - 1], ago = null;
     if (lm) { var want = ts(lm.k + "-15") - 365.25 * 864e5; mo.forEach(function(m){ if (Math.abs(m.x - want) <= 46 * 864e5 && (!ago || Math.abs(m.x - want) < Math.abs(ago.x - want))) ago = m; }); }
     var vendors = {}; pts.forEach(function(p){ vendors[p.r.vendor] = 1; });
     var dev = g.db && last && num(g.db.rate) ? (num(g.db.rate) / last.y - 1) * 100 : null;
-    var h = bar + '<div class="rakpis pt-kpis">' +
-      tile("Latest GRN", last ? "PKR " + raN(last.y, 2) : "—", last ? "per " + esc(u) + " · " + dmy(last.r.date) + " · " + esc(last.it.site) + " · " + esc(last.r.vendor) : "no receipts in this filter") +
+    function pbsTile(s, name){
+      var l = s[s.length - 1]; if (!l) return tile(name, "—", g.p.pbs ? (pbsF(g) == null ? "not in " + esc(u) : "no PBS month in this period") : "no PBS item for this material");
+      var y = s.filter(function(x){ return x.k === (+l.k.slice(0, 4) - 1) + l.k.slice(4); })[0];
+      return tile(name, "PKR " + raN(l.y, 2), pml(l.k) + (y ? " · 12-month " + vs(l.y, y.y) : "") + (last ? " · " + vs(l.y, last.y) + " vs latest GRN" : ""));
+    }
+    var h = bar + '<div class="rakpis pt-kpis pt-k6">' +
+      tile("Latest GRN", last ? "PKR " + raN(last.y, 2) : "—", last ? "per " + esc(u) + " · " + dmy(last.r.date) + " · " + esc(last.it.site) + " · " + esc(last.r.vendor) : g.p.inc === null ? "no GRN item — PBS only" : "no receipts in this filter") +
       tile("Change over 12 months", lm && ago ? '<span class="' + (lm.y > ago.y ? "pt-up" : lm.y < ago.y ? "pt-down" : "") + '">' + pct((lm.y / ago.y - 1) * 100) + "</span>" : "—",
         lm && ago ? "monthly median " + raN(ago.y, 2) + " (" + ago.k + ") → " + raN(lm.y, 2) + " (" + lm.k + ")" : "needs receipts about a year apart") +
+      pbsTile(V.pbs ? pbsSeries(g, V.pbs) : [], "PBS " + esc(V.pbs || "city")) + pbsTile(pbsSeries(g, "mean"), "PBS mean of cities") +
       tile("Rate Database", g.db ? "PKR " + raN(g.db.rate, 2) : "—", g.db ? esc(g.db.code) + " · dated " + dmy(g.db.date) + (dev != null ? " · " + pct(dev) + " vs latest GRN" : "")
         : g.dbOther ? esc(g.dbOther.code) + " is per " + esc(g.dbOther.unit) + " — not compared" : "no matching line for this group") +
       tile("Receipts", raN(pts.length, 0), pts.length ? dmy(pts[0].r.date) + " to " + dmy(last.r.date) + " · " + Object.keys(vendors).length + " vendors" : "—") + "</div>";
@@ -5925,12 +6013,17 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
     g.items.forEach(function(it){ var c = g.p.conv && g.p.conv[it.unit], a = g.p.alias && g.p.alias[it.unit]; if ((c || a) && V.pick[g.key][it.ix]) cv[(c || a).note] = (cv[(c || a).note] || 0) + 1; });
     Object.keys(cv).forEach(function(k){ conv.push(esc(k) + " (" + cv[k] + " item" + (cv[k] > 1 ? "s" : "") + ")"); });
     var title = esc(g.p.name) + " — PKR per " + esc(u);
-    h += '<div class="racard"><div class="hd"><div><h3>' + title + '</h3><div class="sub">Each dot is one GRN receipt, converted to the house unit as in the GRN Price Register. Line: monthly median of the receipts shown.</div></div><div class="sp"></div>' +
+    h += '<div class="racard"><div class="hd"><div><h3>' + title + '</h3><div class="sub">Each dot is one GRN receipt, converted to the house unit as in the GRN Price Register. Line: monthly median of the receipts shown' +
+      (ps.length || pm.length ? "; teal: PBS monthly city price" : "") + (kr || pr ? "; dotted: MRS composite rate" : "") + '.</div></div><div class="sp"></div>' +
       '<button class="rabtn sm" data-pt-act="table">' + (V.table ? "Show chart" : "Show table") + '</button><button class="rabtn sm" data-pt-act="trendCsv">&#8681; CSV</button></div>';
     var hasChart = typeof Chart === "function";
-    if (!V.table && hasChart && pts.length) {
+    if (!V.table && hasChart && (pts.length || ps.length || pm.length)) {
       h += '<div class="pt-key">' + siteSeries(pts).map(function(d){ return '<span><i class="pt-dot" style="background:var(' + d.role + ')"></i>' + esc(d.name) + " receipts</span>"; }).join("") +
-        '<span><i class="pt-ln" style="background:var(--pt-ink2)"></i>Monthly median</span>' + (g.db ? '<span><i class="pt-ln" style="background:var(--pt-s3)"></i>Rate Database ' + esc(g.db.code) + " (" + raN(g.db.rate, 2) + ")</span>" : "") + "</div>" +
+        (pts.length ? '<span><i class="pt-ln" style="background:var(--pt-ink2)"></i>Monthly median</span>' : "") + (g.db ? '<span><i class="pt-ln" style="background:var(--pt-s3)"></i>Rate Database ' + esc(g.db.code) + " (" + raN(g.db.rate, 2) + ")</span>" : "") +
+        (ps.length ? '<span><i class="pt-ln" style="background:' + C_PBS + '"></i>PBS ' + esc(V.pbs) + "</span>" : "") +
+        (pm.length ? '<span><i class="pt-ln pt-dash" style="border-color:' + C_PBS + '"></i>PBS mean of cities</span>' : "") +
+        (kr ? '<span><i class="pt-ln pt-dot2" style="border-color:' + C_KPK + '"></i>KPK MRS ' + esc(kr.code) + " (" + raN(kr.rate, 2) + ")</span>" : "") +
+        (pr ? '<span><i class="pt-ln pt-dot2" style="border-color:' + C_PUN + '"></i>Punjab MRS ' + esc(pr.code) + " (" + raN(pr.rate, 2) + ")</span>" : "") + "</div>" +
         '<div class="pt-chart"><canvas id="ptCanvas" role="img" aria-label="' + title + '"></canvas></div>';
     } else {
       if (!hasChart && !V.table) h += '<div class="pt-note">The chart library did not load (offline?) — the receipts are listed instead.</div>';
@@ -5938,6 +6031,12 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
         (pts.length ? pts.slice().reverse().slice(0, 500).map(function(p){
           return "<tr><td>" + dmy(p.r.date) + "</td><td>" + esc(p.it.site) + "</td><td>" + esc(p.it.desc) + "</td><td>" + esc(p.r.vendor) + "</td><td>" + esc(p.r.rcp) + '</td><td class="n">' + raN(p.r.qty, 2) + '</td><td class="n">' + raN(p.r.grnRate, 2) + "</td><td>" + esc(p.it.uom) + '</td><td class="n"><b>' + raN(p.y, 2) + "</b></td></tr>";
         }).join("") : '<tr><td colspan="9"><div class="raempty">No receipts in this filter.</div></td></tr>') + "</tbody></table></div>";
+      if (ps.length || pm.length) {
+        var pmk = {}; pm.forEach(function(x){ pmk[x.k] = x.y; });
+        var keys = (ps.length ? ps : pm).map(function(x){ return x.k; }).reverse(), psk = {}; ps.forEach(function(x){ psk[x.k] = x.y; });
+        h += '<div class="pt-scroll" style="max-height:300px;border-top:1px solid var(--line)"><table class="ratbl"><thead><tr><th>PBS month</th>' + (ps.length ? '<th class="n">PBS ' + esc(V.pbs) + "</th>" : "") + (pm.length ? '<th class="n">PBS mean of cities</th>' : "") + "</tr></thead><tbody>" +
+          keys.map(function(k){ return "<tr><td>" + pml(k) + "</td>" + (ps.length ? '<td class="n">' + (psk[k] != null ? raN(psk[k], 2) : "—") + "</td>" : "") + (pm.length ? '<td class="n">' + (pmk[k] != null ? raN(pmk[k], 2) : "—") + "</td>" : "") + "</tr>"; }).join("") + "</tbody></table></div>";
+      }
     }
     if (g.items.length > 1 || g.out.length) {
       h += '<div class="pt-items"><span class="pt-small">Items in this group (receipts):</span>' + g.items.map(function(it){
@@ -5947,9 +6046,115 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
       if (g.out.length) h += '<div class="pt-note">Left out — not in ' + esc(u) + ": " + g.out.map(function(it){ return esc(it.desc.slice(0, 50)) + " (" + esc(it.unit) + ", " + it.rc.length + ")"; }).join("; ") + ".</div>";
     }
     if (conv.length) h += '<div class="pt-note">Unit conversions: ' + conv.join("; ") + ".</div>";
+    if (g.p.pbs && (ps.length || pm.length || pbsF(g) == null)) h += '<div class="pt-note">' + esc(pbsNote(g)) + ". Source: " + esc(P.source || "PBS") + ", " + pml(P.months[0]) + " to " + pml(P.months[P.months.length - 1]) + ".</div>";
+    if (kr || pr) h += '<div class="pt-note">MRS rates are supply + labour composites from government schedules, a benchmark only — ' +
+      (kr ? "KPK " + esc(kr.ed) + " item " + esc(kr.code) + " (" + esc(kr.desc.slice(0, 90)) + "), " + esc(kr.base) + " base, PKR " + raN(kr.raw, 2) + " per " + esc(kr.unit) + ", notified " + dmy(kr.date) : "") +
+      (kr && pr ? "; " : "") + (pr ? "Punjab MRS " + esc(pr.ed) + " " + esc(pr.code) + " (" + esc(pr.desc) + "), " + esc(pr.district) + ", PKR " + raN(pr.raw, 2) + " " + esc(pr.unit) + ", from " + dmy(pr.date) : "") + ".</div>";
     h += "</div>";
+    return h + viewLoc(g);
+  }
+
+  /* ------------------------------------------------------------------ location comparison (every site / city / district, and their mean) */
+  function locRows(g){
+    var rows = [], P = pbs(), all = points(g, true), last = all.length ? all[all.length - 1] : null, by = {};
+    all.forEach(function(p){ (by[p.it.site] = by[p.it.site] || []).push(p); });
+    var gs = Object.keys(by).sort().map(function(s){
+      var a = by[s], l = a[a.length - 1], cut = l.x - 365.25 * 864e5, yr = a.filter(function(p){ return p.x >= cut; }).map(function(p){ return p.y; });
+      return {src: "GRN", loc: s, rate: l.y, date: dmy(l.r.date), note: "latest receipt · 12-month median " + raN(median(yr), 2) + " of " + yr.length + " · " + a.length + " receipts in all"};
+    });
+    if (gs.length) rows.push({src: "GRN", loc: "Mean of " + gs.length + " site" + (gs.length > 1 ? "s" : ""), rate: mean(gs.map(function(r){ return r.rate; })), date: last ? dmy(last.r.date) : "", note: "mean of each site's latest receipt", mean: true});
+    rows = rows.concat(gs);
+    var f = pbsF(g);
+    if (f != null && P.months.length) {
+      var L = P.months.length - 1, Y = P.months.indexOf((+P.months[L].slice(0, 4) - 1) + P.months[L].slice(4)), i = g.p.pbs.i;
+      var pc = P.cities.map(function(c, ci){ var v = pbsAt(L, ci, i), y = Y >= 0 ? pbsAt(Y, ci, i) : null;
+        return v == null ? null : {src: "PBS", loc: c, rate: r2(v * f), date: pml(P.months[L]), note: (y ? "12-month " + pct((v / y - 1) * 100) + " · " : "") + "PBS " + c}; }).filter(Boolean);
+      if (pc.length) rows.push({src: "PBS", loc: "Mean of " + pc.length + " cities", rate: mean(pc.map(function(r){ return r.rate; })), date: pml(P.months[L]), note: "PBS cities with a rate this month", mean: true});
+      rows = rows.concat(pc);
+    }
+    var kr = kpkRef(g);
+    if (kr) {
+      var kd = [{d: kr.base + " (base)", f: 1}].concat(kr.districts.filter(function(x){ return x[0].toLowerCase() !== kr.base.toLowerCase(); }).map(function(x){ return {d: x[0], f: x[1]}; }));
+      var kk = kd.map(function(x){ return {src: "KPK MRS", loc: x.d, rate: r2(kr.rate * x.f), date: dmy(kr.date), note: kr.code + (x.f !== 1 ? " × location factor " + x.f.toFixed(2) : "") + " · composite"}; });
+      rows.push({src: "KPK MRS", loc: "Mean of " + kk.length + " districts", rate: mean(kk.map(function(r){ return r.rate; })), date: dmy(kr.date), note: kr.code + " × each district factor", mean: true});
+      rows = rows.concat(kk);
+    }
+    var pr = punRef(g);
+    if (pr) rows.push({src: "Punjab MRS", loc: pr.district, rate: pr.rate, date: dmy(pr.date), note: pr.code + " · " + pr.ed + " · composite"});
+    if (g.db) rows.push({src: "Rate Database", loc: g.db.code, rate: num(g.db.rate), date: dmy(g.db.date), note: String(g.db.src || "").slice(0, 90)});
+    rows.forEach(function(r){ r.dev = last && r.rate ? (r.rate / last.y - 1) * 100 : null; });
+    return {rows: rows, last: last};
+  }
+  function viewLoc(g){
+    var R = locRows(g), u = g.unit, srcs = R.rows.map(function(r){ return r.src; }).filter(function(v, i, a){ return a.indexOf(v) === i; });
+    if (!R.rows.length) return "";
+    var list = R.rows.filter(function(r){ return !V.locSrc || r.src === V.locSrc; });
+    if (V.locSort !== "src") list = list.slice().sort(function(a, b){ return V.locSort === "lo" ? a.rate - b.rate : b.rate - a.rate; });
+    var means = R.rows.filter(function(r){ return r.mean; });
+    var h = '<div class="racard"><div class="hd"><div><h3>Location comparison — PKR per ' + esc(u) + '</h3><div class="sub">Every GRN site, PBS city and KPK district with a rate for this material, and the mean of all locations of each source' +
+      (R.last ? ", against the latest GRN receipt (PKR " + raN(R.last.y, 2) + ", " + dmy(R.last.r.date) + ")" : "") + '.</div></div><div class="sp"></div>' +
+      '<div class="fg"><label>Source</label><select data-pt-f="locSrc"><option value="">All sources</option>' + srcs.map(function(s){ return "<option" + (V.locSrc === s ? " selected" : "") + ">" + esc(s) + "</option>"; }).join("") + "</select></div>" +
+      '<div class="fg"><label>Sort</label><select data-pt-f="locSort">' + [["src", "By source (means first)"], ["lo", "Rate low → high"], ["hi", "Rate high → low"]].map(function(o){ return '<option value="' + o[0] + '"' + (V.locSort === o[0] ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") + "</select></div>" +
+      '<button class="rabtn sm" data-pt-act="locCsv">&#8681; CSV</button></div>';
+    if (means.length > 1) h += '<div class="pt-means">' + means.map(function(r){ return '<span><b>' + esc(r.src) + "</b> " + esc(r.loc.toLowerCase()) + ": PKR " + raN(r.rate, 2) + (r.dev != null ? " (" + vs(r.rate, R.last.y) + " vs GRN)" : "") + "</span>"; }).join("") + "</div>";
+    var lo = Math.min.apply(null, list.map(function(r){ return r.rate; })), hi = Math.max.apply(null, list.map(function(r){ return r.rate; }));
+    h += '<div class="bd flush"><div class="pt-scroll" style="max-height:460px"><table class="ratbl" id="ptLocTbl"><thead><tr><th>Source</th><th>Location</th><th class="n">PKR per ' + esc(u) + '</th><th class="n">vs latest GRN</th><th>Dated</th><th style="min-width:220px">Note</th></tr></thead><tbody>' +
+      list.map(function(r){
+        var bg = r.mean ? "background:#f1f6fd;font-weight:700" : r.rate === lo && lo !== hi ? "background:#e6f6ea" : r.rate === hi && lo !== hi ? "background:#fdecec" : "";
+        return '<tr style="' + bg + '"><td>' + esc(r.src) + "</td><td>" + esc(r.loc) + '</td><td class="n">' + raN(r.rate, 2) + '</td><td class="n">' + (r.dev == null ? "—" : vs(r.rate, R.last.y)) + "</td><td>" + esc(r.date) + '</td><td class="pt-small">' + esc(r.note) + "</td></tr>";
+      }).join("") + "</tbody></table></div></div>" +
+      '<div class="pt-note">Green = lowest, red = highest in the list; shaded rows are the mean of all locations of a source. PBS uses its latest month; KPK = the base rate × each district\'s location factor; MRS rates are supply + labour composites.</div></div>';
     return h;
   }
+
+  /* ------------------------------------------------------------------ 4. source comparison: every material, every source side by side */
+  function cmpRows(){
+    var P = pbs(), ci = P.cities.indexOf(V.cmpCity), L = P.months.length - 1;
+    return PRESETS.map(function(p){
+      var g = groupFor(p), all = points(g, true), last = all.length ? all[all.length - 1] : null, o = {p: p, g: g, unit: g.unit, last: last};
+      if (last) {
+        var cut = last.x - 365.25 * 864e5; o.med = median(all.filter(function(x){ return x.x >= cut; }).map(function(x){ return x.y; }));
+        var by = {}; all.forEach(function(x){ by[x.it.site] = x.y; }); o.sites = Object.keys(by).length; o.siteMean = mean(Object.keys(by).map(function(s){ return by[s]; }));
+      }
+      var f = pbsF(g);
+      if (f != null && L >= 0) {
+        var i = p.pbs.i, v = ci >= 0 ? pbsAt(L, ci, i) : null, m = pbsMean(L, i), lo = null, hi = null;
+        P.cities.forEach(function(c, k){ var x = pbsAt(L, k, i); if (x == null) return; if (!lo || x < lo.v) lo = {c: c, v: x}; if (!hi || x > hi.v) hi = {c: c, v: x}; });
+        o.pbs = v == null ? null : r2(v * f); o.pbsMean = m ? r2(m.y * f) : null; o.pbsN = m ? m.n : 0;
+        o.lo = lo && {c: lo.c, v: r2(lo.v * f)}; o.hi = hi && {c: hi.c, v: r2(hi.v * f)}; o.pbsMonth = P.months[L];
+      }
+      o.kpk = kpkRef(g); o.pun = punRef(g); o.db = g.db ? num(g.db.rate) : null;
+      o.ref = last ? last.y : o.pbs;
+      return o;
+    });
+  }
+  function viewCmp(){
+    var P = pbs(), rows = cmpRows(), S = V;
+    var h = '<div class="rabar"><div class="fg"><label>PBS city</label><select data-pt-f="cmpCity">' + cityOpts(V.cmpCity) + "</select></div>" +
+      '<div class="pt-chks"><span class="pt-small">Show:</span>' + chk("s_grn", S.s_grn, "GRN") + chk("s_pbs", S.s_pbs, "PBS city") + chk("s_mean", S.s_mean, "PBS mean of cities") +
+      chk("s_range", S.s_range, "PBS lowest / highest city") + chk("s_mrs", S.s_mrs, "KPK / Punjab MRS") + chk("s_db", S.s_db, "Rate Database") + "</div></div>";
+    function cell(v, ref, sub){ return '<td class="n">' + (v == null ? '<span class="pt-small">—</span>' : raN(v, 2) + (ref && v !== ref ? '<div class="pt-small">' + vs(v, ref) + "</div>" : "") + (sub ? '<div class="pt-small">' + sub + "</div>" : "")) + "</td>"; }
+    var head = "<th>Material</th><th>Unit</th>" +
+      (S.s_grn ? '<th class="n">GRN latest</th><th class="n">GRN 12-month median</th><th class="n">GRN mean of sites</th>' : "") +
+      (S.s_pbs ? '<th class="n">PBS ' + esc(V.cmpCity) + "</th>" : "") + (S.s_mean ? '<th class="n">PBS mean of cities</th>' : "") +
+      (S.s_range ? '<th class="n">PBS lowest city</th><th class="n">PBS highest city</th>' : "") +
+      (S.s_mrs ? '<th class="n">KPK MRS</th><th class="n">Punjab MRS</th>' : "") + (S.s_db ? '<th class="n">Rate Database</th>' : "");
+    h += '<div class="racard"><div class="hd"><div><h3>Source comparison — every Price Trends material</h3><div class="sub">One row per material, in its house unit (as the GRN Price Register). Under each rate: the difference from the latest GRN receipt (from PBS ' + esc(V.cmpCity) + " when there is no GRN). PBS month " +
+      (P.months.length ? pml(P.months[P.months.length - 1]) : "—") + '. Click a material to open its trend.</div></div><div class="sp"></div><button class="rabtn sm" data-pt-act="cmpCsv">&#8681; CSV</button></div>' +
+      '<div class="bd flush"><div class="pt-scroll" style="max-height:640px"><table class="ratbl" id="ptCmpTbl"><thead><tr>' + head + "</tr></thead><tbody>" +
+      rows.map(function(o){
+        var l = o.last;
+        return '<tr><td><button class="rabtn sm" data-pt-go="' + o.p.id + '" style="text-align:left">' + esc(o.p.name) + "</button></td><td>" + esc(o.unit) + "</td>" +
+          (S.s_grn ? cell(l ? l.y : null, null, l ? dmy(l.r.date) + " · " + esc(l.it.site) : "") + cell(o.med, o.ref) + cell(o.siteMean, o.ref, o.sites ? o.sites + " site" + (o.sites > 1 ? "s" : "") : "") : "") +
+          (S.s_pbs ? cell(o.pbs, l ? o.ref : null) : "") + (S.s_mean ? cell(o.pbsMean, o.ref, o.pbsN ? o.pbsN + " cities" : "") : "") +
+          (S.s_range ? cell(o.lo && o.lo.v, o.ref, o.lo ? esc(o.lo.c) : "") + cell(o.hi && o.hi.v, o.ref, o.hi ? esc(o.hi.c) : "") : "") +
+          (S.s_mrs ? cell(o.kpk && o.kpk.rate, o.ref, o.kpk ? esc(o.kpk.code) + " · Peshawar base" : "") + cell(o.pun && o.pun.rate, o.ref, o.pun ? esc(o.pun.district) : "") : "") +
+          (S.s_db ? cell(o.db, o.ref, o.g.db ? esc(o.g.db.code) : o.g.dbOther ? esc(o.g.dbOther.code) + " per " + esc(o.g.dbOther.unit) : "") : "") + "</tr>";
+      }).join("") + "</tbody></table></div></div>" +
+      '<div class="pt-note">PBS items are the nearest PBS product, not always the same one — e.g. PBS steel is 1/2" grade 40, PBS bajri is not Sargodha crush; each material\'s trend page states its conversion. MRS rates are supply + labour composites (benchmark only). "—" = the source has no rate for that material in this unit.</div></div>';
+    return h;
+  }
+
   /* receipt dots by site: each colour belongs to one site whatever the filter (Quadrangle blue, Phoenix orange,
      Mall 35 violet — the three validated together, all pairs, for colour-blind readers); the other sites share
      one muted "Other sites" series, and the tooltip and table name each receipt's site */
@@ -5969,15 +6174,23 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
   function drawTrend(){
     if (CH) { try { CH.destroy(); } catch (e) {} CH = null; }
     var cv = el("ptCanvas"); if (!cv || typeof Chart !== "function") return;
-    var Gd = grn(), g = group(), pts = points(g), mo = monthly(pts);
+    var g = group(), pts = points(g), mo = monthly(pts);
+    var ps = V.pbs ? pbsSeries(g, V.pbs) : [], pm = V.pbsMean ? pbsSeries(g, "mean") : [], kr = V.mrs ? kpkRef(g) : null, pr = V.mrs ? punRef(g) : null;
+    var xs = pts.concat(ps, pm).map(function(p){ return p.x; }), x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
     var SURF = "#ffffff";
     var ds = siteSeries(pts).map(function(d){
       return {label: d.name + " receipts", data: d.pts, backgroundColor: role(d.role),
               borderColor: SURF, borderWidth: 2, pointRadius: 4.5, pointHoverRadius: 6, pointHitRadius: 10, order: 2};
     });
-    ds.push({label: "Monthly median", type: "line", data: mo, borderColor: role("--pt-ink2"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8, tension: 0, order: 1, borderJoinStyle: "round", borderCapStyle: "round"});
-    if (g.db && pts.length) ds.push({label: "Rate Database " + g.db.code, type: "line", data: [{x: pts[0].x, y: num(g.db.rate)}, {x: pts[pts.length - 1].x, y: num(g.db.rate)}],
+    if (mo.length) ds.push({label: "Monthly median", type: "line", data: mo, borderColor: role("--pt-ink2"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8, tension: 0, order: 1, borderJoinStyle: "round", borderCapStyle: "round"});
+    if (ps.length) ds.push({label: "PBS " + V.pbs, type: "line", data: ps, borderColor: C_PBS, backgroundColor: C_PBS, borderWidth: 2, pointRadius: 2, pointHitRadius: 8, tension: 0, order: 1});
+    if (pm.length) ds.push({label: "PBS mean of cities", type: "line", data: pm, borderColor: C_PBS, borderDash: [6, 4], borderWidth: 2, pointRadius: 0, pointHitRadius: 8, tension: 0, order: 1});
+    if (g.db && xs.length) ds.push({label: "Rate Database " + g.db.code, type: "line", data: [{x: x0, y: num(g.db.rate)}, {x: x1, y: num(g.db.rate)}],
       borderColor: role("--pt-s3"), borderWidth: 2, pointRadius: 0, pointHitRadius: 8, order: 0});
+    [[kr, "KPK MRS", C_KPK], [pr, "Punjab MRS", C_PUN]].forEach(function(m){
+      if (m[0] && xs.length) ds.push({label: m[1] + " " + m[0].code, type: "line", data: [{x: x0, y: m[0].rate, ref: m[1] + " " + m[0].code}, {x: x1, y: m[0].rate, ref: m[1] + " " + m[0].code}],
+        borderColor: m[2], borderDash: [2, 3], borderWidth: 2, pointRadius: 0, pointHitRadius: 8, order: 0});
+    });
     var mut = role("--pt-muted"), grid = role("--pt-grid");
     var d2 = function(v){ var d = new Date(v); return MON[d.getMonth()] + " " + String(d.getFullYear()).slice(2); };
     try {
@@ -5993,11 +6206,13 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
           legend: {display: false},
           tooltip: {backgroundColor: "#ffffff", titleColor: "#0b0b0b", bodyColor: "#0b0b0b", borderColor: "rgba(11,11,11,0.15)", borderWidth: 1, padding: 9,
             callbacks: {
-              title: function(items){ var r = items[0].raw; return r.r ? dmy(r.r.date) : r.k ? r.k : ""; },
+              title: function(items){ var r = items[0].raw; return r.r ? dmy(r.r.date) : r.pb ? pml(r.k) : r.k ? r.k : ""; },
               label: function(c){
                 var r = c.raw;
                 if (r.r) return "PKR " + raN(r.y, 2) + " per " + g.unit + " — " + r.it.site;
+                if (r.pb) return "PKR " + raN(r.y, 2) + " per " + g.unit + " — " + r.pb;
                 if (r.k) return "PKR " + raN(r.y, 2) + " — monthly median of " + r.n + " receipt" + (r.n > 1 ? "s" : "");
+                if (r.ref) return "PKR " + raN(r.y, 2) + " — " + r.ref + " (composite)";
                 return "PKR " + raN(r.y, 2) + " — Rate Database " + g.db.code + ", dated " + dmy(g.db.date);
               },
               afterLabel: function(c){ var r = c.raw; return r.r ? [r.it.desc.slice(0, 70), r.r.vendor + " · " + r.r.rcp + " · qty " + raN(r.r.qty, 2) + " " + r.it.uom] : ""; }
@@ -6161,9 +6376,9 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
   function render(){
     var root = el("ptRoot"); if (!root || !RA) return;
     if (CH) { try { CH.destroy(); } catch (e) {} CH = null; }
-    root.innerHTML = '<div class="pt-tabs">' + [["trend", "&#128200; Price trend"], ["grn", "&#9878; Rate DB vs latest GRN"], ["stale", "&#9638; Staleness map"]].map(function(t){
+    root.innerHTML = '<div class="pt-tabs">' + [["trend", "&#128200; Price trend"], ["cmp", "&#128202; Source comparison (GRN · PBS · MRS)"], ["grn", "&#9878; Rate DB vs latest GRN"], ["stale", "&#9638; Staleness map"]].map(function(t){
       return '<button data-pt-tab="' + t[0] + '"' + (V.tab === t[0] ? ' class="on"' : "") + ">" + t[1] + "</button>"; }).join("") + "</div>" +
-      (V.tab === "grn" ? viewGrn() : V.tab === "stale" ? viewStale() : viewTrend());
+      (V.tab === "grn" ? viewGrn() : V.tab === "stale" ? viewStale() : V.tab === "cmp" ? viewCmp() : viewTrend());
     if (V.tab === "trend") drawTrend();
   }
   function install(){
@@ -6193,7 +6408,8 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
   document.addEventListener("click", function(e){
     if (e.target.closest && e.target.closest('[data-rv="pt"]')) { setTimeout(render, 0); return; }
     if (!inView(e)) return;
-    var t = e.target.closest("[data-pt-tab],[data-pt-act],[data-pt-cell]"); if (!t) return;
+    var t = e.target.closest("[data-pt-tab],[data-pt-act],[data-pt-cell],[data-pt-go]"); if (!t) return;
+    if (t.dataset.ptGo) { V.tab = "trend"; V.g = t.dataset.ptGo; V.item = null; render(); window.scrollTo({top: 0, behavior: "instant"}); return; }
     if (t.dataset.ptTab) { V.tab = t.dataset.ptTab; V.sel = {}; render(); return; }
     if (t.dataset.ptCell) { var c = t.dataset.ptCell.split("|"); V.cell = V.cell && V.cell[0] === c[0] && V.cell[1] === c[1] ? null : c; V.sel = {}; render(); return; }
     var a = t.dataset.ptAct;
@@ -6205,6 +6421,23 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
       var g = group();
       return csv("SAJ_Price_Trend_" + g.p.name.replace(/[^A-Za-z0-9]+/g, "_") + "_" + today() + ".csv", [["Date", "Site", "Item", "Vendor", "GRN", "Qty", "GRN rate", "GRN unit", "PKR per " + g.unit]].concat(points(g).map(function(p){
         return [p.r.date, p.it.site, p.it.desc, p.r.vendor, p.r.rcp, p.r.qty, p.r.grnRate, p.it.uom, p.y]; })));
+    }
+    if (a === "locCsv") {
+      var gl = group(), R = locRows(gl);
+      return csv("SAJ_Location_Comparison_" + gl.p.name.replace(/[^A-Za-z0-9]+/g, "_") + "_" + today() + ".csv", [["Source", "Location", "PKR per " + gl.unit, "vs latest GRN %", "Dated", "Note"]].concat(R.rows.map(function(r){
+        return [r.src, r.loc, r2(r.rate), r.dev == null ? "" : r.dev.toFixed(1), r.date, r.note]; })));
+    }
+    if (a === "cmpCsv") {
+      var P = pbs(), pm0 = P.months.length ? pml(P.months[P.months.length - 1]) : "";
+      return csv("SAJ_Source_Comparison_" + today() + ".csv", [["Material", "Unit", "GRN latest", "GRN date", "GRN site", "GRN 12-month median", "GRN mean of sites", "PBS " + V.cmpCity, "PBS mean of cities",
+        "PBS lowest", "PBS lowest city", "PBS highest", "PBS highest city", "KPK MRS", "Punjab MRS", "Rate Database", "Rate Database code", "Source / remarks"]].concat(cmpRows().map(function(o){
+        var l = o.last, src = [];
+        if (o.pbs != null || o.pbsMean != null) src.push("PBS Annex-III, " + pm0 + " — " + pbsNote(o.g));
+        if (o.kpk) src.push("KPK " + o.kpk.ed + ", " + dmy(o.kpk.date) + " — item " + o.kpk.code + ", " + o.kpk.base + " base (composite)");
+        if (o.pun) src.push("Punjab MRS " + o.pun.ed + ", " + dmy(o.pun.date) + " — " + o.pun.code + ", " + o.pun.district + " (composite)");
+        if (l) src.push(l.it.site + " GRN " + l.r.rcp + ", " + dmy(l.r.date) + " — " + l.r.vendor);
+        return [o.p.name, o.unit, l ? l.y : "", l ? l.r.date : "", l ? l.it.site : "", o.med != null ? r2(o.med) : "", o.siteMean != null ? r2(o.siteMean) : "", o.pbs != null ? o.pbs : "", o.pbsMean != null ? o.pbsMean : "",
+          o.lo ? o.lo.v : "", o.lo ? o.lo.c : "", o.hi ? o.hi.v : "", o.hi ? o.hi.c : "", o.kpk ? o.kpk.rate : "", o.pun ? o.pun.rate : "", o.db != null ? o.db : "", o.g.db ? o.g.db.code : "", src.join(" | ")]; })));
     }
     if (a === "grnCsv") return csv("SAJ_RateDB_vs_GRN_" + today() + ".csv", [["Code", "Name", "Unit", "Rate DB", "Dated", "Linked by", "Latest GRN", "Received", "Site", "Vendor", "GRN", "Difference %", "Off tolerance", "Newer GRN", "Note"]].concat(links().map(function(o){
       var f = flags(o); return [o.x.code, o.x.name, o.x.unit, o.x.rate, o.x.date || "", o.how, o.lastRate != null ? o.lastRate : "", o.last ? o.last.date : "", o.it ? o.it.site : "", o.last ? o.last.vendor : "", o.last ? o.last.rcp : "", o.dev == null ? "" : o.dev.toFixed(1), f.off ? "yes" : "", f.newer ? "yes" : "", o.why || ""]; })));
@@ -6223,6 +6456,7 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
     if (f === "g") { if (t.value) { V.g = t.value; V.item = null; } render(); return; }
     if (f === "thr") { V.thr = Math.max(1, Math.min(100, num(t.value) || 10)); render(); return; }
     if (f === "used") { V.used = t.checked; render(); return; }
+    if (t.type === "checkbox") { V[f] = t.checked; render(); return; }
     V[f] = t.value; if (f === "kind") V.cell = null; render();
   });
   document.addEventListener("input", function(e){
@@ -6231,7 +6465,8 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
     V.qt = setTimeout(function(){ var p = t.selectionStart; render(); var n = document.querySelector('#rav-pt [data-pt-f="q"]'); if (n) { n.focus(); try { n.setSelectionRange(p, p); } catch (x) {} } }, 250);
   });
 
-  window.zdPriceTrends = {links: links, srcType: srcType, group: function(){ return group(); }, points: function(){ return points(group()); }, presets: PRESETS, render: render, state: V};
+  window.zdPriceTrends = {links: links, srcType: srcType, group: function(){ return group(); }, points: function(){ return points(group()); }, presets: PRESETS, render: render, state: V,
+    pbsSeries: function(city){ return pbsSeries(group(), city, true); }, locRows: function(){ return locRows(group()).rows; }, cmpRows: cmpRows};
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", install); else install();
 })();
 </script>
