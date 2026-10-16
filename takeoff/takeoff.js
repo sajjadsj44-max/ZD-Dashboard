@@ -732,7 +732,7 @@ async function addFiles(files){
       await gotoPage(meta.id, 1);
       toast(how === "replace" ? f.name + " replaced — " + d.numPages + " page" + (d.numPages > 1 ? "s" : "") + " · check the measurements sit on the new drawing"
         : name + (name !== f.name ? " (added as a new drawing)" : how === "same" ? " (same drawing — re-attached)" : "") + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""), how === "new" && name === f.name ? 2600 : 5000);
-      if (cad) setTimeout(() => toast(cadSay(name, cad.meta), 9000), 300);
+      if (cad) setTimeout(() => { const t = cadSay(name, cad.meta); toast(t, /^⚠/.test(t) ? 30000 : 9000); }, 300);
       else if (how !== "replace") await bbImport(meta.id, {auto: true}).catch(e => toast("Bluebeam markups could not be read: " + (e.message || e), 6000));   // markups taken in Bluebeam: brought in as conditions
     } catch (e) { const m = e && e.message || String(e); toast(/password/i.test(m) ? m : f.name + " could not be opened — " + m + (/Invalid PDF|empty/i.test(m) ? " (is it a PDF, and complete?)" : ""), 6000); }
     busy("");
@@ -13218,7 +13218,9 @@ function cadAdopt(meta, cad, how){   // a drawing just added: its page's scale f
 }
 function cadSay(name, m){
   const off = m.layers.filter(l => l.off || l.frozen).length, sk = Object.entries(m.stats.skipped || {}).map(([t, n]) => n + " " + t).join(", ");
-  return name + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
+  /* the browser's DWG reader can lose most of a big drawing that AutoCAD reads without fault (its objects come back empty): said first, with the way round it */
+  const jk = m.stats.junk || 0, lost = m.fmt === "DWG" && jk > 0.1 * (jk + (m.stats.ents || 0));
+  return (lost ? "⚠ Only part of this drawing could be read — " + jk.toLocaleString() + " objects came out empty in the browser's DWG reader. In AutoCAD use SAVEAS → DXF and add the .dxf instead. " : "") + name + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
     (m.assumed ? " — ⚠ the drawing has no units set: check the scale (chip → Verify)" : m.unitFix ? " — ⚠ its dimensions disagree with its units setting: check the scale (chip → Verify)" : " — scale exact") +
     " · " + m.layers.length + " layers" + (off ? " (" + off + " off / frozen)" : "") + " · " + (m.stats.ents || 0).toLocaleString() + " objects" +
     (sk ? " · not shown: " + sk : "") + (m.stats.missing ? " · " + m.stats.missing + " block(s) missing (xrefs?)" : "") + (m.stats.far ? " · " + m.stats.far + " far-off object(s) left off the page" : "") + (m.stats.junk ? " · " + m.stats.junk + " damaged object(s) left out" : "") + (m.stats.trunc ? " · ⚠ very large: shown in part" : "");
@@ -13257,7 +13259,7 @@ function inkMap(dark, mono){
     if (m) { const n = parseInt(m[1], 16); R = n >> 16 & 255; G = n >> 8 & 255; B = n & 255; }
     else { const q = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(v); if (!q) { cache.set(v, v); return v; } R = +q[1]; G = +q[2]; B = +q[3]; A = q[4] == null ? 1 : +q[4]; }
     const L = 0.299 * R + 0.587 * G + 0.114 * B; let o;
-    if (mono) o = dark ? [255, 255, 255] : [0, 0, 0];
+    if (mono) o = (Math.max(R, G, B) - Math.min(R, G, B) < 40 && L >= 215) === !dark ? [255, 255, 255] : [0, 0, 0];   // white (and near-white grey) stays paper: an AutoCAD plot paints its sheet white first, which in one ink would hide the whole drawing
     else if (Math.max(R, G, B) - Math.min(R, G, B) < 40) { const g = 255 - L; o = [g, g, g]; }
     else { o = [R, G, B]; if (L < 70) o = o.map(c => c + (255 - c) * 0.45); }
     r = A < 1 ? "rgba(" + o.map(c => Math.round(c)).join(",") + "," + A + ")" : "#" + o.map(c => Math.round(c).toString(16).padStart(2, "0")).join("");
