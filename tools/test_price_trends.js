@@ -43,7 +43,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   const grn = await T(() => {
     const d = JSON.parse(document.getElementById("raGrnData").textContent);
     return d.items.map((a, i) => ({ix: i, site: d.sites[a[0]], desc: a[2], unit: a[6], k: a[7],
-      rc: d.rc.filter(r => r[0] === i).map(r => ({date: r[1], rate: Math.round(r[2] * a[7] * 100) / 100, grnRate: r[2], rcp: r[4]}))}));
+      rc: d.rc.filter(r => r[0] === i && +r[3]).map(r => ({date: r[1], rate: Math.round(r[2] * a[7] * 100) / 100, grnRate: r[2], rcp: r[4]}))}));
   });
 
   console.log("view");
@@ -70,6 +70,8 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   await page.waitForTimeout(300);
   const stl = await T(() => zdPriceTrends.points().filter(p => p.it.unit === "Ton").slice(0, 5).map(p => [p.r.grnRate, p.y]));
   ok(stl.length > 0 && stl.every(a => Math.abs(a[0] / 1000 - a[1]) < 0.01), "steel per Ton converted to per Kg (÷ 1,000)");
+  ok(await T(() => zdPriceTrends.points().every(p => +p.r.qty) && !zdPriceTrends.points().some(p => p.r.rcp === "RCP-2896" && p.it.site === "Quadrangle")) &&
+     /quantity 0[\s\S]*Quadrangle RCP-2896/.test(await $(".racard").first().innerText()), "steel: quantity-0 receipts (Quadrangle RCP-2896 at 131) left out and listed");
   await $('[data-pt-f="site"]').selectOption("Quadrangle");
   await page.waitForTimeout(250);
   ok(await T(() => zdPriceTrends.points().every(p => p.it.site === "Quadrangle")), "site filter");

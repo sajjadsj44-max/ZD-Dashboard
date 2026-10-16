@@ -5913,15 +5913,20 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
     return {key: key, p: p, items: main, out: items.filter(function(it){ return hUnit(p, it) !== unit; }), unit: unit, db: x && x.unit === unit ? x : null, dbOther: x && x.unit !== unit ? x : null};
   }
   function since(){ if (V.period === "all") return ""; var d = new Date(); d.setMonth(d.getMonth() - +V.period); return d.toISOString().slice(0, 10); }
-  /* receipts of the ticked items; all = every site and date (the comparisons), else the site / period filter */
+  /* receipts of the ticked items; all = every site and date (the comparisons), else the site / period filter.
+     A receipt with quantity 0 received no goods (a rate correction or a cancelled line, e.g. Quadrangle RCP-2896
+     at 131/kg against about 240) — left out and counted in out.zero */
   function points(g, all){
-    var from = all ? "" : since(), out = [];
+    var from = all ? "" : since(), out = [], zero = [];
     g.items.forEach(function(it){
       if (!V.pick[g.key][it.ix] || (!all && V.site && it.site !== V.site)) return;
       var f = hFac(g.p, it);
-      it.rc.forEach(function(r){ if (!from || r.date >= from) out.push({x: ts(r.date), y: Math.round(r.rate * f * 100) / 100, it: it, r: r}); });
+      it.rc.forEach(function(r){ if (from && r.date < from) return; if (!num(r.qty)) { zero.push({it: it, r: r}); return; }
+        out.push({x: ts(r.date), y: Math.round(r.rate * f * 100) / 100, it: it, r: r}); });
     });
-    return out.sort(function(a, b){ return a.x - b.x || a.r.date.localeCompare(b.r.date) || a.r.rcp.localeCompare(b.r.rcp); });
+    out.sort(function(a, b){ return a.x - b.x || a.r.date.localeCompare(b.r.date) || a.r.rcp.localeCompare(b.r.rcp); });
+    out.zero = zero;
+    return out;
   }
   function monthly(pts){
     var m = {};
@@ -6046,6 +6051,8 @@ window.zkIc=function(n){var p=window.ZK_ICONS[n];return p?'<svg viewBox="0 0 24 
       if (g.out.length) h += '<div class="pt-note">Left out — not in ' + esc(u) + ": " + g.out.map(function(it){ return esc(it.desc.slice(0, 50)) + " (" + esc(it.unit) + ", " + it.rc.length + ")"; }).join("; ") + ".</div>";
     }
     if (conv.length) h += '<div class="pt-note">Unit conversions: ' + conv.join("; ") + ".</div>";
+    if (pts.zero.length) h += '<div class="pt-note">Left out — ' + pts.zero.length + " receipt" + (pts.zero.length > 1 ? "s" : "") + " with quantity 0 (no goods received): " +
+      pts.zero.slice(0, 6).map(function(z){ return esc(z.it.site + " " + (z.r.rcp || "no GRN no.") + ", " + dmy(z.r.date) + " at " + raN(z.r.rate, 2)); }).join("; ") + (pts.zero.length > 6 ? "; …" : "") + ".</div>";
     if (g.p.pbs && (ps.length || pm.length || pbsF(g) == null)) h += '<div class="pt-note">' + esc(pbsNote(g)) + ". Source: " + esc(P.source || "PBS") + ", " + pml(P.months[0]) + " to " + pml(P.months[P.months.length - 1]) + ".</div>";
     if (kr || pr) h += '<div class="pt-note">MRS rates are supply + labour composites from government schedules, a benchmark only — ' +
       (kr ? "KPK " + esc(kr.ed) + " item " + esc(kr.code) + " (" + esc(kr.desc.slice(0, 90)) + "), " + esc(kr.base) + " base, PKR " + raN(kr.raw, 2) + " per " + esc(kr.unit) + ", notified " + dmy(kr.date) : "") +
