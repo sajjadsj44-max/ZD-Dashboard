@@ -202,16 +202,61 @@ function tx(store, mode, fn){
 }
 /* a big PDF (over 64 MB — a 235 MB Print-to-PDF set) is stored with its bytes as a Blob: the browser keeps a Blob outside the
    record, while one record may not pass about 133 MB ("The serialized keys and/or value are too large"). Read back, it is an
-   ArrayBuffer again, so nothing else changes. */
-const BIG_REC = 64 * 1024 * 1024;
+   ArrayBuffer again, so nothing else changes. The same for an AutoCAD drawing's scene: a 50 MB drawing's lines and points are some
+   200 MB of typed arrays, each one over 1 MB kept as a Blob too (sblobs: [page, field, its kind]). */
+const BIG_REC = 32 * 1024 * 1024, BIG_ARR = 1024 * 1024;
 const recOut = v => { if (!v || typeof v !== "object" || Array.isArray(v)) return v; let o = v;
   for (const f of ["data", "src"]) if (v[f] && v[f].byteLength > BIG_REC && !(v[f] instanceof Blob)) { if (o === v) o = Object.assign({}, v); o[f] = new Blob([v[f]]); o.blobs = (o.blobs || []).concat(f); }
+  const pgs = v.scene && Array.isArray(v.scene.pages) ? v.scene.pages : null;
+  if (pgs && pgs.some(pg => pg && Object.values(pg).some(a => ArrayBuffer.isView(a) && a.byteLength > BIG_ARR))) {   // (copies: the scene in use keeps its arrays)
+    if (o === v) o = Object.assign({}, v); o.scene = Object.assign({}, v.scene, {pages: pgs.map(pg => Object.assign({}, pg))}); o.sblobs = [];
+    o.scene.pages.forEach((pg, i) => Object.keys(pg).forEach(k => { const a = pg[k]; if (ArrayBuffer.isView(a) && a.byteLength > BIG_ARR) { pg[k] = new Blob([a]); o.sblobs.push([i, k, a.constructor.name]); } }));
+  }
   return o; };
-const recIn = async v => { if (v && v.blobs) for (const f of v.blobs) if (v[f] instanceof Blob) v[f] = await v[f].arrayBuffer(); if (v && v.blobs) delete v.blobs; return v; };
-const dbPut = (store, v, k) => { const w = store === "pdfs" ? recOut(v) : v; return tx(store, "readwrite", s => k === undefined ? s.put(w) : s.put(w, k)); };
-const dbGet = (store, k) => tx(store, "readonly", s => s.get(k)).then(v => store === "pdfs" ? recIn(v) : v);
+const ARR_T = {Uint8Array, Uint16Array, Uint32Array, Int8Array, Int16Array, Int32Array, Float32Array, Float64Array};
+const recIn = async v => { if (v && v.blobs) for (const f of v.blobs) if (v[f] instanceof Blob) v[f] = await v[f].arrayBuffer(); if (v && v.blobs) delete v.blobs;
+  if (v && v.sblobs) { for (const [i, k, t] of v.sblobs) { const pg = v.scene && v.scene.pages && v.scene.pages[i]; if (pg && pg[k] instanceof Blob && ARR_T[t]) pg[k] = new ARR_T[t](await pg[k].arrayBuffer()); } delete v.sblobs; }
+  return v; };
+/* AutoCAD-mode edits stored packed: a drawing whose every object was moved or exploded has some 224,000 edited objects, each
+   {id, li, si, pts: [[x, y], …]} — a million small objects the browser took 13 s to write and 6 s to read back on every save and
+   every open. Stored, those of the plain shape are a few typed arrays (cadEd[f].apk in place of .add); read back they are the same
+   objects, in the same key order, so nothing else sees the difference. Any other shape is kept as it is (apk.raw). */
+const ED_PACK_MIN = 2000;
+const ED_SHAPES = ["id,li,si,pts", "id,li,si,pts,cl", "id,li,si,pts,cv", "id,li,si,pts,cv,cl"];   // fl: bit 0 cl, bit 1 cv (an arc's or a curve's per-point marks)
+function edPack(add){
+  const n = add.length, li = new Int32Array(n), si = new Int32Array(n), fl = new Uint8Array(n), np = new Uint32Array(n), nc = new Uint32Array(n), ids = new Array(n), raw = [];
+  const int = v => Number.isInteger(v) && Math.abs(v) <= 2e9;
+  const plain = a => { if (!a || typeof a !== "object" || typeof a.id !== "string" || a.id.includes("\n") || !int(a.li) || !int(a.si) || !Array.isArray(a.pts)) return false;
+    if (!ED_SHAPES.includes(Object.keys(a).join(",")) || (a.cl !== undefined && a.cl !== true) || (a.cv !== undefined && !(Array.isArray(a.cv) && a.cv.every(int)))) return false;
+    return a.pts.every(p => Array.isArray(p) && p.length === 2 && typeof p[0] === "number" && typeof p[1] === "number"); };
+  let m = 0, mc = 0; const ok = new Uint8Array(n);
+  for (let i = 0; i < n; i++) { const a = add[i]; if (plain(a)) { ok[i] = 1; m += a.pts.length; mc += a.cv ? a.cv.length : 0; } else { raw.push([i, a]); ids[i] = ""; } }
+  const xy = new Float64Array(2 * m), cv = new Int32Array(mc); let q = 0, qc = 0;
+  for (let i = 0; i < n; i++) { if (!ok[i]) continue; const a = add[i]; ids[i] = a.id; li[i] = a.li; si[i] = a.si; fl[i] = (a.cl ? 1 : 0) | (a.cv ? 2 : 0); np[i] = a.pts.length;
+    for (const p of a.pts) { xy[q++] = p[0]; xy[q++] = p[1]; } if (a.cv) { nc[i] = a.cv.length; for (const v of a.cv) cv[qc++] = v; } }
+  return {pk: 1, n, ids: ids.join("\n"), li, si, fl, np, xy, nc, cv, raw};
+}
+function edUnpack(k){
+  const n = k.n, ids = k.ids.split("\n"), raw = new Map(k.raw || []), out = new Array(n); let q = 0, qc = 0;
+  for (let i = 0; i < n; i++) {
+    if (raw.has(i)) { out[i] = raw.get(i); continue; }
+    const c = k.np[i], pts = new Array(c); for (let j = 0; j < c; j++, q += 2) pts[j] = [k.xy[q], k.xy[q + 1]];
+    const a = {id: ids[i], li: k.li[i], si: k.si[i], pts};
+    if (k.fl[i] & 2) { const cv = new Array(k.nc[i]); for (let j = 0; j < cv.length; j++) cv[j] = k.cv[qc++]; a.cv = cv; }
+    if (k.fl[i] & 1) a.cl = true; out[i] = a;
+  }
+  return out;
+}
+const prOut = pr => { if (!pr || !pr.cadEd) return pr; let o = pr;   // (a copy: the project in use keeps its plain edits)
+  for (const [f, e] of Object.entries(pr.cadEd)) if (e && Array.isArray(e.add) && e.add.length >= ED_PACK_MIN) {
+    if (o === pr) o = Object.assign({}, pr, {cadEd: Object.assign({}, pr.cadEd)});
+    const c = {}; for (const [k, v] of Object.entries(e)) c[k === "add" ? "apk" : k] = k === "add" ? edPack(v) : v; o.cadEd[f] = c; }   // (apk where add was: read back, the keys come in the same order)
+  return o; };
+const prIn = pr => { if (pr && pr.cadEd) for (const [f, e] of Object.entries(pr.cadEd)) if (e && e.apk) { const c = {}; for (const [k, v] of Object.entries(e)) c[k === "apk" ? "add" : k] = k === "apk" ? edUnpack(v) : v; pr.cadEd[f] = c; } return pr; };
+const dbPut = (store, v, k) => { const w = store === "pdfs" ? recOut(v) : store === "projects" ? prOut(v) : v; return tx(store, "readwrite", s => k === undefined ? s.put(w) : s.put(w, k)); };
+const dbGet = (store, k) => tx(store, "readonly", s => s.get(k)).then(v => store === "pdfs" ? recIn(v) : store === "projects" ? prIn(v) : v);
 const dbDel = (store, k) => tx(store, "readwrite", s => s.delete(k));
-const dbAll = store => tx(store, "readonly", s => s.getAll());
+const dbAll = store => tx(store, "readonly", s => s.getAll()).then(L => store === "projects" ? L.map(prIn) : L);
 
 /* ------------------------------------------------------------------ state */
 const P = {proj: null};               // the open project (saved)
@@ -379,11 +424,11 @@ function flushOne(pr, fast){
   if (fast === true || !base) return write();   // fast: the page is closing — no time for a read before the write
   const fl = {pr, done: false};
   SAVE_FLIGHT.set(pr.id, fl);
-  return fl.promise = dbGet("projects", pr.id).then(db => {
+  return fl.promise = tx("projects", "readonly", s => s.get(pr.id)).then(db => {   // (as stored: only its time is needed, unless it is backed up)
     if (fl.done) return true;   // the page began closing mid-read and flushSave(true) already wrote this copy
     if (db && db.updated && db.updated > base && db.updated !== pr.updated && Date.now() - (BAK_LAST.get(pr.id) || 0) > 300000) {
       BAK_LAST.set(pr.id, Date.now());
-      return backupNow("by another tab or window, kept before this one wrote over it", db).catch(() => {})
+      return backupNow("by another tab or window, kept before this one wrote over it", prIn(db)).catch(() => {})
         .then(() => { toast("This project was also changed in another tab or window — that version is kept under Project → Backups", 6000); return write(); });
     }
     return write();
@@ -484,15 +529,18 @@ function restore(js){ const o = JSON.parse(js), bb0 = P.proj.bbImp || {}, rt0 = 
 
 /* what is kept per drawing (its PDF document, lines, text, layers, thumbnails) is kept for the files of every project open in a window,
    and let go for the rest — a project left behind frees its memory as before */
-function pruneCaches(){
+const WARM_MB = 400;   // the project just left keeps its opened drawings while they come to no more than this: switching back and forth is then instant
+function pruneCaches(prev){
   const keep = new Set(); PANES.forEach(pn => pn.sess.proj && pn.sess.proj.files.forEach(f => keep.add(f.id)));
+  if (prev && prev.files && prev.files.reduce((a, f) => a + (+f.size || 0) * (f.cad ? 10 : 1), 0) <= WARM_MB * 1048576) prev.files.forEach(f => keep.add(f.id));   // (an AutoCAD drawing, held as its scene, takes some ten times its file)
   const fid = k => String(k).split(":")[0];
   Object.keys(S.docs || {}).forEach(id => { if (!keep.has(id)) { const d = S.docs[id]; if (d && d.destroy) d.destroy(); delete S.docs[id]; } });
-  ["geo", "texts", "sizes", "thumbs", "ocgs", "ocBound", "cadSc", "cadP"].forEach(n => { const o = S[n]; if (o) Object.keys(o).forEach(k => { if (!keep.has(fid(k))) delete o[k]; }); });
+  ["geo", "texts", "sizes", "thumbs", "ocgs", "ocBound", "cadSc", "cadP", "cedCache"].forEach(n => { const o = S[n]; if (o) Object.keys(o).forEach(k => { if (!keep.has(fid(k))) delete o[k]; }); });
   S.thumbQ = []; rotSync(P.proj);
 }
 async function openProject(id){
   await flushSave();   // the project being left keeps its last change
+  const prev = P.proj;
   const twin = PANES.find(p => p !== ACT && p.sess.proj && p.sess.proj.id === id);   // already open in the other window: that one, not a second copy of it
   let pr;
   if (twin) { ACT.sess = twin.sess; pr = twin.sess.proj; }
@@ -508,7 +556,7 @@ async function openProject(id){
     S.pgSel = new Set(); S.pgLast = null; S.pgQ = ""; S.pgF = ""; S.condSel = new Set();
   }
   draftClear(); S.page = null; S.fileId = null; S.iso = null; S.docs = S.docs || {}; freeCadBitmap();
-  pruneCaches();
+  pruneCaches(prev !== pr ? prev : null);
   tabSay({t: "open", id: pr.id});
   S.cond = twin ? S.cond : (pr.conds[0] || {}).id || null;
   localStorage.setItem("zdTakeoffLast", pr.id);
@@ -732,7 +780,7 @@ async function addFiles(files){
       await gotoPage(meta.id, 1);
       toast(how === "replace" ? f.name + " replaced — " + d.numPages + " page" + (d.numPages > 1 ? "s" : "") + " · check the measurements sit on the new drawing"
         : name + (name !== f.name ? " (added as a new drawing)" : how === "same" ? " (same drawing — re-attached)" : "") + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""), how === "new" && name === f.name ? 2600 : 5000);
-      if (cad) setTimeout(() => toast(cadSay(name, cad.meta), 9000), 300);
+      if (cad) setTimeout(() => { const t = cadSay(name, cad.meta); toast(t, /^⚠/.test(t) ? 30000 : 9000); }, 300);
       else if (how !== "replace") await bbImport(meta.id, {auto: true}).catch(e => toast("Bluebeam markups could not be read: " + (e.message || e), 6000));   // markups taken in Bluebeam: brought in as conditions
     } catch (e) { const m = e && e.message || String(e); toast(/password/i.test(m) ? m : f.name + " could not be opened — " + m + (/Invalid PDF|empty/i.test(m) ? " (is it a PDF, and complete?)" : ""), 6000); }
     busy("");
@@ -1187,12 +1235,22 @@ function sizeDims(t){ const m = /^\s*([^xX×*]+?)\s*[xX×*]\s*([^xX×*]+?)\s*$/.
 async function scaleFromRooms(key){
   const [f, pg] = key.split(":"), g = S.geo[key]; if (!g || !g.segs.length) return null;
   const F = await drawingFacts(f, +pg), est = [], bf = segRoleFilter(g, BOUND);   // walls / openings / columns only, when the PDF has layers: a bed or a table is not the room's edge
+  /* a ray walks the grid's cells outward from c and stops once the next cell is farther than the nearest line found: a line is in
+     every cell its box covers, so where it crosses the ray it is in that cell (each line looked at once: a stamp per line). The
+     lines in the ray's whole box were collected and sorted for every ray — on a 50 MB drawing over three minutes */
+  const seen = new Uint32Array(g.segs.length), off = layerOffIx(g); let gen = 0;
   const ray = (c, dx, dy, R) => {   // distance from c to the first drawing line along (dx, dy), up to R
-    let best = R; segsIn(g, c[0] - (dx < 0 ? R : 0), c[1] - (dy < 0 ? R : 0), c[0] + (dx > 0 ? R : 0), c[1] + (dy > 0 ? R : 0)).forEach(i => { const s = g.segs[i]; if (s[4] & 9 || (bf && !bf(i))) return;   // (curves — door swings — are not the room's edge)
+    let best = R; gen++;
+    const hit = i => { if (seen[i] === gen) return; seen[i] = gen; const s = g.segs[i]; if ((off && off.has(s[7])) || s[4] & 9 || (bf && !bf(i))) return;   // (curves — door swings — are not the room's edge)
       if (dy === 0) { const y0 = Math.min(s[1], s[3]), y1 = Math.max(s[1], s[3]); if (c[1] < y0 || c[1] > y1 || y1 === y0) return; const x = s[0] + (s[2] - s[0]) * (c[1] - s[1]) / (s[3] - s[1]), d = (x - c[0]) * dx; if (d > 0.5 && d < best) best = d; }
-      else { const x0 = Math.min(s[0], s[2]), x1 = Math.max(s[0], s[2]); if (c[0] < x0 || c[0] > x1 || x1 === x0) return; const y = s[1] + (s[3] - s[1]) * (c[0] - s[0]) / (s[2] - s[0]), d = (y - c[1]) * dy; if (d > 0.5 && d < best) best = d; } });
+      else { const x0 = Math.min(s[0], s[2]), x1 = Math.max(s[0], s[2]); if (c[0] < x0 || c[0] > x1 || x1 === x0) return; const y = s[1] + (s[3] - s[1]) * (c[0] - s[0]) / (s[2] - s[0]), d = (y - c[1]) * dy; if (d > 0.5 && d < best) best = d; } };
+    const cs = g.cell, a = dy === 0 ? c[0] : c[1], b = Math.floor((dy === 0 ? c[1] : c[0]) / cs), st = dy === 0 ? dx : dy, k0 = Math.floor(a / cs), k1 = Math.floor((a + st * R) / cs);
+    for (let k = k0; st > 0 ? k <= k1 : k >= k1; k += st) {
+      const L = g.grid.get(dy === 0 ? k + "," + b : b + "," + k); if (L) for (const i of L) hit(i);
+      if (best < (st > 0 ? (k + 1) * cs - a : a - k * cs) - 1e-6) break;   // every line still unread crosses farther than this
+    }
     return best; };
-  F.rooms.forEach(r => {
+  const one = r => {
     const d = sizeDims(r.size); if (!d || d[0] < 4 || d[1] < 4) return;
     const R = 40 * r.h * Math.max(d[0], d[1]) / 10, c = [r.x + r.w / 2, r.y - r.h / 2], below = r.sizeY != null ? r.sizeY + r.h * 0.6 : r.y + r.h * 1.5;
     // seven parallel rays each way (across: at seven heights round the name; up and down: at seven places side by side); the
@@ -1206,7 +1264,10 @@ async function scaleFromRooms(key){
     const a = [w / d[0], h / d[1]], b = [w / d[1], h / d[0]], A = Math.abs(Math.log(a[0] / a[1])), B = Math.abs(Math.log(b[0] / b[1]));
     const pr = A <= B ? a : b; if (Math.min(A, B) > 0.22) return;
     est.push(Math.sqrt(pr[0] * pr[1]));
-  });
+  };
+  /* a room at a time, giving the page back every 40 ms: on a 50 MB drawing (thousands of rooms, thousands of lines a cell) this
+     check is a minute, and it runs on its own after the page is shown — the page answers meanwhile */
+  let tY = performance.now(); for (const r of F.rooms) { one(r); if (performance.now() - tY > 40) { await new Promise(ok => setTimeout(ok, 0)); tY = performance.now(); } }
   if (est.length < 3) return null;
   est.sort((x, y) => x - y); const med = est[est.length >> 1], agree = est.filter(v => Math.abs(v / med - 1) < 0.1).length;
   if (agree < 3 || agree < est.length / 4) return null;   // written sizes too scattered to say anything
@@ -8685,10 +8746,15 @@ const BAK_KEEP = 10;
 async function backupsOf(pid){ return (await tx("backups", "readonly", s => s.index("pid").getAll(pid))).sort((a, b) => b.at.localeCompare(a.at)); }
 async function backupNow(why, pr){
   pr = pr || P.proj; if (!pr || !DB) return false;
-  const data = JSON.stringify(pr), list = await backupsOf(pr.id);
-  if (list[0] && list[0].data === data) return false;   // nothing changed since the last one
-  await dbPut("backups", {id: uid("B"), pid: pr.id, name: pr.name, at: new Date().toISOString(), why: why || "", n: (pr.items || []).length, data});
-  for (const b of list.slice(BAK_KEEP - 1)) await dbDel("backups", b.id);
+  /* only the newest copy is read to compare (a backup's id starts with the time it was made): reading all ten of a project whose
+     AutoCAD edits make it 130 MB was 1.3 GB and seconds on every open */
+  const ids = (await tx("backups", "readonly", s => s.index("pid").getAllKeys(pr.id))).sort().reverse();
+  const last = ids.length ? await tx("backups", "readonly", s => s.get(ids[0])) : null;
+  if (why === "opened" && last && last.upd && last.upd === pr.updated) return false;   // just read from storage, as it was when that copy was taken: no need to write a 130 MB project out to compare (other backups compare in full — a change need not have been saved yet)
+  const data = JSON.stringify(pr);
+  if (last && last.data === data) return false;   // nothing changed since the last one
+  await dbPut("backups", {id: uid("B"), pid: pr.id, name: pr.name, at: new Date().toISOString(), why: why || "", n: (pr.items || []).length, upd: pr.updated, data});
+  for (const id of ids.slice(BAK_KEEP - 1)) await dbDel("backups", id);
   return true;
 }
 async function backupsDialog(pid){
@@ -11599,9 +11665,14 @@ function tagsOf(T){   // pdf text pieces of one page -> {plan: {k: [[x, y]…]},
     if (occ.some(o => o.k === g.k && Math.hypot(o.x - c[0], o.y - c[1]) < 0.5 * Math.max(o.l.h, l.h))) return;   // the same tag written twice over itself (overprinted, or a block and its copy): one door
     occ.push({k: g.k, l, x: c[0], y: c[1], lev: l.parts.every(tagLevel)}); });
   const sched = {}, inSch = new Set(), rows = [];
+  /* the level lines by their y, once: a tag looks only at those within 0.6 × the tallest line of its own (a 50 MB drawing's
+     thousands of tags each read all its 120,000 lines — minutes); taken in the page's line order, as before */
+  const lev = []; let hL = 0; lines.forEach((r, i) => { if (r.parts.every(tagLevel)) { lev.push({r, i}); if (r.h > hL) hL = r.h; } }); lev.sort((a, b) => a.r.y - b.r.y || a.i - b.i);
+  const levNear = (y, h) => { const d = 0.6 * Math.max(hL, h); let a = 0, b = lev.length; while (a < b) { const m = (a + b) >> 1; if (lev[m].r.y < y - d) a = m + 1; else b = m; }
+    const out = []; for (let k = a; k < lev.length && lev[k].r.y <= y + d; k++) out.push(lev[k]); return out.sort((p, q) => p.i - q.i).map(p => p.r); };
   occ.forEach(o => {   // a schedule row: the tag with a size on the same line to its right
     if (!o.lev) return;
-    const l = o.l, cand = lines.filter(r => r !== l && r.parts.every(tagLevel) && Math.abs(r.y - l.y) < 0.6 * Math.max(r.h, l.h) && r.x > l.x + l.w - l.h && r.x < l.x + 80 * l.h).sort((a, b) => a.x - b.x), row = [];
+    const l = o.l, cand = levNear(l.y, l.h).filter(r => r !== l && Math.abs(r.y - l.y) < 0.6 * Math.max(r.h, l.h) && r.x > l.x + l.w - l.h && r.x < l.x + 80 * l.h).sort((a, b) => a.x - b.x), row = [];
     let edge = l.x + l.w; for (const r of cand) { if (r.x - edge > 12 * l.h || tagParse(r.s)) break; row.push(r); edge = Math.max(edge, r.x + r.w); }   // the cells of its table row: each close after the last
     let sz = sizePair(row.map(r => r.s).join("  "));
     if (!sz) { const L = (row.map(r => r.s).join("  ").replace(/[’′]/g, "'").replace(/[”″]/g, '"').match(/\d+(?:\.\d+)?\s*'\s*-?\s*(?:\d+(?:\.\d+)?)?(?:\s*\d\/\d)?\s*"?/g) || []).map(parseFt).filter(v => v > 0);   // width and height in their own columns
@@ -11616,7 +11687,8 @@ function tagsOf(T){   // pdf text pieces of one page -> {plan: {k: [[x, y]…]},
      room's size is not the door's */
   const aligned = (a, b, t) => Math.min(Math.abs(a.x - b.x), Math.abs(a.x + a.w - b.x - b.w), Math.abs(a.x + a.w / 2 - b.x - b.w / 2)) < t;   // left, right or centre aligned
   const mates = (a, b) => { const h = Math.max(a.o.l.h, b.o.l.h), dy = Math.abs(a.o.l.y - b.o.l.y); return dy > 0.6 * h && dy < 6 * h && aligned(a.o.l, b.o.l, 1.2 * h) && aligned(a.c, b.c, 3 * h); };
-  const headed = a => { const l = a.o.l; return lines.some(t => TAG_HEAD.test(t.s) && t.parts.every(tagLevel) && t.y < l.y - 0.3 * l.h && t.y > l.y - 14 * l.h && t.x < a.end + 10 * l.h && t.x + t.w > l.x - 10 * l.h); };
+  const heads = lines.filter(t => TAG_HEAD.test(t.s) && t.parts.every(tagLevel));   // (the headings, found once)
+  const headed = a => { const l = a.o.l; return heads.some(t => t.y < l.y - 0.3 * l.h && t.y > l.y - 14 * l.h && t.x < a.end + 10 * l.h && t.x + t.w > l.x - 10 * l.h); };
   const sRows = rows.filter(a => rows.some(b => b !== a && mates(a, b)) || headed(a));
   sRows.forEach(a => { inSch.add(a.o); sched[a.o.k] = Object.assign(sched[a.o.k] || {}, a.sz, a.q ? {qty: +a.q[1]} : {}, {page: true}); });
   occ.forEach(o => { if (!inSch.has(o) && o.lev && sRows.some(a => Math.abs(o.l.y - a.o.l.y) < 0.6 * Math.max(o.l.h, a.o.l.h) && o.x > a.o.l.x - 15 * a.o.l.h && o.x < a.end)) inSch.add(o); });   // another mark on a schedule row (the tag's symbol drawn beside its number): not a door either
@@ -11733,10 +11805,17 @@ async function doorWinDialog(){
 }
 function textLines(T){   // pdf text pieces -> lines {s, x, y, w, h, parts}
   const t = T.slice().sort((a, b) => a.y - b.y || a.x - b.x), out = [];
+  /* lines are made in the order of their y, and a piece joins a line less than 0.45 × the taller height above it: a line lower than
+     0.45 × the tallest text of the page can take no later piece, so the search starts past those (a DWG page of 27,000 pieces took
+     3 s, looking through every line for every piece — and it is read several times as a project opens) */
+  let hMax = 0, lo = 0; for (const p of t) if (p.h > hMax) hMax = p.h;
   t.forEach(p => {
-    const L = TAG_RX.test(p.s.trim().replace(/\s+/g, "")) ? null : out.find(l => !l.tag && Math.abs(l.y - p.y) < 0.45 * Math.max(l.h, p.h) && p.x - (l.x + l.w) < 1.6 * l.h && p.x - (l.x + l.w) > -0.3 * l.h);
+    const tag = TAG_RX.test(p.s.trim().replace(/\s+/g, ""));
+    while (lo < out.length && p.y - out[lo].y >= 0.45 * hMax) lo++;
+    let L = null;
+    if (!tag) for (let i = lo; i < out.length; i++) { const l = out[i]; if (!l.tag && Math.abs(l.y - p.y) < 0.45 * Math.max(l.h, p.h) && p.x - (l.x + l.w) < 1.6 * l.h && p.x - (l.x + l.w) > -0.3 * l.h) { L = l; break; } }
     if (L) { L.s += (p.x - (L.x + L.w) > 0.25 * L.h && !/\s$/.test(L.s) ? " " : "") + p.s; L.w = Math.max(L.w, p.x + p.w - L.x); L.parts.push(p); }
-    else out.push({s: p.s, x: p.x, y: p.y, w: p.w || p.s.length * p.h * 0.55, h: p.h, r: p.r || 0, parts: [p], tag: TAG_RX.test(p.s.trim().replace(/\s+/g, ""))});   // a door / window tag stays on its own
+    else out.push({s: p.s, x: p.x, y: p.y, w: p.w || p.s.length * p.h * 0.55, h: p.h, r: p.r || 0, parts: [p], tag});   // a door / window tag stays on its own
   });
   out.forEach(l => { const c = Math.cos(l.r || 0), sn = Math.sin(l.r || 0); l.cx = l.x + c * l.w / 2 + sn * l.h / 2; l.cy = l.y + sn * l.w / 2 - c * l.h / 2;   // the text's centre — along its own direction (a label written up the page too)
     l.s = l.s.replace(/½/g, " 1/2").replace(/¼/g, " 1/4").replace(/¾/g, " 3/4").replace(/⅛/g, " 1/8").replace(/\s+/g, " ").trim(); });   // 13'-5½" is 13'-5 1/2"
@@ -13218,7 +13297,9 @@ function cadAdopt(meta, cad, how){   // a drawing just added: its page's scale f
 }
 function cadSay(name, m){
   const off = m.layers.filter(l => l.off || l.frozen).length, sk = Object.entries(m.stats.skipped || {}).map(([t, n]) => n + " " + t).join(", ");
-  return name + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
+  /* the browser's DWG reader can lose most of a big drawing that AutoCAD reads without fault (its objects come back empty): said first, with the way round it */
+  const jk = m.stats.junk || 0, lost = m.fmt === "DWG" && jk > 0.1 * (jk + (m.stats.ents || 0));
+  return (lost ? "⚠ Only part of this drawing could be read — " + jk.toLocaleString() + " objects came out empty in the browser's DWG reader. In AutoCAD use SAVEAS → DXF and add the .dxf instead. " : "") + name + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
     (m.assumed ? " — ⚠ the drawing has no units set: check the scale (chip → Verify)" : m.unitFix ? " — ⚠ its dimensions disagree with its units setting: check the scale (chip → Verify)" : " — scale exact") +
     " · " + m.layers.length + " layers" + (off ? " (" + off + " off / frozen)" : "") + " · " + (m.stats.ents || 0).toLocaleString() + " objects" +
     (sk ? " · not shown: " + sk : "") + (m.stats.missing ? " · " + m.stats.missing + " block(s) missing (xrefs?)" : "") + (m.stats.far ? " · " + m.stats.far + " far-off object(s) left off the page" : "") + (m.stats.junk ? " · " + m.stats.junk + " damaged object(s) left out" : "") + (m.stats.trunc ? " · ⚠ very large: shown in part" : "");
@@ -13257,7 +13338,7 @@ function inkMap(dark, mono){
     if (m) { const n = parseInt(m[1], 16); R = n >> 16 & 255; G = n >> 8 & 255; B = n & 255; }
     else { const q = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(v); if (!q) { cache.set(v, v); return v; } R = +q[1]; G = +q[2]; B = +q[3]; A = q[4] == null ? 1 : +q[4]; }
     const L = 0.299 * R + 0.587 * G + 0.114 * B; let o;
-    if (mono) o = dark ? [255, 255, 255] : [0, 0, 0];
+    if (mono) o = (Math.max(R, G, B) - Math.min(R, G, B) < 40 && L >= 215) === !dark ? [255, 255, 255] : [0, 0, 0];   // white (and near-white grey) stays paper: an AutoCAD plot paints its sheet white first, which in one ink would hide the whole drawing
     else if (Math.max(R, G, B) - Math.min(R, G, B) < 40) { const g = 255 - L; o = [g, g, g]; }
     else { o = [R, G, B]; if (L < 70) o = o.map(c => c + (255 - c) * 0.45); }
     r = A < 1 ? "rgba(" + o.map(c => Math.round(c)).join(",") + "," + A + ")" : "#" + o.map(c => Math.round(c).toString(16).padStart(2, "0")).join("");

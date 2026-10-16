@@ -414,7 +414,7 @@ const polyAreaS = P => { let s = 0; for (let i = 0, j = P.length - 1; i < P.leng
 const inPoly = (p, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i][1] > p[1]) !== (P[j][1] > p[1]) && p[0] < (P[j][0] - P[i][0]) * (p[1] - P[i][1]) / (P[j][1] - P[i][1]) + P[i][0]) c = !c; return c; };
 
 /* ------------------------------------------------------------------ the scene: model space flattened into page points */
-const MAX_OP = 4e6, MAX_HATCH = 2e6;
+const MAX_OP = 1.6e7, MAX_HATCH = 2e6;   // (a whole working plan saved as DXF needs some 5.4 million; a 50 MB drawing, as binary DXF, 11 million)
 export function cadScene(md, opt){
   opt = opt || {};
   const T0 = Date.now(), skipped = {}, missing = {}; let bad = 0, trunc = false, hatchSegs = 0, junk = 0;
