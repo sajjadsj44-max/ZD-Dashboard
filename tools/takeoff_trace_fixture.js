@@ -54,5 +54,30 @@ function tracePdf(){   // a one-page PDF: the lines on their layers (optional co
   out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, "0") + " 00000 n \n").join("") + `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF\n`;
   return Buffer.from(out, "latin1");
 }
-module.exports = {K, O, X, segs, text, LAYERS, WALL, WH, DUCTS, at, tracePdf, PW, PH};
+/* plan B — a drawing plotted without its wall hatch (as the Phoenix 3rd floor was): 24 × 16 ft outside, 9" walls, no hatch at all,
+   the wall outlines joined where walls meet (as AutoCAD draws them).
+     a 9" wall at x 12 with an open 3 ft door (y 11–14): the BED ROOM (11'-3" x 14'-6", 163.125 Sft) left of it; right of it the
+     LOUNGE, with a BATH in its top-left corner (x 12.75–18, y 0.75–6.5) whose door sits across the corner: the bath's right wall
+     stops at y 4, its bottom wall at x 15.25, and only the door — its leaf hinged at (15.25, 6.5), open into the lounge, and its
+     dashed swing back to (18, 4) — closes the opening.
+       BATH 5.25 × 5.75 − the corner 2.75 × 2.5 / 2 = 26.75 Sft; LOUNGE 10.5 × 14.5 − the bath − its walls (3.25 × 0.75 + 2.5 × 0.75)
+       = 121.1875 Sft; the door 3 × 0.75 = 2.25 Sft; the floor 384 Sft
+     A stair note (STAIR = 4'-6" WIDE) in the lounge and a riser count (24 DN) in the bed room are no room names. */
+const WALLB = 0, DOORB = 1, LAYERS_B = [{name: "Wall", role: "wall"}, {name: "Door", role: "opening"}, {name: "Text", role: "text"}];
+const segsB = [], LB = (x0, y0, x1, y1, lay) => segsB.push([X(x0), X(y0), X(x1), X(y1), 0, lay == null ? WALLB : lay]);
+[[0, 0, 24, 0], [24, 0, 24, 16], [24, 16, 0, 16], [0, 16, 0, 0],                                              // outer face
+ [0.75, 0.75, 12, 0.75], [12.75, 0.75, 18, 0.75], [18.75, 0.75, 23.25, 0.75], [23.25, 0.75, 23.25, 15.25],    // inner face, broken where walls meet it
+ [0.75, 15.25, 12, 15.25], [12.75, 15.25, 23.25, 15.25], [0.75, 0.75, 0.75, 15.25],
+ [12, 0.75, 12, 11], [12.75, 0.75, 12.75, 6.5], [12.75, 7.25, 12.75, 11], [12, 11, 12.75, 11],                // the wall at x 12, its door y 11–14
+ [12, 14, 12, 15.25], [12.75, 14, 12.75, 15.25], [12, 14, 12.75, 14],
+ [18, 0.75, 18, 4], [18.75, 0.75, 18.75, 4], [18, 4, 18.75, 4],                                               // the bath's right wall, to y 4
+ [12.75, 6.5, 15.25, 6.5], [12.75, 7.25, 15.25, 7.25], [15.25, 6.5, 15.25, 7.25]].forEach(l => LB(...l));    // its bottom wall, to x 15.25
+{ const H = [15.25, 6.5], C = [18, 4], r = Math.hypot(C[0] - H[0], C[1] - H[1]), aC = Math.atan2(C[1] - H[1], C[0] - H[0]), aA = aC + Math.PI / 2;
+  LB(H[0], H[1], H[0] + r * Math.cos(aA), H[1] + r * Math.sin(aA), DOORB);                                   // the leaf, open into the lounge
+  const st = 3 / (r * K), gp = 2 / (r * K); for (let t = aA; t > aC + 1e-9; t -= st + gp) { const t2 = Math.max(aC, t - st);   // its swing, dashed
+    LB(H[0] + r * Math.cos(t), H[1] + r * Math.sin(t), H[0] + r * Math.cos(t2), H[1] + r * Math.sin(t2), DOORB); } }
+const TEXT_B = [["BED ROOM", 6, 7], ["11'-3\"x14'-6\"", 6, 7.55], ["24 DN", 6, 12], ["BATH", 15.4, 3], ["5'-3\"x5'-9\"", 15.4, 3.55], ["LOUNGE", 19, 11], ["STAIR = 4'-6\" WIDE", 19, 13]];
+const textB = TEXT_B.map(([s, xf, yf]) => ({s, x: X(xf) - tw(s) / 2, y: X(yf) - FS, w: tw(s), h: FS, r: 0, cx: X(xf), cy: X(yf) - FS / 2}));
+const planB = {segs: segsB, layers: LAYERS_B, lines: textB, at: {bed: [X(6), X(4)], bath: [X(14), X(2)], lounge: [X(20), X(9)]}};
+module.exports = {K, O, X, segs, text, LAYERS, WALL, WH, DUCTS, at, tracePdf, PW, PH, planB};
 if (require.main === module) { const out = process.argv[2] || "trace.pdf"; require("fs").writeFileSync(out, tracePdf()); console.log("wrote " + out); }
