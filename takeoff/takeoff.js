@@ -386,6 +386,7 @@ function migrate(p, rep){
   p.marks = p.marks.filter(m => { const q = obj(m) && m.id != null && MARK_TOOLS[m.type] && pts(m.pts, MK_MINPTS[m.type] || 2); if (!q) { bad++; return false; } m.pts = q; m.id = String(m.id); m.text = String(m.text == null ? "" : m.text);
     if (MK_TYPES.has(m.type)) mkSanitize(m);
     mkCommon(m);
+    if (m.type === "legend") ["border", "fill", "headerFill", "titleFill", "textColor"].forEach(k2 => { if (m[k2] != null && !HEXCOL.test(String(m[k2]))) { note("The legend's colour “" + String(m[k2]).slice(0, 40) + "” is not a colour — reset"); delete m[k2]; } });   // (written into the drawing's SVG)
     if (m.color != null && !HEXCOL.test(String(m.color))) { note("A markup's colour “" + String(m.color).slice(0, 40) + "” is not a colour — replaced"); m.color = "#d03b3b"; } return true; });
   if (bad) note(bad + " markup" + (bad > 1 ? "s" : "") + " with missing or broken points left out");
   mkProjCommon(p);
@@ -2720,12 +2721,12 @@ async function autoAt(p, nc){   // nc: a new area condition, added with the outl
     (res.holes || []).forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, label: h.name + " (void in " + (nm || "room") + ")", det: {how: "auto-void", of: id, src: det.src, gap: det.gap, pts0: h.pts.map(q => q.slice()), a0: kk ? +(polyArea(h.pts) / kk / kk).toFixed(4) : null, at: det.at, flag: ""}})); }, "Auto area");
   if (nc) { S.cond = nc.id; renderConds(); }
   S.sel = id; draw(); renderSheet();
-  const k = hereScale(p);
-  if (res.short && !res.leak) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — " + res.short + ".", 9000);
+  const k = hereScale(p), per = " · perimeter " + f3(polyLen(res.pts, true) / k) + " ft";   // the area and its perimeter
+  if (res.short && !res.leak) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + per + " — " + res.short + ".", 9000);
   if (res.leak) { if (!autoOpt().show) { P.proj.auto = Object.assign({}, P.proj.auto || {}, {show: true}); save(); }
-    return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
-  if (res.warn) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft — " + res.warn + ".", 9000);
-  toast((nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + ((res.holes || []).length ? " less " + res.holes.map(h => h.name + " " + fq(polyArea(h.pts) / k / k)).join(", ") + " Sft (deducted)" : "") + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
+    return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + per + " — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
+  if (res.warn) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + per + " — " + res.warn + ".", 9000);
+  toast((nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + per + ((res.holes || []).length ? " less " + res.holes.map(h => h.name + " " + fq(polyArea(h.pts) / k / k)).join(", ") + " Sft (deducted)" : "") + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
 }
 /* Preview before adding (Auto area settings ⚙ "Show the outline before adding it", or the agent rule "show me the boundary
    before accepting"): the outline is drawn dashed orange with its area; Accept (Enter), Tighter / Wider door gap, Cancel (Esc) */
@@ -4180,6 +4181,7 @@ async function finish(pts){
   if (arcs.length) ni.arcs = arcs;
   mutate(() => { P.proj.items.push(ni); }, (t === "ded" ? "Deduction" : area ? "Area" : "Run") + " in " + c.name);
   if (area && crossed(ni)) toast(crossMsg, 7000);
+  else if (area && t !== "ded" && itemScale(ni)) { const k = itemScale(ni), Q = itemPoly(ni); toast((nm ? nm + " (named from the drawing) — " : "Area — ") + fq(polyArea(Q) / k / k) + " Sft · perimeter " + f3(polyLen(Q, true) / k) + " ft", 3500); }   // what was just taken: its area and perimeter
   else if (nm) toast("Named " + nm + " from the drawing", 1800);
 }
 
@@ -4635,8 +4637,9 @@ function tmpMeasSvg(m, k){   // a temporary angle (arms dashed, an arc at the co
 }
 /* measurement captions, as Bluebeam's "show caption": which values a label shows is set once (🏷 ▾) and used on screen
    and in the marked-up exports. Areas: name, quantity, area, perimeter, L × W; lengths: name, length, quantity, H / T. */
-const LBL_DEF = {on: true, name: true, qty: true, area: false, perim: false, len: true, dims: false, cond: false, seg: false, units: true, small: true, autoName: true};
-function loadLbl(){ let o = null; try { o = JSON.parse(pref("zdTakeoffLbl") || "null"); } catch (e) { o = null; } S.lbl = Object.assign({}, LBL_DEF, o || {}); }
+const LBL_DEF = {on: true, name: true, qty: true, area: true, perim: true, len: true, dims: false, cond: false, seg: false, units: true, small: true, autoName: true, v2: 1};
+function loadLbl(){ let o = null; try { o = JSON.parse(pref("zdTakeoffLbl") || "null"); } catch (e) { o = null; } S.lbl = Object.assign({}, LBL_DEF, o || {});
+  if (o && !o.v2) Object.assign(S.lbl, {area: true, perim: true, v2: 1}); }   // an area's label shows its area and perimeter: switched on once for labels set before (switched off again, it stays off)
 function capLines(it, c, k, ap){
   const o = S.lbl, out = [], u = t => o.units ? " " + t : "", rows = rowsOf(it, k), q = rows.reduce((a, r) => a + r.qty, 0), poly = itemPoly(it);
   const A0 = ap || null, fL = v => A0 ? apLen(v, A0) : f3(v) + u("ft"), fA = v => A0 ? apArea(v, A0) : fq(v) + u("Sft"), fQ = v => A0 ? apQty(v, c.unit, A0) : fq(v, c.unit) + u(c.unit);
@@ -4646,7 +4649,7 @@ function capLines(it, c, k, ap){
     const A = polyArea(poly) / k / k * (it.kind === "ded" ? -1 : 1), P = polyLen(poly, true) / k, r = rows[0];
     if (o.qty) out.push(fQ(q));
     if (o.area && !(o.qty && c.unit === "Sft")) out.push("A " + fA(A));
-    if (o.perim) out.push("P " + fL(P));
+    if (o.perim) out.push("P " + fL(P) + ((+it.nos || 1) > 1 ? " × " + (+it.nos) : ""));   // P = perimeter, short so the label stays no wider than its area (one outline's; the quantity counts every one)
     if (o.dims && r && r.how === "rect") out.push(A0 && A0.units !== "ft" ? apLen(r.L, A0) + " × " + apLen(r.W, A0) : f3(r.L) + " × " + f3(r.W) + u("ft"));
     if (r && r.how === "circle" && (o.dims || o.qty)) out.push("R " + fL(r.D / 2) + " · Ø " + fL(r.D));
     if (r && r.F != null && (o.dims || o.qty)) out.push("slope " + pitchIn(pitchOf(it, c)) + " × " + r.F.toFixed(4));
@@ -4692,7 +4695,7 @@ function segLabels(scr, pts, k, closed, z, ap){   // the length of every side, a
 async function labelDialog(){
   const o = S.lbl, cb = (k2, t) => `<label class="pk"><input type="checkbox" data-lb="${k2}"${o[k2] ? " checked" : ""}> ${t}</label>`;
   const v = await ask("Labels on the drawing", `<div class="grid"><div class="fg"><label>Show on every label</label>${cb("name", "Name (room / label)")}${cb("cond", "Condition name")}${cb("qty", "Quantity in the condition's unit")}${cb("units", "Units (Sft, ft, cft, Nos)")}</div>
-    <div class="fg"><label>Areas</label>${cb("area", "Area Sft (when the unit is not Sft)")}${cb("perim", "Perimeter ft")}${cb("dims", "L × W of rectangles · Ø of circles · H / T of walls")}
+    <div class="fg"><label>Areas</label>${cb("area", "Area Sft (when the unit is not Sft — in Sft the quantity is the area)")}${cb("perim", "Perimeter ft — shown as P (the outline's length)")}${cb("dims", "L × W of rectangles · Ø of circles · H / T of walls")}
       <label style="margin-top:6px">Lengths</label>${cb("len", "Length ft")}</div>
     <div class="fg w2"><label>Display</label>${cb("seg", "Length of every side / segment (always shown on the selected one)")}${cb("small", "Hide labels on shapes too small to read at this zoom")}${cb("autoName", "Name new areas from the room name written inside them (manual, rectangle, auto area, Claude)")}</div></div>
     <p class="small" style="margin-top:8px">The same labels go on the marked-up PNG / PDF exports. <b>L</b> shows or hides all labels.</p>`, "Save", () => { const n = {on: o.on}; document.querySelectorAll("[data-lb]").forEach(x => { n[x.dataset.lb] = x.checked; }); return n; });
@@ -4702,10 +4705,40 @@ async function labelDialog(){
     if (n && S.lbl.autoName && await ask("Name the areas already drawn?", `<p>${n} area${n > 1 ? "s" : ""} on this page ${n > 1 ? "have" : "has"} no name. Name ${n > 1 ? "them" : "it"} from the room text inside?</p>`, "Name them")) nameAreas(); }
 }
 /* ------------------------------------------------------------------ embedded takeoff legend (Bluebeam-style) */
-const LEGEND_COLS = [{id:'symbol',label:'Symbol',on:true},{id:'boq',label:'BOQ',on:true},{id:'description',label:'Description',on:true},{id:'unit',label:'Unit',on:true},{id:'qty',label:'Quantity',on:true},{id:'rate',label:'Rate',on:false},{id:'amount',label:'Amount',on:false}];
+const LEGEND_COLS = [{id:'symbol',label:'Symbol',on:true},{id:'boq',label:'BOQ',on:true},{id:'description',label:'Description',on:true},{id:'unit',label:'Unit',on:true},{id:'qty',label:'Quantity',on:true},{id:'perim',label:'Perimeter',on:true},{id:'rate',label:'Rate',on:false},{id:'amount',label:'Amount',on:false}];
 function legendOfPage(file=S.fileId,page=S.pageNo){return (P.proj.marks||[]).filter(m=>m.type==='legend'&&m.file===file&&m.page===page);}
 function legendCols(m){const src=Array.isArray(m.columns)?m.columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id);return src.map(id=>LEGEND_COLS.find(x=>x.id===id)).filter(Boolean);}
-function legendRows(m){const map=new Map(), list=m.scope==='all'?P.proj.items.filter(i=>!hiddenItem(i)):P.proj.items.filter(i=>i.file===m.file&&i.page===m.page&&!hiddenItem(i));list.forEach(it=>{const c=cond(it.cond);if(!c)return;let q=0,has=false;if(c.type==='count'){q=(+it.pts?.length||0)*Math.max(1,+it.nos||1);has=true}else{const k=itemScale(it);if(k){q=rowsOf(it,k).reduce((a,r)=>a+(+r.qty||0),0);has=true}}if(!has&&!q)return;const old=map.get(c.id);map.set(c.id,{c,q:(old?old.q:0)+q,has:!!(old&&old.has)||has})});let rows=[...map.values()].filter(x=>x.has||x.q!==0);const s=m.sort||'drawing';if(s==='condition')rows.sort((a,b)=>String(a.c.name).localeCompare(String(b.c.name)));else if(s==='boq')rows.sort((a,b)=>String(a.c.boq||'').localeCompare(String(b.c.boq||'')));else if(s==='qty')rows.sort((a,b)=>(+b.q||0)-(+a.q||0));else if(s==='list'){const ix=new Map(P.proj.conds.map((c,i)=>[c.id,i]));rows.sort((a,b)=>ix.get(a.c.id)-ix.get(b.c.id));}return rows;}
+function legendRows(m){   // one row per condition: its quantity, the perimeter of its areas (as P in the bill), the look its measurements have
+  const map = new Map(), list = m.scope === 'all' ? P.proj.items.filter(i => !hiddenItem(i)) : P.proj.items.filter(i => i.file === m.file && i.page === m.page && !hiddenItem(i));
+  list.forEach(it => { const c = cond(it.cond); if (!c) return; let q = 0, has = false, per = 0;
+    if (c.type === 'count') { q = (+it.pts?.length || 0) * Math.max(1, +it.nos || 1); has = true; }
+    else { const k = itemScale(it); if (k) { q = rowsOf(it, k).reduce((a, r) => a + (+r.qty || 0), 0); has = true; if (c.type === 'area' && it.kind === 'shape') per = (+it.nos || 1) * polyLen(itemPoly(it), true) / k; } }
+    if (!has && !q) return;
+    const x = map.get(c.id) || {c, q: 0, has: false, per: 0, its: []}; x.q += q; x.has = x.has || has; x.per += per; x.its.push(it); map.set(c.id, x); });
+  let rows = [...map.values()].filter(x => x.has || x.q !== 0); rows.forEach(x => { x.ap = legAp(x.c, x.its); });
+  const s = m.sort || 'drawing';
+  if (s === 'condition') rows.sort((a, b) => String(a.c.name).localeCompare(String(b.c.name)));
+  else if (s === 'boq') rows.sort((a, b) => String(a.c.boq || '').localeCompare(String(b.c.boq || '')));
+  else if (s === 'qty') rows.sort((a, b) => (+b.q || 0) - (+a.q || 0));
+  else if (s === 'list') { const ix = new Map(P.proj.conds.map((c, i) => [c.id, i])); rows.sort((a, b) => ix.get(a.c.id) - ix.get(b.c.id)); }
+  return rows;
+}
+/* a condition's symbol as its measurements are drawn (as Bluebeam's legend shows it): an area's fill, hatch and outline, a run's
+   line, dash and weight, a count's marker — in their own look when all of them on the sheet share one, else the condition's */
+function legAp(c, its){
+  const own = (its || []).map(i => i.ap && Object.keys(i.ap).length ? JSON.stringify(i.ap) : "");
+  return own.length && own[0] && own.every(x => x === own[0]) ? apOf(c, its[0]) : apOf(c);
+}
+function legSym(c, a, x, y, w, h, z){   // in a box at x, y: h high, up to w wide (a line takes more room than a square)
+  const col = esc(a.col), op = Math.max(.05, Math.min(1, (+a.lineOp || 100) / 100)), lw = Math.max(.8 * z, Math.min(h * .3, swN(a.sw, 2) * z * .7)), dash = apDash(a.dash, lw), da = dash ? ` stroke-dasharray="${dash}"` : "";
+  if (c.type === "count") { const cc = Object.assign({}, c, {ap: a, color: a.col, sym: a.sym || c.sym, cap: "none"}); return countSvg(cc, [[x + h / 2, y + h / 2]], p => p, h * .5 / (+a.csz || 10), -1); }
+  if (c.type !== "area") { const L = Math.max(h, Math.min(w, h * 2.4)), m = (y + h / 2).toFixed(1);
+    return `<line x1="${x.toFixed(1)}" y1="${m}" x2="${(x + L).toFixed(1)}" y2="${m}" stroke="${col}" stroke-width="${lw.toFixed(2)}" stroke-opacity="${op}" stroke-linecap="${a.dash === "dot" ? "round" : "butt"}"${da}/>`; }
+  const r = `x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${h.toFixed(1)}" height="${h.toFixed(1)}"`; let o = `<rect ${r} fill="#fff"/>`;
+  if ((+a.fillOp || 0) > 0) o += `<rect ${r} fill="${esc(a.fill)}" fill-opacity="${((+a.fillOp) / 100).toFixed(2)}"/>`;
+  if (a.hatch && a.hatch !== "none") { const id = "lgh" + (++AP_PID); o += apHatchDefs(id, a.hatch, esc(a.hcol), z * .6, a.hsp) + `<rect ${r} fill="url(#${id})"/>`; }
+  return o + `<rect ${r} fill="none" stroke="${col}" stroke-width="${Math.min(h * .2, lw).toFixed(2)}" stroke-opacity="${op}"${da}/>`;
+}
 function legendQty(x,m){const d=Math.max(0,Math.min(3,Math.round(+m.precision||3)));return x.has?(+x.q||0).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';}
 function legendRate(c,m){const r=Number(c&&c.rate);if(!isFinite(r)||r===0)return'—';const d=Math.max(0,Math.min(2,Math.round(+m.moneyPrecision||2)));return r.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
 function legendSvg(m,T){   // the legend is in drawing units: its text scales with the zoom like its box, and shrinks (never grows) when the box is dragged narrower than refW
@@ -4713,18 +4746,19 @@ function legendSvg(m,T){   // the legend is in drawing units: its text scales wi
  return legendSvg0(m,T,k*Math.min(1,w/k/(+m.refW||340)));
 }
 function legendSvg0(m,T,z){
- const pp=m.pts||[[80,80],[420,260]],a=T(pp[0]),b=T(pp[1]),x0=Math.min(a[0],b[0]),y0=Math.min(a[1],b[1]),x1=Math.max(a[0],b[0]),y1=Math.max(a[1],b[1]),W=Math.max(80*z,x1-x0),H=Math.max(60*z,y1-y0),cols=legendCols(m),rows=legendRows(m),fs=Math.max(5,Math.min(32,+m.fontSize||9))*z,rh=Math.max(fs*1.55,Math.min(80,+m.rowH||18)*z),hh=m.showHeaders===false?0:Math.max(fs*1.8,Math.min(80,+m.headerH||22)*z),th=m.showTitle===false?0:Math.max(fs*1.9,Math.min(80,+m.titleH||24)*z),pad=Math.max(2,Math.min(20,+m.pad||5))*z,bw=Math.max(0,Math.min(8,+m.lineWidth||1))*z,fill=m.fill||'#ffffff',head=m.headerFill||'#eef2f7',border=m.border||'#40556b',textCol=m.textColor||'#172b3f';
+ const pp=m.pts||[[80,80],[420,260]],a=T(pp[0]),b=T(pp[1]),x0=Math.min(a[0],b[0]),y0=Math.min(a[1],b[1]),x1=Math.max(a[0],b[0]),y1=Math.max(a[1],b[1]),W=Math.max(80*z,x1-x0),H=Math.max(60*z,y1-y0),cols=legendCols(m),rows=legendRows(m),fs=Math.max(5,Math.min(32,+m.fontSize||9))*z,rh=Math.max(fs*1.55,Math.min(80,+m.rowH||18)*z),hh=m.showHeaders===false?0:Math.max(fs*1.8,Math.min(80,+m.headerH||22)*z),th=m.showTitle===false?0:Math.max(fs*1.9,Math.min(80,+m.titleH||24)*z),pad=Math.max(2,Math.min(20,+m.pad||5))*z,bw=Math.max(0,Math.min(8,+m.lineWidth||1))*z,hx=(v,d)=>HEXCOL.test(String(v||''))?v:d,fill=hx(m.fill,'#ffffff'),head=hx(m.headerFill,'#eef2f7'),border=hx(m.border,'#40556b'),textCol=hx(m.textColor,'#172b3f');
  const defs='<defs><clipPath id="lg'+esc(m.id)+'"><rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+H.toFixed(1)+'"/></clipPath></defs>';let out='<g clip-path="url(#lg'+esc(m.id)+')">'+defs+'<rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+H.toFixed(1)+'" rx="3" fill="'+fill+'" fill-opacity="'+(m.fillOpacity==null?.96:Math.max(.05,Math.min(1,+m.fillOpacity)))+'" stroke="'+border+'" stroke-width="'+bw.toFixed(1)+'"/>';let yy=y0+pad;
- if(th){out+='<rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+th.toFixed(1)+'" fill="'+(m.titleFill||head)+'"/><text x="'+(x0+pad).toFixed(1)+'" y="'+(y0+th*.68).toFixed(1)+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(m.title||'Takeoff Legend')+'</text>';yy+=th}
- const widths=Array.isArray(m.colWidths)?m.colWidths.map(Number):[],weights=cols.map((c,i)=>Math.max(.05,Number(widths[i])||({symbol:.11,boq:.14,description:.31,unit:.11,qty:.16,rate:.12,amount:.15}[c.id]||.15))),sum=weights.reduce((a,b)=>a+b,0);for(let i=0;i<weights.length;i++)weights[i]/=sum;const xs=[];let xx=x0;cols.forEach((c,i)=>{xs.push(xx);xx+=W*weights[i]});
+ if(th){out+='<rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+th.toFixed(1)+'" fill="'+hx(m.titleFill,head)+'"/><text x="'+(x0+pad).toFixed(1)+'" y="'+(y0+th*.68).toFixed(1)+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(m.title||'Takeoff Legend')+'</text>';yy+=th}
+ const widths=Array.isArray(m.colWidths)?m.colWidths.map(Number):[],weights=cols.map((c,i)=>Math.max(.05,Number(widths[i])||LEG_W0[c.id]||.15)),sum=weights.reduce((a,b)=>a+b,0);for(let i=0;i<weights.length;i++)weights[i]/=sum;const xs=[];let xx=x0;cols.forEach((c,i)=>{xs.push(xx);xx+=W*weights[i]});
  if(hh){out+='<rect x="'+x0.toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+hh.toFixed(1)+'" fill="'+head+'"/>';cols.forEach((c,i)=>{out+='<text x="'+(xs[i]+pad).toFixed(1)+'" y="'+(yy+hh*.67).toFixed(1)+'" font-size="'+Math.max(5,fs*.9).toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(c.label)+'</text>'});yy+=hh}
  const cell=function(x,y,w,s,al,bold){al=al||'start';const tx=al==='end'?x+w-pad:al==='middle'?x+w/2:x+pad;return '<text x="'+tx.toFixed(1)+'" y="'+y.toFixed(1)+'" text-anchor="'+(al==='end'?'end':al==='middle'?'middle':'start')+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="'+(bold?700:400)+'" fill="'+textCol+'">'+esc(s==null?'—':s)+'</text>';};
- rows.forEach(function(r,ri){const y=yy+ri*rh,c=r.c,color=HEXCOL.test(String(c.color||''))?c.color:'#4b3b8f';if(ri%2)out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="#f7f9fb"/>';cols.forEach(function(col,i){const cw=W*weights[i],x=xs[i];if(col.id==='symbol')out+='<rect x="'+(x+pad).toFixed(1)+'" y="'+(y+rh*.28).toFixed(1)+'" width="'+Math.min(cw-pad*2,rh*.42).toFixed(1)+'" height="'+Math.min(cw-pad*2,rh*.42).toFixed(1)+'" rx="2" fill="'+color+'" stroke="'+border+'" stroke-width=".6"/>';else if(col.id==='boq')out+=cell(x,y+rh*.67,cw,c.boq||'—');else if(col.id==='description')out+=cell(x,y+rh*.67,cw,c.name||'—');else if(col.id==='unit')out+=cell(x,y+rh*.67,cw,c.unit||'—','middle');else if(col.id==='qty')out+=cell(x,y+rh*.67,cw,legendQty(r,m),'end');else if(col.id==='rate')out+=cell(x,y+rh*.67,cw,legendRate(c,m),'end');else{const rate=Number(c.rate),amt=isFinite(rate)&&rate?(+r.q||0)*rate:null;out+=cell(x,y+rh*.67,cw,amt==null?'—':f2(amt),'end')}})});
+ rows.forEach(function(r,ri){const y=yy+ri*rh,c=r.c;if(ri%2)out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="#f7f9fb"/>';cols.forEach(function(col,i){const cw=W*weights[i],x=xs[i];if(col.id==='symbol'){const hs=Math.min(cw-pad*2,rh*.46);out+=legSym(c,r.ap||apOf(c),x+pad,y+(rh-hs)/2,cw-pad*2,hs,z)}else if(col.id==='boq')out+=cell(x,y+rh*.67,cw,c.boq||'—');else if(col.id==='description'){const nm=String(c.name||'—'),n=Math.max(4,Math.floor((cw-pad*2)/(fs*.55))),t=nm.length>n?nm.slice(0,n-1)+'…':nm;out+=(t!==nm?'<g><title>'+esc(nm)+'</title>':'')+cell(x,y+rh*.67,cw,t)+(t!==nm?'</g>':'')}
+   else if(col.id==='perim')out+=cell(x,y+rh*.67,cw,c.type==='area'&&r.has?legendQty({has:true,q:r.per},m)+' ft':'—','end');else if(col.id==='unit')out+=cell(x,y+rh*.67,cw,c.unit||'—','middle');else if(col.id==='qty')out+=cell(x,y+rh*.67,cw,legendQty(r,m),'end');else if(col.id==='rate')out+=cell(x,y+rh*.67,cw,legendRate(c,m),'end');else{const rate=Number(c.rate),amt=isFinite(rate)&&rate?(+r.q||0)*rate:null;out+=cell(x,y+rh*.67,cw,amt==null?'—':f2(amt),'end')}})});
  if(cols.length>1)for(let i=1;i<cols.length;i++){out+='<line x1="'+xs[i].toFixed(1)+'" y1="'+(y0+pad).toFixed(1)+'" x2="'+xs[i].toFixed(1)+'" y2="'+Math.min(y1,y0+pad+th+hh+rows.length*rh).toFixed(1)+'" stroke="'+border+'" stroke-opacity=".22" stroke-width=".6"/>'}
  out+='</g>';return out;
 }
-function defaultLegend(file=S.fileId,page=S.pageNo){const w=340,h=190,base=S.base||{width:1000,height:1000},x0=Math.max(20,Math.min(Math.max(20,base.width-w-20),base.width-80)),y0=30;return{id:uid('M'),type:'legend',file,page,pts:[[x0,y0],[x0+w,y0+h]],title:'Takeoff Legend',showTitle:true,showHeaders:true,columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id),precision:3,moneyPrecision:2,fontSize:9,rowH:18,headerH:22,titleH:24,pad:5,lineWidth:1,border:'#40556b',fill:'#ffffff',fillOpacity:.96,headerFill:'#eef2f7',textColor:'#172b3f',sort:'drawing',colWidths:[.11,.14,.31,.11,.16],subject:'Takeoff Legend',author:qaUser(),status:'',at:new Date().toISOString()};}
-const LEG_W0 = {symbol: .11, boq: .14, description: .31, unit: .11, qty: .16, rate: .12, amount: .15};
+function defaultLegend(file=S.fileId,page=S.pageNo){const w=400,h=190,base=S.base||{width:1000,height:1000},x0=Math.max(20,Math.min(Math.max(20,base.width-w-20),base.width-80)),y0=30;return{id:uid('M'),type:'legend',file,page,pts:[[x0,y0],[x0+w,y0+h]],title:'Takeoff Legend',showTitle:true,showHeaders:true,columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id),precision:3,refW:400,moneyPrecision:2,fontSize:9,rowH:18,headerH:22,titleH:24,pad:5,lineWidth:1,border:'#40556b',fill:'#ffffff',fillOpacity:.96,headerFill:'#eef2f7',textColor:'#172b3f',sort:'drawing',colWidths:LEGEND_COLS.filter(x=>x.on).map(x=>LEG_W0[x.id]||.15),subject:'Takeoff Legend',author:qaUser(),status:'',at:new Date().toISOString()};}
+const LEG_W0 = {symbol: .11, boq: .14, description: .31, unit: .11, qty: .16, perim: .15, rate: .12, amount: .15};
 function legendDescShare(m){ const cols = legendCols(m), w = cols.map((c, i) => Math.max(.05, Number((m.colWidths || [])[i]) || LEG_W0[c.id] || .15)), t = w.reduce((a, b) => a + b, 0), i = cols.findIndex(c => c.id === "description"); return i < 0 ? .31 : w[i] / t; }
 function legendWidths(ids, share){   // column weights with the description at the share given, the others in their usual proportions
   const others = ids.filter(id => id !== "description"), t = others.reduce((a, id) => a + (LEG_W0[id] || .15), 0) || 1, rest = ids.includes("description") ? 1 - share : 1;
@@ -5717,7 +5751,7 @@ async function countTextHits(q, hits){   // text found on the drawings -> count 
 
 /* ------------------------------------------------------------------ markups: notes, clouds, arrows, highlights (no quantity) */
 const MARK_TOOLS = {note: "Note", cloud: "Cloud", arrow: "Arrow", dimension: "Dimension", hilite: "Highlight", fence: "Fence (auto-area wall)",
-  text: "Text box", callout: "Callout", line: "Line", polyline: "Polyline", polygon: "Polygon", box: "Rectangle", ellipse: "Ellipse", pen: "Pen", stamp: "Stamp", image: "Image", link: "Hyperlink", attach: "File attachment", redact: "Redaction"};
+  text: "Text box", callout: "Callout", line: "Line", polyline: "Polyline", polygon: "Polygon", box: "Rectangle", ellipse: "Ellipse", pen: "Pen", stamp: "Stamp", image: "Image", link: "Hyperlink", attach: "File attachment", redact: "Redaction", legend: "Takeoff legend"};
 function cloudPath(a, b, r){   // scalloped rectangle between screen points a and b
   const x0 = Math.min(a[0], b[0]), y0 = Math.min(a[1], b[1]), x1 = Math.max(a[0], b[0]), y1 = Math.max(a[1], b[1]);
   const side = (p, q) => { const L = dist(p, q), n = Math.max(1, Math.round(L / (2 * r))), out = []; for (let i = 1; i <= n; i++) { const t = i / n; out.push(`A ${(L / n / 2).toFixed(1)} ${(L / n / 2).toFixed(1)} 0 0 1 ${(p[0] + (q[0] - p[0]) * t).toFixed(1)} ${(p[1] + (q[1] - p[1]) * t).toFixed(1)}`); } return out.join(" "); };
@@ -6238,6 +6272,9 @@ async function stampPicker(){   // -> {label, color, tpl, aid?, w?, h?}; kept as
 
 /* properties of a markup (the panel on the right) */
 function mkPropsHtml(mk){
+  if (mk.type === "legend") return `<h4>Takeoff legend <span style="font-weight:400;color:var(--muted);font-size:11px">markup — not a quantity · drag to move · drag a corner to resize · double-click to edit</span></h4>
+    <div class="row"><span class="small" style="flex:1">Each condition on this sheet: its symbol as drawn, quantity${legendCols(mk).some(c => c.id === "perim") ? ", perimeter of its areas" : " (tick Perimeter in Edit legend for the areas' perimeter)"}.</span></div>
+    <div class="row"><button class="btn sm" data-mact2="legend">Edit legend… (columns, order, size)</button><button class="btn sm" data-act="lock">${mk.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn dng" data-act="delMark"${mk.locked ? " disabled" : ""}>Delete</button></div>`;
   const t = mk.type, nu = MK_TYPES.has(t), fillT = ["box", "ellipse", "polygon", "text", "callout"].includes(t), lineT = ["line", "polyline"].includes(t), textT = ["text", "callout"].includes(t);
   const strokeT = !["image", "link", "attach", "redact", "stamp", "hilite", "fence"].includes(t) && !(t === "pen" && mk.hl), dashT = nu && ["line", "polyline", "polygon", "box", "ellipse"].includes(t);
   const fg = (label, html, flex) => `<div class="fg"${flex ? ` style="flex:${flex}"` : ""}><label>${label}</label>${html}</div>`;
@@ -6287,6 +6324,7 @@ function mkPropSet(mk, f, el){   // a field of the markup's properties changed
   }, "Markup " + f.replace(/\..*/, ""));
 }
 async function mkPropAct(mk, act){
+  if (act === "legend") return editLegend(mk);
   if (act === "edit") return mkEditText(mk);
   if (act === "default") return setDefaultsFromSelection(mk);
   if (act === "link") return mkEditText(mk);
@@ -7059,9 +7097,9 @@ function exportCsv(){
    chosen (BOQ code, quantity, unit, amount) and a set width in pt (0: as wide as its text). An amount is shown only from a rate
    the condition already has (typed with its source, or its Rate Analysis code) — never one made up here. */
 const LEG_ORDERS = [["list", "Condition list order"], ["name", "Name A → Z"], ["boq", "BOQ code"], ["qty", "Quantity, largest first"]];
-const LEG_COLS = [["boq", "BOQ code"], ["qty", "Quantity"], ["unit", "Unit"], ["amt", "Amount PKR"]];
-function legCols(o){ if (Array.isArray(o.lcols)) return new Set(o.lcols); return new Set(o.lq === false ? [] : ["qty", "unit"]); }
-function expLegendSvg(o, pos, tot, file, page, sh, W, H, z, lz, ox){
+const LEG_COLS = [["boq", "BOQ code"], ["qty", "Quantity"], ["unit", "Unit"], ["per", "Perimeter (areas)"], ["amt", "Amount PKR"]];
+function legCols(o){ if (Array.isArray(o.lcols)) return new Set(o.lcols); return new Set(o.lq === false ? [] : ["qty", "unit", "per"]); }
+function expLegendSvg(o, pos, tot, file, page, sh, W, H, z, lz, ox, ext){   // ext {per: perimeter ft of each area condition's shapes, its: its measurements}
   const cols = legCols(o), ord = o.lord || "list", h = [], cw = 6.6 * lz, pad = 8 * lz, sw = 14 * lz;
   let cs = P.proj.conds.filter(c => tot[c.id] !== undefined);
   const amtOf = c => { const r = rateOf(c, c.unit); return !r.na && r.rate > 0 && rateOk(r) ? tot[c.id] * r.rate : null; };
@@ -7069,9 +7107,10 @@ function expLegendSvg(o, pos, tot, file, page, sh, W, H, z, lz, ox){
   else if (ord === "boq") cs = cs.slice().sort((a, b) => String(a.boq || "~").localeCompare(String(b.boq || "~"), undefined, {numeric: true}));
   else if (ord === "qty") cs = cs.slice().sort((a, b) => (tot[b.id] || 0) - (tot[a.id] || 0));
   const head = pos === "margin" ? [[P.proj.name, 700], [[sh.no, sh.title].filter(Boolean).join(" · ") || pageName({file, page}), 600], [pageName({file, page}), 400]].filter((l, i) => i < 2 || sh.no || sh.title) : [[P.proj.name + " — " + pageName({file, page}), 700]];
-  const rows = cs.map(c => ({c, boq: c.boq || "", qty: fq(tot[c.id], c.unit), unit: c.unit, amt: (v => v == null ? "—" : f2(v))(amtOf(c))}));
-  const wOf = k => cols.has(k) ? (Math.max(k === "amt" ? 6 : k === "boq" ? 4 : 3, ...rows.map(r => String(r[k]).length)) + 1) * cw : 0;
-  const wb = wOf("boq"), wq = wOf("qty"), wu = wOf("unit"), wa = wOf("amt"), fixed = pad * 2 + sw + wb + wq + wu + wa;
+  ext = ext || {}; const PER = ext.per || {}, ITS = ext.its || {};
+  const rows = cs.map(c => ({c, boq: c.boq || "", qty: fq(tot[c.id], c.unit), unit: c.unit, per: c.type === "area" && PER[c.id] != null ? f3(PER[c.id]) + " ft" : "—", amt: (v => v == null ? "—" : f2(v))(amtOf(c))}));
+  const wOf = k => cols.has(k) ? (Math.max(k === "amt" ? 6 : k === "boq" ? 4 : k === "per" ? 9 : 3, ...rows.map(r => String(r[k]).length)) + 1) * cw : 0;
+  const wb = wOf("boq"), wq = wOf("qty"), wu = wOf("unit"), wp = wOf("per"), wa = wOf("amt"), fixed = pad * 2 + sw + wb + wq + wu + wp + wa;
   const lwSet = pos === "margin" ? ox - 16 * lz : +o.lw > 0 ? +o.lw * z : 0;
   const nameMax = (Math.max(...rows.map(r => r.c.name.length), 4) + 1) * cw, headMax = Math.max(...head.map(l => l[0].length)) * cw + pad * 2;
   const lw = lwSet || Math.min(W - 16 * z, Math.max(fixed + nameMax, headMax)), wn = Math.max(4 * cw, lw - fixed), room = Math.max(3, Math.floor(wn / cw + 1e-6) - 1), hroom = Math.max(6, Math.floor((lw - pad * 2) / cw));
@@ -7080,15 +7119,15 @@ function expLegendSvg(o, pos, tot, file, page, sh, W, H, z, lz, ox){
   const T = (tx, ty, t, w, anc) => `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}"${anc ? ' text-anchor="end"' : ""} font-family="Segoe UI,Arial" font-size="${12 * lz}" font-weight="${w}" fill="#0b0b0b">${esc(t)}</text>`;
   h.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${lw.toFixed(1)}" height="${lh.toFixed(1)}" fill="rgba(255,255,255,.93)" stroke="#c9d6e4"/>`);
   head.forEach((l, i) => h.push(T(x + pad, y + (16 + i * 17) * lz, cut(l[0], hroom), l[1])));
-  const xb = x + pad + sw, xn = xb + wb, xq = xn + wn + wq, xu = xq + cw * 0.6, xa = x + lw - pad;   // qty right-aligned at xq, unit after it, amount right-aligned at the edge
+  const xb = x + pad + sw, xn = xb + wb, xq = xn + wn + wq, xu = xq + cw * 0.6, xa = x + lw - pad, xp = xa - wa;   // qty right-aligned at xq, unit after it, perimeter and amount right-aligned before the edge
   let r0 = head.length;
-  if (colHead) { const ty = y + (16 + r0 * 17) * lz; if (cols.has("boq")) h.push(T(xb, ty, "BOQ", 600)); h.push(T(xn, ty, "Item", 600)); if (cols.has("qty")) h.push(T(xq, ty, "Qty", 600, 1)); if (cols.has("unit")) h.push(T(xu, ty, "Unit", 600)); if (cols.has("amt")) h.push(T(xa, ty, "PKR", 600, 1));
+  if (colHead) { const ty = y + (16 + r0 * 17) * lz; if (cols.has("boq")) h.push(T(xb, ty, "BOQ", 600)); h.push(T(xn, ty, "Item", 600)); if (cols.has("qty")) h.push(T(xq, ty, "Qty", 600, 1)); if (cols.has("unit")) h.push(T(xu, ty, "Unit", 600)); if (cols.has("per")) h.push(T(xp, ty, "Perimeter", 600, 1)); if (cols.has("amt")) h.push(T(xa, ty, "PKR", 600, 1));
     h.push(`<line x1="${(x + 4 * lz).toFixed(1)}" x2="${(x + lw - 4 * lz).toFixed(1)}" y1="${(ty + 5 * lz).toFixed(1)}" y2="${(ty + 5 * lz).toFixed(1)}" stroke="#c9d6e4"/>`); r0++; }
   rows.forEach((r, i) => { const ty = y + (16 + (r0 + i) * 17) * lz;
-    h.push(`<rect x="${(x + pad).toFixed(1)}" y="${(ty - 9 * lz).toFixed(1)}" width="${9 * lz}" height="${9 * lz}" fill="${r.c.color}"/>`);
+    h.push(legSym(r.c, legAp(r.c, ITS[r.c.id]), x + pad, ty - 9 * lz, sw - 4 * lz, 9 * lz, lz));   // the symbol as the measurements are drawn
     if (cols.has("boq")) h.push(T(xb, ty, cut(r.boq, Math.floor(wb / cw)), 400));
     h.push(T(xn, ty, cut(r.c.name, room), 400));
-    if (cols.has("qty")) h.push(T(xq, ty, r.qty, 400, 1)); if (cols.has("unit")) h.push(T(xu, ty, r.unit, 400)); if (cols.has("amt")) h.push(T(xa, ty, r.amt, 400, 1)); });
+    if (cols.has("qty")) h.push(T(xq, ty, r.qty, 400, 1)); if (cols.has("unit")) h.push(T(xu, ty, r.unit, 400)); if (cols.has("per")) h.push(T(xp, ty, r.per, 400, 1)); if (cols.has("amt")) h.push(T(xa, ty, r.amt, 400, 1)); });
   return h.join("");
 }
 function pageOverlaySvg(file, page, sc, W, H, legend){ const ex0 = S.mkExport; S.mkExport = true; try { return pageOverlaySvg0(file, page, sc, W, H, legend); } finally { S.mkExport = ex0; } }
@@ -7096,19 +7135,20 @@ function pageOverlaySvg0(file, page, sc, W, H, legend){
   const o = legend && typeof legend === "object" ? legend : {legend: legend ? "tl" : "none"}, ox = +o.ox || 0, lblOn = o.lbl == null ? S.lbl.on : !!o.lbl;
   const T = p => [p[0] * sc + ox, p[1] * sc], z = o.z > 0 ? o.z : Math.max(1, sc / 1.6), wz = o.wz > 0 ? o.wz : 1, h = [];
   const ps = P => P.map(p => T(p).map(v => v.toFixed(1)).join(",")).join(" ");
-  const tot = {}, shown = it => o.conds ? o.conds.has(it.cond) : !hiddenItem(it);
+  const tot = {}, per = {}, its = {}, shown = it => o.conds ? o.conds.has(it.cond) : !hiddenItem(it);
   if (ox) h.push(`<rect x="0" y="0" width="${ox.toFixed(1)}" height="${H}" fill="#fff"/><line x1="${ox.toFixed(1)}" y1="0" x2="${ox.toFixed(1)}" y2="${H}" stroke="#9fb0c6" stroke-width="${z}"/>`);
   if (o.meas !== false) P.proj.items.filter(i => i.file === file && i.page === page && shown(i)).forEach(it => {
     const c = cond(it.cond); if (!c) return;
     const k = itemScale(it), rows = k ? rowsOf(it, k) : [], q = rows.reduce((a, r) => a + r.qty, 0), col = c.color, ded = it.kind === "ded";
-    tot[c.id] = (tot[c.id] || 0) + q;
+    tot[c.id] = (tot[c.id] || 0) + q; (its[c.id] = its[c.id] || []).push(it);
+    if (c.type === "area" && it.kind === "shape" && k) per[c.id] = (per[c.id] || 0) + (+it.nos || 1) * polyLen(itemPoly(it), true) / k;   // (as P in the bill)
     if (c.type === "count") { h.push(countSvg(c, it.pts, T, z, -1)); return; }
     if (it.kind === "open") { const a = T(it.pts[0]), b = T(it.pts[1]); h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${4 * z * wz}" stroke-linecap="round"/>`); return; }
     h.push(measSvg(it, c, {T, z, wz, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false}));
   });
   (P.proj.marks || []).filter(m => m.file === file && m.page === page && (m.type === "redact" || (o.mk !== false && m.type !== "fence" && !mkHidden(m)))).forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
   const sh = (P.proj.sheets || {})[keyOf(file, page)] || {}, lz = z * ({s: 0.8, m: 1, l: 1.3}[o.lsz] || 1), pos = o.legend || "none";
-  if (pos !== "none") h.push(expLegendSvg(o, pos, tot, file, page, sh, W, H, z, lz, ox));
+  if (pos !== "none") h.push(expLegendSvg(o, pos, tot, file, page, sh, W, H, z, lz, ox, {per, its}));
   if (o.stamp) {   // project · sheet · page · date, along the bottom of the drawing
     const t = [P.proj.name, [sh.no, sh.title].filter(Boolean).join(" "), pageName({file, page}), "takeoff " + dmy(today())].filter(Boolean).join("  ·  "), sw = t.length * 5.9 * z + 16 * z, sx = pos === "bl" ? W - sw - 8 * z : ox + 8 * z, sy = H - 26 * z;
     h.push(`<rect x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" width="${sw.toFixed(1)}" height="${18 * z}" fill="rgba(255,255,255,.93)" stroke="#c9d6e4"/><text x="${(sx + 8 * z).toFixed(1)}" y="${(sy + 13 * z).toFixed(1)}" font-family="Segoe UI,Arial" font-size="${10.5 * z}" fill="#33475b">${esc(t)}</text>`);
@@ -14693,7 +14733,7 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
-  window.zdTakeoff = {traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {finishDraft: finish, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
