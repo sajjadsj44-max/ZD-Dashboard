@@ -1859,7 +1859,7 @@ async function typeDialog(){
    (the room's core). The core is grown back out over the thin lines to the wall faces, pockets narrower than the
    furniture setting are filled (furniture against a wall), and the outline is traced, squared up when the room is
    rectilinear (the bulge through a door opening is dropped there) and snapped onto the wall lines. */
-const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false, layers: true, confirm: false, square: true};
+const AUTO_DEF = {src: "image", gap: 4, minLen: 0.5, pocket: 7, skipDoors: true, dashBound: true, wall: null, show: false, layers: true, confirm: false, square: true, trace: true};
 const autoOpt = () => Object.assign({}, AUTO_DEF, (P.proj && P.proj.auto) || {});
 function segsIn(g, x0, y0, x1, y1){   // lines in a box — not those on PDF layers switched off
   const c = g.cell, ids = new Set(), off = layerOffIx(g);
@@ -2469,6 +2469,7 @@ function widen(m, W, H, r){   // every ink pixel widened to a disc of radius r p
   return out;
 }
 async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for this one trace (a smaller door gap for a small room)
+  if (!(over && over.noTrace)) { const tr = await traceAt(seed); if (tr) return tr; }   // a page with wall layers: the space as the whole-floor trace found it
   const k = hereScale(seed), g = S.geo[S.key] || {segs: [], grid: new Map(), cell: 24, styles: []};
   if (!k) return {err: "Set the page scale first (K) — the door gap and wall offsets are in feet."};
   const o = Object.assign(autoOpt(), over || {}), img = o.src !== "vector";
@@ -2711,11 +2712,11 @@ async function autoAt(p, nc){   // nc: a new area condition, added with the outl
     }
   }
   const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "", kk = hereScale(p);
-  const det = {how: "auto", src: autoOpt().src === "vector" ? "vector lines" : "drawing image", gap: +(res.gap || autoOpt().gap), note: res.note || "",
+  const det = {how: res.trace ? "trace" : "auto", src: res.trace ? "PDF wall layers (vector trace)" : autoOpt().src === "vector" ? "vector lines" : "drawing image", gap: +(res.gap || autoOpt().gap), note: res.note || "",
     flag: res.leak ? "leaks — " + res.leak : res.short ? res.short : res.warn ? res.warn : res.rect || (res.holes || []).length ? "" : "not square — check the outline", a0: kk ? +(polyArea(res.pts) / kk / kk).toFixed(4) : null, pts0: res.pts.map(q => q.slice()), at: new Date().toISOString(),
     holes: (res.holes || []).map(h => ({name: h.name, a: kk ? +(polyArea(h.pts) / kk / kk).toFixed(4) : null}))};
   mutate(() => { if (nc && !P.proj.conds.includes(nc)) P.proj.conds.push(nc);
-    P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm, det});
+    P.proj.items.push(Object.assign({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm || (res.trace && res.trace.kind !== "threshold" ? res.trace.names.join(" + ").slice(0, 60) : ""), det}, res.ver ? {ver: res.ver} : {}));
     (res.holes || []).forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, label: h.name + " (void in " + (nm || "room") + ")", det: {how: "auto-void", of: id, src: det.src, gap: det.gap, pts0: h.pts.map(q => q.slice()), a0: kk ? +(polyArea(h.pts) / kk / kk).toFixed(4) : null, at: det.at, flag: ""}})); }, "Auto area");
   if (nc) { S.cond = nc.id; renderConds(); }
   S.sel = id; draw(); renderSheet();
@@ -2792,13 +2793,187 @@ async function autoRoomRetried(p){   // the trace retried with wider gaps / dash
   return best.res;
 }
 function squareTrace(r, p){   // a trace's outline (and holes) squared onto the wall faces when the setting is on
-  if (!r || r.err || !r.pts || !autoOpt().square) return r;
+  if (!r || r.err || !r.pts || r.trace || !autoOpt().square) return r;   // (a traced outline is on the wall faces already)
   const k = hereScale(p), g = S.geo[S.key]; if (!k || !g || !g.segs || !g.segs.length) return r;
   r.pts = squareToWalls(r.pts, k, g); (r.holes || []).forEach(h => { if (h.pts) h.pts = squareToWalls(h.pts, k, g); }); return r;
 }
 async function autoRoomGuarded(p){ return squareTrace(await autoRoomRetried(p), p); }   // the retried trace, squared
+/* ------------------------------------------------------------------ vector trace (trace.js): the whole floor from the PDF's wall layers
+   A CAD-plotted PDF that keeps its layers is read once per page, off the page's thread: every space's clear outline on its wall
+   faces, the doors closed at both faces (the threshold its own piece), each outline checked against the size written in it.
+   Auto area clicks, the agents' room measuring and the window scan take their outlines from it; "Trace the whole floor" puts
+   every space, threshold, shaft and washroom / corridor wall run into their own conditions in one step. A page with no layers
+   (a scan, a PDF printed without them) keeps the trace from the drawing image. */
+const TRC = {}, TRACE_SIG = "1";   // page key -> {sig, res} | {sig, wait}
+let trW = null, trN = 0; const trWait = new Map();
+function traceWorker(){
+  if (trW === false) return null; if (trW) return trW;
+  try { trW = new Worker(new URL("./trace-worker.js" + CADV, import.meta.url), {type: "module"});
+    trW.onmessage = e => { const f = trWait.get(e.data.id); if (f) { trWait.delete(e.data.id); f(e.data.res); } };
+    trW.onerror = () => { trW = false; trWait.forEach(f => f(null)); trWait.clear(); }; } catch (e) { trW = false; }
+  return trW || null;
+}
+async function traceRun(inp, opt){   // in the worker; on the page's thread if workers are not to be had
+  const w = traceWorker(); if (w) { const r = await new Promise(ok => { const id = ++trN; trWait.set(id, ok); w.postMessage({id, inp, opt}); }); if (r) return r; }
+  const T = await import("./trace.js" + CADV); return T.traceFloor(inp, opt);
+}
+async function traceInput(key){
+  const g = S.geo[key], [fid, pg] = [key.slice(0, key.lastIndexOf(":")), +key.slice(key.lastIndexOf(":") + 1)], L = layerInfo(g.file || fid) || {};
+  const layers = (g.layerIds || []).map(id => id && L[id] ? {name: L[id].name, role: L[id].role} : {name: "", role: ""}), off = layerOffIx(g), segs = [];
+  for (const s of g.segs) { if (off && off.has(s[7])) continue; segs.push([s[0], s[1], s[2], s[3], s[4], s[7]]); }   // (layers switched off are left out, as everywhere)
+  const lines = textLines(await pageTexts(fid, pg)).map(l => ({s: l.s, x: l.x, y: l.y, w: l.w, h: l.h, r: l.r || 0, cx: l.cx, cy: l.cy}));
+  return {segs, layers, lines};
+}
+async function traceGet(key, quiet){   // -> the page's trace, or null (no lines, no layers, no scale)
+  key = key || S.key; const g = S.geo[key], sc = P.proj && P.proj.scales[key], k = sc && +sc.ptPerFt;
+  if (!g || !g.segs || g.segs.length < 50 || !(k > 0) || g.cad || !g.layerIds || !g.layerIds.some(Boolean)) return null;   // (PDF pages: an AutoCAD drawing keeps its own reader)
+  const off = layerOffIx(g), sig = [TRACE_SIG, g.segs.length, k.toFixed(5), off ? [...off].sort((a, b) => a - b).join(".") : "", (S.texts[key] || []).length].join("|");
+  const c = TRC[key]; if (c && c.sig === sig) return c.wait ? await c.wait : c.res;
+  const run = (async () => { if (!quiet) busy("Reading the whole floor from the drawing's wall layers (once for this page)…");
+    try { const inp = await traceInput(key); inp.k = k; return await traceRun(inp, {}); } catch (e) { return {err: String(e.message || e)}; } finally { if (!quiet) busy(""); } })();
+  TRC[key] = {sig, wait: run}; const res = await run; TRC[key] = {sig, res}; return res;
+}
+// a plan the trace reads: the walls' hatch on a layer (it tells a 9" wall from a 9" gap) and the rooms named in the page's text —
+// else (single-line boxes, no names) Auto area and the window scan trace from the image as before
+const traceWhyNot = T => !T || T.err ? (T && T.err) || "no trace" : !(T.spaces && T.spaces.length) ? "no rooms found between the wall layers"
+  : !(T.layers && T.layers.hatch && T.layers.hatch.length) ? "the walls carry no hatch on a layer of their own"
+  : T.spaces.filter(s => !s.unlabelled).length < Math.max(2, 0.3 * T.spaces.length) ? "few rooms are named in the page's text" : "";
+const traceUsable = T => !traceWhyNot(T);
+const trInside = (p, s) => s.outer.some(P0 => pointInPoly(p, P0)) && !s.holes.some(H0 => pointInPoly(p, H0));
+const trScaleOk = p => { const sc = P.proj.scales[S.key], k = sc && +sc.ptPerFt, h = hereScale(p); return k > 0 && h > 0 && Math.abs(h - k) <= 1e-6 * k; };   // (the trace is in the page's scale: a detail viewport at another scale keeps the image trace)
+function traceOne(s, p, thr){   // a traced space as autoRoom's result (the part the point is in)
+  const part = (p && s.outer.find(P0 => pointInPoly(p, P0))) || s.outer.slice().sort((a, b) => polyArea(b) - polyArea(a))[0];
+  const holes = s.holes.filter(h => pointInPoly(h[0], part)).map(h => ({pts: h.map(q => q.slice()), name: "column / shaft"}));
+  const st = thr ? "walls" : s.status, notes = (s.notes || []).filter(Boolean);
+  return {pts: part.map(q => q.slice()), rect: true, holes, passage: null, partial: false, gap: 8.6,
+    warn: st === "auto" ? (notes.filter(n => /not found|traced where|check/.test(n)).join("; ") || "check the outline against the drawing") : "",
+    note: "vector trace" + (thr ? " — a door threshold" : ""), ver: {st, note: notes.join("; "), by: "vector trace", at: new Date().toISOString()},
+    trace: {names: thr ? ["THRESHOLD"] : s.names, kind: thr ? "threshold" : s.kind, unit: s.unit || "", sizes: s.sizes || []}};
+}
+async function traceAt(seed){   // the traced space at a point of this page, as autoRoom's result — or null (no trace here)
+  if (autoOpt().trace === false) return null;
+  if (!trScaleOk(seed)) return null;
+  const T = await traceGet(); if (!traceUsable(T)) return null;
+  const s = T.spaces.find(x => trInside(seed, x)); if (s) return traceOne(s, seed, false);
+  const t = T.thresholds.find(x => trInside(seed, x)); if (t) return traceOne(t, seed, true);
+  return null;
+}
+async function traceWindow(win, c){   // every traced floor space whose middle is in the window, into condition c -> autoAreaWindow's result, or null
+  if (autoOpt().trace === false) return null;
+  const T = await traceGet(); if (!traceUsable(T)) return null;
+  const x0 = Math.min(win[0], win[2]), y0 = Math.min(win[1], win[3]), x1 = Math.max(win[0], win[2]), y1 = Math.max(win[1], win[3]);
+  const have = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.kind === "shape" && (cond(i.cond) || {}).type === "area" && !hiddenItem(i)), cand = [], skipped = {failed: 0, existing: 0, overlap: 0, large: 0, small: 0, thin: 0};
+  T.spaces.filter(s => !["lift", "stair", "chute", "void"].includes(s.kind)).forEach(s => s.outer.forEach(P0 => {
+    const m = polyCentroid(P0); if (!(m[0] >= x0 && m[0] <= x1 && m[1] >= y0 && m[1] <= y1) || !trScaleOk(m)) return;
+    if (have.some(i => pointInPoly(m, i.pts))) { skipped.existing++; return; }
+    const r = traceOne(s, m, false), kk = hereScale(m) || curScale();
+    cand.push({name: s.names.join(" + ").slice(0, 60), pts: r.pts, holes: r.holes, flag: r.warn, gap: 8.6, note: r.note, ver: r.ver, sft: polyArea(r.pts) / kk / kk}); }));
+  if (!cand.length) return Object.values(skipped).some(Boolean) ? {added: 0, sft: 0, cond: null, skipped, gap: 8.6} : null;   // (no traced room in the window: the scan from the image)
+  autoAreaAdd(cand, c, "vector trace (window)");
+  return {added: cand.length, sft: +cand.reduce((a, x) => a + x.sft, 0).toFixed(2), cond: c.name, skipped, gap: 8.6, flagged: cand.filter(x => x.flag).length};
+}
+function polyCentroid(P0){ let a = 0, cx = 0, cy = 0; for (let i = 0; i < P0.length; i++) { const p = P0[i], q = P0[(i + 1) % P0.length], f = p[0] * q[1] - q[0] * p[1]; a += f; cx += (p[0] + q[0]) * f; cy += (p[1] + q[1]) * f; }
+  if (Math.abs(a) < 1e-9) return P0[0].slice(); const m = [cx / (3 * a), cy / (3 * a)]; if (pointInPoly(m, P0)) return m;
+  let best = P0[0]; for (let i = 0; i < P0.length; i++) { const q = [(P0[i][0] + P0[(i + 2) % P0.length][0]) / 2, (P0[i][1] + P0[(i + 2) % P0.length][1]) / 2]; if (pointInPoly(q, P0)) { best = q; break; } } return best.slice(); }
+
+/* the whole floor in one step: every space into its layer (washrooms, corridors, other rooms and balconies, thresholds,
+   shafts / stairs / lifts / ducts), the floor's outline, each washroom's and corridor's wall face as a run (the openings on
+   it as their own runs, never deducted by themselves), the washrooms' wall centre lines for reference, and the trace's own
+   corrections. Each measurement carries its verification. Run again on the page, it replaces its own earlier trace. */
+const TRACE_LAYERS = [
+  ["L-01", "L-01 Overall Floor Area", "area", "Sft", "#374151", "the external face of the external walls; balconies outside it"],
+  ["L-02", "L-02 Washroom Floor Areas", "area", "Sft", "#2563eb", "clear floor inside the walls"],
+  ["L-03", "L-03 Corridor Floor Areas", "area", "Sft", "#ea580c", "common corridors and lobbies"],
+  ["L-04", "L-04 Other Rooms / Spaces", "area", "Sft", "#16a34a", "rooms, passages, balconies"],
+  ["L-04T", "L-04T Door Thresholds", "area", "Sft", "#dc2626", "the floor in each door opening, between the two rooms"],
+  ["L-05", "L-05 Washroom Wall Length (internal face, gross)", "linear", "ft", "#0891b2", ""],
+  ["L-05D", "L-05D Washroom Wall Openings (deduct only if your rule requires)", "linear", "ft", "#f59e0b", ""],
+  ["L-06", "L-06 Corridor Wall Length (wall face, gross)", "linear", "ft", "#c2410c", ""],
+  ["L-06D", "L-06D Corridor Wall Openings (deduct only if your rule requires)", "linear", "ft", "#fbbf24", ""],
+  ["L-07", "L-07 Wall Centreline / Reference (not billable)", "linear", "ft", "#0d9488", ""],
+  ["L-08", "L-08 Columns, Shafts & Excluded Areas", "area", "Sft", "#64748b", "lifts, stairs, chutes, shafts, duct boxes — not floor finish"],
+  ["L-09", "L-09 Manual Corrections / Unverified Geometry", "linear", "ft", "#db2777", "lines the trace drew itself: wall faces carried across duct boxes, splits on a written size"]];
+async function traceFloorTakeoff(o){
+  o = o || {}; if (!P.proj || !S.page) return {err: "Open a page first."};
+  const key = S.key, k = curScale(); if (!k) return {err: "Set the page scale first (K) — the trace works in feet."};
+  if (scaleDoubt()) return {err: "The page scale is doubtful (the drawing measures " + scaleDoubt().label + ") — settle it first (scale chip)."};
+  const T = await traceGet(key); if (!T) return {err: "This page has no PDF layers to read the walls from — use Auto area (it reads the drawing image) or the window scan."};
+  if (T.err) return {err: "Vector trace: " + (T.why || T.err)}; if (!traceUsable(T)) return {err: "The vector trace can't read this page: " + traceWhyNot(T) + " — use Auto area (it reads the drawing image) or the window scan."};
+  if (S.key !== key) return {err: "The page changed while the floor was read — nothing added."};
+  // an earlier trace of this page (in the trace's own layers, or one imported from a traced takeoff file) is replaced, never doubled
+  const lay = new Set(TRACE_LAYERS.map(x => x[1].toLowerCase()).concat(["l-01 second floor — overall area", "l-05 washroom wall linear length (internal face, gross)", "l-05d washroom wall openings (doors) — deduct only if your rule requires",
+    "l-06 corridor wall linear length (wall face, gross)", "l-06d corridor wall openings — deduct only if your rule requires", "l-07 wall centreline / reference geometry (not billable)", "l-09 manual corrections / unverified geometry (reference lines)", "l-04t door thresholds (openings in walls)"]));
+  const old = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.det && i.det.how === "trace" && lay.has(String((cond(i.cond) || {}).name || "").toLowerCase()));
+  if (old.length && !o.replace) { const ok = await ask("Trace the whole floor", `<p>This page already has <b>${old.length}</b> measurements from an earlier trace. Replace them with this trace?</p><p class="small">Measurements you drew yourself (not traced) are kept. Ctrl+Z undoes.</p>`, "Replace"); if (!ok) return {err: "cancelled"}; }
+  const at = new Date().toISOString(), batch = uid("B"), src = "PDF wall layers (vector trace)", sh = (P.proj.sheets || {})[key] || {}, conds = [], CID = {};
+  TRACE_LAYERS.forEach(([code, name, type, unit, color, note]) => { let c = P.proj.conds.find(x => x.type === type && x.name.toLowerCase() === name.toLowerCase());
+    if (!c) { c = {id: uid("C"), name, type, unit, color, group: "Vector trace", h: "", t: "", faces: 1, dedMin: 0, hidden: code === "L-07" || code === "L-09"}; conds.push(c); } CID[code] = c.id; });
+  const items = [], r3p = v => Math.round(v * 1000) / 1000;
+  const put = (code, pts, label, x) => { x = x || {}; const P1 = pts.map(q => [r3p(q[0]), r3p(q[1])]); if (x.closed) P1.push(P1[0].slice());
+    const it = {id: uid("I"), cond: CID[code], file: S.fileId, page: S.pageNo, kind: x.kind || "shape", pts: P1, nos: 1, label: String(label).slice(0, 120), bldg: sh.bldg || "", floor: sh.floor || "", zone: x.zone || "", room: x.room || ""};
+    if (x.st) { it.ver = {st: x.st, note: x.note || "", by: "vector trace", at}; it.det = {how: "trace", src, gap: 8.6, note: VER_NAMES[x.st] + (x.note ? " — " + x.note : ""), at, batch, a0: (cond(CID[code]) || conds.find(c => c.id === CID[code])).type === "area" ? +(polyArea(P1) / k / k).toFixed(4) : null, pts0: P1.map(q => q.slice())}; if (x.flag) it.det.flag = x.flag; }
+    items.push(it); return it; };
+  const cw = R0 => { let a = 0; for (let i = 0; i < R0.length; i++) { const p = R0[i], q = R0[(i + 1) % R0.length]; a += p[0] * q[1] - q[0] * p[1]; } const R1 = a > 0 ? R0.slice() : R0.slice().reverse();
+    let i0 = 0; R1.forEach((p, i) => { if (Math.round(p[1] * 10) < Math.round(R1[i0][1] * 10) || (Math.round(p[1] * 10) === Math.round(R1[i0][1] * 10) && p[0] < R1[i0][0])) i0 = i; }); return R1.slice(i0).concat(R1.slice(0, i0)); };
+  // space IDs: flat + kind + a number, top to bottom, left to right
+  const KC = {bath: "WR", corridor: "CR", room: "RM", balcony: "BL", lift: "LF", stair: "ST", chute: "GC", void: "VD"}, n0 = {};
+  const here = x => trScaleOk(polyCentroid(x.outer[0]));   // (a detail viewport at another scale on the sheet is left out)
+  const sp = T.spaces.filter(here).sort((a, b) => Math.round(a.bounds[1] / 40) - Math.round(b.bounds[1] / 40) || a.bounds[0] - b.bounds[0]);
+  sp.forEach(s => { const u = s.unit || "C", kc = KC[s.kind] || "XX"; n0[u + kc] = (n0[u + kc] || 0) + 1; s.sid = u + "-" + kc + String(n0[u + kc]).padStart(2, "0"); });
+  const layerOf = s => s.kind === "bath" ? "L-02" : s.kind === "corridor" ? "L-03" : ["room", "balcony"].includes(s.kind) ? "L-04" : "L-08";
+  const nameOf = s => s.names.length > 1 ? s.names.join(" + ") + " (open plan)" : s.names[0] + (s.sizes && s.sizes[0] ? " " + s.sizes[0] : "");
+  const zoneOf = s => s.unit ? "Unit " + s.unit : "Core / common";
+  if (T.overall) { T.overall.outer.forEach(R0 => put("L-01", cw(R0), "FLOOR — OVERALL (external face of external walls, balconies out)", {zone: "Whole floor", st: "walls", note: T.overall.notes.join("; ")}));
+    T.overall.holes.forEach(H0 => put("L-01", cw(H0), "Opening in the floor outline", {kind: "ded", st: "walls"})); }
+  sp.forEach(s => { const code = layerOf(s), nm = nameOf(s), note = (s.notes || []).join("; "), flag = s.status === "auto" ? ((s.notes || []).filter(n => /not found|traced where|check/.test(n)).join("; ") || "check against the drawing") : "";
+    s.outer.forEach(R0 => put(code, cw(R0), s.sid + " " + nm, {room: nm, zone: zoneOf(s), st: s.status, note, flag}));
+    s.holes.forEach(H0 => put(code, cw(H0), s.sid + " column / shaft inside " + s.names[0], {kind: "ded", room: nm, zone: zoneOf(s), st: s.status})); });
+  T.thresholds.forEach((t, i) => { if (!here(t)) return; const a = T.spaces[t.between[0]], b = T.spaces[t.between[1]], w = Math.max(t.bw, t.bh);
+    t.outer.forEach(R0 => put("L-04T", cw(R0), "TH-" + String(i + 1).padStart(3, "0") + " THRESHOLD " + apFtIn(w, 2) + " (" + (a ? a.names[0] : "?") + " | " + (b ? b.names[0] : "?") + ")", {room: "Threshold", zone: a && a.unit ? "Unit " + a.unit : "Core / common", st: t.status, note: (t.notes || []).join("; ") || "opening between two rooms, closed on both wall faces"})); });
+  T.ducts.filter(here).forEach((d, i) => put("L-08", cw(d.outer[0]), "DU-" + String(i + 1).padStart(2, "0") + " DUCT / SHAFT " + f2(d.sft) + " Sft", {room: "Duct", zone: "Ducts", st: "walls", note: "duct box as drawn (in or against walls)"}));
+  let wr = 0, wo = 0, cr = 0, co = 0;
+  sp.filter(s => s.edges && s.edges.length).forEach(s => {
+    const bath = s.kind === "bath", code = bath ? "L-05" : "L-06", dcode = bath ? "L-05D" : "L-06D";
+    let E = s.edges.slice(); const pts = E.map(e => e.p); let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; }
+    if (a < 0) E = E.slice().reverse().map(e => Object.assign({}, e, {p: e.q, q: e.p, open: e.open.map(([u, v]) => [e.L - v, e.L - u]).reverse()}));
+    let i0 = 0; E.forEach((e, i) => { if (Math.round(e.p[1] * 10) < Math.round(E[i0].p[1] * 10) || (Math.round(e.p[1] * 10) === Math.round(E[i0].p[1] * 10) && e.p[0] < E[i0].p[0])) i0 = i; }); E = E.slice(i0).concat(E.slice(0, i0));
+    const chains = [[E[0]]]; for (const e of E.slice(1)) { const l = chains[chains.length - 1]; if (dist(l[l.length - 1].q, e.p) < 0.05) l.push(e); else chains.push([e]); }
+    if (chains.length > 1 && dist(chains[chains.length - 1][chains[chains.length - 1].length - 1].q, chains[0][0].p) < 0.05) chains[0] = chains.pop().concat(chains[0]);
+    const st = s.status === "manual" ? "walls" : s.status, nm = nameOf(s);
+    chains.forEach(ch => { const closed = chains.length === 1 && dist(ch[ch.length - 1].q, ch[0].p) < 0.05, g = ch.reduce((x, e) => x + e.L, 0), op = ch.reduce((x, e) => x + e.open.reduce((y, [u, v]) => y + v - u, 0), 0);
+      put(code, ch.map(e => e.p).concat(closed ? [] : [ch[ch.length - 1].q]), s.sid + " " + nm + " — wall face, " + ch.length + " segments", {room: nm, zone: zoneOf(s), st, closed, note: (bath ? "internal finished face of the walls round the room" : "face of the walls along the corridor (zone divisions left out)") + ", gross " + f3(g) + " ft; openings on it " + f3(op) + " ft (" + dcode + ")"});
+      if (bath) { wr += g; wo += op; } else { cr += g; co += op; } });
+    E.forEach((e, j) => e.open.forEach(([u, v], m) => { const L0 = e.L * k, ux = (e.q[0] - e.p[0]) / L0, uy = (e.q[1] - e.p[1]) / L0;
+      put(dcode, [[e.p[0] + ux * u * k, e.p[1] + uy * u * k], [e.p[0] + ux * v * k, e.p[1] + uy * v * k]], s.sid + "-W" + String(j + 1).padStart(2, "0") + " opening " + (m + 1) + " (" + f2(v - u) + " ft)", {room: nm, zone: zoneOf(s), st: "walls", note: "opening along this wall face (a door or an open side)"}); }));
+    if (bath && s.centre && s.centre.length > 2) put("L-07", s.centre, s.sid + " " + nm + " — wall centreline", {room: nm, zone: zoneOf(s), st: "walls", closed: true, note: "each wall face moved out by half its measured thickness; reference only, not billable"}); });
+  (T.splits || []).forEach(x => put("L-09", x.line, "Split line (no wall on the drawing): " + x.what, {zone: "Corrections", st: "manual", note: "a room open to the one it is named with, split on the written size where the walls fit it"}));
+  (T.repairs || []).forEach(x => put("L-09", [[x[0], x[1]], [x[2], x[3]]], "Wall face carried across a duct box (" + f2(Math.hypot(x[2] - x[0], x[3] - x[1]) / k * 12) + "\")", {zone: "Corrections", st: "manual", note: "the drawing leaves the wall face out where a duct box meets the wall; the face was carried straight across so the room stays closed"}));
+  const oldIds = new Set(old.map(i => i.id));
+  mutate(() => { P.proj.items = P.proj.items.filter(i => !oldIds.has(i.id)); P.proj.conds.push(...conds); P.proj.items.push(...items); }, "Trace the whole floor");
+  renderConds(); refresh();
+  const cnt = {}; T.spaces.forEach(s => { cnt[s.status] = (cnt[s.status] || 0) + 1; });
+  const sum = code => items.filter(i => i.cond === CID[code]).reduce((a2, it) => a2 + rowsOf(it, itemScale(it) || k).reduce((b2, r) => b2 + r.qty, 0), 0);
+  return {ok: {spaces: T.spaces.length, thresholds: T.thresholds.length, measurements: items.length, replaced: old.length, ms: T.ms,
+    overall_sft: +sum("L-01").toFixed(2), washroom_sft: +sum("L-02").toFixed(2), corridor_sft: +sum("L-03").toFixed(2), other_sft: +sum("L-04").toFixed(2),
+    washroom_walls_ft: +wr.toFixed(2), washroom_openings_ft: +wo.toFixed(2), corridor_walls_ft: +cr.toFixed(2), corridor_openings_ft: +co.toFixed(2),
+    verified_dims: cnt.dims || 0, verified_walls: cnt.walls || 0, manual: cnt.manual || 0, review: cnt.auto || 0,
+    to_review: T.spaces.filter(s => s.status === "auto").map(s => s.sid + " " + s.names.join(" + ") + ": " + ((s.notes || []).filter(n => /not found|traced where|check/.test(n)).join("; ") || "check"))}};
+}
+async function agentTraceFloor(){   // the agent's "trace the whole floor": the result in the panel
+  aiLog("bot", "Reading the whole floor from the drawing's wall layers…");
+  const r = await traceFloorTakeoff({}); if (r.err) { aiLog("err", esc(r.err)); return {error: r.err}; }
+  const x = r.ok;
+  aiLog("bot", `Traced <b>${x.spaces}</b> spaces and <b>${x.thresholds}</b> door thresholds in ${f2(x.ms / 1000)} s${x.replaced ? ` (replacing ${x.replaced} from the last trace)` : ""}:<br>floor <b>${fq(x.overall_sft)} Sft</b> · washrooms <b>${fq(x.washroom_sft)} Sft</b> · corridors <b>${fq(x.corridor_sft)} Sft</b> · other rooms ${fq(x.other_sft)} Sft<br>washroom walls ${f2(x.washroom_walls_ft)} ft (openings ${f2(x.washroom_openings_ft)} ft) · corridor walls ${f2(x.corridor_walls_ft)} ft<br>${x.verified_dims} match their written size, ${x.verified_walls} follow the drawn walls, ${x.manual} split on a written size${x.review ? `, <b>${x.review} to review</b>: ${x.to_review.slice(0, 8).map(esc).join("; ")}` : ""}.`);
+  return x;
+}
+async function traceFloorUI(){
+  const r = await traceFloorTakeoff(); if (r.err) { if (r.err !== "cancelled") toast(r.err, 7000); return r; }
+  const x = r.ok; toast(`Whole floor traced: ${x.spaces} spaces, ${x.thresholds} thresholds — floor ${fq(x.overall_sft)} Sft, washrooms ${fq(x.washroom_sft)} Sft, corridors ${fq(x.corridor_sft)} Sft, washroom walls ${f2(x.washroom_walls_ft)} ft. ${x.verified_dims} match their written size${x.review ? `, <b>${x.review} to review</b> (Review list)` : ""}.`, 12000);
+  return r;
+}
 async function autoSettings(){
   const o = autoOpt();
+  setTimeout(() => { const b = $("aoTraceAll"); if (b) b.onclick = () => { autoSettings.traceNow = true; const ok = $("dlgOk"); if (ok) ok.click(); }; }, 0);
   const v = await ask("Auto area settings", `<div class="grid">
     <div class="fg w2"><label>Find walls from</label><select id="aoSrc"><option value="image"${o.src !== "vector" ? " selected" : ""}>The drawing as seen on screen (recommended — works with any PDF)</option><option value="vector"${o.src === "vector" ? " selected" : ""}>The PDF's vector lines (CAD exports only)</option></select></div>
     <div class="fg"><label>Close gaps up to (ft)</label><input type="text" id="aoGap" value="${f3(o.gap)}"><span class="small">door openings — set to the widest door</span></div>
@@ -2806,6 +2981,8 @@ async function autoSettings(){
     <div class="fg"><label>Ignore marks smaller than (ft)</label><input type="text" id="aoMin" value="${f3(o.minLen)}"><span class="small">text, dashes, hatching (image: at least 1 ft)</span></div>
     <div class="fg"><label>Wall lines</label><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="small" id="aoWall">${o.wall ? "colour " + esc(o.wall.split("|")[0]) + ", " + esc(o.wall.split("|")[1]) + " pt and heavier" : "any drawing line"}</span>
       <button class="btn sm" id="aoPick" type="button">Pick a wall…</button>${o.wall ? '<button class="btn sm" id="aoClr" type="button">Any line</button>' : ""}</div></div>
+    <div class="fg w2"><label><input type="checkbox" id="aoTrace" style="width:auto"${o.trace !== false ? " checked" : ""}> Read the whole floor from the PDF's wall layers when it has them (vector trace — each room on its wall faces, doors closed at both faces, checked against its written size; recommended for CAD PDFs)</label>
+      <div style="margin-top:4px"><button class="btn sm" id="aoTraceAll" type="button" title="Every room, washroom, corridor, threshold and wall run of this page in their own conditions">Trace the whole floor now…</button></div></div>
     <div class="fg w2"><label><input type="checkbox" id="aoLay" style="width:auto"${o.layers ? " checked" : ""}> Use the PDF's layers: only walls, doors / windows, columns and railings bound a room (furniture, fixtures, glass screens, hatch, text and clouds ignored) — when the PDF has them</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDoor" style="width:auto"${o.skipDoors ? " checked" : ""}> Ignore door swings and door leaves</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDash" style="width:auto"${o.dashBound ? " checked" : ""}> Straight dashed lines bound a room (e.g. an open dress / wardrobe area) — untick if dashed lines on your drawings are beams overhead</label></div>
@@ -2816,8 +2993,9 @@ async function autoSettings(){
       const gap = parseFt($("aoGap").value), pocket = parseFt($("aoPk").value || "0"), minLen = parseFt($("aoMin").value || "0");
       if (!(gap > 0.2 && gap < 30)) return "Close gaps: a width in ft, e.g. 4";
       if (isNaN(pocket) || isNaN(minLen)) return "Enter decimal feet";
-      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, layers: $("aoLay").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked, confirm: $("aoConfirm").checked, square: $("aoSquare").checked}; }, "aoGap");
+      return {src: $("aoSrc").value, gap, pocket: Math.max(0, pocket), minLen: Math.max(0, minLen), skipDoors: $("aoDoor").checked, layers: $("aoLay").checked, dashBound: $("aoDash").checked, show: $("aoShow").checked, confirm: $("aoConfirm").checked, square: $("aoSquare").checked, trace: $("aoTrace").checked}; }, "aoGap");
   if (v) { P.proj.auto = Object.assign({}, P.proj.auto || {}, v); if (!v.show) S.autoShow = null; save(); draw(); toast("Auto area settings saved"); }
+  if (autoSettings.traceNow) { autoSettings.traceNow = false; await traceFloorUI(); }
 }
 document.addEventListener("click", e => {   // auto-area dialog: pick / clear the wall pen
   if (e.target.id === "aoPick") { $("dlgCancel").click(); S.pickWall = true; setTool("auto"); toast("Click a wall line on the drawing", 4000); }
@@ -9527,6 +9705,7 @@ function paletteCmds(){
   if (S.page) add((S.unmOn ? "Hide" : "Show") + " what is not measured yet — the spaces inside the walls no area covers, shaded red", () => unmToggle(), "Check");
   if (S.page) add("Name rooms by contents (this page) — Bath, Kitchen, Stair, Lift/Shaft, Balcony, Store from the lines in each (by layer)", nameRooms, "Modify");
   add("Combine the selected areas into one (union)", () => combineAreas(), "Modify");
+  if (S.page) add("Trace the whole floor — every room, washroom, corridor, threshold and wall run from the PDF's wall layers", traceFloorUI, "Tool");
   if (S.page) add("Auto area: every room in a window…", async () => { const w = await pickWindow("Auto area: click one corner of the area to scan, then the opposite corner"); if (!w) return;
     busy("Auto area: finding the rooms…"); try { const r = await autoAreaWindow(w); if (r.err) { toast(r.err, 6000); return; } const sk = r.skipped;
       const more = [sk.failed ? sk.failed + " could not be traced" : "", r.flagged ? r.flagged + " to check (flagged)" : "", sk.existing ? sk.existing + " already measured" : "", sk.overlap ? sk.overlap + " ran into a neighbour (left out)" : "", sk.large ? sk.large + " over 3,000 Sft (click those)" : "", sk.small + sk.thin ? (sk.small + sk.thin) + " under 12 Sft or narrower than 3 ft" : ""].filter(Boolean);
@@ -11303,7 +11482,7 @@ async function autoAreaPage(inp){
     if (existing.concat(cand.map(x => ({pts: x.pts}))).some(i => overlapSft(i.pts, res.pts, k) > 1)) issues.push("overlaps an area already measured");
     if (r.sft && Math.abs(net - r.sft) / r.sft > 0.05) issues.push("differs from its written size " + r.size + " (" + fq(r.sft) + " Sft) by " + (100 * (net - r.sft) / r.sft).toFixed(1) + " %");
     const flag = [res.leak ? "leaks — " + res.leak : "", res.short || "", res.warn || ""].concat(issues).filter(Boolean).join("; ");
-    cand.push({name: nm, pts: res.pts, holes: res.holes || [], flag, gap: inp.gap_ft || autoOpt().gap, note: res.note || ""});
+    cand.push({name: nm, pts: res.pts, holes: res.holes || [], flag, gap: inp.gap_ft || autoOpt().gap, note: res.note || "", ver: res.ver});
     out.push({name: nm, status: flag ? "flagged" : "ok", net_sft: +net.toFixed(2), written_sft: r.sft || null, voids_deducted: (res.holes || []).map(h => h.name), flag: flag || null});
   }
   if (!cand.length) return {ok: {rooms: out, added: 0, note: "No outline was created."}};
@@ -11315,8 +11494,8 @@ async function autoAreaPage(inp){
 function autoAreaAdd(cand, c, src){   // src: what found them (default: the agent, by the Auto area source)
   const ids = {}, at = new Date().toISOString();
   mutate(() => cand.forEach(x => { const id = uid("I"), k = hereScale(x.pts[0]) || curScale(); ids[x.name] = id;   // (each at its own scale: a viewport drawn at another)
-    P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: x.pts, nos: 1, ai: true, label: x.name.slice(0, 60),
-      det: {how: "auto", src: src || (autoOpt().src === "vector" ? "vector lines" : "drawing image") + " (agent)", gap: +x.gap, note: x.note, flag: x.flag, a0: +(polyArea(x.pts) / k / k).toFixed(4), pts0: x.pts.map(q => q.slice()), at, holes: x.holes.map(h => ({name: h.name, a: +(polyArea(h.pts) / k / k).toFixed(4)}))}});
+    P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: x.pts, nos: 1, ai: true, label: x.name.slice(0, 60), ...(x.ver ? {ver: x.ver} : {}),
+      det: {how: x.ver ? "trace" : "auto", src: src || (x.ver ? "PDF wall layers (vector trace)" : autoOpt().src === "vector" ? "vector lines" : "drawing image") + " (agent)", gap: +x.gap, note: x.note, flag: x.flag, a0: +(polyArea(x.pts) / k / k).toFixed(4), pts0: x.pts.map(q => q.slice()), at, holes: x.holes.map(h => ({name: h.name, a: +(polyArea(h.pts) / k / k).toFixed(4)}))}});
     x.holes.forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, ai: true, label: h.name + " (void in " + x.name + ")"})); }), "Agent: Auto area");
   refresh(); return ids;
 }
@@ -11498,6 +11677,7 @@ async function autoAreaWindow0(win, o){   // the barrier raster's pockets are th
   const k = curScale() || hereScale([(x0 + x1) / 2, (y0 + y1) / 2]); if (!k) return {err: "Set the page scale first (K) — rooms are found in feet."};   // k sizes the raster's pixels only: each room is judged and measured at the scale where it lies (a viewport drawn at another)
   const g = S.geo[S.key]; if (!g || !g.segs.length) return {err: "This page has no vector lines — Auto area over a window reads the drawing's lines."};
   o = Object.assign(autoOpt(), o || {});
+  if (!o.noTrace) { const tw = await traceWindow(win, aiAreaCond()); if (tw) return tw; }   // a page with wall layers: every traced space in the window
   const key = S.key, pane = ACT, left = () => S.key !== key || ACT !== pane;   // the page (or window) changed under a long scan: never a room of one page put on another
   const LEFT = {err: "The page changed while the rooms were traced — nothing added; scan again"};
   let px = 0.3 * k; while ((x1 - x0) / px > 2000 || (y1 - y0) / px > 2000) px *= 1.5;   // a big window: coarser pixels, the raster stays ≤ 2000 × 2000 (the seeds need about 1 ft)
@@ -11966,6 +12146,7 @@ async function agentStep(text){
     if (/\b(select|tick|choose)\s+(?:the\s+|all\s+)?(?:pages?|sheets?)\b|\b(?:select|tick)\s+all\s+(?:the\s+)?(?:pages?|sheets?)\b/.test(t)) return agentPages(t);
     if (/\b(workspace|focus\s+mode|drawing\s+only|full\s*-?\s*screen|mini\s*-?\s*map|icons?\s+only|compact\s+toolbar)\b/.test(t)) return agentWorkspace(t);
     if (/^(how\s+(many|much)|total\b|sum\b|what(?:'s|\s+is)\s+the\s+(?:total|number))/.test(t)) return agentAnswer(t);
+    if (/\b(trace|measure|take\s*-?\s*off|do)\s+(?:the\s+|this\s+)?(?:whole|entire|full|complete)\s+floor\b|\bwhole[\s-]+floor\b|\bvector\s+trace\b|\btrace\s+(?:the\s+|this\s+)?(?:floor|plan|page)\b/.test(t)) return agentTraceFloor();
     if (/\b(full|complete|whole|entire|auto(?:matic)?)\s*take\s*-?\s*off\b|^take\s*-?\s*off\b|\beverything\b|\bdo\s+(?:it\s+)?all\b|\ball\s+(?:the\s+)?agents\b/.test(t)) return fullTakeoffDialog(scope);
     if (/\b(check|audit|qa|verify|review|mistakes?|errors?|missing)\b/.test(t)) return agentCheck(/\bpage\b/.test(t) && scope === "page" ? "page" : "all");
     if (/\b(finish(?:es|ing)?|plaster(?:ing)?|paint(?:ing)?|skirting|ceiling)\b/.test(t)) return finishesDialog();
@@ -12137,7 +12318,7 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
       const a = polyArea(res.pts) / k / k; if (!(a > 4)) continue;
       const own = pointInPoly(lc, res.pts);   // an outline that misses the room's own name is a neighbouring compartment (the shower of a bath, a wardrobe)
       const err = (r.sft ? Math.abs(a - r.sft) / r.sft : 0) + (own ? 0 : 10);
-      if (!best || err < best.err) best = {pts: res.pts, a, err};
+      if (!best || err < best.err) best = {pts: res.pts, a, err, ver: res.ver, trace: res.trace};
       if (err <= 0.05 || tried.some(t => Math.abs(t - a) / a < 0.005)) break;   // within 5 %, or the same outline twice: the room as drawn
       tried.push(a);
     }
@@ -12155,7 +12336,8 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
     if (others.length && r.sft) best.err = Math.abs(best.a - wrt) / wrt;
     got.push({name: nm, a: best.a, pts: best.pts, with: inside.filter(q => !got.some(o => sameRoom(o.room, q))), room: r});
     const dup = done.has(nm.toLowerCase());
-    mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, ai: true, label: nm}); });
+    mutate(() => { P.proj.items.push(Object.assign({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, ai: true, label: nm}, best.ver ? {ver: best.ver,
+      det: {how: "trace", src: "PDF wall layers (vector trace) (agent)", gap: 8.6, note: best.ver.note || "", flag: best.ver.st === "auto" ? (best.ver.note || "check against the drawing") : "", a0: +best.a.toFixed(4), pts0: best.pts.map(q => q.slice()), at: new Date().toISOString()}} : {})); });
     const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;   // best.err is against the written sizes of every room in the space
     res.push({name: nm, area_sft: +best.a.toFixed(2), written_sft: r.sft ? +wrt.toFixed(2) : null, check: !!bad, open_plan_with: others.map(q => q.name)});
     say("tool", `${esc(nm)}: <b>${fq(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? fq(wrt) + " Sft together" : esc(r.size) + " = " + fq(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + fq(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
@@ -14511,7 +14693,7 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
-  window.zdTakeoff = {segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
