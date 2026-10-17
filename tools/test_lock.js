@@ -120,6 +120,62 @@ const LOCKISH = /lock|pass|pw|unlock|secret/i;
   ok(serrs.length === 0, "no page errors" + (serrs.length ? ": " + serrs[0] : ""));
   await sctx.close();
 
+  // a trusted computer: its browser keeps a key whose SHA-256 is listed in every page — nothing it opens asks for the password.
+  // The test's own random key stands in for the listed one (the real key is not in the repo).
+  console.log("a trusted computer");
+  const cr = require("crypto"), KEY = cr.randomBytes(16).toString("hex"), KEYH = cr.createHash("sha256").update(KEY).digest("hex"), lists = {};
+  const tctx = await browser.newContext({viewport: {width: 1280, height: 860}, serviceWorkers: "block"}), tq = await tctx.newPage(), qerrs = [];
+  await tctx.route(/\/(zameen-developments|takeoff|dashboards|drawing-tracker)\/(\?[^#]*)?$/, async r => {
+    const res = await r.fetch(), body = await res.text(), dir = /\/([a-z-]+)\/(\?|$)/.exec(r.request().url())[1];
+    lists[dir] = (body.match(/var TRUSTED = \['[0-9a-f]{64}'/g) || []).length;
+    r.fulfill({response: res, body: body.replace(/var TRUSTED = \['[0-9a-f]{64}'/, "var TRUSTED = ['" + KEYH + "'")});
+  });
+  await tctx.addInitScript(() => {   // notes if the password card is ever shown (it waits hidden while a kept key is checked)
+    window.__zdCard = false;
+    new MutationObserver(() => { const l = document.getElementById("zd-lock"); if (l && !l.classList.contains("zd-lock-wait")) window.__zdCard = true; })
+      .observe(document, {childList: true, subtree: true, attributes: true, attributeFilter: ["class"]});
+  });
+  tq.on("pageerror", e => qerrs.push(String(e)));
+  const ft = () => tq.waitForFunction(() => { const f = document.querySelector(".zd-start-ft"); return f && /trusted|not valid/.test(f.textContent) && f.textContent; }, null, {timeout: 5000}).then(h => h.jsonValue(), () => tq.textContent(".zd-start-ft"));
+  const kept = () => tq.evaluate(() => localStorage.getItem("zd-trusted-computer"));
+  const fresh = async u => { await tq.goto("about:blank"); await tq.goto(BASE + u, {waitUntil: "load"}); };
+  const openFree = async what => {
+    await tq.waitForTimeout(250);
+    const s = await tq.evaluate(() => ({lock: !!document.getElementById("zd-lock"), locked: document.body.classList.contains("zd-locked"), inert: [...document.body.children].some(e => e.inert), card: window.__zdCard}));
+    ok(!s.lock && !s.locked && !s.inert && !s.card, what + ": opens without the password (no card shown even for a moment)" + (s.lock || s.locked || s.inert || s.card ? " " + JSON.stringify(s) : ""));
+  };
+  await fresh("zameen-developments/#trust=" + "0".repeat(32));
+  ok(/not valid/.test(await ft()) && await kept() === null, "a wrong trust link is refused and nothing is kept");
+  await tq.click('#zd-start [data-zd-pick="all"]');
+  ok(await tq.isVisible("#zd-lock-input"), "…and the password is still asked");
+  await fresh("zameen-developments/#trust=" + KEY);
+  ok(new URL(tq.url()).hash === "", "the trust link's key is taken off the address at once");
+  ok(/now trusted/.test(await ft()) && await kept() === KEY, "the right trust link marks this computer as trusted");
+  ok(Object.values(await tq.evaluate(() => ({...localStorage}))).every(v => v !== "sa" && v !== "123"), "the password itself is still not kept");
+  for (const pick of ["all", "pay", "cm", "calc"]) {
+    await fresh("zameen-developments/");
+    ok(/This computer is trusted/.test(await ft()), pick + ": the start screen says this computer is trusted");
+    await tq.click('#zd-start [data-zd-pick="' + pick + '"]');
+    await openFree(pick);
+    if (pick !== "all") ok(await tq.evaluate(() => document.body.getAttribute("data-zd-app")) === pick, pick + ": still opens on its own (other modules hidden)");
+  }
+  for (const u of ["zameen-developments/?app=pay", "takeoff/", "dashboards/", "drawing-tracker/"]) { await fresh(u); await openFree(u); }
+  await tq.reload({waitUntil: "load"}); await openFree("after a reload");
+  ok(["zameen-developments", "takeoff", "dashboards", "drawing-tracker"].every(d => lists[d] === 1), "every page lists the trusted computers: " + JSON.stringify(lists));
+  await tq.evaluate(k => localStorage.setItem("zd-trusted-computer", k.slice(0, -1) + (k.slice(-1) === "0" ? "1" : "0")), KEY);
+  await fresh("takeoff/"); await tq.waitForTimeout(250);
+  ok(await tq.isVisible("#zd-lock-input") && await tq.evaluate(() => document.activeElement && document.activeElement.id === "zd-lock-input"), "a key that is not on the list: the password is asked (and the field has the focus)");
+  await tq.evaluate(k => localStorage.setItem("zd-trusted-computer", k), KEY);
+  await fresh("zameen-developments/"); await ft();
+  await tq.click(".zd-start-ft button");
+  ok(/no longer trusted/.test(await tq.textContent(".zd-start-ft")) && await kept() === null, "“Ask on this computer too” forgets the key");
+  await tq.click('#zd-start [data-zd-pick="all"]');
+  ok(await tq.isVisible("#zd-lock-input"), "…and the password is asked again right away");
+  await fresh("takeoff/");
+  ok(await tq.isVisible("#zd-lock-input"), "…on the other pages too");
+  ok(qerrs.length === 0, "no page errors" + (qerrs.length ? ": " + qerrs[0] : ""));
+  await tctx.close();
+
   // PDF Takeoff: a PDF locked with an open password — asked when it is opened, never kept (in the browser or an exported project)
   console.log("a PDF locked with an open password (PDF Takeoff)");
   const ctx3 = await browser.newContext({viewport: {width: 1440, height: 900}, acceptDownloads: true}); await require("./zd_unlock")(ctx3);

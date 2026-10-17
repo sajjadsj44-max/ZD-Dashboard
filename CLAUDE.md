@@ -44,5 +44,11 @@
 - Passwords: `123` for Payments on its own (`zameen-developments/?app=pay`), `sa` for everything else
   (the complete Dashboard `?app=all`, `?app=cm`, `?app=calc`, PDF Takeoff, Drawing Tracker, the dashboards list).
   `zameen-developments/` with no `?app=` opens the start screen that picks one of them.
+- One exception, asked for by the owner: a **trusted computer** (the owner's laptop) is never asked, on any
+  page. Its browser keeps a random key in localStorage `zd-trusted-computer`; every page with a lock
+  (zameen-developments, takeoff, dashboards, drawing-tracker) lists only the key's SHA-256 in `TRUSTED` —
+  keep that list the same on all four. The key is set by opening `zameen-developments/#trust=<key>` once
+  (the key never goes in the repo) and removed with the start screen's "Ask on this computer too". The
+  password itself is still never stored. To trust another computer, add its key's hash to all four lists.
 - Browser tests type the password in with `tools/zd_unlock.js`;
   `tools/test_lock.js` checks the lock on every page.
