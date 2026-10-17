@@ -41,7 +41,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
   });
   const page = await ctx.newPage(), errors = [];
   page.on("pageerror", e => errors.push(String(e)));
-  page.on("console", m => { if (m.type() === "error" && !/favicon/.test(m.text())) errors.push("console: " + m.text()); });
+  page.on("console", m => { if (m.type() === "error" && !/favicon/.test(m.text()) && !/^http:\/\/127\.0\.0\.1:11436\//.test((m.location() || {}).url || "")) errors.push("console: " + m.text()); });   // (a DWG added looks for the AutoCAD helper first: none runs here)
   const T = (fn, a) => page.evaluate(fn, a), wait = ms => page.waitForTimeout(ms || 150);
   const scr = async (x, y) => T(([x, y]) => { const S = zdTakeoff.S, r = document.getElementById("stage").getBoundingClientRect(); return [r.left + x * S.view.s + S.view.tx, r.top + y * S.view.s + S.view.ty]; }, [x, y]);
   const click = async (x, y) => { const p = await scr(x, y); await page.mouse.move(p[0], p[1]); await wait(40); await page.mouse.down(); await page.mouse.up(); await wait(70); };
