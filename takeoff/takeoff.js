@@ -380,7 +380,8 @@ function migrate(p, rep){
   p.items.forEach(it => { const nn = Math.round(num(it.nos)); it.nos = nn >= 1 && isFinite(nn) ? nn : 1; if (it.label == null) it.label = ""; it.label = String(it.label);
     if (!["shape", "ded", "open"].includes(it.kind)) it.kind = "shape";
     if (it.arcs != null && !(arr(it.arcs) && it.arcs.every(a => arr(a) && a.length === 2 && Number.isInteger(a[0]) && Number.isInteger(a[1])))) delete it.arcs;
-    ["ow", "oh", "doorW"].forEach(k => { if (it[k] != null && it[k] !== "" && !isFinite(num(it[k]))) delete it[k]; }); });
+    ["ow", "oh", "doorW"].forEach(k => { if (it[k] != null && it[k] !== "" && !isFinite(num(it[k]))) delete it[k]; });
+    if (it.ver != null && !(obj(it.ver) && VER_NAMES[it.ver.st])) delete it.ver; else if (it.ver) it.ver.note = String(it.ver.note == null ? "" : it.ver.note).slice(0, 2000); });
   bad = 0;
   p.marks = p.marks.filter(m => { const q = obj(m) && m.id != null && MARK_TOOLS[m.type] && pts(m.pts, MK_MINPTS[m.type] || 2); if (!q) { bad++; return false; } m.pts = q; m.id = String(m.id); m.text = String(m.text == null ? "" : m.text);
     if (MK_TYPES.has(m.type)) mkSanitize(m);
@@ -2746,7 +2747,7 @@ const detEdited = it => !!(it.det && it.det.pts0 && (it.det.pts0.length !== it.p
 function detHtml(it, k){   // the properties panel line for an outline found by Auto area: how, the original outline, review flag
   const d = it.det; if (!d) return "";
   const a0 = k && d.pts0 ? polyArea(d.pts0) / k / k : d.a0, a1 = k ? polyArea(it.pts) / k / k : null, ed = detEdited(it);
-  return `<div class="row detrow" style="margin-top:6px;gap:6px;align-items:center"><span class="small" style="flex:1;min-width:200px"><b>Auto area</b> · from the ${esc(d.src)}, door gap ${f3(d.gap)} ft · ${esc(dmy(d.at))}${d.note ? " · " + esc(d.note) : ""}
+  return `<div class="row detrow" style="margin-top:6px;gap:6px;align-items:center"><span class="small" style="flex:1;min-width:200px"><b>${d.how === "trace" ? "Vector trace" : "Auto area"}</b> · from the ${esc(d.src)}, ${d.how === "trace" ? "openings closed up to" : "door gap"} ${f3(d.gap)} ft · ${esc(dmy(d.at))}${d.note ? " · " + esc(d.note) : ""}
     · detected <b>${a0 != null ? fq(a0) : "?"} Sft</b>${ed ? ` → now <b>${a1 != null ? fq(a1) : "?"} Sft</b> (edited${a0 && a1 != null ? ", " + (a1 >= a0 ? "+" : "") + fq(a1 - a0) + " Sft" : ""})` : " (as detected)"}${d.flag ? ` · <span style="color:#b45309">⚠ ${esc(d.flag)}</span>` : ""}</span>
     <button class="btn sm${S.detShow ? " on" : ""}" data-act="detShow" title="Show the outline as Auto area found it (grey dashes) next to the current one">${S.detShow ? "Hide" : "Show"} detected</button>${ed && !it.locked ? '<button class="btn sm" data-act="detRestore" title="Put the outline back as Auto area found it (Ctrl+Z undoes)">Restore detected</button>' : ""}</div>`;
 }
@@ -3562,7 +3563,8 @@ function onUp(e){
     if (it) { const pts = it.pts.slice(); it.pts = D.orig; if (D.arcs) it.arcs = D.arcs; mutate(() => { it.pts = pts; if (D.ins) delete it.arcs; qaMoved(it); }, D.ins ? "Add point" : "Move point"); if (D.ins) S.lastIns = {id: it.id, vi: D.vertex, t: Date.now()}; if (crossed(it)) toast(crossMsg, 6000); } }
   S.drag = null; stage().classList.remove("panning");
 }
-const qaMoved = it => { if (it.qa === "checked") { it.qa = ""; it.qaNote = "outline changed after it was checked"; } };
+const qaMoved = it => { if (it.qa === "checked") { it.qa = ""; it.qaNote = "outline changed after it was checked"; }
+  const v = verOf(it); if (v && v !== "manual") it.ver = {st: "manual", note: "outline edited by hand (was: " + VER_NAMES[v] + ")" + (it.ver.note ? " — " + it.ver.note : ""), by: "", at: new Date().toISOString()}; };
 function cancelDrag(){   // Esc / Ctrl+Z during a drag: everything back where it was
   const D = S.drag; S.drag = null; if (!D) return;
   if (D.vertex != null) { const it = P.proj.items.find(i => i.id === D.item); if (it) { it.pts = D.orig; if (D.arcs) it.arcs = D.arcs; } }
@@ -4801,6 +4803,7 @@ function qaBadges(it){
   if (it.ai && it.qa !== "checked") b.push('<span class="tag a" title="Measured by the AI assistant — check it">AI</span>');
   if (it.revFlag && it.qa !== "checked") b.push('<span class="tag a" title="Sits on drawing that changed against ' + esc(it.revFlag.vs) + ' — check it against the new revision">REV</span>');
   if (it.copied && it.qa !== "checked") b.push(`<span class="tag a" title="Copied from ${esc(keyName(it.copied.from))} (${esc(it.copied.how)}) — check it">copied</span>`);
+  const v = verOf(it); if (v) b.push(`<span class="tag ${v === "auto" || v === "open" ? "a" : v === "manual" ? "" : "g"}" title="${esc(VER_NAMES[v] + (it.ver.note ? " — " + it.ver.note : ""))}">${{dims: "✓ dims", walls: "✓ walls", manual: "corrected", auto: "review", open: "unresolved"}[v]}</span>`);
   return b.length ? " " + b.join("") : "";
 }
 function pageName(it){ const f = P.proj.files.find(x => x.id === it.file); return (f ? f.name.replace(/\.pdf$/i, "") : "?") + " p." + it.page; }
@@ -4844,6 +4847,7 @@ function itemDetailHtml(it, c, k){
       pz > 0 ? ["Slope", pitchText(pz) + " × " + slopeF(pz).toFixed(4) + (it.pitch != null ? " (this one)" : "")] : null, +it.rise && c.type === "linear" ? [+it.rise > 0 ? "Rise" : "Drop", f3(Math.abs(+it.rise)) + " ft"] : null,
       c.h ? ["Height H", f3(+c.h) + " ft"] : null, c.t ? ["Thickness T", f3(+c.t) + " ft"] : null, ["BOQ code", c.boq || "not set", c.boq ? "" : "warn"], rateLine(c),
       ["Scale", sc ? (sc.verified ? "verified" : sc.how === "inherited" ? "inherited — not checked" : "not verified") : "not set", sc && sc.verified ? "ok" : "warn"],
+      verOf(it) ? ["Verification", VER_NAMES[verOf(it)], verOk(it) ? "ok" : "warn"] : null,
       it.locked ? ["Locked", "yes"] : null, it.ai ? ["Made by", "AI assistant"] : null, it.copied ? ["Copied from", keyName(it.copied.from)] : null, it.qa === "checked" ? ["Checked", (it.qaBy || "") + (it.qaAt ? ", " + dmy(it.qaAt) : "")] : null])}
     ${k && it.kind === "shape" ? matHtml(c, net, true) : ""}`;
 }
@@ -4885,6 +4889,8 @@ function renderProps(){
     <div class="row" style="margin-top:6px">${LOC_KEYS.map(lk => { const sh = (P.proj.sheets || {})[keyOf(it.file, it.page)] || {}; return `<div class="fg"><label>${LOC_NAMES[lk]}</label><input type="text" data-prop="${lk}" list="dlp_${lk}" value="${esc(it[lk] || "")}" placeholder="${esc(sh[lk] || (lk === "room" ? it.label || "" : ""))}"><datalist id="dlp_${lk}">${locValues(lk).map(x => `<option value="${esc(x)}">`).join("")}</datalist></div>`; }).join("")}</div>
     <div class="row" style="margin-top:6px"><div class="fg"><label>QA status</label><select data-prop="qa">${Object.entries(QA_NAMES).map(([q, n]) => `<option value="${q}"${(it.qa || "") === q ? " selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="fg" style="flex:2"><label>QA note</label><input type="text" data-prop="qaNote" value="${esc(it.qaNote || "")}" placeholder="e.g. confirm against section B-B"></div></div>
+    <div class="row" style="margin-top:6px"><div class="fg" style="flex:2"><label>Verification</label><select data-prop="ver" title="How far this outline is proved against the drawing"><option value=""${verOf(it) ? "" : " selected"}>— (drawn by hand)</option>${Object.entries(VER_NAMES).map(([q, n]) => `<option value="${q}"${verOf(it) === q ? " selected" : ""}>${esc(n)}</option>`).join("")}</select></div></div>
+    ${it.ver && it.ver.note ? `<div class="small" style="margin-top:2px">${esc(it.ver.note)}</div>` : ""}
     ${detHtml(it, k)}${blockFixHtml(it)}
     <div class="small" style="margin-top:4px">${it.qa === "checked" ? "Checked by " + esc(it.qaBy) + ", " + esc(dmy(it.qaAt)) : "Not checked"}${it.ai ? " · AI-generated" : ""}${it.copied ? " · copied from " + esc(keyName(it.copied.from)) + " (" + esc(it.copied.how) + ")" : ""}</div>
     ${it.kind !== "open" ? `<div class="psec" style="display:flex;align-items:center;gap:6px">Appearance <select data-apown style="margin-left:auto;font-size:11px;padding:1px 4px"><option value="cond"${it.ap ? "" : " selected"}>Whole condition</option><option value="item"${it.ap ? " selected" : ""}>This measurement only</option></select></div>
@@ -6694,6 +6700,34 @@ function sheetRows(){
   });
   return out;
 }
+/* every leg of every measured length and every side of every measured area, one row each, with its two ends in feet on
+   the page (from the sheet's top-left corner, y down) — the wall-by-wall list a QS checks a run against. Item numbers are
+   the Measurement sheet's S.No; a leg drawn as an arc is one leg, its length along the arc. */
+function segRows(){
+  const out = []; let sn = 0; const seen = new Set();
+  sheetRows().forEach(g => g.rows.forEach(x => {
+    if (x.i !== 0 || seen.has(x.it.id)) return; seen.add(x.it.id); sn++;
+    const it = x.it, c = g.c, k = itemScale(it); if (!k || c.type === "count" || it.shape === "circle") return;
+    const P0 = it.pts, area = c.type === "area", nameOf = it.label || kindName(it, c), ver = verOf(it) ? VER_NAMES[verOf(it)] : "", kd = it.kind === "ded" ? "deduction" : it.kind === "open" ? "opening" : "";
+    const legs = [], arcs = Array.isArray(it.arcs) ? it.arcs : [];
+    if (it.kind === "open") legs.push([P0[0], P0[1], dist(P0[0], P0[1])]);
+    else {
+      const Q = area ? P0.concat([P0[0]]) : P0;
+      for (let i = 1; i < Q.length;) { const a = !area && arcs.find(q => q[0] === i - 1 && q[1] > q[0] && q[1] < Q.length);
+        if (a) { let L = 0; for (let j = a[0] + 1; j <= a[1]; j++) L += dist(Q[j - 1], Q[j]); legs.push([Q[a[0]], Q[a[1]], L, true]); i = a[1] + 1; }
+        else { if (dist(Q[i - 1], Q[i]) > 1e-9) legs.push([Q[i - 1], Q[i], dist(Q[i - 1], Q[i])]); i++; } }
+    }
+    legs.forEach((l, n) => out.push({id: sn + "." + (n + 1), sn, leg: n + 1, legs: legs.length, c, it, name: nameOf, x0: r3(l[0][0] / k), y0: r3(l[0][1] / k), x1: r3(l[1][0] / k), y1: r3(l[1][1] / k), L: r3(l[2] / k), arc: !!l[3], kind: area ? "side" + (kd ? " (" + kd + ")" : "") : kd || "leg", ver}));
+  }));
+  return out;
+}
+const SEG_HEAD = ["Segment", "S.No", "Condition", "Measurement", "Leg", "of", "From X ft", "From Y ft", "To X ft", "To Y ft", "Length ft", "Kind", "Drawing / page", "Verification"];
+const segLine = r => [r.id, r.sn, r.c.name, r.name, r.leg, r.legs, r.x0, r.y0, r.x1, r.y1, r.L, r.kind + (r.arc ? " (arc)" : ""), pageName(r.it), r.ver];
+function exportSegmentsCsv(){
+  const rows = [SEG_HEAD].concat(segRows().map(segLine));
+  const t = rows.map(r => r.map(v => { v = String(v == null ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
+  saveBlob(new Blob(["\ufeff" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Segments.csv");
+}
 function loadExcel(){ return window.ExcelJS ? Promise.resolve(window.ExcelJS) : new Promise((ok, bad) => { const s = document.createElement("script"); s.src = EXCELJS; s.onload = () => ok(window.ExcelJS); s.onerror = () => bad(new Error("Excel library could not be loaded (offline?) — use CSV")); document.head.appendChild(s); }); }
 function saveBlob(blob, name){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); }
 const fileBase = () => (P.proj.name || "takeoff").replace(/[^A-Za-z0-9]+/g, "_") + "_" + today();
@@ -6735,7 +6769,7 @@ async function exportExcel(){
         q.value = r.below ? {formula: "0", result: 0} : {formula: (r.sign < 0 ? "-" : "") + (r.F != null ? `PRODUCT(D${row}:G${row},L${row})` : `PRODUCT(D${row}:G${row})`), result: r.qty};
         q.fill = r.below ? YELLOW : GREEN; q.numFmt = qFmt(r.unit);
         rr.getCell(9).value = r.unit;
-        if (i === 0) { rr.getCell(10).value = locText(locOf(it)); rr.getCell(11).value = QA_NAMES[it.qa || ""] + (it.qa === "checked" ? " — " + it.qaBy + ", " + dmy(it.qaAt) : "") + (it.ai && it.qa !== "checked" ? " · AI-generated" : "") + (it.copied && it.qa !== "checked" ? " · copied, not checked" : "");
+        if (i === 0) { rr.getCell(10).value = locText(locOf(it)); rr.getCell(11).value = QA_NAMES[it.qa || ""] + (it.qa === "checked" ? " — " + it.qaBy + ", " + dmy(it.qaAt) : "") + (it.ai && it.qa !== "checked" ? " · AI-generated" : "") + (it.copied && it.qa !== "checked" ? " · copied, not checked" : "") + (verOf(it) ? " · " + VER_NAMES[verOf(it)] : "");
           if (it.qa !== "checked") rr.getCell(11).fill = YELLOW; }
         if (r.sign < 0) rr.font = {color: {argb: "FFB32D2D"}};
         row++;
@@ -6789,11 +6823,26 @@ async function exportExcel(){
     (V.L.length ? V.L : [{lvl: "PASS", msg: "No errors or warnings"}]).forEach(x => { const r = vs.addRow([x.lvl, x.msg]); r.getCell(1).font = {bold: true, color: {argb: x.lvl === "ERROR" ? "FFB32D2D" : x.lvl === "WARNING" ? "FF8A5A00" : "FF16723F"}}; });
     const sm = wb.addWorksheet("Summary");
     sm.columns = [{header: "Condition", width: 48}, {header: "Qty", width: 14}, {header: "Unit", width: 8}, {header: "Measurements", width: 14}];
+    const verSplit = c => { let a = 0, b = 0; P.proj.items.filter(i => i.cond === c.id).forEach(it => { const k = itemScale(it); if (!k) return; const q = rowsOf(it, k).reduce((s2, r) => s2 + r.qty, 0); if (verOk(it)) a += q; else b += q; }); return [a, b]; };
+    const anyVer = P.proj.items.some(i => verOf(i));
     sm.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; sm.getRow(1).eachCell(c => { c.fill = HEAD; });
     const XC = P.proj.cols || [];   // custom columns: live formulas on the quantity cell (B), which is the Measurement sheet's total
     XC.forEach((col, j) => { const h = sm.getRow(1).getCell(5 + j); h.value = col.name + (col.unit ? " (" + col.unit + ")" : ""); h.fill = HEAD; sm.getColumn(5 + j).width = Math.max(12, h.value.length + 2); });
     totals.forEach(t => { const r = sm.addRow([t.c.name, {formula: "Measurement!" + t.cell, result: t.t.net}, t.c.unit, P.proj.items.filter(i => i.cond === t.c.id).length]); r.getCell(2).numFmt = qFmt(t.c.unit); r.getCell(2).fill = GREEN;
-      if (XC.length) xlCols(r, t.c, "B" + r.number, 5, xlLetter); });
+      if (XC.length) xlCols(r, t.c, "B" + r.number, 5, xlLetter);
+      if (anyVer) { const [a, b] = verSplit(t.c), vc = 5 + XC.length; r.getCell(vc).value = +a.toFixed(3); r.getCell(vc + 1).value = +b.toFixed(3); r.getCell(vc).numFmt = qFmt(t.c.unit); r.getCell(vc + 1).numFmt = qFmt(t.c.unit); if (Math.abs(b) > 1e-9) r.getCell(vc + 1).fill = YELLOW; } });
+    if (anyVer) [["Verified qty", 16], ["Needs review qty", 16]].forEach(([h, w], j) => { const c2 = sm.getRow(1).getCell(5 + XC.length + j); c2.value = h; c2.fill = HEAD; c2.font = {bold: true, color: {argb: "FFFFFFFF"}}; sm.getColumn(5 + XC.length + j).width = w; });
+    const SG = segRows();
+    if (SG.length) {   // every wall / run leg and every side of every area, with its ends: the segment-by-segment audit trail
+      const sg = wb.addWorksheet("Segments", {views: [{state: "frozen", ySplit: 1}]});
+      sg.columns = [{width: 9}, {width: 6}, {width: 34}, {width: 40}, {width: 5}, {width: 5}, {width: 10}, {width: 10}, {width: 10}, {width: 10}, {width: 11}, {width: 16}, {width: 22}, {width: 34}].map((c, n) => Object.assign(c, {header: SEG_HEAD[n]}));
+      sg.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; sg.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
+      let last = null, first = 2;
+      const sub = () => { if (!last) return; const n = sg.rowCount; const r = sg.addRow(["", last.sn, last.c.name, "Total " + last.name, "", "", "", "", "", "", {formula: `SUM(K${first}:K${n})`, result: SG.filter(x => x.it === last.it).reduce((a, x) => a + x.L, 0)}]); r.font = {bold: true}; r.getCell(11).numFmt = "0.000"; r.eachCell(c2 => { c2.fill = GREY; }); };
+      SG.forEach(x => { if (last && last.it !== x.it) { sub(); first = sg.rowCount + 1; } const r = sg.addRow(segLine(x)); [7, 8, 9, 10, 11].forEach(n => { r.getCell(n).numFmt = "0.000"; }); if (!x.ver || /review|Unresolved/.test(x.ver)) r.getCell(14).fill = YELLOW; last = x; });
+      sub();
+      sg.addRow([]); sg.addRow(["", "", "Ends are in feet on the page, from the sheet's top-left corner (y down), at the page's scale. A closed run lists its closing leg too; an area lists every side once."]);
+    }
     const au = wb.addWorksheet("Scale & audit");
     au.columns = [{header: "Drawing", width: 34}, {header: "Page", width: 7}, {header: "Scale", width: 26}, {header: "1 ft on the sheet (pt)", width: 18}, {header: "How", width: 12}, {header: "Verified", width: 10}, {header: "Check", width: 40}, {header: "Status", width: 26}];
     au.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; au.getRow(1).eachCell(c => { c.fill = HEAD; });
@@ -6819,7 +6868,8 @@ const qCsv = (v, u) => { v = +v || 0; const x = isNos(u) && Math.abs(v - Math.ro
 function exportCsv(){
   const rows = [["S.No", "Condition", "Description", "Drawing / page", "Nos", "L (ft) / Area (Sft)", "W (ft)", "H (ft)", "Qty", "Unit", "BOQ code", "Location", "QA"]];
   let sn = 0; const SR = sheetRows(), anyF = SR.some(g => g.rows.some(x => x.r.F != null)); if (anyF) rows[0].push("Slope ×");   // a slope's factor: its own last column
-  SR.forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.A != null ? f3(r.A) : r.L == null ? "" : f3(r.L), r.W == null ? "" : f3(r.W), r.H == null ? "" : f3(r.H), qCsv(r.qty, r.unit), r.unit, g.c.boq || "", x.i === 0 ? locText(locOf(x.it)) : "", x.i === 0 ? QA_NAMES[x.it.qa || ""] + (x.it.ai && x.it.qa !== "checked" ? " · AI" : "") + (x.it.copied && x.it.qa !== "checked" ? " · copied" : "") : ""].concat(anyF ? [r.F != null ? r.F.toFixed(4) : ""] : [])); });
+  const anyV = P.proj.items.some(i => verOf(i)); if (anyV) rows[0].push("Verification");   // how far each outline is proved (a traced / imported takeoff)
+  SR.forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.A != null ? f3(r.A) : r.L == null ? "" : f3(r.L), r.W == null ? "" : f3(r.W), r.H == null ? "" : f3(r.H), qCsv(r.qty, r.unit), r.unit, g.c.boq || "", x.i === 0 ? locText(locOf(x.it)) : "", x.i === 0 ? QA_NAMES[x.it.qa || ""] + (x.it.ai && x.it.qa !== "checked" ? " · AI" : "") + (x.it.copied && x.it.qa !== "checked" ? " · copied" : "") : ""].concat(anyF ? [r.F != null ? r.F.toFixed(4) : ""] : []).concat(anyV ? [x.i === 0 && verOf(x.it) ? VER_NAMES[verOf(x.it)] : ""] : [])); });
     rows.push(["", g.c.name, "Total " + g.c.name, "", "", "", "", "", qCsv(g.t.net, g.c.unit), g.c.unit, g.c.boq || "", "", ""]); });
   const t = rows.map(r => r.map(v => { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
   saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Measurement.csv");
@@ -7012,11 +7062,11 @@ async function exportMenu(){
     ${V.L.length ? `<div style="max-height:240px;overflow:auto;margin:6px 0;border:1px solid var(--line);border-radius:6px">${V.L.map(x => `<div style="padding:4px 8px;border-bottom:1px solid #f0f4f8;font-size:12px"><b style="color:${lvlCol(x.lvl)};display:inline-block;width:70px">${x.lvl}</b>${esc(x.msg)}</div>`).join("")}</div>` : ""}
     <p class="small">${V.lvl === "PASS" ? "" : "You can still export; the Excel file carries this list on its Validation sheet. "}Measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as rows).</p>`;
   $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button>${V.L.some(x => x.ov) ? '<button class="btn" id="exOv" title="Areas that overlap, counted twice — show and fix them">Fix overlaps…</button>' : ""}<button class="btn" id="exBak">Backups…</button><button class="btn" id="exJson" title="Measurements only — the PDFs are not inside">Project (.json)</button><button class="btn" id="exBnd" title="The project and all its PDFs in one file, to move it to another browser or computer">Project + PDFs</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA" title="Every sheet of the project in one PDF, with or without markups">All project sheets (.pdf)</button>
-    <button class="btn pri" id="exPages" title="Choose the pages (this page, pages with takeoff, ticked pages, or any), the format (PDF, a PDF per page, PNG, JPEG), the resolution up to 600 DPI and the legend">&#8681; Pages — PDF / PNG / JPEG…</button><button class="btn" id="exPlot" title="A window, the view or the page on a paper size, at a scale, colour / monochrome — print it or save it as PDF (Ctrl+P)">&#128424; Plot / print…</button><button class="btn" id="exRepB" title="Report builder: rows by condition, page / sheet or floor, the columns you choose, group and grand totals — Excel or CSV">&#9638; Report…</button><button class="btn" id="exRep" title="A printable takeoff report with a summary, quantities by condition and floor, the bill, the drawings measured and the check — print it or save it as PDF">&#128438; Report (print / PDF)</button><button class="btn" id="exCsv">CSV</button><button class="btn" id="exDxf" title="This page's takeoff as an AutoCAD DXF: a layer per condition">DXF (AutoCAD)</button><button class="btn pri" id="exXls">Excel</button>`;
+    <button class="btn pri" id="exPages" title="Choose the pages (this page, pages with takeoff, ticked pages, or any), the format (PDF, a PDF per page, PNG, JPEG), the resolution up to 600 DPI and the legend">&#8681; Pages — PDF / PNG / JPEG…</button><button class="btn" id="exPlot" title="A window, the view or the page on a paper size, at a scale, colour / monochrome — print it or save it as PDF (Ctrl+P)">&#128424; Plot / print…</button><button class="btn" id="exRepB" title="Report builder: rows by condition, page / sheet or floor, the columns you choose, group and grand totals — Excel or CSV">&#9638; Report…</button><button class="btn" id="exRep" title="A printable takeoff report with a summary, quantities by condition and floor, the bill, the drawings measured and the check — print it or save it as PDF">&#128438; Report (print / PDF)</button><button class="btn" id="exCsv">CSV</button><button class="btn" id="exSeg" title="Every leg of every run and every side of every area, with its ends in feet: the wall-by-wall list">Segments CSV</button><button class="btn" id="exDxf" title="This page's takeoff as an AutoCAD DXF: a layer per condition">DXF (AutoCAD)</button><button class="btn pri" id="exXls">Excel</button>`;
   $("dlgBack").classList.add("on");
   const close = () => $("dlgBack").classList.remove("on");
   $("dlgCancel").onclick = close;
-  $("exXls").onclick = () => { close(); exportExcel(); }; $("exCsv").onclick = () => { close(); exportCsv(); }; $("exDxf").onclick = () => { close(); exportDxf(); };
+  $("exXls").onclick = () => { close(); exportExcel(); }; $("exCsv").onclick = () => { close(); exportCsv(); }; $("exSeg").onclick = () => { close(); exportSegmentsCsv(); }; $("exDxf").onclick = () => { close(); exportDxf(); };
   $("exPng").onclick = () => { close(); exportPng(); }; $("exPdf1").onclick = () => { close(); exportPdf(false, "ui"); }; $("exPdfA").onclick = () => { close(); exportPdf(true, "ui"); }; $("exJson").onclick = () => { close(); exportJson(); }; $("exBnd").onclick = () => { close(); exportBundle(); }; $("exBak").onclick = () => backupsDialog(); if ($("exOv")) $("exOv").onclick = () => overlapDialog("project");
   $("exPages").onclick = () => { close(); exportPagesDialog(); }; $("exPlot").onclick = () => { close(); plotDialog(); }; $("exRep").onclick = () => { close(); reportPrint(); }; $("exRepB").onclick = () => { close(); reportDialog(); };
 }
@@ -8501,7 +8551,12 @@ async function sheetInfoDialog(readFirst){
 
 /* ------------------------------------------------------------------ QA: Measured → Checked, or Recheck required */
 const QA_NAMES = {"": "Measured", checked: "Checked", recheck: "Recheck required"};
-const needsReview = it => (it.ai || it.copied || it.revFlag || (it.det && it.det.flag)) && it.qa !== "checked";
+/* how far a measurement's geometry has been proved (it.ver = {st, note, by, at}): the status a traced or imported outline
+   carries — separate from the QA check, which is a person's sign-off. Nothing set = drawn by hand. */
+const VER_NAMES = {dims: "Verified against dimensions", walls: "Verified against visible wall geometry", auto: "Auto-detected — requires review", manual: "Manually corrected", open: "Unresolved — excluded from the verified total"};
+const verOf = it => it && it.ver && VER_NAMES[it.ver.st] ? it.ver.st : "";
+const verOk = it => !["auto", "open"].includes(verOf(it));   // counts in the verified total (hand-drawn ones do)
+const needsReview = it => (it.ai || it.copied || it.revFlag || (it.det && it.det.flag) || !verOk(it)) && it.qa !== "checked";
 function qaUser(){ return pref("zdTakeoffUser") || ""; }
 async function askUser(){
   let u = qaUser(); if (u) return u;
@@ -8591,6 +8646,27 @@ function rateOf(o, unit){
 }
 
 /* ------------------------------------------------------------------ check before export */
+/* a room named with its written size ("BATH 9'-0"x5'-0"") must have two pairs of square sides that far apart, to the inch:
+   the written L × W is the room's main rectangle, whatever recess or bay the outline also takes in. "" when it agrees,
+   when the name has no size, when it names more than one room (open plan: "LOUNGE + KITCHEN"), or when the outline has
+   no square sides to measure (a skewed room). */
+function sizeMismatch(it, k){
+  const lb = vulgar(String(it.label || "")); if (!k || /\+/.test(lb)) return "";
+  const sp = sizePair(lb); if (!sp || sp.how !== "ft-in") return "";
+  const n = it.pts.length, E = it.pts.map((p, i) => [p, it.pts[(i + 1) % n]]), tol = 0.02;
+  const H = E.filter(([p, q]) => Math.abs(p[1] - q[1]) < tol), V = E.filter(([p, q]) => Math.abs(p[0] - q[0]) < tol);
+  if (H.length < 2 || V.length < 2) return "";
+  const span = (L, d, hz) => { let best = Infinity;
+    for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
+      const [p1, q1] = L[i], [p2, q2] = L[j], a = hz ? 0 : 1, c1 = hz ? p1[1] : p1[0], c2 = hz ? p2[1] : p2[0];
+      const lo = Math.max(Math.min(p1[a], q1[a]), Math.min(p2[a], q2[a])), hi = Math.min(Math.max(p1[a], q1[a]), Math.max(p2[a], q2[a]));
+      if (hi - lo < 0.33 * k) continue;   // the two sides must face each other
+      best = Math.min(best, Math.abs(Math.abs(c1 - c2) / k - d)); }
+    return best; };
+  const o = [[sp.w, sp.h], [sp.h, sp.w]].map(([a, b]) => Math.max(span(V, a, false), span(H, b, true))).sort((x, y) => x - y)[0];
+  if (o <= 1 / 12 + 1e-6) return "";
+  return isFinite(o) ? `written size ${f3(sp.w)} × ${f3(sp.h)} ft is not between its sides (nearest ${(o * 12).toFixed(1)}" off)` : `written size ${f3(sp.w)} × ${f3(sp.h)} ft — no two pairs of facing square sides`;
+}
 function validate(){
   const out = [], E = (lvl, msg) => out.push({lvl, msg});
   if (!P.proj.items.length) E("WARNING", "Nothing is measured yet");
@@ -8608,9 +8684,13 @@ function validate(){
       if (!(q > 0) && !rowsOf(it, k).some(r => r.below)) E("ERROR", `${c.name} — ${it.label || kindName(it, c)} on ${pageName(it)}: zero quantity`);
       if (it.kind === "open" && c.unit !== "ft" && !(openH(it) > 0)) E("ERROR", `${c.name} — opening ${it.label || ""} on ${pageName(it)}: height missing`);
       if (crossed(it)) E("ERROR", `${c.name} — ${it.label || kindName(it, c)} on ${pageName(it)}: the outline crosses itself, so its area is not the area drawn`);
+      if (c.type === "area" && it.kind === "shape" && it.shape !== "circle") { const w = sizeMismatch(it, k); if (w) E("WARNING", `${c.name} — ${it.label} on ${pageName(it)}: ${w}`); }
       if (!locOf(it).floor) noFloor.add(c.name); });
   });
   if (noFloor.size) E("WARNING", `No floor given (Sheet info or the measurement) for some measurements of: ${[...noFloor].join(", ")}`);
+  { const rv = P.proj.items.filter(i => verOf(i) === "auto"), un = P.proj.items.filter(i => verOf(i) === "open");
+    if (rv.length) E("WARNING", `${rv.length} measurement${rv.length > 1 ? "s" : ""} auto-detected — require review before the total is final: ${rv.slice(0, 8).map(i => i.label || i.id).join("; ")}${rv.length > 8 ? " …" : ""}`);
+    if (un.length) E("WARNING", `${un.length} measurement${un.length > 1 ? "s" : ""} unresolved — kept out of the verified total (Summary sheet): ${un.slice(0, 8).map(i => i.label || i.id).join("; ")}${un.length > 8 ? " …" : ""}`); }
   billLines().forEach(l => {
     if (l.err) E("ERROR", `${l.name}: formula error — ${l.err}`);
     else if (l.na) E("WARNING", `${l.name}: ${l.na}`);
@@ -8941,11 +9021,11 @@ async function mergeBuf(buf){
   if (!P.proj) throw new Error("open a project first");
   savePr = P.proj; await flushSave();
   for (const x of P.proj.files) if (!x.sha) { const h = await pdfSha(x.id); if (h) x.sha = h; }   // PDFs added before fingerprints
-  if (!isBundle(buf)) return mergeProject(new TextDecoder().decode(buf));
+  if (!isBundle(buf)) return mergeProject(new TextDecoder().decode(buf), undefined, {scales: "ask"});
   const u = await bundleUnpack(buf, new Set(P.proj.files.map(x => x.sha).filter(Boolean)));
-  return mergeProject(u.text, u.pre);
+  return mergeProject(u.text, u.pre, {scales: "ask"});
 }
-async function mergeProject(text, pre){
+async function mergeProject(text, pre, opt){
   const pr = P.proj; if (!pr) throw new Error("open a project first");
   let o; try { o = JSON.parse(text); } catch (e) { throw new Error("the file is not valid JSON"); }
   if (!o || o.format !== "zd-takeoff" || !Array.isArray(o.items)) throw new Error("not a takeoff project file");
@@ -8994,18 +9074,25 @@ async function mergeProject(text, pre){
   const aMiss = []; for (const a of [...new Set(mAdd.flatMap(mkAids))]) if (!(await assetRec(a).catch(() => null))) aMiss.push(a);
   // page settings only where the page has none; openings by mark
   const sc = {}, vp = {}, sh = {}; let scSkip = 0, vpSkip = 0, shSkip = 0;
-  Object.entries(s.scales).forEach(([k, v]) => { if (pr.scales[k]) scSkip++; else sc[k] = v; });
+  const scDiff = [];   // a page here at another scale than the verified calibration the file was measured at
+  Object.entries(s.scales).forEach(([k, v]) => { if (pr.scales[k]) { scSkip++; if (v && v.verified && v.how === "calibrated" && pr.scales[k].ptPerFt > 0 && Math.abs(v.ptPerFt / pr.scales[k].ptPerFt - 1) > 2e-4) scDiff.push([k, v]); } else sc[k] = v; });
+  let scUse = (opt && opt.scales === "use") ? scDiff : [];
+  if (scDiff.length && opt && opt.scales === "ask") {
+    const ok = await ask("Scale in the imported file", `<p>The file was measured at a <b>verified calibration</b> different from this project's:</p>` + scDiff.map(([k, v]) => `<p>${esc(keyName(k))}: here <b>${pr.scales[k].ptPerFt.toFixed(4)}</b> pt per ft (${esc(pr.scales[k].text || pr.scales[k].how)}) — in the file <b>${v.ptPerFt.toFixed(4)}</b> pt per ft (${esc(v.text || "calibrated")}), ${((v.ptPerFt / pr.scales[k].ptPerFt - 1) * 100).toFixed(3)} %.</p>`).join("") +
+      `<p class="small">Using the file's scale recalculates every quantity on ${scDiff.length > 1 ? "those pages" : "that page"}, those already here too. Keep this project's to leave the scale as it is.</p>`, "Use the file's scale");
+    if (ok) scUse = scDiff;
+  }
   Object.entries(s.viewports).forEach(([k, L]) => { if (!L.length) return; if ((pr.viewports[k] || []).length) vpSkip++; else vp[k] = L.map(v => Object.assign({}, v, {id: uid("V")})); });
   Object.entries(s.sheets).forEach(([k, v]) => { if (pr.sheets && pr.sheets[k]) shSkip++; else sh[k] = v; });
   const oAdd = []; let oUse = 0; s.openings.forEach(x => { if ((pr.openings || []).concat(oAdd).some(y => low(y.mark) === low(x.mark))) oUse++; else oAdd.push(Object.assign({}, x, {id: uid("O")})); });
   const bbWas = new Set(Object.keys(pr.bbImp || {}).filter(f => pr.bbImp[f].off));
-  const nAdd = iAdd.length + mAdd.length + cAdd.length + Object.keys(sc).length + Object.keys(vp).length + Object.keys(sh).length + oAdd.length + kAdd.length + Object.keys(rAdd).length + Object.keys(eAdd).length + hAdd.length;
+  const nAdd = scUse.length + iAdd.length + mAdd.length + cAdd.length + Object.keys(sc).length + Object.keys(vp).length + Object.keys(sh).length + oAdd.length + kAdd.length + Object.keys(rAdd).length + Object.keys(eAdd).length + hAdd.length;
   if (fAdd.length) { pr.files.push(...fAdd); s.files.forEach(f => { const id = fmap[f.id]; if (fAdd.some(x => x.id === id) && s.layersOff && s.layersOff[id] && !(pr.layersOff || {})[id]) { pr.layersOff = pr.layersOff || {}; pr.layersOff[id] = s.layersOff[id]; } }); }   // drawings: kept, as after + PDF
   if (nAdd) mutate(() => {
     pr.conds.push(...cAdd); pr.items.push(...iAdd); pr.marks = (pr.marks || []).concat(mAdd);
     if (lAdd.length) pr.mkLayers = (pr.mkLayers || []).concat(lAdd);
     if (Array.isArray(s.mkStatuses) && s.mkStatuses.length) pr.mkStatuses = [...new Set((pr.mkStatuses || []).concat(s.mkStatuses))].slice(0, 60);
-    Object.assign(pr.scales, sc); Object.assign(pr.viewports, vp); pr.sheets = Object.assign(pr.sheets || {}, sh); pr.openings = (pr.openings || []).concat(oAdd);
+    Object.assign(pr.scales, sc); scUse.forEach(([k, v]) => { pr.scales[k] = Object.assign({}, v); }); Object.assign(pr.viewports, vp); pr.sheets = Object.assign(pr.sheets || {}, sh); pr.openings = (pr.openings || []).concat(oAdd);
     if (kAdd.length) pr.cols = (pr.cols || []).concat(kAdd); if (Object.keys(rAdd).length) pr.rot = Object.assign({}, pr.rot, rAdd);
     if (Object.keys(eAdd).length) pr.cadEd = Object.assign({}, pr.cadEd, eAdd); if (hAdd.length) pr.pageHide = (pr.pageHide || []).concat(hAdd);
     Object.entries(s.bbImp || {}).forEach(([f, v]) => { if (!v || !pr.files.some(x => x.id === f)) return; const w = (pr.bbImp || {})[f] || {};   // Bluebeam markups brought in there: not brought in twice here
@@ -9023,6 +9110,8 @@ async function mergeProject(text, pre){
   if (src.marks.length) add("Markups", src.marks.length, mAdd.length + " added", "PASS", mDup ? mDup + " already here — not added twice" : "");
   if (aMiss.length) add("Markup pictures / files", "", "", "WARNING", aMiss.length + " not in this browser (a .json carries none — a .zdtakeoff does): shown empty");
   [["Page scales", s.scales, sc, scSkip], ["Viewports", s.viewports, vp, vpSkip], ["Sheet info", s.sheets, sh, shSkip]].forEach(([n, a, b, k]) => { const na = Object.keys(a).length; if (na) add(n, na, Object.keys(b).length + " added", "PASS", k ? k + " page" + (k > 1 ? "s" : "") + " already had one — kept" : ""); });
+  if (scUse.length) add("Page scales replaced", scDiff.length, scUse.length + " replaced", "PASS", "the file's verified calibration now used on " + scUse.map(([k, v]) => keyName(k) + " (" + v.ptPerFt.toFixed(4) + " pt per ft)").join(", ") + " — quantities recalculated");
+  else if (scDiff.length) add("Page scales", scDiff.length, "kept", "WARNING", "the file was measured at another verified scale on " + scDiff.map(([k, v]) => keyName(k) + " (" + v.ptPerFt.toFixed(4) + " pt per ft, here " + pr.scales[k].ptPerFt.toFixed(4) + ")").join(", ") + " — this project's scale kept");
   if (src.openings.length) add("Opening schedule", src.openings.length, oAdd.length + " added", "PASS", oUse ? oUse + " mark" + (oUse > 1 ? "s" : "") + " already in the schedule — kept" : "");
   if ((s.cols || []).length) add("Custom columns", s.cols.length, kAdd.length + " added", "PASS", s.cols.length > kAdd.length ? s.cols.length - kAdd.length + " already here (same name) — kept" : "");
   if (Object.keys(rAdd).length || rTurn || rMiss.length) add("Turned pages", Object.keys(src.rot || {}).length, and(Object.keys(rAdd).length && Object.keys(rAdd).length + " kept", rTurn && rTurn + " turned to this project's turn"), rMiss.length ? "WARNING" : "PASS",
@@ -10265,6 +10354,7 @@ function wire(){
       m[mt] = mt === "tin" || mt === "wst" ? Math.max(0, Math.min(mt === "wst" ? 50 : 24, +v || 0)) : v; mc.mat = m; }); return; }
     const it = P.proj.items.find(i => i.id === S.sel), f = e.target.dataset.prop; if (!it || !f) return;
     if (f === "qa") return setQa([it], e.target.value);
+    if (f === "ver") { const v = e.target.value; return mutate(() => { if (!v) delete it.ver; else it.ver = {st: v, note: (it.ver && it.ver.note) || "", by: "", at: new Date().toISOString()}; }, v ? "Verification: " + VER_NAMES[v] : "Verification cleared"); }
     if (f === "pitch" && isNaN(parsePitch(e.target.value))) { toast("Slope: rise:run like 4:12, a percent like 33% or degrees like 18.4° — flat for none, blank for the condition's", 4000); renderProps(); return; }
     if (f === "rise") { const s = e.target.value.trim().replace(/^[−–]/, "-"), v = !s ? 0 : s[0] === "-" ? -parseFt(s.slice(1)) : s[0] === "+" ? parseFt(s.slice(1)) : parseFt(s);
       if (isNaN(v)) { toast("Rise / drop: feet (10, 10'-6\") — a minus for a drop (−4)", 3500); renderProps(); return; }
@@ -14421,7 +14511,7 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
-  window.zdTakeoff = {bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
