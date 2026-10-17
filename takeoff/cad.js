@@ -118,6 +118,7 @@ const head = (u, n) => String.fromCharCode.apply(null, Array.from(u.subarray(0, 
 export async function cadRead(buf, name){
   const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   if (/^AC1\d{3}/.test(head(u8, 6))) return readDwg(u8);
+  if (/^AutoCAD Binary DXF/.test(head(u8, 18))) return readDxf(u8);   // (a DWG kept as the DXF this computer's AutoCAD saved of it)
   if (/\.dwg$/i.test(name || "")) throw new Error("this is not a DWG file (it does not start like one — is it complete?)");
   return readDxf(u8);
 }

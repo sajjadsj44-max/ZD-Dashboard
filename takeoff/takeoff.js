@@ -739,7 +739,8 @@ async function addFiles(files){
     busy("Opening " + f.name + "…");
     try {
       let data = await f.arrayBuffer(), cad = null; const sha = await sha256(data);
-      if (cadF) { const pre = P.proj.files.find(x => x.sha === sha && x.cad); cad = await cadImport(f, data, pre && pre.cad.map); data = cad.pdf; }   // the drawing as a layered vector PDF (+ its scene)
+      if (cadF) { const pre = P.proj.files.find(x => x.sha === sha && x.cad), held = pre && P.proj.items.some(i => i.file === pre.id);   // the same drawing again: onto its old page while measurements sit on it — else laid out afresh (read whole now, it may reach further)
+        cad = await cadImport(f, data, held ? pre.cad.map : null); data = cad.pdf; }   // the drawing as a layered vector PDF (+ its scene)
       const lib = await loadPdfjs();
       const {d} = await openPdfData(lib, data, f.name);
       for (const x of P.proj.files) if (!x.sha) { const h = await pdfSha(x.id); if (h) x.sha = h; }   // PDFs added before fingerprints
@@ -13242,9 +13243,10 @@ function cadLoad(fid, proj = P.proj){
     const C = await cadMod(), rec = await dbGet("pdfs", fid); let sc = null;
     if (rec && rec.scene && rec.scene.ver === C.CAD_VER) sc = rec.scene;
     else if (rec && rec.src) {
-      try { const r = await cadWorker(rec.src, rec.name || "the drawing", meta.map);
+      const rn = meta.via ? String(rec.name || "drawing").replace(/\.dwg$/i, ".dxf") : rec.name || "";   // (opened by AutoCAD: what is kept is its DXF)
+      try { const r = await cadWorker(rec.src, rn || "the drawing", meta.map);
         if (r) { sc = r.scene; if (r.pdf && r.pdf.byteLength) { rec.data = r.pdf.buffer.slice(r.pdf.byteOffset, r.pdf.byteOffset + r.pdf.byteLength); delete rec.pdfSha; } }   // its PDF written again too: exports show it as the screen does
-        else { busy("Reading " + (rec.name || "the drawing") + "…"); sc = C.cadScene(await C.cadRead(rec.src, rec.name || ""), {map: meta.map}); }
+        else { busy("Reading " + (rec.name || "the drawing") + "…"); sc = C.cadScene(await C.cadRead(rec.src, rn), {map: meta.map}); }
         rec.scene = sc; await dbPut("pdfs", rec, fid).catch(() => {}); }
       catch (e) { if (!rec.scene) throw e; sc = rec.scene; toast("Shown as it was first read — the drawing could not be read again here (" + (e.message || e) + ")", 6000); }   // the scene kept from before: still its objects
       finally { busy(""); } }
@@ -13270,14 +13272,36 @@ function cadWorker(buf, name, map){
     say(); const copy = buf.slice(0); w.postMessage({buf: copy, name, map: map || null, pdfLib: PDFLIB_ESM}, [copy]);
   });
 }
+/* a DWG opened by the AutoCAD on this computer: its helper (tools/cad-bridge.js, on 127.0.0.1 only) runs AutoCAD's console on a
+   copy and answers with the drawing as a binary DXF — every drawing AutoCAD opens, whole, external references bound. The
+   browser's own DWG reader loses most of some big drawings and cannot read some versions at all; it is used when the helper
+   is not running. */
+const ACAD_URL = "http://127.0.0.1:11436";
+async function acadHelper(){   // (the first time, the browser asks to let this site reach this computer's apps: time to answer it — with no helper, or the answer given, it is back at once)
+  busy("Looking for AutoCAD on this computer… (if the browser asks, allow this site to reach apps on this device)");
+  try { const r = await fetch(ACAD_URL + "/", {cache: "no-store", signal: AbortSignal.timeout(60000)}); const j = r.ok ? await r.json() : null; return j && j.app === "zd-cad-bridge" && j.autocad && j.autocad.length ? j : null; } catch (e) { return null; } }
+async function acadOpen(buf, name){   // -> {dxf: ArrayBuffer, acad: "AutoCAD 2024"}, or null when no helper answers; throws when AutoCAD could not open it
+  const h = await acadHelper(); if (!h) return null;
+  const t0 = Date.now(), say = () => busy("Opening " + name + " in " + h.autocad[0] + " on this computer…" + (Date.now() - t0 > 3000 ? " " + Math.round((Date.now() - t0) / 1000) + " s" : "")), tick = setInterval(say, 1000);
+  say();
+  try { const r = await fetch(ACAD_URL + "/convert?name=" + encodeURIComponent(name), {method: "POST", headers: {"Content-Type": "application/octet-stream"}, body: buf});
+    if (!r.ok) { let m = "error " + r.status; try { m = (await r.json()).error || m; } catch (e) {} throw new Error(m); }
+    return {dxf: await r.arrayBuffer(), acad: r.headers.get("X-Acad") || h.autocad[0]}; }
+  finally { clearInterval(tick); }
+}
 /* a DWG / DXF file -> the PDF to keep, the drawing itself, its scene and what the project keeps about it */
 async function cadImport(f, buf, map){
-  const C = await cadMod(); let sc, pdf;
-  const r = await cadWorker(buf, f.name, map);
+  const C = await cadMod(); let sc, pdf, via = "";
+  if (/\.dwg$/i.test(f.name) && /^AC1\d{3}/.test(String.fromCharCode.apply(null, new Uint8Array(buf, 0, Math.min(6, buf.byteLength))))) {
+    try { const a = await acadOpen(buf, f.name); if (a) { buf = a.dxf; via = a.acad; } }   // kept as the drawing's own file too: read again later, it is whole again
+    catch (e) { toast("AutoCAD on this computer could not open " + f.name + " (" + (e.message || e) + ") — read in the browser instead", 9000); }
+  }
+  const rname = via ? f.name.replace(/\.dwg$/i, ".dxf") : f.name;
+  const r = await cadWorker(buf, rname, map);
   if (r) { sc = r.scene; pdf = r.pdf.buffer.slice(r.pdf.byteOffset, r.pdf.byteOffset + r.pdf.byteLength); }
   else {   // no worker here: read on this thread
     busy("Reading " + f.name + (S.cadRead ? "…" : " — the first AutoCAD drawing loads the reader (about 10 MB, once)…"));
-    const md = await C.cadRead(buf, f.name); S.cadRead = true;
+    const md = await C.cadRead(buf, rname); S.cadRead = true;
     busy("Drawing " + f.name + "…"); await new Promise(r2 => setTimeout(r2, 0));
     sc = C.cadScene(md, map ? {map} : undefined);
     busy("Writing " + f.name + " as a layered PDF…");
@@ -13288,6 +13312,7 @@ async function cadImport(f, buf, map){
   const st = sc.stats, meta = {fmt: sc.fmt, ver: sc.dver, units: sc.units, unitName: sc.unitName, unitHow: sc.unitHow || "", unitFix: !!sc.unitFix, assumed: sc.assumed, den: pg.den, ptPerFt: pg.ptPerFt, conv: C.CAD_VER, map: pg.map,
     layers: sc.layers.map(l => ({name: l.name, c: l.c, aci: l.aci, off: l.off, frozen: l.frozen, plot: l.plot, lt: l.lt, lw: l.lw})),
     stats: {ents: st.ents, prims: st.prims, texts: st.texts, skipped: st.skipped, missing: Object.keys(st.missing).length, far: st.far, junk: st.junk || 0, trunc: st.trunc}};
+  if (via) meta.via = via;   // opened by this computer's AutoCAD (src is then its DXF)
   return {pdf, src: buf, scene: sc, meta};
 }
 function cadAdopt(meta, cad, how){   // a drawing just added: its page's scale from its units; layers off or frozen in the drawing start off
@@ -13299,7 +13324,7 @@ function cadSay(name, m){
   const off = m.layers.filter(l => l.off || l.frozen).length, sk = Object.entries(m.stats.skipped || {}).map(([t, n]) => n + " " + t).join(", ");
   /* the browser's DWG reader can lose most of a big drawing that AutoCAD reads without fault (its objects come back empty): said first, with the way round it */
   const jk = m.stats.junk || 0, lost = m.fmt === "DWG" && jk > 0.1 * (jk + (m.stats.ents || 0));
-  return (lost ? "⚠ Only part of this drawing could be read — " + jk.toLocaleString() + " objects came out empty in the browser's DWG reader. In AutoCAD use SAVEAS → DXF and add the .dxf instead. " : "") + name + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
+  return (lost ? "⚠ Only part of this drawing could be read — " + jk.toLocaleString() + " objects came out empty in the browser's DWG reader. Start the AutoCAD helper on this computer (tools/cad-bridge.js — it opens every DWG whole) and add the drawing again, or in AutoCAD use SAVEAS → DXF and add the .dxf. " : "") + name + (m.via ? " — opened by " + m.via + " on this computer" : "") + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
     (m.assumed ? " — ⚠ the drawing has no units set: check the scale (chip → Verify)" : m.unitFix ? " — ⚠ its dimensions disagree with its units setting: check the scale (chip → Verify)" : " — scale exact") +
     " · " + m.layers.length + " layers" + (off ? " (" + off + " off / frozen)" : "") + " · " + (m.stats.ents || 0).toLocaleString() + " objects" +
     (sk ? " · not shown: " + sk : "") + (m.stats.missing ? " · " + m.stats.missing + " block(s) missing (xrefs?)" : "") + (m.stats.far ? " · " + m.stats.far + " far-off object(s) left off the page" : "") + (m.stats.junk ? " · " + m.stats.junk + " damaged object(s) left out" : "") + (m.stats.trunc ? " · ⚠ very large: shown in part" : "");
