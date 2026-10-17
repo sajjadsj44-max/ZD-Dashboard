@@ -41,6 +41,9 @@ const near = (a, b, t) => a != null && Math.abs(a - b) <= (t || 0.02);
   ok(R && R.layers && R.layers.outline.includes("Wall") && R.layers.outline.includes("DUCTS") && R.layers.hatch.includes("WH"), "walls from Wall + DUCTS, the hatch from WH");
   ok(R && R.names && R.names.join() === "BATH:dims,BED ROOM:dims,LOUNGE:dims", "each room named from the page's text and verified against its written size (" + (R && R.names) + ")");
 
+  const TL = await T(() => zdTakeoff.textLines([{s: "BALCONY", x: 580.6, y: 1336.7, w: 84.2, h: 19.7, r: -Math.PI / 2}, {s: "12'-5 1/2\"x11'-6\"", x: 690, y: 1340, w: 117.7, h: 19.7, r: 0},
+    {s: "BED", x: 100, y: 100, w: 30, h: 10, r: 0}, {s: "ROOM", x: 134, y: 100.5, w: 40, h: 10, r: 0}]).map(l => l.s).sort());
+  ok(JSON.stringify(TL) === JSON.stringify(["12'-5 1/2\"x11'-6\"", "BALCONY", "BED ROOM"]), "page text: a word written up the page never joins one written across (a balcony's name and the bed room's size beside it, as on the Phoenix 3rd floor); BED + ROOM still join (" + TL.join(" | ") + ")");
   console.log("B. an Auto area click");
   await T(p => zdTakeoff.autoAt(p), F.at.bed); await wait(200);
   let it = await last();
@@ -62,7 +65,10 @@ const near = (a, b, t) => a != null && Math.abs(a - b) <= (t || 0.02);
   const t1 = await tot();
   ok(t1["L-01"] && near(t1["L-01"][1], 600), "L-01 the floor: 600 Sft to the walls' outer face (" + JSON.stringify(t1["L-01"]) + ")");
   ok(t1["L-02"] && near(t1["L-02"][1], 125.344, 0.01), "L-02 washrooms: the bath 125.344 Sft, the duct left out (" + JSON.stringify(t1["L-02"]) + ")");
-  ok(t1["L-04"] && near(t1["L-04"][1], 263.625 + 123.141, 0.01), "L-04 other rooms: bed room + lounge 386.766 Sft (" + JSON.stringify(t1["L-04"]) + ")");
+  ok(t1["L-04"] && near(t1["L-04"][1], 263.625, 0.01), "L-04 rooms: the bed room 263.625 Sft (" + JSON.stringify(t1["L-04"]) + ")");
+  ok(t1["L-04K"] && near(t1["L-04K"][1], 123.141, 0.01), "L-04K kitchen + lounge: the lounge 123.141 Sft, in its own condition (" + JSON.stringify(t1["L-04K"]) + ")");
+  ok(t1["L-04P"] && t1["L-04P"][0] === 0 && t1["L-04B"] && t1["L-04B"][0] === 0, "L-04P passages and L-04B balconies: none on this plan");
+  ok(A && near(A.floor_tile_sft, 263.625 + 123.141, 0.02) && near(A.rooms_sft, 263.625, 0.01) && near(A.kitchen_lounge_sft, 123.141, 0.01), "floor tile = rooms + kitchen / lounge + passages + corridors = 386.766 Sft, the bath apart (" + (A && A.floor_tile_sft) + ")");
   ok(t1["L-04T"] && t1["L-04T"][0] === 2 && near(t1["L-04T"][1], 1.125 + 0.9375, 0.01), "L-04T thresholds: 3 × 4½\" and 2'-6\" × 4½\" = 2.0625 Sft (" + JSON.stringify(t1["L-04T"]) + ")");
   ok(t1["L-05"] && near(t1["L-05"][1], 46.25, 0.01), "L-05 the bath's wall face, gross: 2 × (13'-10½\" + 9'-3\") = 46.25 ft (" + JSON.stringify(t1["L-05"]) + ")");
   ok(t1["L-05D"] && t1["L-05D"][0] === 1 && near(t1["L-05D"][1], 2.5, 0.06), "L-05D its door opening, kept apart: 2'-6\" (" + JSON.stringify(t1["L-05D"]) + ")");

@@ -2834,11 +2834,12 @@ async function traceGet(key, quiet){   // -> the page's trace, or null (no lines
     try { const inp = await traceInput(key); inp.k = k; return await traceRun(inp, {}); } catch (e) { return {err: String(e.message || e)}; } finally { if (!quiet) busy(""); } })();
   TRC[key] = {sig, wait: run}; const res = await run; TRC[key] = {sig, res}; return res;
 }
-// a plan the trace reads: the walls' hatch on a layer (it tells a 9" wall from a 9" gap) and the rooms named in the page's text —
-// else (single-line boxes, no names) Auto area and the window scan trace from the image as before
+// a plan the trace reads: the rooms named in the page's text, and the walls' hatch on a layer (it tells a 9" wall from a 9" gap) —
+// or, for a drawing plotted without its wall hatch, rooms the trace found at their written size. Else (single-line boxes, no
+// names) Auto area and the window scan trace from the image as before
 const traceWhyNot = T => !T || T.err ? (T && T.err) || "no trace" : !(T.spaces && T.spaces.length) ? "no rooms found between the wall layers"
-  : !(T.layers && T.layers.hatch && T.layers.hatch.length) ? "the walls carry no hatch on a layer of their own"
-  : T.spaces.filter(s => !s.unlabelled).length < Math.max(2, 0.3 * T.spaces.length) ? "few rooms are named in the page's text" : "";
+  : T.spaces.filter(s => !s.unlabelled).length < Math.max(2, 0.3 * T.spaces.length) ? "few rooms are named in the page's text"
+  : !(T.layers && T.layers.hatch && T.layers.hatch.length) && T.spaces.filter(s => s.status === "dims").length < 3 ? "the walls carry no hatch on a layer of their own" : "";
 const traceUsable = T => !traceWhyNot(T);
 const trInside = (p, s) => s.outer.some(P0 => pointInPoly(p, P0)) && !s.holes.some(H0 => pointInPoly(p, H0));
 const trScaleOk = p => { const sc = P.proj.scales[S.key], k = sc && +sc.ptPerFt, h = hereScale(p); return k > 0 && h > 0 && Math.abs(h - k) <= 1e-6 * k; };   // (the trace is in the page's scale: a detail viewport at another scale keeps the image trace)
@@ -2877,15 +2878,19 @@ function polyCentroid(P0){ let a = 0, cx = 0, cy = 0; for (let i = 0; i < P0.len
   if (Math.abs(a) < 1e-9) return P0[0].slice(); const m = [cx / (3 * a), cy / (3 * a)]; if (pointInPoly(m, P0)) return m;
   let best = P0[0]; for (let i = 0; i < P0.length; i++) { const q = [(P0[i][0] + P0[(i + 2) % P0.length][0]) / 2, (P0[i][1] + P0[(i + 2) % P0.length][1]) / 2]; if (pointInPoly(q, P0)) { best = q; break; } } return best.slice(); }
 
-/* the whole floor in one step: every space into its layer (washrooms, corridors, other rooms and balconies, thresholds,
-   shafts / stairs / lifts / ducts), the floor's outline, each washroom's and corridor's wall face as a run (the openings on
+/* the whole floor in one step: every space into its layer (washrooms, corridors, rooms, kitchen + lounge, passages and
+   entrance lobbies, balconies, thresholds, shafts / stairs / lifts / ducts), the floor's outline, each washroom's and corridor's wall face as a run (the openings on
    it as their own runs, never deducted by themselves), the washrooms' wall centre lines for reference, and the trace's own
    corrections. Each measurement carries its verification. Run again on the page, it replaces its own earlier trace. */
+const LIVING_RX = /KITCHEN|LOUNGE|DINING|LIVING|PANTRY|\bTV\b|FAMILY/i, PASS_RX = /^(PASSAGE|ENTRANCE|ENTRY|FOYER|LOBBY)\b|\b(ENTRANCE|PASSAGE|FOYER)\b/i;   // kitchen + lounge, passages / entrances
 const TRACE_LAYERS = [
   ["L-01", "L-01 Overall Floor Area", "area", "Sft", "#374151", "the external face of the external walls; balconies outside it"],
   ["L-02", "L-02 Washroom Floor Areas", "area", "Sft", "#2563eb", "clear floor inside the walls"],
   ["L-03", "L-03 Corridor Floor Areas", "area", "Sft", "#ea580c", "common corridors and lobbies"],
-  ["L-04", "L-04 Other Rooms / Spaces", "area", "Sft", "#16a34a", "rooms, passages, balconies"],
+  ["L-04", "L-04 Rooms (bed, dress, store, study)", "area", "Sft", "#16a34a", "bed rooms (a dress open to its bed room with it), dress, store, study, maid's room, service rooms"],
+  ["L-04K", "L-04K Kitchen + Lounge", "area", "Sft", "#65a30d", "kitchen, lounge, dining — one floor where they are open to each other"],
+  ["L-04P", "L-04P Passages & Entrance Lobbies", "area", "Sft", "#a16207", "inside the flats: entrance lobbies and passages between rooms"],
+  ["L-04B", "L-04B Balconies", "area", "Sft", "#c026d3", "clear floor inside the parapet / railing"],
   ["L-04T", "L-04T Door Thresholds", "area", "Sft", "#dc2626", "the floor in each door opening, between the two rooms"],
   ["L-05", "L-05 Washroom Wall Length (internal face, gross)", "linear", "ft", "#0891b2", ""],
   ["L-05D", "L-05D Washroom Wall Openings (deduct only if your rule requires)", "linear", "ft", "#f59e0b", ""],
@@ -2903,7 +2908,8 @@ async function traceFloorTakeoff(o){
   if (S.key !== key) return {err: "The page changed while the floor was read — nothing added."};
   // an earlier trace of this page (in the trace's own layers, or one imported from a traced takeoff file) is replaced, never doubled
   const lay = new Set(TRACE_LAYERS.map(x => x[1].toLowerCase()).concat(["l-01 second floor — overall area", "l-05 washroom wall linear length (internal face, gross)", "l-05d washroom wall openings (doors) — deduct only if your rule requires",
-    "l-06 corridor wall linear length (wall face, gross)", "l-06d corridor wall openings — deduct only if your rule requires", "l-07 wall centreline / reference geometry (not billable)", "l-09 manual corrections / unverified geometry (reference lines)", "l-04t door thresholds (openings in walls)"]));
+    "l-06 corridor wall linear length (wall face, gross)", "l-06d corridor wall openings — deduct only if your rule requires", "l-07 wall centreline / reference geometry (not billable)", "l-09 manual corrections / unverified geometry (reference lines)", "l-04t door thresholds (openings in walls)",
+    "l-04 other rooms / spaces"]));
   const old = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.det && i.det.how === "trace" && lay.has(String((cond(i.cond) || {}).name || "").toLowerCase()));
   if (old.length && !o.replace) { const ok = await ask("Trace the whole floor", `<p>This page already has <b>${old.length}</b> measurements from an earlier trace. Replace them with this trace?</p><p class="small">Measurements you drew yourself (not traced) are kept. Ctrl+Z undoes.</p>`, "Replace"); if (!ok) return {err: "cancelled"}; }
   const at = new Date().toISOString(), batch = uid("B"), src = "PDF wall layers (vector trace)", sh = (P.proj.sheets || {})[key] || {}, conds = [], CID = {};
@@ -2921,7 +2927,8 @@ async function traceFloorTakeoff(o){
   const here = x => trScaleOk(polyCentroid(x.outer[0]));   // (a detail viewport at another scale on the sheet is left out)
   const sp = T.spaces.filter(here).sort((a, b) => Math.round(a.bounds[1] / 40) - Math.round(b.bounds[1] / 40) || a.bounds[0] - b.bounds[0]);
   sp.forEach(s => { const u = s.unit || "C", kc = KC[s.kind] || "XX"; n0[u + kc] = (n0[u + kc] || 0) + 1; s.sid = u + "-" + kc + String(n0[u + kc]).padStart(2, "0"); });
-  const layerOf = s => s.kind === "bath" ? "L-02" : s.kind === "corridor" ? "L-03" : ["room", "balcony"].includes(s.kind) ? "L-04" : "L-08";
+  const layerOf = s => s.kind === "bath" ? "L-02" : s.kind === "corridor" ? "L-03" : s.kind === "balcony" ? "L-04B" : s.kind !== "room" ? "L-08"
+    : s.names.some(n => LIVING_RX.test(n)) ? "L-04K" : s.names.every(n => PASS_RX.test(n)) ? "L-04P" : "L-04";
   const nameOf = s => s.names.length > 1 ? s.names.join(" + ") + " (open plan)" : s.names[0] + (s.sizes && s.sizes[0] ? " " + s.sizes[0] : "");
   const zoneOf = s => s.unit ? "Unit " + s.unit : "Core / common";
   if (T.overall) { T.overall.outer.forEach(R0 => put("L-01", cw(R0), "FLOOR — OVERALL (external face of external walls, balconies out)", {zone: "Whole floor", st: "walls", note: T.overall.notes.join("; ")}));
@@ -2949,13 +2956,17 @@ async function traceFloorTakeoff(o){
     if (bath && s.centre && s.centre.length > 2) put("L-07", s.centre, s.sid + " " + nm + " — wall centreline", {room: nm, zone: zoneOf(s), st: "walls", closed: true, note: "each wall face moved out by half its measured thickness; reference only, not billable"}); });
   (T.splits || []).forEach(x => put("L-09", x.line, "Split line (no wall on the drawing): " + x.what, {zone: "Corrections", st: "manual", note: "a room open to the one it is named with, split on the written size where the walls fit it"}));
   (T.repairs || []).forEach(x => put("L-09", [[x[0], x[1]], [x[2], x[3]]], "Wall face carried across a duct box (" + f2(Math.hypot(x[2] - x[0], x[3] - x[1]) / k * 12) + "\")", {zone: "Corrections", st: "manual", note: "the drawing leaves the wall face out where a duct box meets the wall; the face was carried straight across so the room stays closed"}));
-  const oldIds = new Set(old.map(i => i.id));
-  mutate(() => { P.proj.items = P.proj.items.filter(i => !oldIds.has(i.id)); P.proj.conds.push(...conds); P.proj.items.push(...items); }, "Trace the whole floor");
+  const oldIds = new Set(old.map(i => i.id)), cur = new Set(TRACE_LAYERS.map(x => x[1].toLowerCase()));
+  mutate(() => { P.proj.items = P.proj.items.filter(i => !oldIds.has(i.id)); P.proj.conds.push(...conds); P.proj.items.push(...items);
+    // a condition of an older trace (L-04 Other Rooms / Spaces) left with nothing in it goes: its measurements are in the new layers
+    P.proj.conds = P.proj.conds.filter(c => !(lay.has(c.name.toLowerCase()) && !cur.has(c.name.toLowerCase()) && !P.proj.items.some(i => i.cond === c.id))); }, "Trace the whole floor");
   renderConds(); refresh();
   const cnt = {}; T.spaces.forEach(s => { cnt[s.status] = (cnt[s.status] || 0) + 1; });
   const sum = code => items.filter(i => i.cond === CID[code]).reduce((a2, it) => a2 + rowsOf(it, itemScale(it) || k).reduce((b2, r) => b2 + r.qty, 0), 0);
   return {ok: {spaces: T.spaces.length, thresholds: T.thresholds.length, measurements: items.length, replaced: old.length, ms: T.ms,
-    overall_sft: +sum("L-01").toFixed(2), washroom_sft: +sum("L-02").toFixed(2), corridor_sft: +sum("L-03").toFixed(2), other_sft: +sum("L-04").toFixed(2),
+    overall_sft: +sum("L-01").toFixed(2), washroom_sft: +sum("L-02").toFixed(2), corridor_sft: +sum("L-03").toFixed(2), rooms_sft: +sum("L-04").toFixed(2), kitchen_lounge_sft: +sum("L-04K").toFixed(2),
+    passages_sft: +sum("L-04P").toFixed(2), balcony_sft: +sum("L-04B").toFixed(2), thresholds_sft: +sum("L-04T").toFixed(2), other_sft: +(sum("L-04") + sum("L-04K") + sum("L-04P") + sum("L-04B")).toFixed(2),
+    floor_tile_sft: +(sum("L-04") + sum("L-04K") + sum("L-04P") + sum("L-03")).toFixed(2),   // (rooms, kitchen + lounge, passages, corridors — baths and balconies apart, thresholds apart)
     washroom_walls_ft: +wr.toFixed(2), washroom_openings_ft: +wo.toFixed(2), corridor_walls_ft: +cr.toFixed(2), corridor_openings_ft: +co.toFixed(2),
     verified_dims: cnt.dims || 0, verified_walls: cnt.walls || 0, manual: cnt.manual || 0, review: cnt.auto || 0,
     to_review: T.spaces.filter(s => s.status === "auto").map(s => s.sid + " " + s.names.join(" + ") + ": " + ((s.notes || []).filter(n => /not found|traced where|check/.test(n)).join("; ") || "check"))}};
@@ -2964,12 +2975,12 @@ async function agentTraceFloor(){   // the agent's "trace the whole floor": the 
   aiLog("bot", "Reading the whole floor from the drawing's wall layers…");
   const r = await traceFloorTakeoff({}); if (r.err) { aiLog("err", esc(r.err)); return {error: r.err}; }
   const x = r.ok;
-  aiLog("bot", `Traced <b>${x.spaces}</b> spaces and <b>${x.thresholds}</b> door thresholds in ${f2(x.ms / 1000)} s${x.replaced ? ` (replacing ${x.replaced} from the last trace)` : ""}:<br>floor <b>${fq(x.overall_sft)} Sft</b> · washrooms <b>${fq(x.washroom_sft)} Sft</b> · corridors <b>${fq(x.corridor_sft)} Sft</b> · other rooms ${fq(x.other_sft)} Sft<br>washroom walls ${f2(x.washroom_walls_ft)} ft (openings ${f2(x.washroom_openings_ft)} ft) · corridor walls ${f2(x.corridor_walls_ft)} ft<br>${x.verified_dims} match their written size, ${x.verified_walls} follow the drawn walls, ${x.manual} split on a written size${x.review ? `, <b>${x.review} to review</b>: ${x.to_review.slice(0, 8).map(esc).join("; ")}` : ""}.`);
+  aiLog("bot", `Traced <b>${x.spaces}</b> spaces and <b>${x.thresholds}</b> door thresholds in ${f2(x.ms / 1000)} s${x.replaced ? ` (replacing ${x.replaced} from the last trace)` : ""}:<br>floor <b>${fq(x.overall_sft)} Sft</b> · rooms <b>${fq(x.rooms_sft)}</b> · kitchen + lounge <b>${fq(x.kitchen_lounge_sft)}</b> · passages / entrances ${fq(x.passages_sft)} · corridors <b>${fq(x.corridor_sft)}</b> · baths <b>${fq(x.washroom_sft)}</b> · balconies <b>${fq(x.balcony_sft)}</b> · thresholds ${fq(x.thresholds_sft)} Sft<br>floor tile (rooms, kitchen + lounge, passages, corridors) <b>${fq(x.floor_tile_sft)} Sft</b><br>washroom walls ${f2(x.washroom_walls_ft)} ft (openings ${f2(x.washroom_openings_ft)} ft) · corridor walls ${f2(x.corridor_walls_ft)} ft<br>${x.verified_dims} match their written size, ${x.verified_walls} follow the drawn walls, ${x.manual} split on a written size${x.review ? `, <b>${x.review} to review</b>: ${x.to_review.slice(0, 8).map(esc).join("; ")}` : ""}.`);
   return x;
 }
 async function traceFloorUI(){
   const r = await traceFloorTakeoff(); if (r.err) { if (r.err !== "cancelled") toast(r.err, 7000); return r; }
-  const x = r.ok; toast(`Whole floor traced: ${x.spaces} spaces, ${x.thresholds} thresholds — floor ${fq(x.overall_sft)} Sft, washrooms ${fq(x.washroom_sft)} Sft, corridors ${fq(x.corridor_sft)} Sft, washroom walls ${f2(x.washroom_walls_ft)} ft. ${x.verified_dims} match their written size${x.review ? `, <b>${x.review} to review</b> (Review list)` : ""}.`, 12000);
+  const x = r.ok; toast(`Whole floor traced: ${x.spaces} spaces, ${x.thresholds} thresholds — rooms ${fq(x.rooms_sft)}, kitchen + lounge ${fq(x.kitchen_lounge_sft)}, passages ${fq(x.passages_sft)}, corridors ${fq(x.corridor_sft)}, baths ${fq(x.washroom_sft)}, balconies ${fq(x.balcony_sft)} Sft (floor tile ${fq(x.floor_tile_sft)} Sft). ${x.verified_dims} match their written size${x.review ? `, <b>${x.review} to review</b> (Review list)` : ""}.`, 12000);
   return r;
 }
 async function autoSettings(){
@@ -12123,9 +12134,16 @@ function textLines(T){   // pdf text pieces -> lines {s, x, y, w, h, parts}
   t.forEach(p => {
     const tag = TAG_RX.test(p.s.trim().replace(/\s+/g, ""));
     while (lo < out.length && p.y - out[lo].y >= 0.45 * hMax) lo++;
-    let L = null;
-    if (!tag) for (let i = lo; i < out.length; i++) { const l = out[i]; if (!l.tag && Math.abs(l.y - p.y) < 0.45 * Math.max(l.h, p.h) && p.x - (l.x + l.w) < 1.6 * l.h && p.x - (l.x + l.w) > -0.3 * l.h) { L = l; break; } }
-    if (L) { L.s += (p.x - (L.x + L.w) > 0.25 * L.h && !/\s$/.test(L.s) ? " " : "") + p.s; L.w = Math.max(L.w, p.x + p.w - L.x); L.parts.push(p); }
+    let L = null, gap = 0;
+    // a piece joins a line written the same way, next along it (a word written up the page never joins one written across:
+    // a balcony's name up its strip was read with the bed room's size beside it)
+    const pr = p.r || 0;
+    if (!tag) for (let i = lo; i < out.length; i++) { const l = out[i]; if (l.tag) continue; const lr = l.r || 0;
+      if (lr !== pr && Math.abs(((pr - lr) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI) > 0.02) continue;
+      let along = p.x - l.x, across = p.y - l.y;   // (written across the page: no turning — the common case, kept as fast as it was)
+      if (lr) { const c = Math.cos(lr), sn = Math.sin(lr), dx = along, dy = across; along = dx * c + dy * sn; across = -dx * sn + dy * c; }
+      if (Math.abs(across) < 0.45 * Math.max(l.h, p.h) && along - l.w < 1.6 * l.h && along - l.w > -0.3 * l.h) { L = l; gap = along - l.w; break; } }
+    if (L) { L.s += (gap > 0.25 * L.h && !/\s$/.test(L.s) ? " " : "") + p.s; L.w = Math.max(L.w, gap + L.w + (p.w || 0)); L.parts.push(p); }
     else out.push({s: p.s, x: p.x, y: p.y, w: p.w || p.s.length * p.h * 0.55, h: p.h, r: p.r || 0, parts: [p], tag});   // a door / window tag stays on its own
   });
   out.forEach(l => { const c = Math.cos(l.r || 0), sn = Math.sin(l.r || 0); l.cx = l.x + c * l.w / 2 + sn * l.h / 2; l.cy = l.y + sn * l.w / 2 - c * l.h / 2;   // the text's centre — along its own direction (a label written up the page too)

@@ -20,7 +20,8 @@
    Units: page points (y down) in, the page's scale k (pt per ft). */
 export const TRACE_VER = 1;
 
-const NAME_SKIP = /^(UP|DN|DOWN|N|S|E|W|NORTH|SOUTH|FROM\s+ROAD\s+LEVEL|SCALE.*|.*\bPLAN\b.*|SC|SECTION.*|\d+(\.\d+)?)$/i;
+const NAME_SKIP = /^(UP|DN|DOWN|N|S|E|W|NORTH|SOUTH|FROM\s+ROAD\s+LEVEL|SCALE.*|.*\bPLAN\b.*|SC|SECTION.*|\d+(\.\d+)?|\d+\s*(UP|DN|DOWN)|(UP|DN|DOWN)\s*\d+)$/i;
+const WEAK_RX = /^(STAIR|TREAD|RISER|LANDING)\s*=/i;   // a stair's note (STAIR = 4'-6" WIDE, TREAD = 11"): names a space only when nothing else does
 const SIZE_RX = /(\d+)\s*'\s*-?\s*(\d+)?\s*(?:(\d)\s*\/\s*(\d))?\s*(½)?\s*"?\s*[xX×]\s*(\d+)\s*'\s*-?\s*(\d+)?\s*(?:(\d)\s*\/\s*(\d))?\s*(½)?\s*"?/;
 const WIDE_RX = /(\d+)\s*'\s*-?\s*(\d+)?\s*(?:(\d)\s*\/\s*(\d))?\s*(½)?\s*"\s*WIDE/i;
 export function sizeOf(s){   // "12'-6 1/2"x11'-6"" -> [12.5417, 11.5] ft, or null
@@ -211,6 +212,34 @@ export function traceFloor(inp, opt){
     ducts.sort((a, b) => (b.box[2] - b.box[0]) * (b.box[3] - b.box[1]) - (a.box[2] - a.box[0]) * (a.box[3] - a.box[1]));
     for (let i = ducts.length - 1; i >= 0; i--) { const a = ducts[i].box; if (ducts.some((d, j) => j < i && a[0] >= d.box[0] - 1 && a[1] >= d.box[1] - 1 && a[2] <= d.box[2] + 1 && a[3] <= d.box[3] + 1)) ducts.splice(i, 1); } }
   ducts.forEach(d => { const [x0, y0, x1, y1] = d.box; OUT.push([x0, y0, x1, y0, 0, -3], [x1, y0, x1, y1, 0, -3], [x1, y1, x0, y1, 0, -3], [x0, y1, x0, y0, 0, -3]); });
+  // doors set across a corner (a bath's chamfered door): no wall line runs across the opening, only the leaf and its swing on the
+  // door layer — the opening is closed where the leaf shuts, from the hinge (the swing's centre) to the swing's far end. A door in
+  // line with its wall is left to the face bridges below.
+  const doorFix = [];
+  { const isDoor = i => /door/i.test(nm(i)) && !/window/i.test(nm(i)), DL = inp.segs.filter(s => isDoor(s[5]) && !(s[4] & 8)), len = s => Math.hypot(s[2] - s[0], s[3] - s[1]);
+    const sh = DL.filter(s => len(s) <= 6 && len(s) > 0.05), lg = DL.filter(s => len(s) > 6), n = sh.length, par = Array.from({length: n}, (_, i) => i);
+    const fd = i => { while (par[i] !== i) i = par[i] = par[par[i]]; return i; };
+    const cell = 6, gi = new Map(), key = (x, y) => Math.floor(x / cell) + "," + Math.floor(y / cell);
+    sh.forEach((s, i) => [[s[0], s[1]], [s[2], s[3]]].forEach(([x, y]) => { const kk = key(x, y); let a = gi.get(kk); if (!a) gi.set(kk, a = []); a.push([i, x, y]); }));
+    sh.forEach((s, i) => [[s[0], s[1]], [s[2], s[3]]].forEach(([x, y]) => { const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) (gi.get((cx + dx) + "," + (cy + dy)) || []).forEach(([j, x2, y2]) => { if (j !== i && Math.hypot(x2 - x, y2 - y) <= 5) par[fd(i)] = fd(j); }); }));
+    const grp = new Map(); sh.forEach((s, i) => { const r = fd(i); let a = grp.get(r); if (!a) grp.set(r, a = []); a.push(s); });
+    const fit = P0 => { let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0, sz = 0; const m = P0.length; P0.forEach(([x, y]) => { const z = x * x + y * y; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; sxz += x * z; syz += y * z; sz += z; });
+      const A = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, m]], bb = [sxz, syz, sz], det = M => M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]);
+      const D0 = det(A); if (Math.abs(D0) < 1e-9) return null; const col = c => A.map((row, i) => row.map((v, j) => j === c ? bb[i] : v)), a = det(col(0)) / D0, b = det(col(1)) / D0, c = det(col(2)) / D0;
+      const cx = a / 2, cy = b / 2, r = Math.sqrt(c + cx * cx + cy * cy); return isFinite(r) ? {cx, cy, r} : null; };
+    grp.forEach(G0 => { if (G0.length < 6) return; let P0 = G0.map(s => [(s[0] + s[2]) / 2, (s[1] + s[3]) / 2]), c = fit(P0); if (!c) return;
+      P0 = P0.filter(([x, y]) => Math.abs(Math.hypot(x - c.cx, y - c.cy) - c.r) < 1.5); if (P0.length < 6 || !(c = fit(P0))) return;
+      const res = P0.map(([x, y]) => Math.abs(Math.hypot(x - c.cx, y - c.cy) - c.r)); if (Math.max(...res) > 1.2 || c.r < 1.6 * k || c.r > 4.6 * k) return;
+      const an = P0.map(([x, y]) => Math.atan2(y - c.cy, x - c.cx)), a0 = an[0], rel = an.map(v => { let d = v - a0; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; });
+      const lo = Math.min(...rel), hi = Math.max(...rel), sweep = (hi - lo) * 180 / Math.PI; if (sweep < 50 || sweep > 120) return;
+      const end = t => [c.cx + c.r * Math.cos(a0 + t), c.cy + c.r * Math.sin(a0 + t)], E1 = end(lo), E2 = end(hi);
+      // the leaf: a long door-layer line from near the hinge to one end of the swing — the other end is where it shuts
+      const leafTo = E => lg.some(s => { const q = [[s[0], s[1]], [s[2], s[3]]]; return q.some(([x, y], i) => Math.hypot(x - E[0], y - E[1]) < 0.3 * c.r && Math.hypot(q[1 - i][0] - c.cx, q[1 - i][1] - c.cy) < 0.35 * c.r); });
+      const l1 = leafTo(E1), l2 = leafTo(E2); if (l1 === l2) return; const C = l1 ? E2 : E1;
+      const dx = C[0] - c.cx, dy = C[1] - c.cy, L = Math.hypot(dx, dy), a9 = ((Math.atan2(dy, dx) * 180 / Math.PI) % 90 + 90) % 90; if (a9 < 10 || a9 > 80) return;   // in line with the walls: bridged as any door
+      const ux = dx / L, uy = dy / L, e = 3; doorFix.push([c.cx - ux * e, c.cy - uy * e, C[0] + ux * e, C[1] + uy * e, 0, -4]); });
+    if (doorFix.length) { OUT = OUT.concat(doorFix); log.push(doorFix.length + " door" + (doorFix.length > 1 ? "s" : "") + " set across a corner closed where the leaf shuts"); } }
   // ---- wall bodies
   const lines = new Uint8Array(N), wl = new Uint8Array(N), diag = new Uint8Array(N);   // diag: pixels of slanted lines (a duct's X): they block, but are no wall face to bridge from
   OUT.forEach(s => { line(G, wallL.has(s[5]) ? wl : lines, s[0], s[1], s[2], s[3]); const a = Math.abs(Math.atan2(s[3] - s[1], s[2] - s[0]) * 180 / Math.PI) % 90; if (a > 2 && a < 88) line(G, diag, s[0], s[1], s[2], s[3]); });
@@ -233,7 +262,11 @@ export function traceFloor(inp, opt){
   const outP = pl[0] || pl[W + 1], inch = v => v / 3 / R / k * 12;   // the plan's outside, a chamfer radius in inches
   const body = new Uint8Array(N), wide = new Uint8Array(pn + 1);
   // (a wider piece with hatch in it is a wall whose end the drawing leaves open: its hatched part is wall — when the hatch fills it, not a few strokes in a room)
-  for (let l = 1; l <= pn; l++) { if (l === outP) continue; const r = inch(radPx[l]); if ((hasH[l] && r <= 9) || r <= 3.6) wide[l] = 1; else if (hN[l] > 0.3 * pN[l] && r <= 30) wide[l] = 2; }
+  // (a drawing plotted without its wall hatch: an enclosed piece up to 15" thick, at least four times as long as it is thick and
+  //  with no room name written in it is a wall too — a 9" wall is a strip, a door gap drawn closed is short, a room has its name)
+  const named = new Set(); (inp.lines || []).forEach(t => { const s0 = String(t.s || "").trim(); if (!/[A-Z]{3,}/i.test(s0) || /^[A-Z]{0,2}\d+[A-Z]?$/i.test(s0)) return;
+    const X = G.px(t.cx != null ? t.cx : t.x + (t.w || 0) / 2), Y = G.py(t.cy != null ? t.cy : t.y - (t.h || 0) / 2); if (X >= 0 && Y >= 0 && X < W && Y < H && pl[Y * W + X]) named.add(pl[Y * W + X]); });
+  for (let l = 1; l <= pn; l++) { if (l === outP) continue; const r = inch(radPx[l]), th = 2 * radPx[l] / 3; if ((hasH[l] && r <= 9) || r <= 3.6) wide[l] = 1; else if (hN[l] > 0.3 * pN[l] && r <= 30) wide[l] = 2; else if (!hasH[l] && r <= 7.5 && !named.has(l) && pN[l] >= 4 * th * th) wide[l] = 1; }
   let hc = null;
   for (let i = 0; i < N; i++) { if (lines[i]) { body[i] = 1; continue; } const w = wide[pl[i]]; if (w === 1) body[i] = 1; else if (w === 2) { if (!hc) hc = boxMax(G, boxMin(G, boxMax(G, hatchM, 3), 3), 4); if (hc[i]) body[i] = 1; } }   // (the hatch filled out to the wall's lines: no slivers left along its faces)
   // ---- 2 openings: in-line face runs bridged; wall ends carried to the next wall
@@ -309,11 +342,11 @@ export function traceFloor(inp, opt){
       if (nx.alpha) { name += " " + nx.s.replace(SIZE_RX, "").trim(); usedT.add(nx); if (sizeOf(nx.s)) size = SIZE_RX.exec(nx.s)[0]; cur = nx; continue; }
       break; }
     if (!size && WIDE_RX.test(name)) size = WIDE_RX.exec(name)[0];
-    labels.push({name: name.replace(/\s+/g, " ").trim(), size: size.trim(), x: t.cx, y: t.cy, h: t.h}); });
+    const nm0 = name.replace(/\s+/g, " ").trim(); labels.push({name: nm0, size: size.trim(), x: t.cx, y: t.cy, h: t.h, weak: WEAK_RX.test(nm0)}); });
   const regAt = (x, y) => { for (const [dx, dy] of [[0, 0], [0, 6], [0, -6], [6, 0], [-6, 0], [0, 12], [0, -12], [12, 0], [-12, 0]]) { const X = G.px(x + dx), Y = G.py(y + dy); if (X >= 0 && Y >= 0 && X < W && Y < H && lab[Y * W + X] && lab[Y * W + X] !== out0) return lab[Y * W + X]; } return 0; };
   const spaces = [], r2s = new Map(), done = new Set([out0]);
   const byReg = new Map(); labels.forEach(l => { const r = regAt(l.x, l.y); if (!r) return; let L = byReg.get(r); if (!L) byReg.set(r, L = []); L.push(l); });
-  byReg.forEach((L, r) => { const ns = [], ss = []; L.forEach(l => { if (!ns.includes(l.name)) { ns.push(l.name); ss.push(l.size); } });
+  byReg.forEach((L, r) => { const ns = [], ss = []; if (L.some(l => !l.weak)) L = L.filter(l => !l.weak); L.forEach(l => { if (!ns.includes(l.name)) { ns.push(l.name); ss.push(l.size); } });
     const kinds = ns.map(kindOf), kd = kinds.includes("corridor") ? "corridor" : new Set(kinds).size === 1 ? kinds[0] : "room";
     const s = {regs: [r], names: ns, sizes: ss, kind: kd, lx: L[0].x, ly: L[0].y, labs: L, notes: [], how: "traced"}; spaces.push(s); r2s.set(r, s); done.add(r); });
   const nbS = (regs, thinDepth) => { const out = new Map(); regs.forEach(r => nbrs(r).forEach((v, o2) => { if (regs.includes(o2)) return; const s = r2s.get(o2); if (s) out.set(s, (out.get(s) || 0) + v); })); return [...out.entries()].sort((a, b) => b[1] - a[1]); };
@@ -442,7 +475,7 @@ export function traceFloor(inp, opt){
     else if (bad.length) s.status = "auto";
     else s.status = "walls";
     if (s.names.length > 1) s.notes.push("open plan: " + s.names.map((x, i) => (x + " " + (s.sizes[i] || "")).trim()).join(", ") + " — no walls between them on the drawing, measured as one floor");
-    const nr = s.chk.find(c => c.rect === false); if (s.chk.length && !bad.length && nr) s.notes.push("written size = the main rectangle; the outline " + (nr.more ? "also takes in a recess / bay along the drawn walls" : "leaves out a duct / pier standing in it")); });
+    const nr = s.chk.find(c => c.rect === false); if (s.chk.length && !bad.length && nr) s.notes.push("written size = the main rectangle; the outline " + (nr.more ? "also takes in a recess / bay along the drawn walls" : "leaves out what stands in it (a bath, duct or pier in a corner)")); });
   thresholds.forEach(t => { t.status = t.unsnapped > 1 ? "auto" : "walls"; t.w_ft = Math.max(t.bw, t.bh); t.t_ft = Math.min(t.bw, t.bh); });
   // ---- every side of a washroom / corridor: wall face or opening, and the wall's thickness
   const CD = new Uint8Array(N); thresholds.forEach(t => { if (!t.closedBox) return; const [p, , q] = [t.closedBox[0], 0, t.closedBox[2]]; for (let y = G.py(Math.min(p[1], q[1])); y <= G.py(Math.max(p[1], q[1])); y++) for (let x = G.px(Math.min(p[0], q[0])); x <= G.px(Math.max(p[0], q[0])); x++) if (x >= 0 && y >= 0 && x < W && y < H) CD[y * W + x] = 1; });
