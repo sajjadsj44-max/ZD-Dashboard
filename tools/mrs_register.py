@@ -36,12 +36,11 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_HTML = ROOT / "zameen-developments" / "index.html"
 BLOCK_RE = re.compile(r'(<script type="application/json" id="raMrsData">)(.*?)(</script>)', re.S)
 
-# building-construction chapters of the MRS; pass --chapters to change. Left out:
-# canals, sheet piling, diversion, outlets, roads, drainage, sewerage, wells,
-# tubewells, electrical and HVAC (not building-trade work), and Ch.1 Carriage,
-# whose mile and km bands are printed over each other in the source PDF so its
-# rows cannot be read back reliably.
-DEFAULT_CHAPTERS = "2-13,19,25,26"
+# chapters that price building work, external works and MEP; pass --chapters to change.
+# Left out: canals, sheet piling, diversion, outlets and sinking of wells (Ch.14-17, 22),
+# and Ch.1 Carriage, whose mile and km bands are printed over each other in the source
+# PDF so its rows cannot be read back reliably.
+DEFAULT_CHAPTERS = "2-13,18-21,23-27"
 
 CWT_KG = 50.80234544          # 1 long hundredweight (112 lb)
 LONG_TON_KG = 1016.0469088    # MRS British "Ton" is the long ton (its metric twin is per tonne)
@@ -87,13 +86,15 @@ def text_of(words, numeric=False):
 def header_cols(rows):
     """Column extents from the page's own header lines:
     'Sr. Description Rate (British System) Rate (Metric System) Spec. Remarks'
-    then 'Unit (of M/ment) Labour Composite' twice (British, metric).
+    then 'Unit (of M/ment) Labour Composite' twice (British, metric). Ch.27 (HVAC) prints
+    'Description' and 'Remarks' on a line of their own under 'Sr. ... Spec.'.
     Returns ([(name, left, right)], header bottom, right edge of the description column)."""
     h1 = h_unit = h_lc = None
+    between = []                       # header lines between the first one and Labour / Composite
     for r in rows:
         t = [w["text"] for w in r]
         if h1 is None:
-            if "Sr." in t and "Description" in t and "Rate" in t:
+            if "Sr." in t and "Rate" in t and ("Description" in t or "Spec." in t):
                 h1 = r
             continue
         if h_lc is None and "Labour" in t and "Composite" in t:
@@ -102,11 +103,14 @@ def header_cols(rows):
                 h_unit = r
         elif h_unit is None and "Unit" in t:
             h_unit = r
+        if h_lc is None:
+            between.append(r)
     if not h1 or not h_lc:
         return None, None, None
     ext = lambda row, word: [(w["x0"], w["x1"]) for w in sorted(row or [], key=lambda w: w["x0"]) if w["text"] == word]
     lab, comp = ext(h_lc, "Labour"), ext(h_lc, "Composite")
-    spec, rem = ext(h1, "Spec."), ext(h1, "Remarks")
+    top = h1 + [w for r in between for w in r]
+    spec, rem = ext(top, "Spec."), ext(top, "Remarks")
     unit = [x0 for x0, _ in (ext(h_unit, "Unit") or ext(h_lc, "M/ment"))]
     if len(unit) == 1 and len(lab) >= 2 and comp:
         # some chapters print no "Unit" heading over the metric unit column; it sits

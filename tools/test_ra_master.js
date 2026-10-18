@@ -50,6 +50,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
             unsourced: D.rates.filter(d => !/\d{2}-[A-Z][a-z]{2}-\d{4}|ASSUMPTION/.test(R[d.code].src)).map(d => d.code),
             timb: R["QE-TIMB-CFT"].rate, st200: raCalc(L("ST-200")).C, brk45: raCalc(L("BRK-45-14")).C,
             brk9: raCalc(L("BRK-9-16")).C, brk135: raCalc(L("BRK-135-16")).C, pls05: raCalc(L("PLS-I05-14")).C,
+            labRows: Object.fromEntries(["ST-200", "PLS-I05-14", "PLS-I075-14"].map(id => [id, L(id).L.map(r => [r.ref, raNum(r.qty)])])),
             pls075: raCalc(L("PLS-I075-14")).C, qc: L("CIV-CON-020").qc};
   });
   console.log("Fresh library");
@@ -63,9 +64,14 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
     ok(bad.length === 0, "every item's rate, unit and rows equal the workbook (" + Object.keys(X.excel).length + " checked)" + (bad.length ? ": " + bad.slice(0, 8).map(b => b[0]) : ""));
   }
   ok(fresh.timb === 3680, "QE-TIMB-CFT moved to the GRN rate 3,680");
-  ok(Math.abs(fresh.st200 - 11.08) < 0.01, "ST-200 labour 11.08/kg (MRS 11.03) — was 36.80 (" + fresh.st200.toFixed(2) + ")");
+  // labour productivity, priced at the day wages of the Rev07 build (steel fixer 2,450, plaster mason 2,150, helper 1,538)
+  // so the check holds whatever wages are published later (the 18-Oct-2026 refresh moved them)
+  const at = (id, w) => fresh.labRows[id].reduce((s, [ref, q]) => s + q * w[ref], 0);
+  const W0 = {"L-STEEL": 2450, "L-PLMASON": 2150, "L-HELPER": 1538};
+  ok(Math.abs(at("ST-200", W0) - 11.08) < 0.01, "ST-200 labour 11.08/kg at the Rev07 wages (MRS 11.03) — was 36.80 (" + at("ST-200", W0).toFixed(2) + ")");
   ok(Math.abs(fresh.brk45 * 2 - fresh.brk9) < 0.01 && Math.abs(fresh.brk135 - fresh.brk9 * 1.5) < 0.01, "brick labour scales with wall thickness (4½\" " + fresh.brk45.toFixed(2) + ", 9\" " + fresh.brk9.toFixed(2) + ", 13½\" " + fresh.brk135.toFixed(2) + ")");
-  ok(Math.abs(fresh.pls05 - 36.88) < 0.01 && Math.abs(fresh.pls075 - 46.1) < 0.01, "plaster labour by thickness (½\" 36.88, ¾\" 46.10)");
+  ok(Math.abs(at("PLS-I05-14", W0) - 36.88) < 0.01 && Math.abs(at("PLS-I075-14", W0) - 46.1) < 0.01,
+     "plaster labour by thickness at the Rev07 wages (½\" 36.88, ¾\" 46.10)");
   ok(fresh.qc === "C03", "new items carry their QS category");
 
   // editing a shared rate re-prices the workbook items that use it

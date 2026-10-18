@@ -201,8 +201,8 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   const used = await T(() => { const u = {}; RA.items.forEach(it => ["M", "L", "P"].forEach(k => (it[k] || []).forEach(r => { if (r.ref && +r.qty) u[r.ref] = 1; }))); return RA.rates.filter(x => u[x.code]).length; });
   const tot = await $(".pt-heat tbody tr:last-child td:last-child").innerText();
   ok(+tot.replace(/,/g, "") === used, `map total = lines used in analyses (${used})`);
-  const types = await T(() => Object.fromEntries(["MAT-PPR-075", "DIESEL", "MAT-ASPH", "WATER"].map(c => [c, zdPriceTrends.srcType(RA.rates.find(r => r.code === c))])));
-  ok(types["MAT-PPR-075"] === "list" && types.DIESEL === "grn" && types["MAT-ASPH"] === "mrs" && types.WATER === "assump", "source kinds read from the remarks");
+  const types = await T(() => Object.fromEntries(["MAT-PPR-075", "DIESEL", "MAT-ASPH", "BM-CV-006"].map(c => [c, zdPriceTrends.srcType(RA.rates.find(r => r.code === c))])));
+  ok(types["MAT-PPR-075"] === "list" && types.DIESEL === "grn" && types["MAT-ASPH"] === "mrs" && types["BM-CV-006"] === "assump", "source kinds read from the remarks");
   const cell = $(".pt-cell:not(.z)").first();
   const cn = +(await cell.innerText()).replace(/,/g, "");
   await cell.click();

@@ -62,14 +62,21 @@ class CivilGapData(unittest.TestCase):
                 self.assertIn(r["vs"], ("V", "I"))
 
     def test_mrs_lines_match_the_register(self):
+        """Each MRS line carries the register's figure for its work — at its own item number, or at the
+        number a later edition moved the work to (cg.MRS_MOVED; the line keeps its published code)."""
         mrs = block(self.html, "raMrsData")
         by = {f"MRS-C{a[0]}-{a[1]}-{a[2]}": a for a in mrs["items"]}
+        reg = cg.Mrs(self.html)
         for code, r in self.rates.items():
             if not code.startswith("MRS-"):
                 continue
             with self.subTest(code=code):
                 lab = code.endswith("-L") or r["kind"] == "L"
-                a = by[code[:-2] if code.endswith("-L") else code]
+                key = (code[:-2] if code.endswith("-L") else code)[4:]
+                at = reg.resolve(key)
+                if at != key:
+                    self.assertIn(f"(item {key.split('-')[1]} in the 1st Bi-Annual 2026)", r["src"])
+                a = by["MRS-" + at]
                 v = a[9] if lab else a[10]
                 self.assertAlmostEqual(r["rate"], round(v * a[8], 4), places=4)
                 self.assertEqual(r["date"], mrs["from"])
