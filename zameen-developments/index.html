@@ -8953,7 +8953,7 @@ table.zr-t tr.sub td.am{color:var(--ac)}
     var basisL = [["Specification", esc(it.spec || it.desc)], ["Access", esc(accessText(it))]];
     var basisR = [["Basis", basis], ["Method", esc(it.note || "As per specification; rate built from the component quantities below.")]];
     var pf = function(a){ return a.map(function(x){ return "<p><b>" + x[0] + ":</b> " + x[1] + "</p>"; }).join(""); };
-    var h = '<div class="zr-page"><div class="zr-fit"><div class="zr">';
+    var h = '<div class="zr-page" data-zr-id="' + esc(it.id) + '"><div class="zr-fit"><div class="zr">';
     h += '<div class="zr-hd"><div class="zr-top"><span class="zr-pill">ITEM ' + idx + " / " + total + '</span><span class="zr-kick">' + esc(cat) + ' — Rate Analysis</span></div>' +
       '<div class="zr-ti" style="font-size:' + tfs + 'px">' + esc(it.desc || it.code) + '</div>' +
       '<div class="zr-pills"><span class="zr-chip"><i>&#9679;</i>' + esc(loc) + '</span><span class="zr-chip"><i>&#9632;</i>' + MON[d.m] + " " + d.y + '</span><span class="zr-chip"><i>&#9644;</i>Unit: ' + esc(u) + '</span><span class="zr-chip"><i>&#9670;</i>' + esc(it.code) + '</span></div>' +
@@ -9038,12 +9038,97 @@ table.zr-t tr.sub td.am{color:var(--ac)}
   window.addEventListener("beforeprint", function(){ if (document.body.classList.contains("rs-on")) document.querySelectorAll("#raSheetWrap .zr-page").forEach(function(p){ p.style.width = ""; p.style.height = ""; p.querySelector(".zr-fit").style.transform = ""; }); });
   window.addEventListener("afterprint", function(){ if (document.body.classList.contains("rs-on")) fit(); });
 
+  /* Save as PNG: each sheet is drawn by the browser itself (SVG foreignObject with the page's own CSS), so the
+     picture matches the screen exactly; 2× resolution, one file per sheet, named after the item */
+  var PNG_K = 2;
+  function xmlText(s){ return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+  function pngName(it){
+    var s = ((it ? it.code + " " + it.desc : "Rate analysis")).replace(/[\\\/:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim();
+    return (s.slice(0, 90).trim() || "Rate analysis") + ".png";
+  }
+  function sheetPng(pg){
+    var z = pg.querySelector(".zr"), w = z.offsetWidth || W, h = z.offsetHeight, cs = getComputedStyle(z.parentNode);
+    var css = [].map.call(document.querySelectorAll("style"), function(s){ return s.textContent; }).join("\n");
+    var inh = "width:" + w + "px;height:" + h + "px;margin:0;font-size:" + cs.fontSize + ";line-height:" + cs.lineHeight + ";font-weight:" + cs.fontWeight +
+      ";letter-spacing:" + cs.letterSpacing + ";text-align:" + cs.textAlign + ";color:" + cs.color;
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w * PNG_K + '" height="' + h * PNG_K + '" viewBox="0 0 ' + w + " " + h + '">' +
+      '<foreignObject x="0" y="0" width="' + w + '" height="' + h + '"><div xmlns="http://www.w3.org/1999/xhtml" style="' + inh + '">' +
+      "<style>" + xmlText(css) + "</style>" + new XMLSerializer().serializeToString(z) + "</div></foreignObject></svg>";
+    return new Promise(function(res, rej){
+      var img = new Image();
+      img.onload = function(){
+        var c = document.createElement("canvas"); c.width = w * PNG_K; c.height = h * PNG_K;
+        var g = c.getContext("2d"); g.fillStyle = "#f4f7fb"; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(function(b){ if (b) res(b); else rej(new Error("the picture could not be encoded")); }, "image/png");
+      };
+      img.onerror = function(){ rej(new Error("the sheet could not be drawn as a picture")); };
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    });
+  }
+  function download(blob, name){
+    var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  }
+  function savePng(btn){
+    var pages = [].slice.call(document.querySelectorAll("#raSheetWrap .zr-page"));
+    if (!pages.length || btn.disabled) return;
+    var label = btn.innerHTML, i = 0;
+    btn.disabled = true;
+    (function next(){
+      if (i >= pages.length) { btn.innerHTML = "&#10003; Saved " + pages.length + " PNG" + (pages.length === 1 ? "" : "s"); setTimeout(function(){ btn.innerHTML = label; btn.disabled = false; }, 2200); return; }
+      var pg = pages[i++];
+      btn.innerHTML = "Saving PNG" + (pages.length > 1 ? " " + i + " / " + pages.length : "") + "&hellip;";
+      sheetPng(pg).then(function(b){ download(b, pngName(raItemById(pg.getAttribute("data-zr-id")))); setTimeout(next, 250); })
+        .catch(function(e){ btn.innerHTML = label; btn.disabled = false; alert("Save as PNG failed: " + e.message + ".\n\nUse Print / Save as PDF instead."); });
+    })();
+  }
+  window.zrSheetPng = sheetPng;
+
+  /* Previous / Next: step through the rate analyses (same order as the item picker) without leaving the preview */
+  var moved = false;
+  function stepItem(d){
+    if (!document.getElementById("rsNext")) return false;   // only the one-sheet view steps
+    var list = raSortedItems(), i = list.findIndex(function(x){ return x.id === RA_CUR; }), n = list[i + d];
+    if (i < 0 || !n) return false;
+    RA_CUR = n.id; moved = true;
+    raSheetOpen("one");
+    var w = document.getElementById("raSheetWrap"); if (w) w.scrollTop = 0;
+    window.scrollTo(0, 0);
+    return true;
+  }
+  function addTools(w, mode){
+    var bar = w.querySelector(".rs-tools"), pr = document.getElementById("rsPrint"), cl = document.getElementById("rsClose");
+    if (!bar || !pr || document.getElementById("rsPng")) return;
+    var b = document.createElement("button");
+    b.className = "xbtn"; b.id = "rsPng"; b.type = "button"; b.innerHTML = "&#128247; Save as PNG";
+    b.title = "Save " + (w.querySelectorAll(".zr-page").length > 1 ? "each sheet" : "this sheet") + " as a PNG picture (" + W * PNG_K + " px wide)";
+    b.onclick = function(){ savePng(b); };
+    pr.insertAdjacentElement("afterend", b);
+    if (cl) { var _close = cl.onclick; cl.onclick = function(e){ if (_close) _close.call(this, e); if (moved) { moved = false; try { raGo("an"); } catch (er) {} } }; }
+    if (mode === "all") return;
+    var list = raSortedItems(), i = list.findIndex(function(x){ return x.id === RA_CUR; });
+    if (i < 0 || list.length < 2) return;
+    function nav(id, html, d){
+      var n = list[i + d], x = document.createElement("button");
+      x.className = "xbtn"; x.id = id; x.type = "button"; x.innerHTML = html; x.disabled = !n;
+      x.title = n ? n.code + " — " + String(n.desc || "").slice(0, 80) + " (" + (d < 0 ? "Left" : "Right") + " arrow key)" : (d < 0 ? "This is the first item" : "This is the last item");
+      x.onclick = function(){ stepItem(d); };
+      return x;
+    }
+    var pos = document.createElement("span");
+    pos.className = "xbtn"; pos.id = "rsPos"; pos.style.cssText = "cursor:default;background:#fff"; pos.textContent = (i + 1) + " / " + list.length;
+    bar.appendChild(nav("rsPrev", "&#9664; Previous", -1)); bar.appendChild(pos); bar.appendChild(nav("rsNext", "Next &#9654;", 1));
+  }
+
   /* a click on an item (library, search, links) opens its one-page sheet straight away */
   var _open = raSheetOpen;
   raSheetOpen = function(mode, force){
+    if (!document.body.classList.contains("rs-on")) moved = false;
     _open(mode, force);
     var w = document.getElementById("raSheetWrap"), cl = document.getElementById("rsClose");
     if (cl) cl.innerHTML = "&#9998; Back to editor (edit this item)";
+    if (w && document.body.classList.contains("rs-on")) addTools(w, mode);
   };
   function showOne(){ if (typeof RA_CUR !== "undefined" && raItemById(RA_CUR)) setTimeout(function(){ raSheetOpen("one"); }, 30); }
   document.addEventListener("click", function(e){
@@ -9054,6 +9139,8 @@ table.zr-t tr.sub td.am{color:var(--ac)}
   document.addEventListener("keydown", function(e){
     if (e.target && e.target.id === "raAnQ" && e.key === "Enter") showOne();
     else if (e.key === "Escape" && document.body.classList.contains("rs-on")) { var c = document.getElementById("rsClose"); if (c) c.click(); }
+    else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && document.body.classList.contains("rs-on") && !e.ctrlKey && !e.altKey && !e.metaKey &&
+             !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) && !(e.target && e.target.isContentEditable)) { if (stepItem(e.key === "ArrowRight" ? 1 : -1)) e.preventDefault(); }
   });
   window.zrSheet = {html: html};
 })();
