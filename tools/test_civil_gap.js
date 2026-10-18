@@ -37,6 +37,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
       .forEach(i => { const c = raCalc(i); calc[i.id] = {rate: c.rate, gaps: c.gaps}; });
     return {rev: D.rev, civRev: RA.civRev, want: D.items.length, have: cv.length, calc,
             helper: R["L-HELPER"].rate, brk2: R["BRK-2"].rate, brk1: R["BRK-1"].rate, lcarp: R["L-CARP"].rate,
+            later: (() => { const b = document.getElementById("raRefreshData"); const r = b && JSON.parse(b.textContent).rates.find(r => r.code === "L-HELPER"); return r ? r.rate : null; })(),
             fn560: RA.items.find(i => i.id === "FN-560").M.map(r => r.ref),
             ew950: RA.items.find(i => i.id === "EW-950").M.map(r => r.ref),
             ew960: RA.items.find(i => i.id === "EW-960").M.length,
@@ -51,7 +52,9 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   const open = Object.keys(fresh.calc).filter(k => fresh.calc[k].gaps > 0);
   ok(open.length === 0, "no CV item is left unpriced (TOPSOIL is an assumption since the Master RA Rev07a block) — " + open.join(", "));
   ok(Object.keys(fresh.calc).every(k => fresh.calc[k].rate > 0), "every item has a rate above 0");
-  ok(fresh.helper === 1538 && fresh.brk2 === 13 && fresh.brk1 === 17.5 && fresh.lcarp === 2400, "L-HELPER 1,538, BRK-2 13, BRK-1 17.5, L-CARP 2,400 applied");
+  // L-HELPER: this block's 1,538 unless a later block (the 18-Oct-2026 rate refresh) moved it on
+  ok(fresh.helper === (fresh.later || 1538) && fresh.brk2 === 13 && fresh.brk1 === 17.5 && fresh.lcarp === 2400,
+     "L-HELPER " + fresh.helper + ", BRK-2 13, BRK-1 17.5, L-CARP 2,400 applied");
   ok(fresh.fn560.includes("GRN-QUA-STR-000134"), "FN-560 carries the GI door frame");
   ok(fresh.ew950[0] === "PAVER-60", "EW-950 carries the paver block");
   ok(fresh.ew960 > 10, "EW-960 carries its materials");

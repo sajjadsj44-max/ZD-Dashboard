@@ -66,10 +66,26 @@ def fmt(v):
 
 
 # --------------------------------------------------------------------------- MRS
+# Work the 1st Bi-Annual 2026 register printed under one item number and a later edition prints under
+# another (the Lahore 2nd Bi-Annual 2026 renumbered parts of Ch.10, 19 and 26). The rate line keeps the
+# code it was published with — items, and libraries already saved in a browser, refer to it — while its
+# rate and citation come from the line the work moved to. Each entry names the work, so a register that
+# still prints it under the old number is read there.
+MRS_MOVED = {
+    "C10-33-1": ("C10-15-1", r"Tile skirting.*\(a\) Cement tiles"),
+    "C10-39-1": ("C10-38-1", r"terrazo tile.*12\"x12\"x1\".*Grey"),
+    "C10-47-2": ("C10-62-7", r"China Verona.*3/4\" thick"),
+    "C19-36-1": ("C19-33-1", r"10 cm \(4\"\) gully trap"),
+    "C19-40-3": ("C19-37-3", r"manhole cover.*60 cm"),
+    "C26-48-1": ("C26-49-1", r"Premium uPVC Door"),
+}
+
+
 class Mrs:
     """Lines of the Punjab MRS register (#raMrsData), coded like its + Rate DB button."""
 
-    def __init__(self, html):
+    def __init__(self, html, as_of=None):
+        self.as_of = as_of
         m = MRS_RE.search(html)
         if not m:
             sys.exit("MRS register block (#raMrsData) not found")
@@ -89,8 +105,20 @@ class Mrs:
     def edition(self):
         return f"Punjab MRS {self.meta['edition']} ({self.meta['district']})"
 
+    def resolve(self, key):
+        """Register key that holds the work published under `key` (see MRS_MOVED)."""
+        if key not in MRS_MOVED:
+            return key
+        new, work = MRS_MOVED[key]
+        for k in (key, new):
+            it = self.items.get("MRS-" + k)
+            if it and re.search(work, it["head"] + " " + it["path"], re.I):
+                return k
+        sys.exit(f"MRS line {key}: the work ({work}) is neither at {key} nor at {new} in this register")
+
     def line(self, key, which="lab"):
-        it = self.items.get("MRS-" + key)
+        at = self.resolve(key)
+        it = self.items.get("MRS-" + at)
         if not it:
             sys.exit(f"MRS line {key} not found")
         v = it["labP"] if which == "lab" else it["compP"]
@@ -100,13 +128,15 @@ class Mrs:
         kind = "composite " if which != "lab" else (
             "labour rate (MRS gives no composite) " if it["compP"] is None else "labour share ")
         per = re.sub(r"^(per|p)\.?\s*", "", it["mrsUnit"], flags=re.I)
-        src = (f"{self.edition()}, {dmy(d['from'])} — {it['ref']} ({self.ch[it['ch']]}), p.{it['page']}; "
+        lapsed = self.as_of is not None and self.as_of.isoformat() > d["to"]
+        moved = f" (item {key.split('-')[1]} in the 1st Bi-Annual 2026)" if at != key else ""
+        src = (f"{self.edition()}, {dmy(d['from'])} — {it['ref']}{moved} ({self.ch[it['ch']]}), p.{it['page']}; "
                f"{kind}{v:,.2f} per {per} as printed"
                + (f", converted to per {it['unit']}" if it["k"] != 1 else "")
-               + f"; valid {dmy(d['from'])} to {dmy(d['to'])} — edition lapsed, reconfirm before use")
+               + f"; valid {dmy(d['from'])} to {dmy(d['to'])}" + (" — edition lapsed, reconfirm before use" if lapsed else ""))
         if it["xc"] == -1:
             src += f". MRS British and metric figures disagree for this line — verify on p.{it['page']}"
-        code = it["code"] + ("-L" if which == "lab" and it["compP"] is not None else "")
+        code = "MRS-" + key + ("-L" if which == "lab" and it["compP"] is not None else "")
         return {"code": code, "kind": "L" if which == "lab" else "M",
                 "name": ((it["head"] + " ") if it["head"] else "") + it["path"], "unit": it["unit"],
                 "rate": round(v * it["k"] + 1e-12, 4), "loc": d["district"], "src": src, "date": d["from"], "vs": "I"}
@@ -116,7 +146,7 @@ class Mrs:
 class Ctx:
     def __init__(self, html, as_of):
         self.grn = Grn(html, as_of)
-        self.mrs = Mrs(html)
+        self.mrs = Mrs(html, as_of)
         self.rates = {}
         self.items = []
 
@@ -955,7 +985,27 @@ def make(html, as_of):
     rev = f"{as_of.isoformat()}-{hashlib.sha1(body.encode()).hexdigest()[:8]}"
     return {"rev": rev, "source": "Civil gap review of " + FILE + " (docs/civil-gap-rate-review.md)",
             "rates": rates, "items": items, "upd": upd,
-            "prevRates": PREV_RATES, "prevItems": {k: [v] for k, v in SEED_M.items()}}
+            "prevRates": prev_rates(html, rates), "prevItems": {k: [v] for k, v in SEED_M.items()}}
+
+
+def prev_rates(html, rates):
+    """PREV_RATES plus every value this block has published before for a line it now moves on, read
+    from the block already in the page, so a saved library still holding one takes the new value."""
+    prev = {k: [list(v) for v in vs] for k, vs in PREV_RATES.items()}
+    m = BLOCK_RE.search(html)
+    old = json.loads(m.group(2)) if m else {}
+    for k, vs in (old.get("prevRates") or {}).items():
+        for v in vs:
+            if v not in prev.setdefault(k, []):
+                prev[k].append(v)
+    was = {r["code"]: r for r in old.get("rates") or []}
+    for r in rates:
+        o = was.get(r["code"])
+        if o and (o["rate"], o["date"], o["src"]) != (r["rate"], r["date"], r["src"]):
+            v = [o["rate"], o["date"]]
+            if v not in prev.setdefault(r["code"], []):
+                prev[r["code"]].append(v)
+    return {k: vs for k, vs in prev.items() if vs}
 
 
 def main():

@@ -45,7 +45,7 @@ class GrnLatest(unittest.TestCase):
 
     def test_page_applies_it_to_saved_libraries(self):
         self.assertIn("function raSyncGrnLatest(e,force)", HTML)
-        self.assertIn("raSyncGrnLatest(e),e.set=", HTML)
+        self.assertIn("raSyncMaster(e),raSyncGrnLatest(e),", HTML)   # in raLoad, after the other blocks (the rate refresh merges after it)
         self.assertIn('raSyncGrnLatest(RA, true)', HTML)
 
 
