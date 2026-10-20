@@ -480,7 +480,7 @@ function mutate(fn, label){
 /* the shape being drawn keeps its own history in steps: a click is one step, an arc (many points) is one step, so
    Ctrl+Z / Backspace take back the last click or the whole arc and Ctrl+Y puts it back. With nothing being drawn,
    Ctrl+Z / Ctrl+Y step through the project history. */
-const DRAFT_TOOLS = ["draw", "ded", "measure", "angle", "radius", "fence", "area", "rect", "open", "cal", "circle", "polygon", "vp", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref",
+const DRAFT_TOOLS = ["draw", "ded", "dedrect", "measure", "angle", "radius", "fence", "area", "rect", "open", "cal", "circle", "polygon", "vp", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref",
   "mk_polyline", "mk_polygon", "mk_line", "mk_box", "mk_ellipse", "mk_link", "mk_redact", "mk_erase", "mk_callout", "mk_text", "mk_stamp", "mk_image"];
 function draftPush(pts, arc){
   if (!S.draftSteps || S.draftSteps.reduce((a, n) => a + n, 0) !== S.draft.length) S.draftSteps = S.draft.map(() => 1);
@@ -3494,8 +3494,10 @@ function setTool(t){
   if (t === "match" || S.tool === "match") S.matchSource = null;
   if (t === "zoomwin" && S.tool !== "zoomwin") S.prevTool = S.tool;
   const c = S.cond ? cond(S.cond) : null;
-  if (["draw", "rect", "ded", "open", "auto"].indexOf(t) >= 0 && !c && t !== "count") { toast("Pick or create a condition first (left panel)"); t = "select"; S.pickWall = false; }
+  if (["draw", "rect", "ded", "dedrect", "open", "auto"].indexOf(t) >= 0 && !c && t !== "count") { toast("Pick or create a condition first (left panel)"); t = "select"; S.pickWall = false; }
   if (t === "rect" && c && c.type !== "area") { toast("Rectangle is for area conditions"); t = "draw"; }
+  if (t === "dedrect" && c && c.type === "linear") { toast("A length is cut with the polyline cut-out (D) — the rectangle cut-out is for areas", 3200); t = "ded"; }
+  if (t === "dedrect" && c && c.type === "count") { toast("Counts have no deductions — select a point and press Delete"); t = "draw"; }
   if (t === "circle" && c && c.type === "count") { toast("Circle is for area (round slab, column) or length (round wall) conditions"); t = "draw"; }
   if (t === "circle" && !c) { toast("Pick or create a condition first (left panel)"); t = "select"; }
   if (t === "polygon" && c && c.type === "count") { toast("Polygon is for area (hexagonal column, pad) or length (its perimeter) conditions"); t = "draw"; }
@@ -3545,7 +3547,10 @@ function hint(){
     draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." + drawing : c.type === "linear" ? (S.resume ? "Continuing the run — click on; Enter, double-click or right-click to finish." : "Click along the run; Enter, double-click or right-click to finish.") + drawing : "Click each item to count it; Esc when done.",
     fence: "Draw a line across the opening where Auto area leaks (click points; double-click, right-click or Enter to finish). It counts as a wall for Auto area only.", vsearch: "Box one symbol (two corners) — every matching symbol is counted.", note: "Click where the note goes, then type it.", cloud: "Click two opposite corners of the area to cloud.", arrow: "Click the tail, then the head of the arrow.", hilite: "Click two opposite corners to highlight.",
     area: "Box the takeoff area: click two opposite corners around the part of the drawing to take off. Esc cancels.",
-    rect: "Click two opposite corners — or one corner, then type L x W (e.g. 12 x 14) and Enter.", circle: "Click the centre, then a point on the edge.", polygon: "Regular polygon: click the centre, then a corner (" + polySides() + " sides — type pol 8 in the command line for 8).", vp: "Click two opposite corners of the detail drawn at another scale.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.", ded: (c && c.type === "area" ? "Draw the void / cut-out to deduct; Enter to close." : "Draw the length to deduct; Enter to finish.") + drawing,
+    rect: "Click two opposite corners — or one corner, then type L x W (e.g. 12 x 14) and Enter.",
+    dedrect: !c ? "" : "Rectangular cut-out from " + c.name + ": click two opposite corners of the void — or one corner, then type L x W (e.g. 4 x 3) and Enter. D: polyline cut-out.",
+    ded: !c ? "" : c.type === "area" ? "Polyline cut-out from " + c.name + ": click the corners of the void; click the first point, right-click or press Enter to close. Shift+D: rectangle cut-out." + drawing
+      : "Deduction from " + c.name + ": click along the length to take off; Enter, double-click or right-click to finish." + drawing, circle: "Click the centre, then a point on the edge.", polygon: "Regular polygon: click the centre, then a corner (" + polySides() + " sides — type pol 8 in the command line for 8).", vp: "Click two opposite corners of the detail drawn at another scale.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.",
     open: schOf(S.openMark) ? "Placing " + schOf(S.openMark).mark + " (" + f3(schOf(S.openMark).w) + " × " + f3(schOf(S.openMark).h) + ") — click both sides of each opening. Esc stops." : "Click both sides of the opening, then enter its height or pick its schedule mark.",
     typref: S.typ ? (S.key === S.typ.src ? "Typical copy: click reference point " + (S.typ.a.length + 1) + " of 2 on this (source) sheet." : "Typical copy: click the same reference point " + (S.typ.b.length + 1) + " of 2 on this sheet.") : "", measure: "Click points; double-click, right-click or Enter ends a measurement (it stays on screen). Esc clears. Nothing is saved." + drawing,
     angle: S.draft.length === 1 ? "Angle: now click the corner." : S.draft.length === 2 ? "Angle: click a point on the second arm." : "Angle: click a point on the first arm, then the corner, then a point on the second arm — the angle stays on screen. Esc clears. Nothing is saved.",
@@ -3573,7 +3578,7 @@ function cursorPoint(e, sp){
   let p = raw, s = null;
   const free = e && (e.ctrlKey || e.metaKey) && S.tool !== "select";   // Ctrl: the point goes exactly where clicked, no snap (Bluebeam)
   const ex = S.drag && S.drag.vertex != null ? ((it, i) => it.id === S.drag.item && i === S.drag.vertex) : null;   // a dragged point never snaps onto itself
-  if (!free && (["draw", "rect", "ded", "open", "measure", "angle", "radius", "cal", "circle", "polygon", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp", "stretch"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
+  if (!free && (["draw", "rect", "ded", "dedrect", "open", "measure", "angle", "radius", "cal", "circle", "polygon", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp", "stretch"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
   let last = S.drag ? null : S.tool === "stamp" ? S.stampBase : S.tool === "stretch" ? (S.str && S.str.stage === 3 ? S.str.base : null) : S.draft[S.draft.length - 1];
   if (S.drag && S.drag.vertex != null) { const it = P.proj.items.find(i => i.id === S.drag.item); if (it) last = S.drag.orig[S.drag.vertex - 1] || S.drag.orig[S.drag.vertex + 1] || null; }
   if (((e && e.shiftKey) !== !!S.ortho) && last && !S.arcMid) { const dx = Math.abs(p[0] - last[0]), dy = Math.abs(p[1] - last[1]); p = dx >= dy ? [p[0], last[1]] : [last[0], p[1]]; if (s) s = Object.assign({}, s, {type: s.type + " + straight"}); }   // Shift, or Ortho (F8; Shift then frees one click)
@@ -3642,7 +3647,7 @@ function onDown(e){
   if (S.tool === "stamp") { stampAt(p); return; }
   if (S.tool === "typref") { if (!(S.typ && S.typ.T)) typClick(p).then(hint); return; }
   if (S.tool === "count" || (S.tool === "draw" && cond(S.cond).type === "count")) return addCount(p);
-  if (S.tool === "rect") { if (!S.draft.length) draftPush([p]); else { const a = S.draft[0]; finish([a, [p[0], a[1]], p, [a[0], p[1]]]); } draftBtns(); draw(); return; }
+  if (S.tool === "rect" || S.tool === "dedrect") { if (!S.draft.length) draftPush([p]); else { const a = S.draft[0]; finish([a, [p[0], a[1]], p, [a[0], p[1]]]); } draftBtns(); draw(); return; }
   if (S.tool === "draw" || S.tool === "ded" || S.tool === "measure" || S.tool === "fence") {
     if (S.arcMode && S.draft.length) return arcClick(p);
     const closeArea = isAreaDraft() && S.draft.length >= 3 && dist(toScr(S.draft[0]), toScr(p)) <= SNAP_PX;
@@ -3662,7 +3667,7 @@ function typedPoint(buf){   // the next point at a typed length, along the curso
   const last = S.draft[S.draft.length - 1], k = hereScale(last); if (!k) { toast("Set the page scale first (K)", 2200); draw(); return; }
   const ft = t => { t = t.trim(); let v = parseFt(t); if (isNaN(v) && /^\d+(\.\d+)?\s*"$/.test(t)) v = parseFloat(t) / 12; return v; };
   const cur = S.cursor || [last[0] + 1, last[1]];
-  if (S.tool === "rect") { const m = /^(.+?)\s*[xX×]\s*(.+)$/.exec(buf); if (!m) { toast("Type the rectangle as L x W, e.g. 12 x 14 or 12'-6\" x 10'", 3000); draw(); return; }
+  if (S.tool === "rect" || S.tool === "dedrect") { const m = /^(.+?)\s*[xX×]\s*(.+)$/.exec(buf); if (!m) { toast("Type the rectangle as L x W, e.g. 12 x 14 or 12'-6\" x 10'", 3000); draw(); return; }
     const L = ft(m[1]), W = ft(m[2]); if (!(L > 0 && W > 0)) { toast("Could not read “" + buf + "” as L x W", 2600); draw(); return; }
     const a = S.draft[0], sx = Math.sign(cur[0] - a[0]) || 1, sy = Math.sign(cur[1] - a[1]) || 1, p = [a[0] + sx * L * k, a[1] + sy * W * k];
     finish([a, [p[0], a[1]], p, [a[0], p[1]]]); return; }
@@ -4187,12 +4192,14 @@ async function finish(pts){
     mutate(() => { ri.pts = np; delete ri.arcs; qaMoved(ri); }, "Continue run");
     S.sel = null; toast("Run continued: " + f3(polyLen(np) / (itemScale(ri) || 1)) + (itemScale(ri) ? " ft" : " pt"), 1800); return;
   }
-  const nm = area && t !== "ded" && S.lbl.autoName ? roomNameAt(pts) : "";
-  const ni = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: t === "ded" ? "ded" : "shape", pts, nos: 1, label: nm};
+  const ded = t === "ded" || t === "dedrect";
+  const nm = area && !ded && S.lbl.autoName ? roomNameAt(pts) : "";
+  const ni = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: ded ? "ded" : "shape", pts, nos: 1, label: nm};
   if (arcs.length) ni.arcs = arcs;
-  mutate(() => { P.proj.items.push(ni); }, (t === "ded" ? "Deduction" : area ? "Area" : "Run") + " in " + c.name);
+  mutate(() => { P.proj.items.push(ni); }, (t === "dedrect" ? "Rectangular cut-out" : ded ? "Deduction" : area ? "Area" : "Run") + " in " + c.name);
   if (area && crossed(ni)) toast(crossMsg, 7000);
-  else if (area && t !== "ded" && itemScale(ni)) { const k = itemScale(ni), Q = itemPoly(ni); toast((nm ? nm + " (named from the drawing) — " : "Area — ") + fq(polyArea(Q) / k / k) + " Sft · perimeter " + f3(polyLen(Q, true) / k) + " ft", 3500); }   // what was just taken: its area and perimeter
+  else if (area && ded && itemScale(ni)) { const k = itemScale(ni), Q = itemPoly(ni); toast("Cut-out − " + fq(polyArea(Q) / k / k) + " Sft deducted from " + c.name, 2600); }
+  else if (area && !ded && itemScale(ni)) { const k = itemScale(ni), Q = itemPoly(ni); toast((nm ? nm + " (named from the drawing) — " : "Area — ") + fq(polyArea(Q) / k / k) + " Sft · perimeter " + f3(polyLen(Q, true) / k) + " ft", 3500); }   // what was just taken: its area and perimeter
   else if (nm) toast("Named " + nm + " from the drawing", 1800);
 }
 
@@ -4296,11 +4303,12 @@ function drawNow(){
     dyn.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(r * S.view.s).toFixed(1)}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>`);
     if (k) live = "dia " + f3(2 * r / k) + " ft · " + fq(Math.PI * r * r / k / k) + " Sft · round " + f3(2 * Math.PI * r / k) + " ft";
   } else if (S.draft.length && cur && !mkIsTool(S.tool)) {
-    const D = S.arcMid && S.draft.length ? S.draft.concat(arcPts(S.draft[S.draft.length - 1], S.arcMid, cur)) : S.draft.concat([S.tool === "rect" ? null : cur]).filter(Boolean);
+    const D = S.arcMid && S.draft.length ? S.draft.concat(arcPts(S.draft[S.draft.length - 1], S.arcMid, cur)) : S.draft.concat([S.tool === "rect" || S.tool === "dedrect" ? null : cur]).filter(Boolean);
     if (S.arcMode && !S.arcMid && S.draft.length) { const q = toScr(cur); dyn.push(`<text x="${(q[0] + 12).toFixed(1)}" y="${(q[1] - 12).toFixed(1)}" font-size="11" font-weight="700" fill="#4b3b8f" stroke="#fff" stroke-width="3" paint-order="stroke">arc: point on it</text>`); }
     if (S.arcMid) { const q = toScr(S.arcMid); dyn.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="3.5" fill="#4b3b8f"/>`); }
-    if (S.tool === "rect") { const a = S.draft[0]; const R = [a, [cur[0], a[1]], cur, [a[0], cur[1]]]; dyn.push(`<polygon points="${ptsS(R)}" fill="${c.color}" fill-opacity=".15" stroke="${c.color}" stroke-width="2"/>`);
-      if (k) live = f3(Math.abs(cur[0] - a[0]) / k) + " × " + f3(Math.abs(cur[1] - a[1]) / k) + " ft = " + fq(Math.abs(cur[0] - a[0]) * Math.abs(cur[1] - a[1]) / k / k) + " Sft"; }
+    if (S.tool === "rect" || S.tool === "dedrect") { const a = S.draft[0], R = [a, [cur[0], a[1]], cur, [a[0], cur[1]]], cut = S.tool === "dedrect", rc = cut ? "#d03b3b" : c.color;
+      dyn.push(`<polygon points="${ptsS(R)}" fill="${rc}" fill-opacity=".15" stroke="${rc}" stroke-width="2"${cut ? ' stroke-dasharray="6 3"' : ""}/>`);
+      if (k) live = (cut ? "Cut-out " : "") + f3(Math.abs(cur[0] - a[0]) / k) + " × " + f3(Math.abs(cur[1] - a[1]) / k) + " ft = " + (cut ? "− " : "") + fq(Math.abs(cur[0] - a[0]) * Math.abs(cur[1] - a[1]) / k / k) + " Sft"; }
     else {
       const col = S.tool === "fence" ? "#ff7a00" : S.tool === "ded" || S.tool === "open" ? "#d03b3b" : S.tool === "measure" || S.tool === "cal" ? "#0b0b0b" : c ? c.color : "#0b0b0b";
       if (isAreaDraft() && D.length >= 3) dyn.push(`<polygon points="${ptsS(D)}" fill="${col}" fill-opacity=".12" stroke="none"/>`);
@@ -4332,7 +4340,7 @@ function drawNow(){
   if (!keep) { S.ovSig = sig; const html = h.join(""); if (html !== S.ovHtml) { svg.innerHTML = html; S.ovHtml = html; } }
   svg2.innerHTML = dyn.join("");
   if (!S.passive) $("stMeas").innerHTML = live ? "<b>" + esc(live) + "</b>" : "";
-  if (S.typed && S.draft.length) live = (S.tool === "rect" ? "L x W: " : "Length: ") + S.typed + " ▏ Enter to place · Esc clears";
+  if (S.typed && S.draft.length) live = (S.tool === "rect" || S.tool === "dedrect" ? "L x W: " : "Length: ") + S.typed + " ▏ Enter to place · Esc clears";
   if (!live && S.tool === "select" && S.hover && !S.drag && !S.box && S.cursorScr) live = hoverText(S.hover);   // what is under the cursor, as Bluebeam's tooltip
   if (!live && S.tool === "cadsel" && S.cadHov >= 0 && !S.cbox && S.cursorScr) live = cadHoverText();   // the AutoCAD object under it
   if (live && S.cursorScr) { tip.textContent = live; tip.style.display = "block"; tip.style.left = Math.min(S.cursorScr[0] + 16, E.stage.clientWidth - 220) + "px"; tip.style.top = (S.cursorScr[1] + 18) + "px"; }
@@ -9984,7 +9992,7 @@ function ctxItem(hi, sp, q, e){
   if (!many && c.type === "area" && it.kind !== "open" && it.shape !== "circle") L.push({t: "Square up to walls", fn: () => squareUpSel(it), dis: it.locked || !(S.geo[S.key] && S.geo[S.key].segs.length)});
   if (runs.length >= 2) L.push({t: "Join " + runs.length + " runs into one", fn: () => joinRuns(new Set(runs.map(r => r.id))), dis: lk});
   if (sel.filter(i => i.kind === "shape" && (cond(i.cond) || {}).type === "area").length >= 2) L.push({t: "Combine into one area", fn: () => combineAreas(ids), dis: lk});
-  if (!many && c.type === "area" && it.kind === "shape") L.push({t: "Add a cut-out / deduction", k: "D", fn: () => { S.cond = c.id; setTool("ded"); }});
+  if (!many && c.type === "area" && it.kind === "shape") L.push({t: "Add a rectangular cut-out", k: "Shift+D", fn: () => { S.cond = c.id; setTool("dedrect"); }}, {t: "Add a polyline cut-out", k: "D", fn: () => { S.cond = c.id; setTool("ded"); }});
   if (!many && c.type === "area" && it.kind === "shape") { const under = cutTargets(it); if (under.length) L.push({t: "Cut out of the area" + (under.length > 1 ? "s" : "") + " it overlaps (" + under.slice(0, 2).map(u => u.label || (cond(u.cond) || {}).name).join(", ") + (under.length > 2 ? ", …" : "") + ")", fn: () => cutOutOf(it, under), dis: it.locked}); }
   if (!many && c.type === "linear" && it.kind !== "open") L.push({t: "Add an opening (door / window)", k: "O", fn: () => { S.cond = c.id; setTool("open"); }});
   const lin = P.proj.conds.filter(x => x.type === "linear"), ar = P.proj.conds.filter(x => x.type === "area");
@@ -10027,7 +10035,7 @@ function ctxCanvas(q){
     {t: "Paste here", k: "Ctrl+V", fn: () => pasteClip("cursor", q), dis: !S.clip}, {t: "Paste in place", k: "Ctrl+Shift+V", fn: () => pasteClip("inplace"), dis: !S.clip},
     {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {t: "Invert selection", k: "Ctrl+I", fn: invertSel}, {t: "Quick select…", fn: quickSelect}, {t: "Deselect all", k: "Esc", fn: clearSel, dis: !selIds().size}, {sep: 1},
     {t: "Undo" + (u ? ": " + u : ""), k: "Ctrl+Z", fn: undoAny, dis: !S.undo.length}, {t: "Redo" + (r ? ": " + r : ""), k: "Ctrl+Y", fn: redoAny, dis: !S.redo.length}, {sep: 1},
-    {t: "Tools", sub: [T("select", "Select", "V"), T("cadsel", "Select AutoCAD objects", "Shift+V"), T("lasso", "Lasso select", "Shift+O"), T("pan", "Pan", "H"), {sep: 1}, T("draw", "Draw", "A"), T("rect", "Rectangle", "R"), T("auto", "Auto area", "W"), T("circle", "Circle", "E"), T("count", "Count", "C"), T("ded", "Deduct", "D"), T("open", "Opening", "O"), {sep: 1}, T("break", "Break a run", "B"), T("measure", "Measure", "M"), T("angle", "Angle", "Shift+M"), T("radius", "Radius"), T("cal", "Set scale", "K")]},
+    {t: "Tools", sub: [T("select", "Select", "V"), T("cadsel", "Select AutoCAD objects", "Shift+V"), T("lasso", "Lasso select", "Shift+O"), T("pan", "Pan", "H"), {sep: 1}, T("draw", "Draw", "A"), T("rect", "Rectangle", "R"), T("auto", "Auto area", "W"), T("circle", "Circle", "E"), T("count", "Count", "C"), T("ded", "Cut-out polyline", "D"), T("dedrect", "Cut-out rectangle", "Shift+D"), T("open", "Opening", "O"), {sep: 1}, T("break", "Break a run", "B"), T("measure", "Measure", "M"), T("angle", "Angle", "Shift+M"), T("radius", "Radius"), T("cal", "Set scale", "K")]},
     {t: "View", sub: [{t: "Fit page", k: "F", fn: () => { fit(); renderHi(); }}, {t: "Fit width", k: "Shift+F", fn: fitWidth}, {t: "Zoom window", k: "Z", fn: () => setTool("zoomwin")}, {t: "Zoom in", k: "+", fn: () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2)}, {t: "Zoom out", k: "−", fn: () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2)}, {sep: 1},
       {t: "Labels", k: "L", fn: () => setLblOn(!S.lbl.on), on: S.lbl.on}, {t: "Snap to drawing lines", k: "S", fn: () => { $("snapOn").checked = !$("snapOn").checked; }, on: $("snapOn").checked}, {t: "Markups", fn: () => $("bHideMk").click(), on: !S.hideMk}]},
     {sep: 1}, {t: "Keyboard & mouse shortcuts…", k: "?", fn: keysDialog}];
@@ -10127,7 +10135,7 @@ function paneUi(old){   // the panels and the bar follow the window worked in
   if (pr) {
     saveShow(pr); buildPageSel(); localStorage.setItem("zdTakeoffLast", pr.id);
     if (!S.cond || !cond(S.cond)) S.cond = (pr.conds[0] || {}).id || null;
-    if (!S.cond && ["draw", "rect", "ded", "open", "auto", "circle", "polygon"].indexOf(S.tool) >= 0) { S.tool = "select"; document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === "select")); }
+    if (!S.cond && ["draw", "rect", "ded", "dedrect", "open", "auto", "circle", "polygon"].indexOf(S.tool) >= 0) { S.tool = "select"; document.querySelectorAll("#tools .tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === "select")); }
     stageCls(); hint();
     if (S.page) { pgMark(); renderLayers(); if (!S.geo[S.key]) indexPage(); }
     $("zoomPct").textContent = S.base ? Math.round(S.view.s * 100) + "%" : "—";
@@ -10682,7 +10690,7 @@ function wire(){
       else if (S.sel || S.selMark) { setSel([]); }
       else setTool("select");
       refresh(); return; }
-    if (S.draft.length && ["draw", "ded", "measure", "fence", "rect", "mk_polyline", "mk_polygon"].indexOf(S.tool) >= 0 && !S.arcMid) {   // Bluebeam "sketch to scale": type a length (12'-6", 12.5) — or L x W for a rectangle — and Enter
+    if (S.draft.length && ["draw", "ded", "measure", "fence", "rect", "dedrect", "mk_polyline", "mk_polygon"].indexOf(S.tool) >= 0 && !S.arcMid) {   // Bluebeam "sketch to scale": type a length (12'-6", 12.5) — or L x W for a rectangle — and Enter
       const ch = e.key, buf = S.typed || "";
       if (/^[0-9.'"\/]$/.test(ch) || (buf && /^[- xX×]$/.test(ch))) { S.typed = buf + ch; e.preventDefault(); draw(); return; }
       if (buf && e.key === "Backspace") { S.typed = buf.slice(0, -1); e.preventDefault(); draw(); return; }
@@ -10703,7 +10711,7 @@ function wire(){
     if (k === "o" && e.shiftKey) { setTool("lasso"); return; }   // Bluebeam: Shift+O lasso
     if (e.shiftKey && k === "c") { setXh(!S.xh); return; }   // full-screen cross-hair
     if (e.shiftKey && k === "g") { setMag(!MAG.on); return; }   // magnifier (Shift+M is the Angle tool)
-    if (e.shiftKey) { const ST = {m: "angle", l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen", v: "cadsel", t: "trim", x: "extend", s: "stretch"}; if (ST[k]) { setTool(ST[k]); return; } }
+    if (e.shiftKey) { const ST = {m: "angle", l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen", v: "cadsel", t: "trim", x: "extend", s: "stretch", d: "dedrect"}; if (ST[k]) { setTool(ST[k]); return; } }
     const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", c: "count", e: "circle", n: "note", u: "cloud", d: "ded", o: "open", m: "measure", k: "cal", b: "break", z: "zoomwin",
       t: "mk_text", q: "mk_callout", p: "mk_pen", g: "mk_polygon", y: "mk_polyline", x: "mk_stamp", i: "mk_image"};
     if (T[k]) { setTool(T[k]); return; }
