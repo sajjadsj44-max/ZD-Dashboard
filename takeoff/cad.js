@@ -11,7 +11,7 @@
    exact and needs no calibration. */
 const LDWG = "https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/dist/libredwg-web.js";
 const LDXF = "https://cdn.jsdelivr.net/npm/@mlightcad/dxf-json@1.2.8/dist/esm/bundle.mjs";
-export const CAD_VER = 2;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
+export const CAD_VER = 3;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
 export const INK = -1;             // colour 7 (and true black or white): white on a black background, black on white
 export const isCadName = n => /\.(dwg|dxf)$/i.test(String(n || ""));
 const CAPS_FONT = /^(technic_|techb___|techl___|coprgt[bl]?|copperplate[\w ]*|stencil|engr|castelar|felixti|alger)\.(ttf|otf)$/i;   // fonts with capitals only (their small letters are small capitals)
@@ -526,7 +526,9 @@ export function cadScene(md, opt){
     try {
       switch (e.t) {
         case "LINE": beg(); mv(e.a[0], e.a[1]); ln(e.b[0], e.b[1]); end(0, r.li, stroke()); if (rec) rec.len = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]); break;
-        case "POINT": beg(); mv(e.a[0], e.a[1]); ln(e.a[0], e.a[1]); end(3, r.li, style(r.c, -3, 0, null, 1)); break;
+        case "POINT": {   // a dimension's (or block's) definition points sit on Defpoints, which AutoCAD never plots: here they go with their dimension's layer, so its layer off takes them off too (not thousands of loose dots)
+          const li = cx.d > 0 && cx.L != null && /^defpoints$/i.test(r.nm) ? lay(cx.L) : r.li;
+          beg(); mv(e.a[0], e.a[1]); ln(e.a[0], e.a[1]); end(3, li, style(r.c, -3, 0, null, 1)); break; }
         case "CIRCLE": if (!(e.r > 0)) break; beg(); arc(e.c[0], e.c[1], e.r, 0, 0, e.r, 0, PI2, 0); cl(); end(0, r.li, stroke());
           if (rec) { rec.len = PI2 * e.r; rec.area = Math.PI * e.r * e.r; rec.cl = true; } break;
         case "ARC": { if (!(e.r > 0)) break; const sw = sweepOf(e.a0, e.a1); beg(); arc(e.c[0], e.c[1], e.r, 0, 0, e.r, e.a0, sw, 0); end(0, r.li, stroke()); if (rec) rec.len = e.r * sw; break; }
@@ -835,7 +837,7 @@ function* drawSteps(ctx, pg, v, o){
       ctx.stroke(); }
     ctx.globalAlpha = 1; yield; page(); }
   ctx.setLineDash([]);
-  if (!o.fast) { const r = 1.2 * px * dpr; for (let j = 0, n = 0; j < cnt; j++) { const i = at(j); if (K[i] !== 3 || !vis(i)) continue; ctx.fillStyle = css[St[i]]; const q = pg.q0[i]; ctx.fillRect(pg.xy[q] - r, pg.xy[q + 1] - r, 2 * r, 2 * r); if (++n % 5000 === 0) { yield; page(); } } }
+  if (!o.fast) { const r = 0.6 * px * dpr; /* a point: a pixel-sized dot, as AutoCAD shows one (PDMODE 0) */ for (let j = 0, n = 0; j < cnt; j++) { const i = at(j); if (K[i] !== 3 || !vis(i)) continue; ctx.fillStyle = css[St[i]]; const q = pg.q0[i]; ctx.fillRect(pg.xy[q] - r, pg.xy[q + 1] - r, 2 * r, 2 * r); if (++n % 5000 === 0) { yield; page(); } } }
   if (pg.tn) {
     const tB = pg.tB, tM = pg.tM, minPx = o.fast ? 7 : 3.5; ctx.textBaseline = "alphabetic"; let f0 = "";
     for (let i = 0, n = 0; i < pg.tn; i++) {
