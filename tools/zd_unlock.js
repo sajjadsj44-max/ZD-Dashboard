@@ -1,6 +1,6 @@
 /* The dashboards ask for their password every time a page is opened — nothing is remembered. A test browser types it in on every
    page it opens, as a person would: into the lock's own field, then its Unlock button (the page still checks it). On the Zameen
-   Developments start screen it first picks the complete Dashboard (ZD_APP for another card: pay, cm, calc).
+   Developments start screen it first picks the complete Dashboard (ZD_APP for another card: pay, cm, calc, prod).
 
      await require("./zd_unlock")(ctx);   // once, right after browser.newContext()
 

@@ -10,7 +10,7 @@
 const {chromium} = require("playwright");
 const fs = require("fs"), os = require("os"), path = require("path");
 const BASE = process.env.ZD_URL || "http://127.0.0.1:8765/", LIBS = process.env.TK_LIBS || "", PAGES = [["dashboards/", "sa"], ["takeoff/", "sa"], ["drawing-tracker/", "sa"], ["zameen-developments/?app=all", "sa"],
-  ["zameen-developments/?app=pay", "123"], ["zameen-developments/?app=cm", "sa"], ["zameen-developments/?app=calc", "sa"]];
+  ["zameen-developments/?app=pay", "123"], ["zameen-developments/?app=cm", "sa"], ["zameen-developments/?app=calc", "sa"], ["zameen-developments/?app=prod", "sa"]];
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else fail++; console.log((c ? "  ok   " : "  FAIL ") + m); };
 const LOCKISH = /lock|pass|pw|unlock|secret/i;
@@ -77,10 +77,10 @@ const LOCKISH = /lock|pass|pw|unlock|secret/i;
   sp.on("pageerror", e => serrs.push(String(e)));
   const startUp = async () => { await sp.goto(BASE + "zameen-developments/", {waitUntil: "load"}); return sp.isVisible("#zd-start"); };
   const shown = ids => sp.evaluate(ids => ids.filter(id => { const e = document.getElementById(id); return !!e && e.getClientRects().length > 0; }), ids);
-  const APPS = ["appEXEC", "appADMIN", "appCM", "appPAY", "appRA", "appFEAS", "appCALC"];
+  const APPS = ["appEXEC", "appADMIN", "appCM", "appPAY", "appRA", "appFEAS", "appCALC", "appPROD"];
   ok(await startUp(), "the page opens on the start screen");
   const picks = await sp.$$eval("#zd-start [data-zd-pick]", b => b.map(x => x.dataset.zdPick + ":" + x.querySelector("b").textContent));
-  ok(picks.join() === "all:Dashboard,takeoff:PDF Takeoff,pay:Payments,cm:Change Management,calc:Calculator", "five choices: " + picks.join(", "));
+  ok(picks.join() === "all:Dashboard,takeoff:PDF Takeoff,pay:Payments,cm:Change Management,calc:Calculator,prod:Productivity", "six choices: " + picks.join(", "));
   ok(!(await sp.$("#zd-lock")) && await sp.evaluate(() => [...document.body.children].filter(e => e.id !== "zd-start" && e.tagName !== "SCRIPT" && e.tagName !== "STYLE").every(e => e.inert)), "nothing behind it can be reached yet, and no password is asked before choosing");
   const solo = async (pick, pw, btn, app, title) => {
     ok(await startUp(), pick + ": back on the start screen");
@@ -97,12 +97,12 @@ const LOCKISH = /lock|pass|pw|unlock|secret/i;
       ok((await shown(APPS)).join() === app, pick + ": only its own screen is shown: " + (await shown(APPS)).join());
       const groups = await sp.$$eval(".navgroup", g => g.filter(e => e.getClientRects().length).map(e => e.id));
       ok(groups.every(g => g === "navgroup-" + pick) && !(await shown(["globalSearchWrap"])).length, pick + ": no other module's menu, no all-modules search: " + groups.join());
-      await sp.evaluate(() => { ["modExec", "tabCM", "tabPAY", "tabRA", "modAdmin", "modCalc"].forEach(id => { const e = document.getElementById(id); if (e) e.click(); }); });
+      await sp.evaluate(() => { ["modExec", "tabCM", "tabPAY", "tabRA", "modAdmin", "modCalc", "modProd"].forEach(id => { const e = document.getElementById(id); if (e) e.click(); }); });
       await sp.waitForTimeout(200);
       const after = await shown(APPS);
       ok(after.every(a => a === app), pick + ": another module can't be brought up (even by its hidden button): " + after.join());
     } else {
-      ok(["modExec", "tabCM", "tabPAY", "tabRA", "tabFEAS", "modAdmin", "modCalc", "modTakeoff"].every(id => mods.includes(id)), "all: every module is there: " + mods.join());
+      ok(["modExec", "tabCM", "tabPAY", "tabRA", "tabFEAS", "modAdmin", "modCalc", "modProd", "modTakeoff"].every(id => mods.includes(id)), "all: every module is there: " + mods.join());
     }
     ok(await sp.$eval("#zdHome", a => a.href) === BASE + "zameen-developments/", pick + ": a Start screen button goes back to the start screen");
   };
@@ -110,6 +110,7 @@ const LOCKISH = /lock|pass|pw|unlock|secret/i;
   await solo("pay", "123", "tabPAY", "appPAY", "Payments");
   await solo("cm", "sa", "tabCM", "appCM", "Change Management");
   await solo("calc", "sa", "modCalc", "appCALC", "Calculator");
+  await solo("prod", "sa", "modProd", "appPROD", "Productivity");
   await sp.goto(BASE + "zameen-developments/?app=pay", {waitUntil: "load"});
   ok(await sp.isVisible("#zd-lock") && !(await sp.$("#zd-start")) && await sp.textContent("#zd-lock-title") === "Payments", "?app=pay opens straight on the Payments password");
   await sp.goto(BASE + "zameen-developments/?app=nonsense", {waitUntil: "load"});
@@ -152,7 +153,7 @@ const LOCKISH = /lock|pass|pw|unlock|secret/i;
   ok(new URL(tq.url()).hash === "", "the trust link's key is taken off the address at once");
   ok(/now trusted/.test(await ft()) && await kept() === KEY, "the right trust link marks this computer as trusted");
   ok(Object.values(await tq.evaluate(() => ({...localStorage}))).every(v => v !== "sa" && v !== "123"), "the password itself is still not kept");
-  for (const pick of ["all", "pay", "cm", "calc"]) {
+  for (const pick of ["all", "pay", "cm", "calc", "prod"]) {
     await fresh("zameen-developments/");
     ok(/This computer is trusted/.test(await ft()), pick + ": the start screen says this computer is trusted");
     await tq.click('#zd-start [data-zd-pick="' + pick + '"]');
