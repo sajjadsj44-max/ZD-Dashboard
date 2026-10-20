@@ -72,6 +72,8 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
   ok(wall[0] > 180 && wall[1] < 60 && wall[2] < 60, "A-WALL drawn red " + JSON.stringify(wall));
   const txt = await T(() => { const Z = zdTakeoff, pg = Z.cadPage(); return pg && pg.tS.includes("BEDROOM"); });
   ok(txt, "text is in the scene (BEDROOM)");
+  const dp = await T(() => { const Z = zdTakeoff, sc = Z.S.cadSc[Z.S.fileId], pg = sc.pages[0], out = {}; for (let i = 0; i < pg.n; i++) if (pg.kind[i] === 3) { const n = sc.layers[pg.lay[i]].name; out[n] = (out[n] || 0) + 1; } return out; });
+  ok(dp["A-DIMS"] === 3 && dp["0"] === 1 && !dp.Defpoints, "a dimension's definition points go with its layer (A-DIMS off takes them off too, no loose dots); a point of its own keeps its layer " + JSON.stringify(dp));
   const furnHidden = await T(() => { const Z = zdTakeoff, sc = Z.S.cadSc[Z.S.fileId], h = Z.cadHidden(Z.S.fileId, sc); return h[sc.layers.findIndex(l => l.name === "A-FURN")] === 1; });
   ok(furnHidden, "a layer that is off is left out of the screen");
   const perf = await T(async () => { const Z = zdTakeoff, st = document.getElementById("stage"), t = []; for (let i = 0; i < 12; i++) { const a = performance.now(); Z.S.view.s *= 1.15; Z.applyView(); await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); t.push(performance.now() - a); } return {max: Math.max(...t), rendered: Z.S.rendered && Math.abs(Z.S.rendered.s - Z.S.view.s) < 1e-9}; });
