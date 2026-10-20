@@ -6761,6 +6761,96 @@ var SH=(function(){
     else { g='<polygon points="30,140 180,140 230,100 80,100" class="zc-conc"/><polygon points="30,140 180,140 180,152 30,152" class="zc-side"/><path d="M26,156 H184 L236,114" class="zc-formline"/>'+note(130,184,'Soffit + edges','middle'); }
     return svg(g); };
   S.grid=function(){ return svg('<rect x="40" y="40" width="180" height="120" class="zc-void" style="stroke:currentColor"/>'+note(130,105,'Σ rows (Nos × L)','middle')); };
+  /* any plane figure or solid (Concrete, Area & Volume): p = {el, v:{key: value in ft}, t:{key: 'sym = value unit'}, pts:[{x,y}] in ft, pu, n} */
+  S.geo=function(p){ p=p||{}; var el=p.el||'icon', v=p.v||{}, T=p.t||{}, M=Math, cx=130, g='';
+    function t(k,d){ return T[k]||d; }
+    function n(k,d){ var x=+v[k]; return isFinite(x)&&x>0?x:d; }
+    function z(k){ var x=+v[k]; return isFinite(x)&&x>0?x:0; }
+    function f1(x){ return (+x).toFixed(1); }
+    function pl(a,cls){ return '<polygon points="'+a.map(function(q){ return f1(q[0])+','+f1(q[1]); }).join(' ')+'" class="'+(cls||'zc-solid')+'"/>'; }
+    function foot(k,d){ return T[k]?note(cx,206,t(k,d),'middle'):''; }
+    var r, s, i, P, a, b, h, x0, y0, yt, yb;
+    switch(el){
+      case 'rect': if(!p.flat) return S.box({ll:t('L','L'),wl:t('W','W'),dl:t('D','D'),n:p.n});
+        r=clampRatio(n('L',20),n('W',10),0.12); s=fitScale(r[0],r[1],176,122); a=r[0]*s; b=r[1]*s; x0=(260-a)/2-12; yt=(196-b)/2;
+        return svg('<rect x="'+f1(x0)+'" y="'+f1(yt)+'" width="'+f1(a)+'" height="'+f1(b)+'" class="zc-solid"/>'+dimH(x0,x0+a,yt+b+20,t('L','L'),[yt+b,yt+b])+dimV(yt,yt+b,x0+a+14,t('W','W'),'r',[x0+a,x0+a]));
+      case 'tri3': { a=n('s1',3); b=n('s2',4); var c3=n('s3',5), xa=(b*b-a*a+c3*c3)/(2*c3), ya=Math.sqrt(Math.max(0,b*b-xa*xa)); s=fitScale(M.max(c3,xa,c3-xa),ya||1,170,120);
+        if(!(ya>0)) return svg(note(cx,100,'These three sides do not close into a triangle','middle'));
+        x0=(260-c3*s)/2+M.min(0,xa)*-s; yb=(196+ya*s)/2; P=[[x0,yb],[x0+c3*s,yb],[x0+xa*s,yb-ya*s]];
+        return svg(pl(P)+dimH(P[0][0],P[1][0],yb+18,t('s3','c'),[yb,yb])+note((P[1][0]+P[2][0])/2+8,(P[1][1]+P[2][1])/2,t('s1','a'))+note((P[0][0]+P[2][0])/2-8,(P[0][1]+P[2][1])/2,t('s2','b'),'end')); }
+      case 'circ': case 'ring': if(p.flat){ var Rc=72, cyc2=92, fr=el==='ring'?M.max(0.2,M.min(0.92,n('di',9)/n('dia',10))):0;
+          g='<circle cx="'+cx+'" cy="'+cyc2+'" r="'+Rc+'" class="zc-solid"/>'+(fr?'<circle cx="'+cx+'" cy="'+cyc2+'" r="'+f1(Rc*fr)+'" class="zc-void"/><g class="zc-dim"><line x1="'+f1(cx-Rc*fr)+'" y1="'+cyc2+'" x2="'+f1(cx+Rc*fr)+'" y2="'+cyc2+'" marker-start="url(#zcA)" marker-end="url(#zcA)"/><text x="'+cx+'" y="'+(cyc2-5)+'" text-anchor="middle">'+esc(t('di','Di'))+'</text></g>':'');
+          return svg(g+dimH(cx-Rc,cx+Rc,cyc2+Rc+20,t('dia',fr?'Do':'d'),[cyc2,cyc2])); }
+        { var top=42, hh=112, rx=64, ry=16;
+        g='<path d="M'+(cx-rx)+','+top+' V'+(top+hh)+' A'+rx+','+ry+' 0 0 0 '+(cx+rx)+','+(top+hh)+' V'+top+'" class="zc-solid"/><ellipse cx="'+cx+'" cy="'+top+'" rx="'+rx+'" ry="'+ry+'" class="zc-side"/>';
+        if(el==='ring'){ r=M.max(0.25,M.min(0.9,n('di',1)/n('dia',1.5))); g+='<ellipse cx="'+cx+'" cy="'+top+'" rx="'+f1(rx*r)+'" ry="'+f1(ry*r)+'" class="zc-void"/><g class="zc-dim"><line x1="'+f1(cx-rx*r)+'" y1="'+top+'" x2="'+f1(cx+rx*r)+'" y2="'+top+'" marker-start="url(#zcA)" marker-end="url(#zcA)"/><text x="'+cx+'" y="'+(top-4)+'" text-anchor="middle">'+esc(t('di','Di'))+'</text></g>'; }
+        return svg(g+dimH(cx-rx,cx+rx,top+hh+ry+20,t('dia',el==='ring'?'Do':'d'),[top+hh,top+hh])+dimV(top,top+hh,cx+rx+14,t('D','H'),'r')); }
+      case 'hrect': { r=clampRatio(n('L',20),n('W',10),0.3); s=fitScale(r[0],r[1],170,120); var w=r[0]*s, hh=r[1]*s, x=(260-w)/2-14, y=(200-hh)/2-10, tt=M.max(4,M.min(M.min(w,hh)/2-8,n('t',0.5)*w/n('L',20)));
+        return svg('<rect x="'+f1(x)+'" y="'+f1(y)+'" width="'+f1(w)+'" height="'+f1(hh)+'" class="zc-solid"/><rect x="'+f1(x+tt)+'" y="'+f1(y+tt)+'" width="'+f1(w-2*tt)+'" height="'+f1(hh-2*tt)+'" class="zc-void"/>'+
+          dimH(x,x+w,y+hh+20,t('L','L'),[y+hh,y+hh])+dimV(y,y+hh,x+w+14,t('W','W'),'r',[x+w,x+w])+leader(x+w*0.35,y+tt/2,x+w*0.35+14,y-12,t('t','t'))+foot('D','H')); }
+      case 'poly': { var N=M.max(3,M.min(12,M.round(n('ns',6)))), R=70, cy=92, a0=M.PI/2+M.PI/N; P=[]; for(i=0;i<N;i++){ a=a0+2*M.PI*i/N; P.push([cx+R*M.cos(a),cy+R*M.sin(a)]); }
+        yb=P[0][1]; return svg(pl(P)+dimH(P[0][0],P[N-1][0],yb+18,t('s','s'),[yb,yb])+note(cx,cy+4,N+' sides','middle')+foot('D','H')); }
+      case 'ellipse': { var ex=95, ey=95*M.max(0.25,M.min(1,n('W',10)/n('L',20))), ecy=92;
+        return svg('<ellipse cx="'+cx+'" cy="'+ecy+'" rx="'+ex+'" ry="'+f1(ey)+'" class="zc-solid"/>'+dimH(cx-ex,cx+ex,ecy+ey+20,t('L','2a'),[ecy,ecy])+dimV(ecy-ey,ecy+ey,cx+ex+12,t('W','2b'),'r',[cx,cx])+foot('D','D')); }
+      case 'sector': { var th=M.max(1,M.min(360,n('ang',90))), Ro=th>180?78:100, cyc=th>180?100:(th>=120?150:170), ri=Ro*M.min(0.95,z('ri')/n('ro',10)), a1=(-90-th/2)*M.PI/180, a2=(-90+th/2)*M.PI/180, big=th>180?1:0;
+        function pt(rr,an){ return [cx+rr*M.cos(an),cyc+rr*M.sin(an)]; }
+        if(th>=360) g='<circle cx="'+cx+'" cy="'+cyc+'" r="'+Ro+'" class="zc-solid"/>'+(ri?'<circle cx="'+cx+'" cy="'+cyc+'" r="'+f1(ri)+'" class="zc-void"/>':'');
+        else { var o1=pt(Ro,a1), o2=pt(Ro,a2), i1=pt(ri,a1), i2=pt(ri,a2);
+          g='<path d="M'+f1(o1[0])+','+f1(o1[1])+' A'+Ro+','+Ro+' 0 '+big+' 1 '+f1(o2[0])+','+f1(o2[1])+(ri?' L'+f1(i2[0])+','+f1(i2[1])+' A'+f1(ri)+','+f1(ri)+' 0 '+big+' 0 '+f1(i1[0])+','+f1(i1[1]):' L'+cx+','+cyc)+' Z" class="zc-solid"/>'; }
+        var e2=pt(Ro,th>=360?-M.PI/4:a2); g+='<line x1="'+cx+'" y1="'+cyc+'" x2="'+f1(e2[0])+'" y2="'+f1(e2[1])+'" class="zc-ext" stroke="currentColor"/>';
+        return svg(g+note(cx,cyc-Ro-6,t('ro','R'),'middle')+(ri?note(cx,cyc-ri+14,t('ri','r'),'middle'):'')+note(cx,th>=360?cyc+4:cyc+16,t('ang','θ'),'middle')+foot('D','D')); }
+      case 'segment': { var c=n('ch',12), rs=n('rise',3), half=90, rp=M.max(8,M.min(150,180*rs/c)), Rp=(half*half+rp*rp)/(2*rp); yb=rp>half?170:162;
+        return svg('<path d="M'+(cx-half)+','+yb+' A'+f1(Rp)+','+f1(Rp)+' 0 '+(rp>half?1:0)+' 1 '+(cx+half)+','+yb+' Z" class="zc-solid"/>'+dimH(cx-half,cx+half,yb+18,t('ch','c'),[yb,yb])+dimV(yb-rp,yb,cx,t('rise','h'),'r')+foot('D','D')); }
+      case 'xy': { var Q=(p.pts||[]).filter(function(q){ return isFinite(q.x)&&isFinite(q.y); });
+        if(Q.length<3) return svg('<rect x="40" y="30" width="180" height="130" class="zc-void" style="stroke:currentColor;stroke-dasharray:4 3"/>'+note(cx,100,'Enter 3 or more corner points','middle'));
+        var mnx=M.min.apply(null,Q.map(function(q){return q.x;})), mxx=M.max.apply(null,Q.map(function(q){return q.x;})), mny=M.min.apply(null,Q.map(function(q){return q.y;})), mxy=M.max.apply(null,Q.map(function(q){return q.y;}));
+        var sx=(mxx-mnx)||1, sy=(mxy-mny)||1; s=fitScale(sx,sy,180,130); var ox=(260-sx*s)/2-12, oy=22+(130-sy*s)/2;
+        function X(q){ return ox+(q.x-mnx)*s; } function Y(q){ return oy+(mxy-q.y)*s; }
+        g=pl(Q.map(function(q){ return [X(q),Y(q)]; }));
+        Q.forEach(function(q,j){ g+='<circle cx="'+f1(X(q))+'" cy="'+f1(Y(q))+'" r="2.4" fill="currentColor"/>'+note(X(q)+4,Y(q)-4,String(j+1)); });
+        var u=p.pu||'ft'; function span(d){ var x=conv(d,'len','ft',u); return nw(+x.toFixed(3))+' '+u; }
+        yb=oy+sy*s; return svg(g+dimH(ox,ox+sx*s,yb+18,'X span = '+span(mxx-mnx),[yb,yb])+dimV(oy,yb,ox+sx*s+12,'Y = '+span(mxy-mny),'r',[ox+sx*s,ox+sx*s])+foot('D','D')); }
+      case 'area': return svg('<path d="M52,62 C84,22 172,30 204,58 C238,88 226,148 182,160 C132,174 62,168 46,130 C36,104 32,82 52,62 Z" class="zc-solid"/>'+note(cx,98,t('A','A'),'middle')+(T.P?note(cx,116,t('P','P'),'middle'):'')+foot('D','D'));
+      case 'trap': { a=n('a',1); b=n('b',2); h=n('h',1.5); s=fitScale(M.max(a,b),h,160,115); var aw=a*s, bw=b*s, hp=h*s; yt=(200-hp)/2; yb=yt+hp;
+        return svg(pl([[cx-bw/2,yb],[cx+bw/2,yb],[cx+aw/2,yt],[cx-aw/2,yt]])+dimH(cx-aw/2,cx+aw/2,yt-10,t('a','a'),[yt,yt])+dimH(cx-bw/2,cx+bw/2,yb+18,t('b','b'),[yb,yb])+dimV(yt,yb,cx+M.max(aw,bw)/2+12,t('h','h'),'r')+(T.L?note(cx,206,t('L','L')+' (into page)','middle'):'')); }
+      case 'tri': { b=n('b',2); h=n('h',1.5); s=fitScale(b,h,150,115); var tb=b*s, th2=h*s; x0=(260-tb)/2+30; yt=(200-th2)/2; yb=yt+th2;
+        return svg(pl([[x0,yb],[x0+tb,yb],[x0,yt]])+dimH(x0,x0+tb,yb+18,t('b','b'),[yb,yb])+dimV(yt,yb,x0-10,t('h','h'),'l')+(T.L?note(cx,206,t('L','L')+' (into page)','middle'):'')); }
+      case 'tbeam': { var bf=n('bf',4), df=n('df',0.5), bwb=n('bw',1); h=n('h',1.5); s=fitScale(bf,h,150,120); var BF=bf*s, DF=M.max(3,df*s), BW=M.max(3,bwb*s), HP=h*s, c2=124; yt=(196-HP)/2; yb=yt+HP;
+        return svg(pl([[c2-BF/2,yt],[c2+BF/2,yt],[c2+BF/2,yt+DF],[c2+BW/2,yt+DF],[c2+BW/2,yb],[c2-BW/2,yb],[c2-BW/2,yt+DF],[c2-BF/2,yt+DF]])+
+          dimH(c2-BF/2,c2+BF/2,yt-10,t('bf','bf'),[yt,yt])+dimH(c2-BW/2,c2+BW/2,yb+18,t('bw','bw'),[yb,yb])+dimV(yt,yb,c2+BF/2+12,t('h','D'),'r',[c2+BF/2,c2+BW/2])+
+          leader(c2-BF/2+6,yt+DF/2,c2-BF/2+16,yt+DF+26,t('df','Df'))+(T.L?note(cx,206,t('L','L')+' (into page)','middle'):'')); }
+      case 'foot': { var Lb=n('L',6), lt=z('l2'), d1=z('d1'); h=n('h',1); s=fitScale(Lb,d1+h,180,118); var Lw=Lb*s, lw=lt*s, D1=d1?M.max(14,d1*s):0, HP=M.max(16,h*s); yb=(196+D1+HP)/2; var y1=yb-D1; yt=y1-HP;
+        g=(D1?'<rect x="'+f1(cx-Lw/2)+'" y="'+f1(y1)+'" width="'+f1(Lw)+'" height="'+f1(D1)+'" class="zc-solid"/>':'')+pl([[cx-Lw/2,y1],[cx+Lw/2,y1],[cx+lw/2,yt],[cx-lw/2,yt]]);
+        if(lw) g+='<rect x="'+f1(cx-lw/2)+'" y="'+f1(yt-14)+'" width="'+f1(lw)+'" height="14" class="zc-void" style="stroke-dasharray:3 2"/>'+dimH(cx-lw/2,cx+lw/2,yt-20,t('l2','l'),[yt-14,yt-14]);
+        return svg(g+dimH(cx-Lw/2,cx+Lw/2,yb+18,t('L','L'),[yb,yb])+dimV(yt,y1,cx+Lw/2+12,t('h','h'),'r',[cx+lw/2,cx+Lw/2])+(D1?dimV(y1,yb,cx+Lw/2+12,t('d1','d1'),'r'):'')+note(6,12,t('W','W')+(T.w2?'  ·  '+t('w2','w'):''))); }
+      case 'cone': { var D1c=n('dia',2), D2c=z('dt'); h=n('D',4); s=fitScale(M.max(D1c,D2c),h,150,112); var BWc=D1c*s, TWc=D2c*s, HPc=h*s, ryb=M.max(4,BWc*0.12), ryt=TWc*0.12; yb=(200+HPc)/2-6; yt=yb-HPc;
+        g='<path d="M'+f1(cx-BWc/2)+','+f1(yb)+' L'+f1(cx-TWc/2)+','+f1(yt)+' L'+f1(cx+TWc/2)+','+f1(yt)+' L'+f1(cx+BWc/2)+','+f1(yb)+' A'+f1(BWc/2)+','+f1(ryb)+' 0 0 1 '+f1(cx-BWc/2)+','+f1(yb)+' Z" class="zc-solid"/>'+(TWc?'<ellipse cx="'+cx+'" cy="'+f1(yt)+'" rx="'+f1(TWc/2)+'" ry="'+f1(ryt)+'" class="zc-side"/>'+dimH(cx-TWc/2,cx+TWc/2,yt-ryt-8,t('dt','D2'),[yt,yt]):'');
+        return svg(g+dimH(cx-BWc/2,cx+BWc/2,yb+ryb+16,t('dia','D1'),[yb,yb])+dimV(yt,yb,cx+M.max(BWc,TWc)/2+12,t('D','H'),'r')); }
+      case 'dome': { var span=n('sp',20), rise=n('rise',5), th3=z('t'); s=fitScale(span+2*th3,rise+th3,190,150); var ah=span*s/2, rp2=M.max(6,rise*s), tp=th3?M.max(3,th3*s):0; yb=(200+rp2+tp)/2-8;
+        var Rd=(ah*ah+rp2*rp2)/(2*rp2), Rdo=Rd+tp, ho=rp2+tp, ao=M.sqrt(M.max(0,ho*(2*Rdo-ho)));
+        g=tp?'<path d="M'+f1(cx-ao)+','+yb+' A'+f1(Rdo)+','+f1(Rdo)+' 0 '+(ho>ao?1:0)+' 1 '+f1(cx+ao)+','+yb+' L'+(cx+ah)+','+yb+' A'+f1(Rd)+','+f1(Rd)+' 0 '+(rp2>ah?1:0)+' 0 '+(cx-ah)+','+yb+' Z" class="zc-solid"/>'
+          :'<path d="M'+(cx-ah)+','+yb+' A'+f1(Rd)+','+f1(Rd)+' 0 '+(rp2>ah?1:0)+' 1 '+(cx+ah)+','+yb+' Z" class="zc-solid"/>';
+        return svg(g+'<line x1="14" y1="'+yb+'" x2="246" y2="'+yb+'" class="zc-ground"/>'+dimH(cx-ah,cx+ah,yb+20,t('sp','span'),[yb,yb])+dimV(yb-rp2,yb,cx,t('rise','h'),'r')+(tp?leader(cx-ah*0.45,yb-rp2*0.8-tp/2,cx-ah*0.45-12,yb-rp2-tp-14,t('t','t')):'')); }
+      case 'stair': { var NS=M.max(1,M.round(n('nst',10))), Nd=M.min(NS,9), Tr=n('tr',0.833), Rr=n('rr',0.5), wt=n('t',0.5); s=fitScale(Nd*Tr,Nd*Rr+wt*1.6,186,124);
+        var Tp=Tr*s, Rp2=Rr*s, al=M.atan2(Rp2,Tp), tv=M.max(4,wt*s/M.cos(al)); x0=(260-Nd*Tp)/2-10; y0=(196+Nd*Rp2)/2+4; P=[[x0,y0]];
+        for(i=0;i<Nd;i++){ P.push([x0+i*Tp,y0-(i+1)*Rp2]); P.push([x0+(i+1)*Tp,y0-(i+1)*Rp2]); }
+        var xe=x0+Nd*Tp, ye=y0-Nd*Rp2, xs=M.max(x0,xe-(Nd*Rp2-tv)*Tp/Rp2); P.push([xe,ye+tv]); P.push([xs,y0]);
+        return svg(pl(P)+dimH(xe-Tp,xe,ye-10,t('tr','T'),[ye,ye])+dimV(ye,ye+Rp2,xe+10,t('rr','R'),'r')+leader((xs+xe)/2+4,(y0+ye+tv)/2+2,(xs+xe)/2+22,(y0+ye+tv)/2+28,t('t','t'))+
+          note(cx,206,t('nst','n')+' steps'+(T.W?'  ·  '+t('W','W'):'')+(NS>Nd?'  (first '+Nd+' drawn)':''),'middle')); }
+      case 'incl': { var Lp0=n('L',30), rr2=n('rise',4), tk=n('D',0.5); s=fitScale(Lp0,rr2,180,108); var Lp=Lp0*s, rp3=rr2*s, al2=M.atan2(rp3,Lp), tv2=M.max(5,tk*s/M.cos(al2)); x0=(260-Lp)/2-10; y0=160;
+        return svg(pl([[x0,y0],[x0+Lp,y0-rp3],[x0+Lp,y0-rp3-tv2],[x0,y0-tv2]])+'<line x1="'+(x0-6)+'" y1="'+y0+'" x2="'+f1(x0+Lp+6)+'" y2="'+y0+'" class="zc-ground"/>'+
+          dimH(x0,x0+Lp,y0+20,t('L','L'),[y0,y0])+dimV(y0-rp3,y0,x0+Lp+12,t('rise','rise'),'r',[x0+Lp,x0+Lp])+leader(x0+Lp*0.3,y0-rp3*0.3-tv2/2,x0+Lp*0.3-6,y0-rp3*0.3-tv2-24,t('D','t'))+foot('W','W')); }
+      case 'retw': { var Bb=n('rb',8), Db=n('rd',1.5), t1=n('a',1), t2=n('b',1.5), Hs=n('hs',10); s=fitScale(Bb,Db+Hs,170,146); var Bp=Bb*s, Dp=M.max(4,Db*s), T1=M.max(3,t1*s), T2=M.max(3,t2*s), Hp=Hs*s; x0=(260-Bp)/2-6; yb=(200+Dp+Hp)/2-4; var yB=yb-Dp, xst=x0+M.max(0,(Bp-T2)/3);
+        return svg('<rect x="'+f1(x0)+'" y="'+f1(yB)+'" width="'+f1(Bp)+'" height="'+f1(Dp)+'" class="zc-solid"/>'+pl([[xst,yB],[xst+T2,yB],[xst+T1,yB-Hp],[xst,yB-Hp]])+
+          dimH(x0,x0+Bp,yb+16,t('rb','B'),[yb,yb])+dimV(yB,yb,x0+Bp+10,t('rd','Db'),'r')+dimV(yB-Hp,yB,xst-10,t('hs','H'),'l')+dimH(xst,xst+T1,yB-Hp-8,t('a','t1'),[yB-Hp,yB-Hp])+
+          leader(xst+T2,yB-6,xst+T2+26,yB-26,t('b','t2'))+note(254,12,t('L','L'),'end')); }
+      case 'sph': case 'hemi': { var Rs=70, cys=el==='sph'?95:140;
+        g=el==='sph'?'<circle cx="'+cx+'" cy="'+cys+'" r="'+Rs+'" class="zc-solid"/><ellipse cx="'+cx+'" cy="'+cys+'" rx="'+Rs+'" ry="'+(Rs*0.25)+'" class="zc-line" style="stroke-dasharray:4 3"/>'
+          :'<path d="M'+(cx-Rs)+','+cys+' A'+Rs+','+Rs+' 0 0 1 '+(cx+Rs)+','+cys+' Z" class="zc-solid"/><ellipse cx="'+cx+'" cy="'+cys+'" rx="'+Rs+'" ry="'+(Rs*0.25)+'" class="zc-side"/>';
+        return svg(g+dimH(cx-Rs,cx+Rs,el==='sph'?cys+Rs+20:cys+Rs*0.25+20,t('dia','d'),[cys,cys])); }
+      default: return svg('<polygon points="34,160 84,64 134,160" class="zc-solid"/><circle cx="184" cy="88" r="42" class="zc-side"/><rect x="128" y="112" width="86" height="58" class="zc-side2"/>');
+    }
+  };
   S.none=function(){ return ''; };
   return S;
 })();
@@ -6773,7 +6863,7 @@ function Sel(k,l,opts,def,o){ return Object.assign({k:k,l:l,type:'sel',opts:opts
 var MM_STEEL=['mm','cm','in'], LEN_ALL=['ft','in','m','cm','mm','RFT','yd'];
 var PLATE_T=[1,1.2,1.5,2,2.5,3,4,5,6,8,10,12,14,16,18,20,22,25,28,30,32,35,40,45,50,60,70,80,100];
 var REBAR_D=[6,8,10,12,14,16,18,20,22,25,28,32,36,40,50];
-var MIX_CONC=[['1:1.5:3','1 : 1.5 : 3'],['1:2:4','1 : 2 : 4'],['1:3:6','1 : 3 : 6'],['1:4:8','1 : 4 : 8'],['custom','Custom ratio']];
+var MIX_CONC=[['1:1:2','1 : 1 : 2'],['1:1.5:3','1 : 1.5 : 3'],['1:2:4','1 : 2 : 4'],['1:3:6','1 : 3 : 6'],['1:4:8','1 : 4 : 8'],['custom','Custom ratio']];
 var MIX_MORT=[['1:2','1 : 2'],['1:3','1 : 3'],['1:4','1 : 4'],['1:5','1 : 5'],['1:6','1 : 6'],['custom','Custom ratio']];
 function cft2m3(x){ return x*0.028316846592; } function sft2m2(x){ return x*0.09290304; } function ft2m(x){ return x*0.3048; }
 function ratioParts(v,key){ var s=v[key]==='custom'? (v.rc+':'+v.rs+(v.ra!=null&&key==='mix'?':'+v.ra:'')) : v[key]; return String(s).split(':').map(Number); }
@@ -7165,35 +7255,339 @@ function openingsRows(R,rows,H3,label){ // rows: n,w,h (in ft), H3 thickness or 
 }
 var ROWS_OPEN={type:'rows',k:'ops',l:'Openings to deduct (doors, windows)',cols:[['n','Nos'],['w','Width'],['h','Height']],u:'ft',base:'ft'};
 
-def({id:'concrete',cat:'civil',name:'Concrete (PCC / RCC)',sub:'Volume by dimension strings, deductions, nominal-mix materials, optional steel',ic:'box',
-  kw:'concrete pcc rcc slab footing beam column volume cft m3 mix 1:2:4 cement bags sand crush lean concrete',
-  fl:['V = Nos × L × W × D  (deductions as negative rows)','Vdry = V × 1.54 (convention)','cement bags = Vdry × c/Σ ÷ Vbag','Vbag = 50 kg ÷ 1440 kg/m³ = 1.226 CFT'],
-  inputs:[Sel('kind','Type',[['pcc','PCC (plain)'],['rcc','RCC (reinforced)']],'rcc'),Sel('el','Element',[['rect','Rectangular (slab / footing / beam / wall / column)'],['circ','Circular (column / pile)']],'rect'),
-    Num('n','Nos',1),Lin('L','Length L','ft',20,'ft',{units:FT_UNITS,show:function(v){return v.el==='rect';}}),Lin('W','Width W','ft',10,'ft',{units:FT_UNITS,show:function(v){return v.el==='rect';}}),
-    Lin('dia','Diameter','ft',1.5,'ft',{units:FT_UNITS,show:function(v){return v.el==='circ';}}),Lin('D','Depth / thickness / height','ft',0.5,'ft',{units:FT_UNITS}),
-    {type:'rows',k:'ded',l:'Deductions (Nos × L × W × D)',cols:[['n','Nos'],['l','L'],['w','W'],['d','D']],u:'ft',base:'ft'},
+/* ------------------------------------------------------------------ shape geometry — any plan, section or solid
+   One engine for Concrete and Area & Volume. Inputs in ft, areas in SFT, volumes in CFT; every value comes with its formula
+   and working. A shape table row is [group, name, {key: [form label, symbol for formulas and the diagram]}]. */
+var GEO_KEYS=[ // [key, fallback label, default, default unit, options] — this order is the form order for every shape
+  ['L','Length',20,'ft'],['W','Width',10,'ft'],['dia','Diameter',1.5,'ft'],['sp','Span',20,'ft'],['di','Inner diameter',1,'ft'],['dt','Top diameter',1,'ft',{allow0:true}],
+  ['ro','Outer radius',10,'ft'],['ri','Inner radius',8,'ft',{allow0:true}],['ang','Angle (degrees)',90,'°'],['ch','Chord',12,'ft'],['rise','Rise',3,'ft'],
+  ['ns','Number of sides',6,'#'],['s','Side length',1,'ft'],['s1','Side a',3,'ft'],['s2','Side b',4,'ft'],['s3','Side c',5,'ft'],
+  ['bf','Flange width',4,'ft'],['df','Flange depth',0.5,'ft'],['bw','Web width',1,'ft'],['rb','Base width',8,'ft'],['rd','Base thickness',1.5,'ft'],
+  ['a','Top width',1,'ft'],['b','Bottom width',2,'ft'],['l2','Top length',1.5,'ft',{allow0:true}],['w2','Top width',1.5,'ft',{allow0:true}],['h','Height',1.5,'ft'],
+  ['hs','Stem height',10,'ft'],['d1','Vertical edge depth',0.75,'ft',{allow0:true}],['nst','Number of steps',10,'#'],['tr','Tread (going)',10,'in'],['rr','Riser',6,'in'],
+  ['pts'],['A','Plan area',100,'SFT'],['P','Perimeter',null,'ft',{opt:true}],['t','Thickness',0.5,'ft',{allow0:true}],['D','Depth / thickness / height',0.5,'ft']
+];
+var GEO_G={pr:'Constant plan section × depth / height',xs:'Cross-section × length',so:'Tapered solids & special members',a:'Plane figures — area & perimeter',v:'Solids — volume & surface area'};
+function geoInputs(tab,sk,over){
+  var used={}; Object.keys(tab).forEach(function(id){ Object.keys(tab[id][2]).forEach(function(k){ used[k]=1; }); });
+  return GEO_KEYS.filter(function(g){ return used[g[0]]; }).map(function(g){ var k=g[0];
+    var o=Object.assign({show:function(v){ var s=tab[v[sk]]; return !!(s&&s[2][k]); },lab:function(v){ var s=tab[v[sk]], f=s&&s[2][k]; return f?f[0]:''; }},g[4]||{},(over||{})[k]||{});
+    if(k==='pts') return Object.assign({type:'rows',k:k,l:'Corner points (X, Y)',cols:[['x','X','len'],['y','Y','len']],u:'ft',base:'ft',join:', ',
+      def:[{x:'0',y:'0'},{x:'20',y:'0'},{x:'20',y:'10'},{x:'12',y:'16'},{x:'0',y:'16'}]},o);
+    if(g[3]==='#') return Num(k,g[1],o.def!=null?o.def:g[2],Object.assign({int:true},o));
+    if(g[3]==='°') return Num(k,g[1],o.def!=null?o.def:g[2],o);
+    if(g[3]==='SFT') return Object.assign({k:k,l:g[1],dim:'area',u:'SFT',def:g[2],base:'SFT',units:['SFT','m²','yd²']},o);
+    return Lin(k,g[1],g[3],g[2],'ft',Object.assign({units:FT_UNITS},o)); });
+}
+function geoOpts(tab){ return Object.keys(tab).map(function(k){ return [k,tab[k][1],GEO_G[tab[k][0]]]; }); }
+function geoPts(v){ return (v.pts||[]).filter(function(p){ return isFinite(p.x)&&isFinite(p.y); }); }
+function geoCross(a,b,c,d){ function o(p,q,r){ var x=(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x); return Math.abs(x)<1e-12?0:x>0?1:-1; } return o(a,b,c)*o(a,b,d)<0&&o(c,d,a)*o(c,d,b)<0; }
+/* plane figure → area A (SFT), perimeter P (ft) with its own formula (Pf / Pw), steps */
+function geoPlane(el,v){
+  var o={A:null,P:null,Pl:'Perimeter',Pf:'',Pw:'',steps:[],err:[],warn:[],notes:[]};
+  function S(t,f,w,x,u){ o.steps.push({t:t,f:f,w:w,v:x,u:u}); }
+  function per(P,f,w,l){ o.P=P; o.Pf=f; o.Pw=w; if(l) o.Pl=l; }
+  var th,r,c,h,R,a,b;
+  switch(el){
+    case 'rect': o.A=v.L*v.W; S('Area','A = L × W',nw(v.L)+' × '+nw(v.W),o.A,'SFT'); per(2*(v.L+v.W),'2(L + W)','2 × ('+nw(v.L)+' + '+nw(v.W)+')'); break;
+    case 'circ': o.A=PI/4*v.dia*v.dia; S('Area','A = π/4 × d²','π/4 × '+nw(v.dia)+'²',o.A,'SFT'); per(PI*v.dia,'π × d','π × '+nw(v.dia),'Circumference'); break;
+    case 'ring': if(!(v.di<v.dia)){ o.err.push('Inner diameter must be less than the outer diameter'); break; }
+      S('Wall thickness','t = (Do − Di) / 2','('+nw(v.dia)+' − '+nw(v.di)+') / 2',(v.dia-v.di)/2,'ft');
+      o.A=PI/4*(v.dia*v.dia-v.di*v.di); S('Ring area','A = π/4 × (Do² − Di²)','π/4 × ('+nw(v.dia)+'² − '+nw(v.di)+'²)',o.A,'SFT');
+      per(PI*(v.dia+v.di),'π × (Do + Di)','π × ('+nw(v.dia)+' + '+nw(v.di)+')','Perimeter — outer + inner'); break;
+    case 'hrect': if(!(v.t>0)){ o.err.push('Wall thickness must be greater than zero'); break; } if(!(2*v.t<Math.min(v.L,v.W))){ o.err.push('2 × wall thickness must be less than the smaller outer side'); break; }
+      var li=v.L-2*v.t, wi=v.W-2*v.t; S('Inner (clear) size','l × w = (L − 2t) × (W − 2t)',nw(li)+' × '+nw(wi),li*wi,'SFT');
+      o.A=v.L*v.W-li*wi; S('Wall plan area','A = L × W − l × w',nw(v.L)+' × '+nw(v.W)+' − '+nw(li)+' × '+nw(wi),o.A,'SFT');
+      S('Check — centre-line method','A = 2(L + W − 2t) × t','2 × ('+nw(v.L)+' + '+nw(v.W)+' − 2 × '+nw(v.t)+') × '+nw(v.t),2*(v.L+v.W-2*v.t)*v.t,'SFT');
+      per(2*(v.L+v.W)+2*(li+wi),'2(L + W) + 2(l + w)','2 × ('+nw(v.L)+' + '+nw(v.W)+') + 2 × ('+nw(li)+' + '+nw(wi)+')','Perimeter — outer + inner'); break;
+    case 'poly': var N=v.ns; if(!(N>=3)){ o.err.push('A regular polygon needs 3 or more sides'); break; }
+      var tn=Math.tan(PI/N); o.A=N*v.s*v.s/(4*tn);
+      S('Area','A = n × s² / (4 × tan(180° / n))',nw(N)+' × '+nw(v.s)+'² / (4 × tan('+nw(180/N)+'°))',o.A,'SFT');
+      S('Across corners','AC = s / sin(180° / n)',nw(v.s)+' / sin('+nw(180/N)+'°)',v.s/Math.sin(PI/N),'ft');
+      if(N%2===0) S('Across flats','AF = s / tan(180° / n)',nw(v.s)+' / tan('+nw(180/N)+'°)',v.s/tn,'ft');
+      per(N*v.s,'n × s',nw(N)+' × '+nw(v.s)); break;
+    case 'ellipse': a=v.L/2; b=v.W/2; o.A=PI*a*b; S('Area','A = π/4 × 2a × 2b','π/4 × '+nw(v.L)+' × '+nw(v.W),o.A,'SFT');
+      per(PI*(3*(a+b)-Math.sqrt((3*a+b)*(a+3*b))),'π × [3(a + b) − √((3a + b)(a + 3b))]','π × [3 × ('+nw(a)+' + '+nw(b)+') − √('+nw(3*a+b)+' × '+nw(a+3*b)+')]','Perimeter (Ramanujan approximation)'); break;
+    case 'sector': r=v.ri||0; if(!(r<v.ro)){ o.err.push('Inner radius must be less than the outer radius'); break; } if(!(v.ang>0&&v.ang<=360)){ o.err.push('Angle must be more than 0° and not more than 360°'); break; }
+      th=v.ang*PI/180; var Lo=v.ro*th, Lin2=r*th;
+      S('Outer arc length','Lo = π × R × θ / 180','π × '+nw(v.ro)+' × '+nw(v.ang)+' / 180',Lo,'ft'); if(r) S('Inner arc length','Li = π × r × θ / 180','π × '+nw(r)+' × '+nw(v.ang)+' / 180',Lin2,'ft');
+      o.A=th/2*(v.ro*v.ro-r*r); S('Area','A = θ/360 × π × (R² − r²)',nw(v.ang)+'/360 × π × ('+nw(v.ro)+'² − '+nw(r)+'²)',o.A,'SFT');
+      if(r) S('Check — mean arc × width','A = (Lo + Li)/2 × (R − r)','('+nw(Lo)+' + '+nw(Lin2)+')/2 × ('+nw(v.ro)+' − '+nw(r)+')',(Lo+Lin2)/2*(v.ro-r),'SFT');
+      if(v.ang<360) per(Lo+Lin2+2*(v.ro-r),'Lo + Li + 2(R − r)',nw(Lo)+' + '+nw(Lin2)+' + 2 × ('+nw(v.ro)+' − '+nw(r)+')'); else per(Lo+Lin2,'Lo + Li',nw(Lo)+' + '+nw(Lin2)); break;
+    case 'segment': c=v.ch; h=v.rise; R=(c*c/4+h*h)/(2*h); th=2*Math.atan2(c/2,R-h);
+      S('Radius','R = (c²/4 + h²) / (2h)','('+nw(c)+'²/4 + '+nw(h)+'²) / (2 × '+nw(h)+')',R,'ft');
+      S('Included angle','θ = 2 × atan(c/2 ÷ (R − h))','2 × atan('+nw(c/2)+' ÷ '+nw(R-h)+')',th*180/PI,'°');
+      o.A=R*R/2*(th-Math.sin(th)); S('Area','A = R²/2 × (θ − sin θ), θ in radians',nw(R)+'²/2 × ('+nw(th)+' − sin '+nw(th*180/PI)+'°)',o.A,'SFT');
+      S('Check — parabolic approximation','A ≈ 2/3 × c × h','2/3 × '+nw(c)+' × '+nw(h),2/3*c*h,'SFT');
+      per(R*th+c,'R × θ + c',nw(R)+' × '+nw(th)+' + '+nw(c),'Perimeter — arc + chord');
+      if(h>c/2) o.notes.push('Rise is more than half the chord, so the segment is more than a semicircle.'); break;
+    case 'xy': var Q=geoPts(v); if(Q.length<3){ o.err.push('Enter at least 3 corner points (X, Y)'); break; }
+      var s2=0, pp=0; Q.forEach(function(p,i){ var q=Q[(i+1)%Q.length]; s2+=p.x*q.y-q.x*p.y; pp+=Math.sqrt((q.x-p.x)*(q.x-p.x)+(q.y-p.y)*(q.y-p.y)); });
+      o.A=Math.abs(s2)/2; if(!(o.A>0)){ o.err.push('The points enclose no area — check the order and the values'); break; }
+      outer: for(var i=0;i<Q.length;i++) for(var j=i+2;j<Q.length;j++){ if(i===0&&j===Q.length-1) continue; if(geoCross(Q[i],Q[i+1],Q[j],Q[(j+1)%Q.length])){ o.warn.push('The outline crosses itself — list the corner points in order round the boundary, or the area is wrong.'); break outer; } }
+      S('Corner points','n','listed in order round the outline',Q.length,'Nos');
+      S('Area (coordinate / shoelace method)','A = ½ × |Σ (xᵢ × yᵢ₊₁ − xᵢ₊₁ × yᵢ)|','½ × |'+nw(s2)+'|',o.A,'SFT');
+      per(pp,'Σ √(Δx² + Δy²)',nw(pp)+' ('+Q.length+' sides)'); break;
+    case 'area': o.A=v.A; S('Plan area','A (given — from drawing / takeoff)',nw(v.A)+' SFT',v.A,'SFT'); if(v.P>0) per(v.P,'P (given)',nw(v.P)); break;
+    case 'trap': o.A=(v.a+v.b)/2*v.h; S('Section area','A = (a + b) / 2 × h','('+nw(v.a)+' + '+nw(v.b)+') / 2 × '+nw(v.h),o.A,'SFT');
+      var sl=Math.sqrt(v.h*v.h+Math.pow((v.b-v.a)/2,2)); per(v.a+v.b+2*sl,'a + b + 2√(h² + ((b − a)/2)²)',nw(v.a)+' + '+nw(v.b)+' + 2 × '+nw(sl),'Perimeter (equal sloping sides)'); break;
+    case 'tri': o.A=v.b*v.h/2; S('Area','A = ½ × b × h','½ × '+nw(v.b)+' × '+nw(v.h),o.A,'SFT'); o.Pnote='Perimeter needs the three side lengths — use “Triangle (three sides)” for it.'; break;
+    case 'tri3': a=v.s1; b=v.s2; c=v.s3; if(!(a+b>c&&a+c>b&&b+c>a)){ o.err.push('These sides cannot form a triangle — each side must be shorter than the other two together'); break; }
+      var sp=(a+b+c)/2; S('Semi-perimeter','s = (a + b + c) / 2','('+nw(a)+' + '+nw(b)+' + '+nw(c)+') / 2',sp,'ft');
+      o.A=Math.sqrt(sp*(sp-a)*(sp-b)*(sp-c)); S('Area (Heron)','A = √(s(s − a)(s − b)(s − c))','√('+nw(sp)+' × '+nw(sp-a)+' × '+nw(sp-b)+' × '+nw(sp-c)+')',o.A,'SFT');
+      per(a+b+c,'a + b + c',nw(a)+' + '+nw(b)+' + '+nw(c)); break;
+    case 'tbeam': if(!(v.df<v.h)){ o.err.push('Flange depth must be less than the overall depth'); break; } if(v.bw>v.bf){ o.err.push('Web width must not be more than the flange width'); break; }
+      o.A=v.bf*v.df+v.bw*(v.h-v.df); S('Section area','A = bf × Df + bw × (D − Df)',nw(v.bf)+' × '+nw(v.df)+' + '+nw(v.bw)+' × ('+nw(v.h)+' − '+nw(v.df)+')',o.A,'SFT');
+      per(2*(v.bf+v.h),'2(bf + D)','2 × ('+nw(v.bf)+' + '+nw(v.h)+')'); break;
+    default: o.err.push('Unknown shape');
+  }
+  return o;
+}
+/* solid → volume V (CFT), areas [{l, a SFT, f, w}], total surface, internal capacity, steps. sp = the shape-table row (symbols) */
+var GEO_EXT={rect:'D',circ:'D',ring:'D',hrect:'D',poly:'D',ellipse:'D',sector:'D',segment:'D',xy:'D',area:'D',trap:'L',tri:'L',tbeam:'L'};
+function geoSolid(el,v,sp){
+  var o={V:null,areas:[],tot:null,cap:null,steps:[],err:[],warn:[],notes:[]};
+  function S(t,f,w,x,u){ o.steps.push({t:t,f:f,w:w,v:x,u:u}); }
+  function AR(l,a,f,w){ o.areas.push({l:l,a:a,f:f,w:w}); }
+  function TOT(a,f,w){ o.tot=a; o.totf=f; o.totw=w; }
+  var ek=GEO_EXT[el], a, h, t, d, L, Wd;
+  if(ek){ var p=geoPlane(el,v); o.steps=p.steps; o.err=p.err; o.warn=p.warn; o.notes=p.notes; o.plane=p; if(p.err.length) return o;
+    var e=v[ek], E=(sp&&sp[2][ek]&&sp[2][ek][1])||ek, Pf='('+p.Pf+')', Pw='('+p.Pw+')';
+    o.V=p.A*e; S('Volume','V = A × '+E,nw(p.A)+' × '+nw(e),o.V,'CFT');
+    if(ek==='D'){ AR('Plan / top area',p.A,'A',nw(p.A));
+      if(p.P!=null){ AR('Side area (perimeter × '+E+')'+(el==='ring'||el==='hrect'?' — outer + inner faces':'')+' — formwork / edges',p.P*e,Pf+' × '+E,Pw+' × '+nw(e)); TOT(2*p.A+p.P*e,'2A + P × '+E,'2 × '+nw(p.A)+' + '+nw(p.P)+' × '+nw(e)); } }
+    else if(p.P!=null) TOT(2*p.A+p.P*e,'2A + P × '+E,'2 × '+nw(p.A)+' + '+nw(p.P)+' × '+nw(e));
+    if(el==='tbeam') AR('Beam formwork — soffit + sides below the flange',(v.bw+2*(v.h-v.df))*v.L,'(bw + 2(D − Df)) × L','('+nw(v.bw)+' + 2 × ('+nw(v.h)+' − '+nw(v.df)+')) × '+nw(v.L));
+    if(el==='ring') o.cap={l:'Internal capacity (space inside the ring)',V:PI/4*v.di*v.di*e,f:'π/4 × Di² × '+E,w:'π/4 × '+nw(v.di)+'² × '+nw(e)};
+    if(el==='hrect') o.cap={l:'Internal capacity (space inside the walls)',V:(v.L-2*v.t)*(v.W-2*v.t)*e,f:'(L − 2t)(W − 2t) × '+E,w:nw(v.L-2*v.t)+' × '+nw(v.W-2*v.t)+' × '+nw(e)};
+    return o; }
+  switch(el){
+    case 'foot': L=v.L; Wd=v.W; var l=v.l2||0, w=v.w2||0, d1=v.d1||0; h=v.h; var A1=L*Wd, A2=l*w, Am=(L+l)/2*((Wd+w)/2), V1=L*Wd*d1;
+      if(d1) S('Vertical (pad) part','V1 = L × W × d1',nw(L)+' × '+nw(Wd)+' × '+nw(d1),V1,'CFT');
+      S('Bottom area','A1 = L × W',nw(L)+' × '+nw(Wd),A1,'SFT'); S('Top area','A2 = l × w',nw(l)+' × '+nw(w),A2,'SFT');
+      S('Mid-height area','Am = (L + l)/2 × (W + w)/2','('+nw(L)+' + '+nw(l)+')/2 × ('+nw(Wd)+' + '+nw(w)+')/2',Am,'SFT');
+      var V2=h/6*(A1+4*Am+A2); S(d1?'Sloped part (prismoidal formula)':'Volume (prismoidal formula)',(d1?'V2':'V')+' = h/6 × (A1 + 4Am + A2)',nw(h)+'/6 × ('+nw(A1)+' + 4 × '+nw(Am)+' + '+nw(A2)+')',V2,'CFT');
+      var Vs=h/3*(A1+A2+Math.sqrt(A1*A2));
+      if(Math.abs(Vs-V2)>1e-9*Math.max(1,V2)){ S('Check — h/3 (A1 + A2 + √(A1 × A2)) frustum formula','valid only when top and bottom are similar',nw(h)+'/3 × ('+nw(A1)+' + '+nw(A2)+' + √('+nw(A1*A2)+'))',Vs,'CFT');
+        o.notes.push('Top and bottom are not similar rectangles, so the h/3 (A1 + A2 + √A1·A2) frustum formula is '+nf((Vs-V2)/V2*100,2)+'% off — the prismoidal formula (exact for plane sloping faces) is used.'); }
+      if((l>0)!==(w>0)) o.notes.push('One top dimension is zero, so the top is a ridge line (wedge); the prismoidal formula is still exact.');
+      o.V=V1+V2; if(d1) S('Volume','V = V1 + V2',nw(V1)+' + '+nw(V2),o.V,'CFT');
+      var sw=Math.sqrt(h*h+Math.pow((Wd-w)/2,2)), sl=Math.sqrt(h*h+Math.pow((L-l)/2,2)), slope=(L+l)*sw+(Wd+w)*sl;
+      S('Slant height of the long faces','sW = √(h² + ((W − w)/2)²)','√('+nw(h)+'² + '+nw((Wd-w)/2)+'²)',sw,'ft'); S('Slant height of the short faces','sL = √(h² + ((L − l)/2)²)','√('+nw(h)+'² + '+nw((L-l)/2)+'²)',sl,'ft');
+      AR('Bottom (plan) area',A1,'L × W',nw(L)+' × '+nw(Wd));
+      if(d1) AR('Pad sides — formwork',2*(L+Wd)*d1,'2(L + W) × d1','2 × ('+nw(L)+' + '+nw(Wd)+') × '+nw(d1));
+      AR('Sloping faces',slope,'(L + l) × sW + (W + w) × sL','('+nw(L+l)+') × '+nw(sw)+' + ('+nw(Wd+w)+') × '+nw(sl));
+      if(A2) AR('Top area',A2,'l × w',nw(l)+' × '+nw(w));
+      TOT(A1+A2+2*(L+Wd)*d1+slope,'A1 + A2 + pad sides + sloping faces',nw(A1)+' + '+nw(A2)+' + '+nw(2*(L+Wd)*d1)+' + '+nw(slope));
+      o.notes.push('Sloping-face areas assume the top is centred on the base.'); break;
+    case 'cone': var D1=v.dia, D2=v.dt||0; h=v.D;
+      o.V=PI*h/12*(D1*D1+D1*D2+D2*D2); S(D2?'Volume (frustum of cone)':'Volume (cone)','V = π × H/12 × (D1² + D1 × D2 + D2²)','π × '+nw(h)+'/12 × ('+nw(D1)+'² + '+nw(D1)+' × '+nw(D2)+' + '+nw(D2)+'²)',o.V,'CFT');
+      var sh=Math.sqrt(h*h+Math.pow((D1-D2)/2,2)), lat=PI*(D1+D2)/2*sh; S('Slant height','s = √(H² + ((D1 − D2)/2)²)','√('+nw(h)+'² + '+nw((D1-D2)/2)+'²)',sh,'ft');
+      AR('Side (slant) surface — formwork',lat,'π × (D1 + D2)/2 × s','π × ('+nw(D1)+' + '+nw(D2)+')/2 × '+nw(sh));
+      AR('Bottom area',PI/4*D1*D1,'π/4 × D1²','π/4 × '+nw(D1)+'²'); if(D2) AR('Top area',PI/4*D2*D2,'π/4 × D2²','π/4 × '+nw(D2)+'²');
+      TOT(lat+PI/4*(D1*D1+D2*D2),'side + bottom + top',nw(lat)+' + '+nw(PI/4*D1*D1)+' + '+nw(PI/4*D2*D2)); break;
+    case 'dome': a=v.sp/2; h=v.rise; t=v.t||0; var Rs=(a*a+h*h)/(2*h);
+      S('Sphere radius (inner)','R = (a² + h²) / (2h),  a = span / 2','('+nw(a)+'² + '+nw(h)+'²) / (2 × '+nw(h)+')',Rs,'ft');
+      var Vi=PI*h*h*(3*Rs-h)/3, Si=2*PI*Rs*h; S(t?'Inner cap volume':'Cap volume','Vi = π × h² × (3R − h) / 3','π × '+nw(h)+'² × (3 × '+nw(Rs)+' − '+nw(h)+') / 3',Vi,'CFT');
+      if(t){ var Ro=Rs+t, ho=h+t, Vo=PI*ho*ho*(3*Ro-ho)/3, So=2*PI*Ro*ho, rim=PI*(ho*(2*Ro-ho)-a*a);
+        S('Outer cap volume','Vo = π × (h + t)² × (3(R + t) − (h + t)) / 3','π × '+nw(ho)+'² × (3 × '+nw(Ro)+' − '+nw(ho)+') / 3',Vo,'CFT');
+        o.V=Vo-Vi; S('Shell volume','V = Vo − Vi',nw(Vo)+' − '+nw(Vi),o.V,'CFT');
+        S('Check — mid-surface area × t','V ≈ 2π × (R + t/2) × (h + t/2) × t','2π × '+nw(Rs+t/2)+' × '+nw(h+t/2)+' × '+nw(t),2*PI*(Rs+t/2)*(h+t/2)*t,'CFT');
+        AR('Inner (soffit) surface — formwork',Si,'2π × R × h','2π × '+nw(Rs)+' × '+nw(h)); AR('Outer surface',So,'2π × (R + t) × (h + t)','2π × '+nw(Ro)+' × '+nw(ho));
+        o.cap={l:'Space under the dome (inner cap)',V:Vi,f:'π × h² × (3R − h) / 3',w:'π × '+nw(h)+'² × (3 × '+nw(Rs)+' − '+nw(h)+') / 3'};
+        TOT(Si+So+rim,'inner + outer + springing ring','2π × '+nw(Rs)+' × '+nw(h)+' + 2π × '+nw(Ro)+' × '+nw(ho)+' + '+nw(rim)); }
+      else { o.V=Vi; AR('Curved surface',Si,'2π × R × h','2π × '+nw(Rs)+' × '+nw(h)); AR('Base area',PI*a*a,'π × a²','π × '+nw(a)+'²'); TOT(Si+PI*a*a,'curved + base',nw(Si)+' + '+nw(PI*a*a)); }
+      if(h>a) o.notes.push('Rise is more than half the span — more than a hemisphere.'); break;
+    case 'stair': var N=v.nst, Tr=v.tr, Rr=v.rr; Wd=v.W; t=v.t; if(!(t>0)){ o.err.push('Waist slab thickness must be greater than zero'); break; }
+      var inc=Math.sqrt(Tr*Tr+Rr*Rr), Lw=N*inc, Vw=Lw*Wd*t, Vst=N*Tr*Rr/2*Wd;
+      S('Slope length of one step','√(T² + R²)','√('+nw(Tr)+'² + '+nw(Rr)+'²)',inc,'ft');
+      S('Waist slab length (inclined)','Lw = n × √(T² + R²)',nw(N)+' × '+nw(inc),Lw,'ft');
+      S('Waist slab','Vw = Lw × W × t',nw(Lw)+' × '+nw(Wd)+' × '+nw(t),Vw,'CFT');
+      S('Steps (triangles)','Vs = n × ½ × T × R × W',nw(N)+' × ½ × '+nw(Tr)+' × '+nw(Rr)+' × '+nw(Wd),Vst,'CFT');
+      o.V=Vw+Vst; S('Flight volume','V = Vw + Vs',nw(Vw)+' + '+nw(Vst),o.V,'CFT');
+      S('Pitch','α = atan(R / T)','atan('+nw(Rr)+' / '+nw(Tr)+')',Math.atan2(Rr,Tr)*180/PI,'°');
+      AR('Soffit (waist) — formwork',Lw*Wd,'Lw × W',nw(Lw)+' × '+nw(Wd)); AR('Riser faces — formwork',N*Rr*Wd,'n × R × W',nw(N)+' × '+nw(Rr)+' × '+nw(Wd)); AR('Treads — finishing',N*Tr*Wd,'n × T × W',nw(N)+' × '+nw(Tr)+' × '+nw(Wd));
+      o.notes.push('Flight measured as n step triangles (½ × T × R) on a waist slab n × √(T² + R²) long. Add landings as additional rectangular members.'); break;
+    case 'incl': var Ls=Math.sqrt(v.L*v.L+v.rise*v.rise); Wd=v.W; t=v.D;
+      S('Sloping length','Ls = √(L² + rise²)','√('+nw(v.L)+'² + '+nw(v.rise)+'²)',Ls,'ft');
+      S('Slope angle','α = atan(rise / L)','atan('+nw(v.rise)+' / '+nw(v.L)+')',Math.atan2(v.rise,v.L)*180/PI,'°');
+      S('Gradient','rise / L × 100',nw(v.rise)+' / '+nw(v.L)+' × 100',v.rise/v.L*100,'%');
+      o.V=Ls*Wd*t; S('Volume','V = Ls × W × t',nw(Ls)+' × '+nw(Wd)+' × '+nw(t),o.V,'CFT');
+      AR('Soffit — formwork',Ls*Wd,'Ls × W',nw(Ls)+' × '+nw(Wd)); AR('Top (sloping) surface — finishing',Ls*Wd,'Ls × W',nw(Ls)+' × '+nw(Wd)); AR('Edges — formwork',2*(Ls+Wd)*t,'2(Ls + W) × t','2 × ('+nw(Ls)+' + '+nw(Wd)+') × '+nw(t));
+      AR('Plan (horizontal) area',v.L*Wd,'L × W',nw(v.L)+' × '+nw(Wd));
+      TOT(2*Ls*Wd+2*(Ls+Wd)*t,'2 × Ls × W + 2(Ls + W) × t','2 × '+nw(Ls)+' × '+nw(Wd)+' + 2 × ('+nw(Ls)+' + '+nw(Wd)+') × '+nw(t)); break;
+    case 'retw': if(v.b>v.rb){ o.err.push('Stem bottom width t2 must not be more than the base width B'); break; }
+      var Ab=v.rb*v.rd, As=(v.a+v.b)/2*v.hs; L=v.L;
+      S('Base slab section','Ab = B × Db',nw(v.rb)+' × '+nw(v.rd),Ab,'SFT'); S('Stem section','As = (t1 + t2)/2 × H','('+nw(v.a)+' + '+nw(v.b)+')/2 × '+nw(v.hs),As,'SFT');
+      S('Base slab volume','Vb = Ab × L',nw(Ab)+' × '+nw(L),Ab*L,'CFT'); S('Stem volume','Vs = As × L',nw(As)+' × '+nw(L),As*L,'CFT');
+      o.V=(Ab+As)*L; S('Volume','V = Vb + Vs',nw(Ab*L)+' + '+nw(As*L),o.V,'CFT');
+      var bat=Math.sqrt(v.hs*v.hs+Math.pow(v.b-v.a,2));
+      AR('Stem faces — formwork (one vertical, one battered)',(v.hs+bat)*L,'(H + √(H² + (t2 − t1)²)) × L','('+nw(v.hs)+' + '+nw(bat)+') × '+nw(L));
+      AR('Base edges — formwork',2*(L+v.rb)*v.rd,'2(L + B) × Db','2 × ('+nw(L)+' + '+nw(v.rb)+') × '+nw(v.rd)); AR('Base plan area',v.rb*L,'B × L',nw(v.rb)+' × '+nw(L)); break;
+    case 'sph': d=v.dia; o.V=PI/6*d*d*d; S('Volume','V = π/6 × d³','π/6 × '+nw(d)+'³',o.V,'CFT'); AR('Surface area',PI*d*d,'π × d²','π × '+nw(d)+'²'); break;
+    case 'hemi': d=v.dia; o.V=PI/12*d*d*d; S('Volume','V = π/12 × d³','π/12 × '+nw(d)+'³',o.V,'CFT');
+      AR('Curved surface',PI*d*d/2,'π × d² / 2','π × '+nw(d)+'² / 2'); AR('Base (flat) area',PI/4*d*d,'π/4 × d²','π/4 × '+nw(d)+'²'); TOT(0.75*PI*d*d,'curved + base = 3π/4 × d²','0.75 × π × '+nw(d)+'²'); break;
+    default: o.err.push('Unknown shape');
+  }
+  return o;
+}
+/* diagram parameters: values in ft for proportions, 'sym = value unit' labels as the user typed them */
+function geoDiag(el,v,sp){
+  var p={el:el,v:{},t:{},n:v.n,flat:sp[0]==='a'};
+  Object.keys(sp[2]).forEach(function(k){ var f=sp[2][k], raw=v._raw[k]; p.v[k]=v[k]; if(k==='pts'||!f[1]||!isFinite(raw)) return;
+    p.t[k]=f[1]+(isFinite(raw)?' = '+nw(+(+raw).toFixed(3))+(k==='ang'?'°':v._u[k]?' '+v._u[k]:''):''); });
+  if(sp[2].pts){ p.pts=geoPts(v); p.pu=v._u.pts; }
+  return p;
+}
+function geoAreaStep(R,a,n){ var m=n!==1; R.step(a.l,(m?'Nos × ':'')+a.f,(m?nw(n)+' × ':'')+a.w,a.a*n,'SFT'); }
+
+var CSH={
+  rect:['pr','Rectangular (slab / footing / beam / wall / column)',{L:['Length L','L'],W:['Width W','W'],D:['Depth / thickness / height D','D']}],
+  circ:['pr','Circular (column / pile)',{dia:['Diameter d','d'],D:['Height / length H','H']}],
+  ring:['pr','Hollow circular (well curb / circular tank wall / ring)',{dia:['Outer diameter Do','Do'],di:['Inner diameter Di','Di'],D:['Height H','H']}],
+  hrect:['pr','Hollow rectangular (box / lift shaft / tank walls / manhole)',{L:['Outer length L','L'],W:['Outer width W','W'],t:['Wall thickness t','t'],D:['Height H','H']}],
+  poly:['pr','Regular polygon (hexagonal / octagonal column)',{ns:['Number of sides n','n'],s:['Side length s','s'],D:['Height H','H']}],
+  ellipse:['pr','Elliptical (column / slab)',{L:['Major axis 2a (overall length)','2a'],W:['Minor axis 2b (overall width)','2b'],D:['Depth / height D','D']}],
+  sector:['pr','Curved / annular sector (curved wall or beam, round balcony)',{ro:['Outer radius R','R'],ri:['Inner radius r (0 = full sector)','r'],ang:['Angle θ (degrees)','θ'],D:['Height / thickness D','D']}],
+  segment:['pr','Circular segment (bow balcony / curved slab — chord & rise)',{ch:['Chord c','c'],rise:['Rise h (at the middle of the chord)','h'],D:['Thickness D','D']}],
+  xy:['pr','Irregular plan (polygon by X, Y coordinates)',{pts:['Corner points (X, Y) — in order round the outline'],D:['Thickness / depth D','D']}],
+  area:['pr','Known plan area × thickness (area from CAD / PDF takeoff)',{A:['Plan area A','A'],P:['Perimeter P (optional — gives the edge area)','P'],D:['Thickness / depth D','D']}],
+  trap:['xs','Trapezoidal section (retaining wall stem / tapered cantilever / drain)',{L:['Length L','L'],a:['Top width a','a'],b:['Bottom width b','b'],h:['Section height h','h']}],
+  tri:['xs','Triangular section (haunch / fillet / wedge)',{L:['Length L','L'],b:['Base b','b'],h:['Height h','h']}],
+  tbeam:['xs','T-beam / L-beam (flanged section)',{L:['Length L','L'],bf:['Flange width bf','bf'],df:['Flange depth Df','Df'],bw:['Web width bw','bw'],h:['Overall depth D','D']}],
+  foot:['so','Sloped footing / frustum of pyramid / pyramid',{L:['Bottom length L','L'],W:['Bottom width W','W'],l2:['Top length l (0 = pyramid)','l'],w2:['Top width w (0 = pyramid)','w'],h:['Sloped height h','h'],d1:['Vertical edge depth d1 (0 = none)','d1']}],
+  cone:['so','Cone / frustum of cone (tapered circular column / pier)',{dia:['Bottom diameter D1','D1'],dt:['Top diameter D2 (0 = cone)','D2'],D:['Height H','H']}],
+  dome:['so','Dome (spherical shell or solid cap)',{sp:['Span S (inner base diameter)','S'],rise:['Rise h (inner)','h'],t:['Shell thickness t (0 = solid cap)','t']}],
+  stair:['so','Staircase flight (waist slab + steps)',{W:['Flight width W','W'],nst:['Number of steps n (risers)','n'],tr:['Tread (going) T','T'],rr:['Riser R','R'],t:['Waist slab thickness t','t']}],
+  incl:['so','Inclined slab / ramp / sloped roof',{L:['Horizontal (plan) length L','L'],W:['Width W','W'],rise:['Rise over that length','rise'],D:['Slab thickness t (square to the slope)','t']}],
+  retw:['so','Cantilever retaining wall (base + stem)',{L:['Wall length L','L'],rb:['Base width B','B'],rd:['Base thickness Db','Db'],a:['Stem top width t1','t1'],b:['Stem bottom width t2','t2'],hs:['Stem height H (above the base)','H']}]
+};
+var GRP_LBL={add:'Additional members & circular deductions'};
+function rcc(v){ return v.kind==='rcc'; }
+
+def({id:'concrete',cat:'civil',name:'Concrete (PCC / RCC)',sub:'Any shape — 19 element shapes, deductions, additions, mix materials, water, steel, self-weight, formwork areas',ic:'box',
+  kw:'concrete pcc rcc slab footing beam column volume cft m3 mix 1:2:4 cement bags sand crush lean concrete circular pile ring hollow well curb tank wall lift shaft manhole box polygon hexagonal octagonal elliptical curved wall sector balcony segment irregular coordinates trapezoidal triangular haunch fillet t-beam l-beam flanged sloped footing trapezoidal footing frustum pyramid cone tapered pier dome shell staircase stair steps waist slab ramp inclined sloped roof retaining wall water cement ratio self weight formwork shuttering transit mixer',
+  fl:['Prism: V = Nos × A × D  (A = plan area of the shape)','Ring: A = π/4 (Do² − Di²) · Hollow rectangle: A = L W − (L − 2t)(W − 2t)','Regular polygon: A = n s² / (4 tan(180°/n)) · Ellipse: A = π/4 × 2a × 2b',
+    'Sector: A = θ/360 × π (R² − r²) · Segment: A = R²/2 (θ − sin θ), R = (c²/4 + h²)/(2h)','Coordinates: A = ½ |Σ (xᵢ yᵢ₊₁ − xᵢ₊₁ yᵢ)|','Trapezoid: A = (a + b)/2 × h · T-beam: A = bf Df + bw (D − Df)',
+    'Sloped footing: V = L W d1 + h/6 (A1 + 4Am + A2)','Frustum of cone: V = πH/12 (D1² + D1 D2 + D2²)','Dome shell: V = π/3 [(h + t)² (3(R + t) − (h + t)) − h² (3R − h)]',
+    'Stair flight: V = W [n √(T² + R²) t + n T R / 2]','Ramp: V = √(L² + rise²) × W × t','Retaining wall: V = L [B Db + (t1 + t2)/2 × H]',
+    'Deductions / additions: ± Nos × L × W × D; circular voids − Nos × π/4 Ø² × depth','Vdry = V × 1.54 (convention)','cement bags = Vdry × c/Σ ÷ Vbag','Vbag = 50 kg ÷ 1440 kg/m³ = 1.226 CFT',
+    'Water = cement (kg) × w/c','Self-weight = net V × ρ (PCC 2400, RCC 2500 kg/m³ — EN 1991-1-1)','Steel = net V (m³) × kg/m³, or net V × % × 7850 kg/m³'],
+  inputs:[Sel('kind','Type',[['pcc','PCC (plain)'],['rcc','RCC (reinforced)']],'rcc'),Sel('el','Element / shape',geoOpts(CSH),'rect'),Num('n','Nos',1)]
+    .concat(geoInputs(CSH,'el'))
+    .concat([{type:'rows',k:'ded',l:'Deductions (Nos × L × W × D)',cols:[['n','Nos'],['l','L'],['w','W'],['d','D']],u:'ft',base:'ft'},
+    Sel('stb','Steel quantity from',[['kg','kg per m³ of concrete'],['pct','% of concrete volume']],'kg',{show:rcc}),
+    {k:'steel',l:'Steel (kg per m³ of concrete, from design)',dim:'dens',u:'kg/m³',def:0,base:'kg/m³',allow0:true,opt:true,show:function(v){return rcc(v)&&v.stb!=='pct';}},
+    Num('stp','Steel as % of concrete volume (from design)',1,{allow0:true,opt:true,show:function(v){return rcc(v)&&v.stb==='pct';}}),
+    {type:'rows',k:'add',grp:'add',l:'Additional members — landings, pedestals, upstands (Nos × L × W × D)',cols:[['n','Nos'],['l','L'],['w','W'],['d','D']],u:'ft',base:'ft'},
+    {type:'rows',k:'dedc',grp:'add',l:'Circular deductions — sleeves, pipes, voids (Nos × Ø × depth)',cols:[['n','Nos'],['d','Ø'],['h','Depth']],u:'ft',base:'ft'},
     Sel('mix','Nominal mix (c : s : a)',[['none','No material breakdown']].concat(MIX_CONC),'1:2:4',{grp:'mix'}),
     Num('rc','Cement part',1,{grp:'mix',show:function(v){return v.mix==='custom';}}),Num('rs','Sand part',2,{grp:'mix',show:function(v){return v.mix==='custom';}}),Num('ra','Aggregate part',4,{grp:'mix',show:function(v){return v.mix==='custom';}}),
     Num('dry','Dry-volume factor (convention)',1.54,{grp:'mix',conv:true,show:function(v){return v.mix!=='none';},hint:'QS convention 1.52–1.57; edit to your specification'}),
     Num('wast','Wastage %',0,{allow0:true,grp:'mix',conv:true}),
     CEM_IN[0],CEM_IN[1],
-    {k:'steel',l:'Steel (kg per m³ of concrete, from design)',dim:'dens',u:'kg/m³',def:0,base:'kg/m³',allow0:true,opt:true,show:function(v){return v.kind==='rcc';}}],
+    Num('wc','Water–cement ratio (optional)',null,{grp:'mix',opt:true,allow0:true,show:function(v){return v.mix!=='none';},hint:'From the mix design or specification, e.g. 0.45–0.55 — leave blank for no water quantity'}),
+    {k:'mixc',l:'Transit-mixer capacity (optional)',dim:'vol',u:'m³',def:'',base:'m³',opt:true,allow0:true,grp:'mix',units:['m³','CFT','yd³'],hint:'Gives the number of truck loads'},
+    Num('rate','Your rate (optional)',null,{grp:'mix',opt:true,allow0:true,hint:'Rate per CFT or per m³ from your rate analysis — gives the amount'}),
+    Sel('rbas','Rate is',[['cft','per CFT'],['m3','per m³']],'cft',{grp:'mix',show:function(v){return v.rate>0;}})]),
   calc:function(v,R){
-    var gross, base;
-    if(v.el==='rect'){ if(!(v.L>0&&v.W>0&&v.D>0)) return R.err('L, W and D must be greater than zero'); gross=v.n*v.L*v.W*v.D; R.step('Gross volume','V = Nos × L × W × D',dimStr(v.n,v.L,v.W,v.D),gross,'CFT'); R.res('Plan / top area (Nos × L × W)',sft2m2(v.n*v.L*v.W),'area'); }
-    else { if(!(v.dia>0&&v.D>0)) return R.err('Diameter and height must be greater than zero'); base=PI/4*v.dia*v.dia; gross=v.n*base*v.D; R.step('Gross volume','V = Nos × π/4 × d² × H',nw(v.n)+' × π/4 × '+nw(v.dia)+'² × '+nw(v.D),gross,'CFT'); }
-    var ded=0; (v.ded||[]).forEach(function(o,i){ if(o.n>0&&o.l>0&&o.w>0&&o.d>0){ var q=o.n*o.l*o.w*o.d; ded+=q; R.step('Less deduction '+(i+1),'−(Nos × L × W × D)','−('+dimStr(o.n,o.l,o.w,o.d)+')',-q,'CFT'); } });
-    var net=gross-ded; if(net<=0) return R.err('Deductions exceed the gross volume');
-    if(ded) R.step('Net volume','V = gross − deductions',nw(gross)+' − '+nw(ded),net,'CFT');
+    var el=CSH[v.el]?v.el:'rect', sp=CSH[el], n=v.n, g=geoSolid(el,v,sp);
+    g.err.forEach(function(e){ R.err(e); }); if(R.bad()) return;
+    R.meta({std:'Engineering geometry; mix quantities by nominal-mix convention',src:['geom','is875','conv'],kind:'Calculated'});
+    var gross;
+    if(el==='rect'){ gross=n*v.L*v.W*v.D; R.step('Gross volume','V = Nos × L × W × D',dimStr(n,v.L,v.W,v.D),gross,'CFT'); }
+    else if(el==='circ'){ gross=n*PI/4*v.dia*v.dia*v.D; R.step('Gross volume','V = Nos × π/4 × d² × H',nw(n)+' × π/4 × '+nw(v.dia)+'² × '+nw(v.D),gross,'CFT'); }
+    else { g.steps.forEach(function(s){ R.step(s.t,s.f,s.w,s.v,s.u); }); gross=n*g.V; R.step('Gross volume','V = Nos × V₁',nw(n)+' × '+nw(g.V),gross,'CFT'); }
+    g.warn.forEach(function(w){ R.warn(w); }); g.notes.forEach(function(w){ R.note(w); });
+    var ded=0, add=0;
+    (v.add||[]).forEach(function(o,i){ if(o.n>0&&o.l>0&&o.w>0&&o.d>0){ var q=o.n*o.l*o.w*o.d; add+=q; R.step('Add member '+(i+1),'+(Nos × L × W × D)','+('+dimStr(o.n,o.l,o.w,o.d)+')',q,'CFT'); } });
+    (v.ded||[]).forEach(function(o,i){ if(o.n>0&&o.l>0&&o.w>0&&o.d>0){ var q=o.n*o.l*o.w*o.d; ded+=q; R.step('Less deduction '+(i+1),'−(Nos × L × W × D)','−('+dimStr(o.n,o.l,o.w,o.d)+')',-q,'CFT'); } });
+    (v.dedc||[]).forEach(function(o,i){ if(o.n>0&&o.d>0&&o.h>0){ var q=o.n*PI/4*o.d*o.d*o.h; ded+=q; R.step('Less circular void '+(i+1),'−(Nos × π/4 × Ø² × depth)','−('+nw(o.n)+' × π/4 × '+nw(o.d)+'² × '+nw(o.h)+')',-q,'CFT'); } });
+    var net=gross+add-ded; if(net<=0) return R.err('Deductions exceed the gross volume');
+    if(ded||add) R.step('Net volume','V = gross'+(add?' + additions':'')+(ded?' − deductions':''),nw(gross)+(add?' + '+nw(add):'')+(ded?' − '+nw(ded):''),net,'CFT');
     var wf=1+(v.wast||0)/100, V=net*wf; if(v.wast) R.step('Volume incl. wastage','V × (1 + w%)',nw(net)+' × '+nw(wf),V,'CFT');
     R.res('Concrete volume (wet)',cft2m3(V),'vol',{main:true});
-    R.meta({std:'Engineering geometry; mix quantities by nominal-mix convention',src:['geom','is875','conv'],kind:'Calculated'});
+    if(v.wast) R.res('Net volume (before wastage)',cft2m3(net),'vol');
+    g.areas.forEach(function(a){ geoAreaStep(R,a,n); R.res(a.l,sft2m2(a.a*n),'area'); });
+    if(g.cap){ R.step(g.cap.l,(n!==1?'Nos × ':'')+g.cap.f,(n!==1?nw(n)+' × ':'')+g.cap.w,g.cap.V*n,'CFT'); R.res(g.cap.l,cft2m3(g.cap.V*n),'vol',{units:['litre','imp. gallon','US gallon','CFT']}); }
+    var dm=matRho(v.kind==='rcc'?'rcc':'conc');
+    if(dm.rho>0){ var wt=cft2m3(net)*dm.rho; R.step('Self-weight','W = net V × ρ — '+(dm.custom?'user-defined density':'EN 1991-1-1 density'),nw(cft2m3(net))+' m³ × '+nw(dm.rho)+' kg/m³',wt,'kg');
+      R.res('Self-weight (net volume × density)',wt,'mass'); R.meta({src:['geom','is875','conv','en1991'],dens:{rho:dm.rho,custom:dm.custom,name:dm.m.name,why:dm.why}}); }
     if(v.mix!=='none'){ var parts=ratioParts(v,'mix'); if(parts.some(function(x){return !(x>0);})) return R.err('Enter a valid mix ratio');
       var dry=V*v.dry; R.step('Dry volume','Vdry = V × '+nw(v.dry)+' (convention)',nw(V)+' × '+nw(v.dry),dry,'CFT'); R.res('Dry volume',cft2m3(dry),'vol');
-      mixQty(R,dry,parts,v); R.warn('Dry-volume factor '+v.dry+' is a QS convention (editable), not a standard value.'); }
-    if(v.kind==='rcc'&&v.steel>0){ var st=cft2m3(V)*v.steel; R.step('Reinforcement','Ws = V(m³) × kg/m³',nw(cft2m3(V))+' × '+nw(v.steel),st,'kg'); R.res('Reinforcement steel',st,'mass'); }
-    R.sum=(v.kind==='rcc'?'RCC ':'PCC ')+(v.el==='rect'?dimStr(v.n,v.L,v.W,v.D)+' ft':'Ø'+nw(v.dia)+' ft')+' → '+nf(V,3)+' CFT';
-    R.shape=v.el==='rect'?{sh:'box',p:{L:v._raw.L,W:v._raw.W,D:v._raw.D,u:v._u.L,n:v.n}}:{sh:'cyl',p:{D:v._raw.dia,H:v._raw.D,u:v._u.dia}};
+      var q=mixQty(R,dry,parts,v); R.warn('Dry-volume factor '+v.dry+' is a QS convention (editable), not a standard value.');
+      if(v.wc>0){ var ck=q.bags*v.bagKg, wl=ck*v.wc; R.step('Water','Ww = cement (kg) × w/c',nw(ck)+' kg × '+nw(v.wc),wl,'litre'); R.res('Water (w/c '+nw(v.wc)+')',wl/1000,'vol',{units:['litre','imp. gallon','US gallon']}); } }
+    if(v.kind==='rcc'){ var vm=cft2m3(net), st=0;
+      if(v.stb==='pct'&&v.stp>0){ var sr=matRho('ms').rho||7850; st=vm*v.stp/100*sr; R.step('Reinforcement','Ws = net V (m³) × % / 100 × ρs',nw(vm)+' × '+nw(v.stp)+' / 100 × '+nw(sr)+' kg/m³',st,'kg'); }
+      else if(v.stb!=='pct'&&v.steel>0){ st=vm*v.steel; R.step('Reinforcement','Ws = net V (m³) × kg/m³',nw(vm)+' × '+nw(v.steel),st,'kg'); }
+      if(st) R.res('Reinforcement steel',st,'mass'); }
+    if(v.mixc>0){ var loads=cft2m3(V)/v.mixc; R.step('Transit-mixer loads','V (m³) / capacity',nw(cft2m3(V))+' / '+nw(v.mixc)+' m³',loads,'loads'); R.res('Transit-mixer loads',Math.ceil(loads-1e-9),'count',{u:'loads',dp:0,note:nf(loads,2)+' loads exact'}); }
+    if(v.rate>0){ var qn=v.rbas==='m3'?cft2m3(net):net, amt=qn*v.rate; R.step('Amount','net V × rate',nw(qn)+' '+(v.rbas==='m3'?'m³':'CFT')+' × '+nw(v.rate),amt,'PKR'); R.res('Amount at your rate',amt,'count',{u:'PKR',dp:0,note:'net volume × '+nf(v.rate,2)+' per '+(v.rbas==='m3'?'m³':'CFT')}); }
+    R.sum=(v.kind==='rcc'?'RCC ':'PCC ')+(el==='rect'?dimStr(n,v.L,v.W,v.D)+' ft':el==='circ'?nw(n)+' × Ø'+nw(v.dia)+' × '+nw(v.D)+' ft':(n!==1?nw(n)+' × ':'')+sp[1].replace(/\s*\(.*$/,'').toLowerCase())+' → '+nf(V,3)+' CFT';
+    R.shape={sh:'geo',p:geoDiag(el,v,sp)};
+  }});
+
+var MSH={
+  'a:rect':['a','Rectangle / square',{L:['Length L','L'],W:['Width W','W']}],
+  'a:circ':['a','Circle',{dia:['Diameter d','d']}],
+  'a:ring':['a','Annulus (ring)',{dia:['Outer diameter Do','Do'],di:['Inner diameter Di','Di']}],
+  'a:hrect':['a','Rectangular frame (hollow rectangle)',{L:['Outer length L','L'],W:['Outer width W','W'],t:['Frame width t','t']}],
+  'a:tri':['a','Triangle (base × height)',{b:['Base b','b'],h:['Height h','h']}],
+  'a:tri3':['a','Triangle (three sides — Heron)',{s1:['Side a','a'],s2:['Side b','b'],s3:['Side c','c']}],
+  'a:trap':['a','Trapezium',{a:['Parallel side a (top)','a'],b:['Parallel side b (bottom)','b'],h:['Height h','h']}],
+  'a:poly':['a','Regular polygon',{ns:['Number of sides n','n'],s:['Side length s','s']}],
+  'a:ellipse':['a','Ellipse',{L:['Major axis 2a','2a'],W:['Minor axis 2b','2b']}],
+  'a:sector':['a','Sector / annular sector',{ro:['Outer radius R','R'],ri:['Inner radius r (0 = full sector)','r'],ang:['Angle θ (degrees)','θ']}],
+  'a:segment':['a','Circular segment (chord & rise)',{ch:['Chord c','c'],rise:['Rise h (at the middle of the chord)','h']}],
+  'a:tbeam':['a','T / L section',{bf:['Flange width bf','bf'],df:['Flange depth Df','Df'],bw:['Web width bw','bw'],h:['Overall depth D','D']}],
+  'a:xy':['a','Irregular polygon (X, Y coordinates)',{pts:['Corner points (X, Y) — in order round the outline']}],
+  'v:rect':['v','Cuboid / box',{L:['Length L','L'],W:['Width W','W'],D:['Height H','H']}],
+  'v:circ':['v','Cylinder (round tank, column, pipe bore)',{dia:['Diameter d','d'],D:['Height / length H','H']}],
+  'v:ring':['v','Hollow cylinder (pipe wall / ring / circular tank wall)',{dia:['Outer diameter Do','Do'],di:['Inner diameter Di','Di'],D:['Height H','H']}],
+  'v:hrect':['v','Hollow rectangular box (walls only)',{L:['Outer length L','L'],W:['Outer width W','W'],t:['Wall thickness t','t'],D:['Height H','H']}],
+  'v:poly':['v','Regular polygonal prism',{ns:['Number of sides n','n'],s:['Side length s','s'],D:['Height H','H']}],
+  'v:ellipse':['v','Elliptical cylinder',{L:['Major axis 2a','2a'],W:['Minor axis 2b','2b'],D:['Height H','H']}],
+  'v:sector':['v','Sector / curved prism',{ro:['Outer radius R','R'],ri:['Inner radius r (0 = full sector)','r'],ang:['Angle θ (degrees)','θ'],D:['Height H','H']}],
+  'v:segment':['v','Segmental prism',{ch:['Chord c','c'],rise:['Rise h (at the middle of the chord)','h'],D:['Height / thickness H','H']}],
+  'v:xy':['v','Prism on any polygon (X, Y × height)',{pts:['Corner points (X, Y) — in order round the outline'],D:['Height H','H']}],
+  'v:trap':['v','Trapezoidal prism',{L:['Length L','L'],a:['Top width a','a'],b:['Bottom width b','b'],h:['Section height h','h']}],
+  'v:tri':['v','Triangular prism / wedge',{L:['Length L','L'],b:['Base b','b'],h:['Height h','h']}],
+  'v:tbeam':['v','T / L prism',{L:['Length L','L'],bf:['Flange width bf','bf'],df:['Flange depth Df','Df'],bw:['Web width bw','bw'],h:['Overall depth D','D']}],
+  'v:foot':['v','Pyramid / frustum of pyramid / prismoid',{L:['Bottom length L','L'],W:['Bottom width W','W'],l2:['Top length l (0 = pyramid)','l'],w2:['Top width w (0 = pyramid)','w'],h:['Height h','h']}],
+  'v:cone':['v','Cone / frustum of cone',{dia:['Bottom diameter D1','D1'],dt:['Top diameter D2 (0 = cone)','D2'],D:['Height H','H']}],
+  'v:sph':['v','Sphere',{dia:['Diameter d','d']}],
+  'v:hemi':['v','Hemisphere',{dia:['Diameter d','d']}],
+  'v:dome':['v','Spherical cap / dome shell',{sp:['Base diameter S (inner)','S'],rise:['Rise h (height of the cap)','h'],t:['Shell thickness t (0 = solid cap)','t']}]
+};
+def({id:'geo',cat:'civil',name:'Area & Volume — Any Shape',sub:'Area, perimeter, volume, surface area, tank capacity and weight for 30 plane figures and solids',ic:'geo',
+  kw:'area volume shape geometry mensuration rectangle square circle annulus ring triangle heron trapezium trapezoid polygon hexagon octagon ellipse sector arc segment chord coordinates shoelace irregular cuboid box cylinder hollow pipe prism wedge pyramid frustum prismoid cone sphere hemisphere dome cap tank capacity litre gallon surface perimeter circumference weight',
+  fl:['Rectangle A = L W · Circle A = π d²/4, C = π d · Annulus A = π/4 (Do² − Di²)','Triangle A = ½ b h · Heron A = √(s(s − a)(s − b)(s − c))','Trapezium A = (a + b)/2 × h · Ellipse A = π a b, P ≈ π[3(a + b) − √((3a + b)(a + 3b))]',
+    'Regular polygon A = n s² / (4 tan(180°/n))','Sector A = θ/360 × π (R² − r²) · Segment A = R²/2 (θ − sin θ)','Polygon by coordinates A = ½ |Σ (xᵢ yᵢ₊₁ − xᵢ₊₁ yᵢ)|',
+    'Prism V = A × H, surface = 2A + P × H','Prismoid V = h/6 (A1 + 4Am + A2) · Pyramid V = A h / 3','Cone / frustum V = πH/12 (D1² + D1 D2 + D2²)',
+    'Sphere V = π d³/6, S = π d² · Hemisphere V = π d³/12','Spherical cap V = π h² (3R − h)/3, S = 2π R h','1 CFT = 28.3168 litre · 1 m³ = 1000 litre'],
+  inputs:[Sel('shp','Shape',geoOpts(MSH),'v:circ'),Num('n','Nos',1)].concat(geoInputs(MSH,'shp',{dia:{def:10},di:{def:9},D:{def:10}})).concat([
+    {k:'rho',l:'Material density (optional — gives the weight)',dim:'dens',u:'kg/m³',def:'',base:'kg/m³',opt:true,allow0:true,show:function(v){ return /^v:/.test(v.shp); },hint:'e.g. water 1000 kg/m³ — from your specification or the Engineering Constants table'}]),
+  calc:function(v,R){
+    var id=MSH[v.shp]?v.shp:'v:circ', sp=MSH[id], el=id.slice(2), n=v.n, m=n!==1;
+    R.meta({std:'Engineering geometry — exact mensuration formulas',src:['geom'],kind:'Calculated'});
+    function steps(o){ o.steps.forEach(function(s){ R.step(s.t,s.f,s.w,s.v,s.u); }); o.warn.forEach(function(w){ R.warn(w); }); o.notes.forEach(function(w){ R.note(w); }); }
+    if(id.charAt(0)==='a'){ var p=geoPlane(el,v); p.err.forEach(function(e){ R.err(e); }); if(R.bad()) return; steps(p);
+      if(m) R.step('Total area','ΣA = Nos × A',nw(n)+' × '+nw(p.A),p.A*n,'SFT');
+      R.res(m?'Total area':'Area',sft2m2(p.A*n),'area',{main:true,units:['SFT','m²','yd²']}); if(m) R.res('Area of one',sft2m2(p.A),'area');
+      if(p.P!=null){ R.step(p.Pl,'P = '+p.Pf,p.Pw,p.P,'ft'); R.res(p.Pl,ft2m(p.P),'len',{units:['ft','m','RFT']}); if(m){ R.step('Total perimeter','Nos × P',nw(n)+' × '+nw(p.P),p.P*n,'ft'); R.res('Total perimeter',ft2m(p.P*n),'len',{units:['ft','m','RFT']}); } }
+      else if(p.Pnote) R.note(p.Pnote);
+      R.sum=(m?nw(n)+' × ':'')+sp[1]+' → '+nf(p.A*n,3)+' SFT';
+    } else { var g=geoSolid(el,v,sp); g.err.forEach(function(e){ R.err(e); }); if(R.bad()) return; steps(g);
+      var V=g.V*n; if(m) R.step('Total volume','ΣV = Nos × V',nw(n)+' × '+nw(g.V),V,'CFT');
+      R.res(m?'Total volume':'Volume',cft2m3(V),'vol',{main:true,units:['CFT','m³','yd³']});
+      if(g.cap){ R.step(g.cap.l,(m?'Nos × ':'')+g.cap.f,(m?nw(n)+' × ':'')+g.cap.w,g.cap.V*n,'CFT'); R.res(g.cap.l,cft2m3(g.cap.V*n),'vol',{units:['litre','imp. gallon','US gallon','CFT']}); }
+      else R.res('Capacity (liquid volume)',cft2m3(V),'vol',{units:['litre','imp. gallon','US gallon']});
+      g.areas.forEach(function(a){ geoAreaStep(R,a,n); R.res(a.l,sft2m2(a.a*n),'area'); });
+      if(g.tot!=null){ R.step('Total surface area',(m?'Nos × ':'')+g.totf,(m?nw(n)+' × ':'')+g.totw,g.tot*n,'SFT'); R.res('Total surface area (all faces)',sft2m2(g.tot*n),'area'); }
+      if(v.rho>0){ var W=cft2m3(V)*v.rho; R.step('Weight','W = V × ρ',nw(cft2m3(V))+' m³ × '+nw(v.rho)+' kg/m³',W,'kg'); R.res('Weight',W,'mass'); R.meta({src:['geom','user']}); }
+      R.sum=(m?nw(n)+' × ':'')+sp[1].replace(/\s*\(.*$/,'')+' → '+nf(V,3)+' CFT';
+    }
+    R.shape={sh:'geo',p:geoDiag(el,v,sp)};
   }});
 
 def({id:'mixmat',cat:'civil',name:'Civil Material Calculator',sub:'Cement, sand, crush for any mortar or concrete volume and mix',ic:'box',
@@ -7823,6 +8217,14 @@ item('col','RCC column (12 × 12 in, 10 ft)','Concrete (grey structure)','concre
 item('colc','RCC circular column / pile','Concrete (grey structure)','concrete',{kind:'rcc',el:'circ',mix:'1:1.5:3',n:10,dia:1.5,D:10},null,'pile round');
 item('foot','RCC isolated footing','Concrete (grey structure)','concrete',{kind:'rcc',mix:'1:2:4',n:10,L:5,W:5,D:1.5},null,'foundation base');
 item('lintel','RCC lintel','Concrete (grey structure)','concrete',{kind:'rcc',mix:'1:2:4',n:10,L:5,W:0.75,D:0.5},null,'lintel chajja');
+item('slopefoot','RCC sloped (trapezoidal) footing','Concrete (grey structure)','concrete',{kind:'rcc',el:'foot',mix:'1:2:4',n:10,L:6,W:6,d1:0.75,l2:1.5,w2:1.5,h:1},null,'sloped footing frustum foundation base');
+item('ramp','RCC ramp / sloped slab','Concrete (grey structure)','concrete',{kind:'rcc',el:'incl',mix:'1:2:4',L:30,W:12,rise:4,D:6},IN_,'ramp sloped slab inclined roof');
+item('tankwall','RCC circular water tank wall','Concrete (grey structure)','concrete',{kind:'rcc',el:'ring',mix:'1:1.5:3',dia:12,di:11,D:8},null,'water tank circular wall well curb');
+item('shaft','RCC lift shaft / box walls','Concrete (grey structure)','concrete',{kind:'rcc',el:'hrect',mix:'1:1.5:3',L:8,W:7,t:9,D:10},{t:'in'},'lift shaft core box underground tank walls');
+item('retwall','RCC cantilever retaining wall','Concrete (grey structure)','concrete',{kind:'rcc',el:'retw',mix:'1:2:4',L:50,rb:8,rd:1.5,a:1,b:1.5,hs:10},null,'retaining wall');
+item('tbeam','RCC T-beam (with slab flange)','Concrete (grey structure)','concrete',{kind:'rcc',el:'tbeam',mix:'1:2:4',n:4,L:20,bf:4,df:0.5,bw:1,h:2},null,'t beam flanged');
+item('dome','RCC dome roof (spherical shell)','Concrete (grey structure)','concrete',{kind:'rcc',el:'dome',mix:'1:2:4',sp:20,rise:5,t:4},{t:'in'},'dome gumbad shell');
+item('octcol','RCC octagonal column','Concrete (grey structure)','concrete',{kind:'rcc',el:'poly',mix:'1:1.5:3',n:4,ns:8,s:0.5,D:10},null,'octagonal hexagonal column');
 item('stair','RCC staircase','Concrete (grey structure)','stair',{},null,'stairs');
 item('wt-rcc','RCC weight (CFT → kg)','Concrete (grey structure)','matwt',{mat:'rcc'},null,'concrete weight kg per cft');
 item('wt-pcc','Plain concrete weight (CFT → kg)','Concrete (grey structure)','matwt',{mat:'conc'},null,'concrete weight');
@@ -7915,6 +8317,10 @@ function parseNum(s,unit){
   s=s.replace(/["']$/,''); return /^-?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(s)? +s : NaN;
 }
 
+/* rows: the first column is a count (Nos) unless marked 'len' (coordinates); 'raw' columns are never converted */
+function rowRaw(cc,ci){ return (ci===0&&cc[2]!=='len')||cc[2]==='raw'; }
+function rowUsed(i,r){ return i.cols[0][2]==='len'? i.cols.every(function(cc){ return isFinite(r[cc[0]]); }) : r[i.cols[0][0]]>0; }
+
 /* ------------------------------------------------------------------ state per calculator */
 var LAST=store.get('last',{});
 function freshState(c){
@@ -7942,7 +8348,7 @@ function readV(c,st){
       v.rho=rho; v.matName=m?m.name:ms.id; v.matId=ms.id; }
   });
   c.inputs.forEach(function(i){
-    if(i.type==='rows'){ var u=st.units[i.k]||i.u; v._u[i.k]=u; v[i.k]=(st.rows[i.k]||[]).map(function(r){ var o={}; i.cols.forEach(function(cc,ci){ var x=parseNum(r[cc[0]]); o[cc[0]]=(ci===0||cc[2]==='raw')?x:conv(x,'len',u,i.base); }); return o; }); }
+    if(i.type==='rows'){ var u=st.units[i.k]||i.u; v._u[i.k]=u; v[i.k]=(st.rows[i.k]||[]).map(function(r){ var o={}; i.cols.forEach(function(cc,ci){ var x=parseNum(r[cc[0]]); o[cc[0]]=rowRaw(cc,ci)?x:conv(x,'len',u,i.base); }); return o; }); }
     else if(i.gauge&&st.units[i.k]==='Gauge'){ var gs=gstdOf(i,st,v), gn=parseNum(st.vals[i.k]), gin=gaugeIn(gs,gn); v._raw[i.k]=gn; v._u[i.k]='Gauge'; v._gauge=v._gauge||{};
       if(gin!=null){ v._gauge[i.k]={std:gs,g:gn,inch:gin,mm:gin*25.4}; v[i.k]=conv(gin,'len','in',i.base||'m'); } else v[i.k]=NaN; }
     else if(i.type==='num'||i.dim){ var raw=parseNum(st.vals[i.k],st.units[i.k]); v._raw[i.k]=raw; v._u[i.k]=st.units[i.k];
@@ -7996,7 +8402,7 @@ var catName={}; CATS.forEach(function(c){ catName[c.id]=c.name; });
 var ZK_CAT={conv:'k-green',items:'k-cyan',steel:'k-indigo',civil:'k-orange',fin:'k-grape',mep:'k-red',custom:'k-pink'};
 var ZK_TRADE={'Sheet metal & gauges':'k-slate','Earthwork':'k-brown','Concrete (grey structure)':'k-blue','Masonry':'k-orange','Reinforcement':'k-indigo','Plaster & mortar':'k-amber','Flooring & tiles':'k-green','Painting & coatings':'k-pink','Waterproofing':'k-cyan','Ceiling & partitions':'k-violet','Plumbing':'k-teal','Electrical':'k-red','HVAC':'k-lime'};
 function zkKind(c){ if(!c) return ''; if(c.cat==='items') return ZK_TRADE[c.trade]||ZK_CAT.items; return ZK_CAT[c.cat]||''; }
-var MINI={rebar:'rebar',plate:'plate',rect:'rect',round:'round',hex:'hex',chs:'chs',rhs:'rhs',L:'L',C:'C',I:'I',T:'T',CL:'CL',Z:'Z',box:'box',trench:'trench',wall:'wall',tile:'tile',form:'form',cyl:'cyl',insul:'insul',cable:'cable',duct:'duct',grid:'grid'};
+var MINI={rebar:'rebar',plate:'plate',rect:'rect',round:'round',hex:'hex',chs:'chs',rhs:'rhs',L:'L',C:'C',I:'I',T:'T',CL:'CL',Z:'Z',box:'box',trench:'trench',wall:'wall',tile:'tile',form:'form',cyl:'cyl',insul:'insul',cable:'cable',duct:'duct',grid:'grid',geo:'geo'};
 function mini(ic){ var f=SH[MINI[ic]||'grid']; var s; try{ s=f({}); }catch(e){ s=''; } return s.replace('class="zc-svg"','class="zc-svg zc-mini"').replace(/<g class="zc-dim">[\s\S]*?<\/g>/g,'').replace(/<text[\s\S]*?<\/text>/g,''); }
 
 function go(view){ VIEW=view; render(); try{ ROOT.scrollIntoView({block:'start'}); window.scrollTo({top:0}); }catch(e){} syncNav(); }
@@ -8069,7 +8475,8 @@ function unitSel(dim,cur,k,allowed,cls){ var list=allowed||UNITS[dim].list; if(l
 function fieldHtml(c,i,st,v){
   var lab=labelOf(i,v), conv=i.conv?'<span class="zc-conv" title="QS convention / specification value — editable, not a standard value">convention</span>':'';
   var hint=i.hint?'<div class="zc-hint">'+esc(i.hint)+'</div>':'', h='';
-  if(i.type==='sel'){ h='<select data-k="'+i.k+'">'+i.opts.map(function(o){ return '<option value="'+esc(o[0])+'"'+(String(st.vals[i.k])===String(o[0])?' selected':'')+'>'+esc(o[1])+'</option>'; }).join('')+'</select>'; }
+  if(i.type==='sel'){ var og; h='<select data-k="'+i.k+'">'+i.opts.map(function(o){ var pre=''; if(o[2]!==og){ pre=(og?'</optgroup>':'')+(o[2]?'<optgroup label="'+esc(o[2])+'">':''); og=o[2]; }
+    return pre+'<option value="'+esc(o[0])+'"'+(String(st.vals[i.k])===String(o[0])?' selected':'')+'>'+esc(o[1])+'</option>'; }).join('')+(og?'</optgroup>':'')+'</select>'; }
   else if(i.type==='sec'){ h=secPickerHtml(i,st,v); }
   else if(i.type==='mat'){ h=matHtml(i,st,v); }
   else if(i.type==='rows'){ h=rowsHtml(i,st); }
@@ -8115,12 +8522,17 @@ function renderCalc(body,c,view){
   var st=stateFor(c,view);
   CUR={c:c,st:st,R:null};
   var v=readV(c,st);
-  var main=c.inputs.filter(function(i){return !i.grp;}), extra=c.inputs.filter(function(i){return i.grp;});
+  var main=c.inputs.filter(function(i){return !i.grp;}), grps=[], om=view.openMore;
+  function gk(i){ return GRP_LBL[i.grp]?i.grp:'mix'; }
+  c.inputs.forEach(function(i){ if(i.grp&&grps.indexOf(gk(i))<0) grps.push(gk(i)); });
+  function grpHtml(g){ var l=c.inputs.filter(function(i){ return i.grp&&gk(i)===g; });
+    var open=(om===true&&g==='mix')||(om&&om[g])||l.some(function(i){ return i.type==='rows'&&(st.rows[i.k]||[]).some(function(r){ return Object.keys(r).some(function(x){ return String(r[x]==null?'':r[x]).trim()!==''; }); }); });
+    return '<details class="zc-more" data-grp="'+g+'"'+(open?' open':'')+'><summary>'+esc(GRP_LBL[g]||'Material, mix & convention settings')+'</summary><div class="zc-fields">'+l.map(function(i){return fieldHtml(c,i,st,v);}).join('')+'</div></details>'; }
   var h='<div class="zc-head"><button class="zc-back" data-act="home" title="Back">←</button><div class="zc-ht"><div class="zc-crumb">'+esc((catName[c.cat]||'')+(c.trade?' › '+c.trade:''))+'</div><h3>'+esc(c.name)+
     ' <button class="zc-star'+(isFav(c.id)?' on':'')+'" data-fav="'+esc(c.id)+'" title="Favourite">★</button></h3><p>'+esc(c.sub||'')+'</p></div>'+
     '<div class="zc-acts"><button data-act="reset">↺ Reset</button><button data-act="copy">⧉ Copy</button><button data-act="print">⎙ Print / PDF</button><button data-act="csv">CSV</button><button data-act="xls">Excel</button></div></div>';
   h+='<div class="zc-grid"><div class="zc-card zc-form"><div class="zc-ct">Input</div><div class="zc-fields">'+main.map(function(i){return fieldHtml(c,i,st,v);}).join('')+'</div>'+
-    (extra.length?'<details class="zc-more"'+(view.openMore?' open':'')+'><summary>Material, mix &amp; convention settings</summary><div class="zc-fields">'+extra.map(function(i){return fieldHtml(c,i,st,v);}).join('')+'</div></details>':'')+'</div>'+
+    grps.map(grpHtml).join('')+'</div>'+
     '<div class="zc-side"><div class="zc-card zc-shape" id="zcShape"></div><div class="zc-card zc-res" id="zcRes"></div></div></div>'+
     '<div class="zc-card zc-work" id="zcWork"></div><div class="zc-card zc-props" id="zcProps" hidden></div><div class="zc-card zc-srcp" id="zcSrc"></div>'+
     '<div class="zc-sticky" id="zcSticky"></div>';
@@ -8190,7 +8602,7 @@ function givenRows(R){
     if(i.type==='sel'){ var o=i.opts.filter(function(x){return String(x[0])===String(st.vals[i.k]);})[0]; out.push([lab,o?o[1]:st.vals[i.k]]); }
     else if(i.type==='sec'){ out.push([lab,v[i.k]?v[i.k].name+' ('+v[i.k].series.name+', '+v[i.k].series.std+')':'Custom dimensions']); }
     else if(i.type==='mat'){ out.push(['Material',v.matName||'']); out.push(['Density',v.rho!=null?nf(v.rho,1)+' kg/m³ — '+(v.rhoCustom?'User-defined density':'Standard density'):'not set']); }
-    else if(i.type==='rows'){ (v[i.k]||[]).forEach(function(r,ri){ var raw=st.rows[i.k][ri]; if(!(r[i.cols[0][0]]>0)) return; out.push([lab.replace(/\s*\(.*$/,'')+' '+(ri+1),i.cols.map(function(cc){return cc[1]+' '+raw[cc[0]];}).join(' × ')+' '+(st.units[i.k]||'')]); }); }
+    else if(i.type==='rows'){ (v[i.k]||[]).forEach(function(r,ri){ var raw=st.rows[i.k][ri]; if(!rowUsed(i,r)) return; out.push([lab.replace(/\s*\(.*$/,'')+' '+(ri+1),i.cols.map(function(cc){return cc[1]+' '+raw[cc[0]];}).join(i.join||' × ')+' '+(st.units[i.k]||'')]); }); }
     else if(i.gauge&&st.units[i.k]==='Gauge'){ var g=v._gauge&&v._gauge[i.k]; out.push([lab,g?nf(g.g,0)+' Gauge — '+GSTD[g.std].name+' ('+GSTD[g.std].std+') = '+nf(g.mm,3)+' mm = '+nf(g.inch,4)+' in':st.vals[i.k]+' Gauge (not in table)']); }
     else { var s=st.vals[i.k]; if(s===''||s==null) return; var t=s+(i.dim?' '+st.units[i.k]:''); if(i.dim&&isFinite(v._raw[i.k])&&i.base&&st.units[i.k]!==i.base) t+='  (= '+nw(v[i.k])+' '+i.base+')'; out.push([lab,t]); }
   });
@@ -8519,7 +8931,7 @@ function onInput(e){
   if(d.sq!=null){ var i=CUR.c.inputs.filter(function(x){return x.k===d.sq;})[0], s=st.sec[d.sq], se=SER[s[0]], sel=ROOT.querySelector('[data-size="'+d.sq+'"]'); sel.innerHTML=sizeOpts(i,se,CUR.R.v,s[1],t.value);
     if(sel.options.length&&!sel.querySelector('option[value="'+s[1]+'"]')){ s[1]=+sel.options[0].value; sel.value=s[1]; recompute(); } return; }
 }
-function refreshForm(){ var more=ROOT.querySelector('.zc-more'); renderCalc($('zcView'),CUR.c,{st:CUR.st,openMore:more&&more.open}); }
+function refreshForm(){ var om={}; ROOT.querySelectorAll('.zc-more').forEach(function(d){ if(d.open) om[d.dataset.grp]=true; }); renderCalc($('zcView'),CUR.c,{st:CUR.st,openMore:om}); }
 function onChange(e){
   var t=e.target, d=t.dataset; if(!ROOT.contains(t)) return;
   if(t.id==='zcGgTu'){ GG.tu=t.value; gaugeNearest(); return; }
@@ -8534,7 +8946,7 @@ function onChange(e){
   if(d.ku!=null){ var k=d.ku;
     if(k.indexOf('rho:')===0){ var mk=k.slice(4), ms=st.mat[mk], old=ms.u||'kg/m³'; if(ms.touched&&isFinite(parseNum(ms.rho))) ms.rho=nw(conv(parseNum(ms.rho),'dens',old,t.value)); ms.u=t.value; refreshForm(); return; }
     var ri=c.inputs.filter(function(x){return x.k===k;})[0];
-    if(ri&&ri.type==='rows'){ var ou=st.units[k]; (st.rows[k]||[]).forEach(function(r){ ri.cols.forEach(function(cc,ci){ if(ci===0||cc[2]==='raw') return; var x=parseNum(r[cc[0]]); if(isFinite(x)) r[cc[0]]=nw(+conv(x,'len',ou,t.value).toPrecision(6)); }); }); st.units[k]=t.value; refreshForm(); return; }
+    if(ri&&ri.type==='rows'){ var ou=st.units[k]; (st.rows[k]||[]).forEach(function(r){ ri.cols.forEach(function(cc,ci){ if(rowRaw(cc,ci)) return; var x=parseNum(r[cc[0]]); if(isFinite(x)) r[cc[0]]=nw(+conv(x,'len',ou,t.value).toPrecision(6)); }); }); st.units[k]=t.value; refreshForm(); return; }
     if(ri&&ri.gauge&&(t.value==='Gauge'||st.units[k]==='Gauge')){ var vv=readV(c,st), gs=gstdOf(ri,st,vv);
       if(t.value==='Gauge'){ var xin=conv(parseNum(st.vals[k],st.units[k]),'len',st.units[k],'in'); st.vals[k]=String(isFinite(xin)?nearestGauge(gs,xin):16); st.gman[k]=false; if(isFinite(xin)&&Math.abs(gaugeIn(gs,+st.vals[k])-xin)>1e-4) flash('Nearest '+GSTD[gs].name+' gauge selected'); }
       else { var gi=gaugeIn(gs,parseNum(st.vals[k])); st.vals[k]=gi!=null?nw(+conv(gi,'len','in',t.value).toPrecision(6)):''; }
