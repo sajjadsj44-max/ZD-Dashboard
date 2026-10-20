@@ -156,6 +156,11 @@ function squareToWalls(pts, k, g){
     rec(0, far); rec(far, n);
     return P0.filter((p, i) => keep.has(i)); };
   const P0 = pts.map(p => [p[0], p[1]]), A0 = polyArea(P0); if (!(A0 > 0)) return pts;
+  // squaring works in one right-angled wall grid at each corner: an outline whose long walls meet at an oblique angle (a
+  // trapezoid, a splayed bay — more than 5° off square) is left as traced, its sides already on their own wall lines (squared,
+  // a corner's ends went onto two different lines and the room lost 0.6 %)
+  { const L = P0.map((a, i) => { const b = P0[(i + 1) % P0.length]; return {L: dist(a, b), g: Math.atan2(b[1] - a[1], b[0] - a[0])}; }).filter(e => e.L >= 2 * k);
+    if (L.some((e, i) => { const t = Math.abs(((L[(i + 1) % L.length].g - e.g) * 180 / Math.PI % 180 + 180) % 180); return Math.min(t, Math.abs(t - 90), 180 - t) > 5; })) return pts; }
   { const n = P0.length, tu = P0.map((b, i) => { const a = P0[(i + n - 1) % n], c = P0[(i + 1) % n], t = Math.atan2(c[1] - b[1], c[0] - b[0]) - Math.atan2(b[1] - a[1], b[0] - a[0]); return ((t + 3 * Math.PI) % (2 * Math.PI)) - Math.PI; });
     const bend = i => { const t = Math.abs(tu[i]); return t >= 0.5 * D && t <= 25 * D && dist(P0[i], P0[(i + 1) % n]) < 2 * k; };   // a curve's vertex: a short edge, a small turn
     let run = 0, sum = 0; for (let i = 0; i < 2 * n; i++) { const j = i % n; if (bend(j) && (!run || Math.sign(tu[j]) === Math.sign(tu[(j + n - 1) % n]))) { run++; sum += Math.abs(tu[j]); } else { run = bend(j) ? 1 : 0; sum = run ? Math.abs(tu[j]) : 0; }
