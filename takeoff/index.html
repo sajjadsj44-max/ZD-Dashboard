@@ -915,7 +915,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
         <div class="rg"><div class="rgb">
           <button class="tool" data-px="bHideMk" title="Show / hide all markups and measurements"><svg class="ic"><use href="#i-hilite"/></svg><span class="tl">Markups</span></button>
           <button class="tool" data-px="bLbl" title="Show / hide measurement labels (L)"><svg class="ic"><use href="#i-note"/></svg><span class="tl">Labels</span></button>
-          <button class="tool tsm" id="rbLblMenu" title="Label options: what labels show (full, name + qty, qty only, name only), what cut-out labels show or hide them, follow the zoom, no overlap"><svg class="ic"><use href="#i-cog"/></svg></button>
+          <button class="tool tsm" id="rbLblMenu" title="Label options: what labels show (full, name + qty, qty only, name only), cut-out labels, sizes A+ / A− ( [ ] — Shift for cut-outs), follow the zoom, no overlap. Drag a label to move it."><svg class="ic"><use href="#i-cog"/></svg></button>
           <button class="tool" id="rbLblDed" title="Cut-out labels: show / hide the labels of cut-outs and deductions — their quantity stays on the sheet (⚙: what they show)"><svg class="ic"><use href="#i-ded"/></svg><span class="tl">Cut-outs</span></button>
           <button class="tool" data-px="bLegend" title="Embedded editable takeoff legend"><svg class="ic"><use href="#i-list"/></svg><span class="tl">Legend</span></button>
           <button class="tool" data-px="bMini" title="Minimap"><svg class="ic"><use href="#i-array"/></svg><span class="tl">Minimap</span></button>
@@ -952,7 +952,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
     <div class="propsbox" id="propsBox"><div class="pbh" id="propsHead" title="Click to fold / unfold"><b>Properties</b><span id="propsTag" class="small"></span></div>
       <div class="props" id="props"></div><div class="propsEmpty">Click a measurement on the drawing or on the sheet to see and edit its details here. Select a condition to see its settings.</div></div>
     <details class="keys"><summary>Keyboard shortcuts</summary><div class="kg">
-      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>C</kbd> count</span><span><kbd>E</kbd> circle</span><span><kbd>N</kbd> note</span><span><kbd>D</kbd> cut-out (polyline)</span><span><kbd>Shift</kbd>+<kbd>D</kbd> cut-out (rectangle)</span><span><kbd>O</kbd> opening</span>
+      <span><kbd>A</kbd> draw</span><span><kbd>R</kbd> rectangle</span><span><kbd>W</kbd> auto area</span><span><kbd>C</kbd> count</span><span><kbd>E</kbd> circle</span><span><kbd>N</kbd> note</span><span><kbd>D</kbd> cut-out (polyline)</span><span><kbd>[</kbd> <kbd>]</kbd> label size (<kbd>Shift</kbd>: cut-outs)</span><span><kbd>Shift</kbd>+<kbd>D</kbd> cut-out (rectangle)</span><span><kbd>O</kbd> opening</span>
       <span><kbd>M</kbd> measure</span><span><kbd>K</kbd> set scale</span><span><kbd>V</kbd> select</span><span><kbd>B</kbd> break</span><span><kbd>Shift</kbd>+<kbd>O</kbd> lasso</span><span><kbd>Z</kbd> zoom box</span>
       <span><kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> undo point</span><span><kbd>A</kbd> arc (drawing)</span><span><kbd>Ctrl</kbd>+click no snap</span><span><kbd>Shift</kbd> 0° / 90°</span>
       <span><kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>X</kbd>/<kbd>V</kbd></span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> in place</span><span><kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate</span><span><kbd>Ctrl</kbd>+drag copy</span>
@@ -1145,7 +1145,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-20e"></script>
+<script type="module" src="takeoff.js?v=2026-10-20f"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with

@@ -3541,7 +3541,7 @@ function setTool(t){
 function hint(){
   const c = S.cond ? cond(S.cond) : null, t = S.tool;
   const drawing = " · type a length + Enter (12'-6\") · A: arc · Ctrl+click: no snap · Ctrl+Z / Backspace: last point back · Ctrl+Y: again";
-  const H = {select: "Click to select · drag a box left→right (wholly inside) or right→left (touching) · drag a selected object to move it, Ctrl+drag to copy · double-click an edge to add a point, a point to remove it · right-click for more.",
+  const H = {select: "Click to select · drag a box left→right (wholly inside) or right→left (touching) · drag a selected object to move it, Ctrl+drag to copy · double-click an edge to add a point, a point to remove it · drag a label to move it (right-click → Reset label position) · right-click for more.",
     cadsel: "AutoCAD objects: click one to select it · Shift / Ctrl+click adds or takes out · drag a box left→right (wholly inside) or right→left (touching) · Ctrl+A: all · then Take off, Count, Select similar, Layer off… below · Esc clears.",
     lasso: "Lasso: drag round the objects to select (touching counts) · Shift adds to the selection.", pan: "Drag to pan; scroll to zoom.",
     draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." + drawing : c.type === "linear" ? (S.resume ? "Continuing the run — click on; Enter, double-click or right-click to finish." : "Click along the run; Enter, double-click or right-click to finish.") + drawing : "Click each item to count it; Esc when done.",
@@ -3716,6 +3716,8 @@ function onMove(e){
   if (S.mkd) { mkMoveDrag(sp, e); S.cursorScr = sp; draw(); return; }
   if (S.press && !S.drag && dist(sp, S.press.sp) > 4) startMove(S.press, e);
   if (S.drag && S.drag.move) { moveDrag(sp, e); return; }
+  if (S.drag && S.drag.lbl) { const D = S.drag; if (!D.moved && dist(sp, D.sp0) < 3) return; D.moved = true;   // a label being moved: it follows the mouse, kept as an offset from its object
+    S.lblDrag = {id: D.lbl, lo: [D.lo0[0] + (sp[0] - D.sp0[0]) / S.view.s, D.lo0[1] + (sp[1] - D.sp0[1]) / S.view.s]}; stage().style.cursor = "move"; draw(); return; }
   if (S.box) { S.box.b = sp; if (S.box.pending && dist(S.box.a, sp) > 6) { S.box.pending = false; if (!S.box.add) S.sel = null; } if (!S.box.pending) { draw(); return; } }
   const {p, s} = cursorPoint(e, sp);
   S.cursor = p; S.snap = s; S.cursorScr = sp;
@@ -3738,6 +3740,7 @@ function cancelDrag0(){   // a long press became the menu: drop what the press h
   const D = S.drag; S.press = null; S.box = null; S.lasso = null;
   if (D && D.vertex != null) { const it = P.proj.items.find(i => i.id === D.item); if (it) it.pts = D.orig; }
   if (D && D.mh != null) { const m = objById(D.mark); if (m) m.pts = D.orig; }
+  S.lblDrag = null;
   if (D && D.move) { D.orig.forEach((pts, id) => { const o = objById(id); if (o) o.pts = pts.map(p => p.slice()); }); if (D.added && D.added.length) { const a = new Set(D.added); P.proj.items = P.proj.items.filter(i => !a.has(i.id)); P.proj.marks = (P.proj.marks || []).filter(m => !a.has(m.id)); } }
   S.drag = null;
 }
@@ -3745,6 +3748,8 @@ function onUp(e){
   if (S.touches && e.pointerType === "touch") { delete S.touches[e.pointerId]; if (Object.keys(S.touches).length < 2) S.pinch = null; }   // first: a finger lifted after a markup drag, lasso or box is forgotten too (else the next tap reads as a pinch)
   if (S.lp) { clearTimeout(S.lp.t); const fired = S.lp.fired; S.lp = null; if (fired) return; }
   if (S.mkd) { mkUp(); return; }
+  if (S.drag && S.drag.lbl) { const D = S.drag, L = S.lblDrag, it = P.proj.items.find(i => i.id === D.lbl); S.drag = null; S.lblDrag = null;
+    if (it && D.moved && L) mutate(() => { it.lo = L.lo.map(v => Math.round(v * 100) / 100); }, "Move label"); else draw(); return; }
   if (S.drag && S.drag.mh != null) { const D = S.drag, m = objById(D.mark); S.drag = null;
     if (m && D.moved) { const np = m.pts.map(q => q.slice()); m.pts = D.orig; mutate(() => { m.pts = np; m.mod = new Date().toISOString(); }, "Edit " + (MARK_TOOLS[m.type] || "markup").toLowerCase()); } else draw(); return; }
   if (S.drag && S.drag.pan && S.drag.rc && !S.drag.rcMoved) { S.drag = null; stage().classList.remove("panning"); ctxOpen(evPos(e), e); return; }
@@ -3910,6 +3915,8 @@ function selectDown(sp, e){
     const vi = vertexAt(one, sp); if (vi >= 0) return delPoint(one, vi);
     const sg = segAt(one, sp); if (sg) return addPoint(one, sg.i, sg.p);
   }
+  if (!shift && !ctrl) { const lb = lblAt(sp);   // Bluebeam: drag a measurement's label to put it where it reads best (a click selects its object)
+    if (lb) { if (!selIds().has(lb.id)) setSel([lb.id]); if (!lb.it.locked) S.drag = {lbl: lb.id, sp0: sp, lo0: (lb.it.lo || [0, 0]).slice(), moved: false}; refresh(); return; } }
   const mk = markAt(sp), hi = mk ? null : hitInfo(sp), id = mk ? mk.id : hi ? hi.it.id : null, ids = selIds(), inSel = !!id && ids.has(id);
   if (shift) {   // add to / take out of the selection; a drag from here adds a box
     if (S.sel) S.multi.add(S.sel); if (S.selMark) S.multi.add(S.selMark); S.sel = null; S.selMark = null;
@@ -3937,6 +3944,7 @@ function hoverAt(sp, e){
   const one = selOne();
   if (one && !one.locked && vertexAt(one, sp) >= 0) { cur = "grab"; id = one.id; }
   else if (one && ghostAt(one, sp) >= 0) { cur = "copy"; id = one.id; }
+  else if (!(e.ctrlKey || e.metaKey) && lblAt(sp)) { id = lblAt(sp).id; cur = objById(id).locked ? "not-allowed" : "move"; }   // a label: drag it
   else { const mk = markAt(sp), hi = mk ? null : hitInfo(sp); id = mk ? mk.id : hi ? hi.it.id : null;
     if (id) cur = e.ctrlKey || e.metaKey ? "copy" : selIds().has(id) || mk || hi.edge || hi.pt >= 0 ? (objById(id).locked ? "not-allowed" : "move") : "pointer"; }
   if (S.hover !== id) S.hover = id;
@@ -4252,7 +4260,7 @@ function drawNow(){
     dyn.push(label([Math.min(a[0], b[0]) + 52, Math.min(a[1], b[1]) - 12], cr ? "touching ← crossing" : "window → wholly inside", cr ? "#0e7a52" : "#1d5fae")); }
   if (S.lasso && S.lasso.pts.length > 1) dyn.push(`<polygon points="${S.lasso.pts.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ")}" fill="rgba(27,175,122,.10)" stroke="#139a68" stroke-width="1.5" stroke-dasharray="6 4"/>`);
   if (S.zbox) { const a = S.zbox.a, b = S.zbox.b; dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(15,41,66,.06)" stroke="#0f2942" stroke-width="1.5" stroke-dasharray="3 3"/>`); }
-  const LB = !keep && S.lbl.declutter !== false ? [] : null, lz = lblZ(S.view.s);   // the labels, placed after every object so none covers another
+  const LB = !keep ? [] : null, lz = lblZ(S.view.s), LD = S.drag && S.drag.lbl && S.lblDrag ? S.lblDrag : null;   // the labels, placed after every object so none covers another
   if (!keep && !S.hideMk) P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).forEach(it => {
     const c = cond(it.cond); if (!c) return;
     const col = c.color, sel = it.id === S.sel || S.multi.has(it.id), k = itemScale(it), pts0 = it.pts;
@@ -4271,7 +4279,7 @@ function drawNow(){
       const a = toScr(it.pts[0]), b = toScr(it.pts[1]);
       h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${sel ? 6 : Math.max(1, +c.sw || 4)}" stroke-linecap="round" opacity=".85"/>`);
       if (k) { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], r = rowsOf(it, k)[0]; h.push(label(m, (it.label ? it.label + " " : "") + f3(r.L) + " × " + f3(+it.oh || 0), "#9b2222")); }
-    } else h.push(measSvg(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, {T: toScr, z: 1, lz, lblOut: LB, sp: S.view.s, sel, k, lbl: S.lbl.on, seg: S.lbl.on && S.lbl.seg, small: S.lbl.small, screen: true}));   // as its appearance says (the exports draw it the same way)
+    } else h.push(measSvg(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, {T: toScr, z: 1, lz, lblOut: LB, lo: LD && LD.id === it.id ? LD.lo : undefined, sp: S.view.s, sel, k, lbl: S.lbl.on, seg: S.lbl.on && S.lbl.seg, small: S.lbl.small, screen: true}));   // as its appearance says (the exports draw it the same way)
     if (sel && !S.multi.size) {
       (it._pts || it.pts).forEach((p, i) => { const q = toScr(p); h.push(`<rect x="${(q[0] - 4).toFixed(1)}" y="${(q[1] - 4).toFixed(1)}" width="8" height="8" fill="${it.locked ? "#e8ecf1" : i === S.selPt ? "#0b0b0b" : "#fff"}" stroke="${it.locked ? "#8a97a6" : i === S.selPt ? "#0b0b0b" : col}" stroke-width="2"/>`); });
       if (!it.locked && editPts(it) && S.tool === "select") { const n = closedOf(it) ? it.pts.length : it.pts.length - 1;   // a "+" at the middle of each side: drag it to add a point
@@ -4280,7 +4288,7 @@ function drawNow(){
       if (it.locked) { const q = toScr((it._pts || it.pts)[0]); h.push(lockBadge([q[0] + 10, q[1] - 14])); }
     }
   });
-  if (LB && LB.length) h.push(placeLabels(LB));
+  if (LB) h.push(placeLabels(LB, S.lbl.declutter !== false));
   const c = S.cond ? cond(S.cond) : null, cur = S.cursor;
   let live = "";
   if (S.tool === "stretch" && S.str && cur) dyn.push(...stretchPreview(cur));
@@ -4491,12 +4499,16 @@ function measSvg(it, c, o){
   if (!closed && scr.length >= 2) { const n = scr.length; out.push(apHead(a.h0, scr[0], scr[1], w0, esc(col), op, a.hs), apHead(a.h1, scr[n - 1], scr[n - 2], w0, esc(col), op, a.hs)); }
   if (a.vtx) (it.shape === "circle" ? [] : it.pts.map(T)).forEach(q => out.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(Math.max(2.2, w0 * 0.9)).toFixed(1)}" fill="#fff" stroke="${esc(col)}" stroke-width="${(1.2 * z).toFixed(2)}"/>`));
   if (a.blend === "multiply" && out.length) out.splice(0, out.length, apBlendG(a, out.join("")));
-  const k = o.k, lz = o.lz || z, lzs = o.sel ? Math.max(lz, LBL_SEL_Z) : lz;   // lz: the labels' size (on screen it follows the zoom), z: the lines'; the selected object's label stays readable
+  const ks = (+S.lbl.scale || 1) * (ded ? +S.lbl.dedScale || 1 : 1), lo = o.lo !== undefined ? o.lo : it.lo;   // ks: View → Labels size (cut-outs have their own); lo: the label moved by hand (Bluebeam), its offset in page units
+  const k = o.k, lz = o.lz || z, lzs = o.sel ? Math.max(lz * ks, LBL_SEL_Z) : lz * ks;   // lz: the labels' size (on screen it follows the zoom), z: the lines'; the selected object's label stays readable
   if (k && o.lbl && a.lpos !== "none" && (+a.fsz || 11.5) * lzs >= LBL_MIN_PX) {   // smaller than that it could not be read: left out (hover still tells)
     const big = area ? polyArea(scr) > 2500 * lz * lz : polyLen(scr) > 60 * lz;
-    if (big || o.sel || !o.small) { const L = capLines(it, c, k, a);
-      if (L.length) { const p = apLabelPt(scr, area, a, lzs), svg = apLabel(p, L, a, ded ? "#9b2222" : a.fcol, lzs);
-        if (o.lblOut) { const d = apLabelDims(L, a, lzs); o.lblOut.push({svg, sel: o.sel ? 1 : 0, pri: area ? polyArea(scr) : polyLen(scr) * 20 * lz, b: [p[0] - d.w / 2, p[1] - d.hh / 2, p[0] + d.w / 2, p[1] + d.hh / 2]}); }
+    if (big || o.sel || !o.small || lo) { const L = capLines(it, c, k, a);
+      if (L.length) { const p0 = apLabelPt(scr, area, a, lzs), p = lo ? [p0[0] + lo[0] * sp, p0[1] + lo[1] * sp] : p0, d = apLabelDims(L, a, lzs), lc = ded ? "#9b2222" : a.fcol;
+        const lead = lo && Math.hypot(p[0] - p0[0], p[1] - p0[1]) > d.hh * 0.9 + 6 * lzs ?   // moved well away: a leader back to its object
+          `<g class="aplead"><line x1="${p0[0].toFixed(1)}" y1="${p0[1].toFixed(1)}" x2="${p[0].toFixed(1)}" y2="${p[1].toFixed(1)}" stroke="${esc(lc)}" stroke-width="${Math.max(0.8, lzs).toFixed(2)}" stroke-dasharray="${(4 * lzs).toFixed(1)} ${(3 * lzs).toFixed(1)}" opacity=".75"/><circle cx="${p0[0].toFixed(1)}" cy="${p0[1].toFixed(1)}" r="${(2.5 * lzs).toFixed(1)}" fill="${esc(lc)}"/></g>` : "";
+        const svg = lead + apLabel(p, L, a, lc, lzs);
+        if (o.lblOut) o.lblOut.push({svg, id: it.id, sel: o.sel ? 1 : 0, pin: lo ? 1 : 0, pri: area ? polyArea(scr) : polyLen(scr) * 20 * lz, b: [p[0] - d.w / 2, p[1] - d.hh / 2, p[0] + d.w / 2, p[1] + d.hh / 2]});
         else out.push(svg); } }
   }
   const segOn = a.seg === "on" || (a.seg !== "off" && (o.seg || o.sel));
@@ -4664,7 +4676,11 @@ function tmpMeasSvg(m, k){   // a temporary angle (arms dashed, an arc at the co
 }
 /* measurement captions, as Bluebeam's "show caption": which values a label shows is set once (🏷 ▾) and used on screen
    and in the marked-up exports. Areas: name, quantity, area, perimeter, L × W; lengths: name, length, quantity, H / T. */
-const LBL_DEF = {on: true, name: true, qty: true, area: true, perim: true, len: true, dims: false, cond: false, seg: false, units: true, small: true, autoName: true, zoom: true, declutter: true, show: "full", dedShow: "qty", v2: 1};
+const LBL_DEF = {on: true, name: true, qty: true, area: true, perim: true, len: true, dims: false, cond: false, seg: false, units: true, small: true, autoName: true, zoom: true, declutter: true, show: "full", dedShow: "qty", scale: 1, dedScale: 1, v2: 1};
+/* label sizes (View → Labels ⚙, [ ] keys; Shift for cut-outs): a step up or down this list, × the condition's own size */
+const LBL_SIZES = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75, 2, 2.5, 3];
+function lblStep(v, d){ v = +v || 1; const L = LBL_SIZES; if (d > 0) return L.find(x => x > v + 1e-9) || L[L.length - 1]; return [...L].reverse().find(x => x < v - 1e-9) || L[0]; }
+function lblSize(key, d){ const v = lblStep(S.lbl[key], d); lblSet({[key]: v}); toast((key === "dedScale" ? "Cut-out labels " : "Labels ") + Math.round(v * 100) + " %", 1300); }
 /* what a label shows: full (the ticks in View → Labels), name + quantity, quantity only, name only — cut-outs / deductions have their own
    choice, which can also hide them (their quantity stays on the sheet) */
 const LBL_SHOW = {full: "Full", nameqty: "Name + qty", qty: "Qty only", name: "Name only"}, LBL_DED = {full: "Full", nameqty: "Name + qty", qty: "Qty only", off: "Hidden"};
@@ -4673,9 +4689,18 @@ const LBL_SHOW = {full: "Full", nameqty: "Name + qty", qty: "Qty only", name: "N
 const LBL_MIN_PX = 6, LBL_SEL_Z = 0.85, LBL_MAX_Z = 2.5;
 function lblZ(s){ return S.lbl && S.lbl.zoom === false ? 1 : Math.min(LBL_MAX_Z, s); }
 /* labels that would sit on one another: the selected object's and then the biggest object's stay, the others are left out (hover still shows them) */
-function placeLabels(L){
-  const put = [], pad = 2; L.sort((a, b) => (b.sel - a.sel) || (b.pri - a.pri));
-  return L.filter(x => { const b = x.b; if (!x.sel && put.some(q => b[0] < q[2] + pad && b[2] > q[0] - pad && b[1] < q[3] + pad && b[3] > q[1] - pad)) return false; put.push(b); return true; }).map(x => x.svg).join("");
+function placeLabels(L, dec){   // a label placed by hand is never left out; every label drawn is remembered (S.lblBoxes) so it can be grabbed
+  const put = [], pad = 2; L.sort((a, b) => (b.sel - a.sel) || (b.pin - a.pin) || (b.pri - a.pri)); S.lblBoxes = [];
+  return L.filter(x => { const b = x.b; if (dec && !x.sel && !x.pin && put.some(q => b[0] < q[2] + pad && b[2] > q[0] - pad && b[1] < q[3] + pad && b[3] > q[1] - pad)) return false; put.push(b); S.lblBoxes.push({id: x.id, b}); return true; }).map(x => x.svg).join("");
+}
+function lblAt(sp){   // the label under the mouse (the one drawn last, on top, first)
+  const L = S.lblBoxes || []; for (let i = L.length - 1; i >= 0; i--) { const b = L[i].b; if (sp[0] < b[0] - 2 || sp[0] > b[2] + 2 || sp[1] < b[1] - 2 || sp[1] > b[3] + 2) continue;
+    const it = P.proj && P.proj.items.find(x => x.id === L[i].id); if (it && onPage(it) && !hiddenItem(it)) return {id: it.id, it}; }
+  return null;
+}
+function resetLabelPos(ids){   // labels moved by hand go back into their objects (these, or every one on this page)
+  const L = P.proj.items.filter(i => i.lo && (ids ? ids.has(i.id) : onPage(i)) && !i.locked); if (!L.length) return;
+  mutate(() => L.forEach(i => { delete i.lo; }), "Reset label position" + (L.length > 1 ? "s (" + L.length + ")" : ""));
 }
 function loadLbl(){ let o = null; try { o = JSON.parse(pref("zdTakeoffLbl") || "null"); } catch (e) { o = null; } S.lbl = Object.assign({}, LBL_DEF, o || {});
   if (o && !o.v2) Object.assign(S.lbl, {area: true, perim: true, v2: 1}); }   // an area's label shows its area and perimeter: switched on once for labels set before (switched off again, it stays off)
@@ -4739,11 +4764,13 @@ async function labelDialog(){
   const o = S.lbl, cb = (k2, t) => `<label class="pk"><input type="checkbox" data-lb="${k2}"${o[k2] ? " checked" : ""}> ${t}</label>`;
   const sl = (k2, O, v0) => `<select data-lbs="${k2}">${Object.entries(O).map(([x, t]) => `<option value="${x}"${x === v0 ? " selected" : ""}>${t}</option>`).join("")}</select>`;
   const v = await ask("Labels on the drawing", `<div class="grid"><div class="fg"><label>Every label shows</label>${sl("show", LBL_SHOW, LBL_SHOW[o.show] ? o.show : "full")}</div>
-    <div class="fg"><label>Cut-out / deduction labels show</label>${sl("dedShow", LBL_DED, LBL_DED[o.dedShow] ? o.dedShow : "qty")}</div><div class="fg"><label>Show on every label</label>${cb("name", "Name (room / label)")}${cb("cond", "Condition name")}${cb("qty", "Quantity in the condition's unit")}${cb("units", "Units (Sft, ft, cft, Nos)")}</div>
+    <div class="fg"><label>Cut-out / deduction labels show</label>${sl("dedShow", LBL_DED, LBL_DED[o.dedShow] ? o.dedShow : "qty")}</div>
+    <div class="fg"><label>Label size % ( [ ] )</label><input type="number" data-lbn="scale" min="50" max="300" step="5" value="${Math.round((+o.scale || 1) * 100)}"></div>
+    <div class="fg"><label>Cut-out label size % ( Shift + [ ] )</label><input type="number" data-lbn="dedScale" min="50" max="300" step="5" value="${Math.round((+o.dedScale || 1) * 100)}"></div><div class="fg"><label>Show on every label</label>${cb("name", "Name (room / label)")}${cb("cond", "Condition name")}${cb("qty", "Quantity in the condition's unit")}${cb("units", "Units (Sft, ft, cft, Nos)")}</div>
     <div class="fg"><label>Areas</label>${cb("area", "Area Sft (when the unit is not Sft — in Sft the quantity is the area)")}${cb("perim", "Perimeter ft — shown as P (the outline's length)")}${cb("dims", "L × W of rectangles · Ø of circles · H / T of walls")}
       <label style="margin-top:6px">Lengths</label>${cb("len", "Length ft")}</div>
     <div class="fg w2"><label>Display</label>${cb("seg", "Length of every side / segment (always shown on the selected one)")}${cb("small", "Hide labels on shapes too small to read at this zoom")}${cb("zoom", "Labels grow and shrink with the zoom, as the drawing's own text (off: always one size on screen)")}${cb("declutter", "Leave out a label that would cover another (the bigger object's label stays)")}${cb("autoName", "Name new areas from the room name written inside them (manual, rectangle, auto area, Claude)")}</div></div>
-    <p class="small" style="margin-top:8px">The same labels go on the marked-up PNG / PDF exports. <b>L</b> shows or hides all labels.</p>`, "Save", () => { const n = {on: o.on}; document.querySelectorAll("[data-lb]").forEach(x => { n[x.dataset.lb] = x.checked; }); document.querySelectorAll("[data-lbs]").forEach(x => { n[x.dataset.lbs] = x.value; }); return n; });
+    <p class="small" style="margin-top:8px">The same labels go on the marked-up PNG / PDF exports. <b>L</b> shows or hides all labels.</p>`, "Save", () => { const n = {on: o.on}; document.querySelectorAll("[data-lb]").forEach(x => { n[x.dataset.lb] = x.checked; }); document.querySelectorAll("[data-lbs]").forEach(x => { n[x.dataset.lbs] = x.value; }); document.querySelectorAll("[data-lbn]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) n[x.dataset.lbn] = Math.max(0.5, Math.min(3, v / 100)); }); return n; });
   if (!v) return;
   lblSet(v);
   if (P.proj && S.page) { const n = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !i.label && i.kind === "shape" && (cond(i.cond) || {}).type === "area").length;
@@ -4824,6 +4851,12 @@ function lblMenu(anchor){
     {t: "Follow the zoom (sized as the drawing's text)", fn: () => lblSet({zoom: o.zoom === false}), on: o.zoom !== false},
     {t: "No overlap (leave out a covered label)", fn: () => lblSet({declutter: o.declutter === false}), on: o.declutter !== false},
     {t: "Hide labels on small shapes", fn: () => lblSet({small: !o.small}), on: !!o.small}, {sep: 1},
+    {t: "A+ Labels bigger", k: "] · " + Math.round((+o.scale || 1) * 100) + " %", fn: () => lblSize("scale", 1), dis: (+o.scale || 1) >= LBL_SIZES[LBL_SIZES.length - 1]},
+    {t: "A− Labels smaller", k: "[", fn: () => lblSize("scale", -1), dis: (+o.scale || 1) <= LBL_SIZES[0]},
+    {t: "A+ Cut-out labels bigger", k: "Shift+] · " + Math.round((+o.dedScale || 1) * 100) + " %", fn: () => lblSize("dedScale", 1), dis: (+o.dedScale || 1) >= LBL_SIZES[LBL_SIZES.length - 1]},
+    {t: "A− Cut-out labels smaller", k: "Shift+[", fn: () => lblSize("dedScale", -1), dis: (+o.dedScale || 1) <= LBL_SIZES[0]},
+    {t: "Label sizes back to 100 %", fn: () => lblSet({scale: 1, dedScale: 1}), dis: (+o.scale || 1) === 1 && (+o.dedScale || 1) === 1},
+    {t: "Labels moved by hand back into their objects (this page)", fn: () => resetLabelPos(), dis: !(P.proj && P.proj.items.some(i => i.lo && onPage(i)))}, {sep: 1},
     {t: "More label settings…", fn: labelDialog}], r.left, r.bottom + 4);
 }
 function setLblOn(on){ S.lbl.on = on; pref("zdTakeoffLbl", JSON.stringify(S.lbl)); lblSync(); $("bLbl").classList.toggle("on", on); $("bLbl").title = on ? "Labels shown — click (or L) to hide" : "Labels hidden — click (or L) to show"; viewMark(); draw(); }
@@ -10033,6 +10066,7 @@ function ctxItem(hi, sp, q, e){
   if (!many && c.type === "area" && it.kind !== "open" && it.shape !== "circle") L.push({t: "Square up to walls", fn: () => squareUpSel(it), dis: it.locked || !(S.geo[S.key] && S.geo[S.key].segs.length)});
   if (runs.length >= 2) L.push({t: "Join " + runs.length + " runs into one", fn: () => joinRuns(new Set(runs.map(r => r.id))), dis: lk});
   if (sel.filter(i => i.kind === "shape" && (cond(i.cond) || {}).type === "area").length >= 2) L.push({t: "Combine into one area", fn: () => combineAreas(ids), dis: lk});
+  if (sel.some(o => o.lo)) L.push({t: "Reset label position" + (many ? "s" : "") + " (back into the object)", fn: () => resetLabelPos(new Set(sel.map(o => o.id))), dis: allLk});
   if (!many && c.type === "area" && it.kind === "shape") L.push({t: "Add a rectangular cut-out", k: "Shift+D", fn: () => { S.cond = c.id; setTool("dedrect"); }}, {t: "Add a polyline cut-out", k: "D", fn: () => { S.cond = c.id; setTool("ded"); }});
   if (!many && c.type === "area" && it.kind === "shape") { const under = cutTargets(it); if (under.length) L.push({t: "Cut out of the area" + (under.length > 1 ? "s" : "") + " it overlaps (" + under.slice(0, 2).map(u => u.label || (cond(u.cond) || {}).name).join(", ") + (under.length > 2 ? ", …" : "") + ")", fn: () => cutOutOf(it, under), dis: it.locked}); }
   if (!many && c.type === "linear" && it.kind !== "open") L.push({t: "Add an opening (door / window)", k: "O", fn: () => { S.cond = c.id; setTool("open"); }});
@@ -10752,6 +10786,8 @@ function wire(){
     }
     if (k === "a" && S.draft.length && ["draw", "ded", "measure", "fence"].indexOf(S.tool) >= 0) { S.arcMode = S.arcMode ? 0 : 1; S.arcMid = null; hint(); draw(); return; }   // PlanSwift: A while drawing = arc
     if (k === "o" && e.shiftKey) { setTool("lasso"); return; }   // Bluebeam: Shift+O lasso
+    if (e.key === "]" || e.key === "[") { lblSize("scale", e.key === "]" ? 1 : -1); return; }   // label text bigger / smaller
+    if (e.key === "}" || e.key === "{") { lblSize("dedScale", e.key === "}" ? 1 : -1); return; }   // Shift: the cut-out labels'
     if (e.shiftKey && k === "c") { setXh(!S.xh); return; }   // full-screen cross-hair
     if (e.shiftKey && k === "g") { setMag(!MAG.on); return; }   // magnifier (Shift+M is the Angle tool)
     if (e.shiftKey) { const ST = {m: "angle", l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen", v: "cadsel", t: "trim", x: "extend", s: "stretch", d: "dedrect"}; if (ST[k]) { setTool(ST[k]); return; } }

@@ -8,7 +8,7 @@
 
    TK_URL, TK_LIBS (pdfjs-dist, exceljs) and TK_SHOTS as in tools/test_takeoff.js.
 
-   Checks: a label's text size follows the zoom (100 % = its set size, capped at 2.5 ×); zoomed far out the labels are left
+   Checks: a label can be dragged (offset kept on the drawing, leader, undo, reset, locked), [ ] / ⚙ / dialog sizes; a label's text size follows the zoom (100 % = its set size, capped at 2.5 ×); zoomed far out the labels are left
    out but the selected object's stays readable; small labels that would overlap keep only the bigger object's; View →
    Labels "grow and shrink with the zoom" off keeps one size, "leave out a label that would cover another" off shows them
    all; the hover tip still names a hidden label's object; no page errors. */
@@ -150,6 +150,69 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.05 : t);
   await page.mouse.move(c[0], c[1]); await page.mouse.move(c[0] + 2, c[1] + 1); await wait(300);
   const hv = await page.innerText("#tip").catch(() => "");
   ok(/HALL|Floor area/.test(hv) && (await labels()).length === 0, "zoomed out with no labels drawn, hovering still names the object (" + hv.trim().replace(/\s+/g, " ") + ")");
+
+  console.log("moving a label (Bluebeam)");
+  await zoomTo(1); await page.keyboard.press("v"); await setLbl({declutter: true}); await wait(150);
+  const lblBox = name => T(n => { const g = [...document.querySelectorAll("#ov g.aplbl")].find(x => x.querySelector("text").textContent === n); if (!g) return null; const r = g.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }, name);
+  const itm = id => T(id => { const i = zdTakeoff.P.proj.items.find(x => x.id === id); return i ? {lo: i.lo || null, locked: !!i.locked} : null; }, id);
+  let c0 = await lblBox("HALL");
+  await page.mouse.move(c0[0], c0[1]); await page.mouse.move(c0[0] + 1, c0[1]); await wait(150);
+  ok((await T(() => document.getElementById("stage").style.cursor)) === "move", "over a label the cursor shows move");
+  await page.mouse.down(); for (let i = 1; i <= 6; i++) { await page.mouse.move(c0[0] + 1 + 25 * i, c0[1] - 10 * i); await wait(20); } await page.mouse.up(); await wait(250);
+  let m1 = await itm("IB"), c1 = await lblBox("HALL");
+  ok(m1.lo && Math.abs(m1.lo[0] - 150) < 3 && Math.abs(m1.lo[1] + 60) < 3, "dragging HALL's label 150 px right, 60 up keeps it there (offset " + JSON.stringify(m1.lo) + " pt at 100 %)");
+  ok(c1 && Math.abs(c1[0] - c0[0] - 151) < 4 && Math.abs(c1[1] - c0[1] + 60) < 4, "…the label is drawn where it was dropped");
+  ok((await T(() => zdTakeoff.S.sel)) === "IB", "…and its object is selected (a label is part of its object)");
+  const lead1 = await T(() => { const g = document.querySelector("#ov g.aplead"); if (!g) return 0; const c = g.querySelector("circle"), l = g.querySelector("line"); return Math.hypot(+l.getAttribute("x2") - +c.getAttribute("cx"), +l.getAttribute("y2") - +c.getAttribute("cy")); });
+  ok(lead1 > 150, "moved away from its room it gets a dashed leader back to it (" + Math.round(lead1) + " px)"); await shot("moved");
+  await zoomTo(2);
+  const lead2 = await T(() => { const g = document.querySelector("#ov g.aplead"), c = g.querySelector("circle"), l = g.querySelector("line"); return Math.hypot(+l.getAttribute("x2") - +c.getAttribute("cx"), +l.getAttribute("y2") - +c.getAttribute("cy")); });
+  ok(Math.abs(lead2 - 2 * lead1) < 4, "at 200 % it sits twice as far from its room — it stays put on the drawing (" + Math.round(lead2) + " px)");
+  await zoomTo(1);
+  await page.keyboard.press("Control+z"); await wait(250);
+  ok(!(await itm("IB")).lo && !(await T(() => !!document.querySelector("#ov g.aplead"))), "Ctrl+Z puts the label back in its room");
+  await page.keyboard.press("Control+y"); await wait(250);
+  ok((await itm("IB")).lo, "Ctrl+Y moves it again");
+  await T(() => { const Z = zdTakeoff, d = Z.P.proj.items.find(x => x.id === "D3"); d.lo = [0, 45]; Z.refresh(); }); await wait(200);
+  const ids = await T(() => (zdTakeoff.S.lblBoxes || []).map(b => b.id));
+  ok(ids.includes("D3") && ids.filter(x => /^D/.test(x)).length >= 2, "a cut-out label moved by hand is always shown, even with No overlap on (" + ids.join(", ") + ")");
+  c1 = await lblBox("HALL"); await page.mouse.click(c1[0], c1[1], {button: "right"}); await wait(250);
+  ok(/Reset label position/.test(await page.innerText("#ctx")), "right-click on the moved label offers Reset label position");
+  await page.locator("#ctx .ci", {hasText: "Reset label position"}).first().click(); await wait(250);
+  ok(!(await itm("IB")).lo, "…which puts it back in its room");
+  await page.click('[data-rtab="view"]'); await wait(150); await page.click("#rbLblMenu"); await wait(150);
+  await page.locator("#ctx .ci", {hasText: "Labels moved by hand back into their objects"}).first().click(); await wait(250);
+  ok(!(await itm("D3")).lo, "⚙ → Labels moved by hand back into their objects resets the page's (the cut-out too)");
+  await page.click('[data-rtab="takeoff"]'); await wait(150);
+  await T(() => { const Z = zdTakeoff; Z.P.proj.items.find(x => x.id === "IB").locked = true; Z.S.sel = null; Z.refresh(); }); await wait(200);
+  c0 = await lblBox("HALL"); await page.mouse.move(c0[0], c0[1]); await page.mouse.down(); await page.mouse.move(c0[0] + 80, c0[1] + 40, {steps: 5}); await page.mouse.up(); await wait(200);
+  ok(!(await itm("IB")).lo, "a locked object's label does not move");
+  await T(() => { const Z = zdTakeoff; Z.P.proj.items.find(x => x.id === "IB").locked = false; Z.refresh(); }); await wait(150);
+
+  console.log("label sizes ( [ ] keys, ⚙, the Labels dialog)");
+  await page.mouse.click(5, 300); await zoomTo(1);   // focus out of any field; a click in empty space selects nothing
+  const fsOf = async () => { const L = await labels(); return {hall: (L.find(x => x.s === "HALL") || {}).fs, cut: (L.find(x => /^-9\.000/.test(x.s)) || {}).fs}; };
+  let f = await fsOf(); ok(Math.abs(f.hall - 11.5) < 0.06 && Math.abs(f.cut - 11.5) < 0.06, "both at 100 % (" + f.hall + ", " + f.cut + " px)");
+  await page.keyboard.press("BracketRight"); await wait(200); f = await fsOf();
+  ok(Math.abs(f.hall - 11.5 * 1.15) < 0.06 && Math.abs(f.cut - 11.5 * 1.15) < 0.06, "] makes every label bigger: 115 % (" + f.hall + " px)");
+  await page.keyboard.press("Shift+BracketRight"); await wait(200); f = await fsOf();
+  ok(Math.abs(f.hall - 11.5 * 1.15) < 0.06 && Math.abs(f.cut - 11.5 * 1.15 * 1.15) < 0.06, "Shift+] makes only the cut-out labels bigger (" + f.cut + " px, HALL stays " + f.hall + ")");
+  await page.keyboard.press("BracketLeft"); await page.keyboard.press("BracketLeft"); await wait(200); f = await fsOf();
+  ok(Math.abs(f.hall - 11.5 * 0.9) < 0.06, "[ [ makes them smaller: 90 % (" + f.hall + " px)");
+  await page.click('[data-rtab="view"]'); await wait(150); await page.click("#rbLblMenu"); await wait(150);
+  const mi = await page.locator("#ctx .ci").allInnerTexts();
+  ok(mi.some(t => /A\+ Labels bigger/.test(t) && /90 %/.test(t)) && mi.some(t => /A− Labels smaller/.test(t)) && mi.some(t => /A\+ Cut-out labels bigger/.test(t) && /115 %/.test(t)) && mi.some(t => /A− Cut-out labels smaller/.test(t)), "⚙ has A+ / A− for labels and for cut-out labels, with their sizes");
+  await page.locator("#ctx .ci", {hasText: "Label sizes back to 100 %"}).first().click(); await wait(200); f = await fsOf();
+  ok(Math.abs(f.hall - 11.5) < 0.06 && Math.abs(f.cut - 11.5) < 0.06, "“Label sizes back to 100 %”");
+  await page.click("#rbLblMenu"); await wait(150); await page.locator("#ctx .ci", {hasText: "A+ Cut-out labels bigger"}).first().click(); await wait(200); f = await fsOf();
+  ok(Math.abs(f.cut - 11.5 * 1.15) < 0.06 && Math.abs(f.hall - 11.5) < 0.06, "⚙ A+ Cut-out labels bigger (" + f.cut + " px)");
+  await page.click('[data-rtab="takeoff"]'); await wait(150);
+  await T(() => document.getElementById("bLblSet").click()); await wait(300);
+  await page.fill('[data-lbn="scale"]', "150"); await page.fill('[data-lbn="dedScale"]', "80"); await page.click("#dlgOk"); await wait(300); f = await fsOf();
+  ok(Math.abs(f.hall - 11.5 * 1.5) < 0.06 && Math.abs(f.cut - 11.5 * 1.5 * 0.8) < 0.06, "the Labels dialog sets them in %: labels 150 %, cut-outs 80 % of that (" + f.hall + ", " + f.cut + " px)");
+  const kept2 = await T(() => JSON.parse(localStorage.getItem("zdTakeoffLbl") || "{}"));
+  ok(kept2.scale === 1.5 && kept2.dedScale === 0.8, "the sizes are kept for the next visit");
+  await setLbl({scale: 1, dedScale: 1});
 
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
   await browser.close();
