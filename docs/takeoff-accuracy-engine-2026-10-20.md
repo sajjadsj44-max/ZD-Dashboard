@@ -179,6 +179,20 @@ Measured on this branch before each fix, on the same code as `main` for that pat
 | The agent measuring washrooms on the page turned 90° (p.3) | BATH 1 48, BATH 2 40 Sft | 45.747 (**−4.69 %**) / 38.751 (**−3.12 %**) | 48.000 / 40.000 |
 | BATH 1 traced from its label vs from open floor (p.1) | 48.000 Sft | 44.012 vs 48.000, so the result depended on the click | 48.000 from every click tried (6 points; pockets on or off, squaring on or off) |
 
+### 5.2a The recorded drawing suite (42 seeds, 36 drawing conditions, synthetic), re-recorded
+
+`tools/test_takeoff_drawings.js --write` was run on this branch (commit `c5d8042`) and compared with the recording the KPI page showed before (`2089cb1`, 11-Oct-2026). The verdicts are unchanged: 32 pass, 4 flagged, 3 negative cases refused, 2 exploratory, and no silent miss. These seeds changed, all for the better:
+
+| Drawing condition | Reference Sft | Before | After |
+|---|---|---|---|
+| Door opening with swing | 168.000 | 167.972 (−0.017 %, IoU 0.992) | 168.000 (0 %, IoU 1.000) |
+| Furniture and text inside (still flagged) | 224.000 | 183.080 (**−18.27 %**, IoU 0.818) | 212.500 (**−5.13 %**, IoU 0.949) |
+| Nested shaft / void | 297.438 | 296.520 (−0.31 %, IoU 0.995) | 297.438 (0 %, IoU 1.000) |
+| Skewed scan (2°) | 144.000 | 144.352 (+0.25 %, IoU 0.963) | 144.068 (+0.05 %, IoU 0.991) |
+| Mixed raster + vector (still flagged) | 130.000 | 120.960 (−6.95 %, IoU 0.921) | 122.880 (−5.48 %, IoU 0.935) |
+
+Of the seeds that pass, the median area error is 0.00 %, the worst is 1.44 % (the faint scan, unchanged), and the median IoU is 1.000. The two flagged cases remain flagged with their warnings: a person must review them.
+
 ### 5.3 Whole regression
 
 The final pass ran on the finished code, 20-Oct-2026, in Chrome under Playwright, with nothing else running. It covered every takeoff suite in `tools/`.
