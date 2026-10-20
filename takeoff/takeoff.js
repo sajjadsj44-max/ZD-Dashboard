@@ -4252,6 +4252,7 @@ function drawNow(){
     dyn.push(label([Math.min(a[0], b[0]) + 52, Math.min(a[1], b[1]) - 12], cr ? "touching ← crossing" : "window → wholly inside", cr ? "#0e7a52" : "#1d5fae")); }
   if (S.lasso && S.lasso.pts.length > 1) dyn.push(`<polygon points="${S.lasso.pts.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ")}" fill="rgba(27,175,122,.10)" stroke="#139a68" stroke-width="1.5" stroke-dasharray="6 4"/>`);
   if (S.zbox) { const a = S.zbox.a, b = S.zbox.b; dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(15,41,66,.06)" stroke="#0f2942" stroke-width="1.5" stroke-dasharray="3 3"/>`); }
+  const LB = !keep && S.lbl.declutter !== false ? [] : null, lz = lblZ(S.view.s);   // the labels, placed after every object so none covers another
   if (!keep && !S.hideMk) P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !hiddenItem(i)).forEach(it => {
     const c = cond(it.cond); if (!c) return;
     const col = c.color, sel = it.id === S.sel || S.multi.has(it.id), k = itemScale(it), pts0 = it.pts;
@@ -4270,7 +4271,7 @@ function drawNow(){
       const a = toScr(it.pts[0]), b = toScr(it.pts[1]);
       h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${sel ? 6 : Math.max(1, +c.sw || 4)}" stroke-linecap="round" opacity=".85"/>`);
       if (k) { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], r = rowsOf(it, k)[0]; h.push(label(m, (it.label ? it.label + " " : "") + f3(r.L) + " × " + f3(+it.oh || 0), "#9b2222")); }
-    } else h.push(measSvg(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, {T: toScr, z: 1, sp: S.view.s, sel, k, lbl: S.lbl.on, seg: S.lbl.on && S.lbl.seg, small: S.lbl.small, screen: true}));   // as its appearance says (the exports draw it the same way)
+    } else h.push(measSvg(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, {T: toScr, z: 1, lz, lblOut: LB, sp: S.view.s, sel, k, lbl: S.lbl.on, seg: S.lbl.on && S.lbl.seg, small: S.lbl.small, screen: true}));   // as its appearance says (the exports draw it the same way)
     if (sel && !S.multi.size) {
       (it._pts || it.pts).forEach((p, i) => { const q = toScr(p); h.push(`<rect x="${(q[0] - 4).toFixed(1)}" y="${(q[1] - 4).toFixed(1)}" width="8" height="8" fill="${it.locked ? "#e8ecf1" : i === S.selPt ? "#0b0b0b" : "#fff"}" stroke="${it.locked ? "#8a97a6" : i === S.selPt ? "#0b0b0b" : col}" stroke-width="2"/>`); });
       if (!it.locked && editPts(it) && S.tool === "select") { const n = closedOf(it) ? it.pts.length : it.pts.length - 1;   // a "+" at the middle of each side: drag it to add a point
@@ -4279,6 +4280,7 @@ function drawNow(){
       if (it.locked) { const q = toScr((it._pts || it.pts)[0]); h.push(lockBadge([q[0] + 10, q[1] - 14])); }
     }
   });
+  if (LB && LB.length) h.push(placeLabels(LB));
   const c = S.cond ? cond(S.cond) : null, cur = S.cursor;
   let live = "";
   if (S.tool === "stretch" && S.str && cur) dyn.push(...stretchPreview(cur));
@@ -4452,8 +4454,11 @@ function apHatchDefs(id, kind, col, z, sp){   // an SVG pattern for a hatch, in 
   return `<defs><pattern id="${id}" width="${W.toFixed(2)}" height="${H.toFixed(2)}" patternUnits="userSpaceOnUse">${body.join("")}</pattern></defs>`;
 }
 /* the label box, in the appearance's font */
+function apLabelDims(lines, a, z){   // a label's text size, line height, box width and height
+  z = z || 1; const fs = (+a.fsz || 11.5) * z, lh = fs * 1.22, cw = fs * (a.fb ? 0.6 : 0.56); return {fs, lh, w: Math.max(...lines.map(t => t.length)) * cw + 10 * z, hh: lines.length * lh + 4 * z};
+}
 function apLabel(p, lines, a, col, z){
-  z = z || 1; const fs = (+a.fsz || 11.5) * z, lh = fs * 1.22, cw = fs * (a.fb ? 0.6 : 0.56), w = Math.max(...lines.map(t => t.length)) * cw + 10 * z, hh = lines.length * lh + 4 * z, y0 = p[1] - hh / 2;
+  z = z || 1; const {fs, lh, w, hh} = apLabelDims(lines, a, z), y0 = p[1] - hh / 2;
   const fam = esc(a.font || "Segoe UI") + ",Arial,sans-serif", deco = a.fu ? ' text-decoration="underline"' : "", it = a.fi ? ' font-style="italic"' : "";
   const box = a.lbg !== false ? `<rect x="${(p[0] - w / 2).toFixed(1)}" y="${y0.toFixed(1)}" width="${w.toFixed(1)}" height="${hh.toFixed(1)}" rx="${4 * z}" fill="${esc(a.lbgCol || "#ffffff")}" fill-opacity="${((+a.lbgOp || 0) / 100).toFixed(2)}"${a.lbd ? ` stroke="${esc(col)}" stroke-width="${z}"` : ""}/>` : "";
   const halo = a.lbg === false ? ` stroke="#fff" stroke-width="${3 * z}" paint-order="stroke"` : "";
@@ -4486,13 +4491,16 @@ function measSvg(it, c, o){
   if (!closed && scr.length >= 2) { const n = scr.length; out.push(apHead(a.h0, scr[0], scr[1], w0, esc(col), op, a.hs), apHead(a.h1, scr[n - 1], scr[n - 2], w0, esc(col), op, a.hs)); }
   if (a.vtx) (it.shape === "circle" ? [] : it.pts.map(T)).forEach(q => out.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(Math.max(2.2, w0 * 0.9)).toFixed(1)}" fill="#fff" stroke="${esc(col)}" stroke-width="${(1.2 * z).toFixed(2)}"/>`));
   if (a.blend === "multiply" && out.length) out.splice(0, out.length, apBlendG(a, out.join("")));
-  const k = o.k;
-  if (k && o.lbl && a.lpos !== "none") {
-    const big = area ? polyArea(scr) > 2500 * z * z : polyLen(scr) > 60 * z;
-    if (big || o.sel || !o.small) { const L = capLines(it, c, k, a); if (L.length) out.push(apLabel(apLabelPt(scr, area, a, z), L, a, ded ? "#9b2222" : a.fcol, z)); }
+  const k = o.k, lz = o.lz || z, lzs = o.sel ? Math.max(lz, LBL_SEL_Z) : lz;   // lz: the labels' size (on screen it follows the zoom), z: the lines'; the selected object's label stays readable
+  if (k && o.lbl && a.lpos !== "none" && (+a.fsz || 11.5) * lzs >= LBL_MIN_PX) {   // smaller than that it could not be read: left out (hover still tells)
+    const big = area ? polyArea(scr) > 2500 * lz * lz : polyLen(scr) > 60 * lz;
+    if (big || o.sel || !o.small) { const L = capLines(it, c, k, a);
+      if (L.length) { const p = apLabelPt(scr, area, a, lzs), svg = apLabel(p, L, a, ded ? "#9b2222" : a.fcol, lzs);
+        if (o.lblOut) { const d = apLabelDims(L, a, lzs); o.lblOut.push({svg, sel: o.sel ? 1 : 0, pri: area ? polyArea(scr) : polyLen(scr) * 20 * lz, b: [p[0] - d.w / 2, p[1] - d.hh / 2, p[0] + d.w / 2, p[1] + d.hh / 2]}); }
+        else out.push(svg); } }
   }
   const segOn = a.seg === "on" || (a.seg !== "off" && (o.seg || o.sel));
-  if (k && segOn && it.shape !== "circle") out.push(segLabels(it.pts.map(T), it.pts, k, area, z, a));
+  if (k && segOn && it.shape !== "circle" && (+a.fsz || 11.5) * 0.87 * lzs >= LBL_MIN_PX * 0.85) out.push(segLabels(it.pts.map(T), it.pts, k, area, lzs, a));
   return out.join("");
 }
 
@@ -4656,12 +4664,28 @@ function tmpMeasSvg(m, k){   // a temporary angle (arms dashed, an arc at the co
 }
 /* measurement captions, as Bluebeam's "show caption": which values a label shows is set once (🏷 ▾) and used on screen
    and in the marked-up exports. Areas: name, quantity, area, perimeter, L × W; lengths: name, length, quantity, H / T. */
-const LBL_DEF = {on: true, name: true, qty: true, area: true, perim: true, len: true, dims: false, cond: false, seg: false, units: true, small: true, autoName: true, v2: 1};
+const LBL_DEF = {on: true, name: true, qty: true, area: true, perim: true, len: true, dims: false, cond: false, seg: false, units: true, small: true, autoName: true, zoom: true, declutter: true, show: "full", dedShow: "qty", v2: 1};
+/* what a label shows: full (the ticks in View → Labels), name + quantity, quantity only, name only — cut-outs / deductions have their own
+   choice, which can also hide them (their quantity stays on the sheet) */
+const LBL_SHOW = {full: "Full", nameqty: "Name + qty", qty: "Qty only", name: "Name only"}, LBL_DED = {full: "Full", nameqty: "Name + qty", qty: "Qty only", off: "Hidden"};
+/* labels on screen are sized as the drawing's own text: they grow and shrink with the zoom (100 % = their set size, up to 2.5 ×) and are
+   left out below 6 px, where they could not be read; View → Labels can keep them one size. The selected object's label stays readable. */
+const LBL_MIN_PX = 6, LBL_SEL_Z = 0.85, LBL_MAX_Z = 2.5;
+function lblZ(s){ return S.lbl && S.lbl.zoom === false ? 1 : Math.min(LBL_MAX_Z, s); }
+/* labels that would sit on one another: the selected object's and then the biggest object's stay, the others are left out (hover still shows them) */
+function placeLabels(L){
+  const put = [], pad = 2; L.sort((a, b) => (b.sel - a.sel) || (b.pri - a.pri));
+  return L.filter(x => { const b = x.b; if (!x.sel && put.some(q => b[0] < q[2] + pad && b[2] > q[0] - pad && b[1] < q[3] + pad && b[3] > q[1] - pad)) return false; put.push(b); return true; }).map(x => x.svg).join("");
+}
 function loadLbl(){ let o = null; try { o = JSON.parse(pref("zdTakeoffLbl") || "null"); } catch (e) { o = null; } S.lbl = Object.assign({}, LBL_DEF, o || {});
   if (o && !o.v2) Object.assign(S.lbl, {area: true, perim: true, v2: 1}); }   // an area's label shows its area and perimeter: switched on once for labels set before (switched off again, it stays off)
 function capLines(it, c, k, ap){
   const o = S.lbl, out = [], u = t => o.units ? " " + t : "", rows = rowsOf(it, k), q = rows.reduce((a, r) => a + r.qty, 0), poly = itemPoly(it);
   const A0 = ap || null, fL = v => A0 ? apLen(v, A0) : f3(v) + u("ft"), fA = v => A0 ? apArea(v, A0) : fq(v) + u("Sft"), fQ = v => A0 ? apQty(v, c.unit, A0) : fq(v, c.unit) + u(c.unit);
+  const ded = it.kind === "ded", mode = ded ? (LBL_DED[o.dedShow] ? o.dedShow : "qty") : (LBL_SHOW[o.show] ? o.show : "full");
+  if (mode === "off") return [];
+  if (mode !== "full") { const nm = it.label || (ded ? (c.type === "area" ? "Cut-out" : "Deduction") : c.name);
+    return (mode === "name" ? [nm] : mode === "qty" ? [fQ(q)] : [nm, fQ(q)]).filter(Boolean); }
   if (o.name && it.label) out.push(it.label);
   if (o.cond) out.push(c.name);
   if (c.type === "area") {
@@ -4713,13 +4737,15 @@ function segLabels(scr, pts, k, closed, z, ap){   // the length of every side, a
 }
 async function labelDialog(){
   const o = S.lbl, cb = (k2, t) => `<label class="pk"><input type="checkbox" data-lb="${k2}"${o[k2] ? " checked" : ""}> ${t}</label>`;
-  const v = await ask("Labels on the drawing", `<div class="grid"><div class="fg"><label>Show on every label</label>${cb("name", "Name (room / label)")}${cb("cond", "Condition name")}${cb("qty", "Quantity in the condition's unit")}${cb("units", "Units (Sft, ft, cft, Nos)")}</div>
+  const sl = (k2, O, v0) => `<select data-lbs="${k2}">${Object.entries(O).map(([x, t]) => `<option value="${x}"${x === v0 ? " selected" : ""}>${t}</option>`).join("")}</select>`;
+  const v = await ask("Labels on the drawing", `<div class="grid"><div class="fg"><label>Every label shows</label>${sl("show", LBL_SHOW, LBL_SHOW[o.show] ? o.show : "full")}</div>
+    <div class="fg"><label>Cut-out / deduction labels show</label>${sl("dedShow", LBL_DED, LBL_DED[o.dedShow] ? o.dedShow : "qty")}</div><div class="fg"><label>Show on every label</label>${cb("name", "Name (room / label)")}${cb("cond", "Condition name")}${cb("qty", "Quantity in the condition's unit")}${cb("units", "Units (Sft, ft, cft, Nos)")}</div>
     <div class="fg"><label>Areas</label>${cb("area", "Area Sft (when the unit is not Sft — in Sft the quantity is the area)")}${cb("perim", "Perimeter ft — shown as P (the outline's length)")}${cb("dims", "L × W of rectangles · Ø of circles · H / T of walls")}
       <label style="margin-top:6px">Lengths</label>${cb("len", "Length ft")}</div>
-    <div class="fg w2"><label>Display</label>${cb("seg", "Length of every side / segment (always shown on the selected one)")}${cb("small", "Hide labels on shapes too small to read at this zoom")}${cb("autoName", "Name new areas from the room name written inside them (manual, rectangle, auto area, Claude)")}</div></div>
-    <p class="small" style="margin-top:8px">The same labels go on the marked-up PNG / PDF exports. <b>L</b> shows or hides all labels.</p>`, "Save", () => { const n = {on: o.on}; document.querySelectorAll("[data-lb]").forEach(x => { n[x.dataset.lb] = x.checked; }); return n; });
+    <div class="fg w2"><label>Display</label>${cb("seg", "Length of every side / segment (always shown on the selected one)")}${cb("small", "Hide labels on shapes too small to read at this zoom")}${cb("zoom", "Labels grow and shrink with the zoom, as the drawing's own text (off: always one size on screen)")}${cb("declutter", "Leave out a label that would cover another (the bigger object's label stays)")}${cb("autoName", "Name new areas from the room name written inside them (manual, rectangle, auto area, Claude)")}</div></div>
+    <p class="small" style="margin-top:8px">The same labels go on the marked-up PNG / PDF exports. <b>L</b> shows or hides all labels.</p>`, "Save", () => { const n = {on: o.on}; document.querySelectorAll("[data-lb]").forEach(x => { n[x.dataset.lb] = x.checked; }); document.querySelectorAll("[data-lbs]").forEach(x => { n[x.dataset.lbs] = x.value; }); return n; });
   if (!v) return;
-  S.lbl = Object.assign({}, S.lbl, v); pref("zdTakeoffLbl", JSON.stringify(S.lbl)); draw();
+  lblSet(v);
   if (P.proj && S.page) { const n = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !i.label && i.kind === "shape" && (cond(i.cond) || {}).type === "area").length;
     if (n && S.lbl.autoName && await ask("Name the areas already drawn?", `<p>${n} area${n > 1 ? "s" : ""} on this page ${n > 1 ? "have" : "has"} no name. Name ${n > 1 ? "them" : "it"} from the room text inside?</p>`, "Name them")) nameAreas(); }
 }
@@ -4785,7 +4811,22 @@ function legendWidths(ids, share){   // column weights with the description at t
 async function editLegend(m){const cols=legendCols(m),body='<div class="grid"><div class="fg w2"><label>Title</label><input type="text" id="lgTitle" value="'+esc(m.title||'Takeoff Legend')+'"></div><div class="fg"><label>Font size (pt)</label><input type="number" id="lgFs" min="5" max="32" step=".5" value="'+(+m.fontSize||9)+'"></div><div class="fg"><label>Row height (pt)</label><input type="number" id="lgRh" min="8" max="60" step="1" value="'+(+m.rowH||18)+'"></div><div class="fg"><label>Precision</label><select id="lgPrec">'+[0,1,2,3].map(n=>'<option value="'+n+'" '+((+m.precision||3)===n?'selected':'')+'>'+n+' decimals</option>').join('')+'</select></div><div class="fg"><label>Order</label><select id="lgSort">'+[['drawing','Drawing order'],['list','Condition list order'],['condition','Name A → Z'],['boq','BOQ code'],['qty','Quantity, largest first']].map(([v,t])=>'<option value="'+v+'"'+((m.sort||'drawing')===v?' selected':'')+'>'+t+'</option>').join('')+'</select></div><div class="fg"><label>Description width %</label><input type="number" id="lgDw" min="15" max="70" step="1" value="'+Math.round(100*legendDescShare(m))+'" title="Share of the legend width given to the description; the other columns share the rest"></div><div class="fg"><label>Border colour</label><input type="color" id="lgBorder" value="'+(HEXCOL.test(m.border||'')?m.border:'#40556b')+'"></div><div class="fg"><label>Header fill</label><input type="color" id="lgHead" value="'+(HEXCOL.test(m.headerFill||'')?m.headerFill:'#eef2f7')+'"></div><div class="fg"><label>Fill</label><input type="color" id="lgFill" value="'+(HEXCOL.test(m.fill||'')?m.fill:'#ffffff')+'"></div><div class="fg w2"><label><input type="checkbox" id="lgTitleOn" style="width:auto" '+(m.showTitle===false?'':'checked')+'> Show title</label><label><input type="checkbox" id="lgHeadOn" style="width:auto" '+(m.showHeaders===false?'':'checked')+'> Show column headers</label></div><div class="fg w2"><label>Columns</label><div class="grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">'+LEGEND_COLS.map(c=>'<label class="pk"><input type="checkbox" data-lgcol="'+c.id+'" style="width:auto" '+(cols.some(x=>x.id===c.id)?'checked':'')+'> '+esc(c.label)+'</label>').join('')+'</div></div></div><p class="small">Unit and Quantity are live from the takeoff condition. Rate and Amount use the condition rate when one exists; no rate is invented.</p>';const v=await ask('Edit Legend',body,'Save',()=>{const columns=[...document.querySelectorAll('[data-lgcol]:checked')].map(x=>x.dataset.lgcol);if(!columns.length)return'Choose at least one column';return{title:$('lgTitle').value.trim()||'Takeoff Legend',fontSize:Math.max(5,Math.min(32,+$('lgFs').value||9)),rowH:Math.max(8,Math.min(60,+$('lgRh').value||18)),precision:+$('lgPrec').value||0,sort:$('lgSort').value,border:$('lgBorder').value,headerFill:$('lgHead').value,fill:$('lgFill').value,showTitle:$('lgTitleOn').checked,showHeaders:$('lgHeadOn').checked,columns,colWidths:legendWidths(columns,Math.max(15,Math.min(70,+$('lgDw').value||31))/100)}});if(v)mutate(()=>Object.assign(m,v),'Edit Legend');}
 async function createLegend(){if(!P.proj||!S.page)return toast('Open a drawing page first');const m=defaultLegend();mutate(()=>{(P.proj.marks=P.proj.marks||[]).push(m)},'Add Legend');setSel([m.id]);setTool('select');refresh();toast('Legend placed on the drawing — drag the corners to resize; double-click to edit',3200)}
 function legendButton(){const s=S.selMark&&objById(S.selMark);if(s&&s.type==='legend')return editLegend(s);return createLegend();}
-function setLblOn(on){ S.lbl.on = on; pref("zdTakeoffLbl", JSON.stringify(S.lbl)); $("bLbl").classList.toggle("on", on); $("bLbl").title = on ? "Labels shown — click (or L) to hide" : "Labels hidden — click (or L) to show"; viewMark(); draw(); }
+function lblSet(v){ S.lbl = Object.assign({}, S.lbl, v); pref("zdTakeoffLbl", JSON.stringify(S.lbl)); lblSync(); draw(); }
+function lblSync(){ const b = $("rbLblDed"); if (b) b.classList.toggle("on", (S.lbl || {}).dedShow !== "off"); }   // the View ribbon's Cut-out labels button
+function dedLblToggle(){ const o = S.lbl; lblSet(o.dedShow === "off" ? {dedShow: o.dedLast || "qty"} : {dedShow: "off", dedLast: o.dedShow || "qty"}); }
+/* View ribbon → ⚙ by Labels: what every label shows, what a cut-out's shows (or hidden), the zoom and overlap rules — one click each */
+function lblMenu(anchor){
+  const r = anchor.getBoundingClientRect(), o = S.lbl, sh = LBL_SHOW[o.show] ? o.show : "full", dd = LBL_DED[o.dedShow] ? o.dedShow : "qty";
+  const lo = t => t.charAt(0).toLowerCase() + t.slice(1);
+  ctxShow([{h: "Labels", s: "what they show and how they are sized"},
+    ...Object.entries(LBL_SHOW).map(([v, t]) => ({t: "Labels: " + lo(t), fn: () => lblSet({show: v}), on: sh === v})), {sep: 1},
+    ...Object.entries(LBL_DED).map(([v, t]) => ({t: "Cut-outs: " + lo(t), fn: () => v === "off" ? (dd !== "off" && dedLblToggle()) : lblSet({dedShow: v}), on: dd === v})), {sep: 1},
+    {t: "Follow the zoom (sized as the drawing's text)", fn: () => lblSet({zoom: o.zoom === false}), on: o.zoom !== false},
+    {t: "No overlap (leave out a covered label)", fn: () => lblSet({declutter: o.declutter === false}), on: o.declutter !== false},
+    {t: "Hide labels on small shapes", fn: () => lblSet({small: !o.small}), on: !!o.small}, {sep: 1},
+    {t: "More label settings…", fn: labelDialog}], r.left, r.bottom + 4);
+}
+function setLblOn(on){ S.lbl.on = on; pref("zdTakeoffLbl", JSON.stringify(S.lbl)); lblSync(); $("bLbl").classList.toggle("on", on); $("bLbl").title = on ? "Labels shown — click (or L) to hide" : "Labels hidden — click (or L) to show"; viewMark(); draw(); }
 function loadLegend(){ S.legendOn = pref("zdTakeoffLegend") !== "0"; }
 function setLegendOn(on){
   S.legendOn = !!on; pref("zdTakeoffLegend", S.legendOn ? "1" : "0");
@@ -4819,7 +4860,7 @@ function renderPageStrip(){
     return `<div class="pgt${o.key === S.key ? " on" : ""}" data-pg="${esc(o.f.id)}|${o.i}" title="${esc(o.f.name)} p.${o.i}${sh.title ? " — " + esc(sh.title) : ""}"><img data-th="${esc(o.key)}" alt=""${th && th !== "x" ? ` src="${th}"` : ""}><div class="pgl">p.${o.i}</div></div>`; }).join("") + "</div>";
   const on = el.querySelector(".pgt.on"); if (on && on.scrollIntoView) on.scrollIntoView({block: "nearest", inline: "center"});
 }
-function refresh(){ mlSoon(); renderPageStrip(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); renderLiveLegend(); if (SPLIT.on) paneStrips(); if (S.unmOn) unmSoon(); draw(); draftBtns(); }
+function refresh(){ mlSoon(); renderPageStrip(); lblSync(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); renderLiveLegend(); if (SPLIT.on) paneStrips(); if (S.unmOn) unmSoon(); draw(); draftBtns(); }
 let sheetT = null;
 function refreshSheetSoon(){ clearTimeout(sheetT); sheetT = setTimeout(() => { renderSheet(); renderConds(); }, 120); }
 function renderScaleChip(){
@@ -10496,6 +10537,8 @@ function wire(){
   document.addEventListener("keydown", e => { if (e.key === "Escape" && vpop.classList.contains("on")) { vOpen(false); e.stopPropagation(); } }, true);
   $("bFitW").onclick = () => { fitWidth(); vOpen(false); };
   { const hd = document.querySelector("header"); new ResizeObserver(() => document.documentElement.style.setProperty("--hh", hd.offsetHeight + "px")).observe(hd); }   // the bar's height (one row, or two on a narrower screen)
+  if ($("rbLblDed")) $("rbLblDed").onclick = dedLblToggle;   // View ribbon: Cut-out labels on / off, and ⚙ for the rest
+  if ($("rbLblMenu")) $("rbLblMenu").onclick = e => { e.stopPropagation(); lblMenu(e.currentTarget); };
   $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => { vOpen(false); labelDialog(); }; $("bLegend").onclick = () => legendButton();
   $("bHideMk").onclick = () => { S.hideMk = !S.hideMk; $("bHideMk").classList.toggle("on", !S.hideMk); $("bHideMk").title = S.hideMk ? "Markups hidden — click to show all" : "Hide all markups (measurements and notes) to see the drawing"; viewMark(); draw(); toast(S.hideMk ? "All markups hidden" : "Markups shown", 1500); };
   $("bLayers").onclick = () => { vOpen(false); S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };

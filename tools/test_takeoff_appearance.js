@@ -65,7 +65,8 @@ const ok = (c, m) => { if (c) { pass++; console.log("  ✓ " + m); } else { fail
   h = await ov(); ok(/8\.361 m²/.test(h), "units: metres — the label reads 8.361 m² (90 Sft); the quantity stays in Sft");
   ok(/90\.000 Sft/.test(await T(() => document.getElementById("props").textContent)), "the condition's quantity is still 90.000 Sft");
   await setAp("font", "Georgia"); await setAp("fsz", 15); await page.click('#props .apbar [data-ap="fb"]'); await wait(150); await setAp("fcol", "#c0392b");
-  h = await ov(); ok(/font-family="Georgia,Arial,sans-serif" font-size="15\.0" font-weight="700"[^>]*fill="#c0392b"/.test(h), "label font Georgia 15, bold, red");
+  h = await ov(); { const lz = await T(() => Math.min(2.5, zdTakeoff.S.view.s)), m = /font-family="Georgia,Arial,sans-serif" font-size="([\d.]+)" font-weight="700"[^>]*fill="#c0392b"/.exec(h);
+    ok(m && Math.abs(+m[1] - 15 * lz) < 0.06, "label font Georgia 15 (× the zoom, " + (m && m[1]) + " px), bold, red"); }
   await setAp("lpos", "above"); c = await cnd("Floor tiles"); ok(c.ap.lpos === "above", "label placed above");
   ok(await T(() => document.querySelector('#props .apbar [data-ap="blend"]').value === "normal"), "Blend mode shows, Normal to start");
   await setAp("blend", "multiply"); c = await cnd("Floor tiles"); h = await ov();
