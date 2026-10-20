@@ -915,6 +915,8 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
         <div class="rg"><div class="rgb">
           <button class="tool" data-px="bHideMk" title="Show / hide all markups and measurements"><svg class="ic"><use href="#i-hilite"/></svg><span class="tl">Markups</span></button>
           <button class="tool" data-px="bLbl" title="Show / hide measurement labels (L)"><svg class="ic"><use href="#i-note"/></svg><span class="tl">Labels</span></button>
+          <button class="tool tsm" id="rbLblMenu" title="Label options: what labels show (full, name + qty, qty only, name only), what cut-out labels show or hide them, follow the zoom, no overlap"><svg class="ic"><use href="#i-cog"/></svg></button>
+          <button class="tool" id="rbLblDed" title="Cut-out labels: show / hide the labels of cut-outs and deductions — their quantity stays on the sheet (⚙: what they show)"><svg class="ic"><use href="#i-ded"/></svg><span class="tl">Cut-outs</span></button>
           <button class="tool" data-px="bLegend" title="Embedded editable takeoff legend"><svg class="ic"><use href="#i-list"/></svg><span class="tl">Legend</span></button>
           <button class="tool" data-px="bMini" title="Minimap"><svg class="ic"><use href="#i-array"/></svg><span class="tl">Minimap</span></button>
         </div><div class="rgl">Takeoff display</div></div>
@@ -1143,7 +1145,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-20c"></script>
+<script type="module" src="takeoff.js?v=2026-10-20e"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
