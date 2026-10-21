@@ -11,7 +11,7 @@
    exact and needs no calibration. */
 const LDWG = "https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/dist/libredwg-web.js";
 const LDXF = "https://cdn.jsdelivr.net/npm/@mlightcad/dxf-json@1.2.8/dist/esm/bundle.mjs";
-export const CAD_VER = 8;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (8: lengths inside blocks stretched more one way measured as drawn; 7: text in its style's / \f font — Times for serif, condensed narrower — and LWDISPLAY; 6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
+export const CAD_VER = 9;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (9: justified text at a 0,0 point and backwards / upside-down text on its point; 8: lengths inside blocks stretched more one way measured as drawn; 7: text in its style's / \f font — Times for serif, condensed narrower — and LWDISPLAY; 6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
 export const INK = -1;             // colour 7 (and true black or white): white on a black background, black on white
 export const isCadName = n => /\.(dwg|dxf)$/i.test(String(n || ""));
 const CAPS_FONT = /^(technic_|techb___|techl___|coprgt[bl]?|copperplate[\w ]*|stencil|engr|castelar|felixti|alger)\.(ttf|otf)$/i;   // fonts with capitals only (their small letters are small capitals)
@@ -78,7 +78,7 @@ export const faceCss = (f, px) => (FACES[f] || FACES[0]).css.replace("%", px);
    it than that face (a condensed font: Arial Narrow, Swiss 721 Condensed) */
 export function fontFace(name, bold, italic){
   const n = String(name || "").split(/[\\/]/).pop().replace(/\.(ttf|ttc|otf|shx|pfb)$/i, "").trim().toLowerCase();
-  const serif = /^(times|tnr|georgia|garamond|gara|book ?antiqua|bkant|cambria|century|schlbk|romantic|romanc|romand|romant|bodoni|bod_|baskvill|palatino|pala|constan)/.test(n);
+  const serif = /^(times|tnr|georgia|garamond|gara|book ?antiqua|bkant|cambria|century(?! gothic)|schlbk|romantic|romanc|romant|bodoni|bod_|baskvill|palatino|pala|constan)/.test(n);
   const b = !!bold || /(^arialbd|^arialbi|^timesbd|^timesbi|^swisscb|^swissb|bold|heavy|black|\bbd\b|bdcn|demi)/.test(n);
   const it = !!italic || /(^ariali|^arialbi|^timesi|^timesbi|^swissi|^swisscbi|^swissci|italic|oblique)/.test(n);
   let t = n.replace(/\s+(ce|cyr|baltic|greek|tur|western)$/, ""); t = AFW[t] ? t : AF_ALIAS[t] || "";
@@ -159,8 +159,12 @@ const winHex = s => { let h = ""; for (const ch of String(s)) h += (winCode(ch.c
 /* ------------------------------------------------------------------ the readers (loaded on first use) */
 const LIB = {};
 export function cadUse(o){ Object.assign(LIB, o || {}); }   // tests / offline copies: the reader modules handed in
-let dwgP = null, dxfP = null;
-function dwgLib(){
+let dwgP = null, dxfP = null, dwgUsed = false;
+/* the DWG reader. A LibreDWG WebAssembly instance reads ONE drawing: a second read in the same instance can come out short or trap
+   (seen: a 48,607-object drawing read as 3,188 objects after another drawing, a third read "memory access out of bounds") — so a read
+   after the first gets a new instance (~0.1 s; a drawing read in its own worker always has a new one). fresh: a new one now */
+function dwgLib(fresh){
+  if (fresh || dwgUsed) { dwgP = null; dwgUsed = false; }
   return dwgP || (dwgP = (async () => { const m = LIB.dwg || await import(LDWG), lib = await m.LibreDwg.create(LIB.dwgWasm), pr = Object.getPrototypeOf(lib);
     /* a field the reader trips on (it can trap inside the WebAssembly) is read as unset, rather than losing the whole drawing */
     Object.getOwnPropertyNames(pr).filter(k => /^dwg_dynapi_\w+_value$/.test(k) && typeof pr[k] === "function").forEach(k => { const f = pr[k];
@@ -184,7 +188,7 @@ export async function cadRead(buf, name){
   return readDxf(u8);
 }
 async function readDwg(u8){
-  const ver = head(u8, 6), {m, lib} = await dwgLib(), W = lib.wasmInstance;
+  const ver = head(u8, 6), {m, lib} = await dwgLib(), W = lib.wasmInstance; dwgUsed = true;
   if (ver < "AC1012") throw new Error("AutoCAD " + (VERS[ver] || ver) + " drawings are too old for the DWG reader — save it again in AutoCAD as a newer DWG, or as DXF");
   let ptr = 0, err = 0;
   if (W && W.FS && typeof W.dwg_read_file === "function") {
@@ -203,8 +207,10 @@ async function readDwg(u8){
   const md = normDwg(db); md.ver = ver; md.unk = st.unknownEntityCount || 0; md.warn = err;   // (normDwg throws for a drawing that came out unreadable)
   const ovr = e => e.t === "LEADER" && e.dso;   // (LibreDWG's DXF of the drawing — a second read — only for leaders with overrides, and not for a big drawing)
   if (u8.length < 1.2e7 && typeof lib.dwg_write_dxf === "function" && (md.ents.some(ovr) || [...md.blocks.values()].some(b => b.ents.some(ovr)))) {
-    try { const out = lib.dwg_write_dxf(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)); if (out && out.length) md.ldr = dxfLeaders(new TextDecoder("windows-1252").decode(out)); }   // (the DWG reader garbles a leader's overrides)
-    catch (e) {} finally { try { if (W && W.FS) W.FS.unlink("tmp.dxf"); } catch (e) {} }
+    let W2 = null;   // (in a new instance of its own: a second read in the first can come out short)
+    try { const {lib: L2} = await dwgLib(true); dwgUsed = true; W2 = L2.wasmInstance;
+      const out = L2.dwg_write_dxf(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)); if (out && out.length) md.ldr = dxfLeaders(new TextDecoder("windows-1252").decode(out)); }   // (the DWG reader garbles a leader's overrides)
+    catch (e) {} finally { try { if (W2 && W2.FS) W2.FS.unlink("tmp.dxf"); } catch (e) {} }
   }
   return md;
 }
@@ -336,9 +342,10 @@ function norm(e, dwg){
       o.fp = arr(e.fitPoints).map(P2); { const Q = o.cp.length ? o.cp : o.fp, a = Q[0], b = Q[Q.length - 1];   // (a DWG's spline flags are not DXF's: closed = the ends meet)
         o.closed = !!(a && b && Q.length > 2 && Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-9 * (1 + Math.abs(a[0]) + Math.abs(a[1]))) || (!dwg && !!((+e.flag || 0) & 1)); } o.ex = null; break;
     case "TEXT": case "ATTRIB": case "ATTDEF": { const b = dwg && t !== "TEXT" ? e.text || {} : e, fl = +((dwg ? e.flags : e.attributeFlag) ?? e.flags ?? 0) || 0;
-      o.s = acadStr(b.text); o.p = P2(b.startPoint); o.p2 = P2n(t === "TEXT" ? b.endPoint : b.endPoint || e.alignmentPoint); o.h = +b.textHeight || 0; o.rot = A(b.rotation);
+      o.s = acadStr(b.text); o.p = P2(b.startPoint); o.h = +b.textHeight || 0; o.rot = A(b.rotation);
       o.wf = +(b.xScale ?? b.scale) || 1; o.obl = A(b.obliqueAngle); o.ha = +(b.halign ?? b.horizontalJustification ?? b.horizontalAlignment) || 0;
       o.va = +(b.valign ?? b.verticalJustification ?? b.verticalAlignment) || 0; o.gen = +(b.generationFlag ?? b.textGenerationFlag) || 0;
+      { const ap = t === "TEXT" ? b.endPoint : b.endPoint || e.alignmentPoint; o.p2 = (o.ha || o.va) && ap ? P2(ap) : P2n(ap); }   // (a justified text's alignment point, 0,0 too)
       o.st = String(b.styleName || e.styleName || "");
       if (t !== "TEXT") { o.tag = String(e.tag || ""); o.inv = !!(fl & 1); o.cst = !!(fl & 2); if (t === "ATTDEF" && !o.cst) o.s = o.tag; }
       break; }
@@ -599,9 +606,9 @@ export function cadScene(md, opt){
     if ((e.ha === 3 || e.ha === 5) && e.p2) {   // aligned / fit: between the two points
       const dx = q[0] - e.p[0], dy = q[1] - e.p[1], L = Math.hypot(dx, dy);
       if (L > 1e-9 && W > 0) { rot = Math.atan2(dy, dx); if (e.ha === 5) wf *= L / W; else em *= L / W; }
-    } else if (e.ha || e.va) {
-      const cr = Math.cos(rot), sr = Math.sin(rot);
-      const dx = e.ha === 1 || e.ha === 4 ? -W / 2 : e.ha === 2 ? -W : 0, dy = e.ha === 4 ? -h / 2 : e.va === 3 ? -h : e.va === 2 ? -h / 2 : e.va === 1 ? fc.desc * em : 0;
+    } else if ((e.ha || e.va) && e.p2) {
+      const cr = Math.cos(rot), sr = Math.sin(rot), fx = e.gen & 2 ? -1 : 1, fy = e.gen & 4 ? -1 : 1;   // (a backwards / upside-down text runs the other way from its point)
+      const dx = (e.ha === 1 || e.ha === 4 ? -W / 2 : e.ha === 2 ? -W : 0) * fx, dy = (e.ha === 4 ? -h / 2 : e.va === 3 ? -h : e.va === 2 ? -h / 2 : e.va === 1 ? fc.desc * em : 0) * fy;
       ox = q[0] + cr * dx - sr * dy; oy = q[1] + sr * dx + cr * dy;
     }
     text(s, ox, oy, em, rot, wf, e.obl, r.li, r.c, e.gen & 2, e.gen & 4, F.f);
