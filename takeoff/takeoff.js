@@ -338,12 +338,14 @@ const hiddenItem = it => { const c = cond(it.cond); return !!(c && c.hidden); };
 /* ------------------------------------------------------------------ project lifecycle */
 /* project file version. v1: files scales conds items last (+ viewports marks auto layersOff added over time).
    v2: + sheets (sheet no / title / revision / building / floor per page), openings (door & window schedule); items may
-   carry location (bldg floor zone room), QA (qa qaBy qaAt qaNote), ai / copied flags, sch (schedule mark), doorW.
+   carry location (bldg floor zone room), QA (qa qaBy qaAt qaNote), ai / copied flags, sch (schedule mark), doorW;
+   + floors (added later, still v2): per-page floor folders {pageKey: [{id, name, r: [x0, y0, x1, y1] | null}]} — a measurement
+   is in a folder by name (its own floor), else by the folder's boundary box r, else by the sheet's floor.
    migrate() upgrades any older file in place and never drops a property it does not know. */
 const SCHEMA = 2;
 function newProject(name){
   return {id: uid("P"), name: name || "Untitled takeoff", created: new Date().toISOString(), updated: new Date().toISOString(), v: SCHEMA,
-          files: [], scales: {}, conds: [], items: [], last: {}, viewports: {}, marks: [], sheets: {}, openings: [], cols: [], rot: {}, pageOrder: [], pageHide: []};
+          files: [], scales: {}, conds: [], items: [], last: {}, viewports: {}, floors: {}, marks: [], sheets: {}, openings: [], cols: [], rot: {}, pageOrder: [], pageHide: []};
 }
 /* rep (optional): an array that gets one line per repair. A project file comes from anywhere (a colleague, an old
    version, a damaged disk): values the app draws or multiplies are checked here — a colour that is not a colour (it is
@@ -356,7 +358,7 @@ function migrate(p, rep){
   const pt = q => arr(q) && q.length >= 2 && isFinite(num(q[0])) && isFinite(num(q[1])) ? [num(q[0]), num(q[1])] : null;
   const pts = (P0, min) => { if (!arr(P0)) return null; const o = P0.map(pt); return o.every(Boolean) && o.length >= min ? o : null; };
   if (!arr(p.files)) p.files = []; if (!arr(p.conds)) p.conds = []; if (!arr(p.items)) p.items = []; if (!arr(p.marks)) p.marks = []; if (!arr(p.openings)) p.openings = [];
-  if (!obj(p.scales)) p.scales = {}; if (!obj(p.viewports)) p.viewports = {}; if (!obj(p.last)) p.last = {}; if (!obj(p.sheets)) p.sheets = {}; if (!obj(p.bbImp)) p.bbImp = {};
+  if (!obj(p.scales)) p.scales = {}; if (!obj(p.viewports)) p.viewports = {}; if (!obj(p.floors)) p.floors = {}; if (!obj(p.last)) p.last = {}; if (!obj(p.sheets)) p.sheets = {}; if (!obj(p.bbImp)) p.bbImp = {};
   if (typeof p.name !== "string") p.name = String(p.name == null ? "Untitled takeoff" : p.name);
   let n = p.files.length; p.files = p.files.filter(f => obj(f) && f.id != null); if (p.files.length < n) note((n - p.files.length) + " PDF entr" + (n - p.files.length > 1 ? "ies" : "y") + " without an id left out");
   p.files.forEach(f => { f.id = String(f.id); f.name = String(f.name == null ? f.id : f.name); f.pages = Math.max(1, Math.round(num(f.pages)) || 1); });
@@ -405,6 +407,18 @@ function migrate(p, rep){
   Object.keys(p.scales).forEach(k => { const sc = p.scales[k]; if (!obj(sc) || !(num(sc.ptPerFt) > 0) || !isFinite(num(sc.ptPerFt))) { note("Page scale " + k + " is not a number — removed (set it again)"); delete p.scales[k]; } else sc.ptPerFt = num(sc.ptPerFt); });
   Object.keys(p.viewports).forEach(k => { if (!arr(p.viewports[k])) { delete p.viewports[k]; return; }
     p.viewports[k] = p.viewports[k].filter(v => { const ok = obj(v) && arr(v.r) && v.r.length === 4 && v.r.every(x => isFinite(num(x))) && isFinite(num(v.ptPerFt || 0)); if (!ok) note("A viewport on " + k + " is broken — removed"); else { v.r = v.r.map(num); v.ptPerFt = Math.max(0, num(v.ptPerFt || 0)); v.name = String(v.name == null ? "Viewport" : v.name); } return ok; }); });
+  /* floor folders: each needs a name (unique on its page, any case), keeps its id (a repeated one gets a new one) and has a boundary
+     box [x0, y0, x1, y1] or none. Run again on every undo / redo, so a valid list comes out exactly as it went in */
+  { const fids = new Set(); Object.keys(p.floors).forEach(k => { const L = p.floors[k]; if (!arr(L)) { if (L != null) note("The floor folders of " + k + " are not a list — removed"); delete p.floors[k]; return; }
+    const seen = new Set(); p.floors[k] = L.filter(f => { const s = obj(f) && (typeof f.name === "string" || typeof f.name === "number") ? String(f.name).trim().slice(0, 60).trim() : "";
+      if (!s) { note("A floor folder on " + k + " has no name — removed"); return false; }
+      if (seen.has(s.toLowerCase())) { note("A floor folder on " + k + " named “" + s + "” again — removed"); return false; } seen.add(s.toLowerCase()); f.name = s;
+      let id = f.id == null || f.id === "" ? uid("FL") : String(f.id).slice(0, 40); while (fids.has(id)) id = uid("FL"); fids.add(id); f.id = id;
+      if (f.r == null) f.r = null;
+      else if (!(arr(f.r) && f.r.length === 4 && f.r.every(x => isFinite(num(x))))) { note("The boundary of floor folder “" + s + "” on " + k + " is broken — cleared, the folder is kept (draw its boundary again)"); f.r = null; }
+      else { const r = f.r.map(num); f.r = [Math.min(r[0], r[2]), Math.min(r[1], r[3]), Math.max(r[0], r[2]), Math.max(r[1], r[3])]; }
+      return true; });
+    if (!p.floors[k].length) delete p.floors[k]; }); }
   const pgOk = k => { if (typeof k !== "string") return false; const m = /^(.+):(\d+)$/.exec(k), f = m && p.files.find(x => x.id === m[1]); return !!f && +m[2] >= 1 && +m[2] <= f.pages; };   // a page of this project
   const cadF = k => { const f = p.files.find(x => x.id === String(k).split(":")[0]); return !!(f && f.cad); };   // an AutoCAD drawing is turned in AutoCAD, never here
   p.rot = obj(p.rot) ? Object.fromEntries(Object.entries(p.rot).filter(([k, r]) => pgOk(k) && !cadF(k) && [90, 180, 270].includes(num(r))).map(([k, r]) => [k, num(r)])) : {};   // pages turned in the project
@@ -425,7 +439,7 @@ const SAVE_ERR = new Map();     // project id -> why its last write failed (the 
 const SAVE_PEND = new Map();    // project id -> copy whose write failed, retried on every later flush
 const SAVE_FLIGHT = new Map();  // project id -> a checked flush still before its write ({pr, done}) — grabbed if the page starts closing
 const BAK_LAST = new Map();     // project id -> when a newer other-tab copy was last backed up: one per 5 min, or dual editing would churn the backups
-function save(){ if (!P.proj) return; S.ver = (S.ver || 0) + 1; P.proj.updated = new Date().toISOString(); savePr = P.proj; clearTimeout(saveT); saveT = setTimeout(flushSave, 300); saveShow(P.proj); }
+function save(){ if (!P.proj) return; floorSplitSafe(); S.ver = (S.ver || 0) + 1; P.proj.updated = new Date().toISOString(); savePr = P.proj; clearTimeout(saveT); saveT = setTimeout(flushSave, 300); saveShow(P.proj); }
 function flushOne(pr, fast){
   const write = () => { const fl = SAVE_FLIGHT.get(pr.id); if (fl && fl.pr === pr) SAVE_FLIGHT.delete(pr.id);
     return dbPut("projects", pr)
@@ -477,7 +491,7 @@ if (TABCH) TABCH.onmessage = e => { const m = e.data || {}; if (!P.proj || m.tab
   if (m.t === "open") tabSay({t: "here", id: P.proj.id});
   S.otherTab = m.t === "saved" ? "changed in another tab or window at " + dmyHm(m.at).slice(-5) : "also open in another tab or window";
   renderSheet(); };
-const UNDO_KEYS = ["conds", "items", "scales", "viewports", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd", "bbImp", "cols", "rot", "pageOrder", "pageHide"];
+const UNDO_KEYS = ["conds", "items", "scales", "viewports", "floors", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd", "bbImp", "cols", "rot", "pageOrder", "pageHide"];
 function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 /* every change goes through mutate(): the project before it is kept for Ctrl+Z (200 steps), with a name for the
    undo / redo buttons ("Undo: Move 3 measurements") */
@@ -488,7 +502,7 @@ function mutate(fn, label){
   let tot = 0; S.undo.forEach(e => { tot += undoEntry(e).js.length; });   // 200 steps, fewer (20 at least) for a big project: about 80 MB of history at most
   while (S.undo.length > 200 || (S.undo.length > 20 && tot > 40e6)) tot -= undoEntry(S.undo.shift()).js.length;
   S.redo = []; S.draftRedo = [];
-  fn(); aiRunRecord(ids0, label); save(); refresh();
+  fn(); floorSplitSafe(); aiRunRecord(ids0, label); save(); refresh();
 }
 /* the shape being drawn keeps its own history in steps: a click is one step, an arc (many points) is one step, so
    Ctrl+Z / Backspace take back the last click or the whole arc and Ctrl+Y puts it back. With nothing being drawn,
@@ -658,6 +672,7 @@ function rotData(pr, key, d, W, H){   // a page's measurements, markups, viewpor
     if (ROT_KEEP.has(m.type) && m.pts.length === 2) { const b = mkBox(m.pts[0], m.pts[1]), c = T([(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]), w = (b[2] - b[0]) / 2, h = (b[3] - b[1]) / 2; m.pts = [[c[0] - w, c[1] - h], [c[0] + w, c[1] + h]]; }
     else m.pts = m.pts.map(T); });
   ((pr.viewports || {})[key] || []).forEach(v => { v.r = box(v.r); });
+  ((pr.floors || {})[key] || []).forEach(f => { if (Array.isArray(f.r)) f.r = box(f.r); });   // floor folders' boundaries
   const cal = ((pr.scales || {})[key] || {}).cal; if (cal) { if (Array.isArray(cal.a)) cal.a = T(cal.a); if (Array.isArray(cal.b)) cal.b = T(cal.b); if (Array.isArray(cal.pts)) cal.pts = cal.pts.map(T); }
 }
 async function rotatePage(key, d){
@@ -754,7 +769,7 @@ async function addFiles(files){
     busy("Opening " + f.name + "…");
     try {
       let data = await f.arrayBuffer(), cad = null; const sha = await sha256(data);
-      if (cadF) { const pre = P.proj.files.find(x => x.sha === sha && x.cad), held = pre && P.proj.items.some(i => i.file === pre.id);   // the same drawing again: onto its old page while measurements sit on it — else laid out afresh (read whole now, it may reach further)
+      if (cadF) { const pre = P.proj.files.find(x => x.sha === sha && x.cad), held = pre && (P.proj.items.some(i => i.file === pre.id) || ((P.proj.floors || {})[keyOf(pre.id, 1)] || []).some(x => x.r));   // the same drawing again: onto its old page while measurements (or floor boundaries) sit on it — else laid out afresh (read whole now, it may reach further)
         cad = await cadImport(f, data, held ? pre.cad.map : null); data = cad.pdf; }   // the drawing as a layered vector PDF (+ its scene)
       const lib = await loadPdfjs();
       const {d} = await openPdfData(lib, data, f.name);
@@ -2905,10 +2920,14 @@ async function traceGet(key, quiet, at){   // -> the page's trace, or null (no l
    once (clusters of wall lines with names in them) and each one is traced on its own when it is first worked on — the one clicked
    in, the ones in a scanned window, the one on screen for "Trace the whole floor" — then kept */
 const TRB = {};   // AutoCAD page key -> {sig, boxes, T}
-async function traceGetCad(key, quiet, at, k){
+async function trbGet(key, k){   // an AutoCAD page's plan boxes (found once, again when its lines, text, layers or scale change) -> {sig, boxes, T} | null
   const g = S.geo[key], off = layerOffIx(g), sig = [TRACE_SIG, g.segs.length, k.toFixed(5), off ? [...off].sort((a, b) => a - b).join(".") : "", (S.texts[key] || []).length, g.edv || ""].join("|");
   let B = TRB[key];
   if (!B || B.sig !== sig) { const inp = await traceInput(key); if (!inp) return null; inp.k = k; const T = await import("./trace.js" + CADV); B = TRB[key] = {sig, boxes: T.planBoxes(inp), T}; }
+  return B;
+}
+async function traceGetCad(key, quiet, at, k){
+  const B = await trbGet(key, k); if (!B) return null; const sig = B.sig;
   if (!B.boxes.length) return {err: "no wall layers", why: "no floor plan with wall lines and room names was found in the drawing"};
   const all = B.boxes.map((b, i) => i), inBox = (p, b) => p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3];
   let pick;
@@ -3009,7 +3028,7 @@ async function traceFloorTakeoff(o){
     if (!c) { c = {id: uid("C"), name, type, unit, color, group: "Vector trace", h: "", t: "", faces: 1, dedMin: 0, hidden: code === "L-07" || code === "L-09"}; conds.push(c); } CID[code] = c.id; });
   const items = [], r3p = v => Math.round(v * 1000) / 1000;
   const put = (code, pts, label, x) => { x = x || {}; const P1 = pts.map(q => [r3p(q[0]), r3p(q[1])]); if (x.closed) P1.push(P1[0].slice());
-    const it = {id: uid("I"), cond: CID[code], file: S.fileId, page: S.pageNo, kind: x.kind || "shape", pts: P1, nos: 1, label: String(label).slice(0, 120), bldg: sh.bldg || "", floor: sh.floor || "", zone: x.zone || "", room: x.room || ""};
+    const it = {id: uid("I"), cond: CID[code], file: S.fileId, page: S.pageNo, kind: x.kind || "shape", pts: P1, nos: 1, label: String(label).slice(0, 120), bldg: sh.bldg || "", zone: x.zone || "", room: x.room || ""};   // (no floor of its own: a floor folder's boundary, else the sheet's floor, gives it one)
     if (x.st) { it.ver = {st: x.st, note: x.note || "", by: "vector trace", at}; it.det = {how: "trace", src, gap: 8.6, note: VER_NAMES[x.st] + (x.note ? " — " + x.note : ""), at, batch, a0: (cond(CID[code]) || conds.find(c => c.id === CID[code])).type === "area" ? +(polyArea(P1) / k / k).toFixed(4) : null, pts0: P1.map(q => q.slice())}; if (x.flag) it.det.flag = x.flag; }
     items.push(it); return it; };
   const cw = R0 => { let a = 0; for (let i = 0; i < R0.length; i++) { const p = R0[i], q = R0[(i + 1) % R0.length]; a += p[0] * q[1] - q[0] * p[1]; } const R1 = a > 0 ? R0.slice() : R0.slice().reverse();
@@ -3518,8 +3537,8 @@ function matDialog(){
       return `<tr><td>${esc(o.c.name)}</td><td class="n">${fq(condTotals(o.c).net, o.c.unit)} ${esc(o.c.unit)}</td><td>${o.r.err ? '<span style="color:var(--red)">' + esc(o.r.err) + "</span>" : esc(MAT_KINDS.find(k => k[0] === o.r.m.kind)[1] + " " + (o.r.m.mix || ""))}</td><td class="n">${g("Cement")}</td><td class="n">${g("Sand")}</td><td class="n">${g("Crush")}</td><td class="n">${g("Bricks") || g("Blocks")}</td><td class="n">${o.pr.tot ? f2(o.pr.tot) : "—"}</td></tr>`; }).join("")}</tbody></table>`;
   return ask("Materials — whole takeoff", body, "Close");
 }
-function floorGroups(){   // one group per building / floor found, plus the measurements with no floor
-  const keyL = it => { const L = locOf(it); return [L.bldg, L.floor].filter(Boolean).join(" · "); }, names = [...new Set(P.proj.items.map(keyL))].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+function floorGroups(){   // one group per building / floor found, plus the measurements with no floor — floors in their order (floorSort)
+  const keyL = it => { const L = locOf(it); return [L.bldg, L.floor].filter(Boolean).join(" · "); }, names = floorSort(P.proj.items.map(it => { const L = locOf(it); return {n: [L.bldg, L.floor].filter(Boolean).join(" · "), b: L.bldg, f: L.floor}; }));
   return names.map(n => ({name: n || "No floor given", only: it => keyL(it) === n}));
 }
 /* assembly templates that ship with the tool: formulas only, never a rate — rates come from the bill with source and date */
@@ -3586,7 +3605,8 @@ function setTool(t){
   if (t === "match" || S.tool === "match") S.matchSource = null;
   if (t === "zoomwin" && S.tool !== "zoomwin") S.prevTool = S.tool;
   const c = S.cond ? cond(S.cond) : null;
-  if (["draw", "rect", "ded", "dedrect", "open", "auto"].indexOf(t) >= 0 && !c && t !== "count") { toast("Pick or create a condition first (left panel)"); t = "select"; S.pickWall = false; }
+  if (["draw", "rect", "ded", "dedrect", "open", "auto", "linepick"].indexOf(t) >= 0 && !c && t !== "count") { toast("Pick or create a condition first (left panel)"); t = "select"; S.pickWall = false; }
+  if (t === "linepick" && c && c.type === "count") { toast("Line pick is for length and area conditions — a count is clicked item by item (C)", 3200); t = "draw"; }
   if (t === "rect" && c && c.type !== "area") { toast("Rectangle is for area conditions"); t = "draw"; }
   if (t === "dedrect" && c && c.type === "linear") { toast("A length is cut with the polyline cut-out (D) — the rectangle cut-out is for areas", 3200); t = "ded"; }
   if (t === "dedrect" && c && c.type === "count") { toast("Counts have no deductions — select a point and press Delete"); t = "draw"; }
@@ -3610,6 +3630,7 @@ function setTool(t){
   if (t !== "gap") S.gap = null;
   if (t !== "fillet" && t !== "chamfer") S.fc.first = null;
   if (t !== "stretch") S.str = null;
+  if (t !== "linepick") S.lpk = null;
   S.cedF = null; S.cedO = null; S.cedJ = null; S.cedHov = null;
   if (t !== "typref" && S.typ) { S.typ = null; $("cmpLegend").style.display = "none"; toast("Typical copy stopped — nothing copied"); }
   S.mkd = null;
@@ -3637,6 +3658,7 @@ function hint(){
     cadsel: "AutoCAD objects: click one to select it · Shift / Ctrl+click adds or takes out · drag a box left→right (wholly inside) or right→left (touching) · Ctrl+A: all · then Take off, Count, Select similar, Layer off… below · Esc clears.",
     lasso: "Lasso: drag round the objects to select (touching counts) · Shift adds to the selection.", pan: "Drag to pan; scroll to zoom.",
     draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." + drawing : c.type === "linear" ? (S.resume ? "Continuing the run — click on; Enter, double-click or right-click to finish." : "Click along the run; Enter, double-click or right-click to finish.") + drawing : "Click each item to count it; Esc when done.",
+    linepick: "Line pick: click one line of the drawing — the whole run joined to it is taken off with the active condition (a closed outline: an area). It stops at a junction; Shift+click goes on through it, the straightest way. Ctrl+Z takes it back.",
     fence: "Draw a line across the opening where Auto area leaks (click points; double-click, right-click or Enter to finish). It counts as a wall for Auto area only.", vsearch: "Box one symbol (two corners) — every matching symbol is counted.", note: "Click where the note goes, then type it.", cloud: "Click two opposite corners of the area to cloud.", arrow: "Click the tail, then the head of the arrow.", hilite: "Click two opposite corners to highlight.",
     area: "Box the takeoff area: click two opposite corners around the part of the drawing to take off. Esc cancels.",
     rect: "Click two opposite corners — or one corner, then type L x W (e.g. 12 x 14) and Enter.",
@@ -3728,6 +3750,7 @@ function onDown(e){
   if (S.tool === "cadsel") return cadSelDown(sp, e);
   if (S.tool === "select") return selectDown(sp, e);
   if (S.tool === "match") return matchClick(sp);
+  if (S.tool === "linepick") return lpClick(sp, e);
   const {p} = cursorPoint(e, sp);
   if (mkIsTool(S.tool)) return mkDown(p, sp, e);
   if (cedHere()) return cedClick(sp, p, e);   // AutoCAD mode: the drawing's own objects
@@ -3820,6 +3843,7 @@ function onMove(e){
     if (!D.live && (!D.sp0 || dist(sp, D.sp0) > 3)) D.live = true;
     if (it && D.live) { it.pts[D.vertex] = p; D.moved = true; refreshSheetSoon(); } }
   if (S.tool === "select" && !S.drag) hoverAt(sp, e);
+  if (S.tool === "linepick" && !S.drag) lpHover(sp, e);
   if (S.tool === "cadsel" && !S.drag) cadHoverAt(sp);
   if (cedHere() && cadOn() && !S.drag) cedHover(sp);
   const k = hereScale(p), vp = viewportAt(S.fileId, S.pageNo, p);
@@ -4079,7 +4103,7 @@ function endMove(){
   const k = hereScale(D.g), n = D.ids.size, keep = [];
   mutate(() => {
     if (D.added.length) objs.forEach(o => { o.pts = fin.get(o.id) || o.pts;
-      if (P.proj.items.indexOf(o) < 0 && o.cond) { const c = cond(o.cond), host = c && c.type === "count" ? P.proj.items.find(i => i.cond === o.cond && onPage(i) && i.kind === "shape") : null;   // copied count markers join the page's count
+      if (P.proj.items.indexOf(o) < 0 && o.cond) { const c = cond(o.cond), host = c && c.type === "count" ? countHost(o.cond, S.fileId, S.pageNo, o.pts[0]) : null;   // copied count markers join the page's count
         if (host) { o.pts.forEach(p => { if (!host.pts.some(q => dist(q, p) < 0.5)) host.pts.push(p); }); keep.push(host.id); return; }
         P.proj.items.push(o); keep.push(o.id); }
       else if (!o.cond) { (P.proj.marks = P.proj.marks || []).push(o); keep.push(o.id); } });
@@ -4195,7 +4219,7 @@ function nudgeSel(dx, dy){   // arrow keys: move the selection (screen pixels)
 }
 function addCount(p){
   const c = cond(S.cond); if (!c) return;
-  let it = P.proj.items.find(i => i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && i.kind === "shape");
+  let it = countHost(c.id, S.fileId, S.pageNo, p);   // (the page's count — on a page with floor boundaries, the one in p's)
   mutate(() => {
     if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
     it.pts.push(p);
@@ -4306,9 +4330,104 @@ async function finish(pts){
   else if (area && !ded && itemScale(ni)) { const k = itemScale(ni), Q = itemPoly(ni); toast((nm ? nm + " (named from the drawing) — " : "Area — ") + fq(polyArea(Q) / k / k) + " Sft · perimeter " + f3(polyLen(Q, true) / k) + " ft", 3500); }   // what was just taken: its area and perimeter
   else if (nm) toast("Named " + nm + " from the drawing", 1800);
 }
+/* ------------------------------------------------------------------ line pick (Shift+A): one click takes a whole run of the drawing's lines
+   From the line clicked, the lines joined end to end are followed both ways, round every corner, as long as the way on is plain: one
+   line to go on with, or one of the same drawn path or line style. At a junction it stops; Shift+click goes on through it, the
+   straightest way. A run that comes back to its start is a closed outline: an area for an area condition, a run round it for a length.
+   Over the drawing the run is shown with its length before the click. Filled-only and clip paths, and lines on layers switched off,
+   are not followed. */
+const LP_EPS = 0.6;   // page units: line ends this close are one point
+function lpEnds(g, q){   // the lines with an end at q -> [{i, far: their other end}]
+  const out = [];
+  segsIn(g, q[0] - LP_EPS, q[1] - LP_EPS, q[0] + LP_EPS, q[1] + LP_EPS).forEach(i => { const s = g.segs[i]; if ((s[4] || 0) & 12) return;
+    if (Math.abs(s[0] - q[0]) <= LP_EPS && Math.abs(s[1] - q[1]) <= LP_EPS) out.push({i, far: [s[2], s[3]]});
+    else if (Math.abs(s[2] - q[0]) <= LP_EPS && Math.abs(s[3] - q[1]) <= LP_EPS) out.push({i, far: [s[0], s[1]]}); });
+  return out;
+}
+function lpAt(sp){   // the drawing's line under a screen point -> its index, or -1
+  const g = S.geo[S.key]; if (!g || !g.segs) return -1;
+  const p = toBase(sp[0], sp[1]), tol = Math.max(HIT_PX, 6) / S.view.s; let best = -1, bd = tol;
+  segsIn(g, p[0] - tol, p[1] - tol, p[0] + tol, p[1] + tol).forEach(i => { const s = g.segs[i]; if ((s[4] || 0) & 12) return; const d = distSeg(p, [s[0], s[1]], [s[2], s[3]]); if (d < bd) { bd = d; best = i; } });
+  return best;
+}
+function lpChain(g, i0, thru){   // the run through line i0 -> {pts, closed, stop: "junction" | "end"}
+  const used = new Set([i0]), s0 = g.segs[i0];
+  const turn = (a, b, c) => { const u = [b[0] - a[0], b[1] - a[1]], v = [c[0] - b[0], c[1] - b[1]], d = Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]); return d ? Math.acos(Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1]) / d))) : Math.PI; };
+  const walk = (pts, si) => {   // on from the last point of pts; si: the line just come along
+    for (let n = 0; n < 20000; n++) {
+      const end = pts[pts.length - 1], prev = pts[pts.length - 2], cur = g.segs[si];
+      let C = lpEnds(g, end).filter(o => !used.has(o.i) && dist(o.far, end) > 1e-6);
+      if (!C.length) return "end";
+      if (C.length > 1 && cur[5] != null) { const a = C.filter(o => g.segs[o.i][5] === cur[5]); if (a.length === 1) C = a; }   // the same drawn path goes on
+      if (C.length > 1 && cur[6] != null) { const a = C.filter(o => g.segs[o.i][6] === cur[6]); if (a.length === 1) C = a; }   // or the one line of the same style
+      if (C.length > 1) { if (!thru) return "junction"; C.sort((a, b) => turn(prev, end, a.far) - turn(prev, end, b.far)); }
+      const o = C[0]; used.add(o.i); pts.push(o.far.slice()); si = o.i;
+      if (pts.length > 3 && dist(o.far, pts[0]) <= LP_EPS) return "closed";
+    }
+    return "end";
+  };
+  const fw = [[s0[0], s0[1]], [s0[2], s0[3]]], r1 = walk(fw, i0);
+  let pts = fw, stop = r1;
+  if (r1 !== "closed") { const bw = [[s0[2], s0[3]], [s0[0], s0[1]]], r2 = walk(bw, i0); pts = bw.slice(2).reverse().concat(fw); stop = r1 === "junction" || r2 === "junction" ? "junction" : r2; }
+  let closed = pts.length > 3 && dist(pts[0], pts[pts.length - 1]) <= LP_EPS;
+  if (closed) pts = pts.slice(0, -1);
+  const out = [];   // the corners only: points in a straight line between two others go
+  pts.forEach(p => { if (out.length && dist(out[out.length - 1], p) < 1e-6) return; if (out.length >= 2 && turn(out[out.length - 2], out[out.length - 1], p) < 0.005) out.pop(); out.push(p); });
+  if (closed && out.length >= 3 && turn(out[out.length - 2], out[out.length - 1], out[0]) < 0.005) out.pop();
+  if (closed && out.length >= 3 && turn(out[out.length - 1], out[0], out[1]) < 0.005) out.shift();
+  if (out.length < 3) closed = false;
+  return {pts: out, closed, stop: closed ? "closed" : stop};
+}
+function lpText(r, c){   // what a picked run measures, as said before and after the click
+  const k = hereScale(r.pts[0]), legs = r.pts.length - (r.closed ? 0 : 1), L = polyLen(r.pts, r.closed);
+  if (!k) return legs + " leg" + (legs === 1 ? "" : "s") + " · " + L.toFixed(1) + " pt (no scale)";
+  return (c && c.type === "area" && r.closed ? fq(polyArea(r.pts) / k / k) + " Sft · perimeter " : "") + f3(L / k) + " ft · " + legs + " leg" + (legs === 1 ? "" : "s") + (r.closed ? " · closed" : r.stop === "junction" ? " · stops at a junction (Shift: on through it)" : "");
+}
+function lpHover(sp, e){
+  const i = lpAt(sp), thru = !!(e && e.shiftKey);
+  if (i < 0) { if (S.lpk) { S.lpk = null; draw(); } return; }
+  if (S.lpk && S.lpk.i === i && S.lpk.thru === thru && S.lpk.key === S.key) return;
+  S.lpk = Object.assign(lpChain(S.geo[S.key], i, thru), {i, thru, key: S.key}); draw();
+}
+function lpSvg(r, c){
+  const col = c ? c.color : "#2a78d6", Q = r.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ");
+  return `<${r.closed ? "polygon" : "polyline"} points="${Q}" fill="${r.closed && c && c.type === "area" ? col : "none"}" fill-opacity=".14" stroke="${col}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" opacity=".6"/>`
+    + r.pts.map(p => { const q = toScr(p); return `<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="3" fill="#fff" stroke="${col}" stroke-width="1.5"/>`; }).join("");
+}
+function lpClick(sp, e){
+  const c = S.cond ? cond(S.cond) : null; if (!c) return;
+  const g = S.geo[S.key];
+  if (!g || !g.segs || !g.segs.length) return toast("Line pick follows the drawing's own lines — this page has none (a scan or photo): draw the run point by point (A)", 4500);
+  const i = lpAt(sp); if (i < 0) return toast("No line of the drawing there — click right on a line", 2200);
+  const r = lpChain(g, i, !!e.shiftKey);
+  if (c.type === "area" && !r.closed) return toast("Those lines do not close round an area" + (r.stop === "junction" ? " — they meet other lines at a junction; Shift+click goes on through it the straightest way" : "") + " (for a room, Auto area W traces it from the walls)", 5000);
+  const pts = r.closed && c.type !== "area" ? r.pts.concat([r.pts[0].slice()]) : r.pts;
+  const nm = c.type === "area" && S.lbl.autoName ? roomNameAt(pts) : "";
+  const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, label: nm};
+  mutate(() => { P.proj.items.push(it); }, "Line pick in " + c.name);
+  S.lpk = null;
+  toast((nm ? nm + " — " : "") + "Line pick: " + lpText(r, c) + " → " + c.name, 3500);
+}
 
 /* ------------------------------------------------------------------ overlay */
 let raf = 0;
+/* a heavy takeoff (the layer slower to draw than OV_FAST_MS) is not drawn again at every step of a zoom or pan: the layer as drawn is
+   moved and scaled with the view, as the page's own picture is (applyView), and drawn again once the view has been still for 160 ms */
+const OV_FAST_MS = 12;
+function ovMove(svg, vk){
+  const v0 = svg.__v; if (!v0 || svg.__force || !(svg.__cost > OV_FAST_MS)) return false;
+  if (svg.__tvk !== vk) { const v = S.view, k = v.s / v0.s; svg.__tvk = vk;
+    Object.assign(svg.style, {transformOrigin: "0 0", transform: `translate(${v.tx - v0.tx * k}px,${v.ty - v0.ty * k}px) scale(${k})`});
+    clearTimeout(svg.__t); svg.__t = setTimeout(() => { svg.__force = true; draw(); }, 160); }
+  return true;
+}
+function ovFlat(svg, vk, cost){ clearTimeout(svg.__t); svg.style.transform = ""; svg.__v = {s: S.view.s, tx: S.view.tx, ty: S.view.ty}; svg.__vk = vk; svg.__tvk = null; svg.__force = false; svg.__cost = cost; }
+function hoverGlow(it){
+  const c = cond(it.cond); if (!c) return "";
+  const Q = it.shape === "circle" ? itemPoly(it) : it.pts, pq = p => toScr(p).map(v => v.toFixed(1)).join(",");
+  if (c.type === "count") return Q.map(p => { const q = toScr(p); return `<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(15 * cntZ()).toFixed(1)}" fill="none" stroke="${c.color}" stroke-width="4" opacity=".35"/>`; }).join("");
+  return `<${c.type === "area" || it.shape === "circle" ? "polygon" : "polyline"} points="${Q.map(pq).join(" ")}" fill="none" stroke="${c.color}" stroke-width="9" stroke-linejoin="round" stroke-linecap="round" opacity=".22"/>`;
+}
 function draw(){ if (!raf) raf = requestAnimationFrame(() => { raf = 0; drawNow(); if (SPLIT.on) { linkMark(ACT); PANES.forEach(pn => { if (pn !== ACT) drawPane(pn); }); } if (MAG.on && !MAG.raf && MAG.el && MAG.el.style.display === "block") magDraw(); }); }
 function drawNow(){
   const E = ACT.el, svg = E.ov, svg2 = E.ov2, tip = E.tip;
@@ -4317,8 +4436,10 @@ function drawNow(){
      what follows the cursor (the shape being drawn, snap marker, selection box). A mouse move over a page with a
      thousand measurements then redraws only the cursor layer. */
   let k = curScale(); const h = [], dyn = [];
-  const sig = [P.proj.id, S.ver, S.key, S.view.s, S.view.tx, S.view.ty, S.sel, S.selMark, [...S.multi].join(","), S.hover, S.selPt, S.tool, S.hideMk, JSON.stringify(S.lbl), S.drag || S.typ ? Math.random() : 0, S.autoShow ? S.autoShow.key + S.autoShow.url.length : "", S.unm && S.unm.url ? S.unm.key + S.unm.url.length + "/" + S.unm.sft : "", S.cadSel ? S.cadSelV + "|" + cadKey(ACT) : ""].join("|");
-  const keep = sig === S.ovSig;
+  const sig = [P.proj.id, S.ver, S.key, S.sel, S.selMark, [...S.multi].join(","), S.selPt, S.tool, S.hideMk, JSON.stringify(S.lbl), (S.drag && !S.drag.pan) || S.typ ? Math.random() : 0, S.autoShow ? S.autoShow.key + S.autoShow.url.length : "", S.unm && S.unm.url ? S.unm.key + S.unm.url.length + "/" + S.unm.sft : "", S.cadSel ? S.cadSelV + "|" + cadKey(ACT) : ""].join("|");
+  const vk = S.view.s + "," + S.view.tx + "," + S.view.ty, t0 = performance.now();
+  let keep = sig === S.ovSig && svg.__vk === vk;
+  if (!keep && sig === S.ovSig && ovMove(svg, vk)) keep = true;   // only the view moved and the takeoff is heavy to draw: the layer follows the zoom / pan as drawn
   if (!keep) h.push('<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="rgba(208,59,59,.08)"/><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(208,59,59,.55)" stroke-width="1.5"/></pattern></defs>');
   const ptsS = P => P.map(p => toScr(p).map(v => v.toFixed(1)).join(",")).join(" ");
   const A = S.autoShow; if (!keep && A && A.key === S.key) { const q = toScr([A.x0, A.y0]); h.push(`<image href="${A.url}" x="${q[0].toFixed(1)}" y="${q[1].toFixed(1)}" width="${(A.W * A.px * S.view.s).toFixed(1)}" height="${(A.H * A.px * S.view.s).toFixed(1)}" preserveAspectRatio="none" style="image-rendering:pixelated"/>`); }
@@ -4361,7 +4482,7 @@ function drawNow(){
     const c = cond(it.cond); if (!c) return;
     const col = c.color, sel = it.id === S.sel || S.multi.has(it.id), k = itemScale(it), pts0 = it.pts;
     if (it.shape === "circle") it = Object.assign({}, it, {pts: itemPoly(it), _pts: pts0});
-    if ((it.id === S.hover && S.tool === "select" && !S.drag) || (sel && S.multi.size)) {   // hover glow (Bluebeam), and every object of a multiple selection
+    if (sel && S.multi.size) {   // every object of a multiple selection (the hover glow goes with the cursor: hoverGlow)
       const gc = sel ? "#4b3b8f" : col;
       if (c.type === "count") it.pts.forEach(p => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(15 * cntZ()).toFixed(1)}" fill="none" stroke="${gc}" stroke-width="4" opacity=".35"/>`); });
       else h.push(`<${c.type === "area" || it._pts ? "polygon" : "polyline"} points="${ptsS(it.pts)}" fill="none" stroke="${gc}" stroke-width="9" stroke-linejoin="round" stroke-linecap="round" opacity="${sel ? 0.28 : 0.22}"/>`);
@@ -4385,8 +4506,11 @@ function drawNow(){
     }
   });
   if (LB) h.push(placeLabels(LB, S.lbl.declutter !== false));
+  { const it = S.hover && S.tool === "select" && !S.drag && !S.hideMk ? P.proj.items.find(i => i.id === S.hover) : null;   // hover glow (Bluebeam), drawn with the cursor so a hover never redraws the takeoff
+    if (it && it.file === S.fileId && it.page === S.pageNo && !hiddenItem(it) && !(S.multi.size && (it.id === S.sel || S.multi.has(it.id)))) dyn.push(hoverGlow(it)); }
   const c = S.cond ? cond(S.cond) : null, cur = S.cursor;
   let live = "";
+  if (S.tool === "linepick" && S.lpk && S.lpk.key === S.key && S.lpk.pts.length > 1) { dyn.push(lpSvg(S.lpk, c)); live = "Line pick: " + lpText(S.lpk, c); }   // the run a click would take
   if (S.tool === "stretch" && S.str && cur) dyn.push(...stretchPreview(cur));
   if (S.autoPrev && S.autoPrev.key === S.key) { dyn.push(`<polygon points="${S.autoPrev.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="#e8a33d" fill-opacity=".18" stroke="#c77700" stroke-width="2.5" stroke-dasharray="8 5"/>`);
     (S.autoPrev.holes || []).forEach(h => dyn.push(`<polygon points="${h.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="#fff" fill-opacity=".6" stroke="#b42318" stroke-width="2" stroke-dasharray="4 3"/>`)); }
@@ -4443,7 +4567,7 @@ function drawNow(){
     else if (/midpoint/.test(t)) dyn.push(`<path d="M${q[0]} ${q[1] - 7}L${q[0] + 6} ${q[1] + 5}L${q[0] - 6} ${q[1] + 5}Z" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
     else dyn.push(`<circle cx="${q[0]}" cy="${q[1]}" r="5" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
   }
-  if (!keep) { S.ovSig = sig; const html = h.join(""); if (html !== S.ovHtml) { svg.innerHTML = html; S.ovHtml = html; } }
+  if (!keep) { S.ovSig = sig; const html = h.join(""); if (html !== S.ovHtml) { svg.innerHTML = html; S.ovHtml = html; } ovFlat(svg, vk, performance.now() - t0); }
   svg2.innerHTML = dyn.join("");
   if (!S.passive) $("stMeas").innerHTML = live ? "<b>" + esc(live) + "</b>" : "";
   if (S.typed && S.draft.length) live = (S.tool === "rect" || S.tool === "dedrect" ? "L x W: " : "Length: ") + S.typed + " ▏ Enter to place · Esc clears";
@@ -5109,7 +5233,7 @@ async function removePdf(fid){
   savePr = P.proj; await flushSave(); await backupNow("before removing " + f.name).catch(() => {});
   const pr = P.proj, mine = k => String(k).split(":")[0] === fid;
   pr.files = pr.files.filter(x => x.id !== fid); pr.items = pr.items.filter(i => i.file !== fid); pr.marks = (pr.marks || []).filter(m => m.file !== fid);
-  ["scales", "viewports", "sheets", "ocr", "rot"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) delete pr[n][k]; })); ["pageOrder", "pageHide"].forEach(n => { if (pr[n]) pr[n] = pr[n].filter(k => !mine(k)); });
+  ["scales", "viewports", "floors", "sheets", "ocr", "rot"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) delete pr[n][k]; })); ["pageOrder", "pageHide"].forEach(n => { if (pr[n]) pr[n] = pr[n].filter(k => !mine(k)); });
   if (pr.pins) pr.pins = pr.pins.filter(k => !mine(k)); if (S.pgSel) [...S.pgSel].forEach(k => { if (mine(k)) S.pgSel.delete(k); });
   if (pr.layersOff) delete pr.layersOff[fid]; if (pr.last && pr.last.file === fid) pr.last = {};
   S.undo = []; S.redo = []; S.multi.clear(); S.sel = null; S.selMark = null; Object.keys(S.thumbs || {}).forEach(k => { if (mine(k)) delete S.thumbs[k]; });
@@ -5593,10 +5717,11 @@ function placeClip(cl, at, o){   // -> {ids, f}: the clipboard placed on this pa
   cl.items.forEach(src => {
     const c = cond(src.cond); if (!c) return;
     const pts = src.pts.map(T);
-    if (c.type === "count" && !o.raw) { const host = P.proj.items.find(i => i.cond === c.id && onPage(i) && i.kind === "shape");
+    if (c.type === "count" && !o.raw) { const host = countHost(c.id, S.fileId, S.pageNo, pts[0]);
       if (host) { pts.forEach(p => { if (!host.pts.some(q => dist(q, p) < 0.5)) host.pts.push(p); }); if (!ids.includes(host.id)) ids.push(host.id); return; } }
     const it = Object.assign(JSON.parse(JSON.stringify(src)), {id: uid("I"), file: S.fileId, page: S.pageNo, pts});
     delete it.locked; it.qa = ""; delete it.qaBy; delete it.qaAt;
+    if (it.floor && (cl.key !== keyOf(S.fileId, S.pageNo) || (fb => fb && flLow(fb.name) !== flLow(it.floor))(floorAt(S.fileId, S.pageNo, floorPt(it))))) delete it.floor;   // its floor stays behind on another page, or in another floor's boundary
     P.proj.items.push(it); ids.push(it.id);
   });
   cl.marks.forEach(src => { const m = Object.assign(JSON.parse(JSON.stringify(src)), {id: uid("M"), file: S.fileId, page: S.pageNo, pts: src.pts.map(T)}); delete m.locked; (P.proj.marks = P.proj.marks || []).push(m); ids.push(m.id); });
@@ -9016,10 +9141,11 @@ function reportBuild(o){   // -> {o, cols, groups: [{name, rows | sub: [{name, r
   P.proj.items.forEach(it => { const c = cond(it.cond), k = c && qScale(it); if (!k) return;   // no page scale: left out, as on the measurement sheet (counts need none)
     const R = rowsOf(it, k), key = keyOf(it.file, it.page), L = locOf(it), r = rateOf(c, c.unit);
     recs.push({it, c, key, qty: R.reduce((a, x) => a + x.qty, 0), nos: c.type === "count" ? R.reduce((a, x) => a + (+x.nos || 0), 0) : +it.nos || 1, lbl: it.label || kindName(it, c) + (it.kind === "ded" ? " (deduction)" : ""),
-      floor: [L.bldg, L.floor].filter(Boolean).join(" · ") || repPage(key), rate: !r.na && r.rate > 0 ? r.rate : 0}); });
+      floor: [L.bldg, L.floor].filter(Boolean).join(" · ") || repPage(key), fb: L.bldg, ff: L.floor, rate: !r.na && r.rate > 0 ? r.rate : 0}); });
+  let flOrd = null; const flO = x => { if (!flOrd) flOrd = new Map(floorSort(recs.map(y => ({n: y.floor, b: y.fb, f: y.ff}))).map((n, i) => [n, i])); return flOrd.get(x.floor); };   // floors in their order (floorSort), pages after
   const byOrd = (a, b) => typeof a.ord === "number" && typeof b.ord === "number" ? a.ord - b.ord : String(a.ord).localeCompare(String(b.ord), undefined, {numeric: true});
   const split = (L, f) => { const m = new Map(); L.forEach(x => { const [id, name, ord] = f(x); if (!m.has(id)) m.set(id, {id, name, ord, recs: []}); m.get(id).recs.push(x); }); return [...m.values()].sort(byOrd); };
-  const GK = {cond: x => ["c" + x.c.id, (x.c.boq ? x.c.boq + " · " : "") + x.c.name + " (" + x.c.unit + ")", cOrd.get(x.c.id)], page: x => ["p" + x.key, repPage(x.key), pgOrd.get(x.key)], floor: x => ["f" + x.floor, x.floor, x.floor]};
+  const GK = {cond: x => ["c" + x.c.id, (x.c.boq ? x.c.boq + " · " : "") + x.c.name + " (" + x.c.unit + ")", cOrd.get(x.c.id)], page: x => ["p" + x.key, repPage(x.key), pgOrd.get(x.key)], floor: x => ["f" + x.floor, x.floor, flO(x)]};
   const lv = o.grp === "condpage" ? [GK.cond, GK.page] : [GK[o.grp] || GK.cond];
   const line = (c, x) => Object.assign({c, boq: c.boq || "", unit: c.unit, note: ""}, x, {amt: x.rate ? x.qty * x.rate : null});
   const rowsOfG = L => o.rows === "sum"
@@ -9241,7 +9367,7 @@ function typCommit(mine, targets, giveScale, srcKey){
     mine.forEach(it => { const c = JSON.parse(JSON.stringify(it));
       if (T) c.pts = c.pts.map(T.f);
       if (dupOnPage(c, c.pts, o.f.id, o.i)) { skip++; return; }   // already on that sheet (the typical copy run twice): not doubled
-      Object.assign(c, {id: uid("I"), file: o.f.id, page: o.i, qa: "", qaBy: "", qaAt: "", copied: {from: srcKey, at: now, how: T ? "aligned" : "same place"}});
+      Object.assign(c, {id: uid("I"), file: o.f.id, page: o.i, qa: "", qaBy: "", qaAt: "", copied: {from: srcKey, at: now, how: T ? "aligned" : "same place"}}); delete c.floor;   // (another sheet: another floor — its boundaries or its sheet floor say which)
       P.proj.items.push(c); });
   }));
   toast(mine.length + " measurement" + (mine.length > 1 ? "s" : "") + " copied to " + targets.length + " sheet" + (targets.length > 1 ? "s" : "") + " — marked Copied, not checked" + (skip ? " · " + skip + " skipped — already on the sheet" : ""), 4500);
@@ -9274,9 +9400,230 @@ function doorsOn(it){
 /* ------------------------------------------------------------------ location: building / floor / zone-apartment / room.
    A measurement takes its sheet's building and floor (Sheet info) unless it has its own. */
 const LOC_KEYS = ["bldg", "floor", "zone", "room"], LOC_NAMES = {bldg: "Building", floor: "Floor", zone: "Zone / Apt", room: "Room"};
-function locOf(it){ const sh = (P.proj.sheets || {})[keyOf(it.file, it.page)] || {}; return {bldg: it.bldg || sh.bldg || "", floor: it.floor || sh.floor || "", zone: it.zone || "", room: it.room || ""}; }
+function locOf(it){ const pk = keyOf(it.file, it.page), sh = (P.proj.sheets || {})[pk] || {}; return {bldg: it.bldg || sh.bldg || "", floor: floorName(it, pk) || sh.floor || "", zone: it.zone || "", room: it.room || ""}; }
 const locText = L => [L.bldg, L.floor, L.zone, L.room].filter(Boolean).join(" · ");
-function locValues(k){ const s = new Set(); P.proj.items.forEach(it => { const v = locOf(it)[k]; if (v) s.add(v); }); Object.values(P.proj.sheets || {}).forEach(sh => { if (sh[k]) s.add(sh[k]); }); return [...s].sort(); }
+function locValues(k){ const s = new Set(); P.proj.items.forEach(it => { const v = locOf(it)[k]; if (v) s.add(v); }); Object.values(P.proj.sheets || {}).forEach(sh => { if (sh[k]) s.add(sh[k]); });
+  if (k === "floor") Object.values(P.proj.floors || {}).forEach(L => (L || []).forEach(f => { if (f && f.name) s.add(f.name); }));   // (floor folders, empty ones too)
+  return [...s].sort(); }
+/* ------------------------------------------------------------------ floor folders: one sheet holding several floor plans (a DWG with
+   the ground floor, the typical floor and the roof side by side) has its quantities split by floor. P.proj.floors[pageKey] is the
+   page's list of folders [{id, name, r}] in the order shown; r, when drawn, is the folder's boundary box in page points (y down).
+   A measurement is in a folder BY NAME: its own floor (Move to floor, Properties) wins, else the innermost boundary holding its
+   reference point, else the sheet's floor — all inside locOf, so the bill, the report, Excel, the checks and the AI see the same floors */
+const flLow = s => String(s == null ? "" : s).trim().toLowerCase();
+const flName = s => String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, 60).trim();
+const floorList = pk => ((P.proj && P.proj.floors) || {})[pk] || [];
+const floorNamed = (pk, name) => { const n = flLow(name); return n ? floorList(pk).find(f => flLow(f.name) === n) || null : null; };
+const flHasBox = pk => floorList(pk).some(f => f.r);
+const flBox = r => Array.isArray(r) && r.length === 4 && r.every(v => typeof v === "number" && isFinite(v)) && r[0] !== r[2] && r[1] !== r[3] ? [Math.min(r[0], r[2]), Math.min(r[1], r[3]), Math.max(r[0], r[2]), Math.max(r[1], r[3])] : null;
+const flPk = it => keyOf(it.file, it.page);
+/* the folder whose boundary holds p — the innermost (smallest) when they nest, as viewportAt — or null */
+function floorAt(file, page, p){
+  const L = floorList(keyOf(file, page)); if (!p || !L.length) return null;
+  let best = null, ba = Infinity;
+  L.forEach(f => { const r = f.r; if (!r || !(p[0] >= r[0] && p[0] <= r[2] && p[1] >= r[1] && p[1] <= r[3])) return; const a = (r[2] - r[0]) * (r[3] - r[1]); if (a < ba) { ba = a; best = f; } });
+  return best;
+}
+/* where a measurement stands for its floor: the middle of its points' extent (an outline, a run, a circle's centre and rim, an opening's
+   two points); a count's first marker — floorSplitCounts keeps every marker of a count with no floor of its own in the first one's boundary */
+function floorPt(it){
+  const P0 = it && it.pts; if (!Array.isArray(P0) || !P0.length) return null; if ((cond(it.cond) || {}).type === "count") return P0[0];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; P0.forEach(p => { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; });
+  return [(x0 + x1) / 2, (y0 + y1) / 2];
+}
+const flGrp = (it, p) => { const f = floorAt(it.file, it.page, p); return f ? f.name : ""; };   // the boundary a point is in ("" in none)
+/* the floor a measurement is in by itself (spelt as its folder) or by a boundary — "" for neither (the sheet's floor then) */
+function floorName(it, pk){
+  pk = pk || flPk(it);
+  if (it.floor) { const f = floorNamed(pk, it.floor); return f ? f.name : it.floor; }
+  if (!flHasBox(pk)) return "";
+  return flGrp(it, floorPt(it));
+}
+const floorOf = it => locOf(it).floor;
+/* the page's floors: its folders in their order, then the floors its measurements are in without a folder (their own floor, the sheet's:
+   "ad hoc", in the order first met) — [{id | null, name, r | null, adhoc}] */
+function floorsOf(pk){
+  pk = pk || S.key; const out = floorList(pk).map(f => ({id: f.id, name: f.name, r: f.r || null, adhoc: false})), seen = new Set(out.map(f => flLow(f.name)));
+  P.proj.items.forEach(it => { if (flPk(it) !== pk) return; const n = locOf(it).floor; if (n && !seen.has(flLow(n))) { seen.add(flLow(n)); out.push({id: null, name: String(n), r: null, adhoc: true}); } });
+  return out;
+}
+/* {floor name ("" = no floor): {condition id: net quantity}} for a page — the same signed net as the page in the By page tree, split by
+   floor (the floors add up to the page). A count not regrouped yet (markers in several boundaries) is shared out marker by marker */
+function floorTotals(pk){
+  pk = pk || S.key; const out = {}, box = flHasBox(pk), shF = ((P.proj.sheets || {})[pk] || {}).floor || "";
+  floorsOf(pk).forEach(f => { out[f.name] = {}; }); out[""] = out[""] || {};
+  const put = (n, c, q) => { const m = out[n] = out[n] || {}; m[c] = (m[c] || 0) + q; };
+  P.proj.items.forEach(it => { if (flPk(it) !== pk) return; const k = qScale(it), q = k ? rowsOf(it, k).reduce((a, r) => a + r.qty, 0) : 0, c = cond(it.cond);
+    if (box && c && c.type === "count" && !it.floor && it.pts.length > 1) { const g = new Map(); it.pts.forEach(p => { const n = flGrp(it, p) || shF; g.set(n, (g.get(n) || 0) + 1); });
+      if (g.size > 1) { g.forEach((m, n) => put(n, it.cond, q * m / it.pts.length)); return; } }
+    put(locOf(it).floor || "", it.cond, q); });
+  return out;
+}
+/* deductions and openings go with the outline they are cut from: those of the same condition on the same page whose reference point is
+   inside a moved area's outline, or (a run's openings) inside the run's extent */
+function floorFollowers(its){
+  const ids = new Set(its.map(i => i.id)), out = new Set();
+  its.forEach(it => { if (it.kind !== "shape") return; const c = cond(it.cond); if (!c || c.type === "count" || !Array.isArray(it.pts) || it.pts.length < 2) return;
+    const poly = c.type === "area" ? itemPoly(it) : null; let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    if (!poly) it.pts.forEach(p => { x0 = Math.min(x0, p[0] - 6); x1 = Math.max(x1, p[0] + 6); y0 = Math.min(y0, p[1] - 6); y1 = Math.max(y1, p[1] + 6); });
+    P.proj.items.forEach(d => { if (ids.has(d.id) || out.has(d) || (d.kind !== "ded" && d.kind !== "open") || d.cond !== it.cond || d.file !== it.file || d.page !== it.page) return;
+      const q = floorPt(d); if (q && (poly ? pointInPoly(q, poly) : q[0] >= x0 && q[0] <= x1 && q[1] >= y0 && q[1] <= y1)) out.add(d); }); });
+  return [...out];
+}
+/* a new folder on a page -> the folder, or why not (a string). opts: r (its boundary), move (ids of measurements to put in it) */
+function floorAdd(pk, name, opts){
+  opts = opts || {}; pk = pk || S.key; const nm = flName(name);
+  if (!pk) return "Open a page first";
+  if (!nm) return "Give the floor a name";
+  if (floorNamed(pk, nm)) return "“" + nm + "” is already a folder on this page";
+  const r = opts.r == null ? null : flBox(opts.r); if (opts.r != null && !r) return "The boundary is not a box";
+  const mv = new Set([].concat(opts.move || [])), its = P.proj.items.filter(i => mv.has(i.id) && flPk(i) === pk), all = its.concat(floorFollowers(its)), f = {id: uid("FL"), name: nm, r};
+  mutate(() => { P.proj.floors = P.proj.floors || {}; (P.proj.floors[pk] = P.proj.floors[pk] || []).push(f); all.forEach(i => { i.floor = nm; }); }, "New floor “" + nm + "”");
+  return f;
+}
+/* measurements put in a floor of their page (name "" = out of their own floor: a boundary or the sheet's floor holds them again) — a name
+   not yet a folder on the page becomes one. Their deductions and openings follow. -> how many measurements changed */
+function floorMove(ids, name, pk){
+  const nm = flName(name), set = new Set(ids instanceof Set ? [...ids] : [].concat(ids == null ? [] : ids));
+  const its = P.proj.items.filter(i => set.has(i.id) && (!pk || flPk(i) === pk)); if (!its.length) return 0;
+  const all = its.concat(floorFollowers(its)), to = it => { const f = nm && floorNamed(flPk(it), nm); return f ? f.name : nm; };
+  const ch = all.filter(it => (it.floor || "") !== to(it)), adopt = nm ? [...new Set(its.map(flPk))].filter(k => !floorNamed(k, nm)) : [];
+  if (!ch.length && !adopt.length) return 0;
+  mutate(() => { P.proj.floors = P.proj.floors || {}; adopt.forEach(k => { (P.proj.floors[k] = P.proj.floors[k] || []).push({id: uid("FL"), name: nm, r: null}); });
+    ch.forEach(it => { const t = to(it); if (t) it.floor = t; else delete it.floor; }); }, nm ? "Move " + ch.length + " to “" + nm + "”" : "Remove " + ch.length + " from floor");
+  return ch.length;
+}
+/* a folder renamed (a floor met only on its measurements becomes a folder): what is in it stays in it -> true, or why not */
+function floorRename(pk, oldName, newName){
+  pk = pk || S.key; const nn = flName(newName), lo = flLow(oldName); if (!nn) return "Give the floor a name";
+  const all = floorsOf(pk), cur = all.find(f => flLow(f.name) === lo); if (!cur) return "There is no floor “" + flName(oldName) + "” on this page";
+  if (all.some(f => f !== cur && flLow(f.name) === flLow(nn))) return "“" + nn + "” is already a folder on this page";
+  if (nn === cur.name && !cur.adhoc) return true;
+  mutate(() => { P.proj.floors = P.proj.floors || {}; const L = P.proj.floors[pk] = P.proj.floors[pk] || [], held = P.proj.items.filter(it => flPk(it) === pk && flLow(locOf(it).floor) === lo);
+    const f = L.find(x => flLow(x.name) === lo); if (f) f.name = nn; else L.push({id: uid("FL"), name: nn, r: null});
+    held.forEach(it => { if (it.floor || flLow(locOf(it).floor) !== flLow(nn)) it.floor = nn; }); }, "Rename floor “" + cur.name + "” to “" + nn + "”");   // (in it by the sheet's floor: given the name)
+  return true;
+}
+/* a folder deleted: nothing is deleted with it — its measurements go back to no floor (a boundary or the sheet's floor) -> how many left it */
+function floorDelete(pk, name){
+  pk = pk || S.key; const lo = flLow(name); if (!lo) return 0;
+  const has = !!floorNamed(pk, name), on = P.proj.items.filter(it => flPk(it) === pk), was = on.filter(it => flLow(locOf(it).floor) === lo), own = on.filter(it => it.floor && flLow(it.floor) === lo);
+  if (!has && !own.length) return 0;
+  mutate(() => { if (has) { const L = P.proj.floors[pk].filter(f => flLow(f.name) !== lo); if (L.length) P.proj.floors[pk] = L; else delete P.proj.floors[pk]; } own.forEach(it => { delete it.floor; }); }, "Delete floor “" + (has ? floorNamed(pk, name).name : flName(name)) + "”");
+  return was.filter(it => flLow(locOf(it).floor) !== lo).length;
+}
+/* a folder's boundary drawn, redrawn (r = [x0, y0, x1, y1], page points) or removed (null); a floor without a folder gets one -> the folder */
+function floorSetBox(pk, name, r){
+  pk = pk || S.key; const nm = flName(name); if (!nm) return "Give the floor a name";
+  const b = r == null ? null : flBox(r); if (r != null && !b) return "The boundary is not a box";
+  const f0 = floorNamed(pk, nm); if (!f0 && !b) return null;
+  if (f0 && JSON.stringify(f0.r || null) === JSON.stringify(b)) return f0;
+  let out = null;
+  mutate(() => { P.proj.floors = P.proj.floors || {}; const L = P.proj.floors[pk] = P.proj.floors[pk] || []; let f = L.find(x => flLow(x.name) === flLow(nm)); if (!f) L.push(f = {id: uid("FL"), name: nm, r: null}); f.r = b; out = f; },
+    (b ? (f0 && f0.r ? "Redraw boundary of “" : "Boundary of “") : "Remove boundary of “") + (f0 ? f0.name : nm) + "”");
+  return out;
+}
+/* a folder one up (dir −1) or down (+1) in its page's list -> true when it moved */
+function floorOrder(pk, name, dir){
+  pk = pk || S.key; const L = floorList(pk), i = L.findIndex(f => flLow(f.name) === flLow(name)), j = i + (dir < 0 ? -1 : 1); if (i < 0 || j < 0 || j >= L.length) return false;
+  mutate(() => { const M = P.proj.floors[pk], f = M.splice(i, 1)[0]; M.splice(j, 0, f); }, "Move “" + L[i].name + "” " + (dir < 0 ? "up" : "down"));
+  return true;
+}
+/* a count keeps one measurement per condition and page holding all its markers; with floor boundaries on the page, the markers of a count
+   with no floor of its own are kept in one boundary: those in another go to the count of that boundary (same condition, Nos and label),
+   made as a copy when there is none. Quantities do not change. Runs on every change (mutate, save) -> how many markers moved */
+function floorSplitCounts(){
+  const F = (P.proj && P.proj.floors) || {}, ks = new Set(Object.keys(F).filter(k => (F[k] || []).some(f => f && f.r))); if (!ks.size) return 0;
+  const cc = new Set(P.proj.conds.filter(c => c.type === "count").map(c => c.id)); let n = 0;
+  const hosts = P.proj.items.filter(it => cc.has(it.cond) && it.kind === "shape" && !it.floor && Array.isArray(it.pts) && it.pts.length && ks.has(flPk(it)));
+  hosts.slice().forEach(h => { const g0 = flGrp(h, h.pts[0]), stay = [];
+    h.pts.forEach(p => { const g = flGrp(h, p); if (g === g0) { stay.push(p); return; }
+      let t = hosts.find(o => o !== h && o.cond === h.cond && o.file === h.file && o.page === h.page && (+o.nos || 1) === (+h.nos || 1) && (o.label || "") === (h.label || "") && o.pts.length && flGrp(o, o.pts[0]) === g);
+      if (!t) { t = Object.assign(JSON.parse(JSON.stringify(h)), {id: uid("I"), pts: []}); P.proj.items.push(t); hosts.push(t); }
+      t.pts.push(p); n++; });
+    if (stay.length !== h.pts.length) { h.pts = stay; if (S.sel === h.id) S.selPt = -1; } });
+  return n;
+}
+function floorSplitSafe(){ try { if (P.proj && !S.drag) floorSplitCounts(); } catch (e) { console.warn("floor counts", e); } }
+/* the page's count of a condition a new marker at p joins: on a page with floor boundaries, the one in p's boundary (a count with no floor
+   of its own whose first marker is there, else one whose own floor is that boundary's) — null: start one */
+function countHost(cid, file, page, p){
+  const L = P.proj.items.filter(i => i.cond === cid && i.file === file && i.page === page && i.kind === "shape"); if (!L.length) return null;
+  if (!p || !flHasBox(keyOf(file, page))) return L.find(i => !i.floor) || L[0];
+  const f = floorAt(file, page, p), g = f ? f.name : "";
+  return L.find(i => !i.floor && i.pts.length && flGrp(i, i.pts[0]) === g) || (f && L.find(i => i.floor && flLow(i.floor) === flLow(f.name))) || null;
+}
+/* where a floor sorts in the bill, the Excel "By location" sheet and the report: the project's folders in their order (file by file, page
+   by page), the other floors among them by their natural order (Basement < Lower ground < Ground < Mezzanine < 1st < 2nd … < Roof).
+   -> a number, or null for a name that is neither (a page's name: after the floors, by name) */
+function floorNat(name){
+  const lo = flLow(name), W = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"]; let m;
+  if (!lo) return null;
+  if ((m = /\bbasement\s*[-–]?\s*(\d{1,2})?/.exec(lo))) return -10 - (+m[1] || 1);
+  if (/\blower\s+ground\b/.test(lo)) return -1;
+  if (/\bupper\s+ground\b/.test(lo)) return 0.5;
+  if (/\bground\b/.test(lo)) return 0;
+  if (/\bmezz/.test(lo)) return 0.7;
+  if (/\bpodium\b/.test(lo)) return 0.8;
+  if ((m = /\b(\d{1,3})\s*(?:st|nd|rd|th)\b/.exec(lo) || /\b(?:level|floor|storey|story)\s*[-–]?\s*(\d{1,3})\b/.exec(lo))) return +m[1] + (/\bto\b|\d\s*[-–]\s*\d/.test(lo) ? 0.1 : 0);
+  if ((m = new RegExp("\\b(" + W.join("|") + ")\\b").exec(lo))) return W.indexOf(m[1]) + 1;
+  if (/\bpenthouse\b/.test(lo)) return 997;
+  if (/\bterrace\b/.test(lo)) return 998;
+  if (/\broof/.test(lo)) return 999;
+  return null;
+}
+function floorRank(name){
+  const lo = flLow(name); if (!lo || !P.proj) return null;
+  const fi = new Map((P.proj.files || []).map((f, n) => [f.id, n])), at = k => { const i = String(k).lastIndexOf(":"); return [fi.has(k.slice(0, i)) ? fi.get(k.slice(0, i)) : 1e9, +k.slice(i + 1) || 0]; };
+  const names = [], seen = new Set();
+  Object.keys(P.proj.floors || {}).sort((a, b) => { const A = at(a), B = at(b); return A[0] - B[0] || A[1] - B[1]; })
+    .forEach(k => (P.proj.floors[k] || []).forEach(f => { const l = flLow(f.name); if (l && !seen.has(l)) { seen.add(l); names.push(l); } }));
+  const i = names.indexOf(lo); if (i >= 0) return i * 1000;
+  const n = floorNat(lo); if (n == null) return null;
+  let j = -1; names.forEach((l, x) => { const v = floorNat(l); if (v != null && v <= n) j = x; });   // after the last folder that comes before it naturally
+  return j * 1000 + 500 + (Math.max(-20, Math.min(1000, n)) + 20) / 1020 * 400;
+}
+/* [{n: the name shown, b: building, f: floor}] -> the names, once each, in floor order: by building, then ranked floors (floorRank),
+   then the rest by name */
+function floorSort(L){
+  const m = new Map(); L.forEach(x => { if (!m.has(x.n)) m.set(x.n, x); });
+  const rk = new Map([...m.values()].map(x => [x.n, x.f ? floorRank(x.f) : null]));
+  return [...m.values()].sort((a, b) => { const c = String(a.b || "").localeCompare(String(b.b || ""), undefined, {numeric: true}); if (c) return c;
+    const ra = rk.get(a.n), rb = rk.get(b.n); if ((ra == null) !== (rb == null)) return ra == null ? 1 : -1;
+    if (ra != null && ra !== rb) return ra - rb; return String(a.n).localeCompare(String(b.n), undefined, {numeric: true}); }).map(x => x.n);
+}
+/* a plan's title as a floor name: 'TYPICAL "1ST TO 8TH FLOOR" PLAN (SCALE 1:100)' -> "Typical 1st to 8th floor" */
+function floorTitleName(s){
+  let t = String(s == null ? "" : s).replace(/["“”„'‘’`]/g, " ").replace(/\bSCALE\b.*$/i, " ").replace(/\b\d+\s*:\s*\d+\b.*$/, " ").replace(/[()[\]{}]/g, " ")
+    .replace(/\bPLANS?\b/ig, " ").replace(/\s+/g, " ").trim().replace(/^[\s\-–—:,.;]+|[\s\-–—:,.;]+$/g, "").trim();
+  if (!t) return "";
+  t = t.toLowerCase(); return flName(t.charAt(0).toUpperCase() + t.slice(1));
+}
+/* "Find floors on this page": the plans on a sheet (an AutoCAD drawing's, or a layered PDF's — clusters of wall lines with room names,
+   trace.js planBoxes) each named from its title (GROUND FLOOR PLAN … under it, else in it, else over it) -> [{name, r}], [] when none
+   is found (a plain PDF, a scan, no scale). Never throws */
+async function floorDetect(pk){
+  try {
+    pk = pk || S.key; if (!pk || !P.proj) return [];
+    const i = pk.lastIndexOf(":"), fid = pk.slice(0, i), pg = +pk.slice(i + 1), k = +((P.proj.scales[pk] || {}).ptPerFt) || 0; if (!(k > 0)) return [];
+    if (!S.geo[pk]) { if (S.key !== pk) await gotoPage(fid, pg); for (let n = 0; n < 100 && !S.geo[pk]; n++) await new Promise(r => setTimeout(r, 100)); }
+    const g = S.geo[pk]; if (!g || !g.segs || g.segs.length < 50) return [];
+    let boxes = [];
+    if (g.cad) { const B = await trbGet(pk, k); boxes = B ? B.boxes : []; }
+    else if (g.layerIds && g.layerIds.some(Boolean)) { const inp = await traceInput(pk); if (inp) { inp.k = k; const T = await import("./trace.js" + CADV); boxes = T.planBoxes(inp) || []; } }
+    if (!boxes.length) return [];
+    const lines = textLines(await pageTexts(fid, pg)).filter(l => l && l.s && Math.abs(Math.sin(l.r || 0)) < 0.2 && /\bPLAN\b/i.test(l.s) && (FLOOR_RX.test(l.s) || /FLOOR|BASEMENT|ROOF|LEVEL|TERRACE|MEZZ|PODIUM|PENTHOUSE|STOREY/i.test(l.s)));
+    const W = b => b[2] - b[0], H = b => b[3] - b[1];
+    const bs = boxes.map(b => b.slice()).sort((a, b) => Math.abs(a[0] - b[0]) > 0.1 * Math.min(W(a), W(b)) ? a[0] - b[0] : a[1] - b[1]);   // left to right, then top to bottom
+    const used = new Set(), names = new Set(); let un = 0;
+    return bs.map(b => { const inX = l => l.cx >= b[0] - 0.1 * W(b) && l.cx <= b[2] + 0.1 * W(b);
+      const zone = [l => l.cy > b[3] && l.cy <= b[3] + 0.25 * H(b), l => l.cy >= b[1] && l.cy <= b[3], l => l.cy < b[1] && l.cy >= b[1] - 0.25 * H(b)];
+      let t = null; for (const z of zone) { const c = lines.filter(l => !used.has(l) && inX(l) && z(l)).sort((p, q) => q.h - p.h); if (c.length) { t = c[0]; break; } }
+      let nm = t ? floorTitleName(t.s) : ""; if (t) used.add(t); if (!nm) nm = "Plan " + (++un);
+      let n2 = nm, d = 2; while (names.has(flLow(n2))) n2 = nm + " (" + (d++) + ")"; names.add(flLow(n2));
+      return {name: n2, r: b.map(v => Math.round(v * 1000) / 1000)}; });
+  } catch (e) { console.warn("floorDetect", e); return []; }
+}
 function sheetInfoSuggestions(T){
   const L = textLines(T).map(x => x.s.replace(/\s+/g, " ").trim()).filter(Boolean), out = {};
   const labelled = (rx, valueRx, limit) => {
@@ -9770,13 +10117,14 @@ async function importProject(text, pre){
   for (const f of back.files) { const h = await pdfSha(f.id); if (h === null) miss.push(f.name); else if (f.sha && h && h !== f.sha) diff.push(f.name); }
   const cnt = v => Array.isArray(v) ? v.length : v && typeof v === "object" ? Object.values(v).reduce((a, x) => a + (Array.isArray(x) ? x.length : 1), 0) : v == null ? 0 : 1;
   const ref = JSON.parse(JSON.stringify(o)); migrate(ref);   // the file as upgraded: defaults a v1 file lacks are not losses
-  const same = k => JSON.stringify(ref[k] === undefined ? null : ref[k]) === JSON.stringify(back[k] === undefined ? null : back[k]);
+  const noId = (k, v) => k === "floors" && v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([pk, L]) => [pk, Array.isArray(L) ? L.map(f => Object.assign({}, f, {id: ""})) : L])) : v;   // (a floor folder without an id gets a new one each time it is read)
+  const same = k => JSON.stringify(ref[k] === undefined ? null : noId(k, ref[k])) === JSON.stringify(back[k] === undefined ? null : noId(k, back[k]));
   const rows = (pre || []).slice(), add = (what, a, b, st, note) => rows.push({what, a, b, st, note});
-  [["files", "PDFs"], ["conds", "Conditions"], ["items", "Measurements"], ["scales", "Page scales"], ["viewports", "Viewports"], ["marks", "Markups"], ["sheets", "Sheet info"], ["openings", "Opening schedule"], ["cols", "Custom columns"]].forEach(([k, n]) =>
+  [["files", "PDFs"], ["conds", "Conditions"], ["items", "Measurements"], ["scales", "Page scales"], ["viewports", "Viewports"], ["floors", "Floor folders"], ["marks", "Markups"], ["sheets", "Sheet info"], ["openings", "Opening schedule"], ["cols", "Custom columns"]].forEach(([k, n]) =>
     add(n, cnt(o[k]), cnt(back[k]), o[k] === undefined || (same(k) && cnt(o[k]) === cnt(back[k])) ? "PASS" : "FAIL", o[k] === undefined ? "not in this file (older version) — empty" : cnt(o[k]) !== cnt(back[k]) ? "the file holds entries that could not be read — see Repaired below" : ""));
   repairs.forEach(r => add("Repaired", "", "", /left out|removed/.test(r) ? "FAIL" : "WARNING", r));
   ["auto", "layersOff", "last"].forEach(k => { if (o[k] !== undefined) add({auto: "Auto area settings", layersOff: "PDF layers off", last: "Last page"}[k], "kept", same(k) ? "kept" : "changed", same(k) ? "PASS" : "FAIL", ""); });
-  const known = new Set(["format", "exported", "id", "name", "created", "updated", "v", "files", "conds", "items", "scales", "viewports", "marks", "sheets", "openings", "cols", "auto", "layersOff", "last"]);
+  const known = new Set(["format", "exported", "id", "name", "created", "updated", "v", "files", "conds", "items", "scales", "viewports", "floors", "marks", "sheets", "openings", "cols", "auto", "layersOff", "last"]);
   Object.keys(o).filter(k => !known.has(k)).forEach(k => add("Other: " + k, "kept", same(k) ? "kept" : "changed", same(k) ? "PASS" : "FAIL", "kept as it was"));
   const orphanC = back.items.filter(i => !back.conds.some(c => c.id === i.cond)).length, orphanF = back.items.filter(i => !back.files.some(f => f.id === i.file)).length;
   add("Measurements → condition", back.items.length, back.items.length - orphanC, orphanC ? "FAIL" : "PASS", orphanC ? orphanC + " point to a condition that is not in the file" : "");
@@ -9831,7 +10179,7 @@ async function mergeProject(text, pre, opt){
   const rAdd = {}, rMiss = []; let rTurn = 0;
   for (const f of s.files) for (let i = 1; i <= (+f.pages || 0); i++) { const k = keyOf(f.id, i), rs = rotOf(s, k);
     if (isAdd(f.id)) { if (rs) rAdd[k] = rs; continue; }
-    const d = ((rotOf(pr, k) - rs) % 360 + 360) % 360, on = o => o.file === f.id && +o.page === i; if (!d || !(s.items.some(on) || s.marks.some(on) || (s.viewports[k] || []).length || (s.scales[k] || {}).cal)) continue;
+    const d = ((rotOf(pr, k) - rs) % 360 + 360) % 360, on = o => o.file === f.id && +o.page === i; if (!d || !(s.items.some(on) || s.marks.some(on) || (s.viewports[k] || []).length || (s.floors[k] || []).some(x => x.r) || (s.scales[k] || {}).cal)) continue;
     try { const pg = await (await doc(f.id)).getPage(i), v = pg.getViewport({scale: 1, rotation: ((pg.rotate || 0) + rs) % 360}); rotData(s, k, d, v.width, v.height); rTurn++; } catch (e) { rMiss.push(f.name + " p." + i); } }
   // custom columns by name (a condition's own list of them follows); AutoCAD edits of an added drawing; pages hidden of an added drawing
   const kmap = {}, kAdd = []; (s.cols || []).forEach(x => { const m = (pr.cols || []).concat(kAdd).find(y => colKey(y.name) === colKey(x.name)); if (m) kmap[x.id] = m.id; else { const n = Object.assign({}, x, {id: uid("X")}); kmap[x.id] = n.id; kAdd.push(n); } });
@@ -9868,16 +10216,19 @@ async function mergeProject(text, pre, opt){
     if (ok) scUse = scDiff;
   }
   Object.entries(s.viewports).forEach(([k, L]) => { if (!L.length) return; if ((pr.viewports[k] || []).length) vpSkip++; else vp[k] = L.map(v => Object.assign({}, v, {id: uid("V")})); });
+  const fl = {}; let flN = 0, flAdd = 0, flSkip = 0;   // floor folders by name per page: a name already a folder on that page is kept as it is (what comes in under that name is in it)
+  Object.entries(s.floors || {}).forEach(([k, L]) => { (L || []).forEach(x => { flN++; if (((pr.floors || {})[k] || []).concat(fl[k] || []).some(y => low(y.name) === low(x.name))) { flSkip++; return; }
+    (fl[k] = fl[k] || []).push(Object.assign({}, x, {id: uid("FL"), r: Array.isArray(x.r) ? x.r.slice() : null})); flAdd++; }); });
   Object.entries(s.sheets).forEach(([k, v]) => { if (pr.sheets && pr.sheets[k]) shSkip++; else sh[k] = v; });
   const oAdd = []; let oUse = 0; s.openings.forEach(x => { if ((pr.openings || []).concat(oAdd).some(y => low(y.mark) === low(x.mark))) oUse++; else oAdd.push(Object.assign({}, x, {id: uid("O")})); });
   const bbWas = new Set(Object.keys(pr.bbImp || {}).filter(f => pr.bbImp[f].off));
-  const nAdd = scUse.length + iAdd.length + mAdd.length + cAdd.length + Object.keys(sc).length + Object.keys(vp).length + Object.keys(sh).length + oAdd.length + kAdd.length + Object.keys(rAdd).length + Object.keys(eAdd).length + hAdd.length;
+  const nAdd = scUse.length + iAdd.length + mAdd.length + cAdd.length + Object.keys(sc).length + Object.keys(vp).length + flAdd + Object.keys(sh).length + oAdd.length + kAdd.length + Object.keys(rAdd).length + Object.keys(eAdd).length + hAdd.length;
   if (fAdd.length) { pr.files.push(...fAdd); s.files.forEach(f => { const id = fmap[f.id]; if (fAdd.some(x => x.id === id) && s.layersOff && s.layersOff[id] && !(pr.layersOff || {})[id]) { pr.layersOff = pr.layersOff || {}; pr.layersOff[id] = s.layersOff[id]; } }); }   // drawings: kept, as after + PDF
   if (nAdd) mutate(() => {
     pr.conds.push(...cAdd); pr.items.push(...iAdd); pr.marks = (pr.marks || []).concat(mAdd);
     if (lAdd.length) pr.mkLayers = (pr.mkLayers || []).concat(lAdd);
     if (Array.isArray(s.mkStatuses) && s.mkStatuses.length) pr.mkStatuses = [...new Set((pr.mkStatuses || []).concat(s.mkStatuses))].slice(0, 60);
-    Object.assign(pr.scales, sc); scUse.forEach(([k, v]) => { pr.scales[k] = Object.assign({}, v); }); Object.assign(pr.viewports, vp); pr.sheets = Object.assign(pr.sheets || {}, sh); pr.openings = (pr.openings || []).concat(oAdd);
+    Object.assign(pr.scales, sc); scUse.forEach(([k, v]) => { pr.scales[k] = Object.assign({}, v); }); Object.assign(pr.viewports, vp); if (flAdd) { pr.floors = pr.floors || {}; Object.entries(fl).forEach(([k, L]) => { pr.floors[k] = (pr.floors[k] || []).concat(L); }); } pr.sheets = Object.assign(pr.sheets || {}, sh); pr.openings = (pr.openings || []).concat(oAdd);
     if (kAdd.length) pr.cols = (pr.cols || []).concat(kAdd); if (Object.keys(rAdd).length) pr.rot = Object.assign({}, pr.rot, rAdd);
     if (Object.keys(eAdd).length) pr.cadEd = Object.assign({}, pr.cadEd, eAdd); if (hAdd.length) pr.pageHide = (pr.pageHide || []).concat(hAdd);
     Object.entries(s.bbImp || {}).forEach(([f, v]) => { if (!v || !pr.files.some(x => x.id === f)) return; const w = (pr.bbImp || {})[f] || {};   // Bluebeam markups brought in there: not brought in twice here
@@ -9895,6 +10246,7 @@ async function mergeProject(text, pre, opt){
   if (src.marks.length) add("Markups", src.marks.length, mAdd.length + " added", "PASS", mDup ? mDup + " already here — not added twice" : "");
   if (aMiss.length) add("Markup pictures / files", "", "", "WARNING", aMiss.length + " not in this browser (a .json carries none — a .zdtakeoff does): shown empty");
   [["Page scales", s.scales, sc, scSkip], ["Viewports", s.viewports, vp, vpSkip], ["Sheet info", s.sheets, sh, shSkip]].forEach(([n, a, b, k]) => { const na = Object.keys(a).length; if (na) add(n, na, Object.keys(b).length + " added", "PASS", k ? k + " page" + (k > 1 ? "s" : "") + " already had one — kept" : ""); });
+  if (flN) add("Floor folders", flN, flAdd + " added", "PASS", flSkip ? flSkip + " already a folder on that page (same name) — kept" : "");
   if (scUse.length) add("Page scales replaced", scDiff.length, scUse.length + " replaced", "PASS", "the file's verified calibration now used on " + scUse.map(([k, v]) => keyName(k) + " (" + v.ptPerFt.toFixed(4) + " pt per ft)").join(", ") + " — quantities recalculated");
   else if (scDiff.length) add("Page scales", scDiff.length, "kept", "WARNING", "the file was measured at another verified scale on " + scDiff.map(([k, v]) => keyName(k) + " (" + v.ptPerFt.toFixed(4) + " pt per ft, here " + pr.scales[k].ptPerFt.toFixed(4) + ")").join(", ") + " — this project's scale kept");
   if (src.openings.length) add("Opening schedule", src.openings.length, oAdd.length + " added", "PASS", oUse ? oUse + " mark" + (oUse > 1 ? "s" : "") + " already in the schedule — kept" : "");
@@ -9903,7 +10255,7 @@ async function mergeProject(text, pre, opt){
     and(rTurn && "pages turned otherwise here: what came in on them was turned with them", rMiss.length && rMiss.join(", ") + " could not be read to turn what came in on it — check it"));
   repairs.forEach(r => add("Repaired", "", "", /left out|removed/.test(r) ? "FAIL" : "WARNING", r));
   const lvl = rows.some(r => r.st === "FAIL") ? "FAIL" : rows.some(r => r.st === "WARNING") ? "WARNING" : "PASS";
-  S.lastImport = {lvl, rows, merge: true, files: {add: fAdd.length, use: fUse.length, miss: fMiss.length}, conds: {add: cAdd.length, use: cUse}, items: {add: iAdd.length, dup: iDup, orphan: iOrph}, marks: {add: mAdd.length, dup: mDup, pics: aMiss.length}, scales: Object.keys(sc).length, viewports: Object.keys(vp).length, sheets: Object.keys(sh).length, openings: {add: oAdd.length, use: oUse}, rot: {add: Object.keys(rAdd).length, turned: rTurn, miss: rMiss.length}, cols: kAdd.length, cadEd: Object.keys(eAdd).length, pageHide: hAdd.length};
+  S.lastImport = {lvl, rows, merge: true, files: {add: fAdd.length, use: fUse.length, miss: fMiss.length}, conds: {add: cAdd.length, use: cUse}, items: {add: iAdd.length, dup: iDup, orphan: iOrph}, marks: {add: mAdd.length, dup: mDup, pics: aMiss.length}, scales: Object.keys(sc).length, viewports: Object.keys(vp).length, floors: flAdd, sheets: Object.keys(sh).length, openings: {add: oAdd.length, use: oUse}, rot: {add: Object.keys(rAdd).length, turned: rTurn, miss: rMiss.length}, cols: kAdd.length, cadEd: Object.keys(eAdd).length, pageHide: hAdd.length};
   ask("Import into " + pr.name + " — " + lvl, `<table class="sh"><thead><tr><th>Check</th><th class="n">In file</th><th class="n">Merged</th><th>Status</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.what)}${r.note ? `<div class="ds">${esc(r.note)}</div>` : ""}</td><td class="n">${esc(r.a)}</td><td class="n">${esc(r.b)}</td><td style="font-weight:700;color:${r.st === "PASS" ? "var(--green)" : r.st === "WARNING" ? "var(--amber)" : "var(--red)"}">${r.st}</td></tr>`).join("")}</tbody></table>
     <p class="small" style="margin-top:6px">${nAdd ? "Ctrl+Z takes the whole import back" + (fAdd.length ? " (the drawings it added stay listed, as after + PDF)" : "") + "." : "Nothing new to add — everything in the file is here already."}</p>`, "");
   $("dlgCancel").textContent = "Close";
@@ -10276,7 +10628,7 @@ function magDraw(){
     const fx = cv.width / b.width, fy = cv.height / b.height; c.drawImage(cv, (MAG.x - w / 2 - b.left) * fx, (MAG.y - w / 2 - b.top) * fy, w * fx, w * fy, 0, 0, D, D); });   // (the part outside a canvas is clipped by drawImage)
   c.filter = "none";
   const vk = S.view.s + "," + S.view.tx + "," + S.view.ty;
-  [E.ov, E.ov2].forEach((svg, n) => { const im = magOv(n, svg, st, vk); if (im) c.drawImage(im, cx - w / 2, cy - w / 2, w, w, 0, 0, D, D); });
+  [E.ov, E.ov2].forEach((svg, n) => { if (!n && svg.__vk && svg.__vk !== vk) return; const im = magOv(n, svg, st, vk); if (im) c.drawImage(im, cx - w / 2, cy - w / 2, w, w, 0, 0, D, D); });   // (the takeoff layer moved with a zoom / pan, ovMove: left out until drawn again)
   const m = D / 2, line = (col, lw) => { c.strokeStyle = col; c.lineWidth = lw; c.beginPath(); c.moveTo(0, m); c.lineTo(m - 7, m); c.moveTo(m + 7, m); c.lineTo(D, m); c.moveTo(m, 0); c.lineTo(m, m - 7); c.moveTo(m, m + 7); c.lineTo(m, D); c.stroke(); };
   line("rgba(255,255,255,.85)", 3); line("#d03b3b", 1);
   if (S.snap && S.snap.p) { const q = toScr(S.snap.p), sx = m + (q[0] - cx) * k, sy = m + (q[1] - cy) * k; c.strokeStyle = "#16a34a"; c.lineWidth = 2; c.strokeRect(sx - 6, sy - 6, 12, 12); }
@@ -11040,7 +11392,7 @@ function wire(){
   $("aiRead").onclick = () => aiSend($("aiIn").value.trim() || "Measure the floor area of every room in this view.", true).then(() => { $("aiIn").value = ""; });
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
-  $("bLw").onclick = () => setThin(!S.thin);
+  $("bLw").onclick = lwToggle;
   $("bModePdf").onclick = () => setEdMode("pdf"); $("bModeCad").onclick = () => setEdMode("cad");
   ["auto", "black", "white"].forEach(v => { $("bBg_" + v).onclick = () => setBg(v); }); $("bMono").onclick = () => setMono(!S.mono); $("bPdfBw").onclick = () => setPdfBw(!(S.bg === "white" && S.mono));
   const vpop = $("viewPop"), vOpen = on => { vpop.classList.toggle("on", on); $("bView").setAttribute("aria-expanded", on ? "true" : "false"); };
@@ -11269,7 +11621,7 @@ function wire(){
     if (e.key === "}" || e.key === "{") { lblSize("dedScale", e.key === "}" ? 1 : -1); return; }   // Shift: the cut-out labels'
     if (e.shiftKey && k === "c") { setXh(!S.xh); return; }   // full-screen cross-hair
     if (e.shiftKey && k === "g") { setMag(!MAG.on); return; }   // magnifier (Shift+M is the Angle tool)
-    if (e.shiftKey) { const ST = {m: "angle", l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen", v: "cadsel", t: "trim", x: "extend", s: "stretch", d: "dedrect"}; if (ST[k]) { setTool(ST[k]); return; } }
+    if (e.shiftKey) { const ST = {m: "angle", l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen", v: "cadsel", t: "trim", x: "extend", s: "stretch", d: "dedrect", a: "linepick"}; if (ST[k]) { setTool(ST[k]); return; } }
     const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", c: "count", e: "circle", n: "note", u: "cloud", d: "ded", o: "open", m: "measure", k: "cal", b: "break", z: "zoomwin",
       t: "mk_text", q: "mk_callout", p: "mk_pen", g: "mk_polygon", y: "mk_polyline", x: "mk_stamp", i: "mk_image"};
     if (T[k]) { setTool(T[k]); return; }
@@ -14494,7 +14846,20 @@ function setDim(on){   // on = true/false, or a dimming level 0-90 %
   $("bDim").classList.toggle("on", S.dim); $("dimPct").value = S.dimPct || 50; $("dimLbl").textContent = (S.dim ? S.dimPct : 0) + "%"; const _rp = $("ribDimPct"); if (_rp) _rp.value = S.dimPct || 50; const _rl = $("ribDimLbl"); if (_rl) _rl.textContent = (S.dim ? S.dimPct : 0) + "%";
   pref("zdTakeoffDim", S.dim ? String(S.dimPct) : "0"); viewMark();
 }
-function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); viewMark(); renderAll(); }
+function setThin(on){ S.thin = on; pref("zdTakeoffThin", on ? "1" : "0"); lwMark(); viewMark(); renderAll(); }
+/* an AutoCAD drawing's line weights shown or not: as the drawing's own LWDISPLAY says (AutoCAD's LWT button), until switched here for
+   that drawing — and never when line weights are off for everything */
+function cadLwOn(fid, proj = P.proj){ const o = proj && proj.cadLw && proj.cadLw[fid], sc = S.cadSc && S.cadSc[fid]; return o != null ? !!o : !!(sc && sc.lwd); }
+function lwMark(){
+  const b = $("bLw"); if (!b) return; const cad = !!ACT && cadOn(), on =!S.thin && (!cad || cadLwOn(S.fileId));
+  b.classList.toggle("on", on); b.title = (on ? "Line weights are on" : "Line weights are off") + (cad ? " for this drawing (AutoCAD's LWT; it opens as its LWDISPLAY says)" : "") + " — click to " + (on ? "draw every line thin" : "show them");
+}
+function lwToggle(){   // the Line weights button: on an AutoCAD drawing, that drawing's (as LWT); else for everything
+  if (!cadOn()) return setThin(!S.thin);
+  const fid = S.fileId, on = !S.thin && cadLwOn(fid); P.proj.cadLw = P.proj.cadLw || {}; P.proj.cadLw[fid] = !on; save();
+  if (!on && S.thin) return setThin(false);
+  lwMark(); renderAll(); toast("Line weights " + (on ? "off" : "on") + " for this drawing (LWT)", 1800);
+}
 
 /* ------------------------------------------------------------------ AutoCAD drawings (DWG / DXF) — cad.js
    A drawing added with + PDF is read in this browser and kept as a layered vector PDF — so snapping, auto area, find, the
@@ -14527,7 +14892,7 @@ function cadLoad(fid, proj = P.proj){
         rec.scene = sc; await dbPut("pdfs", rec, fid).catch(() => {}); }
       catch (e) { if (!rec.scene) throw e; sc = rec.scene; toast("Shown as it was first read — the drawing could not be read again here (" + (e.message || e) + ")", 6000); }   // the scene kept from before: still its objects
       finally { busy(""); } }
-    S.cadSc[fid] = sc; delete S.cadP[fid]; return sc;
+    S.cadSc[fid] = sc; delete S.cadP[fid]; if (fid === S.fileId) lwMark(); return sc;
   })().catch(e => { S.cadSc[fid] = null; delete S.cadP[fid]; toast("Shown from its PDF — the drawing's objects could not be read here (" + (e.message || e) + ")", 6000); return null; });
 }
 /* a DWG / DXF read off the page's thread, in a worker (cad-worker.js): the page stays responsive while a big drawing is read, and
@@ -14618,12 +14983,12 @@ function cadHidden(fid, sc, proj = P.proj){ const off = new Set(((proj && proj.l
 
 /* the background (black as AutoCAD's model space, white, or black for CAD drawings only) and monochrome */
 const darkNow = (fid = S.fileId, proj = P.proj) => S.bg === "black" || (S.bg !== "white" && !!cadMeta(fid, proj));
-function viewOpts(dpr, fast, pn = ACT){ const fid = pn.fileId, proj = pn.sess.proj, sc = S.cadSc && S.cadSc[fid]; return {dark: darkNow(fid, proj), mono: !!S.mono, thin: !!S.thin, hidden: sc ? cadHidden(fid, sc, proj) : null, ed: sc ? cedC(fid, cadPage(pn), proj) : null, dpr, fast}; }
+function viewOpts(dpr, fast, pn = ACT){ const fid = pn.fileId, proj = pn.sess.proj, sc = S.cadSc && S.cadSc[fid]; return {dark: darkNow(fid, proj), mono: !!S.mono, thin: !!S.thin || !!(sc && !cadLwOn(fid, proj)), hidden: sc ? cadHidden(fid, sc, proj) : null, ed: sc ? cedC(fid, cadPage(pn), proj) : null, dpr, fast}; }
 function bgMark(){
   ["auto", "black", "white"].forEach(v => { const b = $("bBg_" + v); if (b) b.classList.toggle("on", (S.bg || "auto") === v); });
   const m = $("bMono"); if (m) m.classList.toggle("on", !!S.mono);
   const bw = $("bPdfBw"); if (bw) bw.classList.toggle("on", S.bg === "white" && !!S.mono);
-  PANES.forEach(pn => pn.el.stage.classList.toggle("dark", darkNow(pn.fileId, pn.sess.proj)));
+  PANES.forEach(pn => pn.el.stage.classList.toggle("dark", darkNow(pn.fileId, pn.sess.proj))); lwMark();
 }
 function renderAll(){ PANES.forEach(pn => { if (pn.page) { renderLow(pn); renderHi(true, pn); } }); }   // every window, after a change of how drawings are drawn
 function setBg(v){ S.bg = v; pref("zdTakeoffBg", v); bgMark(); renderAll(); renderLayers(); }
@@ -14665,7 +15030,7 @@ function freeCadBitmap(pn = ACT){
 }
 const CAD_FRAME = 24;   // ms
 const cadMs = cost => cost * (S.cadRate || 1.5e-4);   // ms per path step, measured on this machine as light views are drawn
-const cadLook = pn => [darkNow(pn.fileId, pn.sess.proj), !!S.mono, !!S.thin].join("|");
+const cadLook = pn => [darkNow(pn.fileId, pn.sess.proj), !!S.mono, !!S.thin, cadLwOn(pn.fileId, pn.sess.proj)].join("|");
 const cadKey = pn => cadLook(pn) + "|" + cedV(pn.fileId, pn.sess.proj) + "|" + JSON.stringify(((pn.sess.proj && pn.sess.proj.layersOff) || {})[pn.fileId] || []);   // what the whole-page picture was drawn with
 function cadLowPaint(src, pg, pn){   // the picture under the screen (shown for a moment when a big zoom step outruns the screen)
   const lc = pn.el.low, sc = Math.min(3, 3000 / Math.max(pn.base.width, pn.base.height)); lc.width = Math.ceil(pn.base.width * sc); lc.height = Math.ceil(pn.base.height * sc);
@@ -14760,11 +15125,11 @@ function cadCtxItems(q){   // right-click: the AutoCAD object under the cursor (
   const sc = S.cadSc[S.fileId], ei = cadPickAt(toScr(q), true); if (ei < 0) return [];
   const r = CAD.cadRec(pg, ei); if (!r || r.L < 0) return [];
   const lname = (sc.layers[r.L] || {}).name || "0", blk = cadInBlock(pg, r), L = [{h: "AutoCAD: " + (r.t === "INSERT" ? "block " + (r.n || "") : r.t.toLowerCase()) + " · " + lname + (blk ? " · in block " + blk : ""), s: [r.area ? f2(r.area) + " Sft" : "", r.len ? f2(r.len) + " ft" : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ")}];
-  if (r.t === "INSERT") { const same = pg.ents.filter(x => x.t === "INSERT" && x.n === r.n).length; L.push({t: "Count this " + (r.n || "block"), fn: () => cadPick(ei, "count")}, {t: "Count every " + (r.n || "block") + " (" + same + ")…", fn: () => cadQtyDialog({B: r.n})}); }
+  if (r.t === "INSERT") { const hid = cadHidden(S.fileId, sc), same = pg.ents.concat(pg.subs || []).filter(x => x && x.t === "INSERT" && x.n === r.n && x.L >= 0 && !hid[x.L]).length; L.push({t: "Count this " + (r.n || "block"), fn: () => cadPick(ei, "count")}, {t: "Count every " + (r.n || "block") + " (" + same + ")…", fn: () => cadQtyDialog({B: r.n})}); }
   else { if (r.cl && r.area > 0) L.push({t: "Take off its area — " + f2(r.area) + " Sft", fn: () => cadPick(ei, "area")}); if (r.len > 0) L.push({t: "Take off its length — " + f2(r.len) + " ft", fn: () => cadPick(ei, "line")}); }
   L.push({t: "Quantities on layer " + lname + "…", fn: () => cadQtyDialog({L: r.L})}, {t: "Isolate layer " + lname + " (LAYISO)", fn: () => cadIsolate(lname)}, {t: "Layer " + lname + " off (LAYOFF)", fn: () => cadLayersOnOff([lname], false)}, {sep: 1},
     {t: "Select this object", k: "Shift+V", fn: () => { setTool("cadsel"); cadSelSet([ei]); }}, {t: "Select similar (same type and layer" + (r.t === "INSERT" ? ", same block" : "") + ")", fn: () => { setTool("cadsel"); cadSelSet([ei]); cadSelAct("similar"); }});
-  const C = CAD.cadChain(pg, ei); if (C.length > 1) L.push({t: "Select the block it is in (" + blk + ")", fn: () => { setTool("cadsel"); cadSelSet([C[C.length - 2]]); }});
+  const up = cadUp(pg, ei); if (up >= 0) L.push({t: "Select the block it is in (" + (CAD.cadRec(pg, up).n || blk) + ")", fn: () => { setTool("cadsel"); cadSelSet([up]); }});
   L.push({sep: 1});
   return L;
 }
@@ -14810,6 +15175,9 @@ function cadPickAt(sp, add){
   }
   return C[0];
 }
+/* the nearest block an object inside a block is in that can be seen (its layer on) -> its index, or -1 */
+function cadUp(pg, ei){ const hid = cadHidden(S.fileId, S.cadSc[S.fileId]), C = CAD.cadChain(pg, ei);
+  for (let k = C.length - 2; k >= 0; k--) { const r = CAD.cadRec(pg, C[k]); if (r && r.L >= 0 && !hid[r.L]) return C[k]; } return -1; }
 const cadInBlock = (pg, r) => { const b = r && r.p != null ? CAD.cadRec(pg, r.p) : null; return b ? b.n || "a block" : ""; };   // the block an object inside a block is in
 function cadSelDown(sp, e){
   if (!cadOn()) { toast("Select objects works on an AutoCAD drawing (DWG / DXF added with + PDF), on its page", 4000); return; }
@@ -14846,6 +15214,9 @@ function cadSelSvg(ids, hover){
       CAD.primPaths(pg, i).forEach(P => { if (!P.length) return; pts += P.length;
         d.push(P.map((p, n) => { const q = toScr(p); return (n ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1); }).join("") + (P.closed ? "Z" : "") + (P.length === 1 ? "h0.1" : "")); }); }
     for (let j = E.ts[ei]; j < E.ts[ei + 1]; j++) { const t = 4 * E.tl[j]; R(pg.tB[t], pg.tB[t + 1], pg.tB[t + 2], pg.tB[t + 3]); }
+    const rc = CAD.cadRec(pg, ei);   // a hatch drawn as its pattern (its lines left out above): its outline
+    if (rc && rc.t === "HATCH" && rc.loops && !E.pl.subarray(E.ps[ei], E.ps[ei + 1]).some(i => pg.pf[i] !== 1)) rc.loops.forEach(P => { if (P.length < 2) return; pts += P.length;
+      d.push(P.map((p, n) => { const q = toScr(p); return (n ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1); }).join("") + "Z"); });
   }
   if (!d.length) return "";
   const path = d.join("");
@@ -14865,7 +15236,7 @@ function cadSelSum(ids){   // the selection's totals: by type, lengths, areas, b
 function cadSelHtml(ids){
   const o = cadSelSum(ids), c = S.cond ? cond(S.cond) : null, top = (m, n) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => esc(k) + (v > 1 ? " ×" + v : "")).join(", ") + (m.size > n ? ", …" : "");
   const B = [...o.blocks.values()].reduce((a, v) => a + v, 0), pg = cadPage(), inB = [...new Set(ids.map(ei => cadInBlock(pg, CAD.cadRec(pg, ei))).filter(Boolean))];
-  const where = inB.length ? `<div class="row small" style="margin-top:4px">Inside block <b>${esc(inB.slice(0, 3).join(", "))}${inB.length > 3 ? ", …" : ""}</b> &nbsp;<button class="btn sm" data-cact="up" title="Select the block it is part of, as AutoCAD picks it">Select its block</button></div>`
+  const where = inB.length ? `<div class="row small" style="margin-top:4px">Inside block <b>${esc(inB.slice(0, 3).join(", "))}${inB.length > 3 ? ", …" : ""}</b>${ids.some(ei => cadUp(pg, ei) >= 0) ? ` &nbsp;<button class="btn sm" data-cact="up" title="Select the block it is part of, as AutoCAD picks it">Select its block</button>` : ""}</div>`
     : B && ids.length === 1 ? `<div class="row small" style="margin-top:4px;color:var(--muted)">Click a part of the block again to pick that hatch, text or line on its own</div>` : "";
   const into = c ?"into <b>" + esc(c.name) + "</b> when its type fits, else a condition named after the layer / block" : "into conditions named after each layer / block";
   return `<h4>AutoCAD objects — ${o.n} selected <span style="font-weight:400;color:var(--muted);font-size:11px">Shift / Ctrl+click adds or takes out · box: left→right window, right→left crossing · Ctrl+A all · Esc clears</span></h4>
@@ -14898,7 +15269,7 @@ function cadSelAct(act){
   if (act === "all") { const A = all(); cadSelSet(A); return toast(A.length + " AutoCAD objects selected (layers that are on)", 2200); }
   if (act === "qsel") return cadQuickSelect();
   if (!ids.length) return toast("Select AutoCAD objects first (Shift+V, then click or drag a box)", 3000);
-  if (act === "up") { const P = [...new Set(ids.map(ei => { const r = R(ei); return r && r.p != null ? r.p : ei; }))]; cadSelSet(P); return; }
+  if (act === "up") { const P = [...new Set(ids.map(ei => { const u = cadUp(pg, ei); return u >= 0 ? u : ei; }))]; cadSelSet(P); return; }
   if (act === "similar") { const key = r => r.t + "|" + r.L + "|" + (r.t === "INSERT" ? r.n || "" : ""), K = new Set(ids.map(ei => key(R(ei)))), A = outer(all(deep).filter(ei => K.has(key(R(ei))))); cadSelSet(A); return toast("Similar: " + A.length + " objects", 2000); }
   if (act === "layer") { const L = new Set(ids.map(ei => R(ei).L)), A = outer(all(deep).filter(ei => L.has(R(ei).L))); cadSelSet(A); return toast(A.length + " objects on " + [...L].map(l => (sc.layers[l] || {}).name).join(", "), 2500); }
   if (act === "layoff" || act === "iso") { const N = [...new Set(ids.map(ei => lname(R(ei))))];
@@ -15356,7 +15727,8 @@ function cedHint(){
 async function cadQuickSelect(){   // AutoCAD's QSELECT: by layer, type, block name, length and area
   const pg = cadPage(); if (!pg) return toast("Open an AutoCAD drawing first — + PDF adds a DWG or DXF", 4000);
   const sc = S.cadSc[S.fileId], hid = cadHidden(S.fileId, sc), E = CAD.cadEnts(pg), Q = pg.ents.map((r, ei) => r && r.L >= 0 && !hid[r.L] && E.eb[4 * ei] <= E.eb[4 * ei + 2] ? ei : -1).filter(ei => ei >= 0);
-  const cnt = f => { const m = new Map(); Q.forEach(ei => { const k = f(pg.ents[ei]); if (k != null) m.set(k, (m.get(k) || 0) + 1); }); return [...m].sort((a, b) => String(a[0]).localeCompare(String(b[0]), undefined, {numeric: true})); };
+  const R = ei => CAD.cadRec(pg, ei), selN = cadSelIds().filter(ei => ei >= pg.ents.length), QL = Q.concat(selN);   // (objects inside blocks that are selected: listed too)
+  const cnt = f => { const m = new Map(); QL.forEach(ei => { const k = f(R(ei)); if (k != null) m.set(k, (m.get(k) || 0) + 1); }); return [...m].sort((a, b) => String(a[0]).localeCompare(String(b[0]), undefined, {numeric: true})); };
   const Ls = cnt(r => (sc.layers[r.L] || {}).name || "0"), Ts = cnt(r => r.t), Bs = cnt(r => r.t === "INSERT" ? r.n || "?" : null), have = cadSelIds().length;
   const opts = (L, id) => `<select id="${id}" multiple size="${Math.min(8, Math.max(3, L.length))}" style="width:100%">${L.map(([k, n]) => `<option value="${esc(k)}">${esc(k)} (${n})</option>`).join("")}</select>`;
   const body = `<div class="wide"></div><p class="small">Objects on layers that are switched on. Leave a list with nothing picked for “any”; Ctrl+click picks several.</p>
@@ -15369,11 +15741,11 @@ async function cadQuickSelect(){   // AutoCAD's QSELECT: by layer, type, block n
     return {L: pick("qsL"), T: pick("qsT"), B: pick("qsB"), l0: num("qsL0"), l1: num("qsL1"), a0: num("qsA0"), a1: num("qsA1"), how: (document.querySelector("input[name=qsHow]:checked") || {}).value || ""};
   });
   if (!v) return;
-  const inSel = new Set(cadSelIds()), hit = Q.filter(ei => { const r = pg.ents[ei];
+  const hit = (v.how === "in" ? cadSelIds() : Q).filter(ei => { const r = R(ei); if (!r) return false;
     if (v.L.size && !v.L.has((sc.layers[r.L] || {}).name || "0")) return false; if (v.T.size && !v.T.has(r.t)) return false; if (v.B.size && !(r.t === "INSERT" && v.B.has(r.n || "?"))) return false;
     if ((v.l0 != null || v.l1 != null) && !(r.len > 0 && !(r.cl && r.area > 0) && (v.l0 == null || r.len >= v.l0 - 1e-9) && (v.l1 == null || r.len <= v.l1 + 1e-9))) return false;
     if ((v.a0 != null || v.a1 != null) && !(r.cl && r.area > 0 && (v.a0 == null || r.area >= v.a0 - 1e-9) && (v.a1 == null || r.area <= v.a1 + 1e-9))) return false;
-    return v.how !== "in" || inSel.has(ei); });
+    return true; });
   if (S.tool !== "cadsel") setTool("cadsel");
   cadSelSet(hit, v.how === "add" ? "add" : "");
   toast("Quick select: " + hit.length + " object" + (hit.length === 1 ? "" : "s"), 2500);
@@ -15389,7 +15761,7 @@ async function cadQtyDialog(pre){
     <div class="cq"><table class="sh cqt"><thead><tr><th>Layer</th><th class="n">Lines → length</th><th class="n">Closed → area</th></tr></thead><tbody>${LS.map(l => `<tr${hid[l.li] ? ' class="dim"' : ""}><td>${sw(sc.layers[l.li].c)} ${esc(l.name)}${hid[l.li] ? ' <span class="small">(off)</span>' : ""}</td>
       <td class="n">${l.runs ? `<label class="pk"><input type="checkbox" data-ql="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.runs} · ${f2(l.len)} ft</label>` : ""}</td>
       <td class="n">${l.areas ? `<label class="pk"><input type="checkbox" data-qa="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.areas} · ${f2(l.area)} Sft</label>` : ""}</td></tr>`).join("") || '<tr><td colspan="3" class="small">No lines or outlines on these layers</td></tr>'}</tbody></table></div>
-    <div class="cq"><table class="sh cqt"><thead><tr><th>Block</th><th class="n">Count</th><th>Layer</th><th>Attributes</th></tr></thead><tbody>${BS.map((b, i) => `<tr><td><label class="pk"><input type="checkbox" data-qb="${i}"${pre.B === b.name ? " checked" : ""}> ${esc(b.name)}</label></td><td class="n">${b.n}</td><td class="small">${esc([...b.layers].join(", "))}</td><td class="small">${esc(att(b))}</td></tr>`).join("") || '<tr><td colspan="4" class="small">No blocks in model space</td></tr>'}</tbody></table></div>
+    <div class="cq"><table class="sh cqt"><thead><tr><th>Block</th><th class="n">Count</th><th>Layer</th><th>Attributes</th></tr></thead><tbody>${BS.map((b, i) => `<tr><td><label class="pk"><input type="checkbox" data-qb="${i}"${pre.B === b.name ? " checked" : ""}> ${esc(b.name)}</label></td><td class="n">${b.n}${b.nn ? ` <span class="small" title="copies inside other blocks">(${b.nn} in blocks)</span>` : ""}</td><td class="small">${esc([...b.layers].join(", "))}</td><td class="small">${esc(att(b))}</td></tr>`).join("") || '<tr><td colspan="4" class="small">No blocks in model space</td></tr>'}</tbody></table></div>
     <label class="pk"><input type="checkbox" id="cqVis" checked> Only objects on layers that are switched on</label>`;
   const v = await ask("AutoCAD quantities — " + pageName({file: S.fileId, page: 1}), body, "Add to takeoff", () => {
     const g = a => new Set([...document.querySelectorAll("#dlgB [data-" + a + "]")].filter(x => x.checked).map(x => x.dataset[a]));
@@ -15408,6 +15780,7 @@ function cadTakeoff(sc, pg, sel){   // sel: {lens: Set(layer index), areas: Set(
       if (r.cl && r.area > 0 && sel.areas.has(r.L)) got.area += cadAddGeom(sc, pg, ei, "area", null, null);
       else if (!r.cl && r.len > 0 && sel.lens.has(r.L)) got.line += cadAddGeom(sc, pg, ei, "line", null, null);
     });
+    if (sel.blocks.size) (pg.subs || []).forEach((r, j) => { if (r.t === "INSERT" && sel.blocks.has(r.n) && r.L >= 0 && !(hid && hid[r.L])) got.count += cadAddGeom(sc, pg, pg.ents.length + j, "count", null, counts); });   // (a block's copies inside other blocks)
   }, "AutoCAD takeoff");
   refresh();
   toast("From the drawing: " + [got.area && got.area + " area" + (got.area > 1 ? "s" : ""), got.line && got.line + " run" + (got.line > 1 ? "s" : ""), got.count && got.count + " count marker" + (got.count > 1 ? "s" : "")].filter(Boolean).join(", ") + " — marked AI, check them", 5000);
@@ -15724,7 +16097,9 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
     mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
-    settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow, get SNAP_PX(){ return SNAP_PX; }, get HIT_PX(){ return HIT_PX; }};   // for tests and the console
+    settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
+    floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
+    get SNAP_PX(){ return SNAP_PX; }, get HIT_PX(){ return HIT_PX; }};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
   if (last && setPref().openLast !== false && all.some(p => p.id === last)) await openProject(last); else await showStart();
