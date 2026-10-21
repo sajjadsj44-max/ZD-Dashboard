@@ -7,7 +7,9 @@
       44 + 52 = 96 ft); a long name shortened with … (the full name on hover); a legend made before keeps its columns;
    C. an area's label shows its perimeter (labels set before this are switched to it once; switched off, it stays off); an
       area drawn, or taken with Auto area, says its area and perimeter;
-   D. a legend is kept through Undo and when the project is opened again (both used to drop it), its Properties open.
+   D. a legend is kept through Undo and when the project is opened again (both used to drop it), its Properties open;
+   E. a legend set as default (right-click or Properties) is the look and size of the next one placed, after the first is
+      deleted (it used to come back as the built-in legend); a saved default that is not right falls back.
 
      python3 -m http.server 8765 &                     # from the repo root
      TK_LIBS=/path/with/node_modules node tools/test_takeoff_legend.js     (pdfjs-dist) */
@@ -95,6 +97,32 @@ const LONG = "Ceiling plaster — a condition named far too long to fit its colu
   ok(D.two === 2 && D.undo === 1, "with two legends one Undo takes back only the last (" + D.two + " → " + D.undo + "; it used to drop every legend)");
   ok(D.reopen === 1, "the legend is kept when the project is opened again (" + D.reopen + ")");
   ok(D.kept && /not a colour/.test(D.rep), "a legend in a project file keeps its place; a colour that is not a colour is reset, never written into the drawing (" + D.rep + ")");
+
+  console.log("E. a legend set as default is the one placed next");
+  const E0 = await T(() => { const Z = zdTakeoff, S = Z.S, P = Z.P.proj, m = P.marks.find(x => x.type === "legend"), x0 = m.pts[0][0], y0 = m.pts[0][1];
+    Object.assign(m, {title: "Ground floor legend", fontSize: 12, border: "#aa0000", headerFill: "#ffeeaa", columns: ["symbol", "description", "qty"], colWidths: [.1, .6, .3], sort: "qty", showHeaders: false, pts: [[x0, y0], [x0 + 300, y0 + 150]]});
+    Z.setSel([]); Z.refresh(); Z.ctxOpen([(x0 + 150) * S.view.s + S.view.tx, (y0 + 75) * S.view.s + S.view.ty], {clientX: 500, clientY: 300});
+    return {id: m.id, dflt: localStorage.getItem("zdTakeoffDefaults")}; });
+  await page.locator("#ctx .ci", {hasText: /^Set as default$/}).click(); await wait();
+  const E = await T(id => { const Z = zdTakeoff, P = Z.P.proj, lg = () => P.marks.filter(x => x.type === "legend"), out = {toast: document.getElementById("toast").textContent, dflt: localStorage.getItem("zdTakeoffDefaults")};
+    Z.setSel([id]); Z.delSelected(); out.after = lg().length;
+    Z.createLegend(); const m = lg()[lg().length - 1];
+    out.m = {id: m.id, title: m.title, fontSize: m.fontSize, border: m.border, headerFill: m.headerFill, columns: m.columns, colWidths: m.colWidths, sort: m.sort, showHeaders: m.showHeaders, w: Math.abs(m.pts[1][0] - m.pts[0][0]), h: Math.abs(m.pts[1][1] - m.pts[0][1])};
+    out.svg = Z.legendSvg0(m, p => p, 1); return out; }, E0.id);
+  ok(/default for new legends/.test(E.toast) && E.dflt === E0.dflt, "right-click → Set as default on the legend saves the legend's look, not the markup colour (" + E.toast + ")");
+  const M = E.m;
+  ok(E.after === 0 && M.id !== E0.id, "the legend deleted, a new one placed");
+  ok(M.title === "Ground floor legend" && M.fontSize === 12 && M.border === "#aa0000" && M.headerFill === "#ffeeaa" && M.sort === "qty" && M.showHeaders === false, "the new legend has the title, font size, colours, order and headers set as default (" + JSON.stringify(M) + ")");
+  ok(JSON.stringify(M.columns) === '["symbol","description","qty"]' && JSON.stringify(M.colWidths) === "[0.1,0.6,0.3]" && M.w === 300 && M.h === 150, "…its columns, their widths and its size 300 × 150 (" + M.w + " × " + M.h + ")");
+  ok(/>Ground floor legend</.test(E.svg) && !/>Perimeter</.test(E.svg) && /stroke="#aa0000"/.test(E.svg), "…and is drawn that way");
+  await T(() => { const Z = zdTakeoff, lg = Z.P.proj.marks.filter(x => x.type === "legend"), m = lg[lg.length - 1]; m.title = "Typical floor legend"; Z.setSel([m.id]); Z.refresh(); });
+  await wait(); await page.click('#props [data-mact2="default"]'); await wait();
+  const E2 = await T(() => { const Z = zdTakeoff, lg = () => Z.P.proj.marks.filter(x => x.type === "legend"); Z.createLegend(); const a = lg()[lg().length - 1].title;
+    localStorage.setItem("zdTakeoffLegendStyle", JSON.stringify({border: 'red"/><script>', columns: ["bogus"], colWidths: [9], fontSize: "big", sort: "x", w: 5, title: "Mine"}));
+    Z.createLegend(); const m = lg()[lg().length - 1]; localStorage.removeItem("zdTakeoffLegendStyle");
+    return {a, border: m.border, columns: m.columns, colWidths: m.colWidths, fontSize: m.fontSize, sort: m.sort, w: Math.abs(m.pts[1][0] - m.pts[0][0]), title: m.title}; });
+  ok(E2.a === "Typical floor legend", "Set as default in the legend's Properties does the same (" + E2.a + ")");
+  ok(E2.border === "#40556b" && E2.columns.length === 6 && E2.colWidths.length === 6 && E2.fontSize === 9 && E2.sort === "drawing" && E2.w === 400 && E2.title === "Mine", "a saved default that is not right is not used: colours, columns, sizes and order fall back (" + JSON.stringify(E2) + ")");
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
   await b.close(); console.log(fails ? fails + " failed" : "all passed"); process.exit(fails ? 1 : 0);
 })();
