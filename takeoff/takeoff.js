@@ -4315,7 +4315,7 @@ const OV_FAST_MS = 12;
 function ovMove(svg, vk){
   const v0 = svg.__v; if (!v0 || svg.__force || !(svg.__cost > OV_FAST_MS)) return false;
   if (svg.__tvk !== vk) { const v = S.view, k = v.s / v0.s; svg.__tvk = vk;
-    Object.assign(svg.style, {transformOrigin: "0 0", overflow: "visible", transform: `translate(${v.tx - v0.tx * k}px,${v.ty - v0.ty * k}px) scale(${k})`});
+    Object.assign(svg.style, {transformOrigin: "0 0", transform: `translate(${v.tx - v0.tx * k}px,${v.ty - v0.ty * k}px) scale(${k})`});
     clearTimeout(svg.__t); svg.__t = setTimeout(() => { svg.__force = true; draw(); }, 160); }
   return true;
 }
