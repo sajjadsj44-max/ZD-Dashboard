@@ -903,15 +903,16 @@ export async function cadDrawAsync(ctx, pg, v, o, stale){
 
 /* ------------------------------------------------------------------ the takeoff's index of the page, straight from the scene
    (no PDF parsed): its lines as indexPage makes them from a PDF — [x0, y0, x1, y1, flags (1 on a curve, 2 dashed, 4 a fill's
-   outline), subpath, style, layer] with styles "#rrggbb|width" — hatch pattern lines left out (they are noise to snap to); its text
+   outline, 16 a hatch's pattern line), subpath, style, layer] with styles "#rrggbb|width" — hatch pattern lines left out (they are
+   noise to snap to) unless o.hatch (the vector trace: a wall's hatch tells a 9" wall from a 9" gap, a column from a pocket); its text
    as [{s, x, y, w, h, r}] (x, y the baseline's start, r its turn) */
-export function cadIndex(pg, max, ed){   // ed: AutoCAD-mode edits — the objects taken out are left out, the edited ones put in; s[8] says where a line came from (its primitive, or -1 - the edited object's index)
+export function cadIndex(pg, max, ed, o){   // ed: AutoCAD-mode edits — the objects taken out are left out, the edited ones put in; s[8] says where a line came from (its primitive, or -1 - the edited object's index)
   const segs = [], styles = [], six = new Map(), O = pg.ops, X = pg.xy, hp = ed && ed.hp, ht = ed && ed.ht; let sp = 0; max = max || 600000;
   const styleOf = (st, fill) => { const w = fill ? 0 : st.wid > 0 ? st.wid : st.lw * 72 / 25.4, key = (st.c === INK ? "#000000" : hex6(st.c)) + "|" + Math.round(w * 10) / 10; let si = six.get(key); if (si === undefined) { si = styles.length; styles.push(key); six.set(key, si); } return si; };
   for (let i = 0; i < pg.n && segs.length < max; i++) {
-    const kd = pg.kind[i]; if (kd === 3 || pg.pf[i] === 1 || (hp && hp[i])) continue;
+    const kd = pg.kind[i]; if (kd === 3 || (pg.pf[i] === 1 && !(o && o.hatch)) || (hp && hp[i])) continue;
     const st = pg.styles[pg.sty[i]], fill = kd === 1 || kd === 2, si = styleOf(st, fill);
-    const f0 = fill ? 4 : st.dash ? 2 : 0, li = pg.lay[i];
+    const f0 = (fill ? 4 : st.dash ? 2 : 0) | (pg.pf[i] === 1 ? 16 : 0), li = pg.lay[i];
     const push = (a, b, c, d, f) => { if (Math.abs(a - c) + Math.abs(b - d) > 0.05 && segs.length < max) segs.push([a, b, c, d, f, sp, si, li, i]); };
     let q = pg.q0[i], cx = 0, cy = 0, sx = 0, sy = 0;
     for (let j = pg.p0[i], e = pg.p0[i + 1]; j < e; j++) { const op = O[j];

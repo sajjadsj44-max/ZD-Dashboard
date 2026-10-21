@@ -18,8 +18,9 @@
       it is open to (Bed room + Dress) is split on the written size when the walls fit it, else kept as one (open plan)
 
    Units: page points (y down) in, the page's scale k (pt per ft). */
-export const TRACE_VER = 1;
+export const TRACE_VER = 2;   // 2: plans of an AutoCAD sheet one by one at 9 pt per ft, solid fills as hatch, open plans split on wall lines, foyers
 
+const NOTE_RX = /Ø|\bT\s*\/\s*B\b|\bRWP\b|\bF\s*\/\s*B\b|\b[SWVB]\.\s*[SDF]\b|VALVE|BREECH|\bRISER\b|\bPIPES?\b|\bGAS\b|\bFHC\b|SPRINKL|HYDRANT|\bC\.?\s*H\s*=|F\.?F\.?L\b|^LEV\b|\bRATIO\b|^TYPE\s*[-–]|\bS\.?\s*FT\b|\bSQ\.?\s*FT\b|FIRE\s+DEPART|WALK\s+THROUGH|ENTRANCE\s+GATE|PLOT\s+LINE|TALL\s+UNIT|^\(?TYPICAL\)?$|OPENING\s+IN\b|^SIZE\s*:|\bSLAB\b|\bCOUNTER\b|\bSINK\b|FRIDGE|\bW\s*\/\s*M\b|VANITY|\bHOB\b|CUPBOARD/i;   // notes in a space, never its name
 const NAME_SKIP = /^(UP|DN|DOWN|N|S|E|W|NORTH|SOUTH|FROM\s+ROAD\s+LEVEL|SCALE.*|.*\bPLAN\b.*|SC|SECTION.*|\d+(\.\d+)?|\d+\s*(UP|DN|DOWN)|(UP|DN|DOWN)\s*\d+)$/i;
 const WEAK_RX = /^(STAIR|TREAD|RISER|LANDING)\s*=/i;   // a stair's note (STAIR = 4'-6" WIDE, TREAD = 11"): names a space only when nothing else does
 const SIZE_RX = /(\d+)\s*'\s*-?\s*(\d+)?\s*(?:(\d)\s*\/\s*(\d))?\s*(½)?\s*"?\s*[xX×]\s*(\d+)\s*'\s*-?\s*(\d+)?\s*(?:(\d)\s*\/\s*(\d))?\s*(½)?\s*"?/;
@@ -30,8 +31,9 @@ export function sizeOf(s){   // "12'-6 1/2"x11'-6"" -> [12.5417, 11.5] ft, or nu
   return [f(m[1], m[2], m[3], m[4], m[5]), f(m[6], m[7], m[8], m[9], m[10])];
 }
 function wideOf(s){ const m = WIDE_RX.exec(String(s || "")); return m ? +m[1] + ((+m[2] || 0) + (m[3] && +m[4] ? +m[3] / +m[4] : 0) + (m[5] ? 0.5 : 0)) / 12 : null; }
-export function kindOf(nm){
-  const n = String(nm || "").toUpperCase();
+export function kindOf(nm){   // (the written width is not part of the name: "PASSAGE 5'-0\" WIDE" is a flat's passage, "10'-0\" WIDE LOBBY" a lobby)
+  const n = String(nm || "").toUpperCase().replace(/\d+\s*'\s*-?\s*\d*(\s*\d\s*\/\s*\d)?\s*(½)?\s*"?\s*WIDE?\b/g, " ").replace(/\s+/g, " ").trim();
+  if (/LOOKING\s+BELOW|OPEN\s+TO\s+(SKY|BELOW)|\bCUT\s*-?\s*OUT\b|\bLIGHT\s*WELL\b/.test(n)) return "void";
   if (/\bBATH|TOILET|\bW\.?C\b|POWDER|WASH\s*ROOM|\bPWD\b|\bWR\b/.test(n)) return "bath";
   if (/^LIFT\b(?!\s*LOBBY)|\bELEVATOR\b/.test(n)) return "lift";
   if (/STAIR/.test(n)) return "stair";
@@ -161,25 +163,110 @@ export function area(P){ let a = 0; for (let i = 0; i < P.length; i++) { const p
 function inPoly(p, P){ let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; }
 
 /* ------------------------------------------------------------------ the trace */
-export function traceFloor(inp, opt){
-  const res0 = {}, t0 = Date.now(), k = inp.k, o = Object.assign({gap: 8.6, ext: 4.6, maxPx: 26e6}, opt || {}), log = [], ft = v => v * k;
-  if (!(k > 0)) return {err: "no scale"};
-  const names = inp.layers || [], role = i => names[i] ? names[i].role : "", nm = i => names[i] ? names[i].name : "";
-  // which layers bound rooms: walls, columns, windows, duct boxes — not doors, stairs, railings, furniture, text, hatch
+/* which layers bound rooms: walls, columns, windows, duct boxes, and the railings / parapets round a balcony (those bound the
+   balcony only: not the building's external walls) — not doors, stairs, furniture, text, hatch */
+function layerSets(names){
   const isHatchName = s => /hatch|patt|poch|^wh$|^h$|^hatch1$/i.test(s), isDuct = s => /duct|shaft/i.test(s);
   const outlineL = new Set(), hatchL = new Set(), coreL = new Set(), wallL = new Set();
   names.forEach((L, i) => { const s = L.name || "";
     if (isHatchName(s) || (L.role === "column" && /hatch/i.test(s))) { hatchL.add(i); return; }
-    if (/door|stair|step|rail|furn|fix|text|dim|grid|title|plot|tag|note|mep|elec|plumb|light|louv|point|defpoint|wood|mdf|timber|glass/i.test(s) && !/^walls?$/i.test(s)) return;
-    if (L.role === "wall" || L.role === "column" || /window|glaz/i.test(s) || isDuct(s) || /^walls?$/i.test(s)) { outlineL.add(i); if (!/low|parapet|rail|balcon/i.test(s)) coreL.add(i); if (L.role === "wall") wallL.add(i); } });
+    if ((L.role === "railing" || /rail|\brall\b|parapet|balustr/i.test(s)) && !/stair|step/i.test(s)) { outlineL.add(i); return; }   // (RALL: an office's railing layer)
+    if (/door|stair|step|furn|fix|text|dim|grid|title|plot|tag|note|mep|elec|plumb|light|louv|point|defpoint|wood|mdf|timber|glass/i.test(s) && !/^walls?$/i.test(s)) return;
+    if (L.role === "wall" || L.role === "column" || /window|glaz|\bwin\b|^wn$|wndw/i.test(s) || isDuct(s) || /^walls?$/i.test(s)) { outlineL.add(i); if (!/low|parapet|rail|balcon/i.test(s)) coreL.add(i); if (L.role === "wall") wallL.add(i); } });
+  return {outlineL, hatchL, coreL, wallL};
+}
+/* grid lines drawn on the column layer run right across the plan: a column's side is a few feet long, a grid line tens of feet */
+const gridLine = (s, names, k) => names[s[5]] && names[s[5]].role === "column" && Math.hypot(s[2] - s[0], s[3] - s[1]) > 25 * k;
+
+/* any drawing, any plot scale. An AutoCAD drawing's model space holds every plan of the job side by side and is laid out at 1:960 or
+   so — a 9" wall would be a pixel thick at the trace's resolution, and its limits (set in points for a plan at 1/8" = 1'-0") would
+   mean ten times as much. So each plan (a cluster of wall lines with names in it, apart from the next by open paper) is traced on
+   its own, at 9 pt per ft, and its outlines put back on the page. A PDF of one plan at a usual scale is traced as before. */
+export function traceFloor(inp, opt){
+  const k = inp.k; if (!(k > 0)) return {err: "no scale"};
+  const boxes = planBoxes(inp);
+  if (boxes.length <= 1 && k >= 4.5 && k <= 18) return traceOne(inp, opt);
+  const f = 9 / k, t0 = Date.now(), parts = [];
+  const sc = v => v * f;
+  for (const b of (boxes.length ? boxes : [null])) {
+    const inB = b ? (x, y) => x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3] : () => true;
+    const segs = inp.segs.filter(s => inB(s[0], s[1]) || inB(s[2], s[3])).map(s => [sc(s[0]), sc(s[1]), sc(s[2]), sc(s[3]), s[4], s[5], s[6]]);
+    const lines = (inp.lines || []).filter(t => inB(t.cx != null ? t.cx : t.x, t.cy != null ? t.cy : t.y)).map(t => Object.assign({}, t, {x: sc(t.x), y: sc(t.y), w: sc(t.w || 0), h: sc(t.h || 0), cx: t.cx != null ? sc(t.cx) : t.cx, cy: t.cy != null ? sc(t.cy) : t.cy}));
+    const o2 = Object.assign({}, opt || {}); if (o2.debug) o2.debug = o2.debug.map(([x, y]) => [sc(x), sc(y)]); delete o2.crop;
+    const r = traceOne(Object.assign({}, inp, {segs, lines, k: 9, regionMap: false}), o2);
+    if (r.err) { if (boxes.length <= 1) return r; continue; }
+    parts.push(unscale(r, 1 / f));
+  }
+  if (!parts.length) return {err: "no wall layers", why: "no plan with wall lines and room names was found on the page"};
+  return mergeParts(parts, Date.now() - t0, boxes.length);
+}
+/* the plans on a page: wall-layer lines gathered into cells 15 ft square; cells touching one another are one plan. A plan needs a
+   few names written in it (an elevation or a section drawn on the wall layer has none) */
+export function planBoxes(inp){
+  const k = inp.k, names = inp.layers || [], {outlineL} = layerSets(names), C = 15 * k, cells = new Map();
+  inp.segs.forEach(s => { if ((s[4] & 1) || (s[4] & 8) || (s[4] & 16) || !outlineL.has(s[5]) || gridLine(s, names, k)) return;
+    const L = Math.hypot(s[2] - s[0], s[3] - s[1]), n = Math.max(1, Math.ceil(L / C));
+    for (let j = 0; j <= n; j++) { const x = s[0] + (s[2] - s[0]) * j / n, y = s[1] + (s[3] - s[1]) * j / n, key = Math.floor(x / C) + "," + Math.floor(y / C); if (!cells.has(key)) cells.set(key, null); } });
+  if (!cells.size) return [];
+  const par = new Map(); cells.forEach((_, key) => par.set(key, key));
+  const find = a => { while (par.get(a) !== a) { par.set(a, par.get(par.get(a))); a = par.get(a); } return a; };
+  cells.forEach((_, key) => { const [cx, cy] = key.split(",").map(Number);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) { const o = (cx + dx) + "," + (cy + dy); if (par.has(o)) { const a = find(key), b = find(o); if (a !== b) par.set(a, b); } } });
+  const box = new Map(); cells.forEach((_, key) => { const r = find(key), [cx, cy] = key.split(",").map(Number); let b = box.get(r); if (!b) box.set(r, b = [Infinity, Infinity, -Infinity, -Infinity, 0]);
+    b[0] = Math.min(b[0], cx * C); b[1] = Math.min(b[1], cy * C); b[2] = Math.max(b[2], (cx + 1) * C); b[3] = Math.max(b[3], (cy + 1) * C); b[4]++; });
+  const named = b => (inp.lines || []).filter(t => { const x = t.cx != null ? t.cx : t.x, y = t.cy != null ? t.cy : t.y; return x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3] && /[A-Z]{3,}/i.test(String(t.s || "")); }).length;
+  return [...box.values()].filter(b => b[4] >= 3 && (b[2] - b[0]) >= 12 * k && (b[3] - b[1]) >= 12 * k && named(b) >= 3).map(b => [b[0] - 2 * k, b[1] - 2 * k, b[2] + 2 * k, b[3] + 2 * k]);
+}
+/* a plan's result, traced at 9 pt per ft, back in the page's points */
+function unscale(r, f){
+  const P = q => [q[0] * f, q[1] * f], PP = A => A.map(P), geo = o => { if (!o) return o;
+    if (o.outer) o.outer = o.outer.map(PP); if (o.holes) o.holes = o.holes.map(PP); if (o.bounds) o.bounds = o.bounds.map(v => v * f);
+    if (o.lx != null) { o.lx *= f; o.ly *= f; } if (o.centre) o.centre = PP(o.centre); if (o.unsnE) o.unsnE = o.unsnE.map(e => e.map(P)); if (o.closedBox) o.closedBox = PP(o.closedBox);
+    if (o.edges) o.edges.forEach(e => { e.p = P(e.p); e.q = P(e.q); if (e.t != null) e.t *= f; });
+    return o; };
+  r.spaces.forEach(geo); r.thresholds.forEach(geo); geo(r.overall);
+  r.ducts.forEach(d => { d.box = d.box.map(v => v * f); d.outer = d.outer.map(PP); });
+  r.repairs = r.repairs.map(x => x.map(v => v * f)); r.splits.forEach(x => { x.line = PP(x.line); });
+  if (r.debug) r.debug.forEach(d => { d.scaled = f; });
+  return r;
+}
+export function traceMerge(parts){ return mergeParts(parts, parts.reduce((a, r) => a + (r.ms || 0), 0), parts.length); }   // plans traced one by one (each kept as it was traced)
+function mergeParts(parts, ms, nPlans){
+  const out = {ver: TRACE_VER, ms, R: parts[0].R, plans: nPlans, prof: parts.map(r => r.prof), spaces: [], thresholds: [], ducts: [], overall: null, repairs: [], splits: [], log: [], layers: parts[0].layers};
+  parts.forEach((r, n) => { const off = out.spaces.length;
+    out.spaces.push(...r.spaces); out.thresholds.push(...r.thresholds.map(t => Object.assign({}, t, {between: t.between.map(i => i < 0 ? i : i + off)})));
+    out.ducts.push(...r.ducts); out.repairs.push(...r.repairs); out.splits.push(...r.splits); out.log.push(...r.log.map(x => (nPlans > 1 ? "plan " + (n + 1) + ": " : "") + x));
+    if (r.overall) { if (!out.overall) out.overall = Object.assign({}, r.overall, {outer: [], holes: [], notes: r.overall.notes}); out.overall.outer.push(...r.overall.outer); out.overall.holes.push(...r.overall.holes); }
+    if (r.debug) out.debug = (out.debug || []).concat(r.debug); });
+  if (out.overall) { const xs = out.overall.outer.flatMap(p => p.map(q => q[0])), ys = out.overall.outer.flatMap(p => p.map(q => q[1])); out.overall.bounds = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; }
+  return out;
+}
+function traceOne(inp, opt){
+  const prof = [], mark = n => prof.push([n, Date.now() - t0]);
+  const res0 = {}, t0 = Date.now(), k = inp.k, o = Object.assign({gap: 8.6, ext: 4.6, maxPx: 26e6}, opt || {}), log = [], ft = v => v * k;
+  if (!(k > 0)) return {err: "no scale"};
+  const names = inp.layers || [], role = i => names[i] ? names[i].role : "", nm = i => names[i] ? names[i].name : "";
+  const isDuct = s => /duct|shaft/i.test(s), {outlineL, hatchL, coreL, wallL} = layerSets(names);
   // content-based hatch: a layer of short parallel diagonal strokes is a hatch, whatever its name (not text: its strokes run every way)
   const st = new Map();
   inp.segs.forEach(s => { const li = s[5]; if (li == null || li < 0 || (s[4] & 1)) return; const l = Math.hypot(s[2] - s[0], s[3] - s[1]); let r = st.get(li); if (!r) st.set(li, r = {n: 0, sd: 0, ang: new Map()});
     r.n++; const a = ((Math.atan2(s[3] - s[1], s[2] - s[0]) * 180 / Math.PI) % 180 + 180) % 180, a9 = a % 90; if (l < 12 && a9 > 20 && a9 < 70) { r.sd++; const b = Math.round(a / 4); r.ang.set(b, (r.ang.get(b) || 0) + 1); } });
   st.forEach((r, li) => { const top = Math.max(0, ...r.ang.values()); if (r.n > 40 && r.sd / r.n > 0.6 && top / Math.max(1, r.sd) > 0.4 && !outlineL.has(li) && !["text", "tag"].includes(role(li))) hatchL.add(li); });
   if (!outlineL.size) return {err: "no wall layers", why: "the PDF has no wall / column / window layers to read walls from"};
-  const isOut = s => !(s[4] & 1) && !(s[4] & 8) && outlineL.has(s[5]), isHat = s => hatchL.has(s[5]);
+  const isOut = s => !(s[4] & 1) && !(s[4] & 8) && !(s[4] & 16) && outlineL.has(s[5]), isHat = s => hatchL.has(s[5]);   // (16: a CAD hatch's pattern line — hatch, never a wall line)
   let OUT = inp.segs.filter(isOut), HAT = inp.segs.filter(isHat);
+  { const n0 = OUT.length; OUT = OUT.filter(s => !gridLine(s, names, k)); if (OUT.length < n0) log.push((n0 - OUT.length) + " grid line" + (n0 - OUT.length > 1 ? "s" : "") + " on the column layer left out (longer than 25 ft)"); }
+  { // a railing with stair treads on both sides of it is the rail between two flights (the stair is one space, ended by its landing):
+    // not a boundary. A balcony's railing, or the one round a stairwell, has treads on one side at most
+    const ST = inp.segs.filter(s => /stair|step|tread/i.test(nm(s[5])) && !(s[4] & 17)), SL = new Lines(ST.map(s => s.slice(0, 4)));
+    const treadNear = p => SL.near(p[0] - ft(0.75), p[1] - ft(0.75), p[0] + ft(0.75), p[1] + ft(0.75)).some(t => segDist(p, [t[0], t[1]], [t[2], t[3]]) < ft(0.75));   // (a tread line within 9")
+    const isRail = i => names[i] && (names[i].role === "railing" || /rail|\brall\b|balustr/i.test(names[i].name || ""));
+    if (ST.length) { const n0 = OUT.length;
+      OUT = OUT.filter(s => { if (!isRail(s[5])) return true; const L = Math.hypot(s[2] - s[0], s[3] - s[1]); if (L < ft(1)) return true; const n = [-(s[3] - s[1]) / L, (s[2] - s[0]) / L];
+        let both = 0, tries = 0; for (const f of [0.25, 0.5, 0.75]) { const m = [s[0] + (s[2] - s[0]) * f, s[1] + (s[3] - s[1]) * f]; tries++;
+          if (treadNear([m[0] + n[0] * ft(1.5), m[1] + n[1] * ft(1.5)]) && treadNear([m[0] - n[0] * ft(1.5), m[1] - n[1] * ft(1.5)])) both++; }
+        return both < 2; });
+      if (OUT.length < n0) log.push((n0 - OUT.length) + " railing line" + (n0 - OUT.length > 1 ? "s" : "") + " between two stair flights left out (the stair is one space)"); } }
   if (OUT.length < 20) return {err: "no wall layers", why: "too few wall lines"};
   // the plan's extent: its wall lines
   let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
@@ -191,6 +278,14 @@ export function traceFloor(inp, opt){
   const pxft = v => v * k * R;
   // ---- 1 wall faces left out where a duct box meets the wall: carried across when the hatch runs on beside the gap
   const hatchM = new Uint8Array(N); HAT.forEach(s => line(G, hatchM, s[0], s[1], s[2], s[3]));
+  { // solid fills (a wall's or a column's poché, AutoCAD's SOLID hatch): the inside painted as hatch, not only its outline — a column
+    // filled solid is then wall, never a pocket of the room beside it. A fill's outline is one subpath (s[6]); fills on text,
+    // dimension, furniture or door layers (arrow heads, symbols, a text's mask) are left alone
+    const FP = new Map(); inp.segs.forEach(s => { if (!(s[4] & 4) || s[6] == null || outlineL.has(s[5])) return;
+      const n0 = nm(s[5]), r0 = role(s[5]); if (/text|tag|dim|anno|note|title|furn|fix|door|stair|plant|tree|land/i.test(n0) || ["text", "tag", "fixture"].includes(r0)) return;
+      let P0 = FP.get(s[6]); if (!P0) FP.set(s[6], P0 = []); if (!P0.length) P0.push([s[0], s[1]]); P0.push([s[2], s[3]]); });
+    let nf = 0; FP.forEach(P0 => { if (P0.length < 4) return; const a = area(P0) / k / k; if (a < 0.05 || a > 400) return; fillPoly(G, hatchM, P0); nf++; });
+    if (nf) log.push(nf + " solid fill" + (nf > 1 ? "s" : "") + " (wall / column poché) read as hatch"); }
   const hatchNear = (x, y, r) => { const cx = G.px(x), cy = G.py(y), rr = Math.ceil(r * R); for (let dy = -rr; dy <= rr; dy++) for (let dx = -rr; dx <= rr; dx++) { const X = cx + dx, Y = cy + dy; if (X >= 0 && Y >= 0 && X < W && Y < H && hatchM[Y * W + X]) return true; } return false; };
   const repairs = [], byLine = new Map();
   OUT.forEach(s => { if (!wallL.has(s[5])) return; const v = Math.abs(s[0] - s[2]) < 0.02, h = Math.abs(s[1] - s[3]) < 0.02; if (!v && !h) return;
@@ -215,31 +310,36 @@ export function traceFloor(inp, opt){
   // doors set across a corner (a bath's chamfered door): no wall line runs across the opening, only the leaf and its swing on the
   // door layer — the opening is closed where the leaf shuts, from the hinge (the swing's centre) to the swing's far end. A door in
   // line with its wall is left to the face bridges below.
-  const doorFix = [];
-  { const isDoor = i => /door/i.test(nm(i)) && !/window/i.test(nm(i)), DL = inp.segs.filter(s => isDoor(s[5]) && !(s[4] & 8)), len = s => Math.hypot(s[2] - s[0], s[3] - s[1]);
-    const sh = DL.filter(s => len(s) <= 6 && len(s) > 0.05), lg = DL.filter(s => len(s) > 6), n = sh.length, par = Array.from({length: n}, (_, i) => i);
+  const doorFix = [], swings = [];
+  { const isDoor = i => /door/i.test(nm(i)) && !/window/i.test(nm(i)), DL = inp.segs.filter(s => isDoor(s[5]) && !(s[4] & 24)), len = s => Math.hypot(s[2] - s[0], s[3] - s[1]);
+    const cvs = DL.filter(s => (s[4] & 1) && len(s) <= 6 && len(s) > 0.05);   // (the swing's curve pieces alone, when the drawing marks curves: a door's frame lines spoil the circle)
+    const sh = cvs.length >= 12 ? cvs : DL.filter(s => len(s) <= 6 && len(s) > 0.05), lg = DL.filter(s => len(s) > 6), n = sh.length, par = Array.from({length: n}, (_, i) => i);
     const fd = i => { while (par[i] !== i) i = par[i] = par[par[i]]; return i; };
     const cell = 6, gi = new Map(), key = (x, y) => Math.floor(x / cell) + "," + Math.floor(y / cell);
     sh.forEach((s, i) => [[s[0], s[1]], [s[2], s[3]]].forEach(([x, y]) => { const kk = key(x, y); let a = gi.get(kk); if (!a) gi.set(kk, a = []); a.push([i, x, y]); }));
     sh.forEach((s, i) => [[s[0], s[1]], [s[2], s[3]]].forEach(([x, y]) => { const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
       for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) (gi.get((cx + dx) + "," + (cy + dy)) || []).forEach(([j, x2, y2]) => { if (j !== i && Math.hypot(x2 - x, y2 - y) <= 5) par[fd(i)] = fd(j); }); }));
     const grp = new Map(); sh.forEach((s, i) => { const r = fd(i); let a = grp.get(r); if (!a) grp.set(r, a = []); a.push(s); });
-    const fit = P0 => { let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0, sz = 0; const m = P0.length; P0.forEach(([x, y]) => { const z = x * x + y * y; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; sxz += x * z; syz += y * z; sz += z; });
+    const fit = Q0 => { const mx = Q0.reduce((a, q) => a + q[0], 0) / Q0.length, my = Q0.reduce((a, q) => a + q[1], 0) / Q0.length, P0 = Q0.map(([x, y]) => [x - mx, y - my]);   // (about their middle: page coordinates squared lose the circle)
+      let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0, sz = 0; const m = P0.length; P0.forEach(([x, y]) => { const z = x * x + y * y; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; sxz += x * z; syz += y * z; sz += z; });
       const A = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, m]], bb = [sxz, syz, sz], det = M => M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]);
       const D0 = det(A); if (Math.abs(D0) < 1e-9) return null; const col = c => A.map((row, i) => row.map((v, j) => j === c ? bb[i] : v)), a = det(col(0)) / D0, b = det(col(1)) / D0, c = det(col(2)) / D0;
-      const cx = a / 2, cy = b / 2, r = Math.sqrt(c + cx * cx + cy * cy); return isFinite(r) ? {cx, cy, r} : null; };
+      const cx = a / 2, cy = b / 2, r = Math.sqrt(c + cx * cx + cy * cy); return isFinite(r) ? {cx: cx + mx, cy: cy + my, r} : null; };
     grp.forEach(G0 => { if (G0.length < 6) return; let P0 = G0.map(s => [(s[0] + s[2]) / 2, (s[1] + s[3]) / 2]), c = fit(P0); if (!c) return;
       P0 = P0.filter(([x, y]) => Math.abs(Math.hypot(x - c.cx, y - c.cy) - c.r) < 1.5); if (P0.length < 6 || !(c = fit(P0))) return;
       const res = P0.map(([x, y]) => Math.abs(Math.hypot(x - c.cx, y - c.cy) - c.r)); if (Math.max(...res) > 1.2 || c.r < 1.6 * k || c.r > 4.6 * k) return;
       const an = P0.map(([x, y]) => Math.atan2(y - c.cy, x - c.cx)), a0 = an[0], rel = an.map(v => { let d = v - a0; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; });
       const lo = Math.min(...rel), hi = Math.max(...rel), sweep = (hi - lo) * 180 / Math.PI; if (sweep < 50 || sweep > 120) return;
+      swings.push({cx: c.cx, cy: c.cy, r: c.r});
       const end = t => [c.cx + c.r * Math.cos(a0 + t), c.cy + c.r * Math.sin(a0 + t)], E1 = end(lo), E2 = end(hi);
       // the leaf: a long door-layer line from near the hinge to one end of the swing — the other end is where it shuts
       const leafTo = E => lg.some(s => { const q = [[s[0], s[1]], [s[2], s[3]]]; return q.some(([x, y], i) => Math.hypot(x - E[0], y - E[1]) < 0.3 * c.r && Math.hypot(q[1 - i][0] - c.cx, q[1 - i][1] - c.cy) < 0.35 * c.r); });
       const l1 = leafTo(E1), l2 = leafTo(E2); if (l1 === l2) return; const C = l1 ? E2 : E1;
       const dx = C[0] - c.cx, dy = C[1] - c.cy, L = Math.hypot(dx, dy), a9 = ((Math.atan2(dy, dx) * 180 / Math.PI) % 90 + 90) % 90; if (a9 < 10 || a9 > 80) return;   // in line with the walls: bridged as any door
       const ux = dx / L, uy = dy / L, e = 3; doorFix.push([c.cx - ux * e, c.cy - uy * e, C[0] + ux * e, C[1] + uy * e, 0, -4]); });
+    if (swings.length) log.push(swings.length + " door swing" + (swings.length > 1 ? "s" : "") + " on the door layers");
     if (doorFix.length) { OUT = OUT.concat(doorFix); log.push(doorFix.length + " door" + (doorFix.length > 1 ? "s" : "") + " set across a corner closed where the leaf shuts"); } }
+  mark("doors");
   // ---- wall bodies
   const lines = new Uint8Array(N), wl = new Uint8Array(N), diag = new Uint8Array(N);   // diag: pixels of slanted lines (a duct's X): they block, but are no wall face to bridge from
   OUT.forEach(s => { line(G, wallL.has(s[5]) ? wl : lines, s[0], s[1], s[2], s[3]); const a = Math.abs(Math.atan2(s[3] - s[1], s[2] - s[0]) * 180 / Math.PI) % 90; if (a > 2 && a < 88) line(G, diag, s[0], s[1], s[2], s[3]); });
@@ -269,6 +369,7 @@ export function traceFloor(inp, opt){
   for (let l = 1; l <= pn; l++) { if (l === outP) continue; const r = inch(radPx[l]), th = 2 * radPx[l] / 3; if ((hasH[l] && r <= 9) || r <= 3.6) wide[l] = 1; else if (hN[l] > 0.3 * pN[l] && r <= 30) wide[l] = 2; else if (!hasH[l] && r <= 7.5 && !named.has(l) && pN[l] >= 4 * th * th) wide[l] = 1; }
   let hc = null;
   for (let i = 0; i < N; i++) { if (lines[i]) { body[i] = 1; continue; } const w = wide[pl[i]]; if (w === 1) body[i] = 1; else if (w === 2) { if (!hc) hc = boxMax(G, boxMin(G, boxMax(G, hatchM, 3), 3), 4); if (hc[i]) body[i] = 1; } }   // (the hatch filled out to the wall's lines: no slivers left along its faces)
+  mark("bodies");
   // ---- 2 openings: in-line face runs bridged; wall ends carried to the next wall
   const B = new Uint8Array(N), GMAX = Math.round(pxft(o.gap)), GEXT = Math.round(pxft(o.ext)), TMIN = Math.max(2, Math.round(pxft(2.5 / 12))), TMAX = Math.round(pxft(15 / 12)), RMIN = Math.max(3, Math.round(pxft(0.3)));
   const face = new Uint8Array(N); for (let i = 0; i < N; i++) face[i] = body[i] && !(diag[i] && lines[i]) ? 1 : 0;   // wall pixels a face can run along
@@ -298,6 +399,7 @@ export function traceFloor(inp, opt){
             if (ok && Math.abs(kk - r0) > 2) { const a = Math.min(nr, kk - stp), b = Math.max(nr, kk - stp); for (let r = a; r <= b; r++) { set(r, c); set(r, cr); } } } } } } };
   stubs((r, c) => body[r * W + c], (r, c) => { B[r * W + c] = 1; }, W, H, (r, c) => face[r * W + c]);          // vertical walls: columns c, rows r
   stubs((r, c) => body[c * W + r], (r, c) => { B[c * W + r] = 1; }, H, W, (r, c) => face[c * W + r]);          // horizontal walls
+  mark("openings");
   // ---- 3 spaces
   const bar = new Uint8Array(N); for (let i = 0; i < N; i++) bar[i] = body[i] || B[i] ? 1 : 0;
   const free = new Uint8Array(N); for (let i = 0; i < N; i++) free[i] = bar[i] ? 0 : 1;
@@ -327,7 +429,7 @@ export function traceFloor(inp, opt){
   const inDuct = l => { const [x, y] = cen(l); return ducts.some(d => x >= d.box[0] - 1 && x <= d.box[2] + 1 && y >= d.box[1] - 1 && y <= d.box[3] + 1); };
   // room names and their written sizes: a name line, the lines right under it that carry the name on ("MAID/KIDS" / "ROOM"),
   // and the size line under them — read across the text's own direction (a balcony's name written up the page)
-  const TL = (inp.lines || []).filter(t => t.s && String(t.s).trim()).map(t => { const s0 = String(t.s).trim(), rest = s0.replace(SIZE_RX, "").replace(WIDE_RX, "").replace(/\bWIDE\b/i, "");
+  const TL = (inp.lines || []).filter(t => t.s && String(t.s).trim() && !NOTE_RX.test(String(t.s))).map(t => { const s0 = String(t.s).trim(), rest = s0.replace(SIZE_RX, "").replace(WIDE_RX, "").replace(/\bWIDE\b/i, "");
     const vert = Math.abs(Math.sin(t.r || 0)) > 0.7; return {s: s0, cx: t.cx != null ? t.cx : t.x + t.w / 2, cy: t.cy != null ? t.cy : t.y - t.h / 2, h: t.h || 6, w: t.w || 0, vert,
       size: !!(sizeOf(s0) || WIDE_RX.test(s0)), alpha: /[A-Z]{2,}/i.test(rest) && !NAME_SKIP.test(s0) && !/^[A-Z]?\d{3,4}[A-Z]?$/.test(s0)}; });
   TL.sort((a, b) => a.cy - b.cy || a.cx - b.cx);
@@ -351,8 +453,14 @@ export function traceFloor(inp, opt){
     const s = {regs: [r], names: ns, sizes: ss, kind: kd, lx: L[0].x, ly: L[0].y, labs: L, notes: [], how: "traced"}; spaces.push(s); r2s.set(r, s); done.add(r); });
   const nbS = (regs, thinDepth) => { const out = new Map(); regs.forEach(r => nbrs(r).forEach((v, o2) => { if (regs.includes(o2)) return; const s = r2s.get(o2); if (s) out.set(s, (out.get(s) || 0) + v); })); return [...out.entries()].sort((a, b) => b[1] - a[1]); };
   let ch = true;
+  // a flat's entrance foyer: a small piece off the corridor (through its door, or an opening the drawing leaves without one) with doors
+  // on into the flat's own rooms — the flat's floor, not the corridor's. A door: a swing hinged on the line between the two
+  const doorTo = r => { const out = new Set(); swings.forEach(w => { const X = G.px(w.cx), Y = G.py(w.cy), d = Math.ceil(ft(1.2) * R); let mine = false; const oth = new Set();
+    for (let y = Math.max(0, Y - d); y <= Math.min(H - 1, Y + d); y++) for (let x = Math.max(0, X - d); x <= Math.min(W - 1, X + d); x++) { const l = lab[y * W + x]; if (l === r) mine = true; else if (l && l !== out0) oth.add(l); }
+    if (mine) oth.forEach(l => out.add(l)); }); return out; };
+  const foyerLike = r => { if (sft(r) < 10 || sft(r) > 80) return false; const ds = doorTo(r); return [...ds].some(l => { const so = r2s.get(l); return so && so.kind !== "corridor" && !["lift", "stair", "chute", "void"].includes(so.kind); }); };
   while (ch) { ch = false; for (let r = 1; r <= n; r++) { if (done.has(r) || sft(r) < 0.4 || thin(r) || inDuct(r) || isOutside(r)) continue;   // corridor parts
-    const nb = nbS([r]); if (nb.length && nb[0][0].kind === "corridor" && nb[0][1] >= 2) { nb[0][0].regs.push(r); r2s.set(r, nb[0][0]); done.add(r); ch = true; } } }
+    const nb = nbS([r]); if (nb.length && nb[0][0].kind === "corridor" && nb[0][1] >= 2 && !foyerLike(r)) { nb[0][0].regs.push(r); r2s.set(r, nb[0][0]); done.add(r); ch = true; } } }
   spaces.filter(s => s.kind === "lift").forEach(s => { const b = 4 * s.regs[0], m = 40;   // lift shaft parts behind the car line
     for (let r = 1; r <= n; r++) { if (done.has(r) || sft(r) < 3 || thin(r)) continue; const q = 4 * r;
       if (bb[q] >= bb[b] - m && bb[q + 2] <= bb[b + 2] + m && bb[q + 1] >= bb[b + 1] - m && bb[q + 3] <= bb[b + 3] + m) { s.regs.push(r); r2s.set(r, s); done.add(r); s.notes.push("lift shaft parts behind the car outline joined"); } } });
@@ -372,12 +480,14 @@ export function traceFloor(inp, opt){
     if (!direct.length && !via.size) { if (sft(r) >= 0.8) { const s = {regs: [r], names: ["VOID / SHAFT"], sizes: [""], kind: "void", notes: ["closed by walls on all sides, no name on the drawing: pipe shaft / void"], how: "traced", unlabelled: true}; spaces.push(s); r2s.set(r, s); done.add(r); } return; }
     if (direct.length === 1 && !via.size) { const s = direct[0][0]; s.regs.push(r); r2s.set(r, s); done.add(r); s.notes.push("niche of " + sft(r).toFixed(1) + " Sft (open to this room only) joined"); return; }
     if (sft(r) < 1) return;
-    const s = {regs: [r], names: ["PASSAGE"], sizes: [""], kind: "room", notes: ["no name on the drawing: passage between rooms"], how: "traced", unlabelled: true}; spaces.push(s); r2s.set(r, s); done.add(r); });
+    const fy = all.some(([o2]) => o2.kind === "corridor") && foyerLike(r);   // off the common corridor (directly, or through its doorway's threshold), doors on into the flat: its entrance foyer
+    const s = {regs: [r], names: [fy ? "FOYER" : "PASSAGE"], sizes: [""], kind: "room", notes: [fy ? "no name on the drawing: the flat's entrance foyer, behind its door off the corridor" : "no name on the drawing: passage between rooms"], how: "traced", unlabelled: true}; spaces.push(s); r2s.set(r, s); done.add(r); });
   const thresholds = [];
   groups.forEach(g => { if (g.some(r => done.has(r))) return; const nb = nbS(g);
     if (nb.length >= 2) { thresholds.push({regs: g, kind: "threshold", notes: g.length > 1 ? [g.length + " slivers of one doorway joined"] : [], how: "traced", between: [nb[0][0], nb[1][0]]}); g.forEach(r => done.add(r)); }
     else if (nb.length === 1) { const s = nb[0][0]; g.forEach(r => { s.regs.push(r); r2s.set(r, s); done.add(r); }); s.notes.push("recess of " + g.reduce((a, r) => a + sft(r), 0).toFixed(1) + " Sft joined"); }
     else { const a2 = g.reduce((a, r) => a + sft(r), 0); if (a2 >= 0.8 && !g.some(isOutside)) { const s = {regs: g, names: ["VOID / SHAFT"], sizes: [""], kind: "void", notes: ["closed by walls on all sides, no name on the drawing: pipe shaft / void"], how: "traced", unlabelled: true}; spaces.push(s); g.forEach(r => r2s.set(r, s)); } g.forEach(r => done.add(r)); } });
+  mark("spaces");
   // ---- 4 outlines
   const LN = new Lines(OUT.map(s => s.slice ? s.slice(0, 4) : s)), SNAP = 1.8;
   const traceRegs = regs => {   // the regions' pixels (1 px gaps between them closed) -> {outer: [[pts]], holes, un}
@@ -458,6 +568,117 @@ export function traceFloor(inp, opt){
       spaces.splice(spaces.indexOf(s), 1, A, Bs); splits.push({line: [[xl, yt], [xr, yt]], what: s.names[j] + " / " + other});
       thresholds.forEach(t => { t.between = t.between.map(x => x === s ? A : x); });
       break; } });
+  mark("outlines");
+  // ---- an open plan named as several rooms (a lounge open to its passage and drawing room, the zones of a lobby): split on wall
+  // lines — a wall face carried on from an inside corner to the facing wall (or to a pier standing in the space), or a dashed beam
+  // line across the opening — the fewest and shortest that part the names, as a QS closes an open plan by hand. Kitchen + lounge +
+  // dining (one floor) and a bed room with its dress stay one space, as before; a shaft's or a lift's name written in a lobby is a
+  // note, not a zone of it
+  { const KEEP1 = /KITCHEN|LOUNGE|DINING|LIVING|PANTRY|\bTV\b|FAMILY/i, beamL = new Set(); names.forEach((L, i) => { if (/dash|beam|hidden|lintel|soffit/i.test(L.name || "")) beamL.add(i); });
+    const BEAM = inp.segs.filter(s => beamL.has(s[5]) && !(s[4] & 17) && Math.hypot(s[2] - s[0], s[3] - s[1]) >= ft(1.5));
+    const RISER = inp.segs.filter(s => /stair|step|tread/i.test(nm(s[5])) && !(s[4] & 17) && Math.hypot(s[2] - s[0], s[3] - s[1]) >= ft(2));   // a stair open to the room beside it ends on its last riser
+    const together = ns => ns.every(x => KEEP1.test(x)) || (ns.length === 2 && ns.some(x => /BED/i.test(x)) && ns.some(x => /DRESS|WARD|W\.?I\.?C/i.test(x)))
+      || (ns.length === 2 && ns.some(x => /RECEPTION/i.test(x)) && ns.some(x => /LOBBY|ENTRANCE|FOYER/i.test(x)));   // (the reception desk is in the entrance lobby)
+    const seedsOf = s => { const out = [], kd0 = (s.labs || []).map(l => kindOf(l.name)), mixed = kd0.some(x => ["stair", "lift"].includes(x)) && kd0.some(x => ["room", "corridor", "bath"].includes(x));
+      (s.labs || []).forEach((l, li) => { if (["void", "chute"].includes(kd0[li]) || (["lift", "stair"].includes(kd0[li]) && !mixed)) return;
+      if (!out.some(o2 => o2.name === l.name && Math.hypot(o2.x - l.x, o2.y - l.y) < ft(6))) out.push({name: l.name, size: l.size, lab: l, x: l.x, y: l.y}); }); return out; };
+    const near0 = (P, p) => { let b = Infinity; P.forEach((a, i) => { b = Math.min(b, segDist(p, a, P[(i + 1) % P.length])); }); return b; };
+    const rayHit = (o, u, a, b) => { const v0 = [b[0] - a[0], b[1] - a[1]], den = u[0] * v0[1] - u[1] * v0[0]; if (Math.abs(den) < 1e-9) return null;
+      const t = ((a[0] - o[0]) * v0[1] - (a[1] - o[1]) * v0[0]) / den, v = ((a[0] - o[0]) * u[1] - (a[1] - o[1]) * u[0]) / den; return v >= -1e-6 && v <= 1 + 1e-6 && t > 0.3 ? t : null; };
+    const chords = (rings, sd) => { const out = [], P0 = rings[0], Hs = rings.slice(1), inside = p => inPoly(p, P0) && !Hs.some(h => inPoly(p, h)) && rings.every(R0 => near0(R0, p) >= 0.5);
+      const hitB = (o, u) => { let best = null; rings.forEach(R0 => R0.forEach((a, i) => { const t = rayHit(o, u, a, R0[(i + 1) % R0.length]); if (t != null && (best == null || t < best)) best = t; })); return best; };
+      rings.forEach(R0 => R0.forEach((v, i) => { for (const nb of [R0[(i + R0.length - 1) % R0.length], R0[(i + 1) % R0.length]]) {   // from an inside corner, on along its wall face
+        const dx = v[0] - nb[0], dy = v[1] - nb[1], L = Math.hypot(dx, dy); if (L < 1) continue; const u = [dx / L, dy / L];
+        if (!inside([v[0] + u[0] * 2, v[1] + u[1] * 2])) continue;
+        const t = hitB(v, u); if (t == null || t > ft(20)) continue; out.push({a: v, b: [v[0] + u[0] * t, v[1] + u[1] * t], len: t, beam: false}); } }));
+      const dirs = P0.map((p, i) => { const q = P0[(i + 1) % P0.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1; return [(q[0] - p[0]) / L, (q[1] - p[1]) / L]; });
+      BEAM.forEach(s => { const m = [(s[0] + s[2]) / 2, (s[1] + s[3]) / 2]; if (!inside(m)) return;   // a beam line across the opening, running with the walls (an X marking a void above is not one)
+        const L = Math.hypot(s[2] - s[0], s[3] - s[1]), u = [(s[2] - s[0]) / L, (s[3] - s[1]) / L]; if (!dirs.some(d => Math.abs(d[0] * u[1] - d[1] * u[0]) < 0.035)) return;
+        const t1 = hitB(m, u), t2 = hitB(m, [-u[0], -u[1]]); if (t1 == null || t2 == null || t1 + t2 > L + ft(3)) return;
+        out.push({a: [m[0] - u[0] * t2, m[1] - u[1] * t2], b: [m[0] + u[0] * t1, m[1] + u[1] * t1], len: t1 + t2, beam: true}); });
+      if (sd && sd.some(q => kindOf(q.name) === "stair") && sd.some(q => kindOf(q.name) !== "stair")) {   // the stair's line nearest the room's name
+        const room = sd.filter(q => kindOf(q.name) !== "stair");
+        RISER.forEach(s => { const m = [(s[0] + s[2]) / 2, (s[1] + s[3]) / 2]; if (!inside(m)) return;
+          const L = Math.hypot(s[2] - s[0], s[3] - s[1]), u = [(s[2] - s[0]) / L, (s[3] - s[1]) / L], t1 = hitB(m, u), t2 = hitB(m, [-u[0], -u[1]]); if (t1 == null || t2 == null || t1 + t2 > L + ft(2)) return;
+          const dR = Math.min(...room.map(q => Math.hypot(q.x - m[0], q.y - m[1])));
+          out.push({a: [m[0] - u[0] * t2, m[1] - u[1] * t2], b: [m[0] + u[0] * t1, m[1] + u[1] * t1], len: (t1 + t2) * 0.5 + dR * 0.05, beam: false, riser: true}); }); }
+      const uniq = []; out.sort((p, q) => (p.beam ? 0.6 : 1) * p.len - (q.beam ? 0.6 : 1) * q.len).forEach(c => { if (!uniq.some(o2 => Math.hypot(o2.a[0] - c.a[0], o2.a[1] - c.a[1]) + Math.hypot(o2.b[0] - c.b[0], o2.b[1] - c.b[1]) < 2 || Math.hypot(o2.a[0] - c.b[0], o2.a[1] - c.b[1]) + Math.hypot(o2.b[0] - c.a[0], o2.b[1] - c.a[1]) < 2)) uniq.push(c); });
+      return uniq.slice(0, 60); };
+    const cutLine = (g, m, c) => {   // a cut drawn 2 px thick and run 2 pt on into the walls at both ends: no gap where it meets a jamb's corner
+      const L = Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1]) || 1, u = [(c.b[0] - c.a[0]) / L, (c.b[1] - c.a[1]) / L], e = 2, o = 0.5 / g.R;
+      for (const d of [-o, o]) line(g, m, c.a[0] - u[0] * e - u[1] * d, c.a[1] - u[1] * e + u[0] * d, c.b[0] + u[0] * e - u[1] * d, c.b[1] + u[1] * e + u[0] * d); };
+    const splitPx = (s, sd) => {   // -> [{outer, holes, un, sd}] or null
+      let X0 = W, Y0 = H, X1 = 0, Y1 = 0; s.regs.forEach(r => { const q = 4 * r; X0 = Math.min(X0, bb[q]); Y0 = Math.min(Y0, bb[q + 1]); X1 = Math.max(X1, bb[q + 2]); Y1 = Math.max(Y1, bb[q + 3]); });
+      X0 = Math.max(0, X0 - 2); Y0 = Math.max(0, Y0 - 2); X1 = Math.min(W - 1, X1 + 2); Y1 = Math.min(H - 1, Y1 + 2);
+      const w = X1 - X0 + 1, h = Y1 - Y0 + 1, set = new Set(s.regs), M = new Uint8Array(w * h);
+      for (let y = Y0; y <= Y1; y++) for (let x = X0; x <= X1; x++) if (set.has(lab[y * W + x])) M[(y - Y0) * w + x - X0] = 1;
+      if (s.regs.length > 1) for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; if (!M[i] && ((M[i - 1] && (M[i + 1] || M[i + 2])) || (M[i - w] && (M[i + w] || M[i + 2 * w])))) M[i] = 2; }   // (the 1–2 px line between two of its regions)
+      const GL = {x0: bx0 + X0 / R, y0: by0 + Y0 / R, R, W: w, H: h};
+      const seedPx = sd.map(q => { const cx = Math.floor((q.x - GL.x0) * R), cy = Math.floor((q.y - GL.y0) * R); for (let r = 0; r < 12; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = cx + dx, y = cy + dy; if (x >= 0 && y >= 0 && x < w && y < h && M[y * w + x]) return y * w + x; } return -1; });
+      if (seedPx.some(v => v < 0)) return null;
+      const cand = chords([s.outer[0]].concat(s.holes), sd);
+      // the search runs on the space at half resolution (the cut's pixels at full resolution only once, at the end)
+      const MF = new Map(), maskAt = f => { let v = MF.get(f); if (v) return v; const ww = Math.ceil(w / f), hh = Math.ceil(h / f), Mf = new Uint8Array(ww * hh);
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (M[y * w + x]) Mf[Math.floor(y / f) * ww + Math.floor(x / f)] = 1; MF.set(f, v = Mf); return v; };
+      const comps = (cuts, f) => { const ww = Math.ceil(w / f), hh = Math.ceil(h / f), Mf = maskAt(f), C = new Uint8Array(ww * hh);
+        const GF = {x0: GL.x0, y0: GL.y0, R: R / f, W: ww, H: hh}; cuts.forEach(c => cutLine(GF, C, c));
+        const id = new Int32Array(ww * hh), st = new Int32Array(ww * hh); let n0 = 0;
+        for (let i0 = 0; i0 < ww * hh; i0++) { if (!Mf[i0] || C[i0] || id[i0]) continue; n0++; let top = 0; id[i0] = n0; st[top++] = i0;
+          while (top) { const i = st[--top], x = i % ww;
+            if (x > 0 && Mf[i - 1] && !C[i - 1] && !id[i - 1]) { id[i - 1] = n0; st[top++] = i - 1; }
+            if (x < ww - 1 && Mf[i + 1] && !C[i + 1] && !id[i + 1]) { id[i + 1] = n0; st[top++] = i + 1; }
+            if (i >= ww && Mf[i - ww] && !C[i - ww] && !id[i - ww]) { id[i - ww] = n0; st[top++] = i - ww; }
+            if (i + ww < ww * hh && Mf[i + ww] && !C[i + ww] && !id[i + ww]) { id[i + ww] = n0; st[top++] = i + ww; } } }
+        const at = i => { const x = Math.floor((i % w) / f), y = Math.floor(Math.floor(i / w) / f), j = y * ww + x; if (id[j]) return id[j];
+          for (const q of [j - 1, j + 1, j - ww, j + ww, j - ww - 1, j - ww + 1, j + ww - 1, j + ww + 1]) if (q >= 0 && q < ww * hh && id[q]) return id[q]; return 0; };
+        const sid = seedPx.map(at), cnt = new Map(); for (let i = 0; i < ww * hh; i++) if (id[i]) cnt.set(id[i], (cnt.get(id[i]) || 0) + 1);
+        let sep = 0; for (let i = 0; i < sid.length; i++) for (let j = i + 1; j < sid.length; j++) if (sid[i] !== sid[j]) sep++;
+        const small = sid.some(v => !v || (cnt.get(v) || 0) * f * f / R / R / k / k < 6);   // a name left in a sliver: not the cut
+        let err = 0; sid.forEach((v, i) => { if (sid.filter(x => x === v).length !== 1) return; const z = sizeOf(sd[i].size); if (!z) return; const a = (cnt.get(v) || 0) * f * f / R / R / k / k, w0 = z[0] * z[1]; err += Math.min(2, Math.abs(a - w0) / w0); });   // (its written size: the piece a QS would cut)
+        const pxOf = p => { const x = Math.floor((p[0] - GL.x0) * R / f), y = Math.floor((p[1] - GL.y0) * R / f); return x >= 0 && y >= 0 && x < ww && y < hh ? id[y * ww + x] : 0; };
+        return {id, sid, sep, small, err, n: n0, ww, f, pxOf}; };
+      const want = sd.length * (sd.length - 1) / 2, cuts = []; let cur = comps(cuts, 2);
+      const live = (c, t) => { const m = [(c.a[0] + c.b[0]) / 2, (c.a[1] + c.b[1]) / 2], v = t.pxOf(m) || t.pxOf([m[0] + 1, m[1] + 1]) || t.pxOf([m[0] - 1, m[1] - 1]);   // a chord inside a piece that still holds two names
+        return v && t.sid.filter(x => x === v).length >= 2; };
+      for (let guard = 0; guard < 10 && cur.sep < want; guard++) { let best = null;
+        const pool = cand.filter(c => !cuts.includes(c) && live(c, cur));
+        for (const c of pool) { const t = comps(cuts.concat([c]), 2); if (t.small || t.sep <= cur.sep) continue;
+          const sc = Math.round(t.err * 10) * 1e5 + (c.beam ? 0.6 : 1) * c.len / (t.sep - cur.sep); if (!best || sc < best.sc) best = {cs: [c], t, sc}; }   // (a room nearest its written size first, to the 10 %; then the shortest line)
+        if (!best || best.t.err > 0.1) {   // two lines at once (a drawing room open to the lounge on one side and to the passage through its door), when one line leaves a room far off its written size
+          const P2 = pool.slice(0, 10);
+          for (let i = 0; i < P2.length; i++) for (let j = i + 1; j < P2.length; j++) { const t = comps(cuts.concat([P2[i], P2[j]]), 2); if (t.small || t.sep <= cur.sep) continue;
+            const sc = Math.round(t.err * 10) * 1e5 + ((P2[i].beam ? 0.6 : 1) * P2[i].len + (P2[j].beam ? 0.6 : 1) * P2[j].len) / (t.sep - cur.sep); if (!best || sc < best.sc) best = {cs: [P2[i], P2[j]], t, sc}; } }
+        if (!best) break; cuts.push(...best.cs); cur = best.t; }
+      if (!cuts.length) return null;
+      cur = comps(cuts, 1); if (cur.small) return null;
+      // the pieces: one per name group; a piece with no name (between two cut lines) goes with the named piece it touches most; the cut
+      // lines' own pixels with the piece beside them
+      const {id, sid} = cur, own = new Map(); sid.forEach((v, i) => { if (!own.has(v)) own.set(v, []); own.get(v).push(i); });
+      const toP = new Map(); own.forEach((_, v) => toP.set(v, v));
+      for (let pass = 0; pass < 3; pass++) for (let i = 0; i < w * h; i++) { if (!M[i] || toP.has(id[i])) continue; if (!id[i]) continue;
+        const tally = new Map(); for (const j of [i - 2, i + 2, i - 2 * w, i + 2 * w]) if (j >= 0 && j < w * h && toP.has(id[j])) tally.set(toP.get(id[j]), (tally.get(toP.get(id[j])) || 0) + 1);
+        if (tally.size) toP.set(id[i], [...tally.entries()].sort((p, q) => q[1] - p[1])[0][0]); }
+      const pm = new Int32Array(w * h); for (let i = 0; i < w * h; i++) if (M[i] && id[i] && toP.has(id[i])) pm[i] = toP.get(id[i]);
+      for (let pass = 0; pass < 4; pass++) for (let i = 0; i < w * h; i++) if (M[i] && !pm[i]) { for (const j of [i - w, i - 1, i + 1, i + w]) if (j >= 0 && j < w * h && pm[j]) { pm[i] = pm[j]; break; } }
+      cuts.forEach(c => { const L = Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1]); LN.L.push(Object.assign([c.a[0], c.a[1], c.b[0], c.b[1]], {u: [(c.b[0] - c.a[0]) / L, (c.b[1] - c.a[1]) / L], l: L, th: ((Math.atan2(c.b[1] - c.a[1], c.b[0] - c.a[0]) % Math.PI) + Math.PI) % Math.PI})); }); rebuildGrid(LN);
+      const out = []; own.forEach((seeds, v) => { const Lp = loops(G, i => { const x = i % W, y = (i - x) / W; return x >= X0 && x <= X1 && y >= Y0 && y <= Y1 && pm[(y - Y0) * w + x - X0] === v; }, [X0, Y0, X1 + 1, Y1 + 1]);
+        const outer = [], holes = []; let un = 0; Lp.forEach(lp => { if (lp.apx < 6) return; const f = fitRing(dp(lp.pts, 1.2 / R), LN, SNAP); un += f.un; if (f.pts.length >= 3) (lp.hole ? holes : outer).push(f.pts); });
+        if (outer.length) out.push({outer, holes, un, sd: seeds.map(i => sd[i])}); });
+      return out.length > 1 ? {pieces: out, cuts} : null; };
+    spaces.slice().forEach(s => { if (s.outer.length !== 1 || s.kind === "balcony") return; const sd = seedsOf(s); if (sd.length < 2 || together(sd.map(q => q.name))) return;
+      if (new Set(sd.map(q => q.name)).size === 1 && sd.every(q => ["stair", "lift"].includes(kindOf(q.name)))) return;
+      const r = splitPx(s, sd); if (!r) { log.push("open plan kept as one: " + sd.map(q => q.name).join(" + ") + " — no wall line parts them"); return; }
+      r.pieces.filter(x => x.sd.length > 1).forEach(x => log.push("open plan kept as one: " + x.sd.map(q => q.name).join(" + ") + " — no wall line parts them"));
+      const pieces = r.pieces.map(x => { const ns = [], ss = []; x.sd.forEach(q => { if (!ns.includes(q.name)) { ns.push(q.name); ss.push(q.size); } });
+        const kinds = ns.map(kindOf), kd = kinds.includes("corridor") ? "corridor" : new Set(kinds).size === 1 ? kinds[0] : "room";
+        const p = Object.assign({}, s, {names: ns, sizes: ss, kind: kd, labs: x.sd.map(q => q.lab), how: "manual", lx: x.sd[0].x, ly: x.sd[0].y, edges: undefined, centre: undefined,
+          notes: s.notes.concat(["open plan: split from " + s.names.filter(z => !ns.includes(z)).join(", ") + " on a wall line (no wall on the drawing)"])});
+        setGeom(p, {outer: x.outer, holes: x.holes, un: x.un}); return p; });
+      r.cuts.forEach(c => splits.push({line: [c.a, c.b], what: sd.map(q => q.name).join(" / ") + (c.beam ? " (on the beam line)" : "")}));
+      spaces.splice(spaces.indexOf(s), 1, ...pieces);
+      thresholds.forEach(t => { t.between = t.between.map(x => { if (x !== s) return x; const c = t.outer && t.outer[0] ? [t.outer[0].reduce((a2, q) => a2 + q[0], 0) / t.outer[0].length, t.outer[0].reduce((a2, q) => a2 + q[1], 0) / t.outer[0].length] : [s.lx, s.ly];
+        return pieces.slice().sort((p1, p2) => near0(p1.outer[0], c) - near0(p2.outer[0], c))[0]; }); }); }); }
+  mark("open plans");
   // ---- 5 checks: the written L × W as two pairs of facing sides
   spaces.forEach(s => { s.chk = [];
     if (s.names.length === 1) {
@@ -537,6 +758,7 @@ export function traceFloor(inp, opt){
   const res = {ver: TRACE_VER, ms: Date.now() - t0, R, spaces: spaces.map(s => { const c = Object.assign({}, s); c.regs = undefined; return c; }), thresholds: thresholds.map(t => Object.assign({}, t, {regs: undefined})),
     ducts: ducts.map(d => ({box: d.box, outer: [[[d.box[0], d.box[1]], [d.box[2], d.box[1]], [d.box[2], d.box[3]], [d.box[0], d.box[3]]]], sft: (d.box[2] - d.box[0]) * (d.box[3] - d.box[1]) / k / k})),
     overall, repairs: repairs.map(s => [s[0], s[1], s[2], s[3]]), splits, log, layers: {outline: [...outlineL].map(nm), hatch: [...hatchL].map(nm)}};
+  mark("end"); res.prof = prof;
   if (res0.debug) res.debug = res0.debug;
   if (o.crop) { const [a, b, c, d] = o.crop, X0 = G.px(a), Y0 = G.py(b), X1 = G.px(c), Y1 = G.py(d), rows = [];
     for (let y = Y0; y <= Y1; y++) { let r = ""; for (let x = X0; x <= X1; x++) { const i = y * W + x; r += lines[i] ? "#" : body[i] ? "+" : B[i] ? "B" : lab[i] ? String.fromCharCode(97 + lab[i] % 26) : " "; } rows.push(r); } res.crop = rows; }
@@ -551,6 +773,14 @@ function isectSeg(p, q, a, b){   // fraction along p->q where it crosses a->b, o
 }
 function rebuildGrid(LN){ LN.grid = new Map(); const c = LN.cell; LN.L.forEach((s, i) => { const a0 = Math.floor(Math.min(s[0], s[2]) / c), a1 = Math.floor(Math.max(s[0], s[2]) / c), b0 = Math.floor(Math.min(s[1], s[3]) / c), b1 = Math.floor(Math.max(s[1], s[3]) / c);
   for (let a = a0; a <= a1; a++) for (let b = b0; b <= b1; b++) { const kk = a + "," + b; let A = LN.grid.get(kk); if (!A) LN.grid.set(kk, A = []); A.push(i); } }); }
+function fillPoly(G, m, P){   // the inside of a polygon (pt) set on the raster, by scan lines (even-odd)
+  let y0 = Infinity, y1 = -Infinity; P.forEach(q => { y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); });
+  const Y0 = Math.max(0, G.py(y0)), Y1 = Math.min(G.H - 1, G.py(y1));
+  for (let Y = Y0; Y <= Y1; Y++) { const y = G.y0 + (Y + 0.5) / G.R, xs = [];
+    for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > y) !== (b[1] > y)) xs.push(a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1])); }
+    xs.sort((p, q) => p - q);
+    for (let i = 0; i + 1 < xs.length; i += 2) { const X0 = Math.max(0, G.px(xs[i])), X1 = Math.min(G.W - 1, G.px(xs[i + 1])); for (let X = X0; X <= X1; X++) m[Y * G.W + X] = 1; } }
+}
 function label8(G, m){   // 8-connected labels of set pixels
   const {W, H} = G, lab = new Int32Array(G.N), par = [0];
   const find = a => { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; };
