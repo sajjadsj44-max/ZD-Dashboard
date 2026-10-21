@@ -11341,7 +11341,7 @@ function wire(){
   $("aiRead").onclick = () => aiSend($("aiIn").value.trim() || "Measure the floor area of every room in this view.", true).then(() => { $("aiIn").value = ""; });
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
-  $("bLw").onclick = () => setThin(!S.thin);
+  $("bLw").onclick = lwToggle;
   $("bModePdf").onclick = () => setEdMode("pdf"); $("bModeCad").onclick = () => setEdMode("cad");
   ["auto", "black", "white"].forEach(v => { $("bBg_" + v).onclick = () => setBg(v); }); $("bMono").onclick = () => setMono(!S.mono); $("bPdfBw").onclick = () => setPdfBw(!(S.bg === "white" && S.mono));
   const vpop = $("viewPop"), vOpen = on => { vpop.classList.toggle("on", on); $("bView").setAttribute("aria-expanded", on ? "true" : "false"); };
@@ -14795,7 +14795,20 @@ function setDim(on){   // on = true/false, or a dimming level 0-90 %
   $("bDim").classList.toggle("on", S.dim); $("dimPct").value = S.dimPct || 50; $("dimLbl").textContent = (S.dim ? S.dimPct : 0) + "%"; const _rp = $("ribDimPct"); if (_rp) _rp.value = S.dimPct || 50; const _rl = $("ribDimLbl"); if (_rl) _rl.textContent = (S.dim ? S.dimPct : 0) + "%";
   pref("zdTakeoffDim", S.dim ? String(S.dimPct) : "0"); viewMark();
 }
-function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); viewMark(); renderAll(); }
+function setThin(on){ S.thin = on; pref("zdTakeoffThin", on ? "1" : "0"); lwMark(); viewMark(); renderAll(); }
+/* an AutoCAD drawing's line weights shown or not: as the drawing's own LWDISPLAY says (AutoCAD's LWT button), until switched here for
+   that drawing — and never when line weights are off for everything */
+function cadLwOn(fid, proj = P.proj){ const o = proj && proj.cadLw && proj.cadLw[fid], sc = S.cadSc && S.cadSc[fid]; return o != null ? !!o : !!(sc && sc.lwd); }
+function lwMark(){
+  const b = $("bLw"); if (!b) return; const cad = !!ACT && cadOn(), on =!S.thin && (!cad || cadLwOn(S.fileId));
+  b.classList.toggle("on", on); b.title = (on ? "Line weights are on" : "Line weights are off") + (cad ? " for this drawing (AutoCAD's LWT; it opens as its LWDISPLAY says)" : "") + " — click to " + (on ? "draw every line thin" : "show them");
+}
+function lwToggle(){   // the Line weights button: on an AutoCAD drawing, that drawing's (as LWT); else for everything
+  if (!cadOn()) return setThin(!S.thin);
+  const fid = S.fileId, on = !S.thin && cadLwOn(fid); P.proj.cadLw = P.proj.cadLw || {}; P.proj.cadLw[fid] = !on; save();
+  if (!on && S.thin) return setThin(false);
+  lwMark(); renderAll(); toast("Line weights " + (on ? "off" : "on") + " for this drawing (LWT)", 1800);
+}
 
 /* ------------------------------------------------------------------ AutoCAD drawings (DWG / DXF) — cad.js
    A drawing added with + PDF is read in this browser and kept as a layered vector PDF — so snapping, auto area, find, the
@@ -14828,7 +14841,7 @@ function cadLoad(fid, proj = P.proj){
         rec.scene = sc; await dbPut("pdfs", rec, fid).catch(() => {}); }
       catch (e) { if (!rec.scene) throw e; sc = rec.scene; toast("Shown as it was first read — the drawing could not be read again here (" + (e.message || e) + ")", 6000); }   // the scene kept from before: still its objects
       finally { busy(""); } }
-    S.cadSc[fid] = sc; delete S.cadP[fid]; return sc;
+    S.cadSc[fid] = sc; delete S.cadP[fid]; if (fid === S.fileId) lwMark(); return sc;
   })().catch(e => { S.cadSc[fid] = null; delete S.cadP[fid]; toast("Shown from its PDF — the drawing's objects could not be read here (" + (e.message || e) + ")", 6000); return null; });
 }
 /* a DWG / DXF read off the page's thread, in a worker (cad-worker.js): the page stays responsive while a big drawing is read, and
@@ -14919,12 +14932,12 @@ function cadHidden(fid, sc, proj = P.proj){ const off = new Set(((proj && proj.l
 
 /* the background (black as AutoCAD's model space, white, or black for CAD drawings only) and monochrome */
 const darkNow = (fid = S.fileId, proj = P.proj) => S.bg === "black" || (S.bg !== "white" && !!cadMeta(fid, proj));
-function viewOpts(dpr, fast, pn = ACT){ const fid = pn.fileId, proj = pn.sess.proj, sc = S.cadSc && S.cadSc[fid]; return {dark: darkNow(fid, proj), mono: !!S.mono, thin: !!S.thin, hidden: sc ? cadHidden(fid, sc, proj) : null, ed: sc ? cedC(fid, cadPage(pn), proj) : null, dpr, fast}; }
+function viewOpts(dpr, fast, pn = ACT){ const fid = pn.fileId, proj = pn.sess.proj, sc = S.cadSc && S.cadSc[fid]; return {dark: darkNow(fid, proj), mono: !!S.mono, thin: !!S.thin || !!(sc && !cadLwOn(fid, proj)), hidden: sc ? cadHidden(fid, sc, proj) : null, ed: sc ? cedC(fid, cadPage(pn), proj) : null, dpr, fast}; }
 function bgMark(){
   ["auto", "black", "white"].forEach(v => { const b = $("bBg_" + v); if (b) b.classList.toggle("on", (S.bg || "auto") === v); });
   const m = $("bMono"); if (m) m.classList.toggle("on", !!S.mono);
   const bw = $("bPdfBw"); if (bw) bw.classList.toggle("on", S.bg === "white" && !!S.mono);
-  PANES.forEach(pn => pn.el.stage.classList.toggle("dark", darkNow(pn.fileId, pn.sess.proj)));
+  PANES.forEach(pn => pn.el.stage.classList.toggle("dark", darkNow(pn.fileId, pn.sess.proj))); lwMark();
 }
 function renderAll(){ PANES.forEach(pn => { if (pn.page) { renderLow(pn); renderHi(true, pn); } }); }   // every window, after a change of how drawings are drawn
 function setBg(v){ S.bg = v; pref("zdTakeoffBg", v); bgMark(); renderAll(); renderLayers(); }
@@ -14966,7 +14979,7 @@ function freeCadBitmap(pn = ACT){
 }
 const CAD_FRAME = 24;   // ms
 const cadMs = cost => cost * (S.cadRate || 1.5e-4);   // ms per path step, measured on this machine as light views are drawn
-const cadLook = pn => [darkNow(pn.fileId, pn.sess.proj), !!S.mono, !!S.thin].join("|");
+const cadLook = pn => [darkNow(pn.fileId, pn.sess.proj), !!S.mono, !!S.thin, cadLwOn(pn.fileId, pn.sess.proj)].join("|");
 const cadKey = pn => cadLook(pn) + "|" + cedV(pn.fileId, pn.sess.proj) + "|" + JSON.stringify(((pn.sess.proj && pn.sess.proj.layersOff) || {})[pn.fileId] || []);   // what the whole-page picture was drawn with
 function cadLowPaint(src, pg, pn){   // the picture under the screen (shown for a moment when a big zoom step outruns the screen)
   const lc = pn.el.low, sc = Math.min(3, 3000 / Math.max(pn.base.width, pn.base.height)); lc.width = Math.ceil(pn.base.width * sc); lc.height = Math.ceil(pn.base.height * sc);
@@ -15061,11 +15074,11 @@ function cadCtxItems(q){   // right-click: the AutoCAD object under the cursor (
   const sc = S.cadSc[S.fileId], ei = cadPickAt(toScr(q), true); if (ei < 0) return [];
   const r = CAD.cadRec(pg, ei); if (!r || r.L < 0) return [];
   const lname = (sc.layers[r.L] || {}).name || "0", blk = cadInBlock(pg, r), L = [{h: "AutoCAD: " + (r.t === "INSERT" ? "block " + (r.n || "") : r.t.toLowerCase()) + " · " + lname + (blk ? " · in block " + blk : ""), s: [r.area ? f2(r.area) + " Sft" : "", r.len ? f2(r.len) + " ft" : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ")}];
-  if (r.t === "INSERT") { const same = pg.ents.filter(x => x.t === "INSERT" && x.n === r.n).length; L.push({t: "Count this " + (r.n || "block"), fn: () => cadPick(ei, "count")}, {t: "Count every " + (r.n || "block") + " (" + same + ")…", fn: () => cadQtyDialog({B: r.n})}); }
+  if (r.t === "INSERT") { const hid = cadHidden(S.fileId, sc), same = pg.ents.concat(pg.subs || []).filter(x => x && x.t === "INSERT" && x.n === r.n && x.L >= 0 && !hid[x.L]).length; L.push({t: "Count this " + (r.n || "block"), fn: () => cadPick(ei, "count")}, {t: "Count every " + (r.n || "block") + " (" + same + ")…", fn: () => cadQtyDialog({B: r.n})}); }
   else { if (r.cl && r.area > 0) L.push({t: "Take off its area — " + f2(r.area) + " Sft", fn: () => cadPick(ei, "area")}); if (r.len > 0) L.push({t: "Take off its length — " + f2(r.len) + " ft", fn: () => cadPick(ei, "line")}); }
   L.push({t: "Quantities on layer " + lname + "…", fn: () => cadQtyDialog({L: r.L})}, {t: "Isolate layer " + lname + " (LAYISO)", fn: () => cadIsolate(lname)}, {t: "Layer " + lname + " off (LAYOFF)", fn: () => cadLayersOnOff([lname], false)}, {sep: 1},
     {t: "Select this object", k: "Shift+V", fn: () => { setTool("cadsel"); cadSelSet([ei]); }}, {t: "Select similar (same type and layer" + (r.t === "INSERT" ? ", same block" : "") + ")", fn: () => { setTool("cadsel"); cadSelSet([ei]); cadSelAct("similar"); }});
-  const C = CAD.cadChain(pg, ei); if (C.length > 1) L.push({t: "Select the block it is in (" + blk + ")", fn: () => { setTool("cadsel"); cadSelSet([C[C.length - 2]]); }});
+  const up = cadUp(pg, ei); if (up >= 0) L.push({t: "Select the block it is in (" + (CAD.cadRec(pg, up).n || blk) + ")", fn: () => { setTool("cadsel"); cadSelSet([up]); }});
   L.push({sep: 1});
   return L;
 }
@@ -15111,6 +15124,9 @@ function cadPickAt(sp, add){
   }
   return C[0];
 }
+/* the nearest block an object inside a block is in that can be seen (its layer on) -> its index, or -1 */
+function cadUp(pg, ei){ const hid = cadHidden(S.fileId, S.cadSc[S.fileId]), C = CAD.cadChain(pg, ei);
+  for (let k = C.length - 2; k >= 0; k--) { const r = CAD.cadRec(pg, C[k]); if (r && r.L >= 0 && !hid[r.L]) return C[k]; } return -1; }
 const cadInBlock = (pg, r) => { const b = r && r.p != null ? CAD.cadRec(pg, r.p) : null; return b ? b.n || "a block" : ""; };   // the block an object inside a block is in
 function cadSelDown(sp, e){
   if (!cadOn()) { toast("Select objects works on an AutoCAD drawing (DWG / DXF added with + PDF), on its page", 4000); return; }
@@ -15147,6 +15163,9 @@ function cadSelSvg(ids, hover){
       CAD.primPaths(pg, i).forEach(P => { if (!P.length) return; pts += P.length;
         d.push(P.map((p, n) => { const q = toScr(p); return (n ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1); }).join("") + (P.closed ? "Z" : "") + (P.length === 1 ? "h0.1" : "")); }); }
     for (let j = E.ts[ei]; j < E.ts[ei + 1]; j++) { const t = 4 * E.tl[j]; R(pg.tB[t], pg.tB[t + 1], pg.tB[t + 2], pg.tB[t + 3]); }
+    const rc = CAD.cadRec(pg, ei);   // a hatch drawn as its pattern (its lines left out above): its outline
+    if (rc && rc.t === "HATCH" && rc.loops && !E.pl.subarray(E.ps[ei], E.ps[ei + 1]).some(i => pg.pf[i] !== 1)) rc.loops.forEach(P => { if (P.length < 2) return; pts += P.length;
+      d.push(P.map((p, n) => { const q = toScr(p); return (n ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1); }).join("") + "Z"); });
   }
   if (!d.length) return "";
   const path = d.join("");
@@ -15166,7 +15185,7 @@ function cadSelSum(ids){   // the selection's totals: by type, lengths, areas, b
 function cadSelHtml(ids){
   const o = cadSelSum(ids), c = S.cond ? cond(S.cond) : null, top = (m, n) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => esc(k) + (v > 1 ? " ×" + v : "")).join(", ") + (m.size > n ? ", …" : "");
   const B = [...o.blocks.values()].reduce((a, v) => a + v, 0), pg = cadPage(), inB = [...new Set(ids.map(ei => cadInBlock(pg, CAD.cadRec(pg, ei))).filter(Boolean))];
-  const where = inB.length ? `<div class="row small" style="margin-top:4px">Inside block <b>${esc(inB.slice(0, 3).join(", "))}${inB.length > 3 ? ", …" : ""}</b> &nbsp;<button class="btn sm" data-cact="up" title="Select the block it is part of, as AutoCAD picks it">Select its block</button></div>`
+  const where = inB.length ? `<div class="row small" style="margin-top:4px">Inside block <b>${esc(inB.slice(0, 3).join(", "))}${inB.length > 3 ? ", …" : ""}</b>${ids.some(ei => cadUp(pg, ei) >= 0) ? ` &nbsp;<button class="btn sm" data-cact="up" title="Select the block it is part of, as AutoCAD picks it">Select its block</button>` : ""}</div>`
     : B && ids.length === 1 ? `<div class="row small" style="margin-top:4px;color:var(--muted)">Click a part of the block again to pick that hatch, text or line on its own</div>` : "";
   const into = c ?"into <b>" + esc(c.name) + "</b> when its type fits, else a condition named after the layer / block" : "into conditions named after each layer / block";
   return `<h4>AutoCAD objects — ${o.n} selected <span style="font-weight:400;color:var(--muted);font-size:11px">Shift / Ctrl+click adds or takes out · box: left→right window, right→left crossing · Ctrl+A all · Esc clears</span></h4>
@@ -15199,7 +15218,7 @@ function cadSelAct(act){
   if (act === "all") { const A = all(); cadSelSet(A); return toast(A.length + " AutoCAD objects selected (layers that are on)", 2200); }
   if (act === "qsel") return cadQuickSelect();
   if (!ids.length) return toast("Select AutoCAD objects first (Shift+V, then click or drag a box)", 3000);
-  if (act === "up") { const P = [...new Set(ids.map(ei => { const r = R(ei); return r && r.p != null ? r.p : ei; }))]; cadSelSet(P); return; }
+  if (act === "up") { const P = [...new Set(ids.map(ei => { const u = cadUp(pg, ei); return u >= 0 ? u : ei; }))]; cadSelSet(P); return; }
   if (act === "similar") { const key = r => r.t + "|" + r.L + "|" + (r.t === "INSERT" ? r.n || "" : ""), K = new Set(ids.map(ei => key(R(ei)))), A = outer(all(deep).filter(ei => K.has(key(R(ei))))); cadSelSet(A); return toast("Similar: " + A.length + " objects", 2000); }
   if (act === "layer") { const L = new Set(ids.map(ei => R(ei).L)), A = outer(all(deep).filter(ei => L.has(R(ei).L))); cadSelSet(A); return toast(A.length + " objects on " + [...L].map(l => (sc.layers[l] || {}).name).join(", "), 2500); }
   if (act === "layoff" || act === "iso") { const N = [...new Set(ids.map(ei => lname(R(ei))))];
@@ -15657,7 +15676,8 @@ function cedHint(){
 async function cadQuickSelect(){   // AutoCAD's QSELECT: by layer, type, block name, length and area
   const pg = cadPage(); if (!pg) return toast("Open an AutoCAD drawing first — + PDF adds a DWG or DXF", 4000);
   const sc = S.cadSc[S.fileId], hid = cadHidden(S.fileId, sc), E = CAD.cadEnts(pg), Q = pg.ents.map((r, ei) => r && r.L >= 0 && !hid[r.L] && E.eb[4 * ei] <= E.eb[4 * ei + 2] ? ei : -1).filter(ei => ei >= 0);
-  const cnt = f => { const m = new Map(); Q.forEach(ei => { const k = f(pg.ents[ei]); if (k != null) m.set(k, (m.get(k) || 0) + 1); }); return [...m].sort((a, b) => String(a[0]).localeCompare(String(b[0]), undefined, {numeric: true})); };
+  const R = ei => CAD.cadRec(pg, ei), selN = cadSelIds().filter(ei => ei >= pg.ents.length), QL = Q.concat(selN);   // (objects inside blocks that are selected: listed too)
+  const cnt = f => { const m = new Map(); QL.forEach(ei => { const k = f(R(ei)); if (k != null) m.set(k, (m.get(k) || 0) + 1); }); return [...m].sort((a, b) => String(a[0]).localeCompare(String(b[0]), undefined, {numeric: true})); };
   const Ls = cnt(r => (sc.layers[r.L] || {}).name || "0"), Ts = cnt(r => r.t), Bs = cnt(r => r.t === "INSERT" ? r.n || "?" : null), have = cadSelIds().length;
   const opts = (L, id) => `<select id="${id}" multiple size="${Math.min(8, Math.max(3, L.length))}" style="width:100%">${L.map(([k, n]) => `<option value="${esc(k)}">${esc(k)} (${n})</option>`).join("")}</select>`;
   const body = `<div class="wide"></div><p class="small">Objects on layers that are switched on. Leave a list with nothing picked for “any”; Ctrl+click picks several.</p>
@@ -15670,11 +15690,11 @@ async function cadQuickSelect(){   // AutoCAD's QSELECT: by layer, type, block n
     return {L: pick("qsL"), T: pick("qsT"), B: pick("qsB"), l0: num("qsL0"), l1: num("qsL1"), a0: num("qsA0"), a1: num("qsA1"), how: (document.querySelector("input[name=qsHow]:checked") || {}).value || ""};
   });
   if (!v) return;
-  const inSel = new Set(cadSelIds()), hit = Q.filter(ei => { const r = pg.ents[ei];
+  const hit = (v.how === "in" ? cadSelIds() : Q).filter(ei => { const r = R(ei); if (!r) return false;
     if (v.L.size && !v.L.has((sc.layers[r.L] || {}).name || "0")) return false; if (v.T.size && !v.T.has(r.t)) return false; if (v.B.size && !(r.t === "INSERT" && v.B.has(r.n || "?"))) return false;
     if ((v.l0 != null || v.l1 != null) && !(r.len > 0 && !(r.cl && r.area > 0) && (v.l0 == null || r.len >= v.l0 - 1e-9) && (v.l1 == null || r.len <= v.l1 + 1e-9))) return false;
     if ((v.a0 != null || v.a1 != null) && !(r.cl && r.area > 0 && (v.a0 == null || r.area >= v.a0 - 1e-9) && (v.a1 == null || r.area <= v.a1 + 1e-9))) return false;
-    return v.how !== "in" || inSel.has(ei); });
+    return true; });
   if (S.tool !== "cadsel") setTool("cadsel");
   cadSelSet(hit, v.how === "add" ? "add" : "");
   toast("Quick select: " + hit.length + " object" + (hit.length === 1 ? "" : "s"), 2500);
@@ -15690,7 +15710,7 @@ async function cadQtyDialog(pre){
     <div class="cq"><table class="sh cqt"><thead><tr><th>Layer</th><th class="n">Lines → length</th><th class="n">Closed → area</th></tr></thead><tbody>${LS.map(l => `<tr${hid[l.li] ? ' class="dim"' : ""}><td>${sw(sc.layers[l.li].c)} ${esc(l.name)}${hid[l.li] ? ' <span class="small">(off)</span>' : ""}</td>
       <td class="n">${l.runs ? `<label class="pk"><input type="checkbox" data-ql="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.runs} · ${f2(l.len)} ft</label>` : ""}</td>
       <td class="n">${l.areas ? `<label class="pk"><input type="checkbox" data-qa="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.areas} · ${f2(l.area)} Sft</label>` : ""}</td></tr>`).join("") || '<tr><td colspan="3" class="small">No lines or outlines on these layers</td></tr>'}</tbody></table></div>
-    <div class="cq"><table class="sh cqt"><thead><tr><th>Block</th><th class="n">Count</th><th>Layer</th><th>Attributes</th></tr></thead><tbody>${BS.map((b, i) => `<tr><td><label class="pk"><input type="checkbox" data-qb="${i}"${pre.B === b.name ? " checked" : ""}> ${esc(b.name)}</label></td><td class="n">${b.n}</td><td class="small">${esc([...b.layers].join(", "))}</td><td class="small">${esc(att(b))}</td></tr>`).join("") || '<tr><td colspan="4" class="small">No blocks in model space</td></tr>'}</tbody></table></div>
+    <div class="cq"><table class="sh cqt"><thead><tr><th>Block</th><th class="n">Count</th><th>Layer</th><th>Attributes</th></tr></thead><tbody>${BS.map((b, i) => `<tr><td><label class="pk"><input type="checkbox" data-qb="${i}"${pre.B === b.name ? " checked" : ""}> ${esc(b.name)}</label></td><td class="n">${b.n}${b.nn ? ` <span class="small" title="copies inside other blocks">(${b.nn} in blocks)</span>` : ""}</td><td class="small">${esc([...b.layers].join(", "))}</td><td class="small">${esc(att(b))}</td></tr>`).join("") || '<tr><td colspan="4" class="small">No blocks in model space</td></tr>'}</tbody></table></div>
     <label class="pk"><input type="checkbox" id="cqVis" checked> Only objects on layers that are switched on</label>`;
   const v = await ask("AutoCAD quantities — " + pageName({file: S.fileId, page: 1}), body, "Add to takeoff", () => {
     const g = a => new Set([...document.querySelectorAll("#dlgB [data-" + a + "]")].filter(x => x.checked).map(x => x.dataset[a]));
@@ -15709,6 +15729,7 @@ function cadTakeoff(sc, pg, sel){   // sel: {lens: Set(layer index), areas: Set(
       if (r.cl && r.area > 0 && sel.areas.has(r.L)) got.area += cadAddGeom(sc, pg, ei, "area", null, null);
       else if (!r.cl && r.len > 0 && sel.lens.has(r.L)) got.line += cadAddGeom(sc, pg, ei, "line", null, null);
     });
+    if (sel.blocks.size) (pg.subs || []).forEach((r, j) => { if (r.t === "INSERT" && sel.blocks.has(r.n) && r.L >= 0 && !(hid && hid[r.L])) got.count += cadAddGeom(sc, pg, pg.ents.length + j, "count", null, counts); });   // (a block's copies inside other blocks)
   }, "AutoCAD takeoff");
   refresh();
   toast("From the drawing: " + [got.area && got.area + " area" + (got.area > 1 ? "s" : ""), got.line && got.line + " run" + (got.line > 1 ? "s" : ""), got.count && got.count + " count marker" + (got.count > 1 ? "s" : "")].filter(Boolean).join(", ") + " — marked AI, check them", 5000);

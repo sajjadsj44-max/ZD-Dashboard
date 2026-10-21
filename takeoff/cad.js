@@ -11,12 +11,12 @@
    exact and needs no calibration. */
 const LDWG = "https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/dist/libredwg-web.js";
 const LDXF = "https://cdn.jsdelivr.net/npm/@mlightcad/dxf-json@1.2.8/dist/esm/bundle.mjs";
-export const CAD_VER = 6;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
+export const CAD_VER = 9;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (9: justified text at a 0,0 point and backwards / upside-down text on its point; 8: lengths inside blocks stretched more one way measured as drawn; 7: text in its style's / \f font — Times for serif, condensed narrower — and LWDISPLAY; 6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
 export const INK = -1;             // colour 7 (and true black or white): white on a black background, black on white
 export const isCadName = n => /\.(dwg|dxf)$/i.test(String(n || ""));
 const CAPS_FONT = /^(technic_|techb___|techl___|coprgt[bl]?|copperplate[\w ]*|stencil|engr|castelar|felixti|alger)\.(ttf|otf)$/i;   // fonts with capitals only (their small letters are small capitals)
 const SMALL_CAP = 0.76;   // a small capital's height in those fonts, of a capital's (Technic, as AutoCAD draws it)
-const PI2 = Math.PI * 2, CAP = 0.718, DESC = 0.207;   // Helvetica's cap height and descent, in em: AutoCAD's text height is a capital's
+const PI2 = Math.PI * 2;
 
 /* ------------------------------------------------------------------ colours, units, lineweights */
 /* AutoCAD's 256 index colours, as AutoCAD's own lookup (EntityColor.LookUpRgb) gives them */
@@ -56,33 +56,79 @@ export const VERS = {AC1009: "R11 / R12", AC1012: "R13", AC1014: "R14", AC1015: 
 
 /* ------------------------------------------------------------------ text: Helvetica widths (WinAnsi), AutoCAD's codes */
 const HELV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584,0,556,0,222,556,333,1000,556,556,333,1000,667,333,1000,0,611,0,0,222,222,333,333,350,556,1000,333,1000,500,333,944,0,500,500,278,333,556,556,556,556,260,556,333,737,370,556,584,333,737,333,400,584,333,333,333,556,537,278,333,333,365,556,834,834,834,611,667,667,667,667,667,667,1000,722,667,667,667,667,278,278,278,278,722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,556,556,556,556,556,556,889,500,556,556,556,556,278,278,278,278,556,556,556,556,556,556,556,584,611,556,556,556,556,500,556,500];
+const HELV_B = [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584,0,556,0,278,556,500,1000,556,556,333,1000,667,333,1000,0,611,0,0,278,278,500,500,350,556,1000,333,1000,556,333,944,0,500,556,278,333,556,556,556,556,280,556,333,737,370,556,584,333,737,333,400,584,333,333,333,611,556,278,333,333,365,556,834,834,834,611,722,722,722,722,722,722,1000,722,667,667,667,667,278,278,278,278,722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,556,556,556,556,556,556,889,556,556,556,556,556,278,278,278,278,611,611,611,611,611,611,611,584,611,611,611,611,611,556,611,556];
+const TIMES = [250,333,408,500,500,833,778,180,333,333,500,564,250,333,250,278,500,500,500,500,500,500,500,500,500,500,278,278,564,564,564,444,921,722,667,667,722,611,556,722,722,333,389,722,611,889,722,722,556,722,667,556,611,722,722,944,722,722,611,333,278,333,469,500,333,444,500,444,500,444,333,500,500,278,278,500,278,778,500,500,500,500,333,389,278,500,500,722,500,500,444,480,200,480,541,0,500,0,333,500,444,1000,500,500,333,1000,556,333,889,0,611,0,0,333,333,444,444,350,500,1000,333,980,389,333,722,0,444,500,250,333,500,500,500,500,200,500,333,760,276,500,564,333,760,333,400,564,300,300,333,500,453,250,333,300,310,500,750,750,750,444,722,722,722,722,722,722,889,667,611,611,611,611,333,333,333,333,722,722,722,722,722,722,722,564,722,722,722,722,722,722,556,500,444,444,444,444,444,444,667,444,444,444,444,444,278,278,278,278,500,500,500,500,500,500,500,564,500,500,500,500,500,500,500,500];
+const TIMES_B = [250,333,555,500,500,1000,833,278,333,333,500,570,250,333,250,278,500,500,500,500,500,500,500,500,500,500,333,333,570,570,570,500,930,722,667,722,722,667,611,778,778,389,500,778,667,944,722,778,611,778,722,556,667,722,722,1000,722,722,667,333,278,333,581,500,333,500,556,444,556,444,333,500,556,278,333,556,278,833,556,500,556,556,444,389,333,556,500,722,500,500,444,394,220,394,520,0,500,0,333,500,500,1000,500,500,333,1000,556,333,1000,0,667,0,0,333,333,500,500,350,500,1000,333,1000,389,333,722,0,444,500,250,333,500,500,500,500,220,500,333,747,300,500,570,333,747,333,400,570,300,300,333,556,540,250,333,300,330,500,750,750,750,500,722,722,722,722,722,722,1000,722,667,667,667,667,389,389,389,389,722,722,778,778,778,778,778,570,778,722,722,722,722,722,611,556,500,500,500,500,500,500,722,444,444,444,444,444,278,278,278,278,500,556,500,500,500,500,500,570,500,556,556,556,556,500,556,500];
+const TIMES_I = [250,333,420,500,500,833,778,214,333,333,500,675,250,333,250,278,500,500,500,500,500,500,500,500,500,500,333,333,675,675,675,500,920,611,611,667,722,611,611,722,722,333,444,667,556,833,667,722,611,722,611,500,556,722,611,833,611,556,556,389,278,389,422,500,333,500,500,444,500,444,278,500,500,278,278,444,278,722,500,500,500,500,389,389,278,500,444,667,444,444,389,400,275,400,541,0,500,0,333,500,556,889,500,500,333,1000,500,333,944,0,556,0,0,333,333,556,556,350,500,889,333,980,389,333,667,0,389,444,250,389,500,500,500,500,275,500,333,760,276,500,675,333,760,333,400,675,300,300,333,500,523,250,333,300,310,500,750,750,750,500,611,611,611,611,611,611,889,667,611,611,611,611,333,333,333,333,722,667,722,722,722,722,722,675,722,722,722,722,722,556,611,500,500,500,500,500,500,500,667,444,444,444,444,444,278,278,278,278,500,500,500,500,500,500,500,675,500,500,500,500,500,444,500,444];
+const TIMES_BI = [250,389,555,500,500,833,778,278,333,333,500,570,250,333,250,278,500,500,500,500,500,500,500,500,500,500,333,333,570,570,570,500,832,667,667,667,722,667,667,722,778,389,500,667,611,889,722,722,611,722,667,556,611,722,667,889,667,611,611,333,278,333,570,500,333,500,500,444,500,444,333,500,556,278,278,500,278,778,556,500,500,500,389,389,278,556,444,667,500,444,389,348,220,348,570,0,500,0,333,500,500,1000,500,500,333,1000,556,333,944,0,611,0,0,333,333,500,500,350,500,1000,333,1000,389,333,722,0,389,444,250,389,500,500,500,500,220,500,333,747,266,500,606,333,747,333,400,570,300,300,333,576,500,250,333,300,300,500,750,750,750,500,667,667,667,667,667,667,944,667,667,667,667,667,389,389,389,389,722,722,722,722,722,722,722,570,722,722,722,722,722,611,611,500,500,500,500,500,500,500,722,444,444,444,444,444,278,278,278,278,500,556,500,500,500,500,500,570,500,556,556,556,556,444,500,444];
+/* the faces text is drawn in: AutoCAD's fonts by family — sans-serif TrueType and the SHX fonts as Helvetica / Arial, serif
+   TrueType (Times New Roman…) as Times — each plain, bold, italic, bold italic: [widths, em per text height, AutoCAD's H height
+   in its own font (text heights), cap height, descent (1/1000 em), css, the PDF's standard font]. AutoCAD sizes TrueType text so a
+   capital A is the text height (measured in AutoCAD 2024: Arial's em is 1.3966 heights, Times New Roman's 1.4765, bold 1.4798) */
+const FACES = [[HELV, 1.3966, 1, 718, 207, "", "Helvetica"], [HELV_B, 1.3966, 1, 718, 207, "bold ", "HelveticaBold"], [HELV, 1.3966, 1, 718, 207, "italic ", "HelveticaOblique"], [HELV_B, 1.3966, 1, 718, 207, "italic bold ", "HelveticaBoldOblique"],
+  [TIMES, 1.4765, 0.97765, 662, 217, "", "TimesRoman"], [TIMES_B, 1.4798, 0.97977, 676, 217, "bold ", "TimesRomanBold"], [TIMES_I, 1.4765, 0.97765, 653, 217, "italic ", "TimesRomanItalic"], [TIMES_BI, 1.4798, 0.97977, 669, 217, "italic bold ", "TimesRomanBoldItalic"]]
+  .map(([w, em, hcap, cap, desc, css, pdf], i) => ({w, em, hcap, cap: cap / 1000, desc: desc / 1000, css: css + "%px " + (i >= 4 ? "'Times New Roman', Times, serif" : "Arial, Helvetica, sans-serif"), pdf}));
+/* AutoCAD's own advance widths of the printable ASCII characters (1/1000 of the text height; -1 not measured) and its H height, in
+   the fonts drawings use most — measured in AutoCAD 2024 (textbox of "H<c>H" less "HH"), so text lines up and wraps as AutoCAD's */
+const AFW = Object.fromEntries(Object.entries({"times":{"cap":0.97765,"w":"369,492,603,738,738,-1,1149,266,492,492,738,833,369,492,369,410,738,738,738,738,738,738,738,738,738,738,410,410,833,833,833,655,1360,1066,985,985,1066,902,821,1066,1066,492,575,1066,902,1313,1066,1066,821,1066,985,821,902,1066,1066,1394,1066,1066,902,492,410,492,693,738,492,655,738,655,738,655,492,738,738,410,410,738,410,1149,738,738,738,738,492,575,410,738,738,1066,738,738,655,709,296,709,799"},"timesbd":{"cap":0.97977,"w":"370,493,822,740,740,-1,1233,411,493,493,740,843,370,493,370,411,740,740,740,740,740,740,740,740,740,740,493,493,843,843,843,740,1376,1069,987,1069,1069,987,904,1151,1151,576,740,1151,987,1397,1069,1151,904,1151,1069,823,987,1069,1069,1480,1069,1069,987,493,411,493,860,740,493,740,823,657,823,657,493,740,823,411,493,823,411,1233,823,740,823,823,657,576,493,823,740,1069,740,740,657,583,326,583,770"},"timesi":{"cap":0.97765,"w":"369,492,620,738,738,-1,1149,316,492,492,738,996,369,492,369,410,738,738,738,738,738,738,738,738,738,738,492,492,996,996,996,738,1358,902,902,985,1066,902,902,1066,1066,492,655,985,821,1230,985,1066,902,1066,902,738,821,1066,902,1230,902,821,821,575,410,575,623,738,492,738,738,655,738,655,410,738,738,410,410,655,410,1066,738,738,738,738,575,575,410,738,655,985,655,655,575,590,406,590,799"},"arial":{"cap":1.0,"w":"388,388,496,777,777,-1,932,267,465,465,544,816,388,465,388,388,777,777,777,777,777,777,777,777,777,777,388,388,816,816,816,777,1418,932,932,1009,1009,932,853,1087,1009,388,698,932,777,1164,1009,1087,932,1087,1009,932,853,1009,932,1319,932,932,853,388,388,388,656,777,465,777,777,698,777,777,388,777,777,310,310,698,310,1164,777,777,777,777,465,698,388,777,698,1009,698,698,698,467,363,467,816"},"arialbd":{"cap":1.0,"w":"388,465,662,777,777,-1,1009,332,465,465,544,816,388,465,388,388,777,777,777,777,777,777,777,777,777,777,465,465,816,816,816,853,1362,1009,1009,1009,1009,932,853,1087,1009,388,777,1009,853,1164,1009,1087,932,1087,1009,932,853,1009,932,1319,932,932,853,465,388,465,816,777,465,777,853,777,853,777,465,853,853,388,388,777,388,1242,853,853,853,853,544,777,465,853,777,1087,777,777,698,544,391,544,816"},"arialn":{"cap":1.0,"w":"319,319,407,637,637,-1,764,220,381,381,445,669,319,381,319,319,637,637,637,637,637,637,637,637,637,637,319,319,669,669,669,637,1162,764,764,827,827,764,700,892,827,319,573,764,637,954,827,892,764,892,827,764,700,827,764,1081,764,764,700,319,319,319,538,637,381,637,637,573,637,637,319,637,637,254,254,573,254,954,637,637,637,637,381,573,319,637,573,827,573,573,573,383,297,383,669"},"swissc":{"cap":1.0,"w":"331,344,399,1023,662,-1,814,206,424,424,665,1108,332,439,332,369,662,662,662,662,662,662,662,662,662,662,332,332,1108,1108,1108,661,1330,731,719,751,774,652,575,788,779,293,560,721,633,981,771,779,705,779,777,713,646,766,698,1052,657,668,588,424,369,424,1330,665,665,593,637,612,633,585,345,632,625,265,277,564,260,992,625,642,633,633,387,590,327,625,566,886,536,590,515,665,665,665,1108"},"swisscb":{"cap":1.0,"w":"332,388,440,1023,665,-1,875,229,438,438,665,1108,332,436,332,408,665,665,665,665,665,665,665,665,665,665,363,363,1108,1108,1108,653,1330,727,725,729,782,658,650,783,795,356,586,726,649,1005,793,781,725,781,768,729,641,794,727,1089,729,731,644,436,408,436,1330,665,665,645,646,604,646,633,366,646,645,322,334,575,322,999,645,636,646,646,449,585,362,644,590,871,581,590,509,665,665,665,1108"},"romans":{"cap":1.0,"w":"1000,476,667,1000,952,-1,1238,476,667,667,762,1238,476,1238,476,1048,952,952,952,952,952,952,952,952,952,952,476,476,1143,1238,1143,857,1286,857,1000,1000,1000,905,857,1000,1048,381,762,1000,810,1143,1048,1048,1000,1048,1000,952,762,1048,857,1143,952,857,952,667,1048,619,1048,1143,571,905,905,857,905,857,571,905,905,381,476,810,381,1429,905,905,905,905,619,810,571,905,762,1048,810,762,810,667,381,667,1238"},"simplex":{"cap":1.0,"w":"905,619,714,905,952,-1,1238,429,667,667,762,1238,476,1238,476,1048,952,762,952,952,952,952,952,952,952,952,714,667,952,1238,952,857,1143,1048,1000,1000,1000,905,857,1000,1048,381,762,1000,810,1143,1048,1048,1000,1048,1000,952,857,1048,952,1143,952,952,952,714,1048,571,952,1143,429,905,905,857,905,857,571,905,905,381,476,810,381,1429,905,905,905,905,619,810,667,905,762,1048,810,762,810,571,333,524,1238"},"txt":{"cap":1.0,"w":"1000,333,667,1000,1000,-1,1000,500,667,667,1000,1000,500,1000,333,1000,833,667,1000,1000,1000,1000,1000,1000,1000,1000,333,500,833,1000,833,833,1000,1000,1000,1000,1000,1000,1000,1000,1000,667,1000,1000,1000,1000,1000,1000,1000,1000,1000,1000,1000,1000,1333,1333,1000,1000,1000,667,1000,667,1000,1000,500,1000,1000,1000,1000,1000,1000,1000,1000,333,833,1000,500,1000,1000,1000,1000,1000,1000,1000,1000,1000,1000,1000,1000,1000,1000,667,333,667,1000"},"romanc":{"cap":1.0,"w":"1000,476,667,1000,952,-1,1190,476,667,667,762,1238,476,1238,476,1048,952,810,952,952,952,952,952,952,952,952,476,476,1143,1238,1143,857,1286,952,1048,1000,1048,1000,952,1095,1143,524,714,1048,857,1190,1095,1048,1048,1048,1048,952,905,1143,952,1143,952,1000,952,667,1048,667,1048,1143,571,952,1000,905,1000,905,619,905,1048,524,524,1000,524,1571,1048,952,1000,952,810,810,714,1048,857,1143,952,905,857,667,381,667,1238"},"isocp":{"cap":0.9,"w":"400,300,600,900,700,-1,901,350,400,400,700,700,350,700,300,700,700,500,700,700,800,700,700,700,700,703,300,350,700,700,700,700,1100,900,800,700,800,700,700,800,800,300,600,805,700,900,800,800,800,900,800,800,800,800,900,1100,900,900,800,400,700,400,600,1100,500,700,700,600,700,700,600,700,700,300,500,700,400,900,700,700,700,700,600,702,600,700,700,900,700,700,700,500,300,500,700"},"romand":{"cap":1.0,"w":"1000,524,857,1048,905,-1,1190,524,667,667,810,1190,524,1190,524,1095,952,952,952,952,952,952,952,952,952,952,524,524,1143,1190,1143,905,1286,952,952,1000,1000,905,857,1000,1048,429,810,1000,810,1143,1048,1048,952,1048,952,952,810,1048,952,1238,952,905,952,667,1095,667,1048,1143,524,952,952,857,952,857,667,952,952,429,429,905,429,1476,952,905,952,952,667,810,524,952,762,1143,857,762,857,667,429,667,1286"}}).map(([k, v]) => [k, {cap: v.cap, w: Int16Array.from(v.w.split(",").map(Number))}]));
+const AF_ALIAS = {"times new roman": "times", "tnr": "times", "timesbi": "timesbd", "arial": "arial", "ariali": "arial", "arialbi": "arialbd", "arial narrow": "arialn", "arialnb": "arialn", "arialni": "arialn",
+  "swis721 cn bt": "swissc", "swis721 bdcn bt": "swisscb", "swissci": "swissc", "swisscbi": "swisscb", "simplex8": "simplex"};
+export const faceCss = (f, px) => (FACES[f] || FACES[0]).css.replace("%", px);
+/* a font — a text style's file, or the family an MTEXT \f code names — as one of the faces, and k: how much narrower AutoCAD draws
+   it than that face (a condensed font: Arial Narrow, Swiss 721 Condensed) */
+export function fontFace(name, bold, italic){
+  const n = String(name || "").split(/[\\/]/).pop().replace(/\.(ttf|ttc|otf|shx|pfb)$/i, "").trim().toLowerCase();
+  const serif = /^(times|tnr|georgia|garamond|gara|book ?antiqua|bkant|cambria|century(?! gothic)|schlbk|romantic|romanc|romant|bodoni|bod_|baskvill|palatino|pala|constan)/.test(n);
+  const b = !!bold || /(^arialbd|^arialbi|^timesbd|^timesbi|^swisscb|^swissb|bold|heavy|black|\bbd\b|bdcn|demi)/.test(n);
+  const it = !!italic || /(^ariali|^arialbi|^timesi|^timesbi|^swissi|^swisscbi|^swissci|italic|oblique)/.test(n);
+  let t = n.replace(/\s+(ce|cyr|baltic|greek|tur|western)$/, ""); t = AFW[t] ? t : AF_ALIAS[t] || "";
+  if (t === "times" && b) t = "timesbd"; else if (t === "times" && it) t = "timesi"; else if (t === "arial" && b) t = "arialbd"; else if (t === "swissc" && b) t = "swisscb";
+  return {f: (serif ? 4 : 0) + (b ? 1 : 0) + (it ? 2 : 0), t: AFW[t] || null, k: AFW[t] ? 1 : /(narrow|^arialn|^swissc|swis721 (bd |lt |blk )?cn|\bcn\b|condensed|compressed|^agency)/.test(n) ? 0.8 : 1};
+}
+const fEm = (F, h) => { const fc = FACES[F.f]; return h * fc.em * (F.t ? F.t.cap / fc.hcap : 1); };   // a font's em for text h high (an SHX font's capitals: its own height)
+/* a line of text's width for h high (width factor 1): AutoCAD's advances where they are known, else the face's (a condensed font narrower) */
+function textW(s, F, h){
+  const em = fEm(F, h), W = FACES[F.f].w, T = F.t && F.t.w; let w = 0;
+  for (const ch of String(s)) { const cp = ch.codePointAt(0), a = T && cp >= 32 && cp <= 126 ? T[cp - 32] : -1;
+    if (a >= 0) w += a * h / 1000; else { const c = winCode(cp); w += (c ? W[c - 32] : 556) / 1000 * em * F.k; } }
+  return w;
+}
 const WIN_HI = {0x20ac: 128, 0x201a: 130, 0x192: 131, 0x201e: 132, 0x2026: 133, 0x2020: 134, 0x2021: 135, 0x2c6: 136, 0x2030: 137, 0x160: 138, 0x2039: 139, 0x152: 140,
   0x17d: 142, 0x2018: 145, 0x2019: 146, 0x201c: 147, 0x201d: 148, 0x2022: 149, 0x2013: 150, 0x2014: 151, 0x2dc: 152, 0x2122: 153, 0x161: 154, 0x203a: 155, 0x153: 156, 0x17e: 158, 0x178: 159};
 const winCode = cp => cp >= 32 && cp < 127 || cp >= 160 && cp <= 255 ? cp : WIN_HI[cp] || 0;
-export const emW = s => { let w = 0; for (const ch of String(s)) { const c = winCode(ch.codePointAt(0)); w += c ? HELV[c - 32] : 556; } return w / 1000; };
+export const emW = (s, f) => { const W = (FACES[f] || FACES[0]).w; let w = 0; for (const ch of String(s)) { const c = winCode(ch.codePointAt(0)); w += c ? W[c - 32] : 556; } return w / 1000; };   // f: the face (Helvetica when not given)
 /* %%c Ø, %%d °, %%p ±, %%nnn a character code, \U+XXXX a Unicode character; %%u / %%o / %%k (underline…) dropped */
 export function acadStr(s){
   return String(s == null ? "" : s).replace(/%%%/g, "\u0000").replace(/%%(\d{3})/g, (m, d) => String.fromCharCode(+d)).replace(/%%[cC]/g, "Ø")
     .replace(/%%[dD]/g, "°").replace(/%%[pP]/g, "±").replace(/%%[uUoOkK]/g, "").replace(/\u0000/g, "%")
     .replace(/\\U\+([0-9a-fA-F]{4})/g, (m, h) => String.fromCharCode(parseInt(h, 16))).replace(/[\t\r\n]+/g, " ");
 }
-/* MTEXT's formatting codes stripped: the paragraphs it shows (\P a new line, \S1/2; a fraction, \~ a space, {…} groups) */
-export function mtextLines(raw){
-  const s = String(raw == null ? "" : raw); let out = "";
+/* MTEXT's formatting codes stripped: the paragraphs it shows (\P a new line, \S1/2; a fraction, \~ a space, {…} groups).
+   fmt, an array given: each paragraph's look at its first character — {f: the \f font family, b, i: bold / italic, c: the \C colour
+   index, w: the \W width factor} (unset: the style's) */
+export function mtextLines(raw, fmt){
+  const s = String(raw == null ? "" : raw), stk = []; let out = "", F = {}, P = 0, got = false;
+  const seen = () => { if (fmt && !got) { fmt[P] = Object.assign({}, F); got = true; } }, br = () => { P++; got = false; };
   for (let i = 0; i < s.length;) {
     const ch = s[i];
     if (ch === "\\" && i + 1 < s.length) {
       const c = s[i + 1];
-      if (c === "P" || c === "N") { out += "\n"; i += 2; continue; }
+      if (c === "P" || c === "N") { out += "\n"; br(); i += 2; continue; }
       if (c === "~") { out += " "; i += 2; continue; }
-      if (c === "\\" || c === "{" || c === "}") { out += c; i += 2; continue; }
-      if (c === "U" && s[i + 2] === "+" && /^[0-9a-fA-F]{4}$/.test(s.substr(i + 3, 4))) { out += String.fromCharCode(parseInt(s.substr(i + 3, 4), 16)); i += 7; continue; }
-      if (c === "S") { const e = s.indexOf(";", i + 2), b = e < 0 ? s.slice(i + 2) : s.slice(i + 2, e); if (/\d$/.test(out)) out += " "; out += b.replace(/\s*[\/#]\s*/, "/").replace(/\s*\^\s*/, " "); i = e < 0 ? s.length : e + 1; continue; }
+      if (c === "\\" || c === "{" || c === "}") { seen(); out += c; i += 2; continue; }
+      if (c === "U" && s[i + 2] === "+" && /^[0-9a-fA-F]{4}$/.test(s.substr(i + 3, 4))) { seen(); out += String.fromCharCode(parseInt(s.substr(i + 3, 4), 16)); i += 7; continue; }
+      if (c === "S") { const e = s.indexOf(";", i + 2), b = e < 0 ? s.slice(i + 2) : s.slice(i + 2, e); seen(); if (/\d$/.test(out)) out += " "; out += b.replace(/\s*[\/#]\s*/, "/").replace(/\s*\^\s*/, " "); i = e < 0 ? s.length : e + 1; continue; }
       if ("LlOoKk".includes(c)) { i += 2; continue; }
-      if ("fFHWQTACcpXa".includes(c)) { const e = s.indexOf(";", i + 2); i = e < 0 ? s.length : e + 1; continue; }
+      if ("fFHWQTACcpXa".includes(c)) { const e = s.indexOf(";", i + 2), v = e < 0 ? s.slice(i + 2) : s.slice(i + 2, e);
+        if (fmt) { if (c === "f" || c === "F") { const q = v.split("|"); F = Object.assign({}, F, {f: q[0], b: q.includes("b1"), i: q.includes("i1")}); }
+          else if (c === "C") { const n = parseInt(v, 10); if (n >= 0 && n <= 256) F = Object.assign({}, F, {c: n}); }
+          else if (c === "W") { const m = /^\s*(\d*\.?\d+)\s*([xX]?)\s*$/.exec(v); if (m && +m[1] > 0) F = Object.assign({}, F, {w: m[2] ? (F.w || 1) * m[1] : +m[1]}); } }
+        i = e < 0 ? s.length : e + 1; continue; }
       i += 1; continue;
     }
-    if (ch === "{" || ch === "}") { i++; continue; }
+    if (ch === "{") { stk.push(F); i++; continue; }
+    if (ch === "}") { if (stk.length) F = stk.pop(); i++; continue; }
+    if (ch === "\n") br(); else if (ch.trim()) seen();
     out += ch; i++;
   }
   return out.split("\n");
@@ -102,19 +148,23 @@ function mtextH(raw, h){
   }
   return H > 0 ? H : h;
 }
-const wrap = (s, w) => {   // words of a paragraph to lines no wider than w (em)
+const wrap = (s, w, W) => {   // words of a paragraph to lines no wider than w, measured by W
   const out = []; let cur = "";
-  s.split(/(\s+)/).forEach(t => { if (!t) return; const n = cur + t; if (cur.trim() && emW(n.trimEnd()) > w) { out.push(cur.trimEnd()); cur = t.trimStart(); } else cur = n; });
+  s.split(/(\s+)/).forEach(t => { if (!t) return; const n = cur + t; if (cur.trim() && W(n.trimEnd()) > w) { out.push(cur.trimEnd()); cur = t.trimStart(); } else cur = n; });
   out.push(cur.trimEnd()); return out;
 };
-/* a string as WinAnsi bytes for the PDF's Helvetica (a character it has not: "?") */
+/* a string as WinAnsi bytes for the PDF's standard fonts (a character they have not: "?") */
 const winHex = s => { let h = ""; for (const ch of String(s)) h += (winCode(ch.codePointAt(0)) || 63).toString(16).padStart(2, "0"); return h; };
 
 /* ------------------------------------------------------------------ the readers (loaded on first use) */
 const LIB = {};
 export function cadUse(o){ Object.assign(LIB, o || {}); }   // tests / offline copies: the reader modules handed in
-let dwgP = null, dxfP = null;
-function dwgLib(){
+let dwgP = null, dxfP = null, dwgUsed = false;
+/* the DWG reader. A LibreDWG WebAssembly instance reads ONE drawing: a second read in the same instance can come out short or trap
+   (seen: a 48,607-object drawing read as 3,188 objects after another drawing, a third read "memory access out of bounds") — so a read
+   after the first gets a new instance (~0.1 s; a drawing read in its own worker always has a new one). fresh: a new one now */
+function dwgLib(fresh){
+  if (fresh || dwgUsed) { dwgP = null; dwgUsed = false; }
   return dwgP || (dwgP = (async () => { const m = LIB.dwg || await import(LDWG), lib = await m.LibreDwg.create(LIB.dwgWasm), pr = Object.getPrototypeOf(lib);
     /* a field the reader trips on (it can trap inside the WebAssembly) is read as unset, rather than losing the whole drawing */
     Object.getOwnPropertyNames(pr).filter(k => /^dwg_dynapi_\w+_value$/.test(k) && typeof pr[k] === "function").forEach(k => { const f = pr[k];
@@ -138,7 +188,7 @@ export async function cadRead(buf, name){
   return readDxf(u8);
 }
 async function readDwg(u8){
-  const ver = head(u8, 6), {m, lib} = await dwgLib(), W = lib.wasmInstance;
+  const ver = head(u8, 6), {m, lib} = await dwgLib(), W = lib.wasmInstance; dwgUsed = true;
   if (ver < "AC1012") throw new Error("AutoCAD " + (VERS[ver] || ver) + " drawings are too old for the DWG reader — save it again in AutoCAD as a newer DWG, or as DXF");
   let ptr = 0, err = 0;
   if (W && W.FS && typeof W.dwg_read_file === "function") {
@@ -154,7 +204,15 @@ async function readDwg(u8){
   let db, st = {};
   try { const r = typeof lib.convertEx === "function" ? lib.convertEx(ptr) : {database: lib.convert(ptr)}; db = r.database; st = r.stats || {}; }
   finally { try { lib.dwg_free(ptr); } catch (e) {} }
-  const md = normDwg(db); md.ver = ver; md.unk = st.unknownEntityCount || 0; md.warn = err; return md;   // (normDwg throws for a drawing that came out unreadable)
+  const md = normDwg(db); md.ver = ver; md.unk = st.unknownEntityCount || 0; md.warn = err;   // (normDwg throws for a drawing that came out unreadable)
+  const ovr = e => e.t === "LEADER" && e.dso;   // (LibreDWG's DXF of the drawing — a second read — only for leaders with overrides, and not for a big drawing)
+  if (u8.length < 1.2e7 && typeof lib.dwg_write_dxf === "function" && (md.ents.some(ovr) || [...md.blocks.values()].some(b => b.ents.some(ovr)))) {
+    let W2 = null;   // (in a new instance of its own: a second read in the first can come out short)
+    try { const {lib: L2} = await dwgLib(true); dwgUsed = true; W2 = L2.wasmInstance;
+      const out = L2.dwg_write_dxf(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)); if (out && out.length) md.ldr = dxfLeaders(new TextDecoder("windows-1252").decode(out)); }   // (the DWG reader garbles a leader's overrides)
+    catch (e) {} finally { try { if (W2 && W2.FS) W2.FS.unlink("tmp.dxf"); } catch (e) {} }
+  }
+  return md;
 }
 async function readDxf(u8){
   const M = await dxfLib(), P = new M.DxfParser();
@@ -162,9 +220,27 @@ async function readDxf(u8){
   if (/^AutoCAD Binary DXF/.test(head(u8, 18))) dx = P.parseBuffer(u8);
   else { let t; try { t = new TextDecoder("utf-8", {fatal: true}).decode(u8); } catch (e) { t = new TextDecoder("windows-1252").decode(u8); } dx = P.parseSync(t);
     if (dx && /\nMULTILEADER\r?\n/.test(t)) { const H = mlHeights(t), fix = L => (L || []).forEach(e => { const h = e && e.type === "MULTILEADER" && H.get(String(e.handle).toUpperCase()); if (h) e.textHeight = h; });
-      if (H.size) { fix(dx.entities); Object.values(dx.blocks || {}).forEach(b => fix(b && b.entities)); } } }
+      if (H.size) { fix(dx.entities); Object.values(dx.blocks || {}).forEach(b => fix(b && b.entities)); } }
+    if (dx && /\nLEADER\r?\n/.test(t)) dx.zdLdr = dxfLeaders(t); }
   if (!dx || !Array.isArray(dx.entities)) throw new Error("the DXF could not be read");
-  return normDxf(dx);
+  const md = normDxf(dx); if (dx.zdLdr) md.ldr = dx.zdLdr; return md;
+}
+/* from a DXF's text: its dimension styles (name -> {asz DIMASZ, dsc DIMSCALE, blk DIMLDRBLK's block handle}) and each leader's style and
+   its own overrides (handle -> {st, asz, dsc, blk}: ACAD DSTYLE xdata) — what sizes and shapes a leader's arrowhead, as AutoCAD draws it */
+function dxfLeaders(t){
+  const styles = new Map(), leaders = new Map();
+  const walk = (i, f) => { for (let n = 0; n < 5000; n++) { const a = t.indexOf("\n", i), b = a < 0 ? -1 : t.indexOf("\n", a + 1); if (b < 0) return;
+    const code = +t.slice(i, a), v = t.slice(a + 1, b).trim(); i = b + 1; if (code === 0 || f(code, v) === false) return; } };
+  let re = /\n[ \t]*0\r?\nDIMSTYLE\r?\n/g, m;
+  while ((m = re.exec(t))) { const o = {}; let nm = "";
+    walk(re.lastIndex, (c, v) => { if (c === 2) nm = v.toUpperCase(); else if (c === 41) o.asz = +v; else if (c === 40) o.dsc = +v; else if (c === 341) o.blk = v.toUpperCase(); });
+    if (nm) styles.set(nm, o); }
+  re = /\n[ \t]*0\r?\nLEADER\r?\n[ \t]*5\r?\n([0-9A-Fa-f]+)\r?\n/g;
+  while ((m = re.exec(t))) { const o = {}; let ds = false, k = 0;
+    walk(re.lastIndex, (c, v) => { if (c === 3) o.st = v.toUpperCase(); else if (c === 1000 && v === "DSTYLE") ds = true; else if (ds && c === 1002 && v === "}") ds = false;
+      else if (ds && c === 1070) k = +v; else if (ds && (c === 1040 || c === 1005)) { if (k === 41) o.asz = +v; else if (k === 40) o.dsc = +v; else if (k === 341) o.blk = v.toUpperCase(); } });
+    leaders.set(m[1].toUpperCase(), o); }
+  return {styles, leaders};
 }
 /* each multileader's text height, by handle: CONTEXT_DATA's group 41 — dxf-json reads the MTEXT's box height (44) over it */
 function mlHeights(t){
@@ -191,13 +267,17 @@ function model(fmt, hv){
   const u = Math.round(n("INSUNITS")) || 0;
   return {fmt, ver: "", units: u >= 0 && u <= 24 ? u : 0, badHeader: !(u >= 0 && u <= 24), metric: n("MEASUREMENT") === 1, ltscale: n("LTSCALE") > 0 ? n("LTSCALE") : 1,
     dimasz: (n("DIMASZ") > 0 ? n("DIMASZ") : 0.18) * (n("DIMSCALE") > 0 ? n("DIMSCALE") : 1), textsize: n("TEXTSIZE") > 0 ? n("TEXTSIZE") : 2.5, lunits: Math.round(n("LUNITS")) || 0,
-    layers: new Map(), lorder: [], ltypes: new Map(), styles: new Map(), blocks: new Map(), bh: new Map(), ents: [], unk: 0, warn: 0};
+    layers: new Map(), lorder: [], ltypes: new Map(), styles: new Map(), styleH: new Map(), blocks: new Map(), bh: new Map(), ents: [], unk: 0, warn: 0,
+    lwd: !!n("LWDISPLAY")};   // (LWDISPLAY: AutoCAD shows the lineweights — off, every line thin)
 }
 function addLayer(md, name, c, aci, off, frozen, plot, lw, lt){
   name = String(name == null || name === "" ? "0" : name); const k = name.toUpperCase(); if (md.layers.has(k)) return;
   md.layers.set(k, {name, c, aci, off: !!off, frozen: !!frozen, plot: plot !== false, lw: lw == null ? -3 : lw, lt: String(lt || "CONTINUOUS").toUpperCase()}); md.lorder.push(k);
 }
-function addStyle(md, t){ const k = String(t && t.name || "").toUpperCase(); if (k) md.styles.set(k, String(t.font || "")); }   // a text style -> its font file
+function addStyle(md, t){   // a text style -> {font (its file), wf (width factor)}
+  const k = String(t && t.name || "").toUpperCase(); if (!k) return;
+  md.styles.set(k, {font: String(t.font || ""), wf: +t.widthFactor > 0 ? +t.widthFactor : 1}); if (t.handle) md.styleH.set(String(t.handle).toUpperCase(), k);
+}
 function addLtype(md, t){ const k = String(t && t.name || "").toUpperCase(); if (k) md.ltypes.set(k, (t.pattern || []).map(p => +p.elementLength || 0)); }
 function normDwg(db){
   const H = db.header || {}, md = model("DWG", k => H[k]), T = db.tables || {};
@@ -262,9 +342,10 @@ function norm(e, dwg){
       o.fp = arr(e.fitPoints).map(P2); { const Q = o.cp.length ? o.cp : o.fp, a = Q[0], b = Q[Q.length - 1];   // (a DWG's spline flags are not DXF's: closed = the ends meet)
         o.closed = !!(a && b && Q.length > 2 && Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-9 * (1 + Math.abs(a[0]) + Math.abs(a[1]))) || (!dwg && !!((+e.flag || 0) & 1)); } o.ex = null; break;
     case "TEXT": case "ATTRIB": case "ATTDEF": { const b = dwg && t !== "TEXT" ? e.text || {} : e, fl = +((dwg ? e.flags : e.attributeFlag) ?? e.flags ?? 0) || 0;
-      o.s = acadStr(b.text); o.p = P2(b.startPoint); o.p2 = P2n(t === "TEXT" ? b.endPoint : b.endPoint || e.alignmentPoint); o.h = +b.textHeight || 0; o.rot = A(b.rotation);
+      o.s = acadStr(b.text); o.p = P2(b.startPoint); o.h = +b.textHeight || 0; o.rot = A(b.rotation);
       o.wf = +(b.xScale ?? b.scale) || 1; o.obl = A(b.obliqueAngle); o.ha = +(b.halign ?? b.horizontalJustification ?? b.horizontalAlignment) || 0;
       o.va = +(b.valign ?? b.verticalJustification ?? b.verticalAlignment) || 0; o.gen = +(b.generationFlag ?? b.textGenerationFlag) || 0;
+      { const ap = t === "TEXT" ? b.endPoint : b.endPoint || e.alignmentPoint; o.p2 = (o.ha || o.va) && ap ? P2(ap) : P2n(ap); }   // (a justified text's alignment point, 0,0 too)
       o.st = String(b.styleName || e.styleName || "");
       if (t !== "TEXT") { o.tag = String(e.tag || ""); o.inv = !!(fl & 1); o.cst = !!(fl & 2); if (t === "ATTDEF" && !o.cst) o.s = o.tag; }
       break; }
@@ -281,13 +362,15 @@ function norm(e, dwg){
       o.grad = +e.gradientFlag === 1 ? gradColor(e) : null; break;
     case "SOLID": case "TRACE": o.q = (e.points ? arr(e.points) : [e.corner1, e.corner2, e.corner3, e.corner4].filter(Boolean)).map(P2); break;
     case "3DFACE": o.q = (e.vertices ? arr(e.vertices) : [e.corner1, e.corner2, e.corner3, e.corner4].filter(Boolean)).map(P2); o.ex = null; break;
-    case "LEADER": o.v = arr(e.vertices).map(P2); o.arrow = e.isArrowheadEnabled !== false && e.isArrowheadEnabled !== 0; o.ex = null; break;
+    case "LEADER": o.v = arr(e.vertices).map(P2); o.arrow = e.isArrowheadEnabled !== false && e.isArrowheadEnabled !== 0; o.ex = null;
+      o.dso = dwg && arr(e.xdata).some(x => x.appName === "ACAD" && arr(x.value).some(v => v.value === "DSTYLE")); break;   // (a DWG leader with dimension overrides: the reader garbles their values)
     case "MULTILEADER": case "MLEADER": { const cs = +e.contentScale || 1, d = P2n(e.textDirection); o.t = "MULTILEADER"; o.lines = []; o.ex = null;   // (its text height and dogleg come already scaled; the arrowhead size does not)
       o.dog = []; arr(e.leaderSections).forEach(s => { const lp = P2n(s.lastLeaderLinePoint);
         arr(s.leaderLines).forEach(l => { const v = arr(l.vertices).map(P2); if (lp) v.push(lp); if (v.length >= 2) o.lines.push(v); });
         const dl = +(s.doglegLength ?? e.doglegLength) || 0; if (lp && s.doglegVector && e.doglegEnabled !== false && dl > 0) { const dv = P2(s.doglegVector); o.dog.push([lp, [lp[0] + dv[0] * dl, lp[1] + dv[1] * dl]]); } });
+      o.lc = e.leaderLineColor; o.tc = e.textColor; o.ab = e.arrowheadId ? String(e.arrowheadId).toUpperCase() : "";
       o.asz = (+e.arrowheadSize || 0) * cs; o.s = e.hasMText !== false && e.textContent ? String(e.textContent) : ""; o.p = P2(e.textAnchor || e.contentBasePosition);
-      o.h = +e.textHeight || (+e.arrowheadSize || 0) * cs; o.rot = d ? Math.atan2(d[1], d[0]) : +e.textRotation || 0; o.att = +e.textAttachmentPoint || 1; o.w = +e.textWidth || 0; break; }
+      o.sth = e.textStyleId ? String(e.textStyleId).toUpperCase() : ""; o.h = +e.textHeight || (+e.arrowheadSize || 0) * cs; o.rot = d ? Math.atan2(d[1], d[0]) : +e.textRotation || 0; o.att = +e.textAttachmentPoint || 1; o.w = +e.textWidth || 0; break; }
     case "MLINE": { const V = dwg ? arr(e.vertices).map(v => ({p: P2(v.vertex), m: P2(v.miterDirection), el: arr(v.lines).map(l => +((l.segmentParams || [])[0]) || 0)}))
         : arr(e.segments).map(s => ({p: P2(s.position), m: P2(s.miterDirection), el: arr(s.elements).map(l => +((l.parameters || [])[0]) || 0)}));
       const ne = V.reduce((a, v) => Math.max(a, v.el.length), 0); o.closed = !!((+e.flags || 0) & 2); o.ml = []; o.ex = null;
@@ -504,39 +587,56 @@ export function cadScene(md, opt){
     let lw = e.lw === -1 ? Ly.lw : e.lw === -2 ? cx.lw : e.lw; if (!(lw >= 0)) lw = -3;
     return {nm, li, c, lw, lt: e.lt === "BYLAYER" || !e.lt ? Ly.lt : e.lt === "BYBLOCK" ? cx.lt : e.lt};
   };
-  const text = (s, x, y, em, rot, wf, obl, li, c, mx, my) => {   // a line of text, its baseline starting at (x, y), em high
+  const text = (s, x, y, em, rot, wf, obl, li, c, mx, my, f) => {   // a line of text in face f, its baseline starting at (x, y), em high
     if (!s || !(em > 0) || TX.length > 400000) return;
     const cr = Math.cos(rot), sr = Math.sin(rot), to = Math.tan(obl || 0);
     let axx = cr * em * wf, axy = sr * em * wf, ayx = (-sr + cr * to) * em, ayy = (cr + sr * to) * em;
     if (mx) { axx = -axx; axy = -axy; } if (my) { ayx = -ayx; ayy = -ayy; }
-    const t = {s, li, c, e: cur, u: curU, o: [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]], ax: [m[0] * axx + m[2] * axy, m[1] * axx + m[3] * axy], ay: [m[0] * ayx + m[2] * ayy, m[1] * ayx + m[3] * ayy]};
+    const t = {s, li, c, f: f || 0, e: cur, u: curU, o: [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]], ax: [m[0] * axx + m[2] * axy, m[1] * axx + m[3] * axy], ay: [m[0] * ayx + m[2] * ayy, m[1] * ayx + m[3] * ayy]};
     if (![...t.o, ...t.ax, ...t.ay].every(v => Math.abs(v) < 1e12)) { junk++; return; } TX.push(t);
   };
   /* a style whose font has no small letters (Technic, Copperplate Gothic, Stencil…): AutoCAD draws its text in capitals */
-  const caps = e => CAPS_FONT.test(String((md.styles && md.styles.get(String(e.st || "").toUpperCase())) || "").split(/[\\/]/).pop());
+  const sty = e => md.styles.get(String(e.st || (e.sth && md.styleH.get(e.sth)) || "STANDARD").toUpperCase()) || md.styles.get("STANDARD") || null;   // the text style an object is in
+  const caps = e => CAPS_FONT.test(String((sty(e) || {}).font || "").split(/[\\/]/).pop());
   const textEnt = (e, r) => {
-    const h = e.h > 0 ? e.h : md.textsize, up = caps(e), s = up ? String(e.s).toUpperCase() : e.s; let em = h / CAP * (up && /[a-z]/.test(e.s) && !/[A-Z]/.test(e.s) ? SMALL_CAP : 1), wf = e.wf || 1, rot = e.rot, ox = e.p[0], oy = e.p[1];   // small letters: small capitals
-    const W = emW(s) * em * wf, q = e.p2 || e.p;   // (AutoCAD's alignment point: centre, right, middle…)
+    const F = fontFace((sty(e) || {}).font), fc = FACES[F.f];   // (a TEXT keeps its own width factor)
+    const h = e.h > 0 ? e.h : md.textsize, up = caps(e), s = up ? String(e.s).toUpperCase() : e.s, sm = up && /[a-z]/.test(e.s) && !/[A-Z]/.test(e.s) ? SMALL_CAP : 1;   // small letters: small capitals
+    let em = fEm(F, h) * sm, rot = e.rot, ox = e.p[0], oy = e.p[1];
+    const W = textW(s, F, h * sm) * (e.wf || 1), nat = emW(s, F.f) * em, q = e.p2 || e.p; let wf = nat > 0 ? W / nat : e.wf || 1;   // (the face's glyphs drawn to AutoCAD's width)   // (AutoCAD's alignment point: centre, right, middle…)
     if ((e.ha === 3 || e.ha === 5) && e.p2) {   // aligned / fit: between the two points
       const dx = q[0] - e.p[0], dy = q[1] - e.p[1], L = Math.hypot(dx, dy);
       if (L > 1e-9 && W > 0) { rot = Math.atan2(dy, dx); if (e.ha === 5) wf *= L / W; else em *= L / W; }
-    } else if (e.ha || e.va) {
-      const cr = Math.cos(rot), sr = Math.sin(rot);
-      const dx = e.ha === 1 || e.ha === 4 ? -W / 2 : e.ha === 2 ? -W : 0, dy = e.ha === 4 ? -h / 2 : e.va === 3 ? -h : e.va === 2 ? -h / 2 : e.va === 1 ? DESC * em : 0;
+    } else if ((e.ha || e.va) && e.p2) {
+      const cr = Math.cos(rot), sr = Math.sin(rot), fx = e.gen & 2 ? -1 : 1, fy = e.gen & 4 ? -1 : 1;   // (a backwards / upside-down text runs the other way from its point)
+      const dx = (e.ha === 1 || e.ha === 4 ? -W / 2 : e.ha === 2 ? -W : 0) * fx, dy = (e.ha === 4 ? -h / 2 : e.va === 3 ? -h : e.va === 2 ? -h / 2 : e.va === 1 ? fc.desc * em : 0) * fy;
       ox = q[0] + cr * dx - sr * dy; oy = q[1] + sr * dx + cr * dy;
     }
-    text(s, ox, oy, em, rot, wf, e.obl, r.li, r.c, e.gen & 2, e.gen & 4);
+    text(s, ox, oy, em, rot, wf, e.obl, r.li, r.c, e.gen & 2, e.gen & 4, F.f);
   };
   const mtextEnt = (e, r) => {
-    const h = mtextH(e.s, e.h > 0 ? e.h : md.textsize), em = h / CAP, L = [], SM = [], wMax = e.w > 0 ? e.w / em : 0, up = caps(e);
-    mtextLines(e.s).forEach(p => { p = acadStr(p); const k = up && /[a-z]/.test(p) && !/[A-Z]/.test(p) ? SMALL_CAP : 1; if (up) p = p.toUpperCase();   // small letters in a capitals-only font: small capitals
-      (wMax > 0 ? wrap(p, wMax / k) : [p]).forEach(l => { L.push(l); SM.push(k); }); });
+    const h = mtextH(e.s, e.h > 0 ? e.h : md.textsize), L = [], up = caps(e), S0 = sty(e), F0 = fontFace(S0 && S0.font), fmt = [];
+    /* each paragraph in its own font (its \f code, else the style's), width factor (\W, else the style's) and colour (\C) */
+    mtextLines(e.s, fmt).forEach((p, pi) => { p = acadStr(p); const k = up && /[a-z]/.test(p) && !/[A-Z]/.test(p) ? SMALL_CAP : 1; if (up) p = p.toUpperCase();   // small letters in a capitals-only font: small capitals
+      const q = fmt[pi] || {}, F = q.f ? fontFace(q.f, q.b, q.i) : F0, wf = q.w || (S0 ? S0.wf : 1), em = fEm(F, h) * k, c = q.c == null || q.c === 0 || q.c === 256 ? r.c : aciRgb(q.c);
+      const LW = l => textW(l, F, h * k) * wf;
+      (e.w > 0 ? wrap(p, e.w + 0.08 * h, LW) : [p]).forEach(   // (AutoCAD fits a line by its ink, inside the first and last letters' side bearings)
+l => { const lw = LW(l), nat = emW(l, F.f) * em; L.push({l, f: F.f, lw, wf: nat > 0 ? lw / nat : wf, em, c}); }); });
     const pitch = h * 5 / 3 * (e.ls || 1), n = L.length, col = (e.att - 1) % 3, row = Math.floor((e.att - 1) / 3), cr = Math.cos(e.rot), sr = Math.sin(e.rot);
     const y0 = row <= 0 ? -h : row === 1 ? ((n - 1) * pitch + h) / 2 - h : (n - 1) * pitch;
     const pa = e.w > 0 ? /\\pxq([lcr])/.exec(String(e.s))?.[1] : null, bx = col === 0 ? 0 : col === 1 ? -e.w / 2 : -e.w;   // \pxqc; centres the paragraph in the box, whose edge the attachment point sets
-    L.forEach((l, i) => { if (!l.trim()) return; const lw = emW(l) * em * SM[i], dx = pa ? bx + (pa === "c" ? (e.w - lw) / 2 : pa === "r" ? e.w - lw : 0) : col === 0 ? 0 : col === 1 ? -lw / 2 : -lw, dy = y0 - i * pitch;
-      text(l, e.p[0] + cr * dx - sr * dy, e.p[1] + sr * dx + cr * dy, em * SM[i], e.rot, 1, 0, r.li, r.c); });
+    L.forEach((o, i) => { const l = o.l; if (!l.trim()) return; const lw = o.lw, dx = pa ? bx + (pa === "c" ? (e.w - lw) / 2 : pa === "r" ? e.w - lw : 0) : col === 0 ? 0 : col === 1 ? -lw / 2 : -lw, dy = y0 - i * pitch;
+      text(l, e.p[0] + cr * dx - sr * dy, e.p[1] + sr * dx + cr * dy, o.em, e.rot, o.wf, 0, r.li, o.c, 0, 0, o.f); });
   };
+  /* an arrowhead at tip, pointing away from `from`: the arrow block AutoCAD names (its tip at the block's origin, pointing along +X:
+     _OPEN, _DOT, _ARCHTICK…), else a closed filled one */
+  const arrowAt = (tip, from, sz, blk, li, c, cx0) => {
+    const k = blk && String(blk).toUpperCase(); if (!(sz > 0)) return;
+    if (k && md.blocks.has(k)) { const a = Math.atan2(tip[1] - from[1], tip[0] - from[0]), ca = Math.cos(a) * sz, sa = Math.sin(a) * sz; block(k, [ca, sa, -sa, ca, tip[0], tip[1]], cx0, null); return; }
+    arrow(tip, from, sz, li, c);
+  };
+  /* an object's own colour as the DWG / DXF keeps it (AcCmColor: 0xC3 a colour index, 0xC2 true colour, 0xC0 ByLayer, 0xC1 ByBlock) */
+  const cmCol = (v, r, cx0, dflt) => { if (v == null || !isFinite(+v)) return dflt; const u = (+v) >>> 0, t = u >>> 24;
+    return t === 0xC3 ? ((u & 255) === 0 ? cx0.c : (u & 255) === 256 ? LAY[r.li].c : aciRgb(u & 255)) : t === 0xC2 ? tcol(u & 0xffffff) : t === 0xC0 ? LAY[r.li].c : t === 0xC1 ? cx0.c : dflt; };
   const arrow = (tip, from, sz, li, c) => {   // a closed filled arrowhead at tip, pointing away from `from`
     const dx = tip[0] - from[0], dy = tip[1] - from[1], l = Math.hypot(dx, dy); if (!(l > 0) || !(sz > 0)) return;
     const ux = dx / l, uy = dy / l, bx = tip[0] - ux * sz, by = tip[1] - uy * sz, w = sz / 6;
@@ -560,6 +660,8 @@ export function cadScene(md, opt){
     else if (cx.ins && SUBS.length < MAX_SUB) { rec = {t: e.t, h: e.h, L: -1, p: curU}; curU = -2 - SUBS.length; SUBS.push(rec); }
     if (rec) rec.L = r.li;
     const sc = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1; if (rec && cx.d) rec.k = sc;   // (its length and area in the block's own units: scaled at the end)
+    const a2 = m[0] * m[0] + m[1] * m[1], b2 = m[2] * m[2] + m[3] * m[3], i0 = PK.length;   // (a block stretched more one way than the other: lengths measured as drawn)
+    const sim = Math.abs(a2 - b2) <= 1e-9 * (a2 + b2) && Math.abs(m[0] * m[2] + m[1] * m[3]) <= 1e-9 * (a2 + b2);
     const stroke = wid => style(r.c, r.lw, (wid || 0) * sc, dashFor(r.lt, e.lts, sc), 1);   // (a scaled block scales its dashes and widths too)
     try {
       switch (e.t) {
@@ -612,22 +714,36 @@ export function cadScene(md, opt){
         case "SOLID": case "TRACE": { const q = e.q; if (q.length < 3) break; const Q = q.length >= 4 ? [q[0], q[1], q[3], q[2]] : q;
           beg(); lines(Q); cl(); end(1, r.li, style(r.c, -3, 0, null, 1)); if (rec) { rec.area = Math.abs(polyAreaS(Q)); rec.cl = true; } break; }
         case "3DFACE": if (e.q.length < 3) break; beg(); lines(e.q); cl(); end(0, r.li, stroke()); break;
-        case "LEADER": if (e.v.length < 2) break; beg(); lines(e.v); end(0, r.li, stroke()); if (e.arrow) arrow(e.v[0], e.v[1], md.dimasz, r.li, r.c); break;
-        case "MULTILEADER": e.lines.forEach(v => { beg(); lines(v); end(0, r.li, stroke()); arrow(v[0], v[1], e.asz, r.li, r.c); }); e.dog.forEach(v => { beg(); lines(v); end(0, r.li, stroke()); });
-          if (e.s) mtextEnt({p: e.p, h: e.h, w: e.w, att: e.att, rot: e.rot, s: e.s, ls: 1}, r); break;
+        case "LEADER": { if (e.v.length < 2) break; beg(); lines(e.v); end(0, r.li, stroke()); if (!e.arrow) break;
+          const q = md.ldr && md.ldr.leaders.get(String(e.h).toUpperCase()) || {}, S = md.ldr && md.ldr.styles.get(q.st || "STANDARD") || {};   // (its style's DIMASZ × DIMSCALE and DIMLDRBLK, its own overrides first)
+          const asz = q.asz != null ? q.asz : S.asz != null ? S.asz : null, dsc = q.dsc != null ? q.dsc : S.dsc, bh = q.blk != null ? q.blk : S.blk;
+          arrowAt(e.v[0], e.v[1], asz != null ? asz * (dsc > 0 ? dsc : 1) : md.dimasz, bh && bh !== "0" ? md.bh.get(bh) : "", r.li, r.c, {L: r.nm, c: r.c, lw: r.lw, lt: r.lt, sc: cx.sc, d: cx.d + 1}); break; }
+        case "MULTILEADER": { const lc = cmCol(e.lc, r, cx, r.c), ls = style(lc, r.lw, 0, dashFor(r.lt, e.lts, sc), 1), ab = e.ab && e.ab !== "0" ? md.bh.get(e.ab) : "";   // the leader lines in their own colour, the text in its own
+          e.lines.forEach(v => { beg(); lines(v); end(0, r.li, ls); arrowAt(v[0], v[1], e.asz, ab, r.li, lc, {L: r.nm, c: lc, lw: r.lw, lt: r.lt, sc: cx.sc, d: cx.d + 1}); }); e.dog.forEach(v => { beg(); lines(v); end(0, r.li, ls); });
+          if (e.s) mtextEnt({p: e.p, h: e.h, w: e.w, att: e.att, rot: e.rot, s: e.s, ls: 1, sth: e.sth}, Object.assign({}, r, {c: cmCol(e.tc, r, cx, r.c)})); break; }
         case "MLINE": e.ml.forEach(P => { beg(); lines(P); if (e.closed) cl(); end(0, r.li, stroke()); }); break;
         case "XLINE": case "RAY": { const d = [m[0] * e.d[0] + m[2] * e.d[1], m[1] * e.d[0] + m[3] * e.d[1]], l = Math.hypot(d[0], d[1]); if (!(l > 0)) break;
           XL.push({p: [m[0] * e.a[0] + m[2] * e.a[1] + m[4], m[1] * e.a[0] + m[3] * e.a[1] + m[5]], d: [d[0] / l, d[1] / l], ray: e.t === "RAY", li: r.li, si: stroke(), e: cur, u: curU}); break; }
       }
+      if (rec && cx.d && !sim && rec.len > 0) { rec.len = drawnLen(i0, PK.length); rec.kl = 1; }
     } catch (er) { bad++; } finally { m = m0; curU = u0; }
   };
+  /* the length of the lines drawn as primitives i0..i1 (drawing units, as transformed: curves in 16 steps) */
+  const drawnLen = (i0, i1) => { let s = 0;
+    for (let i = i0; i < i1; i++) { if (PK[i] !== 0) continue; const e1 = i + 1 < PK.length ? P0[i + 1] : nOp; let q = Q0[i], cx = 0, cy = 0, sx = 0, sy = 0;
+      for (let j = P0[i]; j < e1; j++) { const op = OP[j];
+        if (op === 0) { cx = sx = XY[q]; cy = sy = XY[q + 1]; q += 2; }
+        else if (op === 1) { s += Math.hypot(XY[q] - cx, XY[q + 1] - cy); cx = XY[q]; cy = XY[q + 1]; q += 2; }
+        else if (op === 2) { let px = cx, py = cy; for (let t = 1; t <= 16; t++) { const u = t / 16, x = bez(cx, XY[q], XY[q + 2], XY[q + 4], u), y = bez(cy, XY[q + 1], XY[q + 3], XY[q + 5], u); s += Math.hypot(x - px, y - py); px = x; py = y; } cx = XY[q + 4]; cy = XY[q + 5]; q += 6; }
+        else { s += Math.hypot(sx - cx, sy - cy); cx = sx; cy = sy; } } }
+    return s; };
   const top = {L: null, c: INK, lw: -3, lt: "CONTINUOUS", sc: 1, d: 0};
   for (const e of md.ents) { if (trunc) break; cur = ENTS.length; ENTS.push({t: e.t, h: e.h, L: -1}); ent(e, top); }
   /* extents: everything drawn, less a few objects far away from the drawing (a stray block at 0,0 when the plan is at site coordinates) */
   const N = PK.length; let F = [Infinity, Infinity, -Infinity, -Infinity];
   const grow = (B, x0, y0, x1, y1) => { if (x0 < B[0]) B[0] = x0; if (y0 < B[1]) B[1] = y0; if (x1 > B[2]) B[2] = x1; if (y1 > B[3]) B[3] = y1; };
   for (let i = 0; i < N; i++) grow(F, BB[4 * i], BB[4 * i + 1], BB[4 * i + 2], BB[4 * i + 3]);
-  TX.forEach(t => { const w = emW(t.s); grow(F, Math.min(t.o[0], t.o[0] + t.ax[0] * w), Math.min(t.o[1], t.o[1] + t.ax[1] * w), Math.max(t.o[0], t.o[0] + t.ax[0] * w), Math.max(t.o[1], t.o[1] + t.ax[1] * w)); });
+  TX.forEach(t => { const w = emW(t.s, t.f); grow(F, Math.min(t.o[0], t.o[0] + t.ax[0] * w), Math.min(t.o[1], t.o[1] + t.ax[1] * w), Math.max(t.o[0], t.o[0] + t.ax[0] * w), Math.max(t.o[1], t.o[1] + t.ax[1] * w)); });
   if (!isFinite(F[0])) F = [0, 0, 100, 100];
   let B = F.slice(), far = 0;
   if (N > 50) {
@@ -681,21 +797,21 @@ export function cadScene(md, opt){
   pg.p0[n] = o2; pg.q0[n] = q2;
   pg.styles = STY.map(s => ({c: s.c, lw: s.lw >= 0 ? s.lw / 100 : 0.25, wid: s.wid > 0 ? s.wid * k : 0, dash: s.dash ? s.dash.map(v => v * k) : null, a: s.a}));
   const T = TX.filter(t => !crop || (t.o[0] >= B[0] && t.o[0] <= B[2] && t.o[1] >= B[1] && t.o[1] <= B[3])), tn = T.length;
-  pg.tn = tn; pg.tS = T.map(t => t.s); pg.tL = new Uint16Array(tn); pg.tC = new Int32Array(tn); pg.tE = new Int32Array(tn); pg.tU = new Int32Array(tn); pg.tM = new Float32Array(6 * tn); pg.tW = new Float32Array(tn); pg.tB = new Float32Array(4 * tn);
+  pg.tn = tn; pg.tS = T.map(t => t.s); pg.tL = new Uint16Array(tn); pg.tC = new Int32Array(tn); pg.tE = new Int32Array(tn); pg.tU = new Int32Array(tn); pg.tF = new Uint8Array(tn); pg.tM = new Float32Array(6 * tn); pg.tW = new Float32Array(tn); pg.tB = new Float32Array(4 * tn);
   T.forEach((t, i) => {
-    const w = emW(t.s), x = PX(t.o[0]), y = PY(t.o[1]), a = t.ax[0] * k, b = -t.ax[1] * k, c = t.ay[0] * k, d = -t.ay[1] * k;
+    const fc = FACES[t.f], w = emW(t.s, t.f), x = PX(t.o[0]), y = PY(t.o[1]), a = t.ax[0] * k, b = -t.ax[1] * k, c = t.ay[0] * k, d = -t.ay[1] * k; pg.tF[i] = t.f;
     pg.tL[i] = t.li; pg.tC[i] = t.c; pg.tE[i] = t.e; pg.tU[i] = dec(t.u); pg.tW[i] = w; pg.tM.set([a, b, c, d, x, y], 6 * i);
-    const xs = [x, x + a * w, x + c * CAP, x + a * w + c * CAP, x - c * DESC], ys = [y, y + b * w, y + d * CAP, y + b * w + d * CAP, y - d * DESC];
+    const xs = [x, x + a * w, x + c * fc.cap, x + a * w + c * fc.cap, x - c * fc.desc], ys = [y, y + b * w, y + d * fc.cap, y + b * w + d * fc.cap, y - d * fc.desc];
     pg.tB.set([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], 4 * i);
   });
   const fu = uIn / 12;   // drawing units -> feet
   /* a record as kept: lengths in ft, areas in Sft, points on the page — inside a block, scaled by the block and with no handle
      (the block definition's: the same in every insert) */
-  const rout = r => { const o = r.p != null ? {t: r.t, L: r.L} : {t: r.t, h: r.h, L: r.L}, s = r.k || 1; if (r.n) o.n = r.n; if (r.len) o.len = r.len * s * fu; if (r.area) o.area = r.area * s * s * fu * fu; if (r.cl) o.cl = true;
+  const rout = r => { const o = r.p != null ? {t: r.t, L: r.L} : {t: r.t, h: r.h, L: r.L}, s = r.k || 1; if (r.n) o.n = r.n; if (r.len) o.len = r.len * (r.kl ? 1 : s) * fu; if (r.area) o.area = r.area * s * s * fu * fu; if (r.cl) o.cl = true;
     if (r.at) o.at = [PX(r.at[0]), PY(r.at[1])]; if (r.att && r.att.length) o.att = r.att; if (r.loops) o.loops = r.loops.map(l => l.map(p => [PX(p[0]), PY(p[1])])); if (r.p != null) o.p = dec(r.p); return o; };
   pg.ents = ENTS.map(rout); pg.subs = SUBS.map(rout);   // (ents: the drawing's own objects, as AutoCAD lists them; subs: the objects inside its blocks)
   pg.map = {den, x0: B[0], y1: B[3], ox, oy, w: W, h: H, uIn};
-  return {ver: CAD_VER, fmt: md.fmt, dver: md.ver, units, uIn, assumed, unitHow: unitFix || (md.units ? "" : inf ? inf.how : ""), unitFix: !!unitFix, unitName: units ? UNIT_NAME[units] : md.metric ? "millimetres (assumed)" : "inches (assumed)", metric: !!md.metric,
+  return {ver: CAD_VER, fmt: md.fmt, dver: md.ver, lwd: !!md.lwd, units, uIn, assumed, unitHow: unitFix || (md.units ? "" : inf ? inf.how : ""), unitFix: !!unitFix, unitName: units ? UNIT_NAME[units] : md.metric ? "millimetres (assumed)" : "inches (assumed)", metric: !!md.metric,
     layers: LAY.map(l => ({name: l.name, c: l.c, aci: l.aci, off: l.off, frozen: l.frozen, plot: l.plot, lw: l.lw, lt: l.lt})), pages: [pg],
     stats: {ents: md.ents.length, prims: n, texts: tn, segs: nO, skipped, missing, far, junk: junk + (md.bogus || 0), trunc, bad, unk: md.unk || 0, warn: md.warn || 0, ms: Date.now() - T0}};
 }
@@ -716,7 +832,7 @@ class Ops {
   }
   bytes(){ return this.b.subarray(0, this.n); }
 }
-/* the page's drawing as PDF operators (y up), into w. o: {fk font key, A alpha -> ExtGState name, oc each layer in its
+/* the page's drawing as PDF operators (y up), into w. o: {fks the font key of each face, A alpha -> ExtGState name, oc each layer in its
    optional-content group, hidden layers left out, style "color" | "mono" | "gray", lwk line widths times this (a plot keeps its
    mm widths), thin} */
 function pdfOps(pg, o, w){
@@ -756,7 +872,7 @@ function pdfOps(pg, o, w){
     if ((hid && hid[pg.tL[i]]) || (ht && ht[i])) continue;
     layer(pg.tL[i]); const c = pg.tC[i], k = "t" + c; if (k !== fk) { col(c, false, "rg"); fk = k; }
     const m = 6 * i, M = pg.tM;
-    w.s("BT " + o.fk + " 1 Tf ").v(M[m]).v(-M[m + 1]).v(M[m + 2]).v(-M[m + 3]).v(M[m + 4]).v(H - M[m + 5]).s("Tm <" + winHex(pg.tS[i]) + "> Tj ET\n");
+    w.s("BT " + (o.fks[pg.tF ? pg.tF[i] : 0] || o.fks[0]) + " 1 Tf ").v(M[m]).v(-M[m + 1]).v(M[m + 2]).v(-M[m + 3]).v(M[m + 4]).v(H - M[m + 5]).s("Tm <" + winHex(pg.tS[i]) + "> Tj ET\n");
   }
   if (open >= 0) w.s("EMC\n");
 }
@@ -767,12 +883,19 @@ async function opsStream(ctx, w){   // the operators deflated — by the browser
   }
   return ctx.register(ctx.flateStream(raw));
 }
-function pdfRes(L, doc, page, pg, font){   // the page's font and transparency resources -> {fk, A}
+const FONTS = new WeakMap();   // a PDF document's standard fonts, each embedded once: doc -> [font of each face]
+async function pdfFaces(L, doc, pg, f0){   // the fonts of the faces a page's text is in (f0: Helvetica already embedded)
+  let A = FONTS.get(doc); if (!A) FONTS.set(doc, A = []); if (f0 && !A[0]) A[0] = f0;
+  const used = new Set([0]); if (pg.tF) for (let i = 0; i < pg.tn; i++) used.add(pg.tF[i]);
+  for (const f of used) if (!A[f] && FACES[f]) A[f] = await doc.embedFont(L.StandardFonts[FACES[f].pdf]);
+  return A;
+}
+function pdfRes(L, doc, page, pg, fonts){   // the page's font and transparency resources -> {fks, A}
   const res = page.node.normalizedEntries().Resources, N = L.PDFName.of, ctx = doc.context, A = new Map(), gs = {};
-  const fk = page.node.newFontDictionary("F", font.ref).toString();
+  const fks = fonts.map(ft => ft ? page.node.newFontDictionary("F", ft.ref).toString() : null);
   if (pg.styles.some(s => s.a < 1)) { [1, ...pg.styles.map(s => s.a)].forEach(a => { if (!A.has(a)) { const nm = "GA" + A.size; A.set(a, nm); gs[nm] = ctx.obj({Type: "ExtGState", ca: a, CA: a}); } });
     const eg = res.lookup(N("ExtGState")); if (eg) Object.entries(gs).forEach(([k, v]) => eg.set(N(k), v)); else res.set(N("ExtGState"), ctx.obj(gs)); }
-  return {fk, A: A.size ? A : null};
+  return {fks, A: A.size ? A : null};
 }
 export async function cadPdf(sc, L, meta){
   meta = meta || {};
@@ -785,8 +908,8 @@ export async function cadPdf(sc, L, meta){
     const page = doc.addPage([pg.w, pg.h]), props = {};
     ocg.forEach((r, i) => { if (r) props["L" + i] = r; });
     page.node.normalizedEntries().Resources.set(N("Properties"), ctx.obj(props));
-    const R = pdfRes(L, doc, page, pg, font), w = new Ops(pg.ops.length * 14 + pg.tn * 80);
-    w.s("q 1 J 1 j\n"); pdfOps(pg, {fk: R.fk, A: R.A, oc: true}, w); w.s("Q\n");
+    const R = pdfRes(L, doc, page, pg, await pdfFaces(L, doc, pg, font)), w = new Ops(pg.ops.length * 14 + pg.tn * 80);
+    w.s("q 1 J 1 j\n"); pdfOps(pg, {fks: R.fks, A: R.A, oc: true}, w); w.s("Q\n");
     page.node.set(N("Contents"), ctx.obj([await opsStream(ctx, w)]));
   }
   return doc.save({useObjectStreams: true});
@@ -794,10 +917,10 @@ export async function cadPdf(sc, L, meta){
 /* a window of the drawing plotted onto a paper page (pdf-lib), as AutoCAD's PLOT: o {win: [x0, y0, x1, y1] page points (y down),
    s paper points per page point, at: [x, y] the window's lower-left corner on the paper, style, hidden, lw (plot lineweights), font} */
 export async function cadPlotPage(L, doc, page, pg, o){
-  const font = o.font || await doc.embedFont(L.StandardFonts.Helvetica), R = pdfRes(L, doc, page, pg, font), [x0, y0, x1, y1] = o.win, s = o.s, ctx = doc.context, N = L.PDFName.of;
+  const R = pdfRes(L, doc, page, pg, await pdfFaces(L, doc, pg, o.font)), [x0, y0, x1, y1] = o.win, s = o.s, ctx = doc.context, N = L.PDFName.of;
   const ww = (x1 - x0) * s, wh = (y1 - y0) * s, tx = o.at[0] - s * x0, ty = o.at[1] - s * (pg.h - y1), w = new Ops(pg.ops.length * 14 + pg.tn * 80);
   w.s("q\n").v(o.at[0]).v(o.at[1]).v(ww).v(wh).s("re W n\n1 J 1 j\n").v(s).s("0 0 ").v(s).v(tx).v(ty).s("cm\n");
-  pdfOps(pg, {fk: R.fk, A: R.A, hidden: o.hidden, style: o.style, lwk: 1 / s, thin: o.lw === false, ed: o.ed}, w); w.s("Q\n");
+  pdfOps(pg, {fks: R.fks, A: R.A, hidden: o.hidden, style: o.style, lwk: 1 / s, thin: o.lw === false, ed: o.ed}, w); w.s("Q\n");
   const ref = await opsStream(ctx, w), cur = page.node.normalizedEntries().Contents;
   if (cur) cur.push(ref); else page.node.set(N("Contents"), ctx.obj([ref]));
 }
@@ -886,7 +1009,7 @@ function* drawSteps(ctx, pg, v, o){
       if (hid[pg.tL[i]] || (ht && ht[i])) continue; const b = 4 * i; if (tB[b + 2] < x0 || tB[b] > x1 || tB[b + 3] < y0 || tB[b + 1] > y1) continue;
       const m = 6 * i, em = Math.hypot(tM[m + 2], tM[m + 3]) * s; if (em < minPx) continue;
       ctx.setTransform(tM[m] * s / em, tM[m + 1] * s / em, -tM[m + 2] * s / em, -tM[m + 3] * s / em, tM[m + 4] * s + v.tx, tM[m + 5] * s + v.ty);
-      const f = em.toFixed(1) + "px Arial, Helvetica, sans-serif"; if (f !== f0) { ctx.font = f; f0 = f; }
+      const f = faceCss(pg.tF ? pg.tF[i] : 0, em.toFixed(1)); if (f !== f0) { ctx.font = f; f0 = f; }
       ctx.fillStyle = cadCss(pg.tC[i], dark, mono); ctx.fillText(pg.tS[i], 0, 0);
       if (++n % 300 === 0) { yield; ctx.textBaseline = "alphabetic"; f0 = ""; }
     }
@@ -948,23 +1071,25 @@ export const cadRec = (pg, ei) => ei >= 0 && ei < pg.ents.length ? pg.ents[ei] :
 export function cadChain(pg, ei){ const C = []; for (let u = ei, n = 0; u >= 0 && n < 64; n++) { C.unshift(u); const r = cadRec(pg, u); if (!r || r.p == null) break; u = r.p; } return C; }
 export const cadTop = (pg, ei) => cadChain(pg, ei)[0];
 /* the drawing object under a page point: {e (its index in ents), u (the innermost object there — inside a block, the object
-   itself), i (the primitive), d} or null. A hatch drawn as its pattern is picked inside its outline too, as a solid one */
+   itself), i (the primitive), d} or null. A line within tol first, then a text whose box holds the point, then the smallest fill
+   or hatch the point is inside (a hatch drawn as its pattern too, as a solid one) */
 export function cadHit(pg, x, y, tol, hidden, ed){   // ed: AutoCAD-mode edits — what was taken out cannot be picked
-  const g = cadPrep(pg), ids = cand(pg, g, x - tol, y - tol, x + tol, y + tol), p = [x, y], bb = pg.bb, hp = ed && ed.hp, ht = ed && ed.ht, U = pg.leaf || pg.ent; let best = null;
+  const g = cadPrep(pg), ids = cand(pg, g, x - tol, y - tol, x + tol, y + tol), p = [x, y], bb = pg.bb, hp = ed && ed.hp, ht = ed && ed.ht, U = pg.leaf || pg.ent; let best = null, soft = null, sa = Infinity;
+  const under = i => { const b = 4 * i, a = (bb[b + 2] - bb[b]) * (bb[b + 3] - bb[b + 1]); if (a < sa) { sa = a; soft = {e: pg.ent[i], u: U[i], i, d: tol}; } };   // (the smallest fill holding the point)
   for (const i of ids) {
     if ((hidden && hidden[pg.lay[i]]) || (hp && hp[i])) continue; const b = 4 * i; if (bb[b] - tol > x || bb[b + 2] + tol < x || bb[b + 1] - tol > y || bb[b + 3] + tol < y) continue;
     const R = pg.pf[i] === 1 ? cadRec(pg, U[i]) : null, lp = R && R.t === "HATCH" && R.loops;   // (its pattern lines' box is its outline's)
     let d = Infinity; const S = primPaths(pg, i), fill = pg.kind[i] === 1 || pg.kind[i] === 2;
     S.forEach(P => { for (let k = 1; k < P.length; k++) d = Math.min(d, segD(p, P[k - 1], P[k])); if ((P.closed || fill) && P.length > 2) d = Math.min(d, segD(p, P[P.length - 1], P[0])); });
-    if (fill && d > tol) { let inside = false; S.forEach(P => { if (P.length > 2 && inPoly(p, P)) inside = !inside; }); if (inside) d = tol * 0.95; }
-    if (lp && d > tol) { let inside = false; lp.forEach(P => { if (P.length > 2 && inPoly(p, P)) inside = !inside; }); if (inside) d = tol * 0.96; }
+    if (fill && d > tol) { let inside = false; S.forEach(P => { if (P.length > 2 && inPoly(p, P)) inside = !inside; }); if (inside) under(i); }
+    if (lp && d > tol) { let inside = false; lp.forEach(P => { if (P.length > 2 && inPoly(p, P)) inside = !inside; }); if (inside) under(i); }
     if (d <= tol && (!best || d < best.d)) best = {e: pg.ent[i], u: U[i], i, d};
   }
   if (!best && pg.tE) for (let t = 0; t < pg.tn; t++) {   // no line here: a text whose box holds the point
     const b = 4 * t; if ((hidden && hidden[pg.tL[t]]) || (ht && ht[t])) continue;
     if (pg.tB[b] - tol <= x && pg.tB[b + 2] + tol >= x && pg.tB[b + 1] - tol <= y && pg.tB[b + 3] + tol >= y && pg.tE[t] >= 0) return {e: pg.tE[t], u: pg.tU ? pg.tU[t] : pg.tE[t], i: -1, t, d: tol};
   }
-  return best;
+  return best || soft;
 }
 /* the objects' own index: each object's box (page points, over its primitives and texts) and its primitives and texts,
    as lists cut by start offsets — made once per page. An object inside a block has its own (N: every object, ents then subs) */
@@ -1023,7 +1148,8 @@ export function cadGeom(pg, ei){
   if (!subs.length) return null;
   return r.cl ? {kind: "area", loops: subs.filter(P => P.length > 2)} : {kind: "line", runs: subs.filter(P => P.length > 1)};
 }
-/* what the drawing holds, by layer and by block: counts, lengths (ft) and areas (Sft) */
+/* what the drawing holds, by layer and by block: counts, lengths (ft) and areas (Sft). A block's count takes in its copies inside other
+   blocks too (nn of them), as AutoCAD's BCOUNT; the layers' lengths and areas are the drawing's own objects (a block's parts not twice) */
 export function cadQty(sc, pg){
   const byL = new Map(), byB = new Map();
   pg.ents.forEach((r, ei) => {
@@ -1035,5 +1161,10 @@ export function cadQty(sc, pg){
     else if (r.len > 0) { l.runs++; l.len += r.len; }
     else if (/TEXT|ATTRIB|ATTDEF/.test(r.t)) l.txt++;
   });
+  const NE = pg.ents.length, E = pg.subs && pg.subs.length ? cadEnts(pg) : null;   // (blocks inside blocks: counted where they are drawn)
+  (pg.subs || []).forEach((r, j) => { const ei = NE + j; if (r.t !== "INSERT" || r.L < 0 || !(E.eb[4 * ei] <= E.eb[4 * ei + 2])) return;
+    const k = r.n || "?", ln = (sc.layers[r.L] || {}).name || "?"; let b = byB.get(k); if (!b) byB.set(k, b = {name: k, n: 0, layers: new Set(), ents: [], att: new Map()});
+    b.n++; b.nn = (b.nn || 0) + 1; b.layers.add(ln); b.ents.push(ei);
+    (r.att || []).forEach(([t, v]) => { let m = b.att.get(t); if (!m) b.att.set(t, m = new Map()); m.set(v, (m.get(v) || 0) + 1); }); });
   return {layers: [...byL.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})), blocks: [...byB.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name))};
 }
