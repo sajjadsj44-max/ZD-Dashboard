@@ -11,7 +11,7 @@
    exact and needs no calibration. */
 const LDWG = "https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/dist/libredwg-web.js";
 const LDXF = "https://cdn.jsdelivr.net/npm/@mlightcad/dxf-json@1.2.8/dist/esm/bundle.mjs";
-export const CAD_VER = 7;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (7: text in its style's / \f font — Times for serif, condensed narrower — and LWDISPLAY; 6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
+export const CAD_VER = 8;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (8: lengths inside blocks stretched more one way measured as drawn; 7: text in its style's / \f font — Times for serif, condensed narrower — and LWDISPLAY; 6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
 export const INK = -1;             // colour 7 (and true black or white): white on a black background, black on white
 export const isCadName = n => /\.(dwg|dxf)$/i.test(String(n || ""));
 const CAPS_FONT = /^(technic_|techb___|techl___|coprgt[bl]?|copperplate[\w ]*|stencil|engr|castelar|felixti|alger)\.(ttf|otf)$/i;   // fonts with capitals only (their small letters are small capitals)
@@ -653,6 +653,8 @@ l => { const lw = LW(l), nat = emW(l, F.f) * em; L.push({l, f: F.f, lw, wf: nat 
     else if (cx.ins && SUBS.length < MAX_SUB) { rec = {t: e.t, h: e.h, L: -1, p: curU}; curU = -2 - SUBS.length; SUBS.push(rec); }
     if (rec) rec.L = r.li;
     const sc = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1; if (rec && cx.d) rec.k = sc;   // (its length and area in the block's own units: scaled at the end)
+    const a2 = m[0] * m[0] + m[1] * m[1], b2 = m[2] * m[2] + m[3] * m[3], i0 = PK.length;   // (a block stretched more one way than the other: lengths measured as drawn)
+    const sim = Math.abs(a2 - b2) <= 1e-9 * (a2 + b2) && Math.abs(m[0] * m[2] + m[1] * m[3]) <= 1e-9 * (a2 + b2);
     const stroke = wid => style(r.c, r.lw, (wid || 0) * sc, dashFor(r.lt, e.lts, sc), 1);   // (a scaled block scales its dashes and widths too)
     try {
       switch (e.t) {
@@ -716,8 +718,18 @@ l => { const lw = LW(l), nat = emW(l, F.f) * em; L.push({l, f: F.f, lw, wf: nat 
         case "XLINE": case "RAY": { const d = [m[0] * e.d[0] + m[2] * e.d[1], m[1] * e.d[0] + m[3] * e.d[1]], l = Math.hypot(d[0], d[1]); if (!(l > 0)) break;
           XL.push({p: [m[0] * e.a[0] + m[2] * e.a[1] + m[4], m[1] * e.a[0] + m[3] * e.a[1] + m[5]], d: [d[0] / l, d[1] / l], ray: e.t === "RAY", li: r.li, si: stroke(), e: cur, u: curU}); break; }
       }
+      if (rec && cx.d && !sim && rec.len > 0) { rec.len = drawnLen(i0, PK.length); rec.kl = 1; }
     } catch (er) { bad++; } finally { m = m0; curU = u0; }
   };
+  /* the length of the lines drawn as primitives i0..i1 (drawing units, as transformed: curves in 16 steps) */
+  const drawnLen = (i0, i1) => { let s = 0;
+    for (let i = i0; i < i1; i++) { if (PK[i] !== 0) continue; const e1 = i + 1 < PK.length ? P0[i + 1] : nOp; let q = Q0[i], cx = 0, cy = 0, sx = 0, sy = 0;
+      for (let j = P0[i]; j < e1; j++) { const op = OP[j];
+        if (op === 0) { cx = sx = XY[q]; cy = sy = XY[q + 1]; q += 2; }
+        else if (op === 1) { s += Math.hypot(XY[q] - cx, XY[q + 1] - cy); cx = XY[q]; cy = XY[q + 1]; q += 2; }
+        else if (op === 2) { let px = cx, py = cy; for (let t = 1; t <= 16; t++) { const u = t / 16, x = bez(cx, XY[q], XY[q + 2], XY[q + 4], u), y = bez(cy, XY[q + 1], XY[q + 3], XY[q + 5], u); s += Math.hypot(x - px, y - py); px = x; py = y; } cx = XY[q + 4]; cy = XY[q + 5]; q += 6; }
+        else { s += Math.hypot(sx - cx, sy - cy); cx = sx; cy = sy; } } }
+    return s; };
   const top = {L: null, c: INK, lw: -3, lt: "CONTINUOUS", sc: 1, d: 0};
   for (const e of md.ents) { if (trunc) break; cur = ENTS.length; ENTS.push({t: e.t, h: e.h, L: -1}); ent(e, top); }
   /* extents: everything drawn, less a few objects far away from the drawing (a stray block at 0,0 when the plan is at site coordinates) */
@@ -788,7 +800,7 @@ l => { const lw = LW(l), nat = emW(l, F.f) * em; L.push({l, f: F.f, lw, wf: nat 
   const fu = uIn / 12;   // drawing units -> feet
   /* a record as kept: lengths in ft, areas in Sft, points on the page — inside a block, scaled by the block and with no handle
      (the block definition's: the same in every insert) */
-  const rout = r => { const o = r.p != null ? {t: r.t, L: r.L} : {t: r.t, h: r.h, L: r.L}, s = r.k || 1; if (r.n) o.n = r.n; if (r.len) o.len = r.len * s * fu; if (r.area) o.area = r.area * s * s * fu * fu; if (r.cl) o.cl = true;
+  const rout = r => { const o = r.p != null ? {t: r.t, L: r.L} : {t: r.t, h: r.h, L: r.L}, s = r.k || 1; if (r.n) o.n = r.n; if (r.len) o.len = r.len * (r.kl ? 1 : s) * fu; if (r.area) o.area = r.area * s * s * fu * fu; if (r.cl) o.cl = true;
     if (r.at) o.at = [PX(r.at[0]), PY(r.at[1])]; if (r.att && r.att.length) o.att = r.att; if (r.loops) o.loops = r.loops.map(l => l.map(p => [PX(p[0]), PY(p[1])])); if (r.p != null) o.p = dec(r.p); return o; };
   pg.ents = ENTS.map(rout); pg.subs = SUBS.map(rout);   // (ents: the drawing's own objects, as AutoCAD lists them; subs: the objects inside its blocks)
   pg.map = {den, x0: B[0], y1: B[3], ox, oy, w: W, h: H, uIn};
@@ -1051,23 +1063,25 @@ export const cadRec = (pg, ei) => ei >= 0 && ei < pg.ents.length ? pg.ents[ei] :
 export function cadChain(pg, ei){ const C = []; for (let u = ei, n = 0; u >= 0 && n < 64; n++) { C.unshift(u); const r = cadRec(pg, u); if (!r || r.p == null) break; u = r.p; } return C; }
 export const cadTop = (pg, ei) => cadChain(pg, ei)[0];
 /* the drawing object under a page point: {e (its index in ents), u (the innermost object there — inside a block, the object
-   itself), i (the primitive), d} or null. A hatch drawn as its pattern is picked inside its outline too, as a solid one */
+   itself), i (the primitive), d} or null. A line within tol first, then a text whose box holds the point, then the smallest fill
+   or hatch the point is inside (a hatch drawn as its pattern too, as a solid one) */
 export function cadHit(pg, x, y, tol, hidden, ed){   // ed: AutoCAD-mode edits — what was taken out cannot be picked
-  const g = cadPrep(pg), ids = cand(pg, g, x - tol, y - tol, x + tol, y + tol), p = [x, y], bb = pg.bb, hp = ed && ed.hp, ht = ed && ed.ht, U = pg.leaf || pg.ent; let best = null;
+  const g = cadPrep(pg), ids = cand(pg, g, x - tol, y - tol, x + tol, y + tol), p = [x, y], bb = pg.bb, hp = ed && ed.hp, ht = ed && ed.ht, U = pg.leaf || pg.ent; let best = null, soft = null, sa = Infinity;
+  const under = i => { const b = 4 * i, a = (bb[b + 2] - bb[b]) * (bb[b + 3] - bb[b + 1]); if (a < sa) { sa = a; soft = {e: pg.ent[i], u: U[i], i, d: tol}; } };   // (the smallest fill holding the point)
   for (const i of ids) {
     if ((hidden && hidden[pg.lay[i]]) || (hp && hp[i])) continue; const b = 4 * i; if (bb[b] - tol > x || bb[b + 2] + tol < x || bb[b + 1] - tol > y || bb[b + 3] + tol < y) continue;
     const R = pg.pf[i] === 1 ? cadRec(pg, U[i]) : null, lp = R && R.t === "HATCH" && R.loops;   // (its pattern lines' box is its outline's)
     let d = Infinity; const S = primPaths(pg, i), fill = pg.kind[i] === 1 || pg.kind[i] === 2;
     S.forEach(P => { for (let k = 1; k < P.length; k++) d = Math.min(d, segD(p, P[k - 1], P[k])); if ((P.closed || fill) && P.length > 2) d = Math.min(d, segD(p, P[P.length - 1], P[0])); });
-    if (fill && d > tol) { let inside = false; S.forEach(P => { if (P.length > 2 && inPoly(p, P)) inside = !inside; }); if (inside) d = tol * 0.95; }
-    if (lp && d > tol) { let inside = false; lp.forEach(P => { if (P.length > 2 && inPoly(p, P)) inside = !inside; }); if (inside) d = tol * 0.96; }
+    if (fill && d > tol) { let inside = false; S.forEach(P => { if (P.length > 2 && inPoly(p, P)) inside = !inside; }); if (inside) under(i); }
+    if (lp && d > tol) { let inside = false; lp.forEach(P => { if (P.length > 2 && inPoly(p, P)) inside = !inside; }); if (inside) under(i); }
     if (d <= tol && (!best || d < best.d)) best = {e: pg.ent[i], u: U[i], i, d};
   }
   if (!best && pg.tE) for (let t = 0; t < pg.tn; t++) {   // no line here: a text whose box holds the point
     const b = 4 * t; if ((hidden && hidden[pg.tL[t]]) || (ht && ht[t])) continue;
     if (pg.tB[b] - tol <= x && pg.tB[b + 2] + tol >= x && pg.tB[b + 1] - tol <= y && pg.tB[b + 3] + tol >= y && pg.tE[t] >= 0) return {e: pg.tE[t], u: pg.tU ? pg.tU[t] : pg.tE[t], i: -1, t, d: tol};
   }
-  return best;
+  return best || soft;
 }
 /* the objects' own index: each object's box (page points, over its primitives and texts) and its primitives and texts,
    as lists cut by start offsets — made once per page. An object inside a block has its own (N: every object, ents then subs) */
@@ -1126,7 +1140,8 @@ export function cadGeom(pg, ei){
   if (!subs.length) return null;
   return r.cl ? {kind: "area", loops: subs.filter(P => P.length > 2)} : {kind: "line", runs: subs.filter(P => P.length > 1)};
 }
-/* what the drawing holds, by layer and by block: counts, lengths (ft) and areas (Sft) */
+/* what the drawing holds, by layer and by block: counts, lengths (ft) and areas (Sft). A block's count takes in its copies inside other
+   blocks too (nn of them), as AutoCAD's BCOUNT; the layers' lengths and areas are the drawing's own objects (a block's parts not twice) */
 export function cadQty(sc, pg){
   const byL = new Map(), byB = new Map();
   pg.ents.forEach((r, ei) => {
@@ -1138,5 +1153,10 @@ export function cadQty(sc, pg){
     else if (r.len > 0) { l.runs++; l.len += r.len; }
     else if (/TEXT|ATTRIB|ATTDEF/.test(r.t)) l.txt++;
   });
+  const NE = pg.ents.length, E = pg.subs && pg.subs.length ? cadEnts(pg) : null;   // (blocks inside blocks: counted where they are drawn)
+  (pg.subs || []).forEach((r, j) => { const ei = NE + j; if (r.t !== "INSERT" || r.L < 0 || !(E.eb[4 * ei] <= E.eb[4 * ei + 2])) return;
+    const k = r.n || "?", ln = (sc.layers[r.L] || {}).name || "?"; let b = byB.get(k); if (!b) byB.set(k, b = {name: k, n: 0, layers: new Set(), ents: [], att: new Map()});
+    b.n++; b.nn = (b.nn || 0) + 1; b.layers.add(ln); b.ents.push(ei);
+    (r.att || []).forEach(([t, v]) => { let m = b.att.get(t); if (!m) b.att.set(t, m = new Map()); m.set(v, (m.get(v) || 0) + 1); }); });
   return {layers: [...byL.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})), blocks: [...byB.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name))};
 }
