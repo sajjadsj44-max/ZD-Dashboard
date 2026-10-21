@@ -11,7 +11,7 @@
    exact and needs no calibration. */
 const LDWG = "https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/dist/libredwg-web.js";
 const LDXF = "https://cdn.jsdelivr.net/npm/@mlightcad/dxf-json@1.2.8/dist/esm/bundle.mjs";
-export const CAD_VER = 5;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
+export const CAD_VER = 6;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
 export const INK = -1;             // colour 7 (and true black or white): white on a black background, black on white
 export const isCadName = n => /\.(dwg|dxf)$/i.test(String(n || ""));
 const CAPS_FONT = /^(technic_|techb___|techl___|coprgt[bl]?|copperplate[\w ]*|stencil|engr|castelar|felixti|alger)\.(ttf|otf)$/i;   // fonts with capitals only (their small letters are small capitals)
@@ -456,8 +456,11 @@ export function cadScene(md, opt){
   const lay = name => { const k = String(name || "0").toUpperCase(); let i = LIX.get(k); if (i === undefined) { i = LAY.length; LIX.set(k, i); LAY.push({name: String(name || "0"), c: INK, aci: 7, off: false, frozen: false, plot: true, lw: -3, lt: "CONTINUOUS"}); } return i; };
   const STY = [], SIX = new Map();
   const style = (c, lw, wid, dash, a) => { const key = c + "|" + lw + "|" + wid + "|" + (dash ? dash.join(",") : "") + "|" + a; let i = SIX.get(key); if (i === undefined) { i = STY.length; SIX.set(key, i); STY.push({c, lw, wid, dash, a}); } return i; };
-  let OP = new Uint8Array(1 << 16), nOp = 0, XY = new Float64Array(1 << 17), nXy = 0, m = [1, 0, 0, 1, 0, 0], bx0, by0, bx1, by1, op0 = 0, q0 = 0, cur = -1;
+  let OP = new Uint8Array(1 << 16), nOp = 0, XY = new Float64Array(1 << 17), nXy = 0, m = [1, 0, 0, 1, 0, 0], bx0, by0, bx1, by1, op0 = 0, q0 = 0, cur = -1, curU = -1;
   const PK = [], PL = [], PS = [], PE = [], PF = [], P0 = [], Q0 = [], BB = [], TX = [], XL = [], ENTS = [];   // PF: 1 hatch pattern lines, 2 a hatch's fill
+  /* the objects inside blocks, each one its own record (CAD pick drills into a block): {p (the block it is in), k (the
+     block's scale)} — numbered -2, -3, … while the scene is made (PU / curU: the innermost object a primitive or text is part of) */
+  const SUBS = [], PU = [], MAX_SUB = 400000;
   const room = k => { if (nOp + 1 > OP.length) { const b = new Uint8Array(OP.length * 2); b.set(OP); OP = b; } if (nXy + k > XY.length) { const b = new Float64Array(Math.max(XY.length * 2, nXy + k)); b.set(XY); XY = b; } };
   const pt = (x, y) => { const X = m[0] * x + m[2] * y + m[4], Y = m[1] * x + m[3] * y + m[5]; XY[nXy++] = X; XY[nXy++] = Y; if (X < bx0) bx0 = X; if (X > bx1) bx1 = X; if (Y < by0) by0 = Y; if (Y > by1) by1 = Y; };
   const beg = () => { op0 = nOp; q0 = nXy; bx0 = by0 = Infinity; bx1 = by1 = -Infinity; };
@@ -467,7 +470,7 @@ export function cadScene(md, opt){
   const cl = () => { room(0); OP[nOp++] = 3; };
   const LIM = 1e12, end = (kind, li, si, fl) => { if (nOp === op0) return;
     if (!(Math.abs(bx0) < LIM && Math.abs(bx1) < LIM && Math.abs(by0) < LIM && Math.abs(by1) < LIM)) { nOp = op0; nXy = q0; junk++; return; }
-    PK.push(kind); PL.push(li); PS.push(si); PE.push(cur); PF.push(fl || 0); P0.push(op0); Q0.push(q0); BB.push(bx0, by0, bx1, by1); };
+    PK.push(kind); PL.push(li); PS.push(si); PE.push(cur); PU.push(curU); PF.push(fl || 0); P0.push(op0); Q0.push(q0); BB.push(bx0, by0, bx1, by1); };
   /* the elliptic arc C + U cos t + V sin t from t0 through the signed sweep sw, as Béziers of at most 90°; how = 0 move, 1 line, 2 already there */
   const arc = (cx, cy, ux, uy, vx, vy, t0, sw, how) => {
     const n = Math.max(1, Math.ceil(Math.abs(sw) / (Math.PI / 2) - 1e-9)), d = sw / n, k = 4 / 3 * Math.tan(d / 4);
@@ -506,7 +509,7 @@ export function cadScene(md, opt){
     const cr = Math.cos(rot), sr = Math.sin(rot), to = Math.tan(obl || 0);
     let axx = cr * em * wf, axy = sr * em * wf, ayx = (-sr + cr * to) * em, ayy = (cr + sr * to) * em;
     if (mx) { axx = -axx; axy = -axy; } if (my) { ayx = -ayx; ayy = -ayy; }
-    const t = {s, li, c, e: cur, o: [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]], ax: [m[0] * axx + m[2] * axy, m[1] * axx + m[3] * axy], ay: [m[0] * ayx + m[2] * ayy, m[1] * ayx + m[3] * ayy]};
+    const t = {s, li, c, e: cur, u: curU, o: [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]], ax: [m[0] * axx + m[2] * axy, m[1] * axx + m[3] * axy], ay: [m[0] * ayx + m[2] * ayy, m[1] * ayx + m[3] * ayy]};
     if (![...t.o, ...t.ax, ...t.ay].every(v => Math.abs(v) < 1e12)) { junk++; return; } TX.push(t);
   };
   /* a style whose font has no small letters (Technic, Copperplate Gothic, Stencil…): AutoCAD draws its text in capitals */
@@ -552,9 +555,12 @@ export function cadScene(md, opt){
     if (e.t === "SKIP") { if (e.why && e.why !== "VIEWPORT") skipped[e.why] = (skipped[e.why] || 0) + 1; return; }
     if (nOp > MAX_OP) { trunc = true; return; }
     if (e.t === "ATTRIB" && e.inv) return;
-    const r = res(e, cx), m0 = m; if (e.ex) m = mul(m, ocs(e.ex));
-    const rec = cx.d === 0 ? ENTS[cur] : null; if (rec) rec.L = r.li;
-    const sc = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1, stroke = wid => style(r.c, r.lw, (wid || 0) * sc, dashFor(r.lt, e.lts, sc), 1);   // (a scaled block scales its dashes and widths too)
+    const r = res(e, cx), m0 = m, u0 = curU; if (e.ex) m = mul(m, ocs(e.ex));
+    let rec = null; if (cx.d === 0) { rec = ENTS[cur]; curU = cur; }
+    else if (cx.ins && SUBS.length < MAX_SUB) { rec = {t: e.t, h: e.h, L: -1, p: curU}; curU = -2 - SUBS.length; SUBS.push(rec); }
+    if (rec) rec.L = r.li;
+    const sc = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1; if (rec && cx.d) rec.k = sc;   // (its length and area in the block's own units: scaled at the end)
+    const stroke = wid => style(r.c, r.lw, (wid || 0) * sc, dashFor(r.lt, e.lts, sc), 1);   // (a scaled block scales its dashes and widths too)
     try {
       switch (e.t) {
         case "LINE": beg(); mv(e.a[0], e.a[1]); ln(e.b[0], e.b[1]); end(0, r.li, stroke()); if (rec) rec.len = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]); break;
@@ -583,7 +589,7 @@ export function cadScene(md, opt){
         case "TEXT": case "ATTRIB": case "ATTDEF": textEnt(e, r); if (rec && e.t !== "TEXT") rec.n = e.tag; break;
         case "MTEXT": mtextEnt(e, r); break;
         case "INSERT": {
-          const child = {L: r.nm, c: r.c, lw: r.lw, lt: r.lt, sc: cx.sc * Math.sqrt(Math.abs(e.sx * e.sy)), d: cx.d + 1}, cr = Math.cos(e.rot), sr = Math.sin(e.rot);
+          const child = {L: r.nm, c: r.c, lw: r.lw, lt: r.lt, sc: cx.sc * Math.sqrt(Math.abs(e.sx * e.sy)), d: cx.d + 1, ins: !cx.d || cx.ins}, cr = Math.cos(e.rot), sr = Math.sin(e.rot);
           for (let i = 0; i < e.nr; i++) for (let j = 0; j < e.nc; j++) { const ox = j * e.cs, oy = i * e.rs;
             block(e.n, [cr * e.sx, sr * e.sx, -sr * e.sy, cr * e.sy, e.p[0] + cr * ox - sr * oy, e.p[1] + sr * ox + cr * oy], child, e); }
           if (rec) { rec.n = rec.n || e.n; rec.at = [m[0] * e.p[0] + m[2] * e.p[1] + m[4], m[1] * e.p[0] + m[3] * e.p[1] + m[5]]; rec.att = e.att.filter(a => a.tag).map(a => [a.tag, a.s]); }
@@ -611,9 +617,9 @@ export function cadScene(md, opt){
           if (e.s) mtextEnt({p: e.p, h: e.h, w: e.w, att: e.att, rot: e.rot, s: e.s, ls: 1}, r); break;
         case "MLINE": e.ml.forEach(P => { beg(); lines(P); if (e.closed) cl(); end(0, r.li, stroke()); }); break;
         case "XLINE": case "RAY": { const d = [m[0] * e.d[0] + m[2] * e.d[1], m[1] * e.d[0] + m[3] * e.d[1]], l = Math.hypot(d[0], d[1]); if (!(l > 0)) break;
-          XL.push({p: [m[0] * e.a[0] + m[2] * e.a[1] + m[4], m[1] * e.a[0] + m[3] * e.a[1] + m[5]], d: [d[0] / l, d[1] / l], ray: e.t === "RAY", li: r.li, si: stroke(), e: cur}); break; }
+          XL.push({p: [m[0] * e.a[0] + m[2] * e.a[1] + m[4], m[1] * e.a[0] + m[3] * e.a[1] + m[5]], d: [d[0] / l, d[1] / l], ray: e.t === "RAY", li: r.li, si: stroke(), e: cur, u: curU}); break; }
       }
-    } catch (er) { bad++; } finally { m = m0; }
+    } catch (er) { bad++; } finally { m = m0; curU = u0; }
   };
   const top = {L: null, c: INK, lw: -3, lt: "CONTINUOUS", sc: 1, d: 0};
   for (const e of md.ents) { if (trunc) break; cur = ENTS.length; ENTS.push({t: e.t, h: e.h, L: -1}); ent(e, top); }
@@ -654,19 +660,20 @@ export function cadScene(md, opt){
   const R = [B[0] - Wd * 0.02, B[1] - Hd * 0.02, B[2] + Wd * 0.02, B[3] + Hd * 0.02];
   XL.forEach(x => { let t0 = x.ray ? 0 : -Infinity, t1 = Infinity;
     for (const [p, d, lo, hi] of [[x.p[0], x.d[0], R[0], R[2]], [x.p[1], x.d[1], R[1], R[3]]]) { if (Math.abs(d) < 1e-12) { if (p < lo || p > hi) { t0 = 1; t1 = 0; } continue; } const a = (lo - p) / d, b = (hi - p) / d; t0 = Math.max(t0, Math.min(a, b)); t1 = Math.min(t1, Math.max(a, b)); }
-    if (!(t1 > t0)) return; cur = x.e; m = [1, 0, 0, 1, 0, 0]; beg(); mv(x.p[0] + x.d[0] * t0, x.p[1] + x.d[1] * t0); ln(x.p[0] + x.d[0] * t1, x.p[1] + x.d[1] * t1); end(0, x.li, x.si); });
+    if (!(t1 > t0)) return; cur = x.e; curU = x.u; m = [1, 0, 0, 1, 0, 0]; beg(); mv(x.p[0] + x.d[0] * t0, x.p[1] + x.d[1] * t0); ln(x.p[0] + x.d[0] * t1, x.p[1] + x.d[1] * t1); end(0, x.li, x.si); });
   /* final arrays in drawing order: fills, then lines, then points */
   if (MP) { far = 0; for (let i = 0; i < PK.length; i++) if (BB[4 * i + 2] < B[0] || BB[4 * i] > B[2] || BB[4 * i + 3] < B[1] || BB[4 * i + 1] > B[3]) far++; }
   const crop = far > 0, n0 = PK.length, keep = [], inB = i => !(BB[4 * i + 2] < B[0] || BB[4 * i] > B[2] || BB[4 * i + 3] < B[1] || BB[4 * i + 1] > B[3]);
   [1, 0, 3].forEach(pass => { for (let i = 0; i < n0; i++) { const kd = PK[i]; if ((pass === 1 ? kd === 1 || kd === 2 : kd === pass) && (!crop || inB(i))) keep.push(i); } });
   const n = keep.length; let nO = 0, nQ = 0;
   keep.forEach(i => { const e1 = i + 1 < n0 ? P0[i + 1] : nOp, f1 = i + 1 < n0 ? Q0[i + 1] : nXy; nO += e1 - P0[i]; nQ += f1 - Q0[i]; });
+  const NE = ENTS.length, dec = v => v <= -2 ? NE - 2 - v : v;   // an object inside a block: numbered after the drawing's own objects
   const pg = {name: "Model", w: W, h: H, k, den, ptPerFt: 864 / den, x0: B[0], y1: B[3], ox, oy, n, kind: new Uint8Array(n), pf: new Uint8Array(n), lay: new Uint16Array(n), sty: new Uint32Array(n), ent: new Int32Array(n),
-    p0: new Uint32Array(n + 1), q0: new Uint32Array(n + 1), bb: new Float32Array(4 * n), ops: new Uint8Array(nO), xy: new Float32Array(nQ)};
+    leaf: new Int32Array(n), p0: new Uint32Array(n + 1), q0: new Uint32Array(n + 1), bb: new Float32Array(4 * n), ops: new Uint8Array(nO), xy: new Float32Array(nQ)};
   let o2 = 0, q2 = 0;
   keep.forEach((i, j) => {
     const e1 = i + 1 < n0 ? P0[i + 1] : nOp, f1 = i + 1 < n0 ? Q0[i + 1] : nXy;
-    pg.kind[j] = PK[i]; pg.pf[j] = PF[i]; pg.lay[j] = PL[i]; pg.sty[j] = PS[i]; pg.ent[j] = PE[i]; pg.p0[j] = o2; pg.q0[j] = q2;
+    pg.kind[j] = PK[i]; pg.pf[j] = PF[i]; pg.lay[j] = PL[i]; pg.sty[j] = PS[i]; pg.ent[j] = PE[i]; pg.leaf[j] = dec(PU[i]); pg.p0[j] = o2; pg.q0[j] = q2;
     pg.ops.set(OP.subarray(P0[i], e1), o2); o2 += e1 - P0[i];
     for (let q = Q0[i]; q < f1; q += 2) { pg.xy[q2++] = PX(XY[q]); pg.xy[q2++] = PY(XY[q + 1]); }
     pg.bb[4 * j] = PX(BB[4 * i]); pg.bb[4 * j + 1] = PY(BB[4 * i + 3]); pg.bb[4 * j + 2] = PX(BB[4 * i + 2]); pg.bb[4 * j + 3] = PY(BB[4 * i + 1]);
@@ -674,16 +681,19 @@ export function cadScene(md, opt){
   pg.p0[n] = o2; pg.q0[n] = q2;
   pg.styles = STY.map(s => ({c: s.c, lw: s.lw >= 0 ? s.lw / 100 : 0.25, wid: s.wid > 0 ? s.wid * k : 0, dash: s.dash ? s.dash.map(v => v * k) : null, a: s.a}));
   const T = TX.filter(t => !crop || (t.o[0] >= B[0] && t.o[0] <= B[2] && t.o[1] >= B[1] && t.o[1] <= B[3])), tn = T.length;
-  pg.tn = tn; pg.tS = T.map(t => t.s); pg.tL = new Uint16Array(tn); pg.tC = new Int32Array(tn); pg.tE = new Int32Array(tn); pg.tM = new Float32Array(6 * tn); pg.tW = new Float32Array(tn); pg.tB = new Float32Array(4 * tn);
+  pg.tn = tn; pg.tS = T.map(t => t.s); pg.tL = new Uint16Array(tn); pg.tC = new Int32Array(tn); pg.tE = new Int32Array(tn); pg.tU = new Int32Array(tn); pg.tM = new Float32Array(6 * tn); pg.tW = new Float32Array(tn); pg.tB = new Float32Array(4 * tn);
   T.forEach((t, i) => {
     const w = emW(t.s), x = PX(t.o[0]), y = PY(t.o[1]), a = t.ax[0] * k, b = -t.ax[1] * k, c = t.ay[0] * k, d = -t.ay[1] * k;
-    pg.tL[i] = t.li; pg.tC[i] = t.c; pg.tE[i] = t.e; pg.tW[i] = w; pg.tM.set([a, b, c, d, x, y], 6 * i);
+    pg.tL[i] = t.li; pg.tC[i] = t.c; pg.tE[i] = t.e; pg.tU[i] = dec(t.u); pg.tW[i] = w; pg.tM.set([a, b, c, d, x, y], 6 * i);
     const xs = [x, x + a * w, x + c * CAP, x + a * w + c * CAP, x - c * DESC], ys = [y, y + b * w, y + d * CAP, y + b * w + d * CAP, y - d * DESC];
     pg.tB.set([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], 4 * i);
   });
   const fu = uIn / 12;   // drawing units -> feet
-  pg.ents = ENTS.map(r => { const o = {t: r.t, h: r.h, L: r.L}; if (r.n) o.n = r.n; if (r.len) o.len = r.len * fu; if (r.area) o.area = r.area * fu * fu; if (r.cl) o.cl = true;
-    if (r.at) o.at = [PX(r.at[0]), PY(r.at[1])]; if (r.att && r.att.length) o.att = r.att; if (r.loops) o.loops = r.loops.map(l => l.map(p => [PX(p[0]), PY(p[1])])); return o; });
+  /* a record as kept: lengths in ft, areas in Sft, points on the page — inside a block, scaled by the block and with no handle
+     (the block definition's: the same in every insert) */
+  const rout = r => { const o = r.p != null ? {t: r.t, L: r.L} : {t: r.t, h: r.h, L: r.L}, s = r.k || 1; if (r.n) o.n = r.n; if (r.len) o.len = r.len * s * fu; if (r.area) o.area = r.area * s * s * fu * fu; if (r.cl) o.cl = true;
+    if (r.at) o.at = [PX(r.at[0]), PY(r.at[1])]; if (r.att && r.att.length) o.att = r.att; if (r.loops) o.loops = r.loops.map(l => l.map(p => [PX(p[0]), PY(p[1])])); if (r.p != null) o.p = dec(r.p); return o; };
+  pg.ents = ENTS.map(rout); pg.subs = SUBS.map(rout);   // (ents: the drawing's own objects, as AutoCAD lists them; subs: the objects inside its blocks)
   pg.map = {den, x0: B[0], y1: B[3], ox, oy, w: W, h: H, uIn};
   return {ver: CAD_VER, fmt: md.fmt, dver: md.ver, units, uIn, assumed, unitHow: unitFix || (md.units ? "" : inf ? inf.how : ""), unitFix: !!unitFix, unitName: units ? UNIT_NAME[units] : md.metric ? "millimetres (assumed)" : "inches (assumed)", metric: !!md.metric,
     layers: LAY.map(l => ({name: l.name, c: l.c, aci: l.aci, off: l.off, frozen: l.frozen, plot: l.plot, lw: l.lw, lt: l.lt})), pages: [pg],
@@ -930,36 +940,47 @@ export function primPaths(pg, i, steps){   // steps: points per curve (8; the Au
   return out;
 }
 const segD = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy, t = L ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L)) : 0; return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); };
-/* the drawing object under a page point: {e (its index in ents), i (the primitive), d} or null */
+/* an object's record by its index: the drawing's own objects (ents), then the objects inside its blocks (subs, each with p:
+   the block it is in) */
+export const cadRec = (pg, ei) => ei >= 0 && ei < pg.ents.length ? pg.ents[ei] : pg.subs && ei >= 0 ? pg.subs[ei - pg.ents.length] : undefined;
+/* an object and the blocks it is in, outermost first: [the drawing's own object, …, ei] */
+export function cadChain(pg, ei){ const C = []; for (let u = ei, n = 0; u >= 0 && n < 64; n++) { C.unshift(u); const r = cadRec(pg, u); if (!r || r.p == null) break; u = r.p; } return C; }
+export const cadTop = (pg, ei) => cadChain(pg, ei)[0];
+/* the drawing object under a page point: {e (its index in ents), u (the innermost object there — inside a block, the object
+   itself), i (the primitive), d} or null. A hatch drawn as its pattern is picked inside its outline too, as a solid one */
 export function cadHit(pg, x, y, tol, hidden, ed){   // ed: AutoCAD-mode edits — what was taken out cannot be picked
-  const g = cadPrep(pg), ids = cand(pg, g, x - tol, y - tol, x + tol, y + tol), p = [x, y], bb = pg.bb, hp = ed && ed.hp, ht = ed && ed.ht; let best = null;
+  const g = cadPrep(pg), ids = cand(pg, g, x - tol, y - tol, x + tol, y + tol), p = [x, y], bb = pg.bb, hp = ed && ed.hp, ht = ed && ed.ht, U = pg.leaf || pg.ent; let best = null;
   for (const i of ids) {
     if ((hidden && hidden[pg.lay[i]]) || (hp && hp[i])) continue; const b = 4 * i; if (bb[b] - tol > x || bb[b + 2] + tol < x || bb[b + 1] - tol > y || bb[b + 3] + tol < y) continue;
+    const R = pg.pf[i] === 1 ? cadRec(pg, U[i]) : null, lp = R && R.t === "HATCH" && R.loops;   // (its pattern lines' box is its outline's)
     let d = Infinity; const S = primPaths(pg, i), fill = pg.kind[i] === 1 || pg.kind[i] === 2;
     S.forEach(P => { for (let k = 1; k < P.length; k++) d = Math.min(d, segD(p, P[k - 1], P[k])); if ((P.closed || fill) && P.length > 2) d = Math.min(d, segD(p, P[P.length - 1], P[0])); });
     if (fill && d > tol) { let inside = false; S.forEach(P => { if (P.length > 2 && inPoly(p, P)) inside = !inside; }); if (inside) d = tol * 0.95; }
-    if (d <= tol && (!best || d < best.d)) best = {e: pg.ent[i], i, d};
+    if (lp && d > tol) { let inside = false; lp.forEach(P => { if (P.length > 2 && inPoly(p, P)) inside = !inside; }); if (inside) d = tol * 0.96; }
+    if (d <= tol && (!best || d < best.d)) best = {e: pg.ent[i], u: U[i], i, d};
   }
   if (!best && pg.tE) for (let t = 0; t < pg.tn; t++) {   // no line here: a text whose box holds the point
     const b = 4 * t; if ((hidden && hidden[pg.tL[t]]) || (ht && ht[t])) continue;
-    if (pg.tB[b] - tol <= x && pg.tB[b + 2] + tol >= x && pg.tB[b + 1] - tol <= y && pg.tB[b + 3] + tol >= y && pg.tE[t] >= 0) return {e: pg.tE[t], i: -1, t, d: tol};
+    if (pg.tB[b] - tol <= x && pg.tB[b + 2] + tol >= x && pg.tB[b + 1] - tol <= y && pg.tB[b + 3] + tol >= y && pg.tE[t] >= 0) return {e: pg.tE[t], u: pg.tU ? pg.tU[t] : pg.tE[t], i: -1, t, d: tol};
   }
   return best;
 }
 /* the objects' own index: each object's box (page points, over its primitives and texts) and its primitives and texts,
-   as lists cut by start offsets — made once per page */
+   as lists cut by start offsets — made once per page. An object inside a block has its own (N: every object, ents then subs) */
 export function cadEnts(pg){
   const g = cadPrep(pg); if (g.en) return g.en;
-  const N = pg.ents.length, eb = new Float64Array(4 * N), ps = new Uint32Array(N + 1), ts = new Uint32Array(N + 1), tn = pg.tE ? pg.tn : 0;
+  const NE = pg.ents.length, N = NE + (pg.subs ? pg.subs.length : 0), eb = new Float64Array(4 * N), ps = new Uint32Array(N + 1), ts = new Uint32Array(N + 1), tn = pg.tE ? pg.tn : 0;
   for (let e = 0; e < N; e++) { eb[4 * e] = eb[4 * e + 1] = Infinity; eb[4 * e + 2] = eb[4 * e + 3] = -Infinity; }
   const grow = (e, B, b) => { const k = 4 * e; if (B[b] < eb[k]) eb[k] = B[b]; if (B[b + 1] < eb[k + 1]) eb[k + 1] = B[b + 1]; if (B[b + 2] > eb[k + 2]) eb[k + 2] = B[b + 2]; if (B[b + 3] > eb[k + 3]) eb[k + 3] = B[b + 3]; };
-  for (let i = 0; i < pg.n; i++) { const e = pg.ent[i]; if (e >= 0 && e < N) { ps[e + 1]++; grow(e, pg.bb, 4 * i); } }
-  for (let t = 0; t < tn; t++) { const e = pg.tE[t]; if (e >= 0 && e < N) { ts[e + 1]++; grow(e, pg.tB, 4 * t); } }
+  const each = (top, u, f) => { if (top >= 0 && top < NE) f(top); for (let n = 0; u >= NE && u < N && n < 64; n++) { f(u); u = pg.subs[u - NE].p; } };   // the object and every block it is in
+  const U = pg.leaf || pg.ent, TU = pg.tU || pg.tE;
+  for (let i = 0; i < pg.n; i++) each(pg.ent[i], U[i], e => { ps[e + 1]++; grow(e, pg.bb, 4 * i); });
+  for (let t = 0; t < tn; t++) each(pg.tE[t], TU[t], e => { ts[e + 1]++; grow(e, pg.tB, 4 * t); });
   for (let e = 0; e < N; e++) { ps[e + 1] += ps[e]; ts[e + 1] += ts[e]; }
   const pl = new Uint32Array(ps[N]), tl = new Uint32Array(ts[N]), pf = ps.slice(0, N), tf = ts.slice(0, N);
-  for (let i = 0; i < pg.n; i++) { const e = pg.ent[i]; if (e >= 0 && e < N) pl[pf[e]++] = i; }
-  for (let t = 0; t < tn; t++) { const e = pg.tE[t]; if (e >= 0 && e < N) tl[tf[e]++] = t; }
-  return g.en = {N, eb, ps, pl, ts, tl};
+  for (let i = 0; i < pg.n; i++) each(pg.ent[i], U[i], e => { pl[pf[e]++] = i; });
+  for (let t = 0; t < tn; t++) each(pg.tE[t], TU[t], e => { tl[tf[e]++] = t; });
+  return g.en = {N, NE, eb, ps, pl, ts, tl};
 }
 const segBox = (a, b, x0, y0, x1, y1) => {   // does the segment a-b meet the box (Liang–Barsky)
   const dx = b[0] - a[0], dy = b[1] - a[1]; let t0 = 0, t1 = 1;
@@ -970,10 +991,10 @@ const segBox = (a, b, x0, y0, x1, y1) => {   // does the segment a-b meet the bo
 };
 /* the objects a box selects, as AutoCAD's window (wholly inside: every primitive and text of the object) or crossing
    (touching: a line of it crosses the box or lies in it, a text's box meets it, or the box is inside a solid fill or hatch).
-   Objects on hidden layers are left out. -> [object index] */
+   Objects on hidden layers are left out; a block is taken whole, as in AutoCAD. -> [object index] */
 export function cadBox(pg, x0, y0, x1, y1, crossing, hidden){
   const E = cadEnts(pg), eb = E.eb, out = [], ents = pg.ents, bb = pg.bb, c = [(x0 + x1) / 2, (y0 + y1) / 2];
-  for (let e = 0; e < E.N; e++) {
+  for (let e = 0; e < ents.length; e++) {
     const r = ents[e], k = 4 * e; if (!r || r.L < 0 || (hidden && hidden[r.L]) || !(eb[k] <= eb[k + 2])) continue;
     if (eb[k + 2] < x0 || eb[k] > x1 || eb[k + 3] < y0 || eb[k + 1] > y1) continue;
     if (eb[k] >= x0 && eb[k + 2] <= x1 && eb[k + 1] >= y0 && eb[k + 3] <= y1) { out.push(e); continue; }
@@ -994,10 +1015,10 @@ export function cadBox(pg, x0, y0, x1, y1, crossing, hidden){
 }
 /* an object's geometry for the takeoff: an area's outlines, a run's points, or a block's insertion point */
 export function cadGeom(pg, ei){
-  const r = pg.ents[ei]; if (!r) return null;
+  const r = cadRec(pg, ei); if (!r) return null;
   if (r.at) return {kind: "count", at: r.at, n: r.n || "", att: r.att || []};
   if (r.loops) return {kind: "area", loops: r.loops};
-  const subs = []; for (let i = 0; i < pg.n; i++) if (pg.ent[i] === ei && pg.kind[i] !== 3) primPaths(pg, i).forEach(P => subs.push(P));
+  const E = cadEnts(pg), subs = []; for (let j = E.ps[ei]; j < E.ps[ei + 1]; j++) { const i = E.pl[j]; if (pg.kind[i] !== 3) primPaths(pg, i).forEach(P => subs.push(P)); }
   if (!subs.length) return null;
   return r.cl ? {kind: "area", loops: subs.filter(P => P.length > 2)} : {kind: "line", runs: subs.filter(P => P.length > 1)};
 }

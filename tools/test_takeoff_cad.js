@@ -14,7 +14,8 @@
    layers (colours, off / frozen start off, isolate); the screen on black (colour 7 white, colours as AutoCAD), white and
    monochrome, drawn from the scene on every zoom step; a room measured by snapping to the drawing = 120.00 Sft; CAD
    quantities by layer and block into the takeoff; right-click on an object; selecting objects (click, Shift+click,
-   window / crossing box, Ctrl+A, select similar, quick select, layer off) and taking off / counting the selection; Ctrl+P plot (window, scale, monochrome) as a
+   window / crossing box, Ctrl+A, select similar, quick select, layer off) and taking off / counting the selection; a block
+   clicked again picks the object inside it, a pattern hatch is picked inside its outline; Ctrl+P plot (window, scale, monochrome) as a
    PDF; exports keep layers off; Project + PDFs carries the DWG; the scene read again from the DWG lands on the same page; a
    scaled multileader's text as high as AutoCAD draws it, from the DWG and the DXF (make_zd_mleader.lsp). */
 const path = require("path"), fs = require("fs"), os = require("os");
@@ -132,7 +133,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
 
   console.log("selecting AutoCAD objects (Shift+V)");
   await page.click("#bFit"); await wait(300);
-  const sel = () => T(() => { const Z = zdTakeoff, pg = Z.cadPage(); return Z.cadSelIds().map(ei => { const r = pg.ents[ei]; return {t: r.t, n: r.n || "", L: Z.S.cadSc[Z.S.fileId].layers[r.L].name, area: r.area || 0, len: r.len || 0}; }); });
+  const sel = () => T(() => { const Z = zdTakeoff, pg = Z.cadPage(); return Z.cadSelIds().map(ei => { const r = ei < pg.ents.length ? pg.ents[ei] : pg.subs[ei - pg.ents.length]; return {t: r.t, n: r.n || "", L: Z.S.cadSc[Z.S.fileId].layers[r.L].name, area: r.area || 0, len: r.len || 0}; }); });
   const drag = async (A, B) => { const a = await scr(...(await pp(...A))), b = await scr(...(await pp(...B))); await page.mouse.move(a[0], a[1]); await page.mouse.down(); await page.mouse.move((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, {steps: 4}); await page.mouse.move(b[0], b[1], {steps: 4}); await page.mouse.up(); await wait(120); };
   const clickD = async (X, Y, mods) => { const p = await pp(X, Y), q = await scr(p[0], p[1]); for (const m of mods || []) await page.keyboard.down(m); await page.mouse.move(q[0], q[1]); await wait(40); await page.mouse.down(); await page.mouse.up(); for (const m of mods || []) await page.keyboard.up(m); await wait(100); };
   const n0 = await T(() => zdTakeoff.P.proj.items.length);
@@ -172,6 +173,32 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
   ok(near(sq, 120, 0.01), "…and the area measures 120.00 Sft on the sheet (" + sq.toFixed(3) + ")");
   await page.keyboard.press("Escape"); await wait(80);
   ok((await sel()).length === 0 && await T(() => zdTakeoff.S.tool === "cadsel"), "Esc clears the selection (the tool stays)");
+
+  console.log("a part of a block (clicked again) and a pattern hatch");
+  /* as AutoCAD, a click picks a block whole; clicked again, the object inside it under the cursor — DOOR3's 3'-0" leaf, its
+     layer-0 line on the door's layer A-DOOR. Once inside, a click on the swing picks the arc; "Select its block" goes back up */
+  const one = async () => { const s = await sel(); return s.length === 1 ? s[0] : null; };
+  await clickD(30, 18); let p1 = await one();
+  ok(p1 && p1.t === "INSERT" && p1.n === "DOOR3", "a click on the door's leaf picks block DOOR3 whole, as AutoCAD");
+  await clickD(30, 18); p1 = await one();
+  ok(p1 && p1.t === "LINE" && p1.L === "A-DOOR" && near(p1.len, 3, 1e-6) && /Inside block DOOR3/.test(await page.textContent("#props")), "clicked again: the leaf itself — a LINE of 3.000 ft on A-DOOR, inside block DOOR3");
+  await clickD(30 + 36 * Math.SQRT1_2, 36 * Math.SQRT1_2); p1 = await one();
+  ok(p1 && p1.t === "ARC" && near(p1.len, Math.PI / 2 * 3, 1e-6), "a click on the swing then picks the arc in the same block (" + (p1 && p1.len.toFixed(3)) + " ft)");
+  const tkA = await T(() => { zdTakeoff.S.cond = null; return zdTakeoff.cadSelAct("take"); });
+  ok(tkA && tkA.line === 1 && !tkA.count, "Take off: the arc alone, as a run (not the door)");
+  await T(() => zdTakeoff.undoAny()); await wait(100);
+  await page.click('#props [data-cact="up"]'); await wait(80); p1 = await one();
+  ok(p1 && p1.t === "INSERT" && p1.n === "DOOR3", "Select its block: back to DOOR3");
+  await page.keyboard.press("Escape"); await wait(80);
+  /* the ANSI31 hatch (5'-0" square) is drawn as its pattern: a click between its lines, inside its outline, picks it as a solid one */
+  const gap = await T(async () => { const Z = zdTakeoff, C = await Z.cadMod(), pg = Z.cadPage(), m = Z.cadMeta(Z.S.fileId).map, k = 72 * m.uIn / m.den, P = (X, Y) => [m.ox + (X - m.x0) * k, m.oy + (m.y1 - Y) * k];
+    const sd = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy, t = L ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L)) : 0; return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); };
+    const S = []; for (let i = 0; i < pg.n; i++) if (pg.pf[i] === 1) C.primPaths(pg, i).forEach(Q => S.push(Q)); let best = null;
+    for (let X = 290; X <= 330; X += 0.25) for (let Y = 170; Y <= 210; Y += 0.25) { const p = P(X, Y); let d = Infinity; S.forEach(Q => { for (let j = 1; j < Q.length; j++) d = Math.min(d, sd(p, Q[j - 1], Q[j])); }); if (!best || d > best.d) best = {X, Y, d, p}; }
+    const st = document.getElementById("stage"); Z.S.view.s = 20 / best.d; Z.S.view.tx = st.clientWidth / 2 - best.p[0] * Z.S.view.s; Z.S.view.ty = st.clientHeight / 2 - best.p[1] * Z.S.view.s; Z.applyView(); return {X: best.X, Y: best.Y, px: 20}; });
+  await wait(300); await clickD(gap.X, gap.Y); p1 = await one();
+  ok(p1 && p1.t === "HATCH" && p1.n === "ANSI31" && near(p1.area, 25, 1e-6), "a click inside the ANSI31 hatch, " + gap.px + " px from its pattern lines, picks the hatch: 25.00 Sft");
+  await page.keyboard.press("Escape"); await page.click("#bFit"); await wait(300);
   await page.keyboard.press("Control+a"); await wait(80);
   const nAll = (await sel()).length;
   ok(nAll > 10 && !(await sel()).some(x => x.L === "A-FURN" || x.L === "A-FROZEN"), "Ctrl+A selects every object on layers that are on (" + nAll + ")");
