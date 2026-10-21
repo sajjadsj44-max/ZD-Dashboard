@@ -14642,7 +14642,7 @@ function cadIsolate(name){ const cfg = S.ocgs && S.ocgs[S.fileId], e = cfg && Ob
 /* the drawing's own objects into the takeoff: lines and polylines (lengths), closed outlines (areas), blocks (counts) */
 const cadPts = P => P.filter((p, i) => !i || dist(p, P[i - 1]) > 1e-4).map(p => [+p[0].toFixed(3), +p[1].toFixed(3)]);
 function cadAddGeom(sc, pg, ei, how, cnd, counts){   // one object -> measurements; inside mutate. how: area | line | count | countAny (any object, at its middle)
-  const r = pg.ents[ei], g = how === "countAny" ? true : CAD.cadGeom(pg, ei); if (!r || !g) return 0;
+  const r = CAD.cadRec(pg, ei), g = how === "countAny" ? true : CAD.cadGeom(pg, ei); if (!r || !g) return 0;
   const lname = (sc.layers[r.L] || {}).name || "0", fid = S.fileId; let n = 0;
   if (how === "count" || how === "countAny") { const at = r.at || (how === "countAny" ? cadMid(pg, ei) : null); if (!at) return 0;
     const c = cnd && cnd.type === "count" ? cnd : condByName(r.n || lname, "count");
@@ -14663,15 +14663,17 @@ function cadPick(ei, how){   // the object under the cursor, in the condition pi
   mutate(() => { n = cadAddGeom(sc, pg, ei, how, S.cond ? cond(S.cond) : null, null); }, "AutoCAD object into the takeoff");
   refresh(); toast(n ? "Taken off from the drawing: " + n + " measurement" + (n > 1 ? "s" : "") + " — marked AI, check them" : "Nothing to take off from that object", 3000);
 }
-function cadCtxItems(q){   // right-click: the AutoCAD object under the cursor
+function cadCtxItems(q){   // right-click: the AutoCAD object under the cursor (the selected one there, else the one a click picks)
   const pg = cadPage(); if (!pg || !q) return [];
-  const sc = S.cadSc[S.fileId], h = CAD.cadHit(pg, q[0], q[1], 7 / S.view.s, cadHidden(S.fileId, sc), cedC(S.fileId, pg)); if (!h) return [];
-  const r = pg.ents[h.e]; if (!r || r.L < 0) return [];
-  const lname = (sc.layers[r.L] || {}).name || "0", L = [{h: "AutoCAD: " + (r.t === "INSERT" ? "block " + (r.n || "") : r.t.toLowerCase()) + " · " + lname, s: [r.area ? f2(r.area) + " Sft" : "", r.len ? f2(r.len) + " ft" : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ")}];
-  if (r.t === "INSERT") { const same = pg.ents.filter(x => x.t === "INSERT" && x.n === r.n).length; L.push({t: "Count this " + (r.n || "block"), fn: () => cadPick(h.e, "count")}, {t: "Count every " + (r.n || "block") + " (" + same + ")…", fn: () => cadQtyDialog({B: r.n})}); }
-  else { if (r.cl && r.area > 0) L.push({t: "Take off its area — " + f2(r.area) + " Sft", fn: () => cadPick(h.e, "area")}); if (r.len > 0) L.push({t: "Take off its length — " + f2(r.len) + " ft", fn: () => cadPick(h.e, "line")}); }
+  const sc = S.cadSc[S.fileId], ei = cadPickAt(toScr(q), true); if (ei < 0) return [];
+  const r = CAD.cadRec(pg, ei); if (!r || r.L < 0) return [];
+  const lname = (sc.layers[r.L] || {}).name || "0", blk = cadInBlock(pg, r), L = [{h: "AutoCAD: " + (r.t === "INSERT" ? "block " + (r.n || "") : r.t.toLowerCase()) + " · " + lname + (blk ? " · in block " + blk : ""), s: [r.area ? f2(r.area) + " Sft" : "", r.len ? f2(r.len) + " ft" : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ")}];
+  if (r.t === "INSERT") { const same = pg.ents.filter(x => x.t === "INSERT" && x.n === r.n).length; L.push({t: "Count this " + (r.n || "block"), fn: () => cadPick(ei, "count")}, {t: "Count every " + (r.n || "block") + " (" + same + ")…", fn: () => cadQtyDialog({B: r.n})}); }
+  else { if (r.cl && r.area > 0) L.push({t: "Take off its area — " + f2(r.area) + " Sft", fn: () => cadPick(ei, "area")}); if (r.len > 0) L.push({t: "Take off its length — " + f2(r.len) + " ft", fn: () => cadPick(ei, "line")}); }
   L.push({t: "Quantities on layer " + lname + "…", fn: () => cadQtyDialog({L: r.L})}, {t: "Isolate layer " + lname + " (LAYISO)", fn: () => cadIsolate(lname)}, {t: "Layer " + lname + " off (LAYOFF)", fn: () => cadLayersOnOff([lname], false)}, {sep: 1},
-    {t: "Select this object", k: "Shift+V", fn: () => { setTool("cadsel"); cadSelSet([h.e]); }}, {t: "Select similar (same type and layer" + (r.t === "INSERT" ? ", same block" : "") + ")", fn: () => { setTool("cadsel"); cadSelSet([h.e]); cadSelAct("similar"); }}, {sep: 1});
+    {t: "Select this object", k: "Shift+V", fn: () => { setTool("cadsel"); cadSelSet([ei]); }}, {t: "Select similar (same type and layer" + (r.t === "INSERT" ? ", same block" : "") + ")", fn: () => { setTool("cadsel"); cadSelSet([ei]); cadSelAct("similar"); }});
+  const C = CAD.cadChain(pg, ei); if (C.length > 1) L.push({t: "Select the block it is in (" + blk + ")", fn: () => { setTool("cadsel"); cadSelSet([C[C.length - 2]]); }});
+  L.push({sep: 1});
   return L;
 }
 
@@ -14684,7 +14686,7 @@ function cadCtxItems(q){   // right-click: the AutoCAD object under the cursor
 function cadSelIds(){   // the selected objects that can still be seen (their layer on), on this drawing
   const pg = cadPage(); if (!pg || !S.cadSel || S.cadSel.f !== S.fileId || !S.cadSel.ids.size) return [];
   const hid = cadHidden(S.fileId, S.cadSc[S.fileId]), ed = cedC(S.fileId, pg);
-  return [...S.cadSel.ids].filter(ei => { const r = pg.ents[ei]; return r && r.L >= 0 && !hid[r.L] && !cedGone(pg, ed, ei); });
+  return [...S.cadSel.ids].filter(ei => { const r = CAD.cadRec(pg, ei); return r && r.L >= 0 && !hid[r.L] && !cedGone(pg, ed, ei); });
 }
 function cadSelSet(ids, how){   // how: "" replaces, "add", "toggle", "remove"
   if (!cadPage()) return;
@@ -14700,20 +14702,34 @@ function cedGone(pg, ed, ei){   // an object every line and text of which the Au
   return true;
 }
 function cadMid(pg, ei){ const E = CAD.cadEnts(pg), k = 4 * ei; return E.eb[k] <= E.eb[k + 2] ? [(E.eb[k] + E.eb[k + 2]) / 2, (E.eb[k + 1] + E.eb[k + 3]) / 2] : null; }
-function cadPickAt(sp){   // the object under a screen point (on a layer that is on) -> its index, or -1
+/* the object a click at a screen point selects (on a layer that is on) -> its index, or -1. As in AutoCAD a block is picked
+   whole; clicked again, the object inside it under the cursor — a hatch, a text, a line, a block in it — and so on down. Once
+   an object inside a block is selected, a click on another object in the same block picks that one. add (Shift / Ctrl): the
+   selected object there, to take out, or the next one at the same depth */
+function cadPickAt(sp, add){
   const pg = cadPage(); if (!pg) return -1;
-  const q = toBase(sp[0], sp[1]), hid = cadHidden(S.fileId, S.cadSc[S.fileId]), h = CAD.cadHit(pg, q[0], q[1], 7 / S.view.s, hid, cedC(S.fileId, pg)), r = h && pg.ents[h.e];
-  return r && r.L >= 0 && !hid[r.L] ? h.e : -1;
+  const q = toBase(sp[0], sp[1]), hid = cadHidden(S.fileId, S.cadSc[S.fileId]), h = CAD.cadHit(pg, q[0], q[1], 7 / S.view.s, hid, cedC(S.fileId, pg)); if (!h) return -1;
+  const C = CAD.cadChain(pg, h.u != null ? h.u : h.e).filter(ei => { const r = CAD.cadRec(pg, ei); return r && r.L >= 0 && !hid[r.L]; }); if (!C.length) return -1;
+  const sel = S.cadSel && S.cadSel.f === S.fileId ? S.cadSel.ids : null; if (!sel || !sel.size) return C[0];
+  const par = new Set(); sel.forEach(ei => { const r = CAD.cadRec(pg, ei); if (r && r.p != null) par.add(r.p); });
+  for (let k = C.length - 1; k >= 0; k--) {
+    if (sel.has(C[k])) return add ? C[k] : C[Math.min(k + 1, C.length - 1)];
+    const r = CAD.cadRec(pg, C[k]); if (k && r && par.has(r.p)) return C[k];
+  }
+  return C[0];
 }
+const cadInBlock = (pg, r) => { const b = r && r.p != null ? CAD.cadRec(pg, r.p) : null; return b ? b.n || "a block" : ""; };   // the block an object inside a block is in
 function cadSelDown(sp, e){
   if (!cadOn()) { toast("Select objects works on an AutoCAD drawing (DWG / DXF added with + PDF), on its page", 4000); return; }
   S.cbox = {a: sp, b: sp, add: e.shiftKey || e.ctrlKey || e.metaKey};
 }
 function cadSelUp(){
   const B = S.cbox; S.cbox = null; const pg = cadPage(); if (!pg) { draw(); return; }
-  if (dist(B.a, B.b) < 4) { const ei = cadPickAt(B.b);
+  if (dist(B.a, B.b) < 4) { const ei = cadPickAt(B.b, B.add);
     if (ei < 0) { if (!B.add) cadSelSet([]); else draw(); return; }
-    cadSelSet([ei], B.add ? "toggle" : ""); return; }
+    cadSelSet([ei], B.add ? "toggle" : "");
+    const r = CAD.cadRec(pg, ei); if (!B.add && !S.cadDrillTip && r && r.t === "INSERT" && cadPickAt(B.b) !== ei) { S.cadDrillTip = 1; toast("Block " + (r.n || "") + " selected — click a part of it again to pick that hatch, text or line on its own", 5000); }
+    return; }
   const a = toBase(B.a[0], B.a[1]), b = toBase(B.b[0], B.b[1]);
   const ids = CAD.cadBox(pg, Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1]), B.b[0] < B.a[0], cadHidden(S.fileId, S.cadSc[S.fileId]));
   cadSelSet(ids, B.add ? "add" : "");
@@ -14721,8 +14737,8 @@ function cadSelUp(){
 function cadHoverAt(sp){ const ei = S.cbox ? -1 : cadPickAt(sp); if (ei !== S.cadHov) S.cadHov = ei; stage().style.cursor = ei >= 0 ? "pointer" : ""; }
 function cadDesc(sc, r){ return (r.t === "INSERT" ? "Block " + (r.n || "") : r.t.charAt(0) + r.t.slice(1).toLowerCase()) + " · " + ((sc.layers[r.L] || {}).name || "0"); }
 function cadHoverText(){
-  const pg = cadPage(), r = pg && S.cadHov >= 0 && pg.ents[S.cadHov]; if (!r) return "";
-  return [cadDesc(S.cadSc[S.fileId], r), r.cl && r.area > 0 ? fq(r.area) + " Sft" : "", !r.cl && r.len > 0 ? f3(r.len) + " ft" : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ");
+  const pg = cadPage(), r = pg && S.cadHov >= 0 && CAD.cadRec(pg, S.cadHov); if (!r) return "";
+  return [cadDesc(S.cadSc[S.fileId], r), cadInBlock(pg, r) && "in block " + cadInBlock(pg, r), r.cl && r.area > 0 ? fq(r.area) + " Sft" : "", !r.cl && r.len > 0 ? f3(r.len) + " ft" : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ");
 }
 /* the selected objects drawn over the drawing: their own lines, in blue (a text as its box); a very big selection as the
    objects' boxes. Only what is in view. */
@@ -14746,7 +14762,7 @@ function cadSelSvg(ids, hover){
 }
 function cadSelSum(ids){   // the selection's totals: by type, lengths, areas, blocks, texts, layers
   const pg = cadPage(), sc = S.cadSc[S.fileId], o = {n: ids.length, runs: 0, len: 0, areas: 0, area: 0, blocks: new Map(), txt: 0, other: 0, types: new Map(), layers: new Map()};
-  ids.forEach(ei => { const r = pg.ents[ei]; if (!r) return; const ln = (sc.layers[r.L] || {}).name || "0";
+  ids.forEach(ei => { const r = CAD.cadRec(pg, ei); if (!r) return; const ln = (sc.layers[r.L] || {}).name || "0";
     o.types.set(r.t, (o.types.get(r.t) || 0) + 1); o.layers.set(ln, (o.layers.get(ln) || 0) + 1);
     if (r.t === "INSERT") o.blocks.set(r.n || "?", (o.blocks.get(r.n || "?") || 0) + 1);
     else if (r.cl && r.area > 0) { o.areas++; o.area += r.area; }
@@ -14756,11 +14772,13 @@ function cadSelSum(ids){   // the selection's totals: by type, lengths, areas, b
 }
 function cadSelHtml(ids){
   const o = cadSelSum(ids), c = S.cond ? cond(S.cond) : null, top = (m, n) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => esc(k) + (v > 1 ? " ×" + v : "")).join(", ") + (m.size > n ? ", …" : "");
-  const B = [...o.blocks.values()].reduce((a, v) => a + v, 0);
-  const into = c ? "into <b>" + esc(c.name) + "</b> when its type fits, else a condition named after the layer / block" : "into conditions named after each layer / block";
+  const B = [...o.blocks.values()].reduce((a, v) => a + v, 0), pg = cadPage(), inB = [...new Set(ids.map(ei => cadInBlock(pg, CAD.cadRec(pg, ei))).filter(Boolean))];
+  const where = inB.length ? `<div class="row small" style="margin-top:4px">Inside block <b>${esc(inB.slice(0, 3).join(", "))}${inB.length > 3 ? ", …" : ""}</b> &nbsp;<button class="btn sm" data-cact="up" title="Select the block it is part of, as AutoCAD picks it">Select its block</button></div>`
+    : B && ids.length === 1 ? `<div class="row small" style="margin-top:4px;color:var(--muted)">Click a part of the block again to pick that hatch, text or line on its own</div>` : "";
+  const into = c ?"into <b>" + esc(c.name) + "</b> when its type fits, else a condition named after the layer / block" : "into conditions named after each layer / block";
   return `<h4>AutoCAD objects — ${o.n} selected <span style="font-weight:400;color:var(--muted);font-size:11px">Shift / Ctrl+click adds or takes out · box: left→right window, right→left crossing · Ctrl+A all · Esc clears</span></h4>
     <div class="row"><span class="small" style="flex:1;min-width:220px">${[o.runs && "<b>Lines</b> " + o.runs + " · " + f3(o.len) + " ft", o.areas && "<b>Closed</b> " + o.areas + " · " + fq(o.area) + " Sft", B && "<b>Blocks</b> " + B + " (" + top(o.blocks, 4) + ")", o.txt && "<b>Text</b> " + o.txt, o.other && "other " + o.other].filter(Boolean).join(" &nbsp;|&nbsp; ") || "nothing to measure"}<br>
-      <b>Types:</b> ${top(o.types, 6)} &nbsp;·&nbsp; <b>Layers:</b> ${top(o.layers, 6)}</span></div>
+      <b>Types:</b> ${top(o.types, 6)} &nbsp;·&nbsp; <b>Layers:</b> ${top(o.layers, 6)}</span></div>${where}
     <div class="row" style="margin-top:6px;gap:4px;flex-wrap:wrap">
       <button class="btn pri sm" data-cact="take" title="Lines → length, closed outlines → area, blocks → count, ${into}"${o.runs || o.areas || B ? "" : " disabled"}>Take off</button>
       <button class="btn sm" data-cact="len" title="Every line, and each closed outline's perimeter, as length"${o.runs || o.areas ? "" : " disabled"}>All as length</button>
@@ -14781,14 +14799,17 @@ function cadLayersOnOff(names, on){   // AutoCAD layers by name, on or off (the 
 }
 function cadSelAct(act){
   const pg = cadPage(); if (!pg) return; const sc = S.cadSc[S.fileId], ids = cadSelIds(), hid = cadHidden(S.fileId, sc), lname = r => (sc.layers[r.L] || {}).name || "0";
-  const all = () => { const eb = CAD.cadEnts(pg).eb; return pg.ents.map((r, ei) => r && r.L >= 0 && !hid[r.L] && eb[4 * ei] <= eb[4 * ei + 2] ? ei : -1).filter(ei => ei >= 0); };
+  const R = ei => CAD.cadRec(pg, ei), deep = ids.some(ei => ei >= pg.ents.length);   // (similar / layer from an object inside a block: inside every block too)
+  const all = dp => { const eb = CAD.cadEnts(pg).eb, A = pg.ents.concat(dp && pg.subs || []); return A.map((r, ei) => r && r.L >= 0 && !hid[r.L] && eb[4 * ei] <= eb[4 * ei + 2] ? ei : -1).filter(ei => ei >= 0); };
+  const outer = A => { const H = new Set(A); return A.filter(ei => { for (let r = R(ei), n = 0; r && r.p != null && n < 64; r = R(r.p), n++) if (H.has(r.p)) return false; return true; }); };   // a block and what is in it: the block
   if (act === "clear") return cadSelSet([]);
   if (act === "all") { const A = all(); cadSelSet(A); return toast(A.length + " AutoCAD objects selected (layers that are on)", 2200); }
   if (act === "qsel") return cadQuickSelect();
   if (!ids.length) return toast("Select AutoCAD objects first (Shift+V, then click or drag a box)", 3000);
-  if (act === "similar") { const key = r => r.t + "|" + r.L + "|" + (r.t === "INSERT" ? r.n || "" : ""), K = new Set(ids.map(ei => key(pg.ents[ei]))), A = all().filter(ei => K.has(key(pg.ents[ei]))); cadSelSet(A); return toast("Similar: " + A.length + " objects", 2000); }
-  if (act === "layer") { const L = new Set(ids.map(ei => pg.ents[ei].L)), A = all().filter(ei => L.has(pg.ents[ei].L)); cadSelSet(A); return toast(A.length + " objects on " + [...L].map(l => (sc.layers[l] || {}).name).join(", "), 2500); }
-  if (act === "layoff" || act === "iso") { const N = [...new Set(ids.map(ei => lname(pg.ents[ei])))];
+  if (act === "up") { const P = [...new Set(ids.map(ei => { const r = R(ei); return r && r.p != null ? r.p : ei; }))]; cadSelSet(P); return; }
+  if (act === "similar") { const key = r => r.t + "|" + r.L + "|" + (r.t === "INSERT" ? r.n || "" : ""), K = new Set(ids.map(ei => key(R(ei)))), A = outer(all(deep).filter(ei => K.has(key(R(ei))))); cadSelSet(A); return toast("Similar: " + A.length + " objects", 2000); }
+  if (act === "layer") { const L = new Set(ids.map(ei => R(ei).L)), A = outer(all(deep).filter(ei => L.has(R(ei).L))); cadSelSet(A); return toast(A.length + " objects on " + [...L].map(l => (sc.layers[l] || {}).name).join(", "), 2500); }
+  if (act === "layoff" || act === "iso") { const N = [...new Set(ids.map(ei => lname(R(ei))))];
     if (act === "layoff") { cadSelSet([]); return cadLayersOnOff(N, false); }
     const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; const G = Object.entries(cfg.getGroups()), want = new Set(N);
     S.iso = null; setLayer(G.filter(([, g]) => !want.has(g.name)).map(([id]) => id), false); setLayer(G.filter(([, g]) => want.has(g.name)).map(([id]) => id), true); renderLayers(); renderProps(); draw();
@@ -14799,7 +14820,7 @@ function cadSelAct(act){
     S.view = {s: s2, tx: st.clientWidth / 2 - (x0 + x1) / 2 * s2, ty: st.clientHeight / 2 - (y0 + y1) / 2 * s2}; applyView(); renderHi(); return; }
   if (act === "take" || act === "len" || act === "count") {
     const cnd = S.cond ? cond(S.cond) : null, got = {area: 0, line: 0, count: 0}, counts = new Map();
-    mutate(() => ids.forEach(ei => { const r = pg.ents[ei];
+    mutate(() => ids.forEach(ei => { const r = R(ei);
       if (act === "count") { got.count += cadAddGeom(sc, pg, ei, "countAny", cnd, counts); return; }
       if (r.t === "INSERT") { if (act === "take") got.count += cadAddGeom(sc, pg, ei, "count", cnd, counts); return; }
       if (act === "take" && r.cl && r.area > 0) got.area += cadAddGeom(sc, pg, ei, "area", cnd, null);
@@ -15196,7 +15217,7 @@ function cedOffsetClick(sp, p){
 }
 function cedModAct(a){   // Offset / Join / Explode buttons in AutoCAD mode
   if (!cadOn()) return toast("AutoCAD mode edits an AutoCAD drawing's own objects — this page is a PDF. Switch to PDF mode to edit the takeoff's markups.", 4500);
-  const sel = cadSelIds(), picks = () => { const pg = cadPage(); return sel.map(ei => ({e: ei, i: -1, q: cadMid(pg, ei) || [0, 0]})); };
+  const pg0 = cadPage(), sel = pg0 ? [...new Set(cadSelIds().map(ei => CAD.cadTop(pg0, ei)))] : [], picks = () => { const pg = cadPage(); return sel.map(ei => ({e: ei, i: -1, q: cadMid(pg, ei) || [0, 0]})); };   // (an object inside a block: its edits go to the block, the drawing's own object)
   if (a === "offset") return cedOffsetStart();
   if (a === "join") { if (S.tool === "cedjoin") return cedJoin(S.cedJ); if (sel.length >= 2) return cedJoinSel(sel); setTool("cedjoin"); return; }
   if (a === "explode") { if (sel.length) { cedExplode(picks()); cadSelSet([]); return; } setTool("cedexplode"); return; }
