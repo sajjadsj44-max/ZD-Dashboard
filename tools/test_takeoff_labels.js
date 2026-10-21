@@ -8,7 +8,7 @@
 
    TK_URL, TK_LIBS (pdfjs-dist, exceljs) and TK_SHOTS as in tools/test_takeoff.js.
 
-   Checks: a label can be dragged (offset kept on the drawing, leader, undo, reset, locked), [ ] / ⚙ / dialog sizes; a label's text size follows the zoom (100 % = its set size, capped at 2.5 ×); zoomed far out the labels are left
+   Checks: a label can be dragged (offset kept on the drawing, leader, undo, reset, locked), [ ] / ⚙ / dialog sizes; a label's text size follows the zoom at every zoom, as Bluebeam's (100 % = its set size); zoomed far out the labels are left
    out but the selected object's stays readable; small labels that would overlap keep only the bigger object's; View →
    Labels "grow and shrink with the zoom" off keeps one size, "leave out a label that would cover another" off shows them
    all; the hover tip still names a hidden label's object; no page errors. */
@@ -65,7 +65,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.05 : t);
   await zoomTo(2); L = await labels(); const hall2 = L.find(x => x.s === "HALL");
   ok(hall2 && near(hall2.fs, 23, 0.06), "at 200 % it is twice the size, as the drawing's text (" + (hall2 && hall2.fs) + " px)");
   await zoomTo(6); L = await labels(); const hall6 = L.find(x => x.s === "HALL");
-  ok(hall6 && near(hall6.fs, 11.5 * 2.5, 0.06), "zoomed far in it stops at 2.5 × (" + (hall6 && hall6.fs) + " px), not a giant label");
+  ok(hall6 && near(hall6.fs, 11.5 * 6, 0.06), "zoomed far in (600 %) it keeps in step with the drawing, as Bluebeam's: 6 × (" + (hall6 && hall6.fs) + " px)");
   await zoomTo(0.7); L = await labels(); const hall07 = L.find(x => x.s === "HALL");
   ok(hall07 && near(hall07.fs, 11.5 * 0.7, 0.06), "at 70 % it is 0.7 × (" + (hall07 && hall07.fs) + " px) — smaller with the drawing, never larger");
   await shot("70pct");
