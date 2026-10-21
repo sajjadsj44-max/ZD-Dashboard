@@ -3586,7 +3586,8 @@ function setTool(t){
   if (t === "match" || S.tool === "match") S.matchSource = null;
   if (t === "zoomwin" && S.tool !== "zoomwin") S.prevTool = S.tool;
   const c = S.cond ? cond(S.cond) : null;
-  if (["draw", "rect", "ded", "dedrect", "open", "auto"].indexOf(t) >= 0 && !c && t !== "count") { toast("Pick or create a condition first (left panel)"); t = "select"; S.pickWall = false; }
+  if (["draw", "rect", "ded", "dedrect", "open", "auto", "linepick"].indexOf(t) >= 0 && !c && t !== "count") { toast("Pick or create a condition first (left panel)"); t = "select"; S.pickWall = false; }
+  if (t === "linepick" && c && c.type === "count") { toast("Line pick is for length and area conditions — a count is clicked item by item (C)", 3200); t = "draw"; }
   if (t === "rect" && c && c.type !== "area") { toast("Rectangle is for area conditions"); t = "draw"; }
   if (t === "dedrect" && c && c.type === "linear") { toast("A length is cut with the polyline cut-out (D) — the rectangle cut-out is for areas", 3200); t = "ded"; }
   if (t === "dedrect" && c && c.type === "count") { toast("Counts have no deductions — select a point and press Delete"); t = "draw"; }
@@ -3610,6 +3611,7 @@ function setTool(t){
   if (t !== "gap") S.gap = null;
   if (t !== "fillet" && t !== "chamfer") S.fc.first = null;
   if (t !== "stretch") S.str = null;
+  if (t !== "linepick") S.lpk = null;
   S.cedF = null; S.cedO = null; S.cedJ = null; S.cedHov = null;
   if (t !== "typref" && S.typ) { S.typ = null; $("cmpLegend").style.display = "none"; toast("Typical copy stopped — nothing copied"); }
   S.mkd = null;
@@ -3637,6 +3639,7 @@ function hint(){
     cadsel: "AutoCAD objects: click one to select it · Shift / Ctrl+click adds or takes out · drag a box left→right (wholly inside) or right→left (touching) · Ctrl+A: all · then Take off, Count, Select similar, Layer off… below · Esc clears.",
     lasso: "Lasso: drag round the objects to select (touching counts) · Shift adds to the selection.", pan: "Drag to pan; scroll to zoom.",
     draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." + drawing : c.type === "linear" ? (S.resume ? "Continuing the run — click on; Enter, double-click or right-click to finish." : "Click along the run; Enter, double-click or right-click to finish.") + drawing : "Click each item to count it; Esc when done.",
+    linepick: "Line pick: click one line of the drawing — the whole run joined to it is taken off with the active condition (a closed outline: an area). It stops at a junction; Shift+click goes on through it, the straightest way. Ctrl+Z takes it back.",
     fence: "Draw a line across the opening where Auto area leaks (click points; double-click, right-click or Enter to finish). It counts as a wall for Auto area only.", vsearch: "Box one symbol (two corners) — every matching symbol is counted.", note: "Click where the note goes, then type it.", cloud: "Click two opposite corners of the area to cloud.", arrow: "Click the tail, then the head of the arrow.", hilite: "Click two opposite corners to highlight.",
     area: "Box the takeoff area: click two opposite corners around the part of the drawing to take off. Esc cancels.",
     rect: "Click two opposite corners — or one corner, then type L x W (e.g. 12 x 14) and Enter.",
@@ -3728,6 +3731,7 @@ function onDown(e){
   if (S.tool === "cadsel") return cadSelDown(sp, e);
   if (S.tool === "select") return selectDown(sp, e);
   if (S.tool === "match") return matchClick(sp);
+  if (S.tool === "linepick") return lpClick(sp, e);
   const {p} = cursorPoint(e, sp);
   if (mkIsTool(S.tool)) return mkDown(p, sp, e);
   if (cedHere()) return cedClick(sp, p, e);   // AutoCAD mode: the drawing's own objects
@@ -3820,6 +3824,7 @@ function onMove(e){
     if (!D.live && (!D.sp0 || dist(sp, D.sp0) > 3)) D.live = true;
     if (it && D.live) { it.pts[D.vertex] = p; D.moved = true; refreshSheetSoon(); } }
   if (S.tool === "select" && !S.drag) hoverAt(sp, e);
+  if (S.tool === "linepick" && !S.drag) lpHover(sp, e);
   if (S.tool === "cadsel" && !S.drag) cadHoverAt(sp);
   if (cedHere() && cadOn() && !S.drag) cedHover(sp);
   const k = hereScale(p), vp = viewportAt(S.fileId, S.pageNo, p);
@@ -4306,6 +4311,84 @@ async function finish(pts){
   else if (area && !ded && itemScale(ni)) { const k = itemScale(ni), Q = itemPoly(ni); toast((nm ? nm + " (named from the drawing) — " : "Area — ") + fq(polyArea(Q) / k / k) + " Sft · perimeter " + f3(polyLen(Q, true) / k) + " ft", 3500); }   // what was just taken: its area and perimeter
   else if (nm) toast("Named " + nm + " from the drawing", 1800);
 }
+/* ------------------------------------------------------------------ line pick (Shift+A): one click takes a whole run of the drawing's lines
+   From the line clicked, the lines joined end to end are followed both ways, round every corner, as long as the way on is plain: one
+   line to go on with, or one of the same drawn path or line style. At a junction it stops; Shift+click goes on through it, the
+   straightest way. A run that comes back to its start is a closed outline: an area for an area condition, a run round it for a length.
+   Over the drawing the run is shown with its length before the click. Filled-only and clip paths, and lines on layers switched off,
+   are not followed. */
+const LP_EPS = 0.6;   // page units: line ends this close are one point
+function lpEnds(g, q){   // the lines with an end at q -> [{i, far: their other end}]
+  const out = [];
+  segsIn(g, q[0] - LP_EPS, q[1] - LP_EPS, q[0] + LP_EPS, q[1] + LP_EPS).forEach(i => { const s = g.segs[i]; if ((s[4] || 0) & 12) return;
+    if (Math.abs(s[0] - q[0]) <= LP_EPS && Math.abs(s[1] - q[1]) <= LP_EPS) out.push({i, far: [s[2], s[3]]});
+    else if (Math.abs(s[2] - q[0]) <= LP_EPS && Math.abs(s[3] - q[1]) <= LP_EPS) out.push({i, far: [s[0], s[1]]}); });
+  return out;
+}
+function lpAt(sp){   // the drawing's line under a screen point -> its index, or -1
+  const g = S.geo[S.key]; if (!g || !g.segs) return -1;
+  const p = toBase(sp[0], sp[1]), tol = Math.max(HIT_PX, 6) / S.view.s; let best = -1, bd = tol;
+  segsIn(g, p[0] - tol, p[1] - tol, p[0] + tol, p[1] + tol).forEach(i => { const s = g.segs[i]; if ((s[4] || 0) & 12) return; const d = distSeg(p, [s[0], s[1]], [s[2], s[3]]); if (d < bd) { bd = d; best = i; } });
+  return best;
+}
+function lpChain(g, i0, thru){   // the run through line i0 -> {pts, closed, stop: "junction" | "end"}
+  const used = new Set([i0]), s0 = g.segs[i0];
+  const turn = (a, b, c) => { const u = [b[0] - a[0], b[1] - a[1]], v = [c[0] - b[0], c[1] - b[1]], d = Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]); return d ? Math.acos(Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1]) / d))) : Math.PI; };
+  const walk = (pts, si) => {   // on from the last point of pts; si: the line just come along
+    for (let n = 0; n < 20000; n++) {
+      const end = pts[pts.length - 1], prev = pts[pts.length - 2], cur = g.segs[si];
+      let C = lpEnds(g, end).filter(o => !used.has(o.i) && dist(o.far, end) > 1e-6);
+      if (!C.length) return "end";
+      if (C.length > 1 && cur[5] != null) { const a = C.filter(o => g.segs[o.i][5] === cur[5]); if (a.length === 1) C = a; }   // the same drawn path goes on
+      if (C.length > 1 && cur[6] != null) { const a = C.filter(o => g.segs[o.i][6] === cur[6]); if (a.length === 1) C = a; }   // or the one line of the same style
+      if (C.length > 1) { if (!thru) return "junction"; C.sort((a, b) => turn(prev, end, a.far) - turn(prev, end, b.far)); }
+      const o = C[0]; used.add(o.i); pts.push(o.far.slice()); si = o.i;
+      if (pts.length > 3 && dist(o.far, pts[0]) <= LP_EPS) return "closed";
+    }
+    return "end";
+  };
+  const fw = [[s0[0], s0[1]], [s0[2], s0[3]]], r1 = walk(fw, i0);
+  let pts = fw, stop = r1;
+  if (r1 !== "closed") { const bw = [[s0[2], s0[3]], [s0[0], s0[1]]], r2 = walk(bw, i0); pts = bw.slice(2).reverse().concat(fw); stop = r1 === "junction" || r2 === "junction" ? "junction" : r2; }
+  let closed = pts.length > 3 && dist(pts[0], pts[pts.length - 1]) <= LP_EPS;
+  if (closed) pts = pts.slice(0, -1);
+  const out = [];   // the corners only: points in a straight line between two others go
+  pts.forEach(p => { if (out.length && dist(out[out.length - 1], p) < 1e-6) return; if (out.length >= 2 && turn(out[out.length - 2], out[out.length - 1], p) < 0.005) out.pop(); out.push(p); });
+  if (closed && out.length >= 3 && turn(out[out.length - 2], out[out.length - 1], out[0]) < 0.005) out.pop();
+  if (closed && out.length >= 3 && turn(out[out.length - 1], out[0], out[1]) < 0.005) out.shift();
+  if (out.length < 3) closed = false;
+  return {pts: out, closed, stop: closed ? "closed" : stop};
+}
+function lpText(r, c){   // what a picked run measures, as said before and after the click
+  const k = hereScale(r.pts[0]), legs = r.pts.length - (r.closed ? 0 : 1), L = polyLen(r.pts, r.closed);
+  if (!k) return legs + " leg" + (legs === 1 ? "" : "s") + " · " + L.toFixed(1) + " pt (no scale)";
+  return (c && c.type === "area" && r.closed ? fq(polyArea(r.pts) / k / k) + " Sft · perimeter " : "") + f3(L / k) + " ft · " + legs + " leg" + (legs === 1 ? "" : "s") + (r.closed ? " · closed" : r.stop === "junction" ? " · stops at a junction (Shift: on through it)" : "");
+}
+function lpHover(sp, e){
+  const i = lpAt(sp), thru = !!(e && e.shiftKey);
+  if (i < 0) { if (S.lpk) { S.lpk = null; draw(); } return; }
+  if (S.lpk && S.lpk.i === i && S.lpk.thru === thru && S.lpk.key === S.key) return;
+  S.lpk = Object.assign(lpChain(S.geo[S.key], i, thru), {i, thru, key: S.key}); draw();
+}
+function lpSvg(r, c){
+  const col = c ? c.color : "#2a78d6", Q = r.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ");
+  return `<${r.closed ? "polygon" : "polyline"} points="${Q}" fill="${r.closed && c && c.type === "area" ? col : "none"}" fill-opacity=".14" stroke="${col}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" opacity=".6"/>`
+    + r.pts.map(p => { const q = toScr(p); return `<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="3" fill="#fff" stroke="${col}" stroke-width="1.5"/>`; }).join("");
+}
+function lpClick(sp, e){
+  const c = S.cond ? cond(S.cond) : null; if (!c) return;
+  const g = S.geo[S.key];
+  if (!g || !g.segs || !g.segs.length) return toast("Line pick follows the drawing's own lines — this page has none (a scan or photo): draw the run point by point (A)", 4500);
+  const i = lpAt(sp); if (i < 0) return toast("No line of the drawing there — click right on a line", 2200);
+  const r = lpChain(g, i, !!e.shiftKey);
+  if (c.type === "area" && !r.closed) return toast("Those lines do not close round an area" + (r.stop === "junction" ? " — they meet other lines at a junction; Shift+click goes on through it the straightest way" : "") + " (for a room, Auto area W traces it from the walls)", 5000);
+  const pts = r.closed && c.type !== "area" ? r.pts.concat([r.pts[0].slice()]) : r.pts;
+  const nm = c.type === "area" && S.lbl.autoName ? roomNameAt(pts) : "";
+  const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, label: nm};
+  mutate(() => { P.proj.items.push(it); }, "Line pick in " + c.name);
+  S.lpk = null;
+  toast((nm ? nm + " — " : "") + "Line pick: " + lpText(r, c) + " → " + c.name, 3500);
+}
 
 /* ------------------------------------------------------------------ overlay */
 let raf = 0;
@@ -4408,6 +4491,7 @@ function drawNow(){
     if (it && it.file === S.fileId && it.page === S.pageNo && !hiddenItem(it) && !(S.multi.size && (it.id === S.sel || S.multi.has(it.id)))) dyn.push(hoverGlow(it)); }
   const c = S.cond ? cond(S.cond) : null, cur = S.cursor;
   let live = "";
+  if (S.tool === "linepick" && S.lpk && S.lpk.key === S.key && S.lpk.pts.length > 1) { dyn.push(lpSvg(S.lpk, c)); live = "Line pick: " + lpText(S.lpk, c); }   // the run a click would take
   if (S.tool === "stretch" && S.str && cur) dyn.push(...stretchPreview(cur));
   if (S.autoPrev && S.autoPrev.key === S.key) { dyn.push(`<polygon points="${S.autoPrev.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="#e8a33d" fill-opacity=".18" stroke="#c77700" stroke-width="2.5" stroke-dasharray="8 5"/>`);
     (S.autoPrev.holes || []).forEach(h => dyn.push(`<polygon points="${h.pts.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="#fff" fill-opacity=".6" stroke="#b42318" stroke-width="2" stroke-dasharray="4 3"/>`)); }
@@ -11239,7 +11323,7 @@ function wire(){
     if (e.key === "}" || e.key === "{") { lblSize("dedScale", e.key === "}" ? 1 : -1); return; }   // Shift: the cut-out labels'
     if (e.shiftKey && k === "c") { setXh(!S.xh); return; }   // full-screen cross-hair
     if (e.shiftKey && k === "g") { setMag(!MAG.on); return; }   // magnifier (Shift+M is the Angle tool)
-    if (e.shiftKey) { const ST = {m: "angle", l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen", v: "cadsel", t: "trim", x: "extend", s: "stretch", d: "dedrect"}; if (ST[k]) { setTool(ST[k]); return; } }
+    if (e.shiftKey) { const ST = {m: "angle", l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen", v: "cadsel", t: "trim", x: "extend", s: "stretch", d: "dedrect", a: "linepick"}; if (ST[k]) { setTool(ST[k]); return; } }
     const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", c: "count", e: "circle", n: "note", u: "cloud", d: "ded", o: "open", m: "measure", k: "cal", b: "break", z: "zoomwin",
       t: "mk_text", q: "mk_callout", p: "mk_pen", g: "mk_polygon", y: "mk_polyline", x: "mk_stamp", i: "mk_image"};
     if (T[k]) { setTool(T[k]); return; }
