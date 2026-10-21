@@ -883,6 +883,46 @@ PDF's own lines and text, so vector drawings — a scanned sheet has neither):
   page* runs the rooms over the whole PDF; a typing slip (*bedrom*, *kitchn*) still finds the room. The 🏠 Rooms agent
   no longer measures a room twice — one already measured in the condition is left as it is.
 
+**Accuracy engine and QS commands** (20-Oct-2026 — audit, fixes and tests; the full report with root causes, before / after
+figures and limits is `docs/takeoff-accuracy-engine-2026-10-20.md`):
+
+- **Three parts kept apart.** The *interpreter* says what is asked (typed commands for the free rule agent, the `qs_command`
+  tool for Claude / local AI); the *measurement engine* measures (Auto area, the walls agent, the tag scan, the sheet's `rowsOf`
+  and `takeoff/measure.js` — pure geometry and QS formulas, unit-tested in Node); the *review* says how far to trust it. A
+  quantity is never taken from a language model.
+- **QS commands** (structured: action, scope, inputs; refused with the reason when an input is missing or wrong, never reported
+  as done when nothing was done): *measure all rooms on the current floor*, *measure every washroom separately* (washroom = BATH,
+  TOILET, W.C., WASH, POWDER), *create a separate corridor area*, *give me the linear length of each washroom wall* (internal
+  faces, room by room), *measure only the internal face of these walls* (the selected rooms), *count doors and windows
+  separately*, *measure the slab area and deduct confirmed openings* (only openings a person has ✓ checked; no thickness, no
+  volume), *show rooms with incomplete boundaries*, *find duplicate or overlapping wall measurements* (shown, never deleted),
+  *compare manually measured quantities with AI quantities*, *show the exact walls included in this quantity*, *recalculate
+  the room after I correct its boundary*, *undo the last AI measurement* (exactly the last agent run — measurements you edited or
+  checked since are kept), *run a quality check before I export the BOQ*; *accept* / *reject* agent measurements (rejected ones
+  leave the quantities but stay on record in the project).
+- **Review status** on every measurement (Properties, the agents' tools): *Needs calibration* (no scale where it is, or a scale not
+  yet checked against a dimension), *Needs review* (agent-made, copied or flagged, not checked), *Verified* (checked by a person, on
+  a checked scale), *Measured* (by hand on a checked scale). A count needs no scale, and counts on a page not yet calibrated now
+  go into the totals.
+- **Detection fixes** found on a test apartment with known quantities: a corridor carrying on past the end of a partition was cut
+  in two (a closing line drawn from the outside corner of an L junction, as if it were a door jamb) — 205.375 Sft corridor traced
+  as 49.5; a bath's floor fenced off round its WC and basin (fixture boxes taken for walls) — 44.01 instead of 48; a WC's top line
+  a wall's thickness from the wall face measured as a 9" wall (+5 %); a room drawn turned 8° or 12° squared to the page (−6 %,
+  −11 %); on a page turned 90° the agent clicked beside the room names (it took the text box, which lies across) — baths −3 to −5 %.
+  All are exact now, on all three scales and with the page turned.
+- **Scale fixes:** a detail viewport not yet calibrated no longer borrows the page's scale (its measurements wait for
+  calibration); nested viewports — the innermost wins; calibrating with both points inside a viewport sets that viewport; Verify
+  checks against the scale where the dimension is; a calibration span under 1" of paper is warned; `3/4" = 1'-6"` is read as
+  0.5"/ft (was 0.75); a bare `1:12` (a ramp's slope) is no longer taken for a scale; a Bluebeam import keeps a verified scale.
+- **The check (✅)** also reports outlines that are not valid boundaries (crossing or doubling back), agent outlines that do not
+  follow the drawing's lines (an incomplete boundary), measurements edited since they were detected, measurements with no scale in
+  an uncalibrated viewport or across a viewport's edge, a sheet quantity that does not match its outline, and one wall measured in
+  two conditions of the same thickness.
+- Tests: `tools/test_takeoff_measure.js` (62, plain Node), `tools/test_takeoff_accuracy.js` (181 — the apartment
+  `tools/takeoff_apartment_fixture.js` on three pages at 1/4" = 1'-0", 1:100 and 1/8" = 1'-0" turned 90°: every room's area,
+  perimeter and corners, walls, tags, zoom, sheet = drawing, save / reload, export / import, rooms turned 3°–30°, scale notes,
+  viewports, review status), `tools/test_takeoff_agentcmds.js` (36 — the fourteen commands above, done or refused, on the apartment, one of them over all three pages).
+
 **Markup tools — Bluebeam Revu Basics** (added 07-Oct-2026, **✎ Markup ▾** on the toolbar):
 
 - **Text box** (`T`) and **callout** (`Q`, leader with an arrow to the point): typed text, wrapped to the box, the
@@ -1114,6 +1154,12 @@ tools/takeoff_qa_fixture.js         QA drawing set: 8-page house / odd-page PDF,
 tools/test_takeoff_qa.js            full QA audit of the PDF Takeoff (sections 1-23, playwright)
 docs/takeoff-qa-report-2026-10-02.md  QA audit report: bug register, calculation checks, performance, retest checklist
 tools/test_takeoff.js               browser tests for the PDF Takeoff (playwright)
+takeoff/measure.js                  the takeoff's measurement engine: geometry and QS formulas (no DOM)
+tools/test_takeoff_measure.js       unit tests of the measurement engine (plain Node)
+tools/takeoff_apartment_fixture.js  apartment plan with known quantities on three pages / scales
+tools/test_takeoff_accuracy.js      accuracy and reconciliation of the takeoff against it (playwright)
+tools/test_takeoff_agentcmds.js     the agent's QS commands on it, done or refused (playwright)
+docs/takeoff-accuracy-engine-2026-10-20.md  accuracy audit: root causes, fixes, before / after figures, limits
 tools/calc_data.py                  build the Calculator tab's section / pipe / material data block
 .github/workflows/rate-watch.yml    runs the rate watch daily and offers updates as a pull request
 .github/workflows/deploy-pages.yml  deploy to Pages + mirror main onto gh-pages

@@ -28,6 +28,8 @@
 - `takeoff/cad.js` and `takeoff/cad-worker.js` are loaded with takeoff.js's own
   `?v=`, so bump that same `?v=` when either of them changes too. The same for
   `takeoff/trace.js` and `takeoff/trace-worker.js` (the vector trace of a PDF's wall layers).
+  And for `takeoff/measure.js` (the measurement engine: geometry and QS formulas, unit-tested by
+  `tools/test_takeoff_measure.js` in plain Node).
 - When a `takeoff/cad.js` change alters how a DWG / DXF is read or drawn (text placement, geometry,
   layers), raise `CAD_VER` in cad.js too. Each browser keeps the drawing as it was first read and
   only reads it again from the DWG when `CAD_VER` changes, so without it drawings already added keep
