@@ -10949,7 +10949,7 @@ function wire(){
   $("aiRead").onclick = () => aiSend($("aiIn").value.trim() || "Measure the floor area of every room in this view.", true).then(() => { $("aiIn").value = ""; });
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
-  $("bLw").onclick = () => setThin(!S.thin);
+  $("bLw").onclick = lwToggle;
   $("bModePdf").onclick = () => setEdMode("pdf"); $("bModeCad").onclick = () => setEdMode("cad");
   ["auto", "black", "white"].forEach(v => { $("bBg_" + v).onclick = () => setBg(v); }); $("bMono").onclick = () => setMono(!S.mono); $("bPdfBw").onclick = () => setPdfBw(!(S.bg === "white" && S.mono));
   const vpop = $("viewPop"), vOpen = on => { vpop.classList.toggle("on", on); $("bView").setAttribute("aria-expanded", on ? "true" : "false"); };
@@ -14402,7 +14402,20 @@ function setDim(on){   // on = true/false, or a dimming level 0-90 %
   $("bDim").classList.toggle("on", S.dim); $("dimPct").value = S.dimPct || 50; $("dimLbl").textContent = (S.dim ? S.dimPct : 0) + "%"; const _rp = $("ribDimPct"); if (_rp) _rp.value = S.dimPct || 50; const _rl = $("ribDimLbl"); if (_rl) _rl.textContent = (S.dim ? S.dimPct : 0) + "%";
   pref("zdTakeoffDim", S.dim ? String(S.dimPct) : "0"); viewMark();
 }
-function setThin(on){ S.thin = on; $("bLw").classList.toggle("on", !on); $("bLw").title = on ? "Line weights are off — click to show them" : "Line weights are on — click to draw every line thin"; pref("zdTakeoffThin", on ? "1" : "0"); viewMark(); renderAll(); }
+function setThin(on){ S.thin = on; pref("zdTakeoffThin", on ? "1" : "0"); lwMark(); viewMark(); renderAll(); }
+/* an AutoCAD drawing's line weights shown or not: as the drawing's own LWDISPLAY says (AutoCAD's LWT button), until switched here for
+   that drawing — and never when line weights are off for everything */
+function cadLwOn(fid, proj = P.proj){ const o = proj && proj.cadLw && proj.cadLw[fid], sc = S.cadSc && S.cadSc[fid]; return o != null ? !!o : !!(sc && sc.lwd); }
+function lwMark(){
+  const b = $("bLw"); if (!b) return; const cad = !!ACT && cadOn(), on =!S.thin && (!cad || cadLwOn(S.fileId));
+  b.classList.toggle("on", on); b.title = (on ? "Line weights are on" : "Line weights are off") + (cad ? " for this drawing (AutoCAD's LWT; it opens as its LWDISPLAY says)" : "") + " — click to " + (on ? "draw every line thin" : "show them");
+}
+function lwToggle(){   // the Line weights button: on an AutoCAD drawing, that drawing's (as LWT); else for everything
+  if (!cadOn()) return setThin(!S.thin);
+  const fid = S.fileId, on = !S.thin && cadLwOn(fid); P.proj.cadLw = P.proj.cadLw || {}; P.proj.cadLw[fid] = !on; save();
+  if (!on && S.thin) return setThin(false);
+  lwMark(); renderAll(); toast("Line weights " + (on ? "off" : "on") + " for this drawing (LWT)", 1800);
+}
 
 /* ------------------------------------------------------------------ AutoCAD drawings (DWG / DXF) — cad.js
    A drawing added with + PDF is read in this browser and kept as a layered vector PDF — so snapping, auto area, find, the
@@ -14435,7 +14448,7 @@ function cadLoad(fid, proj = P.proj){
         rec.scene = sc; await dbPut("pdfs", rec, fid).catch(() => {}); }
       catch (e) { if (!rec.scene) throw e; sc = rec.scene; toast("Shown as it was first read — the drawing could not be read again here (" + (e.message || e) + ")", 6000); }   // the scene kept from before: still its objects
       finally { busy(""); } }
-    S.cadSc[fid] = sc; delete S.cadP[fid]; return sc;
+    S.cadSc[fid] = sc; delete S.cadP[fid]; if (fid === S.fileId) lwMark(); return sc;
   })().catch(e => { S.cadSc[fid] = null; delete S.cadP[fid]; toast("Shown from its PDF — the drawing's objects could not be read here (" + (e.message || e) + ")", 6000); return null; });
 }
 /* a DWG / DXF read off the page's thread, in a worker (cad-worker.js): the page stays responsive while a big drawing is read, and
@@ -14526,12 +14539,12 @@ function cadHidden(fid, sc, proj = P.proj){ const off = new Set(((proj && proj.l
 
 /* the background (black as AutoCAD's model space, white, or black for CAD drawings only) and monochrome */
 const darkNow = (fid = S.fileId, proj = P.proj) => S.bg === "black" || (S.bg !== "white" && !!cadMeta(fid, proj));
-function viewOpts(dpr, fast, pn = ACT){ const fid = pn.fileId, proj = pn.sess.proj, sc = S.cadSc && S.cadSc[fid]; return {dark: darkNow(fid, proj), mono: !!S.mono, thin: !!S.thin, hidden: sc ? cadHidden(fid, sc, proj) : null, ed: sc ? cedC(fid, cadPage(pn), proj) : null, dpr, fast}; }
+function viewOpts(dpr, fast, pn = ACT){ const fid = pn.fileId, proj = pn.sess.proj, sc = S.cadSc && S.cadSc[fid]; return {dark: darkNow(fid, proj), mono: !!S.mono, thin: !!S.thin || !!(sc && !cadLwOn(fid, proj)), hidden: sc ? cadHidden(fid, sc, proj) : null, ed: sc ? cedC(fid, cadPage(pn), proj) : null, dpr, fast}; }
 function bgMark(){
   ["auto", "black", "white"].forEach(v => { const b = $("bBg_" + v); if (b) b.classList.toggle("on", (S.bg || "auto") === v); });
   const m = $("bMono"); if (m) m.classList.toggle("on", !!S.mono);
   const bw = $("bPdfBw"); if (bw) bw.classList.toggle("on", S.bg === "white" && !!S.mono);
-  PANES.forEach(pn => pn.el.stage.classList.toggle("dark", darkNow(pn.fileId, pn.sess.proj)));
+  PANES.forEach(pn => pn.el.stage.classList.toggle("dark", darkNow(pn.fileId, pn.sess.proj))); lwMark();
 }
 function renderAll(){ PANES.forEach(pn => { if (pn.page) { renderLow(pn); renderHi(true, pn); } }); }   // every window, after a change of how drawings are drawn
 function setBg(v){ S.bg = v; pref("zdTakeoffBg", v); bgMark(); renderAll(); renderLayers(); }
@@ -14573,7 +14586,7 @@ function freeCadBitmap(pn = ACT){
 }
 const CAD_FRAME = 24;   // ms
 const cadMs = cost => cost * (S.cadRate || 1.5e-4);   // ms per path step, measured on this machine as light views are drawn
-const cadLook = pn => [darkNow(pn.fileId, pn.sess.proj), !!S.mono, !!S.thin].join("|");
+const cadLook = pn => [darkNow(pn.fileId, pn.sess.proj), !!S.mono, !!S.thin, cadLwOn(pn.fileId, pn.sess.proj)].join("|");
 const cadKey = pn => cadLook(pn) + "|" + cedV(pn.fileId, pn.sess.proj) + "|" + JSON.stringify(((pn.sess.proj && pn.sess.proj.layersOff) || {})[pn.fileId] || []);   // what the whole-page picture was drawn with
 function cadLowPaint(src, pg, pn){   // the picture under the screen (shown for a moment when a big zoom step outruns the screen)
   const lc = pn.el.low, sc = Math.min(3, 3000 / Math.max(pn.base.width, pn.base.height)); lc.width = Math.ceil(pn.base.width * sc); lc.height = Math.ceil(pn.base.height * sc);

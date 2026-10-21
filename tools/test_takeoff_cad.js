@@ -17,7 +17,9 @@
    window / crossing box, Ctrl+A, select similar, quick select, layer off) and taking off / counting the selection; a block
    clicked again picks the object inside it, a pattern hatch is picked inside its outline; Ctrl+P plot (window, scale, monochrome) as a
    PDF; exports keep layers off; Project + PDFs carries the DWG; the scene read again from the DWG lands on the same page; a
-   scaled multileader's text as high as AutoCAD draws it, from the DWG and the DXF (make_zd_mleader.lsp). */
+   scaled multileader's text as high as AutoCAD draws it, from the DWG and the DXF (make_zd_mleader.lsp); line weights as the
+   drawing's LWDISPLAY says, LWT per drawing; text in its own font at AutoCAD's widths (Times New Roman, ROMANS, Swiss Condensed),
+   a boxed MTEXT wrapping as AutoCAD's, a leader's own arrowhead from its dimension overrides (make_zd_text.lsp). */
 const path = require("path"), fs = require("fs"), os = require("os");
 let pw;
 try { pw = require("playwright"); } catch (e) { pw = require("/opt/node22/lib/node_modules/playwright"); }
@@ -70,6 +72,12 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
   ok(await T(() => document.getElementById("stage").classList.contains("dark")), "an AutoCAD drawing opens on black (View → Background: Auto)");
   await page.click("#bFit"); await wait(500);
   ok(JSON.stringify(await pix(500, 200)) === "[0,0,0]", "model space is black");
+  /* AutoCAD shows line weights only when the drawing's LWDISPLAY says so — this one's is off: every line thin, until LWT (the Line
+     weights button) switches them on for this drawing */
+  const lwd = await T(() => ({lwd: zdTakeoff.S.cadSc[zdTakeoff.S.fileId].lwd, on: document.getElementById("bLw").classList.contains("on")}));
+  ok(lwd.lwd === false && !lwd.on, "the drawing opens as its LWDISPLAY says: line weights off, every line thin " + JSON.stringify(lwd));
+  await T(() => document.getElementById("bLw").click()); await wait(400);
+  ok(await T(() => document.getElementById("bLw").classList.contains("on") && zdTakeoff.P.proj.cadLw[zdTakeoff.S.fileId] === true), "Line weights (LWT) turns them on for this drawing");
   const wall = await pix(0, 72);   // the room's left side (inner face)
   ok(wall[0] > 180 && wall[1] < 60 && wall[2] < 60, "A-WALL drawn red " + JSON.stringify(wall));
   const txt = await T(() => { const Z = zdTakeoff, pg = Z.cadPage(); return pg && pg.tS.includes("BEDROOM"); });
@@ -323,8 +331,26 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
   for (const f of ["zd_mleader_2018.dwg", "zd_mleader_2018.dxf"]) {
     await add(f);
     const ml = await T(n => { const Z = zdTakeoff, F = Z.P.proj.files.find(x => x.name === n), pg = Z.S.cadSc[F.id].pages[0], m = pg.map, k = 72 * m.uIn / m.den, o = {};
-      for (let i = 0; i < pg.tn; i++) o[pg.tS[i]] = Math.hypot(pg.tM[6 * i + 2], pg.tM[6 * i + 3]) * 0.718 / k; return o; }, f);   // (em × Helvetica's cap height = AutoCAD's text height)
+      for (let i = 0; i < pg.tn; i++) o[pg.tS[i]] = Math.hypot(pg.tM[6 * i + 2], pg.tM[6 * i + 3]) / 1.3966 / k; return o; }, f);   // (Arial's em is 1.3966 text heights in AutoCAD)
     ok(near(ml["SLAB OPENING"], 6.4, 0.01) && near(ml["REFERENCE 6.4"], 6.4, 0.01), f.slice(-3).toUpperCase() + ": the multileader's text 6.4\" high as AutoCAD draws it, as high as the MTEXT beside it → " + JSON.stringify(ml));
+  }
+
+  console.log("text in its own font, a leader's own arrowhead");
+  /* made by AutoCAD from make_zd_text.lsp. TEXT 10 high: Times New Roman "HHHHHHHHHH" 106.6 wide (AutoCAD's own advances, drawn in
+     Times); ROMANS.SHX "20'-6" WIDE RAMP" and Swiss 721 Condensed "HHHHHHHHHH" within their side bearings of AutoCAD's ink (143.8,
+     76.1); an MTEXT boxed as wide as its ink stays on one line, as AutoCAD keeps it; a leader's own DIMASZ 42 / _OPEN overrides
+     (ACAD DSTYLE xdata) give it a 42" open arrowhead, 14" across */
+  for (const f of ["zd_text_2018.dwg", "zd_text_2018.dxf"]) {
+    await add(f);
+    const tx = await T(n => { const Z = zdTakeoff, F = Z.P.proj.files.find(x => x.name === n), pg = Z.S.cadSc[F.id].pages[0], k = pg.k, o = [];
+      for (let i = 0; i < pg.tn; i++) o.push({s: pg.tS[i], f: pg.tF[i], w: +(Math.hypot(pg.tM[6 * i], pg.tM[6 * i + 1]) * pg.tW[i] / k).toFixed(3)});
+      const li = pg.ents.findIndex(r => r.t === "LEADER"); let y0 = Infinity, y1 = -Infinity; for (let i = 0; i < pg.n; i++) if (pg.ent[i] === li) { y0 = Math.min(y0, pg.bb[4 * i + 1]); y1 = Math.max(y1, pg.bb[4 * i + 3]); }
+      return {o, arrow: (y1 - y0) / k}; }, f);
+    const g = (s, fc) => tx.o.find(t => t.s === s && t.f === fc), F = f.slice(-3).toUpperCase(), tnr = g("HHHHHHHHHH", 4), rms = g("20'-6\" WIDE RAMP", 0), swc = g("HHHHHHHHHH", 0), box = g("20'-6\" WIDE RAMP", 4);
+    ok(tnr && near(tnr.w, 106.6, 0.05), F + ": Times New Roman drawn in Times, AutoCAD's width (106.6) → " + JSON.stringify(tnr));
+    ok(rms && Math.abs(rms.w / 143.81 - 1) < 0.03 && swc && Math.abs(swc.w / 76.14 - 1) < 0.03, F + ": ROMANS and Swiss 721 Condensed as wide as AutoCAD draws them → " + JSON.stringify([rms, swc]));
+    ok(!!box, F + ": the MTEXT boxed as wide as its ink stays on one line → " + JSON.stringify(tx.o.filter(t => t.f === 4)));
+    ok(near(tx.arrow, 14, 0.1), F + ": the leader's own 42\" open arrowhead (_OPEN, 14\" across) → " + tx.arrow.toFixed(2));
   }
 
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
