@@ -15,7 +15,8 @@
    monochrome, drawn from the scene on every zoom step; a room measured by snapping to the drawing = 120.00 Sft; CAD
    quantities by layer and block into the takeoff; right-click on an object; selecting objects (click, Shift+click,
    window / crossing box, Ctrl+A, select similar, quick select, layer off) and taking off / counting the selection; Ctrl+P plot (window, scale, monochrome) as a
-   PDF; exports keep layers off; Project + PDFs carries the DWG; the scene read again from the DWG lands on the same page. */
+   PDF; exports keep layers off; Project + PDFs carries the DWG; the scene read again from the DWG lands on the same page; a
+   scaled multileader's text as high as AutoCAD draws it, from the DWG and the DXF (make_zd_mleader.lsp). */
 const path = require("path"), fs = require("fs"), os = require("os");
 let pw;
 try { pw = require("playwright"); } catch (e) { pw = require("/opt/node22/lib/node_modules/playwright"); }
@@ -287,6 +288,17 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
     delete Z.S.cadSc[f.id]; const sc = await Z.cadLoad(f.id), msg = document.getElementById("toast").textContent;
     rec.src = src; await put(rec); return {n: sc && sc.pages[0].n, msg}; });
   ok(fb.n > 20 && /first read/.test(fb.msg), "a drawing that cannot be read again keeps the scene it was first read into (its objects and snaps), not just its PDF → " + JSON.stringify(fb));
+
+  console.log("a multileader with an overall scale");
+  /* made by AutoCAD from make_zd_mleader.lsp: text height 0.8 at scale 8, which AutoCAD draws 6.4" high — as high as the MTEXT
+     "REFERENCE 6.4" beside it. The height comes already scaled (scaled again it was 51.2"); in a DXF it is CONTEXT_DATA's 41,
+     which dxf-json reads the MTEXT box height (44) over */
+  for (const f of ["zd_mleader_2018.dwg", "zd_mleader_2018.dxf"]) {
+    await add(f);
+    const ml = await T(n => { const Z = zdTakeoff, F = Z.P.proj.files.find(x => x.name === n), pg = Z.S.cadSc[F.id].pages[0], m = pg.map, k = 72 * m.uIn / m.den, o = {};
+      for (let i = 0; i < pg.tn; i++) o[pg.tS[i]] = Math.hypot(pg.tM[6 * i + 2], pg.tM[6 * i + 3]) * 0.718 / k; return o; }, f);   // (em × Helvetica's cap height = AutoCAD's text height)
+    ok(near(ml["SLAB OPENING"], 6.4, 0.01) && near(ml["REFERENCE 6.4"], 6.4, 0.01), f.slice(-3).toUpperCase() + ": the multileader's text 6.4\" high as AutoCAD draws it, as high as the MTEXT beside it → " + JSON.stringify(ml));
+  }
 
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
   await browser.close();

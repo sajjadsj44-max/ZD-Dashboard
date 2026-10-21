@@ -11,7 +11,7 @@
    exact and needs no calibration. */
 const LDWG = "https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/dist/libredwg-web.js";
 const LDXF = "https://cdn.jsdelivr.net/npm/@mlightcad/dxf-json@1.2.8/dist/esm/bundle.mjs";
-export const CAD_VER = 4;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
+export const CAD_VER = 5;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
 export const INK = -1;             // colour 7 (and true black or white): white on a black background, black on white
 export const isCadName = n => /\.(dwg|dxf)$/i.test(String(n || ""));
 const CAPS_FONT = /^(technic_|techb___|techl___|coprgt[bl]?|copperplate[\w ]*|stencil|engr|castelar|felixti|alger)\.(ttf|otf)$/i;   // fonts with capitals only (their small letters are small capitals)
@@ -160,9 +160,26 @@ async function readDxf(u8){
   const M = await dxfLib(), P = new M.DxfParser();
   let dx;
   if (/^AutoCAD Binary DXF/.test(head(u8, 18))) dx = P.parseBuffer(u8);
-  else { let t; try { t = new TextDecoder("utf-8", {fatal: true}).decode(u8); } catch (e) { t = new TextDecoder("windows-1252").decode(u8); } dx = P.parseSync(t); }
+  else { let t; try { t = new TextDecoder("utf-8", {fatal: true}).decode(u8); } catch (e) { t = new TextDecoder("windows-1252").decode(u8); } dx = P.parseSync(t);
+    if (dx && /\nMULTILEADER\r?\n/.test(t)) { const H = mlHeights(t), fix = L => (L || []).forEach(e => { const h = e && e.type === "MULTILEADER" && H.get(String(e.handle).toUpperCase()); if (h) e.textHeight = h; });
+      if (H.size) { fix(dx.entities); Object.values(dx.blocks || {}).forEach(b => fix(b && b.entities)); } } }
   if (!dx || !Array.isArray(dx.entities)) throw new Error("the DXF could not be read");
   return normDxf(dx);
+}
+/* each multileader's text height, by handle: CONTEXT_DATA's group 41 — dxf-json reads the MTEXT's box height (44) over it */
+function mlHeights(t){
+  const out = new Map(), re = /\n[ \t]*0\r?\nMULTILEADER\r?\n[ \t]*5\r?\n([0-9A-Fa-f]+)\r?\n/g; let m;
+  while ((m = re.exec(t))) {
+    let i = re.lastIndex, ctx = false;
+    for (let n = 0; n < 50000; n++) {   // (its proxy graphics come first: many 310 lines)
+      const a = t.indexOf("\n", i), b = a < 0 ? -1 : t.indexOf("\n", a + 1); if (b < 0) break;
+      const code = +t.slice(i, a), v = t.slice(a + 1, b).trim(); i = b + 1;
+      if (code === 0 || code === 301) break;
+      if (code === 300 && v === "CONTEXT_DATA{") ctx = true;
+      else if (ctx && code === 41) { if (+v > 0) out.set(m[1].toUpperCase(), +v); break; }
+    }
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ one model from either reader
