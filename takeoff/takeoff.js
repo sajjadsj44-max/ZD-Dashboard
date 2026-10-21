@@ -4307,7 +4307,7 @@ function drawNow(){
   }
   if (S.tool === "area" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(255,122,0,.07)" stroke="#ff7a00" stroke-width="2" stroke-dasharray="8 4"/>`); }
   { const ar = areaOf(); if (ar && S.tool !== "area") { const a = toScr([ar[0], ar[1]]), b = toScr([ar[2], ar[3]]), x = Math.min(a[0], b[0]), y = Math.min(a[1], b[1]);
-    dyn.push(`<rect x="${x}" y="${y}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="none" stroke="#ff7a00" stroke-width="2" stroke-dasharray="8 4" pointer-events="none"/><text x="${x + 4}" y="${y - 6}" font-size="12" font-weight="700" fill="#ff7a00" stroke="#fff" stroke-width="3" paint-order="stroke" pointer-events="none">Takeoff area</text>`); } }
+    dyn.push(`<rect x="${x}" y="${y}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="none" stroke="#ff7a00" stroke-width="2" stroke-dasharray="8 4" pointer-events="none"/><text x="${x + 4}" y="${y - 6}" font-size="12" font-weight="700" fill="#ff7a00" stroke="#fff" stroke-width="3" paint-order="stroke" pointer-events="none">Takeoff area · Esc clears</text>`); } }
   if (S.tool === "vsearch" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(42,120,214,.08)" stroke="#2a78d6" stroke-width="1.5" stroke-dasharray="4 3"/>`); }
   if (mkIsTool(S.tool)) dyn.push(mkDraftSvg());
   if (S.tool === "stamp" && S.clip) dyn.push(stampGhostSvg());
@@ -4888,8 +4888,36 @@ function legendSvg0(m,T,z){
  if(cols.length>1)for(let i=1;i<cols.length;i++){out+='<line x1="'+xs[i].toFixed(1)+'" y1="'+(y0+pad).toFixed(1)+'" x2="'+xs[i].toFixed(1)+'" y2="'+Math.min(y1,y0+pad+th+hh+rows.length*rh).toFixed(1)+'" stroke="'+border+'" stroke-opacity=".22" stroke-width=".6"/>'}
  out+='</g>';return out;
 }
-function defaultLegend(file=S.fileId,page=S.pageNo){const w=400,h=190,base=S.base||{width:1000,height:1000},x0=Math.max(20,Math.min(Math.max(20,base.width-w-20),base.width-80)),y0=30;return{id:uid('M'),type:'legend',file,page,pts:[[x0,y0],[x0+w,y0+h]],title:'Takeoff Legend',showTitle:true,showHeaders:true,columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id),precision:3,refW:400,moneyPrecision:2,fontSize:9,rowH:18,headerH:22,titleH:24,pad:5,lineWidth:1,border:'#40556b',fill:'#ffffff',fillOpacity:.96,headerFill:'#eef2f7',textColor:'#172b3f',sort:'drawing',colWidths:LEGEND_COLS.filter(x=>x.on).map(x=>LEG_W0[x.id]||.15),subject:'Takeoff Legend',author:qaUser(),status:'',at:new Date().toISOString()};}
+function defaultLegend(file=S.fileId,page=S.pageNo){const st=legendStyle()||{},base=S.base||{width:1000,height:1000},w=Math.max(80,Math.min(st.w||400,base.width-40)),h=Math.max(60,Math.min(st.h||190,base.height-60)),x0=Math.max(20,Math.min(Math.max(20,base.width-w-20),base.width-80)),y0=30;delete st.w;delete st.h;return Object.assign({id:uid('M'),type:'legend',file,page,pts:[[x0,y0],[x0+w,y0+h]],title:'Takeoff Legend',showTitle:true,showHeaders:true,columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id),precision:3,refW:400,moneyPrecision:2,fontSize:9,rowH:18,headerH:22,titleH:24,pad:5,lineWidth:1,border:'#40556b',fill:'#ffffff',fillOpacity:.96,headerFill:'#eef2f7',textColor:'#172b3f',sort:'drawing',colWidths:LEGEND_COLS.filter(x=>x.on).map(x=>LEG_W0[x.id]||.15),subject:'Takeoff Legend'},st,{author:qaUser(),status:'',at:new Date().toISOString()});}
 const LEG_W0 = {symbol: .11, boq: .14, description: .31, unit: .11, qty: .16, perim: .15, rate: .12, amount: .15};
+/* the legend's look set as default (right-click → Set as default, or Properties): a legend placed after it starts with that
+   title, columns, order, sizes and colours, at that size — kept in this browser like the other tools' defaults */
+const LEGEND_STYLE_KEY = "zdTakeoffLegendStyle";
+const LEGEND_STYLE_KEYS = ["title", "subject", "showTitle", "showHeaders", "columns", "colWidths", "precision", "moneyPrecision", "sort", "fontSize", "rowH", "headerH", "titleH", "pad", "lineWidth", "refW", "border", "fill", "fillOpacity", "headerFill", "titleFill", "textColor"];
+const LEGEND_SORTS = ["drawing", "list", "condition", "boq", "qty"];
+function saveLegendStyle(m){
+  const o = {}, pp = m.pts || [[0, 0], [400, 190]];
+  LEGEND_STYLE_KEYS.forEach(k => { if (m[k] != null) o[k] = Array.isArray(m[k]) ? m[k].slice() : m[k]; });
+  o.w = Math.abs(pp[1][0] - pp[0][0]); o.h = Math.abs(pp[1][1] - pp[0][1]);
+  pref(LEGEND_STYLE_KEY, JSON.stringify(o));
+}
+function legendStyle(){   // the saved look, checked before it is drawn into the SVG: known columns, colours that are colours, numbers
+  let o = null; try { o = JSON.parse(pref(LEGEND_STYLE_KEY) || "null"); } catch (e) {}
+  if (!o || typeof o !== "object") return null;
+  const s = {};
+  LEGEND_STYLE_KEYS.forEach(k => { const v = o[k]; if (v == null) return;
+    if (["border", "fill", "headerFill", "titleFill", "textColor"].includes(k)) { if (HEXCOL.test(String(v))) s[k] = v; }
+    else if (k === "columns") { const c = Array.isArray(v) ? v.filter(id => LEGEND_COLS.some(x => x.id === id)) : []; if (c.length) s.columns = c; }
+    else if (k === "colWidths") { if (Array.isArray(v)) s.colWidths = v.map(Number); }
+    else if (k === "title" || k === "subject") s[k] = String(v).slice(0, 200);
+    else if (k === "sort") { if (LEGEND_SORTS.includes(v)) s.sort = v; }
+    else if (k === "showTitle" || k === "showHeaders") s[k] = !!v;
+    else if (isFinite(+v) && +v >= 0) s[k] = +v; });
+  if (!s.columns) delete s.colWidths;
+  else if (!s.colWidths || s.colWidths.length !== s.columns.length || s.colWidths.some(x => !(x > 0))) s.colWidths = s.columns.map(id => LEG_W0[id] || .15);
+  if (+o.w >= 80) s.w = +o.w; if (+o.h >= 60) s.h = +o.h;
+  return s;
+}
 function legendDescShare(m){ const cols = legendCols(m), w = cols.map((c, i) => Math.max(.05, Number((m.colWidths || [])[i]) || LEG_W0[c.id] || .15)), t = w.reduce((a, b) => a + b, 0), i = cols.findIndex(c => c.id === "description"); return i < 0 ? .31 : w[i] / t; }
 function legendWidths(ids, share){   // column weights with the description at the share given, the others in their usual proportions
   const others = ids.filter(id => id !== "description"), t = others.reduce((a, id) => a + (LEG_W0[id] || .15), 0) || 1, rest = ids.includes("description") ? 1 - share : 1;
@@ -5686,9 +5714,11 @@ function matchInk(I, W, H, T, tw, th, thr){
 }
 /* ------------------------------------------------------------------ takeoff area
    Before the takeoff agent, auto area of every room, counting tags or Find similar runs, it asks where: a part of the page
-   boxed now (or the box already drawn) or the whole page. The box stays on the page (dashed orange) until the whole page is
-   chosen; only what is found inside it is kept — rooms and tags by their position, wall runs cut at its edge. */
+   boxed now (or the box already drawn) or the whole page. The box stays on the page (dashed orange, on screen only — never
+   exported or printed) for the next run until Esc, right-click → Clear the takeoff area box, or the whole page is chosen;
+   only what is found inside it is kept — rooms and tags by their position, wall runs cut at its edge. */
 function areaOf(key){ const a = S.area; return a && a.key === (key || S.key) ? a.r : null; }
+function areaClear(){ if (!areaOf()) return; S.area = null; draw(); toast("Takeoff area box cleared — the next run asks where again", 2400); }
 const inArea = (r, p) => p[0] >= r[0] - 1e-6 && p[0] <= r[2] + 1e-6 && p[1] >= r[1] - 1e-6 && p[1] <= r[3] + 1e-6;
 function areaBoxed(r){ if (r[2] - r[0] < 2 || r[3] - r[1] < 2) return toast("Box a larger area — click two opposite corners", 3000);
   S.area = {key: S.key, r}; const w = S.areaWait; S.areaWait = null; setTool(S.areaPrev || "select"); S.areaPrev = null; draw(); if (w) w(r); }
@@ -5698,7 +5728,7 @@ async function askArea(what){
   if (!S.page) return null;
   let v; const cur = areaOf(), opt = (v, t, on) => `<label class="pk" style="display:block;margin:4px 0"><input type="radio" name="arW" value="${v}"${on ? " checked" : ""}> ${t}</label>`;
   v = await ask("Where — " + what, `<p>Take off a part of this drawing, or all of it?</p><div style="margin-top:8px">${cur ? opt("cur", "<b>The takeoff area already boxed</b> <span class=\"small\">(dashed orange)</span>", true) : ""}${opt("box", "<b>Box an area now</b> — click two opposite corners on the drawing", !cur)}${opt("all", "The whole page", false)}</div>
-    <p class="small" style="margin-top:8px">Only what is found inside the box is kept: rooms and tags by their place, wall runs cut at its edge. The box stays shown until you choose the whole page.</p>`, "Next", () => ({w: (document.querySelector('input[name="arW"]:checked') || {}).value || "all"}));   // (a string back would read as an error)
+    <p class="small" style="margin-top:8px">Only what is found inside the box is kept: rooms and tags by their place, wall runs cut at its edge. The box stays shown (on screen only) for the next run — press Esc or right-click → Clear the takeoff area box to remove it.</p>`, "Next", () => ({w: (document.querySelector('input[name="arW"]:checked') || {}).value || "all"}));   // (a string back would read as an error)
   if (!v) return false;
   v = v.w;
   if (v === "all") { if (S.area && S.area.key === S.key) { S.area = null; draw(); } return null; }
@@ -6427,7 +6457,7 @@ async function stampPicker(){   // -> {label, color, tpl, aid?, w?, h?}; kept as
 function mkPropsHtml(mk){
   if (mk.type === "legend") return `<h4>Takeoff legend <span style="font-weight:400;color:var(--muted);font-size:11px">markup — not a quantity · drag to move · drag a corner to resize · double-click to edit</span></h4>
     <div class="row"><span class="small" style="flex:1">Each condition on this sheet: its symbol as drawn, quantity${legendCols(mk).some(c => c.id === "perim") ? ", perimeter of its areas" : " (tick Perimeter in Edit legend for the areas' perimeter)"}.</span></div>
-    <div class="row"><button class="btn sm" data-mact2="legend">Edit legend… (columns, order, size)</button><button class="btn sm" data-act="lock">${mk.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn dng" data-act="delMark"${mk.locked ? " disabled" : ""}>Delete</button></div>`;
+    <div class="row"><button class="btn sm" data-mact2="legend">Edit legend… (columns, order, size)</button><button class="btn sm" data-mact2="default" title="New legends start with this legend's look and size">Set as default</button><button class="btn sm" data-act="lock">${mk.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn dng" data-act="delMark"${mk.locked ? " disabled" : ""}>Delete</button></div>`;
   const t = mk.type, nu = MK_TYPES.has(t), fillT = ["box", "ellipse", "polygon", "text", "callout"].includes(t), lineT = ["line", "polyline"].includes(t), textT = ["text", "callout"].includes(t);
   const strokeT = !["image", "link", "attach", "redact", "stamp", "hilite", "fence"].includes(t) && !(t === "pen" && mk.hl), dashT = nu && ["line", "polyline", "polygon", "box", "ellipse"].includes(t);
   const fg = (label, html, flex) => `<div class="fg"${flex ? ` style="flex:${flex}"` : ""}><label>${label}</label>${html}</div>`;
@@ -10158,6 +10188,7 @@ function ctxItem(hi, sp, q, e){
   return L;
 }
 function setDefaultsFromSelection(o){
+  if (o && o.type === "legend") { saveLegendStyle(o); toast("Takeoff legend: this look is the default for new legends", 2400); return; }
   if (o && MK_TYPES.has(o.type)) { const kind = mkKindOf(o); saveMkStyle(kind, mkStyleOf(o)); toast((MK_TOOL_NAMES["mk_" + kind] || MARK_TOOLS[o.type]) + ": this style is the default for new ones", 2400); return; }
   const d = toolDefaults();
   if (o && o.type) {
@@ -10181,7 +10212,7 @@ function ctxCanvas(q){
   const u = S.undo.length ? undoEntry(S.undo[S.undo.length - 1]).label : "", r = S.redo.length ? undoEntry(S.redo[S.redo.length - 1]).label : "", T = (t, n, key) => ({t: n, k: key, fn: () => setTool(t), on: S.tool === t});
   return [{h: pageName({file: S.fileId, page: S.pageNo}), s: S.clip ? "clipboard: " + S.clip.n + " object" + (S.clip.n > 1 ? "s" : "") : ""}, ...cadSelCtx(), ...cadCtxItems(q), ...sheetLinkItems(q),
     {t: "Paste here", k: "Ctrl+V", fn: () => pasteClip("cursor", q), dis: !S.clip}, {t: "Paste in place", k: "Ctrl+Shift+V", fn: () => pasteClip("inplace"), dis: !S.clip},
-    {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {t: "Invert selection", k: "Ctrl+I", fn: invertSel}, {t: "Quick select…", fn: quickSelect}, {t: "Deselect all", k: "Esc", fn: clearSel, dis: !selIds().size}, {sep: 1},
+    {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {t: "Invert selection", k: "Ctrl+I", fn: invertSel}, {t: "Quick select…", fn: quickSelect}, {t: "Deselect all", k: "Esc", fn: clearSel, dis: !selIds().size}, areaOf() ? {t: "Clear the takeoff area box", k: "Esc", fn: areaClear} : null, {sep: 1},
     {t: "Undo" + (u ? ": " + u : ""), k: "Ctrl+Z", fn: undoAny, dis: !S.undo.length}, {t: "Redo" + (r ? ": " + r : ""), k: "Ctrl+Y", fn: redoAny, dis: !S.redo.length}, {sep: 1},
     {t: "Tools", sub: [T("select", "Select", "V"), T("cadsel", "Select AutoCAD objects", "Shift+V"), T("lasso", "Lasso select", "Shift+O"), T("pan", "Pan", "H"), {sep: 1}, T("draw", "Draw", "A"), T("rect", "Rectangle", "R"), T("auto", "Auto area", "W"), T("circle", "Circle", "E"), T("count", "Count", "C"), T("ded", "Cut-out polyline", "D"), T("dedrect", "Cut-out rectangle", "Shift+D"), T("open", "Opening", "O"), {sep: 1}, T("break", "Break a run", "B"), T("measure", "Measure", "M"), T("angle", "Angle", "Shift+M"), T("radius", "Radius"), T("cal", "Set scale", "K")]},
     {t: "View", sub: [{t: "Fit page", k: "F", fn: () => { fit(); renderHi(); }}, {t: "Fit width", k: "Shift+F", fn: fitWidth}, {t: "Zoom window", k: "Z", fn: () => setTool("zoomwin")}, {t: "Zoom in", k: "+", fn: () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2)}, {t: "Zoom out", k: "−", fn: () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2)}, {sep: 1},
@@ -10838,6 +10869,7 @@ function wire(){
       else if (["gap", "stamp", "break", "zoomwin", "lasso", "match", "trim", "extend", "fillet", "chamfer", "stretch", "cedoffset", "cedjoin", "cedexplode"].indexOf(S.tool) >= 0) setTool("select");
       else if (S.measures.length || S.measure) { S.measures = []; S.measure = null; }
       else if (S.sel || S.selMark) { setSel([]); }
+      else if (S.tool === "select" && areaOf()) areaClear();
       else setTool("select");
       refresh(); return; }
     if (S.draft.length && ["draw", "ded", "measure", "fence", "rect", "dedrect", "mk_polyline", "mk_polygon"].indexOf(S.tool) >= 0 && !S.arcMid) {   // Bluebeam "sketch to scale": type a length (12'-6", 12.5) — or L x W for a rectangle — and Enter

@@ -4,6 +4,7 @@
    On the fixture page 1 (tools/takeoff_fixture.js): bed room 12' × 14' and store 10' × 14', side by side.
      - box around the bed room → only the bed room is measured; the box stays shown
      - the box already drawn is offered next time; Whole page → the store too, and the box goes
+     - Esc, or right-click → Clear the takeoff area box, takes the box away by hand
      - Esc while boxing → nothing runs
      - wall runs cut at the box edge, counts outside it left out, what was there before untouched (areaClip)
 
@@ -62,6 +63,17 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   R = await rooms();
   ok(R.length === 2 && R.some(x => /STORE/.test(x)), "Whole page: the store is measured too " + JSON.stringify(R));
   ok(await T(() => !zdTakeoff.areaOf()), "choosing the whole page takes the box away");
+
+  console.log("clearing the box by hand");
+  const setBox = () => T(() => { const Z = zdTakeoff, S = Z.S; Z.setTool("select"); Z.setSel([]); S.area = {key: S.key, r: [20, 20, 60, 60]}; Z.refresh(); });
+  await setBox(); await page.keyboard.press("Escape"); await wait();
+  ok(await T(() => !zdTakeoff.areaOf() && /Takeoff area box cleared/.test(document.getElementById("toast").textContent)), "Esc (Select tool, nothing selected) clears the box");
+  await setBox();
+  const menu = await T(() => { const Z = zdTakeoff, S = Z.S; Z.ctxOpen([S.view.tx + 5000, S.view.ty + 5000], {clientX: 400, clientY: 300}); return document.getElementById("ctx").textContent; });
+  ok(/Clear the takeoff area box/.test(menu), "right-click on the drawing offers Clear the takeoff area box");
+  await page.locator("#ctx .ci", {hasText: /Clear the takeoff area box/}).click(); await wait();
+  ok(await T(() => { const Z = zdTakeoff, S = Z.S, gone = !Z.areaOf(); Z.ctxOpen([S.view.tx + 5000, S.view.ty + 5000], {clientX: 400, clientY: 300});
+    const t = document.getElementById("ctx").textContent; Z.ctxClose(); return gone && /Deselect all/.test(t) && !/Clear the takeoff area box/.test(t); }), "…which clears it (and is not offered with no box)");
 
   console.log("Esc cancels");
   await T(() => { const P = zdTakeoff.P.proj; P.items = []; zdTakeoff.refresh(); });
