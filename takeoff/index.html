@@ -863,6 +863,7 @@ table.sktbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}ta
           <button class="tool" data-tool="chamfer" title="Chamfer (CHA in Ctrl+K): bevel the corner between two runs, or two legs of one run, by two distances"><svg class="ic"><use href="#i-chamfer"/></svg><span class="tl">Chamfer…</span></button>
           <button class="tool" data-tool="break" title="Break (B): click a length run to cut it in two there · Shift+click deletes one segment"><svg class="ic"><use href="#i-break"/></svg><span class="tl">Break</span> <kbd>B</kbd></button>
           <button class="tool" data-mod="join" title="Join the selected runs into one (gaps are bridged and reported)"><svg class="ic"><use href="#i-join"/></svg><span class="tl">Join</span></button>
+          <button class="tool" data-mod="merge" title="Merge areas: the selected areas made one outline (union) — a gap between them up to 2 ft, such as a wall between two rooms, is filled; a wider one after asking"><svg class="ic"><use href="#i-merge"/></svg><span class="tl">Merge areas</span></button>
           <button class="tool" data-mod="explode" title="Explode a run into one row per segment"><svg class="ic"><use href="#i-explode"/></svg><span class="tl">Explode</span></button>
           <button class="tool" data-mod="close" title="Close a run back to its start"><svg class="ic"><use href="#i-close"/></svg><span class="tl">Close</span></button>
         </div><div class="rgl">Edit</div></div>
@@ -1041,6 +1042,7 @@ table.sktbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}ta
       <symbol id="i-xh" viewBox="0 0 24 24"><path d="M12 2v20M2 12h20"/></symbol>
       <symbol id="i-offset" viewBox="0 0 24 24"><path d="M3 17L17 3M7 21L21 7"/></symbol>
       <symbol id="i-join" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></symbol>
+      <symbol id="i-merge" viewBox="0 0 24 24"><path d="M3 5h7v14H3zM14 5h7v14h-7z"/><path d="M10 12h4M12 10l2 2-2 2"/></symbol>
       <symbol id="i-explode" viewBox="0 0 24 24"><path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/></symbol>
       <symbol id="i-close" viewBox="0 0 24 24"><path d="M4 17l3-11 12 4-3 10z" stroke-dasharray="0"/><path d="M4 17l3-11" stroke-width="3" opacity=".25"/></symbol>
       <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></symbol>
@@ -1169,7 +1171,7 @@ table.sktbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}ta
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-21g"></script>
+<script type="module" src="takeoff.js?v=2026-10-22a"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with

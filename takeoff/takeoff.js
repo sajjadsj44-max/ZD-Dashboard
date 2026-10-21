@@ -5290,7 +5290,7 @@ function renderProps(){
       <div class="row"><div class="fg" style="flex:2"><label>Move to condition</label><select data-mact="cond"><option value="">—</option>${P.proj.conds.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select></div>
       <button class="btn" data-mact="check">✓ Mark checked</button><button class="btn" data-mact="hide">Hide their conditions</button><button class="btn dng" data-mact="del">Delete ${S.multi.size}</button></div>
       <div class="row" style="margin-top:6px">${(() => { const t = selTotals(S.multi); return t ? `<span class="small" style="flex:1"><b>Selected:</b> ${esc(t)}</span>` : ""; })()}
-      ${its.filter(isRun).length >= 2 ? '<button class="btn sm" data-mact="join" title="Make the selected runs one run">Join runs</button>' : ""}${its.filter(i => i.kind === "shape" && (cond(i.cond) || {}).type === "area").length >= 2 ? '<button class="btn sm" data-mact="combine" title="Make the selected areas one outline (union)">Combine areas</button>' : ""}<button class="btn sm" data-mact="dup" title="Duplicate (Ctrl+D)">Duplicate</button><button class="btn sm" data-mact="lock" title="Lock / unlock (Ctrl+Shift+L)">${[...S.multi].map(objById).every(o => o && o.locked) ? "Unlock" : "Lock"}</button><button class="btn sm" data-mact="rot" title="Rotate 90° clockwise">&#8635; 90°</button></div>`;
+      ${its.filter(isRun).length >= 2 ? '<button class="btn sm" data-mact="join" title="Make the selected runs one run">Join runs</button>' : ""}${its.filter(i => i.kind === "shape" && (cond(i.cond) || {}).type === "area").length >= 2 ? '<button class="btn sm" data-mact="combine" title="Make the selected areas one outline (union) — a gap between them up to ' + MERGE_GAP + ' ft, such as a wall, is filled">Merge areas</button>' : ""}<button class="btn sm" data-mact="dup" title="Duplicate (Ctrl+D)">Duplicate</button><button class="btn sm" data-mact="lock" title="Lock / unlock (Ctrl+Shift+L)">${[...S.multi].map(objById).every(o => o && o.locked) ? "Unlock" : "Lock"}</button><button class="btn sm" data-mact="rot" title="Rotate 90° clockwise">&#8635; 90°</button></div>`;
     $("props").classList.add("on"); $("propsTag").textContent = S.multi.size + " selected"; return; }
   $("propsTag").textContent = "";
   const el = $("props"), it = S.sel && P.proj ? P.proj.items.find(i => i.id === S.sel) : null;
@@ -8322,10 +8322,40 @@ function overlapDialog(scope){   // the pairs, each with Show and Fix, and Fix a
   $("dlgB").querySelectorAll("[data-ovs]").forEach(b => b.onclick = async () => { const p = L[+b.dataset.ovs], ids = [p.a.id, p.b.id]; close(); if (S.key !== keyOf(p.a.file, p.a.page)) await gotoPage(p.a.file, p.a.page); if (S.key !== keyOf(p.a.file, p.a.page)) return; setSel(ids); setTool("select"); zoomTo(ids); refresh(); });
   return L;
 }
-/* Combine (union): areas of one condition that overlap or share a side made one outline — the first one selected keeps its
-   name and look, the others go, a space they close round becomes a void of the condition. Areas with other Nos or slopes are not
-   combined (one outline cannot count them as they were) */
-function combineAreas(ids){
+/* the strips filling a gap between outlines that face each other across it (a wall between two rooms): each pair of sides of two
+   outlines that run along each other (within 10°), outward faces turned to each other, each side's part across from the other,
+   cut back to where they are no more than lim apart (a gap that widens is filled only as far as it is narrow enough).
+   outs: [ring], lim / eps: page units (eps: the shortest strip kept) -> {quads: [[p, p, p, p]], lo, hi: the narrowest and widest gap
+   filled, near: the narrowest gap facing across that is wider than lim (Infinity: none — they meet at corners only, or not at all)} */
+function gapBridges(outs, lim, eps){
+  const dot = (u, v) => u[0] * v[0] + u[1] * v[1], sub = (u, v) => [u[0] - v[0], u[1] - v[1]], sin10 = Math.sin(10 * Math.PI / 180);
+  const E = outs.flatMap((Q, r) => { const s = polySigned(Q) > 0 ? 1 : -1;   // outward: to the right going round anticlockwise
+    return Q.map((a, i) => { const b = Q[(i + 1) % Q.length], L = dist(a, b); return L > eps / 100 ? {r, a, b, L, u: [(b[0] - a[0]) / L, (b[1] - a[1]) / L], n: [s * (b[1] - a[1]) / L, -s * (b[0] - a[0]) / L], bb: bbOf([a, b])} : null; }).filter(Boolean); });
+  const out = {quads: [], lo: Infinity, hi: 0, near: Infinity};
+  lim *= 1 + 1e-9;   // (a gap of just the distance asked for is filled)
+  E.forEach((e, i) => E.slice(i + 1).forEach(f => {
+    if (f.r === e.r || Math.abs(e.u[0] * f.u[1] - e.u[1] * f.u[0]) > sin10 || dot(e.n, f.n) >= 0) return;   // two outlines' sides, along each other, facing
+    const tc = dot(sub(f.a, e.a), e.u), td = dot(sub(f.b, e.a), e.u), s0 = Math.max(0, Math.min(tc, td)), s1 = Math.min(e.L, Math.max(tc, td));
+    if (s1 - s0 < eps) return;   // not across from each other (or only for a sliver)
+    const c = -dot(e.n, f.n), P = s => [e.a[0] + e.u[0] * s, e.a[1] + e.u[1] * s], g = s => dot(sub(P(s), f.a), f.n) / c, g0 = g(s0), g1 = g(s1);   // the gap: straight out from e's point to f's line
+    if (g0 <= 0 && g1 <= 0) return;
+    let a0 = s0, a1 = s1;
+    if (Math.abs(g1 - g0) > 1e-12) { const at = v => s0 + (s1 - s0) * (v - g0) / (g1 - g0), x = [at(0), at(lim)].sort((p, q) => p - q); a0 = Math.max(s0, x[0]); a1 = Math.min(s1, x[1]); }
+    else if (g0 > lim) a1 = a0;
+    const wide = Math.max(1e-12, Math.min(g0 > 0 ? g0 : Infinity, g1 > 0 ? g1 : Infinity));
+    if (a1 - a0 < eps) { if (wide > lim) out.near = Math.min(out.near, wide); return; }
+    const p0 = P(a0), p1 = P(a1), h0 = g(a0), h1 = g(a1), q0 = [p0[0] + e.n[0] * h0, p0[1] + e.n[1] * h0], q1 = [p1[0] + e.n[0] * h1, p1[1] + e.n[1] * h1];   // (on f: [s0, s1] is where f is across from e)
+    out.quads.push([p0, p1, q1, q0]); out.lo = Math.min(out.lo, h0, h1); out.hi = Math.max(out.hi, h0, h1);
+  }));
+  return out;
+}
+/* Combine / merge (union): areas of one condition that overlap or share a side made one outline — the first one selected keeps its
+   name and look, the others go, a space they close round becomes a void of the condition. Areas apart with a gap between them (a
+   wall between two rooms) are merged with the gap filled: up to MERGE_GAP ft at once, a wider one after asking (opt.gap: ft, the
+   widest to fill). Areas with other Nos or slopes are not combined (one outline cannot count them as they were) */
+const MERGE_GAP = 2;
+function combineAreas(ids, opt){
+  opt = opt || {};
   const sel = [...(ids || selIds())].map(id => P.proj.items.find(i => i.id === id)).filter(Boolean), ar = sel.filter(i => i.kind === "shape" && (cond(i.cond) || {}).type === "area" && Array.isArray(i.pts) && i.pts.length >= (i.shape === "circle" ? 2 : 3));
   const no = m => { toast(m, 5000); return null; };
   if (ar.length < 2) return no("Select two or more areas (Shift-click) to combine them");
@@ -8335,14 +8365,34 @@ function combineAreas(ids){
   if (new Set(ar.map(i => +i.nos || 1)).size > 1) return no("Not combined: those areas have different Nos (" + [...new Set(ar.map(i => +i.nos || 1))].join(", ") + ") — one outline would change what the others count");
   { const c0 = cond(ar[0].cond); if (new Set(ar.map(i => pitchOf(i, c0).toFixed(6))).size > 1) return no("Not combined: those areas have different slopes — set the same slope on each first"); }
   let U = [itemPoly(ar[0])]; ar.slice(1).forEach(it => { U = polyBool(U, itemPoly(it), "union"); });
-  const outs = U.filter(Q => polySigned(Q) > 0), holes = U.filter(Q => polySigned(Q) < 0);
-  if (outs.length !== 1) return no("Not combined: those areas would stay " + outs.length + " separate outlines — they must overlap or share a side (touching at a corner is not enough)");
-  const it = ar[0], c = cond(it.cond), k = itemScale(it), drop = new Set(ar.slice(1).map(i => i.id)), nos = +it.nos || 1;
+  const k = itemScale(ar[0]), U0 = U, holes0 = U.filter(Q => polySigned(Q) < 0);
+  let outs = U.filter(Q => polySigned(Q) > 0), holes = holes0, fill = null;
+  if (outs.length > 1) {   // apart: fill the gap between them where they face each other across it
+    const n0 = outs.length, bb = bbOf(outs.flat()), diag = Math.hypot(bb[2] - bb[0], bb[3] - bb[1]), gapFt = opt.gap > 0 ? opt.gap : MERGE_GAP;
+    const B = gapBridges(outs, k ? gapFt * k : 0.01 * diag, k ? 0.05 * k : 0.001 * diag);
+    if (B.quads.length) { let V = U; B.quads.forEach(q => { V = polyBool(V, q, "union"); });
+      const o2 = V.filter(Q => polySigned(Q) > 0);
+      if (o2.length === 1) { U = V; outs = o2;   // a space the strips close round: a void when it is 1 Sft or more, or one the areas closed round already
+        holes = V.filter(Q => polySigned(Q) < 0 && (holes0.some(H => Math.abs(polySigned(H) - polySigned(Q)) <= 1e-6 * Math.abs(polySigned(H))) || !k || -polySigned(Q) >= k * k));
+        fill = {lo: B.lo, hi: B.hi, a: boolArea([outs[0], ...holes]) - boolArea(U0)}; } }
+    if (!fill) {
+      if (k && !opt.gap && isFinite(B.near)) {   // a wider gap than is filled at once: ask
+        const idl = [...(ids || selIds())];
+        ask("Merge areas", `<p>Those areas are <b>${f3(B.near / k)} ft</b> apart at the closest — more than the ${MERGE_GAP} ft filled without asking. Fill the gap between them and make them one area?</p>
+          <div class="grid" style="margin-top:8px"><div class="fg"><label>Fill gaps up to (ft)</label><input type="text" id="mgG" value="${f3(Math.ceil(B.near / k * 100 - 1e-6) / 100)}"></div></div>
+          <p class="small" style="margin-top:6px">Only where the areas face each other across the gap — the strip between them is added to the area.</p>`, "Fill and merge",
+          () => { const d = parseFt($("mgG").value.trim()); return d > 0 ? d : "Enter a distance in ft, e.g. 2.5"; }, "mgG").then(d => { if (d) combineAreas(new Set(idl), Object.assign({}, opt, {gap: d})); });
+        return null; }
+      return no("Not combined: those areas would stay " + n0 + " separate outlines — " + (!isFinite(B.near) ? "they must overlap, share a side or face each other across a gap (touching at a corner is not enough)"
+        : k ? "the gap between them is " + f3(B.near / k) + " ft" + (opt.gap ? ", more than the " + f3(opt.gap) + " ft to fill" : "") : "set the page scale first (K) to fill the gap between them"));
+    }
+  }
+  const it = ar[0], c = cond(it.cond), drop = new Set(ar.slice(1).map(i => i.id)), nos = +it.nos || 1;
   const voids = holes.map(Q => ({id: uid("I"), cond: it.cond, file: it.file, page: it.page, kind: "ded", nos, pts: Q.slice().reverse(), label: "Void in " + (it.label || c.name)}));
   mutate(() => { it.pts = outs[0]; delete it.arcs; delete it.shape; qaMoved(it); P.proj.items = P.proj.items.filter(i => !drop.has(i.id)); P.proj.items.splice(P.proj.items.indexOf(it) + 1, 0, ...voids); }, "Combine " + ar.length + " areas");
   setSel([it.id]); refresh();
   const left = sel.length - ar.length;
-  toast("Combined " + ar.length + " areas into one" + (k ? " — " + fq(polyArea(outs[0]) / k / k) + " Sft" : "") + (voids.length ? " · " + voids.length + " space" + (voids.length > 1 ? "s" : "") + " closed round taken off as void" + (voids.length > 1 ? "s" : "") : "")
+  toast("Combined " + ar.length + " areas into one" + (k ? " — " + fq(polyArea(outs[0]) / k / k) + " Sft" : "") + (fill ? k ? " · gap " + (fill.hi - fill.lo > 0.01 * k ? f3(fill.lo / k) + "–" : "") + f3(fill.hi / k) + " ft filled (+" + fq(fill.a / k / k) + " Sft)" : " · the gap between them filled" : "") + (voids.length ? " · " + voids.length + " space" + (voids.length > 1 ? "s" : "") + " closed round taken off as void" + (voids.length > 1 ? "s" : "") : "")
     + (nos > 1 ? " · Nos " + nos : "") + (left ? " · " + left + " other item" + (left > 1 ? "s" : "") + " left as " + (left > 1 ? "they were" : "it was") : ""), 5000);
   return it;
 }
@@ -8878,6 +8928,7 @@ function modAct(a){
   if (a === "scalesel") return items.length ? scaleSelDialog() : need();
   if (a === "front") return items.length ? orderSel(1) : need();
   if (a === "lock") return items.length ? lockSel() : need();
+  if (a === "merge") { const ar = meas.filter(o => o.kind === "shape" && (cond(o.cond) || {}).type === "area"); return ar.length >= 2 ? combineAreas(new Set(ar.map(o => o.id))) : toast("Select two or more areas to merge (Shift-click, or drag a box round them)", 2800); }
   if (cedOn() && (a === "offset" || a === "join" || a === "explode")) return cedModAct(a);   // AutoCAD mode: the drawing's own objects
   if (a === "offset") { if (meas.length !== 1) return toast("Select one measurement to offset", 2600); const c = cond(meas[0].cond); if (meas[0].kind === "open" || (c && c.type === "count")) return toast("A count point or an opening cannot be offset", 2600); return offsetDialog(meas[0]); }
   const runs = meas.filter(isRun);
@@ -10261,7 +10312,7 @@ function paletteCmds(){
   add("Next unchecked measurement", nextUnchecked, "Check");
   if (S.page) add((S.unmOn ? "Hide" : "Show") + " what is not measured yet — the spaces inside the walls no area covers, shaded red", () => unmToggle(), "Check");
   if (S.page) add("Name rooms by contents (this page) — Bath, Kitchen, Stair, Lift/Shaft, Balcony, Store from the lines in each (by layer)", nameRooms, "Modify");
-  add("Combine the selected areas into one (union)", () => combineAreas(), "Modify");
+  add("Combine the selected areas into one (union) — merge them, small gaps between them filled", () => combineAreas(), "Modify");
   if (S.page) add("Trace the whole floor — every room, washroom, corridor, threshold and wall run from the drawing's wall layers (a CAD PDF, or the AutoCAD plan on screen)", traceFloorUI, "Tool");
   if (S.page) add("Auto area: every room in a window…", async () => { const w = await pickWindow("Auto area: click one corner of the area to scan, then the opposite corner"); if (!w) return;
     busy("Auto area: finding the rooms…"); try { const r = await autoAreaWindow(w); if (r.err) { toast(r.err, 6000); return; } const sk = r.skipped;
@@ -10317,7 +10368,7 @@ function paletteCmds(){
 }
 /* AutoCAD command aliases: type tr + Enter for Trim, f for Fillet, sc for Scale… (the command whose name starts so; a "…" one — the dialog — first) */
 const PAL_ALIAS = [["tr", "trim"], ["ex", "extend"], ["f", "fillet"], ["fil", "fillet"], ["cha", "chamfer"], ["s", "stretch"], ["str", "stretch"], ["sc", "scale selection"], ["scale", "scale selection"],
-  ["ro", "rotate…"], ["rotate", "rotate…"], ["o", "offset"], ["off", "offset"], ["m", "move"], ["mo", "move"], ["co", "copy"], ["cp", "copy"], ["mi", "mirror"], ["br", "break"], ["j", "join"], ["x", "explode"],
+  ["ro", "rotate…"], ["rotate", "rotate…"], ["o", "offset"], ["off", "offset"], ["m", "move"], ["mo", "move"], ["co", "copy"], ["cp", "copy"], ["mi", "mirror"], ["br", "break"], ["j", "join"], ["x", "explode"], ["mer", "merge areas"], ["merge", "merge areas"], ["uni", "merge areas"], ["union", "merge areas"],
   ["ar", "array"], ["l", "length"], ["rec", "rectangle"], ["ci", "circle"], ["pol", "polygon"], ["qs", "quick select"], ["qselect", "quick select"], ["inv", "invert selection"], ["di", "measure"], ["dist", "measure"], ["dan", "angle"], ["dimangular", "angle"], ["dra", "radius"], ["dimradius", "radius"], ["ddi", "radius"], ["z", "zoom window"], ["pl", "plot"], ["xh", "cross-hair"], ["cross", "cross-hair"],
   ["dxf", "dxf"], ["dxfout", "dxf"], ["u", "undo"], ["re", "redo"], ["or", "ortho"], ["po", "polar"], ["os", "object snaps"], ["lock", "lock"], ["w", "auto area"], ["aa", "auto area"]];
 function palAlias(L){
@@ -10491,7 +10542,7 @@ function ctxItem(hi, sp, q, e){
   if (!many && it.kind !== "open" && c.type !== "count") L.push({t: "Offset…", fn: () => offsetDialog(it)});
   if (!many && c.type === "area" && it.kind !== "open" && it.shape !== "circle") L.push({t: "Square up to walls", fn: () => squareUpSel(it), dis: it.locked || !(S.geo[S.key] && S.geo[S.key].segs.length)});
   if (runs.length >= 2) L.push({t: "Join " + runs.length + " runs into one", fn: () => joinRuns(new Set(runs.map(r => r.id))), dis: lk});
-  if (sel.filter(i => i.kind === "shape" && (cond(i.cond) || {}).type === "area").length >= 2) L.push({t: "Combine into one area", fn: () => combineAreas(ids), dis: lk});
+  if (sel.filter(i => i.kind === "shape" && (cond(i.cond) || {}).type === "area").length >= 2) L.push({t: "Merge into one area (small gaps filled)", fn: () => combineAreas(ids), dis: lk});
   if (sel.some(o => o.lo)) L.push({t: "Reset label position" + (many ? "s" : "") + " (back into the object)", fn: () => resetLabelPos(new Set(sel.map(o => o.id))), dis: allLk});
   if (!many && c.type === "area" && it.kind === "shape") L.push({t: "Add a rectangular cut-out", k: "Shift+D", fn: () => { S.cond = c.id; setTool("dedrect"); }}, {t: "Add a polyline cut-out", k: "D", fn: () => { S.cond = c.id; setTool("ded"); }});
   if (!many && c.type === "area" && it.kind === "shape") { const under = cutTargets(it); if (under.length) L.push({t: "Cut out of the area" + (under.length > 1 ? "s" : "") + " it overlaps (" + under.slice(0, 2).map(u => u.label || (cond(u.cond) || {}).name).join(", ") + (under.length > 2 ? ", …" : "") + ")", fn: () => cutOutOf(it, under), dis: it.locked}); }
