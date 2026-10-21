@@ -379,7 +379,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 #pal .pr{font-size:9.5px;color:var(--purple);border:1px solid currentColor;border-radius:4px;padding:0 4px;margin-right:6px}
 #pal .pf{padding:6px 16px;border-top:1px solid var(--line);color:var(--muted)}
 #dlgBack{position:fixed;inset:0;background:rgba(15,41,66,.35);display:none;align-items:center;justify-content:center;z-index:10;padding:16px}
-#dlgBack.on{display:flex}
+#dlgBack.on{display:flex}#dlgBack.on.peek{display:none}
 .rbcols{display:flex;flex-wrap:wrap;gap:0 14px}.rbprev{max-height:42vh;overflow:auto;margin-top:8px;border:1px solid var(--line);border-radius:6px}.rbprev table.sh{width:100%}.rbprev table.sh.rbt+table.sh.rbt{margin-top:10px}table.sh tr.gt td{background:#e2f4e8}
 #pvWrap{position:fixed;inset:0;z-index:12;background:rgba(15,41,66,.62);display:flex;flex-direction:column;padding:12px}
 #pvWrap .pvh,#pvWrap .pvf{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:#fff;padding:8px 10px}#pvWrap .pvh{border-radius:10px 10px 0 0;border-bottom:1px solid var(--line)}#pvWrap .pvh b{color:var(--navy);font-size:13px}
@@ -706,7 +706,7 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 .cview{display:flex;gap:2px;margin:0 2px 6px;background:var(--pg2,#eef2f7);border-radius:6px;padding:2px}.cview button{flex:1;border:0;background:none;font-size:11px;padding:3px 4px;border-radius:5px;color:#5b6b80;cursor:pointer}.cview button.on{background:#fff;color:var(--navy);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 .ctree{font-size:12px}
 .ctr{display:flex;align-items:center;gap:5px;padding:3px 4px;cursor:pointer;user-select:none;color:var(--navy);white-space:nowrap;overflow:hidden}.ctr b{overflow:hidden;text-overflow:ellipsis;font-size:12px}.ctr .small{margin-left:auto;font-size:10.5px;color:var(--muted);flex:none}.ctr .car{color:#8a98ac;width:10px;flex:none}
-.ctr.root{background:#eef3fb;border-radius:4px;margin-top:3px}.ctr.pg b{color:#2b4fb8}.ctr.pg.cur{background:#f1f6ff}.ctr .ed{border:0;background:none;color:#8a98ac;cursor:pointer;padding:0 3px;flex:none}
+.ctr.root{background:#eef3fb;border-radius:4px;margin-top:3px}.ctr.fl b{color:#0b6e64}.ctr.fl:hover{background:#eefaf8}.ctr.pg b{color:#2b4fb8}.ctr.pg.cur{background:#f1f6ff}.ctr .ed{border:0;background:none;color:#8a98ac;cursor:pointer;padding:0 3px;flex:none}
 .crow{display:flex;align-items:center;gap:5px;height:22px;padding-right:2px;border-bottom:1px solid #f0f3f7;cursor:pointer;font-size:12px}
 .crow:hover{background:#f4f7fc}.crow.on{background:#dbe7fb;box-shadow:inset 3px 0 0 var(--blue)}.crow.off .cn,.crow.off .cq{opacity:.45}
 .crow input[type=checkbox]{margin:0;width:12px;height:12px;flex:none;display:none}.crow:hover input[type=checkbox],.crow input[type=checkbox]:checked,.ticking .crow input[type=checkbox]{display:block}
@@ -838,6 +838,10 @@ table.sktbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}ta
           <button class="tool" data-tool="radius" title="Radius — not saved: click the centre, then a point on the edge — radius, diameter and circumference"><svg class="ic"><use href="#i-radius"/></svg><span class="tl">Radius</span></button>
           <button class="tool" data-tool="cal" title="Set scale from a known length (K)"><svg class="ic"><use href="#i-cal"/></svg><span class="tl">Scale</span> <kbd>K</kbd></button>
         </div><div class="rgl">Check</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-fn="floors" title="Floors on this page — one sheet with several floor plans split by floor: finds the plans and names each from its title (Ground floor, 1st floor …); the By page tree, the bill and Excel then give each floor its own quantities"><svg class="ic"><use href="#i-floors"/></svg><span class="tl">Floors</span></button>
+          <button class="tool" data-tool="floorbox" title="Floor box — click two opposite corners round one floor plan, then name the floor: the measurements inside it are in that floor"><svg class="ic"><use href="#i-floorbox"/></svg><span class="tl">Floor box</span></button>
+        </div><div class="rgl">Floors</div></div>
       </div>
       <div class="rpanel" data-rp="modify" hidden>
         <div class="rg"><div class="rgb">
@@ -1055,6 +1059,8 @@ table.sktbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}ta
       <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h12l-2 4 2 4H5"/></symbol>
       <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></symbol>
       <symbol id="i-compare" viewBox="0 0 24 24"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></symbol>
+      <symbol id="i-floors" viewBox="0 0 24 24"><path d="M12 3 3 7.5 12 12l9-4.5z"/><path d="M3 12l9 4.5 9-4.5"/><path d="M3 16.5 12 21l9-4.5"/></symbol>
+      <symbol id="i-floorbox" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1" stroke-dasharray="3 2.5"/><path d="M7 8.5h7"/></symbol>
       <symbol id="i-typical" viewBox="0 0 24 24"><rect x="3" y="3" width="10" height="10" rx="1"/><rect x="11" y="11" width="10" height="10" rx="1"/></symbol>
       <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
       <symbol id="i-snap" viewBox="0 0 24 24"><path d="M6 3v9a6 6 0 0012 0V3M6 8h4M14 8h4"/></symbol>
@@ -1173,7 +1179,7 @@ table.sktbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}ta
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-22d"></script>
+<script type="module" src="takeoff.js?v=2026-10-22e"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with

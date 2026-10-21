@@ -400,6 +400,7 @@ function migrate(p, rep){
   p.marks = p.marks.filter(m => { const q = obj(m) && m.id != null && MARK_TOOLS[m.type] && pts(m.pts, MK_MINPTS[m.type] || 2); if (!q) { bad++; return false; } m.pts = q; m.id = String(m.id); m.text = String(m.text == null ? "" : m.text);
     if (MK_TYPES.has(m.type)) mkSanitize(m);
     mkCommon(m);
+    if (m.type === "legend" && m.floor != null) m.floor = String(m.floor).slice(0, 60);
     if (m.type === "legend") ["border", "fill", "headerFill", "titleFill", "textColor"].forEach(k2 => { if (m[k2] != null && !HEXCOL.test(String(m[k2]))) { note("The legend's colour “" + String(m[k2]).slice(0, 40) + "” is not a colour — reset"); delete m[k2]; } });   // (written into the drawing's SVG)
     if (m.color != null && !HEXCOL.test(String(m.color))) { note("A markup's colour “" + String(m.color).slice(0, 40) + "” is not a colour — replaced"); m.color = "#d03b3b"; } return true; });
   if (bad) note(bad + " markup" + (bad > 1 ? "s" : "") + " with missing or broken points left out");
@@ -507,7 +508,7 @@ function mutate(fn, label){
 /* the shape being drawn keeps its own history in steps: a click is one step, an arc (many points) is one step, so
    Ctrl+Z / Backspace take back the last click or the whole arc and Ctrl+Y puts it back. With nothing being drawn,
    Ctrl+Z / Ctrl+Y step through the project history. */
-const DRAFT_TOOLS = ["draw", "ded", "dedrect", "measure", "angle", "radius", "fence", "area", "rect", "open", "cal", "circle", "polygon", "vp", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref",
+const DRAFT_TOOLS = ["draw", "ded", "dedrect", "measure", "angle", "radius", "fence", "area", "rect", "open", "cal", "circle", "polygon", "vp", "floorbox", "cloud", "arrow", "dimension", "hilite", "vsearch", "typref",
   "mk_polyline", "mk_polygon", "mk_line", "mk_box", "mk_ellipse", "mk_link", "mk_redact", "mk_erase", "mk_callout", "mk_text", "mk_stamp", "mk_image"];
 function draftPush(pts, arc){
   if (!S.draftSteps || S.draftSteps.reduce((a, n) => a + n, 0) !== S.draft.length) S.draftSteps = S.draft.map(() => 1);
@@ -3631,6 +3632,7 @@ function setTool(t){
   if (t !== "fillet" && t !== "chamfer") S.fc.first = null;
   if (t !== "stretch") S.str = null;
   if (t !== "linepick") S.lpk = null;
+  if (t !== "floorbox") S.flRedraw = null;
   S.cedF = null; S.cedO = null; S.cedJ = null; S.cedHov = null;
   if (t !== "typref" && S.typ) { S.typ = null; $("cmpLegend").style.display = "none"; toast("Typical copy stopped — nothing copied"); }
   S.mkd = null;
@@ -3664,7 +3666,7 @@ function hint(){
     rect: "Click two opposite corners — or one corner, then type L x W (e.g. 12 x 14) and Enter.",
     dedrect: !c ? "" : "Rectangular cut-out from " + c.name + ": click two opposite corners of the void — or one corner, then type L x W (e.g. 4 x 3) and Enter. D: polyline cut-out.",
     ded: !c ? "" : c.type === "area" ? "Polyline cut-out from " + c.name + ": click the corners of the void; click the first point, right-click or press Enter to close. Shift+D: rectangle cut-out." + drawing
-      : "Deduction from " + c.name + ": click along the length to take off; Enter, double-click or right-click to finish." + drawing, circle: "Click the centre, then a point on the edge.", polygon: "Regular polygon: click the centre, then a corner (" + polySides() + " sides — type pol 8 in the command line for 8).", vp: "Click two opposite corners of the detail drawn at another scale.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.",
+      : "Deduction from " + c.name + ": click along the length to take off; Enter, double-click or right-click to finish." + drawing, circle: "Click the centre, then a point on the edge.", polygon: "Regular polygon: click the centre, then a corner (" + polySides() + " sides — type pol 8 in the command line for 8).", vp: "Click two opposite corners of the detail drawn at another scale.", floorbox: S.flRedraw ? "Floor boundary of “" + S.flRedraw + "”: click two opposite corners round its plan." : "Floor box: click two opposite corners round one floor plan (with its title), then name the floor — the measurements inside it are in that floor · Esc when done.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.",
     open: schOf(S.openMark) ? "Placing " + schOf(S.openMark).mark + " (" + f3(schOf(S.openMark).w) + " × " + f3(schOf(S.openMark).h) + ") — click both sides of each opening. Esc stops." : "Click both sides of the opening, then enter its height or pick its schedule mark.",
     typref: S.typ ? (S.key === S.typ.src ? "Typical copy: click reference point " + (S.typ.a.length + 1) + " of 2 on this (source) sheet." : "Typical copy: click the same reference point " + (S.typ.b.length + 1) + " of 2 on this sheet.") : "", measure: "Click points; double-click, right-click or Enter ends a measurement (it stays on screen). Esc clears. Nothing is saved." + drawing,
     angle: S.draft.length === 1 ? "Angle: now click the corner." : S.draft.length === 2 ? "Angle: click a point on the second arm." : "Angle: click a point on the first arm, then the corner, then a point on the second arm — the angle stays on screen. Esc clears. Nothing is saved.",
@@ -3771,7 +3773,7 @@ function onDown(e){
     draftPush([p]); draftBtns(); draw(); return;
   }
   if (S.tool === "angle" || S.tool === "radius") { if (S.draft.length && dist(S.draft[S.draft.length - 1], p) < 1e-6) return; draftPush([p]); if (S.draft.length === (S.tool === "angle" ? 3 : 2)) finish(S.draft.slice()); else hint(); draftBtns(); draw(); return; }   // arm, corner, arm · centre, edge
-  if (S.tool === "open" || S.tool === "cal" || S.tool === "circle" || S.tool === "polygon" || S.tool === "vp") { draftPush([p]); if (S.draft.length === 2) finish(S.draft.slice()); draftBtns(); draw(); }
+  if (S.tool === "open" || S.tool === "cal" || S.tool === "circle" || S.tool === "polygon" || S.tool === "vp" || S.tool === "floorbox") { draftPush([p]); if (S.draft.length === 2) finish(S.draft.slice()); draftBtns(); draw(); }
   if (S.tool === "note") return addMark("note", [p]);
   if (S.tool === "area") { draftPush([toBase(sp[0], sp[1])]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); areaBoxed([Math.min(d[0][0], d[1][0]), Math.min(d[0][1], d[1][1]), Math.max(d[0][0], d[1][0]), Math.max(d[0][1], d[1][1])]); } return; }
   if (S.tool === "vsearch") { draftPush([toBase(sp[0], sp[1])]); if (S.draft.length === 2) { const d = S.draft.slice(); draftClear(); findSimilar([Math.min(d[0][0], d[1][0]), Math.min(d[0][1], d[1][1]), Math.max(d[0][0], d[1][0]), Math.max(d[0][1], d[1][1])]); } draftBtns(); draw(); return; }
@@ -4232,6 +4234,7 @@ async function finish(pts){
   if (t === "angle" || t === "radius") { pts.t = t; S.measures.push(pts); const m = measText(pts, hereScale(pts[0])); if (m) toast(m, 4000); draw(); return; }   // kept with the measurements until Esc, not saved
   if (t === "mk_polyline" || t === "mk_polygon") { mkPoly(t, pts); return; }
   if (t === "fence") { if (pts.length >= 2) mutate(() => { (P.proj.marks = P.proj.marks || []).push({id: uid("M"), type: "fence", file: S.fileId, page: S.pageNo, pts, text: "", color: "#ff7a00", at: new Date().toISOString()}); }); draw(); return; }
+  if (t === "floorbox") { floorBoxDone(pts); return; }
   if (t === "vp") {
     const r = [Math.min(pts[0][0], pts[1][0]), Math.min(pts[0][1], pts[1][1]), Math.max(pts[0][0], pts[1][0]), Math.max(pts[0][1], pts[1][1])];
     if (r[2] - r[0] < 2 || r[3] - r[1] < 2) { draw(); return; }
@@ -4449,6 +4452,9 @@ function drawNow(){
   if (!keep) ((P.proj.viewports || {})[S.key] || []).forEach(v => { const a = toScr([v.r[0], v.r[1]]), b = toScr([v.r[2], v.r[3]]);
     h.push(`<rect x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="none" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`);
     h.push(label([a[0] + 6 + (v.name.length + 14) * 3.2, a[1] + 12], v.name + " · " + (v.ptPerFt ? v.text || "own scale" : "scale not set"), "#4b3b8f")); });
+  if (!keep) floorList(S.key).forEach(f => { if (!f.r) return; const a = toScr([f.r[0], f.r[1]]), b = toScr([f.r[2], f.r[3]]), w = f.name.length * 6.4 + 10;   // floor boundaries, each with its floor's name
+    h.push(`<rect class="flbox" x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="none" stroke="#0f9d8f" stroke-width="1.5" stroke-dasharray="10 5" pointer-events="none"/>`);
+    h.push(label([a[0] + w / 2 + 4, a[1] + 13], f.name, "#0b6e64")); });
   if (!keep && !S.hideMk) (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo && !mkHidden(m)).forEach(m => h.push(markSvg(m, toScr, 1)));
   if (!keep && S.cadSel) h.push(cadSelSvg(cadSelIds()));   // AutoCAD objects selected (Shift+V)
   if (cedHere()) dyn.push(cedSvg());
@@ -4471,6 +4477,9 @@ function drawNow(){
   if (S.tool === "stamp" && S.clip) dyn.push(stampGhostSvg());
   if (["cloud", "arrow", "dimension", "hilite"].indexOf(S.tool) >= 0 && S.draft.length && S.cursor) dyn.push(markSvg({type: S.tool, pts: [S.draft[0], S.cursor], color: S.tool === "dimension" ? "#2b7de9" : "#d03b3b", size: 13, width: 2, arrow: 10}, toScr, 1));
   if (S.flash && S.flash.key === S.key && Date.now() < S.flash.until) { const q = toScr(S.flash.p); dyn.push(`<circle cx="${q[0]}" cy="${q[1] - 5}" r="26" fill="none" stroke="#ff2d55" stroke-width="3"><animate attributeName="r" values="18;30;18" dur="1s" repeatCount="indefinite"/></circle>`); }
+  if (S.flShow && S.flShow.pk === S.key) { const a = toScr([S.flShow.r[0], S.flShow.r[1]]), b = toScr([S.flShow.r[2], S.flShow.r[3]]), w = S.flShow.name.length * 6.4 + 10;   // a found plan shown from the Floors dialog
+    dyn.push(`<rect x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="rgba(255,122,0,.06)" stroke="#ff7a00" stroke-width="2.5" stroke-dasharray="10 5" pointer-events="none"/>` + label([a[0] + w / 2 + 4, a[1] - 12], S.flShow.name, "#b85600")); }
+  if (S.tool === "floorbox" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(15,157,143,.06)" stroke="#0f9d8f" stroke-width="1.5" stroke-dasharray="10 5"/>`); }
   if (S.tool === "vp" && S.draft.length && S.cursor) { const a = toScr(S.draft[0]), b = toScr(S.cursor); dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="rgba(123,92,224,.06)" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`); }
   if (S.box && !S.box.pending) { const a = S.box.a, b = S.box.b, cr = b[0] < a[0];   // window (left → right, blue, solid) / crossing (right → left, green, dashed)
     dyn.push(`<rect x="${Math.min(a[0], b[0])}" y="${Math.min(a[1], b[1])}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}" fill="${cr ? "rgba(27,175,122,.10)" : "rgba(42,120,214,.10)"}" stroke="${cr ? "#139a68" : "#2a78d6"}" stroke-width="1.5" ${cr ? 'stroke-dasharray="6 4"' : ""}/>`);
@@ -5003,8 +5012,21 @@ async function labelDialog(){
 const LEGEND_COLS = [{id:'symbol',label:'Symbol',on:true},{id:'boq',label:'BOQ',on:true},{id:'description',label:'Description',on:true},{id:'unit',label:'Unit',on:true},{id:'qty',label:'Quantity',on:true},{id:'perim',label:'Perimeter',on:true},{id:'rate',label:'Rate',on:false},{id:'amount',label:'Amount',on:false}];
 function legendOfPage(file=S.fileId,page=S.pageNo){return (P.proj.marks||[]).filter(m=>m.type==='legend'&&m.file===file&&m.page===page);}
 function legendCols(m){const src=Array.isArray(m.columns)?m.columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id);return src.map(id=>LEGEND_COLS.find(x=>x.id===id)).filter(Boolean);}
-function legendRows(m){   // one row per condition: its quantity, the perimeter of its areas (as P in the bill), the look its measurements have
-  const map = new Map(), list = m.scope === 'all' ? P.proj.items.filter(i => !hiddenItem(i)) : P.proj.items.filter(i => i.file === m.file && i.page === m.page && !hiddenItem(i));
+/* a legend's floor (m.floor): "" the whole sheet, "*" split by floor — a section for each floor of the sheet with its own rows — or a
+   floor's name: that floor only (a legend for each floor). Floors are those of the By page tree (floor boundaries, Move to floor) */
+function legendRows(m){
+  const list = m.scope === 'all' ? P.proj.items.filter(i => !hiddenItem(i)) : P.proj.items.filter(i => i.file === m.file && i.page === m.page && !hiddenItem(i)), fl = m.scope === 'all' ? "" : String(m.floor || "");
+  if (fl && fl !== "*") return legendRowsOf(list.filter(it => flLow(locOf(it).floor) === flLow(fl)), m);
+  if (fl === "*") { const by = new Map(); list.forEach(it => { const n = flLow(locOf(it).floor); if (!by.has(n)) by.set(n, []); by.get(n).push(it); });
+    if (by.size > 1 || !by.has("")) { const out = [], names = floorsOf(keyOf(m.file, m.page)).map(f => f.name).concat([""]);
+      [...by.keys()].forEach(n => { if (!names.some(x => flLow(x) === n)) names.push(n); });
+      names.forEach(n => { const L = by.get(flLow(n)); by.delete(flLow(n)); const rs = L ? legendRowsOf(L, m) : []; if (rs.length) out.push({sec: n || "No floor"}, ...rs); });
+      return out; } }
+  return legendRowsOf(list, m);
+}
+const legendTitle = m => { const t = m.title || 'Takeoff Legend', f = m.scope === 'all' ? "" : String(m.floor || ""); return f && f !== "*" && !t.toLowerCase().includes(f.toLowerCase()) ? t + " — " + f : t; };
+function legendRowsOf(list, m){   // one row per condition: its quantity, the perimeter of its areas (as P in the bill), the look its measurements have
+  const map = new Map();
   list.forEach(it => { const c = cond(it.cond); if (!c) return; let q = 0, has = false, per = 0;
     if (c.type === 'count') { q = (+it.pts?.length || 0) * Math.max(1, +it.nos || 1); has = true; }
     else { const k = qScale(it); if (k) { q = rowsOf(it, k).reduce((a, r) => a + (+r.qty || 0), 0); has = true; if (c.type === 'area' && it.kind === 'shape') per = (+it.nos || 1) * polyLen(itemPoly(it), true) / k; } }
@@ -5043,11 +5065,11 @@ function legendSvg(m,T){   // the legend is in drawing units: its text scales wi
 function legendSvg0(m,T,z){
  const pp=m.pts||[[80,80],[420,260]],a=T(pp[0]),b=T(pp[1]),x0=Math.min(a[0],b[0]),y0=Math.min(a[1],b[1]),x1=Math.max(a[0],b[0]),y1=Math.max(a[1],b[1]),W=Math.max(80*z,x1-x0),H=Math.max(60*z,y1-y0),cols=legendCols(m),rows=legendRows(m),fs=Math.max(5,Math.min(32,+m.fontSize||9))*z,rh=Math.max(fs*1.55,Math.min(80,+m.rowH||18)*z),hh=m.showHeaders===false?0:Math.max(fs*1.8,Math.min(80,+m.headerH||22)*z),th=m.showTitle===false?0:Math.max(fs*1.9,Math.min(80,+m.titleH||24)*z),pad=Math.max(2,Math.min(20,+m.pad||5))*z,bw=Math.max(0,Math.min(8,+m.lineWidth||1))*z,hx=(v,d)=>HEXCOL.test(String(v||''))?v:d,fill=hx(m.fill,'#ffffff'),head=hx(m.headerFill,'#eef2f7'),border=hx(m.border,'#40556b'),textCol=hx(m.textColor,'#172b3f');
  const defs='<defs><clipPath id="lg'+esc(m.id)+'"><rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+H.toFixed(1)+'"/></clipPath></defs>';let out='<g clip-path="url(#lg'+esc(m.id)+')">'+defs+'<rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+H.toFixed(1)+'" rx="3" fill="'+fill+'" fill-opacity="'+(m.fillOpacity==null?.96:Math.max(.05,Math.min(1,+m.fillOpacity)))+'" stroke="'+border+'" stroke-width="'+bw.toFixed(1)+'"/>';let yy=y0+pad;
- if(th){out+='<rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+th.toFixed(1)+'" fill="'+hx(m.titleFill,head)+'"/><text x="'+(x0+pad).toFixed(1)+'" y="'+(y0+th*.68).toFixed(1)+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(m.title||'Takeoff Legend')+'</text>';yy+=th}
+ if(th){out+='<rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+th.toFixed(1)+'" fill="'+hx(m.titleFill,head)+'"/><text x="'+(x0+pad).toFixed(1)+'" y="'+(y0+th*.68).toFixed(1)+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(legendTitle(m))+'</text>';yy+=th}
  const widths=Array.isArray(m.colWidths)?m.colWidths.map(Number):[],weights=cols.map((c,i)=>Math.max(.05,Number(widths[i])||LEG_W0[c.id]||.15)),sum=weights.reduce((a,b)=>a+b,0);for(let i=0;i<weights.length;i++)weights[i]/=sum;const xs=[];let xx=x0;cols.forEach((c,i)=>{xs.push(xx);xx+=W*weights[i]});
  if(hh){out+='<rect x="'+x0.toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+hh.toFixed(1)+'" fill="'+head+'"/>';cols.forEach((c,i)=>{out+='<text x="'+(xs[i]+pad).toFixed(1)+'" y="'+(yy+hh*.67).toFixed(1)+'" font-size="'+Math.max(5,fs*.9).toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(c.label)+'</text>'});yy+=hh}
  const cell=function(x,y,w,s,al,bold){al=al||'start';const tx=al==='end'?x+w-pad:al==='middle'?x+w/2:x+pad;return '<text x="'+tx.toFixed(1)+'" y="'+y.toFixed(1)+'" text-anchor="'+(al==='end'?'end':al==='middle'?'middle':'start')+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="'+(bold?700:400)+'" fill="'+textCol+'">'+esc(s==null?'—':s)+'</text>';};
- rows.forEach(function(r,ri){const y=yy+ri*rh,c=r.c;if(ri%2)out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="#f7f9fb"/>';cols.forEach(function(col,i){const cw=W*weights[i],x=xs[i];if(col.id==='symbol'){const hs=Math.min(cw-pad*2,rh*.46);out+=legSym(c,r.ap||apOf(c),x+pad,y+(rh-hs)/2,cw-pad*2,hs,z)}else if(col.id==='boq')out+=cell(x,y+rh*.67,cw,c.boq||'—');else if(col.id==='description'){const nm=String(c.name||'—'),n=Math.max(4,Math.floor((cw-pad*2)/(fs*.55))),t=nm.length>n?nm.slice(0,n-1)+'…':nm;out+=(t!==nm?'<g><title>'+esc(nm)+'</title>':'')+cell(x,y+rh*.67,cw,t)+(t!==nm?'</g>':'')}
+ rows.forEach(function(r,ri){const y=yy+ri*rh,c=r.c;if(r.sec!=null){out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="'+head+'"/><text x="'+(x0+pad).toFixed(1)+'" y="'+(y+rh*.67).toFixed(1)+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(r.sec)+'</text>';return}if(ri%2)out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="#f7f9fb"/>';cols.forEach(function(col,i){const cw=W*weights[i],x=xs[i];if(col.id==='symbol'){const hs=Math.min(cw-pad*2,rh*.46);out+=legSym(c,r.ap||apOf(c),x+pad,y+(rh-hs)/2,cw-pad*2,hs,z)}else if(col.id==='boq')out+=cell(x,y+rh*.67,cw,c.boq||'—');else if(col.id==='description'){const nm=String(c.name||'—'),n=Math.max(4,Math.floor((cw-pad*2)/(fs*.55))),t=nm.length>n?nm.slice(0,n-1)+'…':nm;out+=(t!==nm?'<g><title>'+esc(nm)+'</title>':'')+cell(x,y+rh*.67,cw,t)+(t!==nm?'</g>':'')}
    else if(col.id==='perim')out+=cell(x,y+rh*.67,cw,c.type==='area'&&r.has?legendQty({has:true,q:r.per},m)+' ft':'—','end');else if(col.id==='unit')out+=cell(x,y+rh*.67,cw,c.unit||'—','middle');else if(col.id==='qty')out+=cell(x,y+rh*.67,cw,legendQty(r,m),'end');else if(col.id==='rate')out+=cell(x,y+rh*.67,cw,legendRate(c,m),'end');else{const rate=Number(c.rate),amt=isFinite(rate)&&rate?(+r.q||0)*rate:null;out+=cell(x,y+rh*.67,cw,amt==null?'—':f2(amt),'end')}})});
  if(cols.length>1)for(let i=1;i<cols.length;i++){out+='<line x1="'+xs[i].toFixed(1)+'" y1="'+(y0+pad).toFixed(1)+'" x2="'+xs[i].toFixed(1)+'" y2="'+Math.min(y1,y0+pad+th+hh+rows.length*rh).toFixed(1)+'" stroke="'+border+'" stroke-opacity=".22" stroke-width=".6"/>'}
  out+='</g>';return out;
@@ -5086,7 +5108,47 @@ function legendDescShare(m){ const cols = legendCols(m), w = cols.map((c, i) => 
 function legendWidths(ids, share){   // column weights with the description at the share given, the others in their usual proportions
   const others = ids.filter(id => id !== "description"), t = others.reduce((a, id) => a + (LEG_W0[id] || .15), 0) || 1, rest = ids.includes("description") ? 1 - share : 1;
   return ids.map(id => id === "description" ? +share.toFixed(3) : +((LEG_W0[id] || .15) / t * rest).toFixed(3)); }
-async function editLegend(m){const cols=legendCols(m),body='<div class="grid"><div class="fg w2"><label>Title</label><input type="text" id="lgTitle" value="'+esc(m.title||'Takeoff Legend')+'"></div><div class="fg"><label>Font size (pt)</label><input type="number" id="lgFs" min="5" max="32" step=".5" value="'+(+m.fontSize||9)+'"></div><div class="fg"><label>Row height (pt)</label><input type="number" id="lgRh" min="8" max="60" step="1" value="'+(+m.rowH||18)+'"></div><div class="fg"><label>Precision</label><select id="lgPrec">'+[0,1,2,3].map(n=>'<option value="'+n+'" '+((+m.precision||3)===n?'selected':'')+'>'+n+' decimals</option>').join('')+'</select></div><div class="fg"><label>Order</label><select id="lgSort">'+[['drawing','Drawing order'],['list','Condition list order'],['condition','Name A → Z'],['boq','BOQ code'],['qty','Quantity, largest first']].map(([v,t])=>'<option value="'+v+'"'+((m.sort||'drawing')===v?' selected':'')+'>'+t+'</option>').join('')+'</select></div><div class="fg"><label>Description width %</label><input type="number" id="lgDw" min="15" max="70" step="1" value="'+Math.round(100*legendDescShare(m))+'" title="Share of the legend width given to the description; the other columns share the rest"></div><div class="fg"><label>Border colour</label><input type="color" id="lgBorder" value="'+(HEXCOL.test(m.border||'')?m.border:'#40556b')+'"></div><div class="fg"><label>Header fill</label><input type="color" id="lgHead" value="'+(HEXCOL.test(m.headerFill||'')?m.headerFill:'#eef2f7')+'"></div><div class="fg"><label>Fill</label><input type="color" id="lgFill" value="'+(HEXCOL.test(m.fill||'')?m.fill:'#ffffff')+'"></div><div class="fg w2"><label><input type="checkbox" id="lgTitleOn" style="width:auto" '+(m.showTitle===false?'':'checked')+'> Show title</label><label><input type="checkbox" id="lgHeadOn" style="width:auto" '+(m.showHeaders===false?'':'checked')+'> Show column headers</label></div><div class="fg w2"><label>Columns</label><div class="grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">'+LEGEND_COLS.map(c=>'<label class="pk"><input type="checkbox" data-lgcol="'+c.id+'" style="width:auto" '+(cols.some(x=>x.id===c.id)?'checked':'')+'> '+esc(c.label)+'</label>').join('')+'</div></div></div><p class="small">Unit and Quantity are live from the takeoff condition. Rate and Amount use the condition rate when one exists; no rate is invented.</p>';const v=await ask('Edit Legend',body,'Save',()=>{const columns=[...document.querySelectorAll('[data-lgcol]:checked')].map(x=>x.dataset.lgcol);if(!columns.length)return'Choose at least one column';return{title:$('lgTitle').value.trim()||'Takeoff Legend',fontSize:Math.max(5,Math.min(32,+$('lgFs').value||9)),rowH:Math.max(8,Math.min(60,+$('lgRh').value||18)),precision:+$('lgPrec').value||0,sort:$('lgSort').value,border:$('lgBorder').value,headerFill:$('lgHead').value,fill:$('lgFill').value,showTitle:$('lgTitleOn').checked,showHeaders:$('lgHeadOn').checked,columns,colWidths:legendWidths(columns,Math.max(15,Math.min(70,+$('lgDw').value||31))/100)}});if(v)mutate(()=>Object.assign(m,v),'Edit Legend');}
+async function editLegend(m){const cols=legendCols(m),body='<div class="grid"><div class="fg w2"><label>Title</label><input type="text" id="lgTitle" value="'+esc(m.title||'Takeoff Legend')+'"></div><div class="fg"><label>Font size (pt)</label><input type="number" id="lgFs" min="5" max="32" step=".5" value="'+(+m.fontSize||9)+'"></div><div class="fg"><label>Row height (pt)</label><input type="number" id="lgRh" min="8" max="60" step="1" value="'+(+m.rowH||18)+'"></div><div class="fg"><label>Precision</label><select id="lgPrec">'+[0,1,2,3].map(n=>'<option value="'+n+'" '+((+m.precision||3)===n?'selected':'')+'>'+n+' decimals</option>').join('')+'</select></div><div class="fg"><label>Order</label><select id="lgSort">'+[['drawing','Drawing order'],['list','Condition list order'],['condition','Name A → Z'],['boq','BOQ code'],['qty','Quantity, largest first']].map(([v,t])=>'<option value="'+v+'"'+((m.sort||'drawing')===v?' selected':'')+'>'+t+'</option>').join('')+'</select></div><div class="fg"><label>Description width %</label><input type="number" id="lgDw" min="15" max="70" step="1" value="'+Math.round(100*legendDescShare(m))+'" title="Share of the legend width given to the description; the other columns share the rest"></div>'+(m.scope==='all'?'':'<div class="fg"><label>Floors</label><select id="lgFloor" title="The whole sheet, a section for each floor, or one floor only (a legend for each floor)">'+legendFloorOpts(m)+'</select></div>')+'<div class="fg"><label>Border colour</label><input type="color" id="lgBorder" value="'+(HEXCOL.test(m.border||'')?m.border:'#40556b')+'"></div><div class="fg"><label>Header fill</label><input type="color" id="lgHead" value="'+(HEXCOL.test(m.headerFill||'')?m.headerFill:'#eef2f7')+'"></div><div class="fg"><label>Fill</label><input type="color" id="lgFill" value="'+(HEXCOL.test(m.fill||'')?m.fill:'#ffffff')+'"></div><div class="fg w2"><label><input type="checkbox" id="lgTitleOn" style="width:auto" '+(m.showTitle===false?'':'checked')+'> Show title</label><label><input type="checkbox" id="lgHeadOn" style="width:auto" '+(m.showHeaders===false?'':'checked')+'> Show column headers</label></div><div class="fg w2"><label>Columns</label><div class="grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">'+LEGEND_COLS.map(c=>'<label class="pk"><input type="checkbox" data-lgcol="'+c.id+'" style="width:auto" '+(cols.some(x=>x.id===c.id)?'checked':'')+'> '+esc(c.label)+'</label>').join('')+'</div></div></div><p class="small">Unit and Quantity are live from the takeoff condition. Rate and Amount use the condition rate when one exists; no rate is invented.</p>';const v=await ask('Edit Legend',body,'Save',()=>{const columns=[...document.querySelectorAll('[data-lgcol]:checked')].map(x=>x.dataset.lgcol);if(!columns.length)return'Choose at least one column';return{title:$('lgTitle').value.trim()||'Takeoff Legend',fontSize:Math.max(5,Math.min(32,+$('lgFs').value||9)),rowH:Math.max(8,Math.min(60,+$('lgRh').value||18)),precision:+$('lgPrec').value||0,sort:$('lgSort').value,border:$('lgBorder').value,headerFill:$('lgHead').value,fill:$('lgFill').value,showTitle:$('lgTitleOn').checked,showHeaders:$('lgHeadOn').checked,columns,colWidths:legendWidths(columns,Math.max(15,Math.min(70,+$('lgDw').value||31))/100),floor:$('lgFloor')?$('lgFloor').value:(m.floor||'')}});if(v)mutate(()=>{Object.assign(m,v);if(!m.floor)delete m.floor;legendFit(m)},'Edit Legend');}
+/* the choices of a legend's Floors: the whole sheet, split by floor, or each floor of its sheet */
+function legendFloorOpts(m){ const cur = String(m.floor || ""), fls = floorsOf(keyOf(m.file, m.page)).map(f => f.name);
+  if (cur && cur !== "*" && !fls.some(n => flLow(n) === flLow(cur))) fls.push(cur);
+  return [["", "Whole sheet"], ["*", "Split by floor — a section for each floor"]].concat(fls.map(n => [n, "Only " + n])).map(([v, t]) => `<option value="${esc(v)}"${flLow(v) === flLow(cur) && (v === "*") === (cur === "*") ? " selected" : ""}>${esc(t)}</option>`).join(""); }
+/* a legend's box made tall enough for its rows (never shorter): in its own units, as legendSvg0 draws them */
+function legendFit(m){
+  const pp = m.pts; if (!Array.isArray(pp) || pp.length < 2) return;
+  const y0 = Math.min(pp[0][1], pp[1][1]), y1 = Math.max(pp[0][1], pp[1][1]), w = Math.abs(pp[1][0] - pp[0][0]), s = Math.min(1, w / (+m.refW || 340)), fs = Math.max(5, Math.min(32, +m.fontSize || 9)) * s;
+  const rh = Math.max(fs * 1.55, Math.min(80, +m.rowH || 18) * s), hh = m.showHeaders === false ? 0 : Math.max(fs * 1.8, Math.min(80, +m.headerH || 22) * s), th = m.showTitle === false ? 0 : Math.max(fs * 1.9, Math.min(80, +m.titleH || 24) * s), pad = Math.max(2, Math.min(20, +m.pad || 5)) * s;
+  const need = pad * 2 + th + hh + Math.max(1, legendRows(m).length) * rh;
+  if (y1 - y0 < need) { const i = pp[0][1] > pp[1][1] ? 0 : 1; pp[i] = [pp[i][0], y0 + need]; }
+}
+function legendFloorSet(m, v){ mutate(() => { if (v) m.floor = v; else delete m.floor; legendFit(m); }, v === "*" ? "Legend split by floor" : v ? "Legend of " + v : "Legend of the whole sheet"); }
+/* a legend for each floor of a page (only: that floor), each just over its floor's boundary — or inside it at the top of the sheet —
+   listing that floor's conditions and quantities; a floor that has one already, or nothing measured, is left. One Ctrl+Z -> how many */
+function floorLegends(pk, only){
+  pk = pk || S.key; if (!P.proj || !pk || pk !== S.key) return 0;
+  const i = pk.lastIndexOf(":"), file = pk.slice(0, i), page = +pk.slice(i + 1), base = S.base || {width: 1000, height: 1000};
+  const have = new Set((P.proj.marks || []).filter(m => m.type === "legend" && m.file === file && m.page === page && m.floor && m.floor !== "*").map(m => flLow(m.floor)));
+  const made = []; let free = 0;
+  floorsOf(pk).filter(f => (!only || flLow(f.name) === flLow(only)) && !have.has(flLow(f.name))).forEach(f => {
+    const m = defaultLegend(file, page), w0 = Math.abs(m.pts[1][0] - m.pts[0][0]); m.floor = f.name; if (!legendRows(m).length) return;
+    m.pts = [[0, 0], [w0, 10]]; legendFit(m); const h = m.pts[1][1], gap = 12;
+    let w = w0, x0, y0;
+    if (f.r) { w = Math.max(160, Math.min(w0, f.r[2] - f.r[0])); m.pts = [[0, 0], [w, 10]]; legendFit(m); const hh = m.pts[1][1];
+      x0 = Math.max(4, f.r[2] - w); y0 = f.r[1] - gap - hh >= 4 ? f.r[1] - gap - hh : f.r[1] + gap; m.pts = [[x0, y0], [x0 + w, y0 + hh]]; }
+    else { x0 = Math.max(4, base.width - w - 20); y0 = 30 + free; free += h + gap; m.pts = [[x0, y0], [x0 + w, y0 + h]]; }
+    made.push(m); });
+  if (!made.length) return 0;
+  mutate(() => { (P.proj.marks = P.proj.marks || []).push(...made); }, made.length === 1 ? "Legend of " + made[0].floor : made.length + " floor legends");
+  return made.length;
+}
+function floorLegendsAsk(pk, only){
+  floorPage(pk || S.key).then(ok => { if (!ok) return; const n = floorLegends(pk || S.key, only);
+    toast(n ? (n === 1 ? "A legend for " + (only || "the floor") : n + " legends, one for each floor,") + " placed over " + (n === 1 ? "its" : "their") + " boundar" + (n === 1 ? "y" : "ies") + " — drag to move, double-click to edit" : only ? "“" + only + "” has a legend already, or nothing measured in it" : "Every floor with measurements has its legend already", 4000); });
+}
+function floorLegendSplit(pk){
+  floorPage(pk || S.key).then(ok => { if (!ok) return; const m = defaultLegend(); m.floor = "*"; legendFit(m);
+    mutate(() => { (P.proj.marks = P.proj.marks || []).push(m); }, "Legend split by floor"); setSel([m.id]); setTool("select"); refresh(); toast("Legend placed — a section for each floor; drag to move, double-click to edit", 3200); });
+}
 async function createLegend(){if(!P.proj||!S.page)return toast('Open a drawing page first');const m=defaultLegend();mutate(()=>{(P.proj.marks=P.proj.marks||[]).push(m)},'Add Legend');setSel([m.id]);setTool('select');refresh();toast('Legend placed on the drawing — drag the corners to resize; double-click to edit',3200)}
 function legendButton(){const s=S.selMark&&objById(S.selMark);if(s&&s.type==='legend')return editLegend(s);return createLegend();}
 function lblSet(v){ S.lbl = Object.assign({}, S.lbl, v); pref("zdTakeoffLbl", JSON.stringify(S.lbl)); lblSync(); draw(); }
@@ -5286,17 +5348,25 @@ function condTreeHtml(shown){
   const ids = new Set(shown.map(c => c.id)), per = new Map(), used = new Set(), off = S.condGrpOff;
   P.proj.items.forEach(it => { if (!ids.has(it.cond)) return; const pk = keyOf(it.file, it.page); used.add(it.cond); if (!per.has(pk)) per.set(pk, new Map());
     const m = per.get(pk), k = qScale(it), q = k ? rowsOf(it, k).reduce((a, r) => a + r.qty, 0) : 0; m.set(it.cond, (m.get(it.cond) || 0) + q); });
+  const flPg = new Set(Object.keys(P.proj.floors || {}).filter(k => floorList(k).length)); P.proj.items.forEach(it => { if (it.floor) flPg.add(flPk(it)); });   // pages split by floor
   let h = "";
   P.proj.files.forEach(f => {
-    const pages = []; for (let i = 1; i <= f.pages; i++) { const pk = keyOf(f.id, i); if (per.has(pk) || pk === S.key) pages.push(i); }
+    const pages = []; for (let i = 1; i <= f.pages; i++) { const pk = keyOf(f.id, i); if (per.has(pk) || pk === S.key || flPg.has(pk)) pages.push(i); }
     if (!pages.length) return; const fk = "f:" + f.id;
     h += `<div class="ctr root" data-cgrp="${esc(fk)}"><span class="car">${off.has(fk) ? "&#9656;" : "&#9662;"}</span>&#128193; <b>${esc(f.name.replace(/\.(pdf|dwg|dxf)$/i, ""))}</b><span class="small">[${f.pages} page${f.pages === 1 ? "" : "s"}]</span></div>`;
     if (off.has(fk)) return;
-    pages.forEach(i => { const pk = keyOf(f.id, i), sh = (P.proj.sheets || {})[pk] || {}, m = per.get(pk) || new Map(), gk = "p:" + pk;
+    pages.forEach(i => { const pk = keyOf(f.id, i), sh = (P.proj.sheets || {})[pk] || {}, m = per.get(pk) || new Map(), gk = "p:" + pk, byF = flPg.has(pk);
       const nm = [sh.no, sh.title || sh.floor].filter(Boolean).join(" — ") || "Page " + i;
-      h += `<div class="ctr pg${pk === S.key ? " cur" : ""}" data-cgrp="${esc(gk)}" style="padding-left:16px" title="Click to fold / unfold · double-click to open this page"><span class="car">${off.has(gk) ? "&#9656;" : "&#9662;"}</span><b>${esc(nm)}</b><span class="small">p.${i} · ${m.size}</span><button class="ed" data-cgo="${esc(pk)}" title="Open this page">&#8599;</button></div>`;
+      h += `<div class="ctr pg${pk === S.key ? " cur" : ""}" data-cgrp="${esc(gk)}" style="padding-left:16px" title="Click to fold / unfold · double-click to open this page"><span class="car">${off.has(gk) ? "&#9656;" : "&#9662;"}</span><b>${esc(nm)}</b><span class="small">p.${i} · ${m.size}</span><button class="ed" data-flfind="${esc(pk)}" title="${byF ? "Floors on this page — rename, order, boundaries, find more" : "Split this page by floor — finds the floor plans on the sheet (Ground floor, 1st floor …) and lists each floor's quantities on their own"}">&#128194;</button><button class="ed" data-cgo="${esc(pk)}" title="Open this page">&#8599;</button></div>`;
       if (off.has(gk)) return;
-      h += shown.filter(c => m.has(c.id)).map(c => condRowHtml(c, m.get(c.id), 2, pk)).join("") || '<div class="small" style="padding:2px 0 4px 44px">nothing measured on this page yet</div>';
+      if (!byF) { h += shown.filter(c => m.has(c.id)).map(c => condRowHtml(c, m.get(c.id), 2, pk)).join("") || '<div class="small" style="padding:2px 0 4px 44px">nothing measured on this page yet</div>'; return; }
+      const T0 = floorTotals(pk), T = {}, fls = floorsOf(pk).map(x => x.name);   // (by name in any case, as floorsOf)
+      Object.keys(T0).forEach(n => { const t = T[flLow(n)] = T[flLow(n)] || {}; Object.keys(T0[n]).forEach(c => { t[c] = (t[c] || 0) + T0[n][c]; }); });
+      if (Object.keys(T[""] || {}).length) fls.push("");   // the page's floors, then what is in none
+      fls.forEach(fn => { const q = T[flLow(fn)] || {}, lk = "l:" + pk + "|" + flLow(fn), n = shown.filter(c => c.id in q).length, fo = floorNamed(pk, fn);
+        h += `<div class="ctr fl" data-cgrp="${esc(lk)}" data-flpk="${esc(pk)}" data-fl="${esc(fn)}" style="padding-left:26px" title="${fn ? esc(fn) + (fo && fo.r ? " — measurements inside its boundary" : "") + " · click to fold / unfold · double-click to zoom to it · right-click or ⋯ for its menu" : "Measurements in no floor of this page · double-click to zoom to them"}"><span class="car">${off.has(lk) ? "&#9656;" : "&#9662;"}</span>${fn ? "&#128194;" : "&#9675;"} <b>${esc(fn || "No floor")}</b><span class="small">${n}</span><button class="ed" data-flmenu="1" title="Floor menu: zoom, move the selected here, rename, boundary, order, delete">&#8943;</button></div>`;
+        if (off.has(lk)) return;
+        h += shown.filter(c => c.id in q).map(c => condRowHtml(c, q[c.id], 3, pk)).join("") || '<div class="small" style="padding:2px 0 4px 56px">nothing measured on this floor yet — draw its boundary (⋯), or select measurements and right-click → Move to floor</div>'; });
     });
   });
   const un = shown.filter(c => !used.has(c.id));
@@ -6622,6 +6692,7 @@ async function stampPicker(){   // -> {label, color, tpl, aid?, w?, h?}; kept as
 function mkPropsHtml(mk){
   if (mk.type === "legend") return `<h4>Takeoff legend <span style="font-weight:400;color:var(--muted);font-size:11px">markup — not a quantity · drag to move · drag a corner to resize · double-click to edit</span></h4>
     <div class="row"><span class="small" style="flex:1">Each condition on this sheet: its symbol as drawn, quantity${legendCols(mk).some(c => c.id === "perim") ? ", perimeter of its areas" : " (tick Perimeter in Edit legend for the areas' perimeter)"}.</span></div>
+    ${mk.scope === "all" ? "" : `<div class="row"><div class="fg" style="flex:1"><label>Floors</label><select data-lgfloor="1" title="The whole sheet, a section for each floor, or one floor only">${legendFloorOpts(mk)}</select></div></div>`}
     <div class="row"><button class="btn sm" data-mact2="legend">Edit legend… (columns, order, size)</button><button class="btn sm" data-mact2="default" title="New legends start with this legend's look and size">Set as default</button><button class="btn sm" data-act="lock">${mk.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn dng" data-act="delMark"${mk.locked ? " disabled" : ""}>Delete</button></div>`;
   const t = mk.type, nu = MK_TYPES.has(t), fillT = ["box", "ellipse", "polygon", "text", "callout"].includes(t), lineT = ["line", "polyline"].includes(t), textT = ["text", "callout"].includes(t);
   const strokeT = !["image", "link", "attach", "redact", "stamp", "hilite", "fence"].includes(t) && !(t === "pen" && mk.hl), dashT = nu && ["line", "polyline", "polygon", "box", "ellipse"].includes(t);
@@ -8996,7 +9067,7 @@ function ribbonInit(){
     el.addEventListener("dragleave", e => { if (!el.contains(e.relatedTarget)) el.classList.remove("dropok"); });
     el.addEventListener("drop", dropHere); });
   /* ribbon tabs added for Costing / Export / View: each button runs an existing control or dialog */
-  const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog()};
+  const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog(), floors: () => floorsDialog()};
   const PX = {bDefaults: () => settingsDialog("measure")};   // Costing → Defaults: the top bar's Defaults is now in Settings (the tool keeps its name, so My tools keeps it)
   document.querySelectorAll("#tools [data-px]").forEach(b => b.addEventListener("click", () => { if (PX[b.dataset.px]) return PX[b.dataset.px](); const t = $(b.dataset.px); if (t && !t.disabled) t.click(); setTimeout(syncPx, 60); }));
   document.querySelectorAll("#tools [data-fn]").forEach(b => b.addEventListener("click", () => { if (P.proj && FN[b.dataset.fn]) FN[b.dataset.fn](); else toast("Open a project first", 2000); }));
@@ -9010,8 +9081,11 @@ function ribbonInit(){
     ctxShow([{h: c.name, s: fq(condTotals(c).net, c.unit) + " " + c.unit + ((P.proj.cols || []).length ? " · " + colTip(c).replace(/\n/g, " · ") : "")}, {t: "Edit condition…", fn: () => editCond(c)},
       {t: "Apply to pages / typical floors…" + (mine.length ? " (" + mine.length + " on this page)" : " — nothing on this page"), fn: () => copyToPagesDialog(c.id), dis: !mine.length || !S.page},
       {t: "Select all on this page", fn: () => { setTool("select"); S.cond = c.id; setSel(mine.map(i => i.id)); refresh(); }, dis: !mine.length}, {sep: 1}, {t: "Custom columns…", fn: colsDialog}], e.clientX, e.clientY); });
-  $("condList").addEventListener("dblclick", e => { const g = e.target.closest(".ctr.pg[data-cgrp]"); if (!g) return; const [f, p] = g.dataset.cgrp.slice(2).split(":"); gotoPage(f, +p); });
-  $("condList").addEventListener("click", e => { const g = e.target.closest("[data-cgrp]"); if (!g || e.target.closest("[data-cgo]")) return; const k = g.dataset.cgrp; if (S.condGrpOff.has(k)) S.condGrpOff.delete(k); else S.condGrpOff.add(k); renderConds(); });
+  $("condList").addEventListener("contextmenu", e => { const r = e.target.closest(".ctr.fl[data-flpk]"); if (!r || !P.proj) return; e.preventDefault(); e.stopPropagation(); floorMenu(e.clientX, e.clientY, r.dataset.flpk, r.dataset.fl); }, true);   // right-click a floor: its menu
+  $("condList").addEventListener("dblclick", e => { const fl = e.target.closest(".ctr.fl[data-flpk]"); if (fl) { floorZoom(fl.dataset.flpk, fl.dataset.fl); return; }
+    const g = e.target.closest(".ctr.pg[data-cgrp]"); if (!g) return; const [f, p] = g.dataset.cgrp.slice(2).split(":"); gotoPage(f, +p); });
+  $("condList").addEventListener("click", e => { const g = e.target.closest("[data-cgrp]"); if (!g || e.target.closest("button")) return; const k = g.dataset.cgrp; if (S.condGrpOff.has(k)) S.condGrpOff.delete(k); else S.condGrpOff.add(k); renderConds();
+    if (e.detail === 2 && g.matches(".ctr.fl[data-flpk]")) floorZoom(g.dataset.flpk, g.dataset.fl); });   // (a double-click on a floor: folded and unfolded again, and the view on it — the row was drawn again after the first click, so no dblclick comes)
   $("condQ").addEventListener("input", e => { S.condQ = e.target.value; renderConds(); });
   $("condTypes").addEventListener("click", e => { const b = e.target.closest("[data-cty]"); if (!b) return; S.condTy = b.dataset.cty; renderConds(); });
   /* right panel footer and the takeoff-agent bar at the bottom */
@@ -9501,7 +9575,8 @@ function floorRename(pk, oldName, newName){
   if (nn === cur.name && !cur.adhoc) return true;
   mutate(() => { P.proj.floors = P.proj.floors || {}; const L = P.proj.floors[pk] = P.proj.floors[pk] || [], held = P.proj.items.filter(it => flPk(it) === pk && flLow(locOf(it).floor) === lo);
     const f = L.find(x => flLow(x.name) === lo); if (f) f.name = nn; else L.push({id: uid("FL"), name: nn, r: null});
-    held.forEach(it => { if (it.floor || flLow(locOf(it).floor) !== flLow(nn)) it.floor = nn; }); }, "Rename floor “" + cur.name + "” to “" + nn + "”");   // (in it by the sheet's floor: given the name)
+    held.forEach(it => { if (it.floor || flLow(locOf(it).floor) !== flLow(nn)) it.floor = nn; });   // (in it by the sheet's floor: given the name)
+    (P.proj.marks || []).forEach(m => { if (m.type === "legend" && keyOf(m.file, m.page) === pk && m.floor && m.floor !== "*" && flLow(m.floor) === lo) m.floor = nn; }); }, "Rename floor “" + cur.name + "” to “" + nn + "”");   // (its legends follow)
   return true;
 }
 /* a folder deleted: nothing is deleted with it — its measurements go back to no floor (a boundary or the sheet's floor) -> how many left it */
@@ -9612,17 +9687,168 @@ async function floorDetect(pk){
     if (g.cad) { const B = await trbGet(pk, k); boxes = B ? B.boxes : []; }
     else if (g.layerIds && g.layerIds.some(Boolean)) { const inp = await traceInput(pk); if (inp) { inp.k = k; const T = await import("./trace.js" + CADV); boxes = T.planBoxes(inp) || []; } }
     if (!boxes.length) return [];
-    const lines = textLines(await pageTexts(fid, pg)).filter(l => l && l.s && Math.abs(Math.sin(l.r || 0)) < 0.2 && /\bPLAN\b/i.test(l.s) && (FLOOR_RX.test(l.s) || /FLOOR|BASEMENT|ROOF|LEVEL|TERRACE|MEZZ|PODIUM|PENTHOUSE|STOREY/i.test(l.s)));
+    const all = textLines(await pageTexts(fid, pg)).filter(l => l && l.s && Math.abs(Math.sin(l.r || 0)) < 0.2);
+    const lines = all.filter(l => /\bPLAN\b/i.test(l.s) && (FLOOR_RX.test(l.s) || /FLOOR|BASEMENT|ROOF|LEVEL|TERRACE|MEZZ|PODIUM|PENTHOUSE|STOREY/i.test(l.s)));
     const W = b => b[2] - b[0], H = b => b[3] - b[1];
     const bs = boxes.map(b => b.slice()).sort((a, b) => Math.abs(a[0] - b[0]) > 0.1 * Math.min(W(a), W(b)) ? a[0] - b[0] : a[1] - b[1]);   // left to right, then top to bottom
     const used = new Set(), names = new Set(); let un = 0;
     return bs.map(b => { const inX = l => l.cx >= b[0] - 0.1 * W(b) && l.cx <= b[2] + 0.1 * W(b);
       const zone = [l => l.cy > b[3] && l.cy <= b[3] + 0.25 * H(b), l => l.cy >= b[1] && l.cy <= b[3], l => l.cy < b[1] && l.cy >= b[1] - 0.25 * H(b)];
       let t = null; for (const z of zone) { const c = lines.filter(l => !used.has(l) && inX(l) && z(l)).sort((p, q) => q.h - p.h); if (c.length) { t = c[0]; break; } }
-      let nm = t ? floorTitleName(t.s) : ""; if (t) used.add(t); if (!nm) nm = "Plan " + (++un);
+      let nm = t ? floorTitleOf(t, all) : ""; if (t) used.add(t); const titled = !!nm; if (!nm) nm = "Plan " + (++un);
       let n2 = nm, d = 2; while (names.has(flLow(n2))) n2 = nm + " (" + (d++) + ")"; names.add(flLow(n2));
-      return {name: n2, r: b.map(v => Math.round(v * 1000) / 1000)}; });
+      return {name: n2, r: b.map(v => Math.round(v * 1000) / 1000), titled}; });   // (titled false: no floor title found — a section, a detail…)
   } catch (e) { console.warn("floorDetect", e); return []; }
+}
+/* a plan's title line as a floor name, with the floors it stands for when they are written on a line of their own beside it:
+   TYPICAL FLOOR PLAN over 1ST TO 8TH FLOOR -> "Typical 1st to 8th floor", over 8TH TO ROOF -> "Typical 8th to roof" */
+function floorTitleOf(t, all){
+  const RNG = /\b(?:\d{1,2}\s*(?:ST|ND|RD|TH)|GROUND|FIRST|SECOND|THIRD|FOURTH|FIFTH)\b.*\bTO\b|\bTO\s+(?:ROOF|TOP|\d{1,2}\s*(?:ST|ND|RD|TH))\b/i;
+  if (RNG.test(t.s)) return floorTitleName(t.s);
+  const sub = (all || []).filter(l => l !== t && RNG.test(l.s) && !/\bPLAN\b/i.test(l.s) && Math.abs(l.cy - t.cy) <= 3 * t.h && Math.abs(l.cx - t.cx) <= ((t.w || 0) + (l.w || 0)) / 2 + t.h)
+    .sort((p, q) => Math.abs(p.cy - t.cy) - Math.abs(q.cy - t.cy))[0];
+  if (!sub) return floorTitleName(t.s);
+  const base = t.s.replace(/["“”„'‘’`]/g, " ").replace(/\bSCALE\b.*$/i, " ").replace(/\b\d+\s*:\s*\d+\b.*$/, " ").replace(/[()[\]{}]/g, " ").replace(/\b(FLOOR|PLANS?)\b/ig, " ").replace(/\s+/g, " ").trim();
+  return floorTitleName((base ? base + " " : "") + sub.s);
+}
+/* ------------------------------------------------------------------ floors: what the user works with (the data is above). Takeoff → Floors
+   (or the 📂 of a page in the By page tree) finds the floor plans on the sheet and adds a floor for each; Floor box draws a floor's boundary
+   round a plan by hand; right-click a measurement → Move to floor puts it in a floor whatever its place. The By page tree then lists each
+   floor of the page with its own conditions and quantities */
+const flOrd = n => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
+/* the name offered for the next floor of a page: Ground floor first, then the floor above the highest one there (1st floor, 2nd floor …) */
+function floorNext(pk){
+  const L = floorsOf(pk), top = n => { const m = /(\d{1,3})\s*(?:st|nd|rd|th)?\s*(?:to|[-–])\s*(\d{1,3})(?:st|nd|rd|th)?\b/i.exec(n); return m ? +m[2] : floorNat(n); };   // (a typical floor: its last)
+  const v = L.map(f => top(f.name)).filter(x => x != null && x >= 0 && x < 900);
+  let n = v.length ? Math.floor(Math.max(...v)) + 1 : L.length;
+  while (L.some(f => flLow(f.name) === flLow(n ? flOrd(n) + " floor" : "Ground floor"))) n++;
+  return n ? flOrd(n) + " floor" : "Ground floor";
+}
+/* a plan title in a box, or just under or over it, as a floor name ("" for none) — the name offered for a boundary drawn by hand */
+async function floorTitleIn(pk, b){
+  try {
+    const i = pk.lastIndexOf(":"), all = textLines(await pageTexts(pk.slice(0, i), +pk.slice(i + 1))).filter(l => l && l.s && Math.abs(Math.sin(l.r || 0)) < 0.2);
+    const L = all.filter(l => /\b(PLAN|FLOOR)\b/i.test(l.s) && (FLOOR_RX.test(l.s) || /\bFLOOR\b|BASEMENT|ROOF|LEVEL|MEZZ|PODIUM|PENTHOUSE|STOREY/i.test(l.s)));
+    const W = b[2] - b[0], H = b[3] - b[1], inX = l => l.cx >= b[0] - 0.1 * W && l.cx <= b[2] + 0.1 * W;
+    for (const z of [l => l.cy >= b[1] && l.cy <= b[3], l => l.cy > b[3] && l.cy <= b[3] + 0.25 * H, l => l.cy < b[1] && l.cy >= b[1] - 0.25 * H]) {
+      const c = L.filter(l => inX(l) && z(l)).sort((p, q) => (/\bPLAN\b/i.test(q.s) - /\bPLAN\b/i.test(p.s)) || q.h - p.h); if (c.length) { const n = floorTitleOf(c[0], all); if (n) return n; } }
+  } catch (e) {}
+  return "";
+}
+/* floors added to a page in one step (Ctrl+Z takes them all back): [{name, r}] — a name already a floor there gets the boundary -> how many */
+function floorAddMany(pk, list){
+  pk = pk || S.key; const L = []; (list || []).forEach(f => { const name = flName(f && f.name); if (name && !L.some(x => flLow(x.name) === flLow(name))) L.push({name, r: f.r == null ? null : flBox(f.r)}); });
+  if (!pk || !L.length) return 0;
+  mutate(() => { P.proj.floors = P.proj.floors || {}; const M = P.proj.floors[pk] = P.proj.floors[pk] || [];
+    L.forEach(f => { const o = M.find(x => flLow(x.name) === flLow(f.name)); if (o) { if (f.r) o.r = f.r; } else M.push({id: uid("FL"), name: f.name, r: f.r}); }); }, L.length === 1 ? "New floor “" + L[0].name + "”" : L.length + " floors on " + keyName(pk));
+  return L.length;
+}
+const floorItems = (pk, name) => P.proj.items.filter(it => flPk(it) === pk && flLow(locOf(it).floor) === flLow(name));
+async function floorPage(pk){ const i = pk.lastIndexOf(":"); if (pk !== S.key) await gotoPage(pk.slice(0, i), +pk.slice(i + 1)); return pk === S.key; }
+/* the view on a floor: its boundary, else the measurements in it */
+async function floorZoom(pk, name){
+  if (!(await floorPage(pk))) return;
+  const f = floorNamed(pk, name);
+  if (f && f.r) { floorView(f.r); return; }
+  const ids = floorItems(pk, name).map(i => i.id); if (ids.length) zoomTo(ids);
+}
+function floorView(r){ const st = stage(), m = 24 / Math.max(1e-6, S.view.s), s2 = Math.max(0.05, Math.min(5000, Math.min(st.clientWidth / (r[2] - r[0] + 2 * m), st.clientHeight / (r[3] - r[1] + 2 * m))));
+  S.view = {s: s2, tx: st.clientWidth / 2 - (r[0] + r[2]) / 2 * s2, ty: st.clientHeight / 2 - (r[1] + r[3]) / 2 * s2}; applyView(); renderHi(); }
+/* Floor box: two corners round one floor plan; a new floor is named (from the plan's title when there is one) — or, from a floor's menu,
+   that floor's boundary is drawn again (S.flRedraw). The tool stays on for the next plan */
+function floorBoxStart(pk, name){
+  floorPage(pk || S.key).then(ok => { if (!ok) return; setTool("floorbox"); S.flRedraw = name || null;
+    toast(name ? "Click two opposite corners round “" + name + "”" : "Click two opposite corners round one floor plan (with its title), then name the floor", 3500); });
+}
+async function floorBoxDone(pts){
+  const r = flBox([pts[0][0], pts[0][1], pts[1][0], pts[1][1]]), pk = S.key, re = S.flRedraw;
+  if (!r || (r[2] - r[0]) * S.view.s < 8 || (r[3] - r[1]) * S.view.s < 8) { draw(); return; }
+  if (re) { S.flRedraw = null; const f = floorSetBox(pk, re, r); setTool("select"); if (f && typeof f === "object") toast("Boundary of “" + f.name + "” drawn — what is inside it is in that floor", 3000); else if (typeof f === "string") toast(f, 3000); return; }
+  const sug = (await floorTitleIn(pk, r)) || floorNext(pk);
+  const v = await ask("New floor", `<div class="fg w2"><label>Floor name</label><input type="text" id="flNm" value="${esc(sug)}" list="flNmL" autocomplete="off"><datalist id="flNmL">${locValues("floor").map(x => `<option value="${esc(x)}">`).join("")}</datalist></div>
+    <p class="small" style="margin-top:6px">Every measurement inside the box is in this floor: the By page tree lists the floor with its own quantities, and the bill and Excel split by floor.</p>`, "Add floor",
+    () => { const n = flName($("flNm").value), f = floorNamed(pk, n); if (!n) return "Give the floor a name"; if (f && f.r) return "“" + f.name + "” already has a boundary on this page — another name, or its menu → Redraw its boundary"; return {n}; }, "flNm");   // (a string back is an error)
+  if (!v || S.key !== pk) { draw(); return; }
+  const nm = v.n, f = floorNamed(pk, nm) ? floorSetBox(pk, nm, r) : floorAdd(pk, nm, {r});
+  if (typeof f === "string") { toast(f, 3000); return; }
+  toast("Floor “" + f.name + "” added — box the next floor plan, or Esc when done", 3500);
+}
+/* a floor with no boundary: the selected measurements of the page go in it (with their cut-outs and openings) */
+async function floorNewAsk(pk, ids){
+  pk = pk || S.key; if (!pk) return null; const mine = (ids || []).filter(id => P.proj.items.some(i => i.id === id && flPk(i) === pk));
+  const v = await ask("New floor", `<div class="fg w2"><label>Floor name</label><input type="text" id="flNm" value="${esc(floorNext(pk))}" autocomplete="off"></div>
+    <p class="small" style="margin-top:6px">${mine.length ? "The " + mine.length + " selected measurement" + (mine.length > 1 ? "s go" : " goes") + " in it, with their cut-outs and openings." : "Then select measurements on the drawing and right-click → Move to floor — or draw its boundary from its menu in the By page tree."}</p>`, "Add floor",
+    () => { const n = flName($("flNm").value); if (!n) return "Give the floor a name"; if (floorNamed(pk, n)) return "“" + n + "” is already a floor on this page"; return {n}; }, "flNm");
+  if (!v) return null;
+  const f = floorAdd(pk, v.n, {move: mine}); if (typeof f === "string") { toast(f, 3000); return null; }
+  toast("Floor “" + f.name + "” added" + (mine.length ? " with " + mine.length + " measurement" + (mine.length > 1 ? "s" : "") : ""), 2600); return f;
+}
+async function floorRenameAsk(pk, name){
+  await ask("Rename floor", `<div class="fg w2"><label>Floor name</label><input type="text" id="flNm" value="${esc(name)}" autocomplete="off"></div>`, "Rename", () => floorRename(pk, name, $("flNm").value), "flNm");
+}
+/* the menu of a floor row in the By page tree (⋯ or right-click) */
+function floorMenu(x, y, pk, name){
+  const f = floorNamed(pk, name), L = floorList(pk), at = f ? L.indexOf(f) : -1, n = floorItems(pk, name).length;
+  const ids = [...selIds()].filter(id => P.proj.items.some(i => i.id === id && flPk(i) === pk));
+  ctxShow([{h: name || "No floor", s: keyName(pk) + " · " + n + " measurement" + (n === 1 ? "" : "s")}, {t: "Zoom to it", k: "Dbl-click", fn: () => floorZoom(pk, name), dis: !(f && f.r) && !n},
+    name ? {t: "Move the selected here" + (ids.length ? " (" + ids.length + ")" : " — select on the drawing first"), fn: () => { const k = floorMove(ids, name, pk); toast(k ? k + " moved to “" + name + "”" : "Already in “" + name + "”", 2200); }, dis: !ids.length} : null,
+    name ? {t: "Rename…", fn: () => floorRenameAsk(pk, name)} : null,
+    name ? {t: f && f.r ? "Redraw its boundary" : "Draw its boundary", fn: () => floorBoxStart(pk, name)} : null,
+    f && f.r ? {t: "Remove its boundary (keep the floor)", fn: () => floorSetBox(pk, name, null)} : null,
+    f ? {t: "Move up", fn: () => floorOrder(pk, name, -1), dis: at <= 0} : null, f ? {t: "Move down", fn: () => floorOrder(pk, name, 1), dis: at < 0 || at >= L.length - 1} : null,
+    name && n ? {t: "Legend for this floor", fn: () => floorLegendsAsk(pk, name)} : null,
+    {sep: 1}, {t: "Floors on this page…", fn: () => floorsDialog(pk)},
+    name ? {sep: 1} : null, name ? {t: "Delete this floor (its measurements are kept)", dng: 1, fn: () => { const k = floorDelete(pk, name); toast("Floor “" + name + "” deleted" + (k ? " — its " + k + " measurement" + (k > 1 ? "s are" : " is") + " under No floor now" : ""), 3000); }} : null], x, y);
+}
+/* Floors on a page: "Find floor plans" (each plan on the sheet a floor named from its title, ticked to add) and the page's floors —
+   rename, order, boundary, delete. found: undefined = find them when the page has no floor yet, null = not looked for, [] = none found */
+async function floorsDialog(pk, found){
+  if (!P.proj) return; pk = pk || S.key; if (!pk) { toast("Open a page first", 2000); return; }
+  if (!(await floorPage(pk))) return;
+  if (found === undefined) { found = null; if (!floorList(pk).length) { busy("Finding the floor plans on this sheet…"); try { found = await floorDetect(pk); } finally { busy(""); } if (S.key !== pk) return; } }
+  const F = (found || []).filter(f => f && f.name && flBox(f.r)), L = floorsOf(pk), k = curScale() || 0;
+  const ids = [...selIds()].filter(id => P.proj.items.some(i => i.id === id && flPk(i) === pk));
+  const size = r => k > 0 ? Math.round((r[2] - r[0]) / k) + " × " + Math.round((r[3] - r[1]) / k) + " ft" : "";
+  const nT = F.filter(f => f.titled !== false).length, un = nT ? F.filter(f => f.titled === false).length : 0;   // plans with no floor title (sections, details, a site plan) unticked, folded — unless no plan has one
+  const one = (f, i) => `<div class="cand"><input type="checkbox" data-flck="${i}"${!nT || f.titled !== false ? " checked" : ""} title="Add this floor"><input type="text" data-flnew="${i}" value="${esc(f.name)}" style="flex:1;min-width:120px" aria-label="Floor name"><span class="small">${size(f.r)}${floorNamed(pk, f.name) ? " · its boundary replaces the one there" : ""}</span><button class="btn sm" data-flpz="${i}" title="Show this plan on the drawing (the dialog stays open)">Show</button></div>`;
+  const prop = F.map((f, i) => !un || f.titled !== false ? one(f, i) : "").join("") + (un ? `<details style="margin-top:4px"><summary class="small">${un} other plan${un > 1 ? "s" : ""} with no floor title (sections, details, a site plan…) — tick one to add it as a floor</summary>${F.map((f, i) => f.titled === false ? one(f, i) : "").join("")}</details>` : "");
+  const rows = L.map((f, i) => { const n = floorItems(pk, f.name).length;
+    return `<div class="cand"><input type="text" data-flname="${i}" value="${esc(f.name)}" style="flex:1;min-width:120px" aria-label="Floor name" title="Type to rename"><span class="small">${n} measurement${n === 1 ? "" : "s"} · ${f.r ? "boundary drawn" : f.adhoc ? "set on its measurements" : "no boundary"}</span>
+      <button class="btn sm" data-fla="zoom" data-i="${i}" title="Show it on the drawing"${f.r || n ? "" : " disabled"}>Zoom</button><button class="btn sm" data-fla="box" data-i="${i}" title="Click two corners round this floor's plan">${f.r ? "Redraw" : "Draw"} boundary</button>${f.r ? `<button class="btn sm" data-fla="unbox" data-i="${i}" title="Remove the boundary (the floor stays)">No boundary</button>` : ""}
+      ${f.adhoc ? "" : `<button class="btn sm" data-fla="up" data-i="${i}" title="Earlier in the list"${i ? "" : " disabled"}>&#9650;</button><button class="btn sm" data-fla="down" data-i="${i}" title="Later in the list"${i < floorList(pk).length - 1 ? "" : " disabled"}>&#9660;</button>`}<button class="btn sm dng" data-fla="del" data-i="${i}" title="Delete the floor — its measurements are kept, out of any floor">Delete</button></div>`; }).join("");
+  const body = `<p><b>${esc(keyName(pk))}</b> — one sheet with several floor plans split by floor: every measurement inside a floor's boundary is in that floor. The By page tree lists each floor with its own conditions and quantities, and the bill, the report and Excel split by floor.</p>
+    ${F.length ? `<p style="margin-top:10px"><b>${nT || F.length} floor plan${(nT || F.length) > 1 ? "s" : ""} found on this sheet</b> <span class="small">— named from their titles; untick any that is not a floor and rename as you like</span></p>${prop}`
+      : found && !L.length ? '<p class="small" style="margin-top:10px">No floor plan was found on this sheet by itself (a scanned page, a drawing with no wall lines, or no scale yet) — draw a box round each floor plan with <b>+ Draw a floor boundary</b>.</p>' : ""}
+    <p style="margin-top:10px"><b>Floors on this page</b></p>${rows || '<p class="small">None yet.</p>'}
+    <div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap"><button class="btn sm" data-fla="find" title="Find the floor plans on the sheet (clusters of wall lines with room names) and name each from its title">Find floor plans</button><button class="btn sm" data-fla="draw" title="Click two corners round a floor plan, then name it">+ Draw a floor boundary</button><button class="btn sm" data-fla="add" title="A floor with no boundary: measurements go in it by Move to floor">+ Floor with no boundary${ids.length ? " (the " + ids.length + " selected)" : ""}</button></div>
+    ${L.length ? `<p style="margin-top:10px"><b>Legend</b> <span class="small">— the takeoff legend on the sheet, floor by floor</span></p><div class="row" style="margin-top:4px;gap:6px;flex-wrap:wrap"><button class="btn sm" data-fla="legs" title="A legend over each floor's boundary listing that floor's conditions and quantities">Legend for each floor</button><button class="btn sm" data-fla="leg1" title="One legend with a section for each floor">One legend split by floor</button></div>` : ""}`;
+  const pr = ask("Floors", body, F.length ? "Add the ticked floors" : "Done", () => {
+    const add = [];
+    for (const ck of $("dlgB").querySelectorAll("[data-flck]")) { if (!ck.checked) continue; const i = +ck.dataset.flck, nm = flName($("dlgB").querySelector(`[data-flnew="${i}"]`).value);
+      if (!nm) return "Give every ticked floor a name"; if (add.some(a => flLow(a.name) === flLow(nm))) return "“" + nm + "” is ticked twice — rename one"; add.push({name: nm, r: F[i].r}); }
+    return {add}; });
+  const B = $("dlgB"), again = () => floorsDialog(pk, found);
+  B.querySelectorAll("[data-flpz]").forEach(b => b.addEventListener("click", () => {   // a found plan shown on the sheet: the dialog steps aside until the next click
+    const i = +b.dataset.flpz, inp = B.querySelector(`[data-flnew="${i}"]`); S.flShow = {pk, r: F[i].r, name: flName(inp && inp.value) || F[i].name}; $("dlgBack").classList.add("peek"); floorView(F[i].r); draw();
+    toast("“" + S.flShow.name + "” — click anywhere to go back to the Floors list", 5000);
+    setTimeout(() => document.addEventListener("pointerdown", function back(e){ document.removeEventListener("pointerdown", back, true); e.stopPropagation(); e.preventDefault(); $("dlgBack").classList.remove("peek"); S.flShow = null; draw(); }, true), 0); }));
+  B.querySelectorAll("[data-flname]").forEach(inp => inp.addEventListener("change", () => { const f = L[+inp.dataset.flname], r = floorRename(pk, f.name, inp.value);
+    if (r === true) { f.name = flName(inp.value); inp.value = f.name; $("dlgErr").textContent = ""; } else { $("dlgErr").textContent = r; inp.value = f.name; } }));
+  B.querySelectorAll("[data-fla]").forEach(b => b.addEventListener("click", async () => { const a = b.dataset.fla, f = L[+b.dataset.i];
+    if (a === "find") { busy("Finding the floor plans on this sheet…"); let r = []; try { r = await floorDetect(pk); } finally { busy(""); } if (S.key === pk) floorsDialog(pk, r); return; }
+    if (a === "draw" || a === "box" || a === "zoom" || a === "add" || a === "legs" || a === "leg1") { if (ask.cur) ask.cur(null); }
+    if (a === "legs") return floorLegendsAsk(pk);
+    if (a === "leg1") return floorLegendSplit(pk);
+    if (a === "draw") return floorBoxStart(pk, null);
+    if (a === "box") return floorBoxStart(pk, f.name);
+    if (a === "zoom") return floorZoom(pk, f.name);
+    if (a === "add") return floorNewAsk(pk, ids);
+    if (a === "unbox") floorSetBox(pk, f.name, null);
+    else if (a === "up" || a === "down") floorOrder(pk, f.name, a === "up" ? -1 : 1);
+    else if (a === "del") floorDelete(pk, f.name);
+    again(); }));
+  const v = await pr; $("dlgBack").classList.remove("peek"); if (S.flShow) { S.flShow = null; draw(); }
+  if (v && v.add && v.add.length) { const n = floorAddMany(pk, v.add); toast(n + " floor" + (n > 1 ? "s" : "") + " added — each floor's quantities are listed on their own in the By page tree", 4000); }
 }
 function sheetInfoSuggestions(T){
   const L = textLines(T).map(x => x.s.replace(/\s+/g, " ").trim()).filter(Boolean), out = {};
@@ -10905,6 +11131,9 @@ function ctxItem(hi, sp, q, e){
   L.push({sep: 1}, ...ctxClip(q), {sep: 1}, ctxArrange(), {t: allLk ? "Unlock" : "Lock", k: "Ctrl+Shift+L", fn: lockSel}, {sep: 1});
   const same = P.proj.conds.filter(x => x.type === c.type && x.id !== it.cond);
   L.push({t: "Move to condition", sub: same.map(x => ({t: x.name, fn: () => { const bad = sel.filter(i => (cond(i.cond) || {}).type !== x.type).length; mutate(() => sel.forEach(i => { if ((cond(i.cond) || {}).type === x.type) i.cond = x.id; }), "Move to " + x.name); toast("Moved to " + x.name + (bad ? " — " + bad + " of another kind left as they were" : ""), 2600); }})), dis: lk});
+  { const pk = flPk(it), fls = floorsOf(pk), now = new Set(sel.map(i => flLow(locOf(i).floor)));   // the floor they are in (Ground floor, 1st floor …): a floor of the page, a new one, or back to their boundary's
+    L.push({t: "Move to floor", sub: fls.map(f => ({t: f.name, on: now.size === 1 && now.has(flLow(f.name)), fn: () => { const n = floorMove(ids, f.name, pk); toast(n ? n + " moved to “" + f.name + "”" : "Already in “" + f.name + "”", 2200); }}))
+      .concat(fls.length ? [{sep: 1}] : [], [{t: "New floor…", fn: () => floorNewAsk(pk, sel.map(i => i.id))}], sel.some(i => i.floor) ? [{t: "Out of the floor set by hand (by its boundary again)", fn: () => floorMove(ids, "", pk)}] : [], [{t: "Floors on this page…", fn: () => floorsDialog(pk)}])}); }
   L.push({t: "Select all “" + c.name + "” on this page", fn: () => selectSimilar(it)});
   L.push({t: "Condition", sub: [{t: "Edit “" + c.name + "”…", fn: () => editCond(c)}, {t: "Change colour…", fn: () => colorPop({getBoundingClientRect: () => ({left: e.clientX, bottom: e.clientY})}, c)},
     {t: "Hide this condition", fn: () => { c.hidden = true; setSel([]); save(); refresh(); }}, {t: "Show only this condition", fn: () => { P.proj.conds.forEach(x => { x.hidden = x.id !== c.id; }); save(); refresh(); }},
@@ -10930,7 +11159,7 @@ function setDefaultsFromSelection(o){
 function ctxMark(m){
   const ids = selIds(), many = ids.size > 1, allLk = [...ids].map(objById).filter(Boolean).every(o => o.locked);
   return [{h: many ? ids.size + " selected" : MARK_TOOLS[m.type], s: many ? "" : (m.text || "markup — not a quantity") + (m.locked ? " · locked" : "")},
-    ...mkCtxItems(m, many), !many ? {t: "Comments and replies…", fn: () => { S.ml.focus = m.id; mlSet({scope: "page"}); mlToggle(true); }} : null,
+    ...mkCtxItems(m, many), !many && m.type === "legend" && m.scope !== "all" ? {t: "Floors", sub: [{t: "Whole sheet", on: !m.floor, fn: () => legendFloorSet(m, "")}, {t: "Split by floor — a section for each floor", on: m.floor === "*", fn: () => legendFloorSet(m, "*")}].concat(floorsOf(keyOf(m.file, m.page)).map(f => ({t: "Only " + f.name, on: !!m.floor && m.floor !== "*" && flLow(m.floor) === flLow(f.name), fn: () => legendFloorSet(m, f.name)})))} : null, !many ? {t: "Comments and replies…", fn: () => { S.ml.focus = m.id; mlSet({scope: "page"}); mlToggle(true); }} : null,
     !many ? {t: "Properties…", fn: focusProps} : null, !many ? {t: "Set as default", fn: () => setDefaultsFromSelection(m)} : null, !many && MARK_PROFILE_TYPES.includes(mkKindOf(m)) ? {t: "Add to Tool Chest…", fn: () => toolChestDialog({object: m, name: MARK_TOOLS[m.type] + " profile"})} : null, {sep: 1}, ...ctxClip(null), {sep: 1}, ctxArrange(), {t: allLk ? "Unlock" : "Lock", k: "Ctrl+Shift+L", fn: lockSel},
     {t: "Select all " + MARK_TOOLS[m.type].toLowerCase() + "s on this page", fn: () => selectSimilar(m)}, {t: "Zoom to", fn: () => zoomTo(ids)}, {sep: 1}, {t: "Delete", k: "Del", fn: delSelected, dng: 1, dis: allLk}];
 }
@@ -10939,6 +11168,7 @@ function ctxCanvas(q){
   return [{h: pageName({file: S.fileId, page: S.pageNo}), s: S.clip ? "clipboard: " + S.clip.n + " object" + (S.clip.n > 1 ? "s" : "") : ""}, ...cadSelCtx(), ...cadCtxItems(q), ...sheetLinkItems(q),
     {t: "Paste here", k: "Ctrl+V", fn: () => pasteClip("cursor", q), dis: !S.clip}, {t: "Paste in place", k: "Ctrl+Shift+V", fn: () => pasteClip("inplace"), dis: !S.clip},
     {t: "Select all on this page", k: "Ctrl+A", fn: selectAll}, {t: "Invert selection", k: "Ctrl+I", fn: invertSel}, {t: "Quick select…", fn: quickSelect}, {t: "Deselect all", k: "Esc", fn: clearSel, dis: !selIds().size}, areaOf() ? {t: "Clear the takeoff area box", k: "Esc", fn: areaClear} : null, {sep: 1},
+    {t: "Floors on this page…" + (floorList(S.key).length ? " (" + floorList(S.key).length + ")" : " — split it by floor"), fn: () => floorsDialog()}, {t: "Draw a floor boundary", fn: () => floorBoxStart(S.key, null), on: S.tool === "floorbox"}, {sep: 1},
     {t: "Undo" + (u ? ": " + u : ""), k: "Ctrl+Z", fn: undoAny, dis: !S.undo.length}, {t: "Redo" + (r ? ": " + r : ""), k: "Ctrl+Y", fn: redoAny, dis: !S.redo.length}, {sep: 1},
     {t: "Tools", sub: [T("select", "Select", "V"), T("cadsel", "Select AutoCAD objects", "Shift+V"), T("lasso", "Lasso select", "Shift+O"), T("pan", "Pan", "H"), {sep: 1}, T("draw", "Draw", "A"), T("rect", "Rectangle", "R"), T("auto", "Auto area", "W"), T("circle", "Circle", "E"), T("count", "Count", "C"), T("ded", "Cut-out polyline", "D"), T("dedrect", "Cut-out rectangle", "Shift+D"), T("open", "Opening", "O"), {sep: 1}, T("break", "Break a run", "B"), T("measure", "Measure", "M"), T("angle", "Angle", "Shift+M"), T("radius", "Radius"), T("cal", "Set scale", "K")]},
     {t: "View", sub: [{t: "Fit page", k: "F", fn: () => { fit(); renderHi(); }}, {t: "Fit width", k: "Shift+F", fn: fitWidth}, {t: "Zoom window", k: "Z", fn: () => setTool("zoomwin")}, {t: "Zoom in", k: "+", fn: () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2)}, {t: "Zoom out", k: "−", fn: () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2)}, {sep: 1},
@@ -11458,6 +11688,8 @@ function wire(){
     if (e.target.id === "bFirstCond") return editCond(null);
     const cv = e.target.closest("[data-cview]"); if (cv) { S.condView = cv.dataset.cview; pref("tkCondView", S.condView); renderConds(); return; }
     const go = e.target.closest("[data-cgo]"); if (go) { const [f, p] = go.dataset.cgo.split(":"); gotoPage(f, +p); return; }
+    const ff = e.target.closest("[data-flfind]"); if (ff) { floorsDialog(ff.dataset.flfind); return; }
+    const fm = e.target.closest("[data-flmenu]"), fr = fm && fm.closest(".ctr.fl[data-flpk]"); if (fr) { const b = fm.getBoundingClientRect(); floorMenu(b.left, b.bottom, fr.dataset.flpk, fr.dataset.fl); return; }
     const ed = e.target.closest("[data-edit]"); if (ed) return editCond(cond(ed.dataset.edit));
     const ck = e.target.closest("[data-ck]"); if (ck) { if (ck.checked) S.condSel.add(ck.dataset.ck); else S.condSel.delete(ck.dataset.ck); renderConds(); return; }
     const cka = e.target.closest("[data-cka]"); if (cka) { S.condSel = cka.checked ? new Set(P.proj.conds.map(c => c.id)) : new Set(); renderConds(); return; }
@@ -11489,6 +11721,7 @@ function wire(){
   });
   apWire();   // the appearance bar (Bluebeam-style properties)
   $("props").addEventListener("change", e => {
+    if (e.target.dataset.lgfloor) { const lg = (P.proj.marks || []).find(m => m.id === S.selMark && m.type === "legend"); if (lg) legendFloorSet(lg, e.target.value); return; }   // a legend's Floors
     const mk = e.target.dataset.mprop && (P.proj.marks || []).find(m => m.id === S.selMark);
     if (mk) { mkPropSet(mk, e.target.dataset.mprop, e.target); return; }
     const mt = e.target.dataset.matk, mc = mt && cond(S.cond);   // the condition's material settings (Materials section)
@@ -11592,7 +11825,7 @@ function wire(){
       if (S.pickWall) { S.pickWall = false; hint(); }
       else if (S.arcMode) { S.arcMode = 0; S.arcMid = null; hint(); }
       else if (S.draft.length) { if (S.resume) toast("Run left as it was", 1500); S.resume = null; draftClear(); hint(); }
-      else if (["gap", "stamp", "break", "zoomwin", "lasso", "match", "trim", "extend", "fillet", "chamfer", "stretch", "cedoffset", "cedjoin", "cedexplode"].indexOf(S.tool) >= 0) setTool("select");
+      else if (["gap", "stamp", "break", "zoomwin", "lasso", "match", "floorbox", "trim", "extend", "fillet", "chamfer", "stretch", "cedoffset", "cedjoin", "cedexplode"].indexOf(S.tool) >= 0) setTool("select");
       else if (S.measures.length || S.measure) { S.measures = []; S.measure = null; }
       else if (S.sel || S.selMark) { setSel([]); }
       else if (S.tool === "select" && areaOf()) areaClear();
@@ -16099,6 +16332,7 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
     mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
+    floorsDialog, floorAddMany, floorNext, floorTitleIn, floorZoom, floorMenu, floorBoxStart, floorNewAsk, floorLegends, floorLegendSplit, legendFloorSet, legendFit, legendTitle, floorTitleOf,
     get SNAP_PX(){ return SNAP_PX; }, get HIT_PX(){ return HIT_PX; }};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
