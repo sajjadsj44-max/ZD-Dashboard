@@ -111,6 +111,13 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
   await click(c0[0] + 0.4, c0[1] - 0.3); await click(c1[0] - 0.3, c1[1] + 0.4); await wait(300);
   const room = await T(() => { const Z = zdTakeoff, it = Z.P.proj.items[Z.P.proj.items.length - 1], k = Z.P.proj.scales[it.file + ":" + it.page].ptPerFt; return Z.rowsOf(it, k)[0]; });
   ok(room && near(room.qty, 120, 0.005), "the 10'-0\" x 12'-0\" room, snapped to the drawing's corners: " + (room ? room.qty.toFixed(3) : "?") + " Sft");
+  /* its label, sized on the sheet as Bluebeam's: in step with the zoom; on a sheet laid at a smaller plot scale than 1/8" = 1'-0"
+     (a model space of many plans: 1:960) as on one plotted at 1/8" = 1'-0", not taller than the rooms */
+  const lblFs = async (s, ppf) => { await T(([s, ppf]) => { const Z = zdTakeoff; Z.cadMeta(Z.S.fileId).ptPerFt = ppf; Z.S.sel = null; Z.S.multi.clear(); Z.S.view.s = s; Z.applyView(); Z.refresh(); }, [s, ppf]); await wait(250);
+    return T(() => { const t = document.querySelector("#ov g.aplbl text"); return t ? +t.getAttribute("font-size") : 0; }); };
+  const fs1 = await lblFs(1, 54), fs2 = await lblFs(2, 54), fsS = await lblFs(1, 5.4), fsS2 = await lblFs(2, 5.4); await lblFs(1, 54);
+  ok(fs1 > 6 && near(fs2, 2 * fs1, 0.11), "a label grows with the zoom, in step with the drawing (" + fs1 + " px at 100 %, " + fs2 + " px at 200 %)");
+  ok(near(fsS, fs1 * 0.6, 0.11) && near(fsS2, fs1 * 1.2, 0.11), "on a sheet at 1:160 (5.4 pt per ft) it is 0.6 × — as at 1/8\" = 1'-0\" (" + fsS + " / " + fsS2 + " px at 100 / 200 %)");
 
   console.log("CAD quantities");
   const before = await T(() => zdTakeoff.P.proj.items.length);
