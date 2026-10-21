@@ -371,17 +371,25 @@ function traceOne(inp, opt){
   for (let i = 0; i < N; i++) { if (lines[i]) { body[i] = 1; continue; } const w = wide[pl[i]]; if (w === 1) body[i] = 1; else if (w === 2) { if (!hc) hc = boxMax(G, boxMin(G, boxMax(G, hatchM, 3), 3), 4); if (hc[i]) body[i] = 1; } }   // (the hatch filled out to the wall's lines: no slivers left along its faces)
   mark("bodies");
   // ---- 2 openings: in-line face runs bridged; wall ends carried to the next wall
-  const B = new Uint8Array(N), GMAX = Math.round(pxft(o.gap)), GEXT = Math.round(pxft(o.ext)), TMIN = Math.max(2, Math.round(pxft(2.5 / 12))), TMAX = Math.round(pxft(15 / 12)), RMIN = Math.max(3, Math.round(pxft(0.3)));
+  const B = new Uint8Array(N), GMAX = Math.round(pxft(o.gap)), GEXT = Math.round(pxft(o.ext)), TMIN = Math.max(2, Math.round(pxft(2.5 / 12))), TMAX = Math.round(pxft(15 / 12)), RMIN = Math.max(3, Math.round(pxft(0.3))), FMIN = Math.round(pxft(1.2));
   const face = new Uint8Array(N); for (let i = 0; i < N; i++) face[i] = body[i] && !(diag[i] && lines[i]) ? 1 : 0;   // wall pixels a face can run along
   const bridgeRuns = (get, set, A, Bn, isF) => {   // A rows of Bn pixels; get(r, c) = wall, isF(r, c) = a wall pixel a face may run along
-    for (let r = 1; r < A; r++) for (const side of [-1, 1]) {   // wall pixels with free space above (side -1) / below (+1)
-      let runs = [], s = -1;
-      for (let c = 0; c <= Bn; c++) { const f = c < Bn && isF(r, c) && !(r + side >= 0 && r + side < A && get(r + side, c)) && r + side >= 0 && r + side < A;
+    // (the face on the far side of the gap may be up to 2 px out of line — a column a little proud of its wall: the gap is closed on
+    //  this face's row and carried across to the other face at the gap's end; both faces 1.2 ft or more — a wall, not a door jamb)
+    const RC = [new Map(), new Map()], runsAt = (r, side) => { const M0 = RC[side > 0 ? 1 : 0]; let runs = M0.get(r); if (runs) return runs; runs = []; let s = -1;
+      if (r >= 0 && r < A) for (let c = 0; c <= Bn; c++) { const f = c < Bn && isF(r, c) && !(r + side >= 0 && r + side < A && get(r + side, c)) && r + side >= 0 && r + side < A;
         if (f && s < 0) s = c; else if (!f && s >= 0) { runs.push([s, c - 1]); s = -1; } }
-      for (let a = 0; a + 1 < runs.length; a++) { const c1 = runs[a][1], c2 = runs[a + 1][0], g = c2 - c1 - 1;
-        if (g < 2 || g > GMAX || runs[a][1] - runs[a][0] < RMIN || runs[a + 1][1] - runs[a + 1][0] < RMIN) continue;
+      M0.set(r, runs); if (M0.size > 8) M0.delete(M0.keys().next().value); return runs; };
+    for (let r = 1; r < A; r++) for (const side of [-1, 1]) {   // wall pixels with free space above (side -1) / below (+1)
+      const runs = runsAt(r, side);
+      for (let a = 0; a < runs.length; a++) { const c1 = runs[a][1]; if (runs[a][1] - runs[a][0] < RMIN) continue;
+        let nx = null; for (const dr of [0, -1, 1, -2, 2]) { const R2 = runsAt(r + dr, side); for (const q of R2) { if (q[0] <= c1 + 1) continue; if (!nx || q[0] < nx.c2) nx = {c2: q[0], len: q[1] - q[0], dr}; break; } }
+        if (!nx) continue; const c2 = nx.c2, g = c2 - c1 - 1;
+        if (g < 2 || g > GMAX || nx.len < RMIN || (nx.dr && Math.min(nx.len, runs[a][1] - runs[a][0]) < FMIN)) continue;
         let clear = true; for (let c = c1 + 1; c < c2; c++) if (get(r, c)) { clear = false; break; }
-        if (clear) for (let c = c1 + 1; c < c2; c++) set(r, c); } } };
+        if (!clear) continue;
+        for (let c = c1 + 1; c < c2; c++) set(r, c);
+        if (nx.dr) for (let d = 0; d !== nx.dr; d += Math.sign(nx.dr)) if (!get(r + d, c2)) set(r + d, c2); } } };
   bridgeRuns((r, c) => body[r * W + c], (r, c) => { B[r * W + c] = 1; }, H, W, (r, c) => face[r * W + c]);
   bridgeRuns((r, c) => body[c * W + r], (r, c) => { B[c * W + r] = 1; }, W, H, (r, c) => face[c * W + r]);
   const stubs = (get, set, A, Bn, isF) => {   // columns as rows: A = number of columns, Bn = rows per column
@@ -410,17 +418,21 @@ function traceOne(inp, opt){
   const sft = l => cnt[l] / R / R / k / k, bft = l => [(bb[4 * l + 2] - bb[4 * l] + 1) / R / k, (bb[4 * l + 3] - bb[4 * l + 1] + 1) / R / k], cen = l => [sx[l] / cnt[l] / R + bx0, sy[l] / cnt[l] / R + by0];
   const thin = l => { const [w, h] = bft(l); return Math.min(w, h) <= 1.3 && sft(l) <= 14; };
   // regions touching across an opening line or a single drawn line (up to 3 px; 5 for a thin piece) — never through a wall
-  const touch = (l, depth) => {
+  const touch = (l, depth, blk) => {
     const b = 4 * l, res = new Map(), X0 = Math.max(0, bb[b] - depth), Y0 = Math.max(0, bb[b + 1] - depth), X1 = Math.min(W - 1, bb[b + 2] + depth), Y1 = Math.min(H - 1, bb[b + 3] + depth);
     const w = X1 - X0 + 1, seen = new Uint8Array(w * (Y1 - Y0 + 1)); let fr = [];
     for (let y = bb[b + 1]; y <= bb[b + 3]; y++) for (let x = bb[b]; x <= bb[b + 2]; x++) if (lab[y * W + x] === l) { seen[(y - Y0) * w + x - X0] = 1; fr.push(x, y); }
     for (let dd = 0; dd < depth && fr.length; dd++) { const nf = [];
       for (let q = 0; q < fr.length; q += 2) { const x = fr[q], y = fr[q + 1];
         for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + ax, Y = y + ay; if (X < X0 || Y < Y0 || X > X1 || Y > Y1) continue; const j = (Y - Y0) * w + X - X0; if (seen[j]) continue; seen[j] = 1;
-          const i = Y * W + X, o2 = lab[i]; if (o2 && o2 !== l) { if (o2 !== out0) res.set(o2, (res.get(o2) || 0) + 1); continue; } nf.push(X, Y); } }   // (through a drawn line or two: a wall is 13 px and more)
+          const i = Y * W + X, o2 = lab[i]; if (blk && blk[i]) continue; if (o2 && o2 !== l) { if (o2 !== out0) res.set(o2, (res.get(o2) || 0) + 1); continue; } nf.push(X, Y); } }   // (through a drawn line or two: a wall is 13 px and more)
       fr = nf; }
     res.forEach((v, kk) => res.set(kk, v / R / k)); return res; };
   const ADJ = new Map(), nbrs = l => { let v = ADJ.get(l); if (!v) { v = touch(l, thin(l) ? 5 : 3); ADJ.set(l, v); } return v; };
+  // a balcony's railing: what lies beyond it (a ledge for the pipes, a planter, the gap to the next flat's balcony) is not the balcony
+  const railM = new Uint8Array(N); let railN = 0;
+  OUT.forEach(s => { const L = names[s[5]]; if (L && (L.role === "railing" || /rail|\brall\b|balustr/i.test(L.name || "")) && !/stair|step/i.test(L.name || "")) { line(G, railM, s[0], s[1], s[2], s[3]); railN++; } });
+  const acrossRail = (g, s) => railN > 0 && g.every(r => { const v = touch(r, thin(r) ? 5 : 3, railM); return !s.regs.some(x => v.has(x)); });
   // the inside of the external walls: wall lines (no parapets, railings) and opening lines, holes filled
   const core = new Uint8Array(N); OUT.forEach(s => { if (coreL.has(s[5]) || s[5] === -2 || s[5] === -3) line(G, core, s[0], s[1], s[2], s[3]); });
   for (let i = 0; i < N; i++) if (B[i]) core[i] = 1;
@@ -475,7 +487,11 @@ function traceOne(inp, opt){
   pending.slice().sort((a, b) => sft(b) - sft(a)).forEach(r => { if (thin(r) || done.has(r)) return;
     const direct = nbS([r]), via = new Map(); nbrs(r).forEach((_, o2) => { const g = gOf.get(o2); if (g && !g.some(x => done.has(x))) nbS(g).forEach(([s, v]) => via.set(s, v)); });
     const all = direct.concat([...via.entries()]), kinds = new Set(all.map(e => e[0].kind));
-    if ((kinds.size === 1 && kinds.has("balcony")) || (isOutside(r) && kinds.has("balcony"))) { const tb = all.filter(e => e[0].kind === "balcony").sort((a, b) => b[1] - a[1])[0][0]; tb.regs.push(r); r2s.set(r, tb); done.add(r); tb.notes.push("balcony piece of " + sft(r).toFixed(1) + " Sft across a parapet / railing break joined"); return; }
+    const walk = isOutside(r) ? all.filter(([o2]) => o2.kind !== "balcony" && o2.names.some(x => /PASSAGE|CORRIDOR|WALKWAY|GALLERY|WALK/i.test(x))) : [];
+    if (walk.length && all.every(([o2]) => o2 === walk[0][0] || o2.kind === "balcony") && new Set(walk.map(e => e[0])).size === 1) { const s = walk[0][0]; s.regs.push(r); r2s.set(r, s); done.add(r); s.notes.push("an open walk of " + sft(r).toFixed(1) + " Sft outside the walls, off this passage only, joined"); return; }
+    if ((kinds.size === 1 && kinds.has("balcony")) || (isOutside(r) && kinds.has("balcony"))) { const tb = all.filter(e => e[0].kind === "balcony").sort((a, b) => b[1] - a[1])[0][0];
+      if (all.filter(e => e[0].kind === "balcony").every(e => acrossRail([r], e[0])) && (isOutside(r) || kinds.size === 1)) { log.push("a piece of " + sft(r).toFixed(1) + " Sft beyond the railing of " + tb.names[0] + " left out (a ledge / planter outside the rail)"); done.add(r); return; }
+      tb.regs.push(r); r2s.set(r, tb); done.add(r); tb.notes.push("balcony piece of " + sft(r).toFixed(1) + " Sft across a parapet / railing break joined"); return; }
     if (isOutside(r)) { log.push("a piece of " + sft(r).toFixed(1) + " Sft outside the external walls, touching no balcony, left out"); done.add(r); return; }
     if (!direct.length && !via.size) { if (sft(r) >= 0.8) { const s = {regs: [r], names: ["VOID / SHAFT"], sizes: [""], kind: "void", notes: ["closed by walls on all sides, no name on the drawing: pipe shaft / void"], how: "traced", unlabelled: true}; spaces.push(s); r2s.set(r, s); done.add(r); } return; }
     if (direct.length === 1 && !via.size) { const s = direct[0][0]; s.regs.push(r); r2s.set(r, s); done.add(r); s.notes.push("niche of " + sft(r).toFixed(1) + " Sft (open to this room only) joined"); return; }
@@ -485,6 +501,7 @@ function traceOne(inp, opt){
   const thresholds = [];
   groups.forEach(g => { if (g.some(r => done.has(r))) return; const nb = nbS(g);
     if (nb.length >= 2) { thresholds.push({regs: g, kind: "threshold", notes: g.length > 1 ? [g.length + " slivers of one doorway joined"] : [], how: "traced", between: [nb[0][0], nb[1][0]]}); g.forEach(r => done.add(r)); }
+    else if (nb.length === 1 && nb[0][0].kind === "balcony" && acrossRail(g, nb[0][0])) { log.push("a strip of " + g.reduce((a, r) => a + sft(r), 0).toFixed(1) + " Sft beyond the railing of " + nb[0][0].names[0] + " left out (a ledge outside the rail)"); g.forEach(r => done.add(r)); }
     else if (nb.length === 1) { const s = nb[0][0]; g.forEach(r => { s.regs.push(r); r2s.set(r, s); done.add(r); }); s.notes.push("recess of " + g.reduce((a, r) => a + sft(r), 0).toFixed(1) + " Sft joined"); }
     else { const a2 = g.reduce((a, r) => a + sft(r), 0); if (a2 >= 0.8 && !g.some(isOutside)) { const s = {regs: g, names: ["VOID / SHAFT"], sizes: [""], kind: "void", notes: ["closed by walls on all sides, no name on the drawing: pipe shaft / void"], how: "traced", unlabelled: true}; spaces.push(s); g.forEach(r => r2s.set(r, s)); } g.forEach(r => done.add(r)); } });
   mark("spaces");
@@ -572,37 +589,67 @@ function traceOne(inp, opt){
   // ---- an open plan named as several rooms (a lounge open to its passage and drawing room, the zones of a lobby): split on wall
   // lines — a wall face carried on from an inside corner to the facing wall (or to a pier standing in the space), or a dashed beam
   // line across the opening — the fewest and shortest that part the names, as a QS closes an open plan by hand. Kitchen + lounge +
-  // dining (one floor) and a bed room with its dress stay one space, as before; a shaft's or a lift's name written in a lobby is a
+  // dining (one floor) stay one space, and a bed room with a dress that has no written size of its own; a shaft's or a lift's name written in a lobby is a
   // note, not a zone of it
   { const KEEP1 = /KITCHEN|LOUNGE|DINING|LIVING|PANTRY|\bTV\b|FAMILY/i, beamL = new Set(); names.forEach((L, i) => { if (/dash|beam|hidden|lintel|soffit/i.test(L.name || "")) beamL.add(i); });
     const BEAM = inp.segs.filter(s => beamL.has(s[5]) && !(s[4] & 17) && Math.hypot(s[2] - s[0], s[3] - s[1]) >= ft(1.5));
-    const RISER = inp.segs.filter(s => /stair|step|tread/i.test(nm(s[5])) && !(s[4] & 17) && Math.hypot(s[2] - s[0], s[3] - s[1]) >= ft(2));   // a stair open to the room beside it ends on its last riser
-    const together = ns => ns.every(x => KEEP1.test(x)) || (ns.length === 2 && ns.some(x => /BED/i.test(x)) && ns.some(x => /DRESS|WARD|W\.?I\.?C/i.test(x)))
-      || (ns.length === 2 && ns.some(x => /RECEPTION/i.test(x)) && ns.some(x => /LOBBY|ENTRANCE|FOYER/i.test(x)));   // (the reception desk is in the entrance lobby)
-    const seedsOf = s => { const out = [], kd0 = (s.labs || []).map(l => kindOf(l.name)), mixed = kd0.some(x => ["stair", "lift"].includes(x)) && kd0.some(x => ["room", "corridor", "bath"].includes(x));
+    const RISER = (() => { const S0 = inp.segs.filter(s => /stair|step|tread/i.test(nm(s[5])) && !(s[4] & 17)), rows = new Map(), out = [];   // a stair open to the room beside it ends on its last riser
+      S0.forEach(s => { const h = Math.abs(s[1] - s[3]) < 0.05, v = Math.abs(s[0] - s[2]) < 0.05; if (!h && !v) { if (Math.hypot(s[2] - s[0], s[3] - s[1]) >= ft(2)) out.push(s); return; }
+        const key = (h ? "H" : "V") + Math.round((h ? s[1] : s[0]) * 4); let r = rows.get(key); if (!r) rows.set(key, r = {h, c: h ? s[1] : s[0], iv: []}); r.iv.push(h ? [Math.min(s[0], s[2]), Math.max(s[0], s[2])] : [Math.min(s[1], s[3]), Math.max(s[1], s[3])]); });
+      rows.forEach(r => { r.iv.sort((a, b) => a[0] - b[0]); const m = []; r.iv.forEach(([a, b]) => { if (m.length && a <= m[m.length - 1][1] + ft(0.3)) m[m.length - 1][1] = Math.max(m[m.length - 1][1], b); else m.push([a, b]); });   // (one flight's tread and the next one's, end to end)
+        m.forEach(([a, b]) => { if (b - a >= ft(2)) out.push(r.h ? [a, r.c, b, r.c, 0, -5] : [r.c, a, r.c, b, 0, -5]); }); });
+      return out; })();
+    const RAILS = OUT.filter(s => { const L = names[s[5]]; return L && (L.role === "railing" || /rail|\brall\b|balustr/i.test(L.name || "")) && !/stair|step/i.test(L.name || "") && Math.hypot(s[2] - s[0], s[3] - s[1]) >= ft(2); });
+    // a stair drawn with no name on it (DN / UP only): its flights — five treads or more, parallel, as long as one another, 7" to 16"
+    // apart — one seed for the stair at its first flight's middle
+    const treadSeeds = s => { const P0 = s.outer[0], len = t => Math.hypot(t[2] - t[0], t[3] - t[1]), mid = t => [(t[0] + t[2]) / 2, (t[1] + t[3]) / 2];
+      const T0 = RISER.filter(t => len(t) <= ft(8) && inPoly(mid(t), P0)); if (T0.length < 5) return [];
+      const ang = t => ((Math.atan2(t[3] - t[1], t[2] - t[0]) % Math.PI) + Math.PI) % Math.PI, used = new Set(), fl = [];
+      T0.forEach((t, i) => { if (used.has(i)) return; const L = len(t), a = ang(t), u = [(t[2] - t[0]) / L, (t[3] - t[1]) / L], n0 = [-u[1], u[0]], m0 = mid(t), F = [];
+        T0.forEach((q, j) => { let d = Math.abs(ang(q) - a); d = Math.min(d, Math.PI - d); if (d > 0.05 || Math.abs(len(q) - L) > 0.35 * L) return; const mq = mid(q);
+          if (Math.abs((mq[0] - m0[0]) * u[0] + (mq[1] - m0[1]) * u[1]) > 0.3 * L) return; F.push({j, off: (mq[0] - m0[0]) * n0[0] + (mq[1] - m0[1]) * n0[1]}); });
+        F.sort((p, q) => p.off - q.off); let best = [], cur = [];
+        F.forEach(f => { if (!cur.length) { cur.push(f); return; } const g = f.off - cur[cur.length - 1].off; if (g < ft(7 / 12)) return; if (g <= ft(16 / 12)) cur.push(f); else { if (cur.length > best.length) best = cur; cur = [f]; } });
+        if (cur.length > best.length) best = cur;
+        if (best.length >= 5) { best.forEach(f => used.add(f.j)); const ms = best.map(f => mid(T0[f.j])); fl.push([ms.reduce((a2, p) => a2 + p[0], 0) / ms.length, ms.reduce((a2, p) => a2 + p[1], 0) / ms.length]); } });
+      const out = []; fl.forEach(p => { if (!out.some(q => Math.hypot(q.x - p[0], q.y - p[1]) < ft(14))) out.push({name: "STAIR", size: "", lab: null, x: p[0], y: p[1], treads: true}); });
+      return out; };
+    const together = sd => { const ns = sd.map(q => q.name), dr = sd.find(q => /DRESS|WARD|W\.?I\.?C/i.test(q.name));
+      return ns.every(x => KEEP1.test(x)) || (ns.length === 2 && ns.some(x => /BED/i.test(x)) && dr && !sizeOf(dr.size || ""))   // (a dress with its own written size is a room of its own)
+        || (ns.length === 2 && ns.some(x => /RECEPTION/i.test(x)) && ns.some(x => /LOBBY|ENTRANCE|FOYER/i.test(x))); };   // (the reception desk is in the entrance lobby)
+    const seedsOf = s => { const out = [], kd0 = (s.labs || []).map(l => kindOf(l.name)), st = kd0.length && !kd0.includes("stair") ? treadSeeds(s) : [], kd1 = kd0.concat(st.map(() => "stair"));
+      const mixed = kd1.some(x => ["stair", "lift"].includes(x)) && kd1.some(x => ["room", "corridor", "bath"].includes(x));
       (s.labs || []).forEach((l, li) => { if (["void", "chute"].includes(kd0[li]) || (["lift", "stair"].includes(kd0[li]) && !mixed)) return;
-      if (!out.some(o2 => o2.name === l.name && Math.hypot(o2.x - l.x, o2.y - l.y) < ft(6))) out.push({name: l.name, size: l.size, lab: l, x: l.x, y: l.y}); }); return out; };
+      if (!out.some(o2 => o2.name === l.name && Math.hypot(o2.x - l.x, o2.y - l.y) < ft(6))) out.push({name: l.name, size: l.size, lab: l, x: l.x, y: l.y}); });
+      if (mixed && out.length) st.forEach(q => out.push(q)); return out; };
     const near0 = (P, p) => { let b = Infinity; P.forEach((a, i) => { b = Math.min(b, segDist(p, a, P[(i + 1) % P.length])); }); return b; };
     const rayHit = (o, u, a, b) => { const v0 = [b[0] - a[0], b[1] - a[1]], den = u[0] * v0[1] - u[1] * v0[0]; if (Math.abs(den) < 1e-9) return null;
       const t = ((a[0] - o[0]) * v0[1] - (a[1] - o[1]) * v0[0]) / den, v = ((a[0] - o[0]) * u[1] - (a[1] - o[1]) * u[0]) / den; return v >= -1e-6 && v <= 1 + 1e-6 && t > 0.3 ? t : null; };
+    const wt = c => (c.beam ? 0.6 : 1) * (c.jamb ? 1.3 : 1);   // a drawn beam / railing line favoured; a jamb's line not
     const chords = (rings, sd) => { const out = [], P0 = rings[0], Hs = rings.slice(1), inside = p => inPoly(p, P0) && !Hs.some(h => inPoly(p, h)) && rings.every(R0 => near0(R0, p) >= 0.5);
       const hitB = (o, u) => { let best = null; rings.forEach(R0 => R0.forEach((a, i) => { const t = rayHit(o, u, a, R0[(i + 1) % R0.length]); if (t != null && (best == null || t < best)) best = t; })); return best; };
       rings.forEach(R0 => R0.forEach((v, i) => { for (const nb of [R0[(i + R0.length - 1) % R0.length], R0[(i + 1) % R0.length]]) {   // from an inside corner, on along its wall face
         const dx = v[0] - nb[0], dy = v[1] - nb[1], L = Math.hypot(dx, dy); if (L < 1) continue; const u = [dx / L, dy / L];
         if (!inside([v[0] + u[0] * 2, v[1] + u[1] * 2])) continue;
-        const t = hitB(v, u); if (t == null || t > ft(20)) continue; out.push({a: v, b: [v[0] + u[0] * t, v[1] + u[1] * t], len: t, beam: false}); } }));
+        const t = hitB(v, u); if (t == null || t > ft(20)) continue; out.push({a: v, b: [v[0] + u[0] * t, v[1] + u[1] * t], len: t, beam: false, jamb: L < ft(0.9)}); } }));
       const dirs = P0.map((p, i) => { const q = P0[(i + 1) % P0.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1; return [(q[0] - p[0]) / L, (q[1] - p[1]) / L]; });
       BEAM.forEach(s => { const m = [(s[0] + s[2]) / 2, (s[1] + s[3]) / 2]; if (!inside(m)) return;   // a beam line across the opening, running with the walls (an X marking a void above is not one)
         const L = Math.hypot(s[2] - s[0], s[3] - s[1]), u = [(s[2] - s[0]) / L, (s[3] - s[1]) / L]; if (!dirs.some(d => Math.abs(d[0] * u[1] - d[1] * u[0]) < 0.035)) return;
         const t1 = hitB(m, u), t2 = hitB(m, [-u[0], -u[1]]); if (t1 == null || t2 == null || t1 + t2 > L + ft(3)) return;
         out.push({a: [m[0] - u[0] * t2, m[1] - u[1] * t2], b: [m[0] + u[0] * t1, m[1] + u[1] * t1], len: t1 + t2, beam: true}); });
+      RAILS.forEach(s => { const L = Math.hypot(s[2] - s[0], s[3] - s[1]), u = [(s[2] - s[0]) / L, (s[3] - s[1]) / L];   // a railing standing in the space (a stair's, a void's): on to the walls
+        if (!dirs.some(d => Math.abs(d[0] * u[1] - d[1] * u[0]) < 0.035)) return;
+        const A = [s[0], s[1]], Bp = [s[2], s[3]], m = [(A[0] + Bp[0]) / 2, (A[1] + Bp[1]) / 2]; if (!inPoly(m, P0) || Hs.some(h => inPoly(m, h))) return;
+        const ext = (p, v) => inside([p[0] + v[0] * 1.5, p[1] + v[1] * 1.5]) ? hitB(p, v) : 0, tB = ext(Bp, u), tA = ext(A, [-u[0], -u[1]]);
+        if (tA == null || tB == null || tA + tB < 1 || tA + tB > ft(6)) return;
+        out.push({a: [A[0] - u[0] * tA, A[1] - u[1] * tA], b: [Bp[0] + u[0] * tB, Bp[1] + u[1] * tB], len: L + tA + tB, beam: true, rail: true}); });
       if (sd && sd.some(q => kindOf(q.name) === "stair") && sd.some(q => kindOf(q.name) !== "stair")) {   // the stair's line nearest the room's name
         const room = sd.filter(q => kindOf(q.name) !== "stair");
         RISER.forEach(s => { const m = [(s[0] + s[2]) / 2, (s[1] + s[3]) / 2]; if (!inside(m)) return;
           const L = Math.hypot(s[2] - s[0], s[3] - s[1]), u = [(s[2] - s[0]) / L, (s[3] - s[1]) / L], t1 = hitB(m, u), t2 = hitB(m, [-u[0], -u[1]]); if (t1 == null || t2 == null || t1 + t2 > L + ft(2)) return;
           const dR = Math.min(...room.map(q => Math.hypot(q.x - m[0], q.y - m[1])));
           out.push({a: [m[0] - u[0] * t2, m[1] - u[1] * t2], b: [m[0] + u[0] * t1, m[1] + u[1] * t1], len: (t1 + t2) * 0.5 + dR * 0.05, beam: false, riser: true}); }); }
-      const uniq = []; out.sort((p, q) => (p.beam ? 0.6 : 1) * p.len - (q.beam ? 0.6 : 1) * q.len).forEach(c => { if (!uniq.some(o2 => Math.hypot(o2.a[0] - c.a[0], o2.a[1] - c.a[1]) + Math.hypot(o2.b[0] - c.b[0], o2.b[1] - c.b[1]) < 2 || Math.hypot(o2.a[0] - c.b[0], o2.a[1] - c.b[1]) + Math.hypot(o2.b[0] - c.a[0], o2.b[1] - c.a[1]) < 2)) uniq.push(c); });
+      const uniq = []; out.sort((p, q) => wt(p) * p.len - wt(q) * q.len).forEach(c => { if (!uniq.some(o2 => Math.hypot(o2.a[0] - c.a[0], o2.a[1] - c.a[1]) + Math.hypot(o2.b[0] - c.b[0], o2.b[1] - c.b[1]) < 2 || Math.hypot(o2.a[0] - c.b[0], o2.a[1] - c.b[1]) + Math.hypot(o2.b[0] - c.a[0], o2.b[1] - c.a[1]) < 2)) uniq.push(c); });
       return uniq.slice(0, 60); };
     const cutLine = (g, m, c) => {   // a cut drawn 2 px thick and run 2 pt on into the walls at both ends: no gap where it meets a jamb's corner
       const L = Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1]) || 1, u = [(c.b[0] - c.a[0]) / L, (c.b[1] - c.a[1]) / L], e = 2, o = 0.5 / g.R;
@@ -643,11 +690,11 @@ function traceOne(inp, opt){
       for (let guard = 0; guard < 10 && cur.sep < want; guard++) { let best = null;
         const pool = cand.filter(c => !cuts.includes(c) && live(c, cur));
         for (const c of pool) { const t = comps(cuts.concat([c]), 2); if (t.small || t.sep <= cur.sep) continue;
-          const sc = Math.round(t.err * 10) * 1e5 + (c.beam ? 0.6 : 1) * c.len / (t.sep - cur.sep); if (!best || sc < best.sc) best = {cs: [c], t, sc}; }   // (a room nearest its written size first, to the 10 %; then the shortest line)
+          const sc = Math.round(t.err * 10) * 1e5 + wt(c) * c.len / (t.sep - cur.sep) + t.err * ft(8); if (!best || sc < best.sc) best = {cs: [c], t, sc}; }   // (a room nearest its written size first, to the 10 %; then the shortest line — of two as long, the one nearer the sizes)
         if (!best || best.t.err > 0.1) {   // two lines at once (a drawing room open to the lounge on one side and to the passage through its door), when one line leaves a room far off its written size
           const P2 = pool.slice(0, 10);
           for (let i = 0; i < P2.length; i++) for (let j = i + 1; j < P2.length; j++) { const t = comps(cuts.concat([P2[i], P2[j]]), 2); if (t.small || t.sep <= cur.sep) continue;
-            const sc = Math.round(t.err * 10) * 1e5 + ((P2[i].beam ? 0.6 : 1) * P2[i].len + (P2[j].beam ? 0.6 : 1) * P2[j].len) / (t.sep - cur.sep); if (!best || sc < best.sc) best = {cs: [P2[i], P2[j]], t, sc}; } }
+            const sc = Math.round(t.err * 10) * 1e5 + (wt(P2[i]) * P2[i].len + wt(P2[j]) * P2[j].len) / (t.sep - cur.sep) + t.err * ft(8); if (!best || sc < best.sc) best = {cs: [P2[i], P2[j]], t, sc}; } }
         if (!best) break; cuts.push(...best.cs); cur = best.t; }
       if (!cuts.length) return null;
       cur = comps(cuts, 1); if (cur.small) return null;
@@ -665,14 +712,14 @@ function traceOne(inp, opt){
         const outer = [], holes = []; let un = 0; Lp.forEach(lp => { if (lp.apx < 6) return; const f = fitRing(dp(lp.pts, 1.2 / R), LN, SNAP); un += f.un; if (f.pts.length >= 3) (lp.hole ? holes : outer).push(f.pts); });
         if (outer.length) out.push({outer, holes, un, sd: seeds.map(i => sd[i])}); });
       return out.length > 1 ? {pieces: out, cuts} : null; };
-    spaces.slice().forEach(s => { if (s.outer.length !== 1 || s.kind === "balcony") return; const sd = seedsOf(s); if (sd.length < 2 || together(sd.map(q => q.name))) return;
+    spaces.slice().forEach(s => { if (s.outer.length !== 1 || s.kind === "balcony") return; const sd = seedsOf(s); if (sd.length < 2 || together(sd)) return;
       if (new Set(sd.map(q => q.name)).size === 1 && sd.every(q => ["stair", "lift"].includes(kindOf(q.name)))) return;
       const r = splitPx(s, sd); if (!r) { log.push("open plan kept as one: " + sd.map(q => q.name).join(" + ") + " — no wall line parts them"); return; }
       r.pieces.filter(x => x.sd.length > 1).forEach(x => log.push("open plan kept as one: " + x.sd.map(q => q.name).join(" + ") + " — no wall line parts them"));
       const pieces = r.pieces.map(x => { const ns = [], ss = []; x.sd.forEach(q => { if (!ns.includes(q.name)) { ns.push(q.name); ss.push(q.size); } });
         const kinds = ns.map(kindOf), kd = kinds.includes("corridor") ? "corridor" : new Set(kinds).size === 1 ? kinds[0] : "room";
-        const p = Object.assign({}, s, {names: ns, sizes: ss, kind: kd, labs: x.sd.map(q => q.lab), how: "manual", lx: x.sd[0].x, ly: x.sd[0].y, edges: undefined, centre: undefined,
-          notes: s.notes.concat(["open plan: split from " + s.names.filter(z => !ns.includes(z)).join(", ") + " on a wall line (no wall on the drawing)"])});
+        const p = Object.assign({}, s, {names: ns, sizes: ss, kind: kd, labs: x.sd.map(q => q.lab).filter(Boolean), how: "manual", lx: x.sd[0].x, ly: x.sd[0].y, edges: undefined, centre: undefined,
+          notes: s.notes.concat(["open plan: split from " + [...new Set(sd.map(q => q.name))].filter(z => !ns.includes(z)).join(", ") + " on a wall line (no wall on the drawing)"])});
         setGeom(p, {outer: x.outer, holes: x.holes, un: x.un}); return p; });
       r.cuts.forEach(c => splits.push({line: [c.a, c.b], what: sd.map(q => q.name).join(" / ") + (c.beam ? " (on the beam line)" : "")}));
       spaces.splice(spaces.indexOf(s), 1, ...pieces);
