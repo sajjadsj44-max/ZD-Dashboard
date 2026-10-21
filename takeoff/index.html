@@ -610,7 +610,7 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
 #condList{min-height:150px}
 .propsbox{max-height:46%}
 .lyrbar .small{display:none}
-@media (max-width:1750px){header #bToolChest .tl,header #bDefaults .tl,header #bWs .tl,header .projpill .tl{display:none}.projpill #projName{width:150px}header #findIn{width:220px}}
+@media (max-width:1750px){header #bToolChest .tl,header #bWs .tl,header .projpill .tl{display:none}.projpill #projName{width:150px}header #findIn{width:220px}}
 @media (max-width:1500px){header #bCmd .tl,header #bClaude .tl{display:none}header .ttl{display:none}}
 @media (max-width:860px){.rgb{flex-wrap:wrap}.rrow{overflow-x:auto}.rpanel{flex-wrap:wrap}header #findIn{max-width:none;width:100%;flex:1 1 100%}.projpill{flex:1 1 100%;max-width:100%;min-width:0}.projpill #projName{flex:1;width:auto;min-width:60px}.cbar #pageSel{max-width:150px}.agentbar .agch{display:none}.app .panel{min-width:0}.rtabs{overflow-x:auto;flex-wrap:nowrap}.rtab{white-space:nowrap}}
 
@@ -726,6 +726,30 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
 @media (hover:none){.crow input[type=checkbox]{display:block}.crow .ed.pen{opacity:1}.pgt .pgck{opacity:1}.crow{height:30px}.ctr{padding:6px 4px}}
 .msplit{display:flex;flex-wrap:wrap;gap:2px 10px;font-variant-numeric:tabular-nums}.msplit span{white-space:nowrap}.matset .fg{min-width:80px;flex:1}
 .propsbox{max-height:40%}
+/* Settings (⚙ in the top bar, Ctrl+,): pages on the left, the open page's options on the right */
+.dlg:has(.setw){width:min(1000px,100%);height:min(720px,calc(100vh - 32px))}
+.dlg:has(.setw) .db{padding:0;overflow:hidden;display:flex;flex:1;min-height:0}.dlg:has(.setw) #dlgErr{display:none}
+.setw{flex:1;display:flex;min-height:0;min-width:0}
+.setw nav{width:210px;flex:none;overflow:auto;border-right:1px solid var(--line);background:#f6f8fb;padding:10px 8px;display:flex;flex-direction:column;gap:1px}
+.setw nav input{margin:0 0 8px;padding:5px 9px;font-size:12px}
+.setw .spg{border:0;background:none;text-align:left;padding:7px 10px;border-radius:6px;font:inherit;font-size:12.5px;color:#3c4c60;cursor:pointer}
+.setw .spg:hover{background:#e9eef6}.setw .spg.on{background:#fff;color:var(--blue);font-weight:600;box-shadow:inset 3px 0 0 var(--blue),0 1px 2px rgba(15,41,66,.08)}
+.setw .sb{flex:1;min-width:0;overflow:auto;padding:12px 20px 16px}
+.setw .shead{display:flex;flex-direction:column;gap:1px;padding:4px 0 8px;border-bottom:1px solid var(--line)}.setw .shead b{font-size:15px;color:var(--navy)}
+.setw h4.sh{font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);margin:16px 0 0}
+.srow{display:flex;align-items:center;gap:6px 18px;padding:9px 0;border-bottom:1px solid #eef1f5}
+.srow .sl{flex:1;min-width:0}.srow .sl[data-stl]{cursor:pointer}.srow .sl b{display:block;font-size:12.5px;font-weight:600;color:var(--txt)}.srow .sl small{display:block;font-size:11px;color:var(--muted);line-height:1.4;margin-top:1px}
+.srow .sc{flex:none;display:flex;align-items:center;gap:6px;max-width:55%}.srow .sc select{max-width:100%;min-width:150px;font-size:12px;padding:4px 6px}
+.srow .sc input[type=text]{width:220px;font-size:12px;padding:4px 8px}.srow .sc input[type=color]{width:46px;height:28px;padding:1px 2px}
+.srow .snum{display:flex;align-items:center;gap:5px}.srow .snum input{width:78px;font-size:12px;padding:4px 6px;text-align:right}
+.srow.full{flex-direction:column;align-items:stretch;gap:6px}.srow.full .presets{display:flex;gap:6px;flex-wrap:wrap}.srow.full .presets .btn{flex:1;min-width:140px;text-align:left;line-height:1.35}.srow.full .presets .btn small{display:block;color:var(--muted);font-weight:400}
+.stog{appearance:none;-webkit-appearance:none;width:36px;height:20px;border-radius:10px;background:#c4cfdd;position:relative;cursor:pointer;margin:0;flex:none;transition:background .15s}
+.stog::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .15s}
+.stog:checked{background:var(--blue)}.stog:checked::after{left:18px}.stog:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.setw .sfoot{display:flex;justify-content:flex-end;padding-top:14px}
+.skadd{display:flex;gap:6px;flex-wrap:wrap}.skadd #skKey{width:150px;font-size:12px;padding:4px 8px;cursor:pointer}.skadd #skCmd{flex:1;min-width:200px;font-size:12px;padding:4px 8px}
+table.sktbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}table.sktbl td{padding:4px 6px;border-bottom:1px solid #eef1f5}table.sktbl td:first-child{white-space:nowrap;width:1%}table.sktbl td:last-child{width:1%;text-align:right}
+@media (max-width:720px){.dlg:has(.setw){height:calc(100vh - 32px)}.setw{flex-direction:column}.setw nav{width:auto;flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:8px;gap:4px}.setw nav input{margin:0;min-width:130px}.setw .spg{white-space:nowrap;padding:6px 9px}.setw .sb{padding:10px 14px}.srow{flex-wrap:wrap}.srow .sc{max-width:100%}.srow .sc input[type=text]{width:180px}}
 </style>
 </head>
 <body>
@@ -753,7 +777,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
   <button class="btn sm" id="bRedo" title="Redo (Ctrl+Y)">&#8631;</button>
   <button class="btn sm" id="bCmd" title="Every command by name — tools, exports, pages, AI agents (Ctrl+K)">&#8984; Commands</button>
   <button class="btn sm" id="bToolChest" title="Tool Chest — reusable, favorited tool profiles; click a profile to activate its saved appearance">&#129520; Tool Chest</button>
-  <button class="btn sm" id="bDefaults" title="Professional defaults for new measurements, markups, dimensions and highlights">&#9881; Defaults</button>
+  <button class="btn sm" id="bSettings" title="Settings — every option in one window: start-up, ribbon, panels, drawing, snap, measurement and markup defaults, labels, your own shortcuts, export, AI, saving (Ctrl+,)">&#9881; Settings</button>
   <button class="btn sm" id="bWs" title="Workspace: layouts (takeoff, drawing only, pages), icons-only toolbar, minimap, full screen, thumbnail size" aria-haspopup="true">&#9638; Workspace</button>
   <button class="btn sm tg2" id="bClaude" title="Ask Claude to read the drawing and measure the rooms">&#10022; Takeoff agent</button>
   <button class="btn sm pri" id="bExport" title="Export: Excel, CSV, marked-up pages as PDF / PNG / JPEG (choose pages, resolution, legend), report, project">&#8681; Export</button>
@@ -887,7 +911,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
         </div><div class="rgl">Check</div></div>
         <div class="rg"><div class="rgb">
           <button class="tool" data-px="bNewCond" title="New condition — then set its BOQ code, Rate Analysis code and assemblies in Edit"><svg class="ic"><use href="#i-draw"/></svg><span class="tl">New condition</span></button>
-          <button class="tool" data-px="bDefaults" title="Professional defaults for new measurements"><svg class="ic"><use href="#i-cog"/></svg><span class="tl">Defaults</span></button>
+          <button class="tool" data-px="bDefaults" title="Defaults for new measurements and markups — colour, line weight, dimensions (Settings → Measurements)"><svg class="ic"><use href="#i-cog"/></svg><span class="tl">Defaults</span></button>
         </div><div class="rgl">Conditions</div></div>
       </div>
       <div class="rpanel" data-rp="export" hidden>
@@ -1145,7 +1169,7 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-20i"></script>
+<script type="module" src="takeoff.js?v=2026-10-21a"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
