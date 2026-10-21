@@ -16,6 +16,9 @@
      - Combine into one area (right-click, selection panel, palette): two areas sharing a side become one outline with the
        first one's label and look, a space closed round becomes a void; areas touching at a corner only, in two
        conditions, or with other Nos or slopes are not combined (and say why); one Ctrl+Z puts them back
+     - Merge areas apart: a gap between them (a wall) up to 2 ft is filled at once (gapBridges, also in node: a taller room, a
+       gap that widens, one turned, far from the origin); a wider one asks first and is filled up to the distance given;
+       the Modify ribbon's Merge areas button
 
      python3 -m http.server 8765 &            # from the repo root
      TK_LIBS=<dir with pdfjs-dist/> node tools/test_takeoff_overlap.js
@@ -30,8 +33,8 @@ function unit(){
   console.log("polyBool (node)");
   const src = fs.readFileSync(path.join(__dirname, "..", "takeoff", "takeoff.js"), "utf8"), line = re => src.match(re)[0];
   const fn = name => { const i = src.indexOf("function " + name + "("); let d = 0, j = src.indexOf("{", i); for (; j < src.length; j++) { if (src[j] === "{") d++; else if (src[j] === "}" && !--d) break; } return src.slice(i, j + 1); };
-  const lib = [line(/const dist = [^\r\n]*/), line(/const polySigned = [^\r\n]*/), fn("pointInPoly"), fn("distSeg"), fn("cleanPoly"), fn("polyBool"), line(/const boolArea = [^\r\n]*/)].join("\n");
-  const {polyBool, boolArea, polySigned} = new Function(lib + "\nreturn {polyBool, boolArea, polySigned};")();
+  const lib = [line(/const dist = [^\r\n]*/), line(/const polySigned = [^\r\n]*/), fn("pointInPoly"), fn("distSeg"), fn("cleanPoly"), fn("polyBool"), line(/const boolArea = [^\r\n]*/), line(/const bbOf = [^\r\n]*/), fn("gapBridges")].join("\n");
+  const {polyBool, boolArea, polySigned, gapBridges} = new Function(lib + "\nreturn {polyBool, boolArea, polySigned, gapBridges};")();
   const sq = (x, y, w, h) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
   const t = (A, B, op, area, n, m) => { const R = polyBool(A, B, op), a = boolArea(R); ok(near(a, area, 1e-6) && (n == null || R.length === n), `${m}: ${op} ${+a.toFixed(6)} (${area})${n != null ? ", " + R.length + " outline" + (R.length === 1 ? "" : "s") : ""}`); return R; };
   const A = sq(0, 0, 10, 10), B = sq(5, 5, 10, 10), L = [[0, 0], [10, 0], [10, 4], [4, 4], [4, 10], [0, 10]];
@@ -57,6 +60,17 @@ function unit(){
   ok(near(boolArea(polyBool(rot(A, 0.3, 3000), rot(B, 0.3, 3000), "inter")), 25, 1e-6), "rotated, 3000 pt from the origin: the overlap still 25");
   const R4 = polyBool(rot(A, 0.7, 2500), rot(sq(10, 0, 10, 10), 0.7, 2500), "union"); ok(R4.length === 1 && near(boolArea(R4), 200, 1e-6), "rotated squares sharing a side: still one outline");
   const circ = (cx, cy, r, n) => Array.from({length: n}, (_, i) => [cx + r * Math.cos(2 * Math.PI * i / n), cy + r * Math.sin(2 * Math.PI * i / n)]), t0 = Date.now();
+  { const merge = (A2, B2, lim, area, m, corners) => { const U2 = polyBool(A2, B2, "union"), G = gapBridges(U2.filter(Q => polySigned(Q) > 0), lim, 0.05); let V = U2; G.quads.forEach(q => { V = polyBool(V, q, "union"); }); V = V.filter(Q => polySigned(Q) > 0 || -polySigned(Q) >= 1);   // (a pocket under 1 Sft left inside is filled, as combineAreas does)
+      const o = V.filter(Q => polySigned(Q) > 0); ok(o.length === 1 && near(boolArea(V), area, 1e-6) && (corners == null || o[0].length === corners), `gap filled — ${m}: ${o.length} outline${o.length === 1 ? "" : "s"}, ${+boolArea(V).toFixed(6)} (${area})${corners != null ? ", " + (o[0] || []).length + " corners" : ""}`); return G; };
+    const G1 = merge(A, sq(10.75, 0, 10, 10), 2, 207.5, "two rooms, a 9\" wall between", 4); ok(near(G1.lo, 0.75, 1e-9) && near(G1.hi, 0.75, 1e-9), "…the gap reported 0.75 (" + G1.lo + "–" + G1.hi + ")");
+    merge(A, sq(10.75, 0, 9.25, 15), 2, 246.25, "the other room longer: only the part across is filled", 6);
+    merge(sq(0, 0, 6, 6), [[6.5, 0], [12, 0], [12, 6], [7, 6]], 2, 72, "a gap that widens 0.5 → 1 ft (a side 4.8° off)", 4);
+    merge(sq(0, 0, 6, 6), [[6.5, 0], [12, 0], [12, 6], [7.5, 6]], 1, 68.25, "a gap widening 0.5 → 1.5 ft, 1 ft to fill: filled as far as it is 1 ft");
+    merge(rot(A, 0.3, 3000), rot(sq(10.75, 0, 10, 10), 0.3, 3000), 2, 207.5, "turned 17°, 3000 from the origin");
+    merge(L, sq(4.5, 4.5, 5.5, 5.5), 2, 100, "a square in an L's corner, a 0.5 gap on two sides: the L's square");
+    const far = gapBridges([sq(0, 0, 5, 5), sq(8, 0, 5, 5)], 2, 0.05); ok(!far.quads.length && near(far.near, 3, 1e-9), "3 apart, 2 to fill: nothing filled, the gap (3) reported for asking (" + far.near + ")");
+    const cor = gapBridges([sq(0, 0, 5, 5), sq(5.5, 5.5, 5, 5)], 2, 0.05); ok(!cor.quads.length && cor.near === Infinity, "near at a corner only: nothing filled, nothing to ask");
+    const back = gapBridges([sq(0, 0, 10, 10), sq(0, 11, 10, 0.5)], 2, 0.05); ok(back.quads.length === 1 && near(back.hi, 1, 1e-9), "a thin strip 1 away: only its near side is filled across, never its far side (" + back.quads.length + " strip)"); }
   polyBool(circ(0, 0, 100, 400), circ(50, 30, 100, 400), "inter"); ok(Date.now() - t0 < 1000, "two 400-corner outlines in " + (Date.now() - t0) + " ms");
 }
 
@@ -177,15 +191,17 @@ function unit(){
       I("u1", "FT", "U", [[0, 15], [9, 15], [9, 24], [6, 24], [6, 18], [3, 18], [3, 24], [0, 24]].map(([x, y]) => [300 + x * 9, 200 + y * 9])), I("u2", "FT", "Bar", sq(0, 24, 9, 3)),   // closes round a 3 × 6 space
       I("x1", "FT", "Far 1", sq(30, 0, 5, 5)), I("x2", "FT", "Far 2", sq(35, 5, 5, 5)),   // touching at a corner only
       I("y1", "CP", "Ceiling", sq(30, 15, 5, 5)), I("q1", "FT", "Q1", sq(30, 30, 5, 5)), I("q2", "FT", "Q2", sq(35, 30, 5, 5), {nos: 3}),   // sharing a side, other Nos
-      I("s1", "FT", "S1", sq(30, 40, 5, 5), {pitch: 0.3333}), I("s2", "FT", "S2", sq(35, 40, 5, 5))];   // sharing a side, other slopes
+      I("s1", "FT", "S1", sq(30, 40, 5, 5), {pitch: 0.3333}), I("s2", "FT", "S2", sq(35, 40, 5, 5)),   // sharing a side, other slopes
+      I("g1", "FT", "Lounge", sq(42, 0, 6, 6)), I("g2", "FT", "Dining", sq(48.75, 0, 6, 9)),   // a 9" wall between
+      I("w1", "FT", "W1", sq(42, 12, 5, 5)), I("w2", "FT", "W2", sq(50, 12, 5, 5)), I("v1", "FT", "V1", sq(42, 20, 5, 5)), I("v2", "FT", "V2", sq(50, 20, 5, 5))];   // 3 ft apart
     Z.refresh(); Z.setSel(["m1", "m2"]); Z.setTool("select"); Z.zoomTo(["m1", "m2"]); Z.refresh(); });
-  ok(await T(() => /Combine areas/.test(document.getElementById("props").textContent)), "two areas selected: “Combine areas” in the selection panel");
+  ok(await T(() => /Merge areas/.test(document.getElementById("props").textContent)), "two areas selected: “Merge areas” in the selection panel");
   ok(await T(() => zdTakeoff.paletteCmds().some(c => /Combine the selected areas into one/.test(c.t))), "…and in the command palette (Ctrl+K)");
   { const q = await T(() => { const S = zdTakeoff.S, r = document.getElementById("stage").getBoundingClientRect(), p = [300, 200 + 5 * 9]; return [r.left + p[0] * S.view.s + S.view.tx, r.top + p[1] * S.view.s + S.view.ty]; });
     await page.mouse.click(q[0], q[1], {button: "right"}); await wait(200); }
-  ok(await page.isVisible("#ctx") && /Combine into one area/.test(await page.innerText("#ctx")), "right-click on the selection: “Combine into one area”" + (await page.isVisible("#ctx") ? "" : " (no menu)"));
+  ok(await page.isVisible("#ctx") && /Merge into one area/.test(await page.innerText("#ctx")), "right-click on the selection: “Merge into one area”" + (await page.isVisible("#ctx") ? "" : " (no menu)"));
   const u1 = await T(() => zdTakeoff.S.undo.length);
-  await page.locator("#ctx .ci", {hasText: "Combine into one area"}).click(); await wait(200);
+  await page.locator("#ctx .ci", {hasText: "Merge into one area"}).click(); await wait(200);
   const m = await T(() => { const it = zdTakeoff.P.proj.items.find(i => i.id === "m1"); return {n: zdTakeoff.P.proj.items.filter(i => /^m/.test(i.id)).length, pts: it.pts.length, a: zdTakeoff.rowsOf(it, 9).reduce((a, r) => a + r.qty, 0), label: it.label, nos: it.nos, ap: it.ap, sel: [...zdTakeoff.selIds()].join()}; });
   ok(m.n === 1 && m.pts === 4 && near(m.a, 2 * 200) && m.label === "Room A" && m.nos === 2 && m.ap && m.ap.lw === 3 && m.sel === "m1", "one 20 × 10 outline (4 corners), Room A's label, Nos 2 and look kept, selected: " + JSON.stringify(m));
   ok(/Combined 2 areas into one — 200(\.0+)? Sft/.test(await toast()) && /· Nos 2/.test(await toast()), "toast: " + await toast());
@@ -202,6 +218,31 @@ function unit(){
   ok(await T(() => zdTakeoff.combineAreas(new Set(["q1", "q2"]))) === null && /different Nos/.test(await toast()), "other Nos: not combined — " + await toast());
   ok(await T(() => zdTakeoff.combineAreas(new Set(["s1", "s2"]))) === null && /different slopes/.test(await toast()), "other slopes: not combined — " + await toast());
   ok(await T(() => zdTakeoff.S.undo.length) === n0 && await T(() => zdTakeoff.P.proj.items.filter(i => /^[xy]/.test(i.id)).length === 3), "nothing changed by those, no undo step");
+
+  console.log("merge areas with a gap between them");
+  const area = id => T(i => { const Z = zdTakeoff, it = Z.P.proj.items.find(x => x.id === i); return it ? Z.rowsOf(it, 9).reduce((a, r) => a + r.qty, 0) : null; }, id);
+  const G = await T(() => { const Z = zdTakeoff, it = Z.combineAreas(new Set(["g1", "g2"])); return {ok: !!it, ids: Z.P.proj.items.filter(i => /^g/.test(i.id)).map(i => i.id).join(), pts: it && it.pts.length, label: it && it.label, ded: Z.P.proj.items.filter(i => i.kind === "ded" && /Lounge/.test(i.label || "")).length}; });
+  ok(G.ok && G.ids === "g1" && G.pts === 6 && G.label === "Lounge" && G.ded === 0 && near(await area("g1"), 36 + 4.5 + 54), "a 0.75 ft wall between: one outline (6 corners), the wall strip 0.75 × 6 filled — " + await area("g1") + " Sft (94.5): " + JSON.stringify(G));
+  ok(/Combined 2 areas into one — 94\.5/.test(await toast()) && /gap 0\.750 ft filled \(\+4\.5/.test(await toast()), "toast says the gap filled: " + await toast());
+  await T(() => zdTakeoff.undoAny()); await wait(150);
+  ok(await T(() => zdTakeoff.P.proj.items.filter(i => /^g/.test(i.id)).length) === 2 && near(await area("g1"), 36), "Ctrl+Z: both back");
+  const n1 = await T(() => zdTakeoff.S.undo.length);
+  ok(await T(() => zdTakeoff.combineAreas(new Set(["w1", "w2"]))) === null, "3 ft apart: nothing done at once…");
+  ok(await page.isVisible("#dlgBack") && /3\.000 ft apart/.test(await page.innerText("#dlgB")) && await page.inputValue("#mgG") === "3.000", "…it asks, the gap filled in (" + (await page.isVisible("#dlgBack") ? await page.inputValue("#mgG") : "no dialog") + ")");
+  await page.click("#dlgCancel"); await wait(150);
+  ok(await T(() => zdTakeoff.S.undo.length) === n1 && await T(() => zdTakeoff.P.proj.items.filter(i => /^w/.test(i.id)).length) === 2, "Cancel: nothing changed");
+  await T(() => { zdTakeoff.combineAreas(new Set(["w1", "w2"])); }); await page.fill("#mgG", "2.5"); await page.click("#dlgOk"); await wait(200);
+  ok(await T(() => zdTakeoff.P.proj.items.filter(i => /^w/.test(i.id)).length) === 2 && /gap between them is 3\.000 ft, more than the 2\.500 ft to fill/.test(await toast()), "2.5 ft asked for, 3 ft apart: not combined, and says so — " + await toast());
+  await T(() => { zdTakeoff.combineAreas(new Set(["w1", "w2"])); }); await page.click("#dlgOk"); await wait(200);
+  ok(await T(() => zdTakeoff.P.proj.items.filter(i => /^w/.test(i.id)).length) === 1 && near(await area("w1"), 65) && /gap 3\.000 ft filled/.test(await toast()), "Fill and merge: one 13 × 5 area, 65 Sft — " + await toast());
+  ok(await T(() => zdTakeoff.S.undo.length) === n1 + 1, "one undo step");
+  await T(() => { const Z = zdTakeoff; Z.setSel(["v1", "v2"]); Z.refresh(); Z.ribShow && Z.ribShow("modify"); });
+  ok(await T(() => !!document.querySelector('#tools [data-mod="merge"]')), "Modify ribbon: a Merge areas button");
+  await T(() => document.querySelector('#tools [data-mod="merge"]').click()); await wait(150);
+  ok(await page.isVisible("#dlgBack") && /3\.000 ft apart/.test(await page.innerText("#dlgB")), "…it merges the selection (asking for the 3 ft gap)");
+  await page.click("#dlgOk"); await wait(200);
+  ok(await T(() => zdTakeoff.P.proj.items.filter(i => /^v/.test(i.id)).length) === 1 && near(await area("v1"), 65), "…and merges them: " + await area("v1"));
+  ok(await T(() => zdTakeoff.paletteCmds().some(c => /^Merge areas/.test(c.t) && (c.al || []).includes("merge"))), "palette: Merge areas, typed as ‘merge’ too");
 
   ok(errors.length === 0, "no page errors" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();
