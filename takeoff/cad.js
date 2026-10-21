@@ -11,7 +11,7 @@
    exact and needs no calibration. */
 const LDWG = "https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/dist/libredwg-web.js";
 const LDXF = "https://cdn.jsdelivr.net/npm/@mlightcad/dxf-json@1.2.8/dist/esm/bundle.mjs";
-export const CAD_VER = 3;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
+export const CAD_VER = 4;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
 export const INK = -1;             // colour 7 (and true black or white): white on a black background, black on white
 export const isCadName = n => /\.(dwg|dxf)$/i.test(String(n || ""));
 const CAPS_FONT = /^(technic_|techb___|techl___|coprgt[bl]?|copperplate[\w ]*|stencil|engr|castelar|felixti|alger)\.(ttf|otf)$/i;   // fonts with capitals only (their small letters are small capitals)
@@ -86,6 +86,21 @@ export function mtextLines(raw){
     out += ch; i++;
   }
   return out.split("\n");
+}
+/* the height MTEXT's own codes give all of its text — \H2.5; (absolute) or \H0.7x; (times) before its first character — else h */
+function mtextH(raw, h){
+  const s = String(raw == null ? "" : raw), st = []; let H = h;
+  for (let i = 0; i < s.length;) {
+    const ch = s[i];
+    if (ch === "{") { st.push(H); i++; continue; }
+    if (ch === "}") { if (st.length) H = st.pop(); i++; continue; }
+    const c = s[i + 1]; if (ch !== "\\" || !c) break;
+    if ("LlOoKk".includes(c)) { i += 2; continue; }
+    const e = s.indexOf(";", i + 2); if (!"fFHWQTACcp".includes(c) || e < 0) break;
+    if (c === "H") { const m = /^\s*(\d*\.?\d+)\s*([xX]?)\s*$/.exec(s.slice(i + 2, e)); if (m && +m[1] > 0) H = m[2] ? H * m[1] : +m[1]; }
+    i = e + 1;
+  }
+  return H > 0 ? H : h;
 }
 const wrap = (s, w) => {   // words of a paragraph to lines no wider than w (em)
   const out = []; let cur = "";
@@ -250,12 +265,12 @@ function norm(e, dwg){
     case "SOLID": case "TRACE": o.q = (e.points ? arr(e.points) : [e.corner1, e.corner2, e.corner3, e.corner4].filter(Boolean)).map(P2); break;
     case "3DFACE": o.q = (e.vertices ? arr(e.vertices) : [e.corner1, e.corner2, e.corner3, e.corner4].filter(Boolean)).map(P2); o.ex = null; break;
     case "LEADER": o.v = arr(e.vertices).map(P2); o.arrow = e.isArrowheadEnabled !== false && e.isArrowheadEnabled !== 0; o.ex = null; break;
-    case "MULTILEADER": case "MLEADER": { const cs = +e.contentScale || 1, d = P2n(e.textDirection); o.t = "MULTILEADER"; o.lines = []; o.ex = null;
+    case "MULTILEADER": case "MLEADER": { const cs = +e.contentScale || 1, d = P2n(e.textDirection); o.t = "MULTILEADER"; o.lines = []; o.ex = null;   // (its text height and dogleg come already scaled; the arrowhead size does not)
       o.dog = []; arr(e.leaderSections).forEach(s => { const lp = P2n(s.lastLeaderLinePoint);
         arr(s.leaderLines).forEach(l => { const v = arr(l.vertices).map(P2); if (lp) v.push(lp); if (v.length >= 2) o.lines.push(v); });
         const dl = +(s.doglegLength ?? e.doglegLength) || 0; if (lp && s.doglegVector && e.doglegEnabled !== false && dl > 0) { const dv = P2(s.doglegVector); o.dog.push([lp, [lp[0] + dv[0] * dl, lp[1] + dv[1] * dl]]); } });
       o.asz = (+e.arrowheadSize || 0) * cs; o.s = e.hasMText !== false && e.textContent ? String(e.textContent) : ""; o.p = P2(e.textAnchor || e.contentBasePosition);
-      o.h = (+e.textHeight || +e.arrowheadSize || 0) * cs; o.rot = d ? Math.atan2(d[1], d[0]) : +e.textRotation || 0; o.att = +e.textAttachmentPoint || 1; o.w = +e.textWidth || 0; break; }
+      o.h = +e.textHeight || (+e.arrowheadSize || 0) * cs; o.rot = d ? Math.atan2(d[1], d[0]) : +e.textRotation || 0; o.att = +e.textAttachmentPoint || 1; o.w = +e.textWidth || 0; break; }
     case "MLINE": { const V = dwg ? arr(e.vertices).map(v => ({p: P2(v.vertex), m: P2(v.miterDirection), el: arr(v.lines).map(l => +((l.segmentParams || [])[0]) || 0)}))
         : arr(e.segments).map(s => ({p: P2(s.position), m: P2(s.miterDirection), el: arr(s.elements).map(l => +((l.parameters || [])[0]) || 0)}));
       const ne = V.reduce((a, v) => Math.max(a, v.el.length), 0); o.closed = !!((+e.flags || 0) & 2); o.ml = []; o.ex = null;
@@ -493,7 +508,7 @@ export function cadScene(md, opt){
     text(s, ox, oy, em, rot, wf, e.obl, r.li, r.c, e.gen & 2, e.gen & 4);
   };
   const mtextEnt = (e, r) => {
-    const h = e.h > 0 ? e.h : md.textsize, em = h / CAP, L = [], SM = [], wMax = e.w > 0 ? e.w / em : 0, up = caps(e);
+    const h = mtextH(e.s, e.h > 0 ? e.h : md.textsize), em = h / CAP, L = [], SM = [], wMax = e.w > 0 ? e.w / em : 0, up = caps(e);
     mtextLines(e.s).forEach(p => { p = acadStr(p); const k = up && /[a-z]/.test(p) && !/[A-Z]/.test(p) ? SMALL_CAP : 1; if (up) p = p.toUpperCase();   // small letters in a capitals-only font: small capitals
       (wMax > 0 ? wrap(p, wMax / k) : [p]).forEach(l => { L.push(l); SM.push(k); }); });
     const pitch = h * 5 / 3 * (e.ls || 1), n = L.length, col = (e.att - 1) % 3, row = Math.floor((e.att - 1) / 3), cr = Math.cos(e.rot), sr = Math.sin(e.rot);
