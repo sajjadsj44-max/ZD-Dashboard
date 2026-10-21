@@ -1,0 +1,4584 @@
+{
+ "note": "Curated 20-Oct-2026 from IS 7272, CPWD DAR and manufacturers' data sheets; every row keeps the printed figure, clause / page and a quote. Rebuild the page block with tools/productivity_data.py.",
+ "sources": {
+  "is7272": {
+   "t": "IS 7272 (Part 1):1974 — Recommendations for labour output constants for building work, Part 1 North Zone (Bureau of Indian Standards), with Amendment No. 1 (Feb-1979); reaffirmed 2010",
+   "d": "1974",
+   "k": "std",
+   "sh": "IS 7272 (1974)",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf",
+   "use": "Labour constants per unit (8-hour day) from CBRI work study on Delhi / Roorkee sites — North Zone, the nearest Indian zone to Lahore"
+  },
+  "cpwd23": {
+   "t": "CPWD Delhi Analysis of Rates 2023, Vol. I & II (Civil), corrections to 10-Nov-2023 — Wayback Machine copy of cpwd.gov.in captured 30-Apr-2026",
+   "d": "10-Nov-2023",
+   "k": "std",
+   "sh": "CPWD DAR 2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf",
+   "use": "Labour per unit in the Delhi analyses of rates (8-hour day)"
+  },
+  "nippon": {
+   "t": "Nippon Paint Pakistan — technical data sheets (nipponpaint.com.pk)",
+   "d": "accessed 20-Oct-2026",
+   "k": "mfr",
+   "sh": "Nippon Paint PK",
+   "url": "https://nipponpaint.com.pk/",
+   "use": "Paint, primer and putty coverage"
+  },
+  "berger": {
+   "t": "Berger Paints Pakistan — product pages (shop.berger.com.pk)",
+   "d": "accessed 20-Oct-2026",
+   "k": "mfr",
+   "sh": "Berger PK",
+   "url": "https://shop.berger.com.pk/",
+   "use": "Paint, primer and putty coverage"
+  },
+  "dulux": {
+   "t": "Dulux Pakistan (AkzoNobel) — product pages (dulux.com.pk)",
+   "d": "accessed 20-Oct-2026",
+   "k": "mfr",
+   "sh": "Dulux PK",
+   "url": "https://www.dulux.com.pk/",
+   "use": "Paint, primer and Aquashield waterproofing coverage"
+  },
+  "diamond": {
+   "t": "Diamond Paints — Overall Weather Max technical data sheet (undated)",
+   "d": "accessed 20-Oct-2026",
+   "k": "mfr",
+   "sh": "Diamond Paints",
+   "url": "https://diamondpaints.com/",
+   "use": "Exterior emulsion coverage"
+  },
+  "sika-pk": {
+   "t": "Sika Pakistan — product data sheets (pak.sika.com)",
+   "d": "accessed 20-Oct-2026",
+   "k": "mfr",
+   "sh": "Sika PK",
+   "url": "https://pak.sika.com/",
+   "use": "Tile adhesive, grout, waterproofing, self-levelling, curing compound, admixture dosage"
+  },
+  "sika": {
+   "t": "Sika — product data sheets of other Sika companies (Ireland, Australia, Egypt)",
+   "d": "accessed 20-Oct-2026",
+   "k": "mfr",
+   "sh": "Sika (intl)",
+   "url": "https://www.sika.com/",
+   "use": "Bitumen primers, epoxy floor system"
+  },
+  "mapei": {
+   "t": "Mapei Keraflex technical data sheet (GB edition)",
+   "d": "20-Jun-2016",
+   "k": "mfr",
+   "sh": "Mapei",
+   "url": "https://img.bretts.com.au/Mapei-Keraflex.pdf",
+   "use": "Tile adhesive by trowel notch"
+  },
+  "fosroc": {
+   "t": "Fosroc Australia — technical data sheets",
+   "d": "accessed 20-Oct-2026",
+   "k": "mfr",
+   "sh": "Fosroc",
+   "url": "https://www.fosroc.com.au/",
+   "use": "Primer and SBR bonding agent"
+  },
+  "polyglass": {
+   "t": "Polyglass Polyflex (APP) technical data sheet",
+   "d": "Dec-2023",
+   "k": "mfr",
+   "sh": "Polyglass",
+   "url": "https://www.rpm.rcabc.org/images/9/9f/Polyglass_Polyflex_APP_TDS.pdf",
+   "use": "Torch-on membrane net coverage per roll"
+  },
+  "siniat": {
+   "t": "Siniat (Etex) UK — jointing compound data sheets",
+   "d": "31-Oct-2019",
+   "k": "mfr",
+   "sh": "Siniat UK",
+   "url": "https://www.siniat.co.uk/",
+   "use": "Gypsum board jointing compound coverage"
+  },
+  "ncma": {
+   "t": "NCMA TEK 04-02A Concrete Masonry Construction (Concrete Masonry & Hardscapes Association)",
+   "d": "accessed 20-Oct-2026",
+   "k": "std",
+   "sh": "NCMA TEK 4-2A",
+   "url": "https://www.cmha.org/resource/tek-04-02a/",
+   "use": "Blocks per wall area and per bag of masonry cement"
+  },
+  "is875": {
+   "t": "IS 875 (Part 1):1987 Table 1 — unit weights of building materials (Bureau of Indian Standards)",
+   "d": "30-Oct-1987",
+   "k": "std",
+   "sh": "IS 875-1 (1987)",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.875.1.1987.pdf",
+   "use": "Bulk densities of cement, sand and aggregate"
+  },
+  "cpwdem22": {
+   "t": "CPWD Delhi Analysis of Rates (E&M) 2022 — Wayback Machine copy of cpwd.gov.in captured 30-Apr-2026",
+   "d": "2022",
+   "k": "std",
+   "sh": "CPWD DAR E&M 2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf",
+   "use": "Labour per unit for wiring, conduits, boards, fittings, cables, ducts and insulation (8-hour day)"
+  },
+  "cpwdem18": {
+   "t": "CPWD Delhi Analysis of Rates (E&M) 2018 — Wayback Machine copy of cpwd.gov.in",
+   "d": "2018",
+   "k": "std",
+   "sh": "CPWD DAR E&M 2018",
+   "url": "https://web.archive.org/web/20250710095931/https://cpwd.gov.in/Publication/Delhi_Analysis_of_Rates_(E_and_M)_2018.pdf",
+   "use": "Drawing wires in existing conduit (the 2022 edition misprints this item's basis)"
+  }
+ },
+ "norms": [
+  {
+   "act": "exc_hard",
+   "s": "is7272",
+   "src_unit": "m3",
+   "printed_unit": "m3",
+   "labour": [
+    [
+     "Mate",
+     0.06
+    ],
+    [
+     "Mazdoor",
+     0.62
+    ]
+   ],
+   "ref": "Table 1, Sl No. (i)(a), p. 4",
+   "q": "a) Excavation over areas (Hard/dense soil), depth up to 1.5 m and removal (up to one metre from edge) M3 Mate 0.06 Mazdoor 0.62",
+   "note": "",
+   "cond": "Manual. Removal up to 1 m from edge. Unit printed 'M3', changed to m3 by Amendment No. 1. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "exc_trench",
+   "s": "is7272",
+   "src_unit": "m3",
+   "printed_unit": "m3",
+   "labour": [
+    [
+     "Mate",
+     0.05
+    ],
+    [
+     "Mazdoor",
+     0.5
+    ]
+   ],
+   "ref": "Table 1, Sl No. (i)(b), p. 4",
+   "q": "b) Excavation in trenches (Soft/loose soil) for foundations not exceeding 1.5 m in width ... depth up to 1.5 m ... M3 Mate 0.05 Mazdoor 0.50",
+   "note": "",
+   "cond": "Manual. Also shafts, wells, cesspits not exceeding 10 m2 on plan; removal up to 1 m from edge. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "backfill",
+   "s": "is7272",
+   "src_unit": "m3",
+   "printed_unit": "m3",
+   "labour": [
+    [
+     "Mate",
+     0.02
+    ],
+    [
+     "Mazdoor",
+     0.22
+    ],
+    [
+     "Bhisti",
+     0.02
+    ]
+   ],
+   "ref": "Table 1, Sl No. (i)(f) as amended (Amendment No. 1, item c), p. 5",
+   "q": "f) Returning, filling and ramming of excavated earth in layers not exceeding 20 cm in depth, watering, well ramming and levelling lead up to 25 m m3 Mate 0.02 Mazdoor 0.22 Bhisti 0.02",
+   "note": "",
+   "cond": "As substituted by Amendment No. 1 (Feb 1979): lead up to 25 m. Superseded 1974 text (lead up to 50 m): Mate 0.02, Mazdoor 0.25, Bhisti 0.02. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1979",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "pcc_hand",
+   "s": "is7272",
+   "src_unit": "m3",
+   "printed_unit": "m3",
+   "labour": [
+    [
+     "Mason",
+     0.1
+    ],
+    [
+     "Mazdoor",
+     2.13
+    ],
+    [
+     "Bhisti",
+     0.7
+    ]
+   ],
+   "ref": "Table 1, Sl No. (ii)(d)(1), p. 5",
+   "q": "d) Unreinforced concrete in foundations including mixing, pouring, consolidating and curing: 1) Hand mixed cement concrete M3 Mason 0.10 Mazdoor 2.13 Bhisti 0.70",
+   "note": "",
+   "cond": "Unreinforced; depths up to 3 m, 40 mm and below aggregate (wording per Amendment No. 1). North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "pcc",
+   "s": "is7272",
+   "src_unit": "m3",
+   "printed_unit": "m3",
+   "labour": [
+    [
+     "Mason",
+     0.1
+    ],
+    [
+     "Mazdoor",
+     1.63
+    ],
+    [
+     "Bhisti",
+     0.7
+    ],
+    [
+     "Mixer operator",
+     0.07
+    ]
+   ],
+   "ref": "Table 1, Sl No. (ii)(d)(2), p. 6",
+   "q": "2) Mixer mixed cement concrete M3 Mason 0.10 Mazdoor 1.63 Bhisti 0.70 Mixer operator 0.07 Mixer 0.07 Vibrator 0.07",
+   "note": "Plant: Mixer 0.07 day, Vibrator 0.07 day per m3.",
+   "cond": "Unreinforced; depths up to 3 m. Mixer and vibrator listed as machine-days. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "rcc_fdn",
+   "s": "is7272",
+   "src_unit": "m3",
+   "printed_unit": "m3",
+   "labour": [
+    [
+     "Mason",
+     0.17
+    ],
+    [
+     "Mazdoor",
+     2.0
+    ],
+    [
+     "Bhisti",
+     0.9
+    ],
+    [
+     "Mixer operator",
+     0.07
+    ]
+   ],
+   "ref": "Table 1, Sl No. (ii)(f), p. 6",
+   "q": "f) Reinforced cement concrete in situ in foundations, footings, bases for columns, etc excluding form work and reinforcement M3 Mason 0.17 Mazdoor 2.00 Bhisti 0.90",
+   "note": "Plant: Mixer 0.07 day, Vibrator 0.07 day per m3.",
+   "cond": "Remark for items (f)-(m): constants include mixing, pouring, consolidating and curing; exclude fair finish. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "rcc_slab",
+   "s": "is7272",
+   "src_unit": "m3",
+   "printed_unit": "m3",
+   "labour": [
+    [
+     "Mason",
+     0.24
+    ],
+    [
+     "Mazdoor",
+     2.5
+    ],
+    [
+     "Bhisti",
+     0.9
+    ],
+    [
+     "Mixer operator",
+     0.07
+    ]
+   ],
+   "ref": "Table 1, Sl No. (ii)(g), p. 6",
+   "q": "g) Reinforced cement concrete in situ in suspended floors/roofs excluding form work, and reinforcement M3 Mason 0.24 Mazdoor 2.50 Bhisti 0.90",
+   "note": "Plant: Mixer 0.07 day, Vibrator 0.07 day per m3.",
+   "cond": "Includes mixing, pouring, consolidating, curing; excludes fair finish. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "rcc_beam",
+   "s": "is7272",
+   "src_unit": "m3",
+   "printed_unit": "m3",
+   "labour": [
+    [
+     "Mason",
+     0.2
+    ],
+    [
+     "Mazdoor",
+     3.0
+    ],
+    [
+     "Bhisti",
+     0.9
+    ],
+    [
+     "Mixer operator",
+     0.07
+    ]
+   ],
+   "ref": "Table 1, Sl No. (ii)(j), p. 7",
+   "q": "j) Reinforced cement concrete in situ in beams excluding form work and reinforcement M3 Mason 0.20 Mazdoor 3.00 Bhisti 0.90 Mixer operator 0.07",
+   "note": "Plant: Mixer 0.07 day, Vibrator 0.07 day per m3.",
+   "cond": "Includes mixing, pouring, consolidating, curing. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "rcc_col",
+   "s": "is7272",
+   "src_unit": "m3",
+   "printed_unit": "m3",
+   "labour": [
+    [
+     "Mason",
+     0.23
+    ],
+    [
+     "Mazdoor",
+     3.5
+    ],
+    [
+     "Bhisti",
+     0.9
+    ],
+    [
+     "Mixer operator",
+     0.1
+    ]
+   ],
+   "ref": "Table 1, Sl No. (ii)(k), p. 7",
+   "q": "k) Reinforced cement concrete in situ in columns, pillars in ground floor excluding form work and reinforcement M3 Mason 0.23 Mazdoor 3.50 Bhisti 0.90",
+   "note": "Plant: Mixer 0.1 day, Vibrator 0.1 day per m3.",
+   "cond": "Ground floor columns only; includes mixing, pouring, consolidating, curing. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "rcc_stair",
+   "s": "is7272",
+   "src_unit": "m3",
+   "printed_unit": "m3",
+   "labour": [
+    [
+     "Mason",
+     0.3
+    ],
+    [
+     "Mazdoor",
+     4.3
+    ],
+    [
+     "Bhisti",
+     0.9
+    ],
+    [
+     "Mixer operator",
+     0.07
+    ]
+   ],
+   "ref": "Table 1, Sl No. (ii)(m), p. 7",
+   "q": "m) Reinforced cement concrete in situ in stairs excluding form work and reinforcement M3 Mason 0.30 Mazdoor 4.30 Bhisti 0.90",
+   "note": "Plant: Mixer 0.07 day, Vibrator 0.07 day per m3.",
+   "cond": "Includes mixing, pouring, consolidating, curing. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "screed15",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Mason",
+     0.08
+    ],
+    [
+     "Mazdoor",
+     0.12
+    ],
+    [
+     "Bhisti",
+     0.1
+    ]
+   ],
+   "ref": "Table 1, Sl No. (viii)(a), p. 9",
+   "q": "a) Laying of PCC 40 mm thick in alternate bays with side forms and templates and finished smooth M2 Mason 0.08 Mazdoor 0.12 Bhisti 0.10",
+   "note": "Mixing the concrete is extra (as printed).",
+   "cond": "Labour for mixing concrete extra; Bhisti includes curing (Amendment No. 1). North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "brick135",
+   "s": "is7272",
+   "src_unit": "m3",
+   "printed_unit": "m3",
+   "labour": [
+    [
+     "Mason",
+     0.94
+    ],
+    [
+     "Mazdoor",
+     1.8
+    ],
+    [
+     "Bhisti",
+     0.2
+    ]
+   ],
+   "ref": "Table 1, Sl No. (iv)(a), p. 8",
+   "q": "a) Brick work in walls exceeding one brick thick, in cement/lime mortar M3 Mason 0.94 Mazdoor 1.80 Bhisti 0.20",
+   "note": "",
+   "cond": "Straight walls. Remarks: constants include labour involved in scaffolding; any mix of mortar; labour for mixing mortar extra. No separate foundation/floor-height split. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "brick9w",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Mason",
+     0.25
+    ],
+    [
+     "Mazdoor",
+     0.4
+    ],
+    [
+     "Bhisti",
+     0.1
+    ]
+   ],
+   "ref": "Table 1, Sl No. (iv)(b), p. 8",
+   "q": "b) Brick work in walls, one brick thick, in cement/lime mortar M2 Mason 0.25 Mazdoor 0.40 Bhisti 0.10",
+   "note": "",
+   "cond": "Straight walls; measured per m2 of wall. Includes scaffolding labour; mortar mixing extra. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "brick45",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Mason",
+     0.12
+    ],
+    [
+     "Mazdoor",
+     0.2
+    ],
+    [
+     "Bhisti",
+     0.07
+    ]
+   ],
+   "ref": "Table 1, Sl No. (iv)(c), p. 8",
+   "q": "c) Half brick walls (with or without hoop iron reinforcement) in cement mortar M2 Mason 0.12 Mazdoor 0.20 Bhisti 0.07",
+   "note": "",
+   "cond": "Includes scaffolding labour; mortar mixing extra. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "fw_col",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Carpenter",
+     0.25
+    ],
+    [
+     "Mazdoor",
+     0.2
+    ]
+   ],
+   "ref": "Table 1, Sl No. (v)(a)(1), p. 8 (with Amendment No. 1 items e, f)",
+   "q": "1) Rectangular column and walls M3 [read m2 per Amendment No. 1] Carpenter 0.25 Mazdoor 0.20",
+   "note": "Fabrication & erection only — the standard gives no stripping labour.",
+   "cond": "Fabrication and erection with all supports, struts, braces, and dressing with oil; stripping not separately given. Unit printed M3, corrected to m2 by Amendment No. 1 (item f). North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "fw_slab",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Carpenter",
+     0.23
+    ],
+    [
+     "Mazdoor",
+     0.2
+    ]
+   ],
+   "ref": "Table 1, Sl No. (v)(a)(2), p. 8",
+   "q": "2) Suspended floors/roofs M2 Carpenter 0.23 Mazdoor 0.20",
+   "note": "Fabrication & erection only — the standard gives no stripping labour.",
+   "cond": "Fabrication and erection incl. supports, struts, braces, oiling; stripping not separately given. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "fw_beam",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Carpenter",
+     0.3
+    ],
+    [
+     "Mazdoor",
+     0.2
+    ]
+   ],
+   "ref": "Table 1, Sl No. (v)(a)(3), p. 8",
+   "q": "3) Sides and soffits of beams M2 Carpenter 0.30 Mazdoor 0.20",
+   "note": "Fabrication & erection only — the standard gives no stripping labour.",
+   "cond": "Fabrication and erection incl. supports, struts, braces, oiling; stripping not separately given. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "rebar",
+   "s": "is7272",
+   "src_unit": "quintal",
+   "printed_unit": "quintal",
+   "labour": [
+    [
+     "Bar-bender",
+     1.0
+    ],
+    [
+     "Mazdoor",
+     1.0
+    ]
+   ],
+   "ref": "Table 1, Sl No. (vi), p. 9",
+   "q": "Bar reinforcement including cutting to length, hooked ends, cranking or bending, hoisting and placing in any position, binding ... Quintal Bar-bender 1.00 Mazdoor 1.00",
+   "note": "",
+   "cond": "1 quintal = 100 kg. Includes holding firmly during concreting. North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "dpc",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Mason",
+     0.1
+    ],
+    [
+     "Mazdoor",
+     0.1
+    ],
+    [
+     "Bhisti",
+     0.01
+    ]
+   ],
+   "ref": "Table 1, Sl No. (ix)(a), p. 11",
+   "q": "a) Laying damp-proof course 40 mm thick cement concrete including formwork and fair finishing to edges and mixing M2 Mason 0.10 Mazdoor 0.10 Bhisti 0.01",
+   "note": "",
+   "cond": "Bhisti includes curing (Amendment No. 1). North Zone (Punjab, Haryana, Delhi, UP, Rajasthan); constants are days of 8 working hours (Amendment No. 1); derived by CBRI work-measurement on Delhi/Roorkee sites, buildings up to 10 m height.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "exc_surface",
+   "s": "cpwd23",
+   "src_unit": "100 m2",
+   "printed_unit": "100 sqm",
+   "labour": [
+    [
+     "Beldar",
+     6.8
+    ],
+    [
+     "Coolie",
+     5.6
+    ]
+   ],
+   "ref": "Item 2.1.1, Vol. 1 printed p. 93 (PDF p. 102)",
+   "q": "2.1 Earth work in surface excavation not exceeding 30 cm in depth ... All kinds of soil ... Details of cost for 100 Sqm ... Beldar day 6.80 ... Coolie day 5.60",
+   "note": "",
+   "cond": "Manual (labour-only analysis). Lead up to 50 m, lift up to 1.5 m. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "backfill",
+   "s": "cpwd23",
+   "src_unit": "10 m3",
+   "printed_unit": "10 cum",
+   "labour": [
+    [
+     "Beldar",
+     0.45
+    ],
+    [
+     "Coolie",
+     1.208
+    ],
+    [
+     "Bhisti",
+     0.18
+    ]
+   ],
+   "ref": "Item 2.25, Vol. 1 printed p. 127 (PDF p. 136)",
+   "q": "2.25 Filling available excavated earth (excluding rock) in trenches, plinth, sides of foundations ... 10 cum ... Beldar day 0.450 Coolie day 1.208 Bhisti day 0.18",
+   "note": "",
+   "cond": "Manual. Lead up to 50 m, all lifts (excluding rock). Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "sand_fill",
+   "s": "cpwd23",
+   "src_unit": "10 m3",
+   "printed_unit": "10 cum",
+   "labour": [
+    [
+     "Beldar",
+     0.89
+    ],
+    [
+     "Coolie",
+     1.07
+    ],
+    [
+     "Bhisti",
+     0.35
+    ]
+   ],
+   "ref": "Item 2.27, Vol. 1 printed p. 129 (PDF p. 138)",
+   "q": "2.27 Supplying and filling in plinth with sand under floors, including watering, ramming, consolidating ... 10 cum ... Beldar day 0.89 Coolie day 1.07 Bhisti day 0.35",
+   "note": "",
+   "cond": "Manual; material (sand) supply in same analysis. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "carriage",
+   "s": "cpwd23",
+   "src_unit": "35 m3",
+   "printed_unit": "35 cum",
+   "labour": [
+    [
+     "Beldar/Coolie",
+     7.67
+    ]
+   ],
+   "ref": "Item 1.2 (1.2.2 Earth), Sub-head 1 Carriage of Materials, Vol. 1 printed p. 86 (PDF p. 95)",
+   "q": "The following labour work for 8 hours a day wil carry following material upto 1st 50 metre ... Beldars (Male/Female) 7.67 Nos. ... Lime, moorum, earth, building rubbish etc. 35 cum",
+   "note": "Net payable earth 28 cum per 35 cum carried (looseness), as printed.",
+   "cond": "Data sheet: 7.67 Beldars/Coolies (male/female) in one 8-hour day carry 35 cum of earth/rubbish in first 50 m; net payable quantity for earth is 28 cum (deduction for looseness). Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "pcc",
+   "s": "cpwd23",
+   "src_unit": "m3",
+   "printed_unit": "1 cum",
+   "labour": [
+    [
+     "Mason (average)",
+     0.1
+    ],
+    [
+     "Beldar",
+     1.63
+    ],
+    [
+     "Bhisti",
+     0.7
+    ]
+   ],
+   "ref": "Item 4.1 (e.g. 4.1.3 1:2:4), Vol. 1 printed pp. 151-155 (PDF p. 160-164)",
+   "q": "4.1.3 1:2:4 ... Details of cost for 1 cum ... Mason (average) day 0.10 ... Beldar day 1.63 ... Bhisti day 0.70 ... Concrete Mixer ... day 0.07 ... Vibrator day 0.07",
+   "note": "Plant: Concrete mixer 0.25-0.40 cum with hopper 0.07 day, Vibrator (needle type 40 mm) 0.07 day per 1 cum.",
+   "cond": "Excludes centering/shuttering. Identical labour in sub-items 4.1.2 to 4.1.13. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "rcc_fdn",
+   "s": "cpwd23",
+   "src_unit": "m3",
+   "printed_unit": "1 cum",
+   "labour": [
+    [
+     "Mason (average)",
+     0.17
+    ],
+    [
+     "Beldar",
+     2.0
+    ],
+    [
+     "Bhisti",
+     0.9
+    ]
+   ],
+   "ref": "Item 5.1.2, Vol. 1 printed p. 205 (PDF p. 214)",
+   "q": "5.1 ... reinforced cement concrete ... All work up to plinth level ... 1 cum ... Mason (average) day 0.17 Beldar day 2.00 Bhisti day 0.90 ... Mixer day 0.07 Vibrator day 0.07",
+   "note": "Plant: Concrete mixer 0.25-0.40 cum with hopper 0.07 day, Vibrator (needle type 40 mm) 0.07 day per 1 cum.",
+   "cond": "Excludes centering, shuttering, finishing and reinforcement. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "rcc_col",
+   "s": "cpwd23",
+   "src_unit": "91.80 m3",
+   "printed_unit": "91.80 cum",
+   "labour": [
+    [
+     "Beldar",
+     112.9
+    ],
+    [
+     "Coolie",
+     75.3
+    ],
+    [
+     "Bhisti",
+     82.6
+    ],
+    [
+     "Mason 1st class",
+     9.2
+    ],
+    [
+     "Mason 2nd class",
+     9.2
+    ]
+   ],
+   "ref": "Item 5.2.2, Vol. 1 printed p. 207 (PDF p. 216)",
+   "q": "Details of cost for 10x9.18 cum =91.80 cum ... Beldar 112.900 Coolie 75.300 Bhisti 82.600 Mason 1st class 9.200 Mason 2nd class 9.200 ... lifting ... Coolie 137.700",
+   "note": "Lifting above floor II (up to V) adds 137.7 day Coolie per 91.80 cum — not in this crew; set the floor instead. Plant: Concrete mixer 0.25-0.40 cum with hopper 6.4 day, Vibrator (needle type 40 mm) 6.4 day per 91.80 cum.",
+   "cond": "Analysis basis 10 x 9.18 = 91.80 cum. Excludes centering, shuttering, finishing, reinforcement; scaffolding as lump sum. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "rcc_slab",
+   "s": "cpwd23",
+   "src_unit": "m3",
+   "printed_unit": "1 cum",
+   "labour": [
+    [
+     "Mason (average)",
+     0.24
+    ],
+    [
+     "Beldar",
+     2.75
+    ],
+    [
+     "Bhisti",
+     0.9
+    ]
+   ],
+   "ref": "Item 5.3, Vol. 1 printed p. 209 (PDF p. 218)",
+   "q": "5.3 Reinforced cement concrete work in beams, suspended floors, roofs ... 1 cum ... Mason (average) 0.24 Beldar 2.75 Bhisti 0.90 ... Coolie (2.0x0.75=1.50)",
+   "note": "Lifting above floor II (up to V) adds 1.5 day Coolie per 1 cum — not in this crew; set the floor instead. Plant: Concrete mixer 0.25-0.40 cum with hopper 0.08 day, Vibrator (needle type 40 mm) 0.08 day per 1 cum.",
+   "cond": "Excludes centering, shuttering, finishing, reinforcement. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "fw_found",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     0.75,
+     "L-CARP"
+    ],
+    [
+     "Beldar",
+     1.5
+    ]
+   ],
+   "ref": "Item 5.9.1, Vol. 1 printed p. 218 (PDF p. 227)",
+   "q": "Details of cost for footing size 2.5mx2.5mx1.00m Contact area = 10.00 sqm ... Fitter (grade 1) day 0.75 ... Beldar day 1.50",
+   "note": "Steel form panels, fix & strip.",
+   "cond": "Steel wall-form panels (40 uses); includes strutting, propping and removal - fixing and stripping not split. Basis footing 2.5x2.5x1.0 m. Same in item 4.3.1. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "fw_wall",
+   "s": "cpwd23",
+   "src_unit": "15 m2",
+   "printed_unit": "15 sqm",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     3.5,
+     "L-CARP"
+    ],
+    [
+     "Beldar",
+     6.0
+    ]
+   ],
+   "ref": "Item 5.9.2, Vol. 1 printed p. 219 (PDF p. 228)",
+   "q": "5.9.2 Walls (any thickness) ... Area of contact= 2 x 7.5 x1.0 = 15.00 sqm ... Fitter (grade 1) day 3.50 Beldar day 6.00",
+   "note": "Steel form panels, fix & strip.",
+   "cond": "Steel form panels; includes removal. Basis 7.5 m long x 1.0 m high wall, both faces. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "fw_slab",
+   "s": "cpwd23",
+   "src_unit": "135 m2",
+   "printed_unit": "135 sqm",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     30.0,
+     "L-CARP"
+    ],
+    [
+     "Beldar",
+     60.0
+    ]
+   ],
+   "ref": "Item 5.9.3, Vol. 1 printed p. 220 (PDF p. 229)",
+   "q": "5.9.3 Suspended floors, roofs ... Detail of cost for 10 room 10x4.50x3 = 135 sqm, height 3.5 m ... Fitter (grade 1) day 30.000 Beldar day 60.000",
+   "note": "Steel plates & props, fix & strip.",
+   "cond": "Steel plates and props; includes removal. Basis 10 rooms 4.50 x 3.0 m, floor height 3.5 m. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "fw_beam",
+   "s": "cpwd23",
+   "src_unit": "78 m2",
+   "printed_unit": "78 sqm",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     12.5,
+     "L-CARP"
+    ],
+    [
+     "Beldar",
+     25.0
+    ]
+   ],
+   "ref": "Item 5.9.5, Vol. 1 printed p. 222 (PDF p. 231)",
+   "q": "Consider 10 beam of 6 m clear span, 0.50 m deep 0.30 m wide ... 78 sqm ... Fitter (grade 1) day 12.500 Beldar day 25.000",
+   "note": "Steel forms, fix & strip.",
+   "cond": "Steel forms; includes removal. Basis 10 beams 6 m clear span, 0.50 deep x 0.30 wide, 3.5 m above floor. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "fw_col",
+   "s": "cpwd23",
+   "src_unit": "45 m2",
+   "printed_unit": "45 sqm",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     10.0,
+     "L-CARP"
+    ],
+    [
+     "Beldar",
+     20.0
+    ]
+   ],
+   "ref": "Item 5.9.6, Vol. 1 printed p. 223 (PDF p. 232)",
+   "q": "Detail of cost for 45 sqm Size of column 450x450mm and 2.5m high ... Fitter (grade 1) day 10.000 Beldar day 20.000",
+   "note": "Steel form panels with clamps, fix & strip.",
+   "cond": "Steel form panels with column clamps; includes removal. Basis 10 columns 450x450 mm, 2.5 m high. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "fw_stair",
+   "s": "cpwd23",
+   "src_unit": "57.9 m2",
+   "printed_unit": "57.9 sqm",
+   "labour": [
+    [
+     "Carpenter 2nd class",
+     17.5
+    ],
+    [
+     "Beldar",
+     10.0
+    ]
+   ],
+   "ref": "Item 5.9.7, Vol. 1 printed p. 224 (PDF p. 233)",
+   "q": "5.9.7 Stairs, (excluding landings) ... Details of cost for 57.9 sqm ... Carpenter 2nd class day 17.500 Beldar day 10.000",
+   "note": "Timber, fix & strip.",
+   "cond": "Timber (kail wood planks/battens, 8 uses); includes removal. Basis 10 staircases, 3.40 m clear span incl. 1 m landing. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "rebar",
+   "s": "cpwd23",
+   "src_unit": "quintal",
+   "printed_unit": "1 quintal",
+   "labour": [
+    [
+     "Blacksmith 1st class",
+     1.0
+    ],
+    [
+     "Beldar",
+     1.0
+    ]
+   ],
+   "ref": "Items 5.22.6 & 5.22A.6, Vol. 1 printed pp. 261, 264 (PDF p. 270, 273)",
+   "q": "5.22 Steel reinforcement for R.C.C. work including straightening, cutting, bending, placing in position and binding ... 1 quintal ... Blacksmith 1st class 1.00 Beldar 1.00",
+   "note": "",
+   "cond": "1 quintal = 100 kg. Same constants up to plinth (5.22.6) and above plinth (5.22A.6), and for MS / cold-twisted / HRD bars; binding wire as sundries. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "brick_fdn",
+   "s": "cpwd23",
+   "src_unit": "m3",
+   "printed_unit": "1 cum",
+   "labour": [
+    [
+     "Mason 1st class",
+     0.36
+    ],
+    [
+     "Mason 2nd class",
+     0.36
+    ],
+    [
+     "Coolie",
+     1.37
+    ],
+    [
+     "Bhisti",
+     0.2
+    ]
+   ],
+   "ref": "Item 6.1.1, Vol. 1 printed p. 307 (PDF p. 316)",
+   "q": "6.1 Brick work with common burnt clay F.P.S. (non modular) bricks ... in foundation and plinth ... 1 cum ... Mason 1st class 0.36 Mason 2nd class 0.36 Coolie 1.37 Bhisti 0.20",
+   "note": "",
+   "cond": "Same labour for 1:4 (6.1.1) and 1:6 (6.1.2). Mortar priced separately via item 3.x (0.25 cum/cum). Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "brick9",
+   "s": "cpwd23",
+   "src_unit": "m3",
+   "printed_unit": "1 cum",
+   "labour": [
+    [
+     "Mason 1st class",
+     0.47
+    ],
+    [
+     "Mason 2nd class",
+     0.47
+    ],
+    [
+     "Coolie",
+     1.8
+    ],
+    [
+     "Bhisti",
+     0.2
+    ]
+   ],
+   "ref": "Item 6.4.1, Vol. 1 printed p. 310 (PDF p. 319)",
+   "q": "6.4 Brick work ... in superstructure above plinth level up to floor V level ... Mason 1st class 0.47 Mason 2nd class 0.47 ... Coolie 1.80 Bhisti 0.20 Scaffolding ... Coolie 1.13",
+   "note": "Lifting above floor II (up to V) adds 1.13 day Coolie per 1 cum — not in this crew; set the floor instead.",
+   "cond": "Scaffolding as lump sum. The printed lifting caption sits above the 1.80 Coolie line, but items 6.13.1/6.38 show the lifting extra is 1.13 per cum. Above floor V: extra item 6.5 is by mobile crane (no labour). Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "brick45",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason 1st class",
+     0.6
+    ],
+    [
+     "Mason 2nd class",
+     0.6
+    ],
+    [
+     "Coolie",
+     2.0
+    ],
+    [
+     "Bhisti",
+     0.7
+    ]
+   ],
+   "ref": "Item 6.13.1, Vol. 1 printed p. 317 (PDF p. 326)",
+   "q": "6.13 Half brick masonry ... in superstructure above plinth level up to floor V level ... Mason 1st class 0.60 ... Coolie 2.00 Bhisti 0.70 ... lifting ... Coolie 1.29 10 x 0.115 x1.13",
+   "note": "Lifting above floor II (up to V) adds 1.29 day Coolie per 10 sqm — not in this crew; set the floor instead.",
+   "cond": "Lifting extra computed as 10 x 0.115 x 1.13. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "block8",
+   "s": "cpwd23",
+   "src_unit": "50 sqm",
+   "printed_unit": "10 cum",
+   "labour": [
+    [
+     "Mason (brick layer) 1st class",
+     4.7
+    ],
+    [
+     "Mason 2nd class",
+     4.7
+    ],
+    [
+     "Coolie",
+     18.0
+    ],
+    [
+     "Bhisti",
+     2.0
+    ]
+   ],
+   "ref": "Item 26.69.1, Vol. 2 printed p. 1998 (PDF p. 1057)",
+   "q": "26.69 ... solid blocks of 200 mm ... in superstructure above plinth level up to floor V level ... Mason 1st class 4.700 Mason 2nd class 4.700 Coolie 18.000 Bhisti 2.000 ... Coolie 11.300",
+   "note": "10 cum of 200 mm wall = 50 m² of wall face. Lifting above floor II (up to V) adds 11.3 day Coolie per 10 cum — not in this crew; set the floor instead.",
+   "cond": "Scaffolding as lump sum. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "block4",
+   "s": "cpwd23",
+   "src_unit": "100 m2",
+   "printed_unit": "100 sqm",
+   "labour": [
+    [
+     "Mason (brick layer) 1st class",
+     6.0
+    ],
+    [
+     "Mason 2nd class",
+     6.0
+    ],
+    [
+     "Coolie",
+     20.0
+    ],
+    [
+     "Bhisti",
+     7.0
+    ]
+   ],
+   "ref": "Item 26.71.1, Vol. 2 printed p. 1999 (PDF p. 1058)",
+   "q": "26.71 ... half block masonry ... solid blocks of 100 mm ... superstructure ... 100 sqm ... Mason 1st class 6.000 Mason 2nd class 6.000 Coolie 20.000 Bhisti 7.000 ... Coolie 11.300",
+   "note": "Lifting above floor II (up to V) adds 11.3 day Coolie per 100 sqm — not in this crew; set the floor instead.",
+   "cond": "Foundation version (26.70.1): Mason 4.5+4.5, Coolie 15.5, Bhisti 7.0 per 100 sqm. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "stone_rr",
+   "s": "cpwd23",
+   "src_unit": "m3",
+   "printed_unit": "1 cum",
+   "labour": [
+    [
+     "Mason (for plain stone work) 2nd class",
+     1.07
+    ],
+    [
+     "Beldar",
+     1.07
+    ],
+    [
+     "Coolie",
+     0.71
+    ],
+    [
+     "Bhisti",
+     0.09
+    ]
+   ],
+   "ref": "Item 7.1.1, Vol. 1 printed p. 345 (PDF p. 354)",
+   "q": "7.1 Random rubble masonry with hard stone in foundation and plinth ... 1 cum ... Mason (for plain stone work) 2nd class) 1.07 Beldar 1.07 Coolie 0.71 Bhisti 0.09",
+   "note": "",
+   "cond": "Includes levelling up with CC 1:6:12 (lump sum). Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "steel_erect",
+   "s": "cpwd23",
+   "src_unit": "quintal",
+   "printed_unit": "1 quintal",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     0.5,
+     "LAB-FAB"
+    ],
+    [
+     "Blacksmith 2nd class",
+     0.75,
+     "LAB-FAB"
+    ],
+    [
+     "Beldar",
+     1.0
+    ]
+   ],
+   "ref": "Item 10.1, Vol. 1 printed p. 713 (PDF p. 722)",
+   "q": "10.1 Structural steel work in single section, fixed with or without connecting plate, including cutting, hoisting, fixing ... Fitter (grade 1) 0.50 Blacksmith 2nd class 0.75 Beldar 1.00",
+   "note": "",
+   "cond": "Fabrication + erection combined (not split). Priming coat priced via item 13.50.3 (3 sqm/quintal). Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "steel_fab",
+   "s": "cpwd23",
+   "src_unit": "3.95 quintal",
+   "printed_unit": "3.95 quintal",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     2.7,
+     "LAB-FAB"
+    ],
+    [
+     "Blacksmith 2nd class",
+     3.6,
+     "LAB-FAB"
+    ],
+    [
+     "Skilled Beldar",
+     5.4
+    ],
+    [
+     "Beldar",
+     3.6
+    ],
+    [
+     "Bandhani",
+     0.44
+    ]
+   ],
+   "ref": "Item 10.2, Vol. 1 printed pp. 713-714 (PDF p. 722-723)",
+   "q": "Details of cost for a truss 7.6m clear span (weight = 3.95 quintal) ... Fitter (grade 1) 2.70 Blacksmith 2nd class 3.60 Skilled Beldar ... 5.40 Beldar 3.60 Bandhani 0.44",
+   "note": "",
+   "cond": "Basis one truss of 7.6 m clear span weighing 3.95 quintal; fabrication + erection combined. 'Skilled Beldar' printed with description '(for floor rubbing etc.)'. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "scaffold",
+   "s": "cpwd23",
+   "src_unit": "202.5 m2",
+   "printed_unit": "202.5 sqm",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     15.5,
+     "LAB-SCF"
+    ],
+    [
+     "Beldar",
+     31.0
+    ]
+   ],
+   "ref": "Item 14.72, Vol. 2 printed p. 1080 (PDF p. 139)",
+   "q": "14.72 Providing and fixing double scaffolding system (cup lock type) ... Details of cost for area 22.5m x 9.0m =202.5 sqm ... Fitter (grade 1) 15.50 Beldar 31.00",
+   "note": "Elevation area measured once, whatever the duration.",
+   "cond": "Elevational area measured once irrespective of duration. Item is under Sub-head 14 Repairs to Buildings (intended for maintenance work); in new-work items scaffolding is a lump sum inside each item. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "demo_pcc",
+   "s": "cpwd23",
+   "src_unit": "m3",
+   "printed_unit": "1 cum",
+   "labour": [
+    [
+     "Beldar",
+     1.59
+    ],
+    [
+     "Coolie",
+     0.72
+    ]
+   ],
+   "ref": "Item 15.2.1, Vol. 2 printed p. 1099 (PDF p. 158)",
+   "q": "15.2 Demolishing cement concrete manually/ by mechanical means ... 15.2.1 Nominal concrete 1:3:6 or richer mix ... Beldar 1.59 Coolie 0.72",
+   "note": "",
+   "cond": "Manually / by mechanical means (labour-only analysis). Leaner mix 1:4:8 (15.2.2): Beldar 0.88, Coolie 0.55. Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "demo_rcc",
+   "s": "cpwd23",
+   "src_unit": "m3",
+   "printed_unit": "1 cum",
+   "labour": [
+    [
+     "Beldar",
+     2.65
+    ],
+    [
+     "Coolie",
+     0.72
+    ]
+   ],
+   "ref": "Item 15.3, Vol. 2 printed p. 1100 (PDF p. 159)",
+   "q": "15.3 Demolishing R.C.C. work manually/ by mechanical means including stacking of steel bars ... 1 cum ... Beldar 2.65 Coolie 0.72",
+   "note": "",
+   "cond": "Cutting reinforcement extra (item 15.5: Blacksmith 2nd class 0.50 + Beldar 0.50 per sqm of cross-section). Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "demo_brick",
+   "s": "cpwd23",
+   "src_unit": "m3",
+   "printed_unit": "1 cum",
+   "labour": [
+    [
+     "Beldar",
+     1.06
+    ],
+    [
+     "Coolie",
+     0.9
+    ]
+   ],
+   "ref": "Item 15.7.4, Vol. 2 printed p. 1103 (PDF p. 162)",
+   "q": "15.7.4 In cement mortar ... Detail of cost for 1 cum ... Beldar day 1.06 ... Coolie day 0.90",
+   "note": "",
+   "cond": "Manually / by mechanical means (labour-only analysis). Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "demo_stone",
+   "s": "cpwd23",
+   "src_unit": "m3",
+   "printed_unit": "1 cum",
+   "labour": [
+    [
+     "Beldar",
+     1.3
+    ],
+    [
+     "Coolie",
+     1.04
+    ]
+   ],
+   "ref": "Item 15.9.2, Vol. 2 printed p. 1105 (PDF p. 164)",
+   "q": "15.9.2 In cement mortar ... Detail of cost for 1 cum ... Beldar day 1.30 ... Coolie day 1.04",
+   "note": "",
+   "cond": "Manually / by mechanical means (labour-only analysis). Day = 8-hour day. Labour quantities are as printed in the 'Details of cost' block (labour only; materials/plant excluded unless noted).",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "plaster_ceil",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Mason",
+     0.08,
+     "L-PLMASON"
+    ],
+    [
+     "Mazdoor",
+     0.1
+    ],
+    [
+     "Bhisti",
+     0.1
+    ]
+   ],
+   "ref": "Table 1, Sl No. (vii)(a), printed p. 9",
+   "q": "a) 15 mm thick cement plaster to ceiling including mixing of mortar M² Mason 0·08 Mazdoor 0·10 Bhisti 0·10",
+   "note": "15 mm thick.",
+   "cond": "15 mm thick, including mixing of mortar. Amdt 1(g): Bhisti constants include labour for curing. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "plaster_half",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Mason",
+     0.08,
+     "L-PLMASON"
+    ],
+    [
+     "Mazdoor",
+     0.1
+    ],
+    [
+     "Bhisti",
+     0.1
+    ]
+   ],
+   "ref": "Table 1, Sl No. (vii)(d), printed p. 9",
+   "q": "d) 15 mm thick cement plaster on brick walls ( interior ) including mixing mortar M² Mason 0·08 Mazdoor 0·10 Bhisti 0·10",
+   "note": "15 mm thick, interior walls.",
+   "cond": "15 mm thick, interior, including mixing mortar. Amdt 1(g): Bhisti constants include labour for curing. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "pointing",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Mason",
+     0.08,
+     "L-PLMASON"
+    ],
+    [
+     "Mazdoor",
+     0.1
+    ],
+    [
+     "Bhisti",
+     0.1
+    ]
+   ],
+   "ref": "Table 1, Sl No. (vii)(e), printed p. 9",
+   "q": "e) Struck pointing to brick work in cement mortar including mixing mortar M² Mason 0·08 Mazdoor 0·10 Bhisti 0·10",
+   "note": "Struck pointing.",
+   "cond": "Including mixing mortar. Amdt 1(g): Bhisti constants include labour for curing. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "screed1",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Mason",
+     0.07
+    ],
+    [
+     "Mazdoor",
+     0.1
+    ],
+    [
+     "Bhisti",
+     0.1
+    ]
+   ],
+   "ref": "Table 1, Sl No. (viii)(b), printed p. 10",
+   "q": "b) Laying of PCC 25 mm thick in alternate bays with side forms and templates and finished smooth M² Mason 0·07 Mazdoor 0·10 Bhisti 0·10",
+   "note": "25 mm in alternate bays; mixing the concrete is extra (as printed).",
+   "cond": "25 mm thick, alternate bays with side forms and templates; labour for mixing concrete extra. Amdt 1(h): labour for mixing concrete for items (a)-(e) is extra; Bhisti includes curing. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "terrazzo",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Mason",
+     0.22
+    ],
+    [
+     "Mazdoor",
+     0.72
+    ],
+    [
+     "Bhisti",
+     0.1
+    ]
+   ],
+   "ref": "Table 1, Sl No. (viii)(c)(1), printed p. 10 + Table 1",
+   "q": "c) Laying of 40 mm thick in situ terrazo flooring, under layer 30 mm thick cement concrete and top layer of 10 mm ... 1) Laying M² Mason 0·22 Mazdoor 0·22 Bhisti 0·10 | 2) Cutting, grinding and polishing M² Mazdoor 0·50 Machine 0·40",
+   "note": "Laying (viii)(c)(1) + cutting, grinding & polishing (viii)(c)(2) added; polishing machine 0.40 day per m² extra.",
+   "cond": "Laying only, with dividing strips of glass/metal/asbestos; cutting, grinding & polishing is a separate line (viii)(c)(2). Amdt 1(h): labour for mixing concrete for items (a)-(e) is extra; Bhisti includes curing. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "terrazzo_tile",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Mason",
+     0.12
+    ],
+    [
+     "Mazdoor",
+     0.7
+    ],
+    [
+     "Bhisti",
+     0.1
+    ]
+   ],
+   "ref": "Table 1, Sl No. (viii)(e)(1), printed p. 10 + Table 1",
+   "q": "e) Precast terrazo tile flooring 20 mm thick laid over 10 mm thick cement mortar: 1) Laying M² Mason 0·12 Mazdoor 0·20 Bhisti 0·10 | 2) Cutting, grinding and polishing M² Mazdoor 0·50 Machine 0·40",
+   "note": "Laying (viii)(e)(1) + grinding & polishing (viii)(e)(2) added.",
+   "cond": "Laying only; grinding/polishing separate (viii)(e)(2). Amdt 1(h): labour for mixing concrete for items (a)-(e) is extra; Bhisti includes curing. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "door_shutter",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Carpenter",
+     0.25
+    ],
+    [
+     "Mazdoor",
+     0.25
+    ]
+   ],
+   "ref": "Table 1, Sl No. (x)(c), printed p. 11",
+   "q": "c) Fixing of readymade shutters to frames including fixing of fittings M² Carpenter 0·25 Mazdoor 0·25",
+   "note": "Ready-made shutters, incl. fixing the fittings.",
+   "cond": "Fixing only (shutter supplied ready-made), including ironmongery fittings. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "glazing",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Glazier",
+     0.2,
+     "LAB-GLZ"
+    ],
+    [
+     "Mazdoor",
+     0.01
+    ]
+   ],
+   "ref": "Table 1, Sl No. (xi), printed p. 11",
+   "q": "Fixing glass panes on steel or wood work bedded with putty M² Glazier 0·20 Mazdoor 0·01",
+   "note": "Panes bedded in putty on steel or wood.",
+   "cond": "Unit superscript is blurred in the scan (reads like M3); area unit m2 is implied by the item and Amendment 1. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "french_polish",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Polisher",
+     0.35,
+     "L-PAINT"
+    ]
+   ],
+   "ref": "Table 1, Sl No. (xii), printed p. 11",
+   "q": "French polishing complete including a coat of wood filler on new work M² Painter 0·35",
+   "note": "Incl. a coat of wood filler.",
+   "cond": "Printed role 'Painter'; Amendment 1(k) substitutes 'Polisher' for 'Painter' in col 4. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "whitewash",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Washer",
+     0.02,
+     "L-PAINT"
+    ],
+    [
+     "Mazdoor",
+     0.01
+    ]
+   ],
+   "ref": "Table 1, Sl No. (xiii)(a), printed p. 11",
+   "q": "a) White washing with lime 3 coats on new surface M² Washer 0·02 Mazdoor 0·01",
+   "note": "3 coats; scaffolding excluded.",
+   "cond": "Walls and flat ceilings; 3 coats total. Amdt 1(m): items (a)-(e) exclude labour for erecting/dismantling scaffolding. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "distemper",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Painter",
+     0.08
+    ],
+    [
+     "Mazdoor",
+     0.04
+    ]
+   ],
+   "ref": "Table 1, Sl No. (xiii)(c), printed p. 12",
+   "q": "c) Distempering with dry distemper 3 coats on new surface including a priming coat of whiting M² Painter 0·08 Mazdoor 0·04",
+   "note": "Dry distemper, 3 coats incl. priming; scaffolding excluded.",
+   "cond": "Total for 3 coats + priming. Amdt 1(m): items (a)-(e) exclude labour for erecting/dismantling scaffolding. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "roof_mud",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Mason",
+     0.01
+    ],
+    [
+     "Mazdoor",
+     0.2
+    ],
+    [
+     "Bhisti",
+     0.01
+    ]
+   ],
+   "ref": "Table 1, Sl No. (xiv)(a), printed p. 12",
+   "q": "a) 10 cm thick ( average ) mud PHUSKA of clay mixed with BHUSA at 8 kg per m³ of clay on roofs laid to slope and consolidated M² Mason 0·01 Mazdoor 0·20 Bhisti 0·01",
+   "note": "4\" (10 cm) clay + bhusa, laid to slope.",
+   "cond": "Traditional terraced roofing (insulation/waterproofing layer). Bhusa at 8 kg per m3 of clay. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "roof_tile",
+   "s": "is7272",
+   "src_unit": "m2",
+   "printed_unit": "m2",
+   "labour": [
+    [
+     "Mason",
+     0.12
+    ],
+    [
+     "Mazdoor",
+     0.15
+    ],
+    [
+     "Bhisti",
+     0.1
+    ]
+   ],
+   "ref": "Table 1, Sl No. (xiv)(c), printed p. 12",
+   "q": "c) One layer of tile brick laid over GOBRI leeping and grouted with cement mortar including mixing and finished neat M² Mason 0·12 Mazdoor 0·15 Bhisti 0·10",
+   "note": "Over mud plaster / gobri leeping, grouted.",
+   "cond": "Terraced roofing top layer, including mixing and finished neat. Constants in days of 8 working hours (Amendment 1 col 5 heading). Unit printed 'M2', changed to 'm2' by Amendment 1. North Zone = Punjab, Haryana, Delhi, UP, Rajasthan; CBRI work-study observations at Delhi & Roorkee, buildings up to 10 m height. Mazdoor = unskilled helper (Beldar); Bhisti = water carrier.",
+   "d": "1974",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.7272.1.1974.pdf"
+  },
+  {
+   "act": "plaster_half",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason (average)",
+     0.67,
+     "L-PLMASON"
+    ],
+    [
+     "Coolie",
+     0.75
+    ],
+    [
+     "Bhisti",
+     0.92
+    ]
+   ],
+   "ref": "Item 13.4.2, Sub Head 13 Finishing, printed p. 956 (PDF p. 15)",
+   "q": "Detail of cost for 10 sqm ... 0155 Mason (average) day 0.67 ... 0115 Coolie day 0.75 ... 0101 Bhisti day 0.92",
+   "note": "12 mm, 1:6.",
+   "cond": "12 mm thick, CM 1:6. Same labour as 1:4 (13.4.1) and fine-sand versions (13.1.x). DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "plaster_3q",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason (average)",
+     0.94,
+     "L-PLMASON"
+    ],
+    [
+     "Coolie",
+     1.02
+    ],
+    [
+     "Bhisti",
+     1.1
+    ]
+   ],
+   "ref": "Item 13.6.2, Sub Head 13 Finishing, printed p. 958 (PDF p. 17)",
+   "q": "Detail of cost for 10 sqm ... 0155 Mason (average) day 0.94 ... 0115 Coolie day 1.02 ... 0101 Bhisti day 1.10",
+   "note": "20 mm, 1:6.",
+   "cond": "20 mm thick, CM 1:6 coarse sand. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "plaster_ceil",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason (average)",
+     0.51,
+     "L-PLMASON"
+    ],
+    [
+     "Coolie",
+     0.75
+    ],
+    [
+     "Bhisti",
+     0.92
+    ]
+   ],
+   "ref": "Item 13.16.1, Sub Head 13 Finishing, printed p. 965 (PDF p. 24)",
+   "q": "Detail of cost for 10 sqm ... 0155 Mason (average) day 0.51 ... 0115 Coolie day 0.75 ... 0101 Bhisti day 0.92",
+   "note": "6 mm, 1:3 on RCC surfaces.",
+   "cond": "6 mm thick CM 1:3 fine sand - the DSR item normally used for ceiling plaster. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "pointing",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason (average)",
+     0.5,
+     "L-PLMASON"
+    ],
+    [
+     "Coolie",
+     0.6
+    ],
+    [
+     "Bhisti",
+     0.93
+    ]
+   ],
+   "ref": "Item 13.31.1, Sub Head 13 Finishing, printed p. 979 (PDF p. 38)",
+   "q": "Detail of cost for 10 sqm ... 0155 Mason (average) day 0.50 ... 0115 Coolie day 0.60 ... 0101 Bhisti day 0.93",
+   "note": "Flush / ruled / struck, 1:3.",
+   "cond": "Brick work or brick flooring, cement mortar 1:3. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "putty_coat",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason (for plaster of paris work) 1st class",
+     0.45,
+     "L-PLMASON"
+    ],
+    [
+     "Beldar",
+     0.45
+    ]
+   ],
+   "ref": "Item 13.80, Sub Head 13 Finishing, printed p. 1010 (PDF p. 69)",
+   "q": "Detail of cost for 10 sqm ... 0122 Mason (for plaster of paris work) 1st class day 0.45 ... 0114 Beldar day 0.45",
+   "note": "White cement putty, 1 mm average.",
+   "cond": "Over plastered wall surface to make it even and smooth. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "primer_wall",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Painter",
+     0.4
+    ],
+    [
+     "Coolie",
+     0.2
+    ]
+   ],
+   "ref": "Item 13.85.3, Sub Head 13 Finishing, printed p. 1014 (PDF p. 73)",
+   "q": "Detail of cost for 10 sqm ... 0131 Painter day 0.40 ... 0115 Coolie day 0.20",
+   "note": "Water-thinnable cement primer.",
+   "cond": "One priming coat on walls. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "primer_wood",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Painter",
+     0.25
+    ],
+    [
+     "Coolie",
+     0.25
+    ]
+   ],
+   "ref": "Item 13.85.1, Sub Head 13 Finishing, printed p. 1014 (PDF p. 73)",
+   "q": "Detail of cost for 10 sqm ... 0131 Painter day 0.25 ... 0115 Coolie day 0.25",
+   "note": "Pink / grey primer.",
+   "cond": "One priming coat on hard/soft wood. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "primer_steel",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Painter",
+     0.24
+    ],
+    [
+     "Coolie",
+     0.24
+    ]
+   ],
+   "ref": "Item 13.50.3, Sub Head 13 Finishing, printed p. 990 (PDF p. 49)",
+   "q": "Detail of cost for 10 sqm ... 0131 Painter day 0.24 ... 0115 Coolie day 0.24",
+   "note": "Red oxide zinc chromate.",
+   "cond": "One priming coat on steel/galvanised iron. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "emulsion_coat",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Painter",
+     0.36
+    ],
+    [
+     "Coolie",
+     0.36
+    ]
+   ],
+   "ref": "Item 13.82.1, Sub Head 13 Finishing, printed p. 1011 (PDF p. 70)",
+   "q": "Detail of cost for 10 sqm ... 0131 Painter day 0.36 ... 0115 Coolie day 0.36",
+   "note": "Acrylic emulsion, one coat.",
+   "cond": "Interior wall painting, VOC < 50 g/l, one coat (13.82.2 two coats = Painter 0.54, Coolie 0.54). DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "emulsion2",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Painter",
+     0.54
+    ],
+    [
+     "Coolie",
+     0.54
+    ]
+   ],
+   "ref": "Item 13.82.2, Sub Head 13 Finishing, printed p. 1012 (PDF p. 71)",
+   "q": "Detail of cost for 10 sqm ... 0131 Painter day 0.54 ... 0115 Coolie day 0.54",
+   "note": "Acrylic emulsion, two coats.",
+   "cond": "Two coats (compare one coat 13.82.1). DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "distemper",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Painter",
+     1.0
+    ],
+    [
+     "Coolie",
+     0.5
+    ]
+   ],
+   "ref": "Item 13.41.1, Sub Head 13 Finishing, printed p. 985 (PDF p. 44)",
+   "q": "Detail of cost for 10 sqm ... 0131 Painter day 1.00 ... 0115 Coolie day 0.50",
+   "note": "Acrylic distemper, 2 coats incl. cement primer.",
+   "cond": "Ready mixed acrylic distemper over and including water-thinnable cement primer. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "whitewash",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "White Washer",
+     0.2,
+     "L-PAINT"
+    ],
+    [
+     "Coolie",
+     0.1
+    ]
+   ],
+   "ref": "Item 13.37.1, Sub Head 13 Finishing, printed p. 983 (PDF p. 42)",
+   "q": "Detail of cost for 10 sqm ... 0141 White Washer day 0.20 ... 0115 Coolie day 0.10",
+   "note": "3 or more coats.",
+   "cond": "To give an even shade. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "enamel2",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Painter",
+     0.54
+    ],
+    [
+     "Coolie",
+     0.54
+    ]
+   ],
+   "ref": "Item 13.61.1, Sub Head 13 Finishing, printed p. 999 (PDF p. 58)",
+   "q": "Detail of cost for 10 sqm ... 0131 Painter day 0.54 ... 0115 Coolie day 0.54",
+   "note": "Priming not included.",
+   "cond": "Excludes priming (see primer rows). DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "cement_paint",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Painter",
+     0.46
+    ],
+    [
+     "Coolie",
+     0.23
+    ],
+    [
+     "Bhisti",
+     0.1
+    ]
+   ],
+   "ref": "Item 13.44.1, Sub Head 13 Finishing, printed p. 985 (PDF p. 44)",
+   "q": "Detail of cost for 10 sqm ... 0131 Painter day 0.46 ... 0115 Coolie day 0.23 ... 0101 Bhisti day 0.10",
+   "note": "2 or more coats @ 3.84 kg / 10 m².",
+   "cond": "Applied @ 3.84 kg/10 sqm. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "paint_ext",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Painter",
+     0.6
+    ],
+    [
+     "Coolie",
+     0.3
+    ],
+    [
+     "Bhisti",
+     0.05
+    ]
+   ],
+   "ref": "Item 13.46.1, Sub Head 13 Finishing, printed p. 987 (PDF p. 46)",
+   "q": "Detail of cost for 10 sqm ... 0131 Painter day 0.60 ... 0115 Coolie day 0.30 ... 0101 Bhisti day 0.05",
+   "note": "Acrylic smooth exterior paint over exterior primer.",
+   "cond": "Paint @ 1.67 l/10 sqm over primer @ 0.90 l/10 sqm. Closest DSR item to 'weather-shield' exterior emulsion. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "french_polish",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Painter",
+     3.5
+    ]
+   ],
+   "ref": "Item 13.68.1, Sub Head 13 Finishing, printed p. 1003 (PDF p. 62)",
+   "q": "Detail of cost for 10 sqm ... 0131 Painter day 3.50",
+   "note": "French spirit polish, 2+ coats incl. wood filler.",
+   "cond": "Wood polishing. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "screed15",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason 2nd class",
+     0.8
+    ],
+    [
+     "Beldar",
+     1.4
+    ],
+    [
+     "Bhisti",
+     1.04
+    ]
+   ],
+   "ref": "Item 11.3.1, Sub Head 11 Flooring, printed p. 756 (PDF p. 765)",
+   "q": "Details of cost for 10 sqm. ... 0124 Mason 2nd class day 0.80 ... 0114 Beldar day 1.40 ... 0101 Bhisti day 1.04 ... Truck etc.) day 0.03 ... 0.40 cum with hooper day 0.03",
+   "note": "1:2:4, 40 mm, neat cement floating coat.",
+   "cond": "40 mm thick with 20 mm aggregate incl. cement slurry. Non-labour lines excluded: Driver (for Road Roller, Concrete Mixer, Truck etc.) 0.03; Hire charges of Concrete Mixer 0.25 to 0.40 cum with hooper 0.03 (machine/hire or mixer-crew days, kept out of the labour list). DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "terrazzo",
+   "s": "cpwd23",
+   "src_unit": "100 m2",
+   "printed_unit": "100 sqm",
+   "labour": [
+    [
+     "Mason 2nd class",
+     17.9,
+     "L-TILE"
+    ],
+    [
+     "Beldar",
+     19.9
+    ],
+    [
+     "Bhisti",
+     10.4
+    ],
+    [
+     "Skilled Beldar (for floor rubbing etc.)",
+     10.0
+    ]
+   ],
+   "ref": "Item 11.9.1, Sub Head 11 Flooring, printed p. 760 (PDF p. 769)",
+   "q": "0124 Mason 2nd class day 17.900 ... 0114 Beldar day 19.900 ... 0101 Bhisti day 10.400 ... 0139 Skilled Beldar (for floor rubbing etc.) day 10.000 ... Truck etc.) day 0.300",
+   "note": "Laid, rubbed and polished; rubbing machine extra.",
+   "cond": "34 mm CC 1:2:4 under layer + 6 mm marble chip top layer, dark shade/ordinary cement; includes laying, rubbing and polishing. Non-labour lines excluded: Driver (for Road Roller, Concrete Mixer, Truck etc.) 0.3; Hire charges of Concrete Mixer 0.25 to 0.40 cum with hooper 0.3; Machine for rubbing of floors 16.0 (machine/hire or mixer-crew days, kept out of the labour list). DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "terrazzo_tile",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason 2nd class",
+     1.6,
+     "L-TILE"
+    ],
+    [
+     "Coolie",
+     2.0
+    ],
+    [
+     "Skilled Beldar (for floor rubbing etc.)",
+     1.0
+    ],
+    [
+     "Bhisti",
+     1.0
+    ]
+   ],
+   "ref": "Item 11.16.1, Sub Head 11 Flooring, printed p. 777 (PDF p. 786)",
+   "q": "0124 Mason 2nd class day 1.60 ... 0115 Coolie day 2.00 ... 0139 Skilled Beldar (for floor rubbing etc.) day 1.00 ... 0101 Bhisti day 1.00 ... 0013 Machine for rubbing of floors day 1.60",
+   "note": "22 mm tiles on 20 mm mortar, rubbed & polished.",
+   "cond": "Light shade, white cement. Non-labour lines excluded: Machine for rubbing of floors 1.6 (machine/hire or mixer-crew days, kept out of the labour list). DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "tile_floor_mortar",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason 1st class",
+     2.0,
+     "L-TILE"
+    ],
+    [
+     "Coolie",
+     2.0
+    ]
+   ],
+   "ref": "Item 11.41.2, Sub Head 11 Flooring, printed p. 812 (PDF p. 821)",
+   "q": "Details of cost for 10 sqm ... 0123 Mason 1st class day 2.000 ... 0115 Coolie day 2.000",
+   "note": "600×600 vitrified on 20 mm 1:4 mortar (same labour for 500 and 800).",
+   "cond": "Same labour for 500x500 and 800x800 (11.41.1, 11.41.3). DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "tile_floor",
+   "s": "cpwd23",
+   "src_unit": "1 m2",
+   "printed_unit": "1 sqm",
+   "labour": [
+    [
+     "Mason 1st class",
+     0.2,
+     "L-TILE"
+    ],
+    [
+     "Coolie",
+     0.4
+    ]
+   ],
+   "ref": "Item 11.49.1, Sub Head 11 Flooring, printed p. 837 (PDF p. 846)",
+   "q": "Details of cost for 1 sqm ... 0123 Mason 1st class day 0.20 ... 0115 Coolie day 0.40",
+   "note": "500×500 vitrified on 6 mm polymer adhesive, grouted.",
+   "cond": "Cement based polymer modified quick-set adhesive IS 15477, grouted. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "marble_floor",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason 1st class",
+     1.2,
+     "L-TILE"
+    ],
+    [
+     "Beldar",
+     1.0
+    ],
+    [
+     "Coolie",
+     1.0
+    ],
+    [
+     "Skilled Beldar (for floor rubbing etc.)",
+     5.0
+    ]
+   ],
+   "ref": "Item 11.23.1, Sub Head 11 Flooring, printed p. 792 (PDF p. 801)",
+   "q": "0123 Mason 1st class day 1.20 ... 0114 Beldar day 1.00 ... 0115 Coolie day 1.00 ... 0139 Skilled Beldar (for floor rubbing etc.) day 5.00 ... 0013 Machine for rubbing of floors day 4.00",
+   "note": "18 mm on 20 mm 1:4 mortar, rubbed & polished; rubbing machine 4.0 days / 10 m² extra.",
+   "cond": "Makrana white 2nd quality; same gang for other marbles in 11.23. Non-labour lines excluded: Machine for rubbing of floors 4.0 (machine/hire or mixer-crew days, kept out of the labour list). DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "granite_floor",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason 2nd class",
+     1.2,
+     "L-TILE"
+    ],
+    [
+     "Beldar",
+     1.0
+    ],
+    [
+     "Coolie",
+     1.0
+    ],
+    [
+     "Skilled Beldar (for floor rubbing etc.)",
+     2.0
+    ]
+   ],
+   "ref": "Item 11.56.1, Sub Head 11 Flooring, printed p. 846 (PDF p. 855)",
+   "q": "0124 Mason 2nd class day 1.20 ... 0114 Beldar day 1.00 ... 0115 Coolie day 1.00 ... 0139 Skilled Beldar (for floor rubbing etc.) day 2.00 ... 0019 Machine for cutting (hand grinding) day 2.00",
+   "note": "18 mm polished granite on 20 mm 1:4 mortar.",
+   "cond": "Black / Cherry-Ruby red granite. Non-labour lines excluded: Machine for cutting (hand grinding) 2.0 (machine/hire or mixer-crew days, kept out of the labour list). DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "tile_wall",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason 1st class",
+     2.5,
+     "L-TILE"
+    ],
+    [
+     "Coolie",
+     2.5
+    ]
+   ],
+   "ref": "Item 8.31, Sub Head 8 Cladding Work, printed p. 430 (PDF p. 439)",
+   "q": "Details of cost for 10 sqm ... 0123 Mason 1st class day 2.500 ... 0115 Coolie day 2.500",
+   "note": "On 12 mm 1:3 mortar, white cement pointing.",
+   "cond": "Any size, white cement pointing. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "stone_clad",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason 1st class",
+     10.0,
+     "L-TILE"
+    ],
+    [
+     "Beldar",
+     10.0
+    ]
+   ],
+   "ref": "Item 8.9.1.2, Sub Head 8 Cladding Work, printed p. 393 (PDF p. 402)",
+   "q": "Details of cost for 10 sqm. ... 0123 Mason 1st class day 10.000 ... 0114 Beldar day 10.000",
+   "note": "8 mm polished granite tiles on 12 mm mortar.",
+   "cond": "Wall lining with polished stone tiles (granite of any colour). DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "stone_dry",
+   "s": "cpwd23",
+   "src_unit": "1 m2",
+   "printed_unit": "1 sqm",
+   "labour": [
+    [
+     "Mason (for plain stone work) 2nd class",
+     0.448
+    ],
+    [
+     "Bandhani",
+     0.336
+    ],
+    [
+     "Beldar",
+     0.336
+    ],
+    [
+     "Coolie",
+     0.336
+    ]
+   ],
+   "ref": "Item 8.20, Sub Head 8 Cladding Work, printed p. 417 (PDF p. 426)",
+   "q": "Details of cost for 1 sqm. ... 0125 Mason (for plain stone work) 2nd class day 0.448 ... 0100 Bandhani day 0.336 ... 0114 Beldar day 0.336 ... 0115 Coolie day 0.336",
+   "note": "30 mm stone, dry cladding with clamps, up to 10 m high.",
+   "cond": "Stone fixed with SS cramps/pins on separately-paid structural steel frame. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "door_frame",
+   "s": "cpwd23",
+   "src_unit": "1 nos",
+   "printed_unit": "one door chowkhat 206.75x117.5 cm (36 cudm)",
+   "labour": [
+    [
+     "Carpenter (average)",
+     0.72
+    ],
+    [
+     "Beldar",
+     0.07
+    ]
+   ],
+   "ref": "Item 9.1.1, Sub Head 9 Wood & PVC Work, printed p. 435 (PDF p. 444)",
+   "q": "Details of cost for Chowkhat of a door 206.75x117.5cm ... 0156 Carpenter (average) day 0.72 ... 0114 Beldar day 0.07",
+   "note": "One teak chowkhat 206.75 × 117.5 cm.",
+   "cond": "Frame 9.5x7.0 cm section; hold-fast lugs paid separately. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "door_shutter",
+   "s": "cpwd23",
+   "src_unit": "2.2 m2",
+   "printed_unit": "2.2 sqm",
+   "labour": [
+    [
+     "Carpenter (average)",
+     0.55
+    ],
+    [
+     "Beldar",
+     0.55
+    ]
+   ],
+   "ref": "Item 9.20.1, Sub Head 9 Wood & PVC Work, printed p. 473 (PDF p. 482)",
+   "q": "Details of cost for 2.2 sqm. ... 0156 Carpenter (average) day 0.55 ... 0114 Beldar day 0.55",
+   "note": "Flush shutter of 2.2 m², incl. butt hinges.",
+   "cond": "Labour 'For fixing shutter and fittings'. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "gyp_part",
+   "s": "cpwd23",
+   "src_unit": "21.9 m2",
+   "printed_unit": "21.90 sqm (6.00x3.65 m partition panel)",
+   "labour": [
+    [
+     "Carpenter 1st class",
+     6.57,
+     "LAB-CLG"
+    ],
+    [
+     "Carpenter 2nd class",
+     2.847,
+     "LAB-CLG"
+    ],
+    [
+     "Painter",
+     1.095
+    ],
+    [
+     "Beldar",
+     7.665
+    ]
+   ],
+   "ref": "Item 9.105.2, Sub Head 9 Wood & PVC Work, printed p. 575 (PDF p. 584)",
+   "q": "Details of cost for 6.00x3.65m = 21.90 sqm (Partition Panel) ... 0111 Carpenter 1st class day 6.57 ... 0112 Carpenter 2nd class day 2.847 ... 0131 Painter day 1.095 ... 0114 Beldar day 7.665",
+   "note": "75 mm, double 12.5 mm board on GI studs.",
+   "cond": "Per-sqm constants printed: Carpenter 1st 0.3, Carpenter 2nd 0.13, Painter 0.05, Beldar 0.35 per sqm. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "hinges",
+   "s": "cpwd23",
+   "src_unit": "10 nos",
+   "printed_unit": "ten hinges",
+   "labour": [
+    [
+     "Carpenter 2nd class",
+     0.14
+    ],
+    [
+     "Beldar",
+     0.09
+    ]
+   ],
+   "ref": "Item 9.55.2, Sub Head 9 Wood & PVC Work, printed p. 510 (PDF p. 519)",
+   "q": "Details of cost for ten hinges ... 0112 Carpenter 2nd class day 0.14 ... 0114 Beldar day 0.09",
+   "note": "100 mm MS butt hinges.",
+   "cond": "Providing and fixing with screws. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "tower_bolt",
+   "s": "cpwd23",
+   "src_unit": "10 nos",
+   "printed_unit": "10 nos.",
+   "labour": [
+    [
+     "Carpenter 2nd class",
+     0.1
+    ]
+   ],
+   "ref": "Item 9.63.2, Sub Head 9 Wood & PVC Work, printed p. 523 (PDF p. 532)",
+   "q": "Details of cost for 10 nos. ... 0112 Carpenter 2nd class day 0.10",
+   "note": "200 mm tower bolts.",
+   "cond": "Providing and fixing with screws. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "gyp_ceiling",
+   "s": "cpwd23",
+   "src_unit": "103.68 m2",
+   "printed_unit": "103.68 sqm (10.8x9.6 m)",
+   "labour": [
+    [
+     "Carpenter 2nd class",
+     31.104,
+     "LAB-CLG"
+    ],
+    [
+     "Beldar",
+     31.104
+    ],
+    [
+     "Painter",
+     10.368
+    ]
+   ],
+   "ref": "Item 12.45.1, Sub Head 12 Roofing, printed p. 905 (PDF p. 914)",
+   "q": "Details of cost for 10.8x9.6m = 103.68sqm. ... 0112 Carpenter 2nd class day 31.104 ... 0114 Beldar day 31.104 ... 0131 Painter day 10.368",
+   "note": "12.5 mm board on GI frame, jointed & finished, any height.",
+   "cond": "Tapered-edge plain gypsum board, MS/GI power-pressed frame, jointing and finishing. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "tbar_ceiling",
+   "s": "cpwd23",
+   "src_unit": "100 m2",
+   "printed_unit": "100 sqm",
+   "labour": [
+    [
+     "Carpenter 1st class",
+     28.0,
+     "LAB-CLG"
+    ],
+    [
+     "Beldar",
+     23.0
+    ]
+   ],
+   "ref": "Item 12.52.3, Sub Head 12 Roofing, printed p. 919 (PDF p. 928)",
+   "q": "Details of cost for 100 sqm. ... 0111 Carpenter 1st class day 28.00 ... 0114 Beldar day 23.00",
+   "note": "595×595 laminated gypsum tiles.",
+   "cond": "Lay-in tiles on hot-dip galvanised interlocking grid. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "wp_bitumen",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 Sqm.",
+   "labour": [
+    [
+     "Beldar",
+     0.38
+    ],
+    [
+     "Painter",
+     0.15,
+     "LAB-WPA"
+    ]
+   ],
+   "ref": "Item 12.15.1, Sub Head 12 Roofing, printed p. 873 (PDF p. 882)",
+   "q": "Details of cost for 10 Sqm. ... 0114 Beldar day 0.38 ... 0131 Painter day 0.15",
+   "note": "Hot bitumen @ 17 kg / 10 m² + coarse sand.",
+   "cond": "Bitumen coating to roofs. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_I_14092023-Civil.pdf"
+  },
+  {
+   "act": "wp_felt",
+   "s": "cpwd23",
+   "src_unit": "30 m2",
+   "printed_unit": "30 sqm",
+   "labour": [
+    [
+     "Painter",
+     2.16,
+     "LAB-WPA"
+    ],
+    [
+     "Beldar",
+     3.24
+    ],
+    [
+     "Mistry",
+     0.18
+    ]
+   ],
+   "ref": "Item 22.8.1, Sub Head 22 Water Proofing, printed p. 1852 (PDF p. 911)",
+   "q": "Detail of cost for 30 sqm ... 0131 Painter day 2.160 ... 0114 Beldar day 3.240 ... 0130 Mistry day 0.180",
+   "note": "4 courses: 2 coats hot bitumen + 1 felt layer + grit.",
+   "cond": "Two coats hot blown bitumen + one layer hessian-base felt type 3 + grit. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "wp_torch",
+   "s": "cpwd23",
+   "src_unit": "30 m2",
+   "printed_unit": "30 sqm",
+   "labour": [
+    [
+     "Skilled torch operator for laying tack",
+     2.16,
+     "LAB-WPA"
+    ],
+    [
+     "Mistry",
+     0.18
+    ],
+    [
+     "Beldar",
+     3.24
+    ]
+   ],
+   "ref": "Item 14.90.1, Sub Head 14 Repairs to Building, printed p. 1094 (PDF p. 153)",
+   "q": "Detail of cost for 30 sqm ... 0159 Skilled torch operator for laying tack day 2.16 ... 0130 Mistry day 0.18 ... 0114 Beldar day 3.24",
+   "note": "APP 3 mm, incl. primer.",
+   "cond": "Five-layer prefabricated membrane, glass-fibre mat; laid by authorised applicator. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "wp_cem_wet",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason (average)",
+     2.0,
+     "LAB-WPA"
+    ],
+    [
+     "Beldar",
+     2.0
+    ],
+    [
+     "Bhisti",
+     0.25
+    ]
+   ],
+   "ref": "Item 22.5, Sub Head 22 Water Proofing, printed p. 1849 (PDF p. 908)",
+   "q": "Details of cost for 10 sqm ... 0155 Mason (average) day 2.00 ... 0114 Beldar day 2.00 ... 0101 Bhisti day 0.25",
+   "note": "Slurry + compound in sunken WC / bath.",
+   "cond": "Cement slurry mixed with waterproofing cement compound in layers. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "wp_cem",
+   "s": "cpwd23",
+   "src_unit": "10 m2",
+   "printed_unit": "10 sqm",
+   "labour": [
+    [
+     "Mason (average)",
+     2.0,
+     "LAB-WPA"
+    ],
+    [
+     "Beldar",
+     1.0
+    ],
+    [
+     "Bhisti",
+     0.25
+    ]
+   ],
+   "ref": "Item 22.6, Sub Head 22 Water Proofing, printed p. 1850 (PDF p. 909)",
+   "q": "Details of cost for 10 sqm ... 0155 Mason (average) day 2.00 ... 0114 Beldar day 1.00 ... 0101 Bhisti day 0.25",
+   "note": "Slurry + compound on roof slabs.",
+   "cond": "Cement slurry with waterproofing compound, roofs. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "alu_frame",
+   "s": "cpwd23",
+   "src_unit": "40.02 kg",
+   "printed_unit": "40.02 kg",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     2.0,
+     "LAB-GLZ"
+    ],
+    [
+     "Skilled Beldar (for floor rubbing etc.)",
+     1.0
+    ],
+    [
+     "Beldar",
+     1.0
+    ],
+    [
+     "Bandhani",
+     0.05
+    ]
+   ],
+   "ref": "Item 21.1.1.2, Sub Head 21 Aluminium Work, printed p. 1816 (PDF p. 875)",
+   "q": "Details of cost for 40.02 kg ... 0116 Fitter (grade 1) day 2.00 ... 0139 Skilled Beldar (for floor rubbing etc.) day 1.00 ... 0114 Beldar day 1.00 ... 0100 Bandhani day 0.05",
+   "note": "Powder-coated frames (fixed portion).",
+   "cond": "Extruded sections IS 733/1285; labour per 40.02 kg of aluminium. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "alu_shutter",
+   "s": "cpwd23",
+   "src_unit": "20.62 kg",
+   "printed_unit": "20.62 kg",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     1.0,
+     "LAB-GLZ"
+    ],
+    [
+     "Skilled Beldar (for floor rubbing etc.)",
+     1.0
+    ],
+    [
+     "Beldar",
+     1.0
+    ],
+    [
+     "Bandhani",
+     0.4
+    ],
+    [
+     "Carpenter 1st class",
+     0.2,
+     "L-CARP"
+    ]
+   ],
+   "ref": "Item 21.1.2.2, Sub Head 21 Aluminium Work, printed p. 1819 (PDF p. 878)",
+   "q": "0116 Fitter (grade 1) day 1.00 ... 0139 Skilled Beldar (for floor rubbing etc.) day 1.00 ... 0114 Beldar day 0.50 ... 0100 Bandhani day 0.40 ... 0111 Carpenter 1st class day 0.20",
+   "note": "Powder-coated shutters incl. hinges / pivots.",
+   "cond": "Labour per 20.62 kg of aluminium shutter sections. Same role printed on two sub-operation lines and summed here: Beldar: 0.5 + 0.5. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "glazing",
+   "s": "cpwd23",
+   "src_unit": "1 m2",
+   "printed_unit": "1.00 sqm",
+   "labour": [
+    [
+     "Carpenter 2nd class",
+     0.23,
+     "LAB-GLZ"
+    ],
+    [
+     "Beldar",
+     0.23
+    ]
+   ],
+   "ref": "Item 21.3.2, Sub Head 21 Aluminium Work, printed p. 1823 (PDF p. 882)",
+   "q": "Details of cost for 1.00 sqm ... 0112 Carpenter 2nd class day 0.23 ... 0114 Beldar day 0.23",
+   "note": "5 mm float glass in aluminium shutters with EPDM gasket.",
+   "cond": "Cost of aluminium beading excluded. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "wc",
+   "s": "cpwd23",
+   "src_unit": "1 nos",
+   "printed_unit": "one pan",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     1.25,
+     "L-PLUMB"
+    ],
+    [
+     "Mason 1st class",
+     0.5
+    ],
+    [
+     "Beldar",
+     1.0
+    ]
+   ],
+   "ref": "Item 17.2.1, Sub Head 17 Sanitary Installations, printed p. 1282 (PDF p. 341)",
+   "q": "Details of cost for one pan ... 0116 Fitter (grade 1) day 1.25 ... 0123 Mason 1st class day 0.50 ... 0114 Beldar day 1.00",
+   "note": "Pedestal WC with seat, lid and 10 L cistern.",
+   "cond": "Includes P/S trap and flushing cistern fixing. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "wc_indian",
+   "s": "cpwd23",
+   "src_unit": "1 nos",
+   "printed_unit": "one pan",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     1.25,
+     "L-PLUMB"
+    ],
+    [
+     "Mason 1st class",
+     0.5
+    ],
+    [
+     "Beldar",
+     1.0
+    ]
+   ],
+   "ref": "Item 17.1.1, Sub Head 17 Sanitary Installations, printed p. 1281 (PDF p. 340)",
+   "q": "Details of cost for one pan ... 0116 Fitter (grade 1) day 1.25 ... 0123 Mason 1st class day 0.50 ... 0114 Beldar day 1.00",
+   "note": "Squatting pan with trap and cistern.",
+   "cond": "Vitreous china 580x440 with 100 mm SCI trap. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "sink",
+   "s": "cpwd23",
+   "src_unit": "1 nos",
+   "printed_unit": "one no.",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     0.22,
+     "L-PLUMB"
+    ],
+    [
+     "Mason 1st class",
+     0.33
+    ],
+    [
+     "Beldar",
+     0.56
+    ]
+   ],
+   "ref": "Item 17.10.2.1, Sub Head 17 Sanitary Installations, printed p. 1304 (PDF p. 363)",
+   "q": "Details of cost for one no. ... 0116 Fitter (grade 1) day 0.22 ... 0123 Mason 1st class day 0.33 ... 0114 Beldar day 0.56",
+   "note": "Stainless steel 610×510 sink.",
+   "cond": "With CI brackets, waste and plug. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "ci_pipe",
+   "s": "cpwd23",
+   "src_unit": "17.37 m",
+   "printed_unit": "17.37 m",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     0.42,
+     "L-PLUMB"
+    ],
+    [
+     "Bandhani",
+     0.21
+    ],
+    [
+     "Beldar",
+     0.83
+    ]
+   ],
+   "ref": "Item 17.35.1.1, Sub Head 17 Sanitary Installations, printed p. 1328 (PDF p. 387)",
+   "q": "Details of cost for 17.37 m ... 0116 Fitter (grade 1) day 0.42 ... 0100 Bandhani day 0.21 ... 0114 Beldar day 0.83",
+   "note": "100 mm cast iron, spigot & socket.",
+   "cond": "Labour per 17.37 m run (see basis). DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "gi_pipe",
+   "s": "cpwd23",
+   "src_unit": "10 m",
+   "printed_unit": "10 metre",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     0.33,
+     "L-PLUMB"
+    ],
+    [
+     "Assistant Fitter or 2nd class Fitter",
+     0.66,
+     "L-PLUMB"
+    ],
+    [
+     "Beldar",
+     0.66
+    ]
+   ],
+   "ref": "Item 18.10.1, Sub Head 18 Water Supply, printed p. 1426 (PDF p. 485)",
+   "q": "Details of cost for 10 metre ... 0116 Fitter (grade 1) day 0.33 ... 0117 Assistant Fitter or 2nd class Fitter day 0.66 ... 0114 Beldar day 0.66",
+   "note": "15 mm, internal, with fittings & clamps.",
+   "cond": "Internal work, exposed on wall; includes cutting and making good walls. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "gi_pipe1",
+   "s": "cpwd23",
+   "src_unit": "10 m",
+   "printed_unit": "10 metre",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     0.33,
+     "L-PLUMB"
+    ],
+    [
+     "Assistant Fitter or 2nd class Fitter",
+     0.98,
+     "L-PLUMB"
+    ],
+    [
+     "Beldar",
+     0.66
+    ]
+   ],
+   "ref": "Item 18.10.3, Sub Head 18 Water Supply, printed p. 1427 (PDF p. 486)",
+   "q": "Details of cost for 10 metre ... 0116 Fitter (grade 1) day 0.33 ... 0117 Assistant Fitter or 2nd class Fitter day 0.98 ... 0114 Beldar day 0.66",
+   "note": "25 mm, internal, with fittings & clamps.",
+   "cond": "Internal work. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "gi_pipe2",
+   "s": "cpwd23",
+   "src_unit": "10 m",
+   "printed_unit": "10 metre",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     0.33,
+     "L-PLUMB"
+    ],
+    [
+     "Assistant Fitter or 2nd class Fitter",
+     1.64,
+     "L-PLUMB"
+    ],
+    [
+     "Beldar",
+     1.64
+    ]
+   ],
+   "ref": "Item 18.10.6, Sub Head 18 Water Supply, printed p. 1428 (PDF p. 487)",
+   "q": "Details of cost for 10 metre ... 0116 Fitter (grade 1) day 0.33 ... 0117 Assistant Fitter or 2nd class Fitter day 1.64 ... 0114 Beldar day 1.64",
+   "note": "50 mm, internal, with fittings & clamps.",
+   "cond": "Internal work. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "ppr_s",
+   "s": "cpwd23",
+   "src_unit": "10 m",
+   "printed_unit": "10 metre",
+   "labour": [
+    [
+     "Fitter (grade 1)",
+     0.33,
+     "L-PLUMB"
+    ],
+    [
+     "Assistant Fitter or 2nd class Fitter",
+     0.82,
+     "L-PLUMB"
+    ],
+    [
+     "Beldar",
+     0.66
+    ]
+   ],
+   "ref": "Item 18.4.1, Sub Head 18 Water Supply, printed p. 1403 (PDF p. 462)",
+   "q": "Details of cost for 10 metre ... 0116 Fitter (grade 1) day 0.33 ... 0117 Assistant Fitter or 2nd class Fitter day 0.82 ... 0114 Beldar day 0.66",
+   "note": "20 mm OD PN-16, fusion welded.",
+   "cond": "3-layer PP-R IS 15801, internal work. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "sewer",
+   "s": "cpwd23",
+   "src_unit": "30 m",
+   "printed_unit": "30 metre",
+   "labour": [
+    [
+     "Mason 1st class",
+     1.0
+    ],
+    [
+     "Mason 2nd class",
+     1.0
+    ],
+    [
+     "Beldar",
+     3.0
+    ],
+    [
+     "Bhisti",
+     1.0
+    ]
+   ],
+   "ref": "Item 19.1.1, Sub Head 19 Drainage, printed p. 1691 (PDF p. 750)",
+   "q": "Details of cost for 30 metre ... 0123 Mason 1st class day 1.00 ... 0124 Mason 2nd class day 1.00 ... 0114 Beldar day 3.00 ... 0101 Bhisti day 1.00",
+   "note": "Stoneware 100 mm.",
+   "cond": "SP-1 class, CM 1:1 joints, testing; excludes excavation & bedding concrete. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "sewer6",
+   "s": "cpwd23",
+   "src_unit": "30 m",
+   "printed_unit": "30 metre",
+   "labour": [
+    [
+     "Mason 1st class",
+     1.5
+    ],
+    [
+     "Mason 2nd class",
+     1.5
+    ],
+    [
+     "Beldar",
+     4.0
+    ],
+    [
+     "Bhisti",
+     1.0
+    ]
+   ],
+   "ref": "Item 19.1.2, Sub Head 19 Drainage, printed p. 1691 (PDF p. 750)",
+   "q": "Details of cost for 30 metre ... 0123 Mason 1st class day 1.50 ... 0124 Mason 2nd class day 1.50 ... 0114 Beldar day 4.00 ... 0101 Bhisti day 1.00",
+   "note": "Stoneware 150 mm.",
+   "cond": "As 19.1.1. DAR labour = days per analysed quantity (CPWD disclaimer: coefficients indicative). Coolie/Beldar = unskilled; Bhisti = water carrier (curing); Mason (average) = blended skilled grade.",
+   "d": "10-Nov-2023",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/CPWD_DAR_Vol_II_14092023_Civil.pdf"
+  },
+  {
+   "act": "conduit",
+   "s": "cpwdem22",
+   "src_unit": "50 m",
+   "printed_unit": "50 metres",
+   "labour": [
+    [
+     "Wireman",
+     1.25
+    ],
+    [
+     "Mason, Grade 2",
+     0.75
+    ],
+    [
+     "Khallasi",
+     2.0
+    ]
+   ],
+   "ref": "Item 1.21.1, Chapter 1 Wiring, printed p. 57 (PDF p. 66)",
+   "q": "COST FOR 50 meterS ... 1001 Wireman day 1.25 ... 1010 Mason, Grade 2 day 0.75 ... 1007 Khallasi day 2.00",
+   "note": "PVC 20 mm, surface or recessed incl. cutting & making good.",
+   "cond": "Includes cutting wall and making good for recessed conduit. Same labour in DAR (E&M) 2018 item 1.21.1. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  },
+  {
+   "act": "wiring_pt",
+   "s": "cpwdem22",
+   "src_unit": "1 point",
+   "printed_unit": "1 point",
+   "labour": [
+    [
+     "Wireman",
+     0.2
+    ],
+    [
+     "Mason, Grade 2",
+     0.1
+    ],
+    [
+     "Khallasi",
+     0.3
+    ]
+   ],
+   "ref": "Item 1.10.1, Chapter 1 Wiring, printed p. 20 (PDF p. 29)",
+   "q": "COST FOR 1 POINT ... 1001 Wireman day 0.20 ... 1010 Mason, Grade 2 day 0.10 ... 1007 Khallasi day 0.30",
+   "note": "Group A point, 1.5 mm² in PVC conduit with modular switch.",
+   "cond": "Material take-off printed for Group A: cable 2x3+1x1.5 = 7.5 m and conduit 2.5 m per point (+5% wastage); incl. GI box, modular switch/plate, earth wire. Groups B/C (longer runs) in 1.10.2-1.10.3. Same labour in DAR (E&M) 2018. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  },
+  {
+   "act": "wiring_ckt",
+   "s": "cpwdem22",
+   "src_unit": "50 m",
+   "printed_unit": "50 metres",
+   "labour": [
+    [
+     "Wireman",
+     2.0
+    ],
+    [
+     "Mason, Grade 2",
+     0.75
+    ],
+    [
+     "Khallasi",
+     2.75
+    ]
+   ],
+   "ref": "Item 1.14.1, Chapter 1 Wiring, printed p. 24 (PDF p. 33)",
+   "q": "COST FOR 50 METERS ... 1001 Wireman day 2.00 ... 1010 Mason, Grade 2 day 0.75 ... 1007 Khallasi Day 2.75",
+   "note": "2 × 1.5 + 1.5 mm² earth in PVC conduit.",
+   "cond": "Wiring in surface/recessed medium class PVC conduit (conduit included). Same labour in DAR (E&M) 2018. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  },
+  {
+   "act": "wire_draw",
+   "s": "cpwdem18",
+   "src_unit": "50 m",
+   "printed_unit": "50 metres",
+   "labour": [
+    [
+     "Wireman",
+     0.5
+    ],
+    [
+     "Khallasi",
+     0.5
+    ]
+   ],
+   "ref": "Item 1.17.2, Chapter 1 Wiring, printed p. 40 (PDF p. 49)",
+   "q": "COST FOR 50 METRES ... 1001 Wireman day 0.50 ... 1007 Khallasi day 0.50",
+   "note": "Drawing 2 × 1.5 mm² in existing conduit.",
+   "cond": "Wire drawing only (conduit existing). Taken from the 2018 edition because DAR (E&M) 2022 item 1.17.2 has identical labour (Wireman 0.50, Khallasi 0.50) but misprints its basis as 'COST FOR 1 POINT' while costing ~101 m of cable and giving a rate per metre. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2018",
+   "url": "https://web.archive.org/web/20250710095931/https://cpwd.gov.in/Publication/Delhi_Analysis_of_Rates_(E_and_M)_2018.pdf"
+  },
+  {
+   "act": "switch",
+   "s": "cpwdem22",
+   "src_unit": "1 nos",
+   "printed_unit": "each",
+   "labour": [
+    [
+     "Wireman",
+     0.03
+    ],
+    [
+     "Khallasi",
+     0.03
+    ]
+   ],
+   "ref": "Item 1.24.1, Chapter 1 Wiring, printed p. 72 (PDF p. 81)",
+   "q": "COST FOR EACH ... 1001 Wireman day 0.03 ... 1007 Khallasi day 0.03",
+   "note": "Modular switch on existing box.",
+   "cond": "Including connections. Same labour in DAR (E&M) 2018. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  },
+  {
+   "act": "switch_board",
+   "s": "cpwdem22",
+   "src_unit": "1 nos",
+   "printed_unit": "each",
+   "labour": [
+    [
+     "Wireman",
+     0.04
+    ],
+    [
+     "Mason, Grade 2",
+     0.06
+    ],
+    [
+     "Khallasi",
+     0.1
+    ]
+   ],
+   "ref": "Item 1.27.1, Chapter 1 Wiring, printed p. 76 (PDF p. 85)",
+   "q": "COST FOR EACH ... 1001 Wireman day 0.04 ... 1010 Mason, Grade 2 day 0.06 ... 1007 Khallasi day 0.10",
+   "note": "GI box, modular base and cover plate.",
+   "cond": "Recessed GI box incl. making good. Same labour in DAR (E&M) 2018. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  },
+  {
+   "act": "db",
+   "s": "cpwdem22",
+   "src_unit": "1 nos",
+   "printed_unit": "one each",
+   "labour": [
+    [
+     "Wireman",
+     0.08
+    ],
+    [
+     "Mason, Grade 2",
+     0.12
+    ],
+    [
+     "Khallasi",
+     0.2
+    ]
+   ],
+   "ref": "Item 2.3.2, Chapter 2 MCCB, MCB & DBs, printed p. 117 (PDF p. 126)",
+   "q": "Details of cost for one each ... 1001 Wireman day 0.08 ... 1010 Mason, Grade 2 day 0.12 ... 1007 Khallasi day 0.20",
+   "note": "SPN 8-way double-door DB, without MCBs.",
+   "cond": "DB without MCB/RCCB/isolator. Same labour in DAR (E&M) 2018. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  },
+  {
+   "act": "db_tpn",
+   "s": "cpwdem22",
+   "src_unit": "1 nos",
+   "printed_unit": "one each",
+   "labour": [
+    [
+     "Wireman",
+     0.12
+    ],
+    [
+     "Mason, Grade 2",
+     0.12
+    ],
+    [
+     "Khallasi",
+     0.24
+    ]
+   ],
+   "ref": "Item 2.4.1, Chapter 2 MCCB, MCB & DBs, printed p. 118 (PDF p. 127)",
+   "q": "Details of cost for one each ... 1001 Wireman day 0.12 ... 1010 Mason, Grade 2 day 0.12 ... 1007 Khallasi day 0.24",
+   "note": "TPN 4-way (4+12) double-door DB.",
+   "cond": "Horizontal type, 415 V; without MCBs. Same labour in DAR (E&M) 2018. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  },
+  {
+   "act": "mcb",
+   "s": "cpwdem22",
+   "src_unit": "1 nos",
+   "printed_unit": "one each",
+   "labour": [
+    [
+     "Wireman",
+     0.04
+    ],
+    [
+     "Khallasi",
+     0.04
+    ]
+   ],
+   "ref": "Item 2.10.1, Chapter 2 MCCB, MCB & DBs, printed p. 121 (PDF p. 130)",
+   "q": "Details of cost for one each ... 1001 Wireman day 0.04 ... 1007 Khallasi day 0.04",
+   "note": "Single-pole MCB in existing DB.",
+   "cond": "Including connections, testing and commissioning. Same labour in DAR (E&M) 2018. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  },
+  {
+   "act": "light",
+   "s": "cpwdem22",
+   "src_unit": "1 nos",
+   "printed_unit": "each",
+   "labour": [
+    [
+     "Wireman",
+     0.1
+    ],
+    [
+     "Khallasi",
+     0.1
+    ]
+   ],
+   "ref": "Item 1.41, Chapter 1 Wiring, printed p. 88 (PDF p. 97)",
+   "q": "COST FOR EACH ... 1001 Wireman day 0.10 ... 1007 Khallasi day 0.10",
+   "note": "Pre-wired LED / fluorescent fitting, incl. connection & earthing.",
+   "cond": "Installation, testing & commissioning incl. connection with 1.5 sq mm cable and earthing. Same labour in DAR (E&M) 2018. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  },
+  {
+   "act": "fan",
+   "s": "cpwdem22",
+   "src_unit": "10 nos",
+   "printed_unit": "10 nos of fans",
+   "labour": [
+    [
+     "Wireman",
+     1.0
+    ],
+    [
+     "Khallasi",
+     1.0
+    ]
+   ],
+   "ref": "Item 1.44, Chapter 1 Wiring, printed p. 90 (PDF p. 99)",
+   "q": "COST FOR 10 NOS OF FANS ... 1001 Wireman day 1.00 ... 1007 Khallasi day 1.00",
+   "note": "Incl. down-rod wiring, testing & commissioning.",
+   "cond": "Installation, testing and commissioning. Same labour in DAR (E&M) 2018. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  },
+  {
+   "act": "cable",
+   "s": "cpwdem22",
+   "src_unit": "100 m",
+   "printed_unit": "100 Meters",
+   "labour": [
+    [
+     "Wireman",
+     1.0
+    ],
+    [
+     "Mason, Grade 2",
+     0.5
+    ],
+    [
+     "Khallasi",
+     2.0
+    ]
+   ],
+   "ref": "Item 7.7.1, Chapter 7 MV Cable Laying, printed p. 326 (PDF p. 335)",
+   "q": "Details of cost for 100 Meters ... 1001 Wireman day 1.00 ... 1010 Mason, Grade 2 day 0.50 ... 1007 Khallasi day 2.00",
+   "note": "LV cable up to 35 mm², laid & clamped on wall.",
+   "cond": "PVC/XLPE 1.1 kV cable clamped with 1 mm saddles. Same labour in DAR (E&M) 2018. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  },
+  {
+   "act": "duct",
+   "s": "cpwdem22",
+   "src_unit": "10 m2",
+   "printed_unit": "10 METRES DUCT (material line 10 sqm; result 'cost per sqm')",
+   "labour": [
+    [
+     "Fitter",
+     2.48,
+     "LAB-HVT"
+    ],
+    [
+     "Helper",
+     2.48
+    ]
+   ],
+   "ref": "Item 16.12.2.1, Chapter 16 HVAC, printed p. 594 (PDF p. 603) + Item 16.12.2.1",
+   "q": "COST FOR 10 METRES DUCT ... 1004 Fitter per day 1.48 ... 1007 Helper per day 1.48 | COST FOR 10 METRES DUCT ... 1004 Fitter per day 1.00 ... 1007 Helper per day 1.00",
+   "note": "Site fabrication (16.12.2.1) + fixing added; printed 'per 10 metres duct' but analysed per 10 m² of sheet.",
+   "cond": "Labour 'for Fabrication' only; fixing is the next row. Header prints 'COST FOR 10 METRES DUCT' but the analysis is for 10 sqm of sheet and ends 'cost per sqm'. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  },
+  {
+   "act": "duct_ins",
+   "s": "cpwdem22",
+   "src_unit": "10 m2",
+   "printed_unit": "10 SQ. M.",
+   "labour": [
+    [
+     "Fitter",
+     0.5,
+     "LAB-HVT"
+    ],
+    [
+     "Helper",
+     0.5
+    ]
+   ],
+   "ref": "Item 16.23.2, Chapter 16 HVAC, printed p. 605 (PDF p. 614)",
+   "q": "RATE FOR 10 SQ. M. ... 1004 Fitter per day 0.5 ... 1007 Helper per day 0.5",
+   "note": "25 mm nitrile rubber with foil.",
+   "cond": "On existing duct with adhesive and nitrile tape at joints. PDF text layer uses an offset font encoding; values decoded programmatically and spot-checked against rendered page images. DAR (E&M) labour = days per analysed quantity; rates for working height up to 4.5 m (General Note 3). Khallasi = electrical helper; Mason Grade 2 does chasing/making good. CPWD disclaimer: coefficients indicative.",
+   "d": "2022",
+   "url": "https://web.archive.org/web/20260430100358/https://cpwd.gov.in/Publication/DAR_2022.pdf"
+  }
+ ],
+ "coverage": [
+  {
+   "category": "Paint",
+   "material": "Exterior emulsion (weather coat)",
+   "product": "Nippon Paint Pakistan - Nippon Quality Exterior Emulsion",
+   "coverage_low": 14,
+   "coverage_high": 16,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Exterior walls; 3-4 coats recommended; 'may vary depending on the substrate conditions'; dilute 20-30% water for roller",
+   "pack": "1L, 4L, 16L",
+   "s": "nippon",
+   "ref": "Nippon Quality Exterior Emulsion - Technical Data Sheet",
+   "d": "Oct-2025",
+   "url": "https://nipponpaint.com.pk/wp-content/uploads/2022/01/Nippon-Quality-Exterior-Emulsion-1.pdf",
+   "quote": "14 -16 m² per litre per coat (May vary depending on the substrate conditions.) ... 3-4 coats",
+   "printed": "m² per litre per coat",
+   "pack_qty": 4
+  },
+  {
+   "category": "Paint",
+   "material": "Exterior emulsion (premium weather coat)",
+   "product": "Nippon Paint Pakistan - Nippon Weatherbond",
+   "coverage_low": 15,
+   "coverage_high": 17,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Exterior walls; coverage depends on film thickness, texture, porosity, temperature and wastage",
+   "pack": "1L, 4L, 16L",
+   "s": "nippon",
+   "ref": "Nippon Weatherbond - Technical Data Sheet",
+   "d": "Oct-2026",
+   "url": "https://nipponpaint.com.pk/wp-content/uploads/2022/01/Nippon-Paint-Weatherbond-TDS-2.pdf",
+   "quote": ": 15-17 m² per litre per coat (Coverage depends on the film thickness applied, surface texture, porosity, imperfections, temperature, and wastage",
+   "printed": "m² per litre per coat",
+   "pack_qty": 4
+  },
+  {
+   "category": "Paint",
+   "material": "Interior emulsion (economy)",
+   "product": "Nippon Paint Pakistan - Nippon Quality Emulsion",
+   "coverage_low": 10,
+   "coverage_high": 12,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Interior walls, smooth flat finish; varies with substrate",
+   "pack": "0.91 L, 3.64 L, 14.56 L (ready mix)",
+   "s": "nippon",
+   "ref": "Nippon Quality Emulsion - Technical Data Sheet",
+   "d": "Oct-2025",
+   "url": "https://nipponpaint.com.pk/wp-content/uploads/2022/01/Nippon-Quality-Emulsion.pdf",
+   "quote": "Smooth Flat finish 10-12 m² per litre per coat (May vary depending on the substrate conditions.)",
+   "printed": "m² per litre per coat",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Paint",
+   "material": "Interior emulsion (premium matt)",
+   "product": "Nippon Paint Pakistan - Nippon Spot-less",
+   "coverage_low": 12,
+   "coverage_high": 14,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Interior walls, low sheen; varies with substrate",
+   "pack": "0.91 L, 3.64 L",
+   "s": "nippon",
+   "ref": "Nippon Spot-less - Technical Data Sheet",
+   "d": "Oct-2025",
+   "url": "https://nipponpaint.com.pk/wp-content/uploads/2022/01/Nippon-Spotless.pdf",
+   "quote": "Low Sheen 12 - 14 m² per litre per coat (May vary depending on the substrate conditions.)",
+   "printed": "m² per litre per coat",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Paint",
+   "material": "Synthetic gloss enamel",
+   "product": "Nippon Paint Pakistan - Nippon Gloss Enamel",
+   "coverage_low": 12,
+   "coverage_high": 14,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Wood/metal; theoretical; 2-3 finish coats in system; depends on film thickness, temperature, wastage",
+   "pack": "0.91 L, 3.64 L, 14.56 L",
+   "s": "nippon",
+   "ref": "Nippon Gloss Enamel - Technical Data Sheet",
+   "d": "Oct-2025",
+   "url": "https://nipponpaint.com.pk/wp-content/uploads/2025/11/Gloss-Enamel-Oct-25.pdf",
+   "quote": "Theoretical Coverage : 12-14 m² per liter per coat (Coverage depends on the film thickness applied, temperature, and wastage during application, etc.)",
+   "printed": "m² per liter per coat",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Paint",
+   "material": "Synthetic gloss enamel (economy)",
+   "product": "Nippon Paint Pakistan - Nippon Q-Lac Gloss Enamel",
+   "coverage_low": 12,
+   "coverage_high": 14,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Wood/metal; varies with substrate condition",
+   "pack": "0.91 L, 3.64 L, 14.56 L",
+   "s": "nippon",
+   "ref": "Nippon Q-Lac Gloss Enamel - Technical Data Sheet",
+   "d": "Oct-2025",
+   "url": "https://nipponpaint.com.pk/wp-content/uploads/2022/01/Nippon-Q-Lac-Gloss-Enamel.pdf",
+   "quote": "12-14 m² per liter per coat (May vary depending on the substrate condition.)",
+   "printed": "m² per liter per coat",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Primer",
+   "material": "Wall sealer (exterior, alkali resistant)",
+   "product": "Nippon Paint Pakistan - Nippon Vinilex 5100 Wall Sealer",
+   "coverage_low": 12,
+   "coverage_high": 14,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Exterior plastered walls, brickwork, ceilings; new walls and repaint",
+   "pack": "1L, 4L, 16L",
+   "s": "nippon",
+   "ref": "Nippon Vinilex 5100 Wall Sealer - Technical Data Sheet",
+   "d": "Oct-2025",
+   "url": "https://nipponpaint.com.pk/wp-content/uploads/2022/01/Nippon-Vinilex-5100-Wall-Sealer-1.pdf",
+   "quote": "Coverage 12-14 m² per litre per coat",
+   "printed": "m² per litre per coat",
+   "pack_qty": 4
+  },
+  {
+   "category": "Primer",
+   "material": "Wall sealer (interior)",
+   "product": "Nippon Paint Pakistan - Nippon Quality-Primer Wall Sealer",
+   "coverage_low": 12,
+   "coverage_high": 14,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Interior walls; at recommended dry film thickness; varies with substrate",
+   "pack": "0.91 L, 3.64 L, 14.56 L",
+   "s": "nippon",
+   "ref": "Nippon Quality-Primer - Technical Data Sheet (no revision date printed)",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://nipponpaint.com.pk/wp-content/uploads/2022/04/Nippon-Quality-Primer.pdf",
+   "quote": "Theoretical Coverage at Recommended Dry Film Thickness 12-14 m² per litre per coat (May vary depending on the substrate condition)",
+   "printed": "m² per litre per coat",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Primer",
+   "material": "Red oxide metal primer",
+   "product": "Nippon Paint Pakistan - Nippon Red Oxide Primer",
+   "coverage_low": 14,
+   "coverage_high": 16,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Alkyd anti-corrosive primer for iron and steel (non-immersed); theoretical",
+   "pack": "0.91L, 3.64L, 14.56L",
+   "s": "nippon",
+   "ref": "Nippon Red Oxide Primer - Technical Data Sheet",
+   "d": "Oct-2025",
+   "url": "https://nipponpaint.com.pk/wp-content/uploads/2022/01/Nippon-Red-Oxide-Primer-1.pdf",
+   "quote": "Theoretical coverage 14-16 m² per litre per coat",
+   "printed": "m² per litre per coat",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Putty",
+   "material": "Wall putty (interior, water based)",
+   "product": "Nippon Paint Pakistan - Nippon Wall Putty",
+   "coverage_low": 3,
+   "coverage_high": 5,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Interior only. Printed per litre although the putty is sold by kg — check with Nippon",
+   "pack": "5 Kg, 20 Kg",
+   "s": "nippon",
+   "ref": "Nippon Wall Putty - Technical Data Sheet",
+   "d": "Oct-2025",
+   "url": "https://nipponpaint.com.pk/wp-content/uploads/2022/01/Nippon-Wall-Putty-1.pdf",
+   "quote": "Theoretical Coverage 3 - 5 m² per litre per coat (Coverage may very depending on the substrate conditions) ... Standard Packing : 5 Kg, 20 Kg",
+   "printed": "m² per litre per coat"
+  },
+  {
+   "category": "Paint",
+   "material": "Distemper (acrylic 'super emulsion' distemper)",
+   "product": "Berger Paints Pakistan - Top Super Emulsion",
+   "coverage_low": 12,
+   "coverage_high": 16,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Interior walls; varies with surface type and colour",
+   "pack": "0.91 L, 3.64 L, 14.56 L",
+   "s": "berger",
+   "ref": "Berger shop product page - Top Super Emulsion",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://shop.berger.com.pk/products/top-super-emulsion",
+   "quote": "One litre of Super Emulsion distemper covers approximately 12 - 16 m² per coat.",
+   "printed": "m² per litre per coat",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Paint",
+   "material": "Interior emulsion (semi plastic)",
+   "product": "Berger Paints Pakistan - SPD Semi Plastic Emulsion",
+   "coverage_low": 11,
+   "coverage_high": 15,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Interior; depends on surface porosity and preparation",
+   "pack": "0.91 L, 3.64 L, 14.56 L",
+   "s": "berger",
+   "ref": "Berger shop product page - SPD Semi Plastic Emulsion",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://shop.berger.com.pk/products/spd-semi-plastic-emulsion",
+   "quote": "provides an impressive coverage of approximately 11 to 15 square meters per litre per coat, depending on the surface porosity and preparation",
+   "printed": "square meters per litre per coat",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Paint",
+   "material": "Interior emulsion (premium matt)",
+   "product": "Berger Paints Pakistan - Elegance Matt Emulsion",
+   "coverage_low": 14,
+   "coverage_high": 16,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Interior; depends on surface porosity and absorbency",
+   "pack": "1, 4, 16 L",
+   "s": "berger",
+   "ref": "Berger shop product page - Elegance Matt Emulsion",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://shop.berger.com.pk/products/elegance-matt-emulsion",
+   "quote": "Elegance Matt Emulsion ... covers 14 to 16 meter square per litre per coat",
+   "printed": "meter square per litre per coat",
+   "pack_qty": 4
+  },
+  {
+   "category": "Paint",
+   "material": "Exterior emulsion (weather coat)",
+   "product": "Berger Paints Pakistan - VIP Weathercoat",
+   "coverage_low": 12,
+   "coverage_high": 14,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Exterior; depends on porosity of surface",
+   "pack": "1, 4 & 16 liters",
+   "s": "berger",
+   "ref": "Berger Pakistan paint visualizer page - VIP Weathercoat",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://berger.com.pk/color-visualizer/VIP%20Weathercoat/exterior",
+   "quote": "12 to 14 meter square per litre per coat, depending on the porosity of surface.",
+   "printed": "meter square per litre per coat",
+   "pack_qty": 4
+  },
+  {
+   "category": "Paint",
+   "material": "Synthetic gloss enamel",
+   "product": "Berger Paints Pakistan - VIP Super Gloss Enamel",
+   "coverage_low": 13,
+   "coverage_high": 15,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Wood/metal; depends on porosity of surface",
+   "pack": "0.91, 3.64 and 14.56 litres",
+   "s": "berger",
+   "ref": "Berger shop product page - VIP Super Gloss Enamel",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://shop.berger.com.pk/products/vip-super-gloss-enamel",
+   "quote": "VIP Super Gloss Enamel is 13 to 15 meter square per litre per coat, depending on the porosity of the surface.",
+   "printed": "meter square per litre per coat",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Primer",
+   "material": "Wall primer sealer (interior/exterior)",
+   "product": "Berger Paints Pakistan - Plastron Wall Primer Sealer",
+   "coverage_low": 10,
+   "coverage_high": 12,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Depends on porosity; two coats on plaster/render under 3 months old",
+   "pack": "0.91, 3.64, and 14.56 litres",
+   "s": "berger",
+   "ref": "Berger shop product page - Plastron Wall Primer",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://shop.berger.com.pk/products/plastron-wall-primer",
+   "quote": "Plastron Wall Primer Sealer covers 10 to 12 meter square per litre per coat, depending on the porosity of surface.",
+   "printed": "meter square per litre per coat",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Primer",
+   "material": "Exterior wall sealer (water based)",
+   "product": "Berger Paints Pakistan - Weathercoat Pure Seal",
+   "coverage_low": 16,
+   "coverage_high": 18,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Exterior new plaster; water based",
+   "pack": "4 and 16 liters",
+   "s": "berger",
+   "ref": "Berger shop product page - Weathercoat Pure Seal",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://shop.berger.com.pk/products/weathercoat-pure-seal",
+   "quote": "16-18 m2 per liter per coat",
+   "printed": "m2 per liter per coat",
+   "pack_qty": 4
+  },
+  {
+   "category": "Primer",
+   "material": "Red oxide metal primer",
+   "product": "Berger Paints Pakistan - Red Oxide Primer",
+   "coverage_low": 10,
+   "coverage_high": 12,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "On a smooth non-absorbent surface; thin with mineral turpentine if needed",
+   "pack": "0.91 & 3.64 litres",
+   "s": "berger",
+   "ref": "Berger shop product page - Red Oxide Primer",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://shop.berger.com.pk/products/red-oxide-primer",
+   "quote": "10 to 12 meter square per litre per coat on a smooth non-absorbent surface.",
+   "printed": "meter square per litre per coat",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Putty",
+   "material": "Wall putty (interior)",
+   "product": "Berger Paints Pakistan - NU Wall Putty",
+   "coverage_low": 5,
+   "coverage_high": 7,
+   "coverage_unit": "m2/kg",
+   "per_coat": true,
+   "conditions": "Interior walls",
+   "pack": "5 kg and 20 kg",
+   "s": "berger",
+   "ref": "Berger shop product page - NU Wall Putty",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://shop.berger.com.pk/products/nu-putty",
+   "quote": "Berger NU Putty covers 5-7 meter square per kg per coat.",
+   "printed": "meter square per kg per coat",
+   "pack_qty": 20
+  },
+  {
+   "category": "Putty",
+   "material": "Exterior putty (white cement based)",
+   "product": "Berger Paints Pakistan - Weather Coat Exterior Putty",
+   "coverage_low": 24,
+   "coverage_high": 24,
+   "coverage_unit": "sft/kg",
+   "per_coat": false,
+   "conditions": "Exterior; the printed figure covers TWO coats together",
+   "pack": "20 Kg",
+   "s": "berger",
+   "ref": "Berger shop product page - Weather Coat Exterior Putty (White Cement Based)",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://shop.berger.com.pk/products/weather-coat-exterior-putty-white-cement-based",
+   "quote": "24 sq. ft/kg for 2 coats",
+   "printed": "sq. ft/kg for 2 coats",
+   "pack_qty": 20
+  },
+  {
+   "category": "Paint",
+   "material": "Exterior emulsion (weather shield)",
+   "product": "Dulux Pakistan (AkzoNobel) - Dulux Weathershield Max",
+   "coverage_low": 13,
+   "coverage_high": 15,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Exterior; key info lists 3 coats; application text says 3-4 coats at 2-3 h interval",
+   "pack": "1 L, 4L",
+   "s": "dulux",
+   "ref": "Dulux Pakistan product page - Dulux Weathershield Max",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://www.dulux.com.pk/en/products/dulux-weathershield-max",
+   "quote": "Coverage 13-15 m2/L ... Coats 3 ... Apply 3-4 coats of Dulux Weathershield Max with 2-3 hrs of interval in between coats.",
+   "printed": "m2/L",
+   "pack_qty": 4
+  },
+  {
+   "category": "Paint",
+   "material": "Interior emulsion",
+   "product": "Dulux Pakistan (AkzoNobel) - Dulux Promise Interior Emulsion",
+   "coverage_low": 13,
+   "coverage_high": 15,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Interior; 3-4 coats with 2-3 h interval",
+   "pack": "1 L, 4 L, 16 L",
+   "s": "dulux",
+   "ref": "Dulux Pakistan product page - Dulux Promise Interior Emulsion",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://www.dulux.com.pk/en/products/dulux-promise-interior-emulsion",
+   "quote": "Coverage 13-15 m2/l/coat ... Apply 3-4 coats of Dulux Promise Interior Emulsion with 2-3 hours interval between coats.",
+   "printed": "m2/l/coat",
+   "pack_qty": 4
+  },
+  {
+   "category": "Primer",
+   "material": "Wood & metal primer / undercoat (synthetic)",
+   "product": "Dulux Pakistan (AkzoNobel) - Dulux Synthetic Undercoat Wood and Metal Primer",
+   "coverage_low": 11,
+   "coverage_high": 13,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Wood and metal; key info says 1 coat, application text says 2-3 coats, 16 h between coats",
+   "pack": "0.91 L, 3.64 L",
+   "s": "dulux",
+   "ref": "Dulux Pakistan product page - Dulux Synthetic Undercoat Wood and Metal Primer",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://www.dulux.com.pk/en/products/dulux-synthetic-undercoat-wood-and-metal-primer",
+   "quote": "Coverage 11-13 m2/L",
+   "printed": "m2/L",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Primer",
+   "material": "Red oxide metal primer",
+   "product": "Dulux Pakistan (AkzoNobel) - Dulux Red Oxide Metal Primer",
+   "coverage_low": 11,
+   "coverage_high": 13,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Metal; 1 coat",
+   "pack": "0.91 L, 3.64 L",
+   "s": "dulux",
+   "ref": "Dulux Pakistan product page - Dulux Red Oxide Metal Primer",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://www.dulux.com.pk/en/products/dulux-red-oxide-metal-primer",
+   "quote": "Coverage 11-13 m2/L ... Coats 1",
+   "printed": "m2/L",
+   "pack_qty": 3.64
+  },
+  {
+   "category": "Primer",
+   "material": "Wall primer (interior acrylic)",
+   "product": "Dulux Pakistan (AkzoNobel) - Dulux Interior Acrylic Primer",
+   "coverage_low": 16,
+   "coverage_high": 18,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Interior walls; 1 coat",
+   "pack": "4 L",
+   "s": "dulux",
+   "ref": "Dulux Pakistan product page - Dulux Interior Acrylic Primer",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://www.dulux.com.pk/en/products/dulux-interior-acrylic-primer",
+   "quote": "Coverage 16-18 m2/L ... Coats 1",
+   "printed": "m2/L",
+   "pack_qty": 4
+  },
+  {
+   "category": "Paint",
+   "material": "Exterior emulsion (pure acrylic)",
+   "product": "Diamond Paints Pakistan - Diamond Overall Weather Max",
+   "coverage_low": 12,
+   "coverage_high": 14,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Interior/exterior plaster, concrete, brickwork; film thickness 20-30 microns/coat",
+   "pack": "not stated",
+   "s": "diamond",
+   "ref": "Diamond Overall Weather Max - TDS (undated)",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://diamondpaints.com/cdn/shop/files/Overall-Weather-Max-TDS.pdf",
+   "quote": "Film Thickness 20-30 microns/Coat Theoretical spreading rate 12-14 (m²/L/coat)",
+   "printed": "m²/L/coat (theoretical spreading rate)"
+  },
+  {
+   "category": "Tile adhesive",
+   "material": "Tile adhesive — small tiles, 6 mm notch",
+   "product": "Sika Pakistan - SikaCeram-205 PK",
+   "coverage_low": 2,
+   "coverage_high": 3,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Small tiles; trowel size 6 mm; depends on substrate levelness, tile size and placing technique",
+   "pack": "25 kg bag",
+   "s": "sika-pk",
+   "ref": "SikaCeram-205 PK Product Data Sheet, Version 01.02",
+   "d": "Oct-2023",
+   "url": "https://pak.sika.com/dms/getdocument.get/e738c6f7-284b-4a37-800b-229d94259a64/sikaceram-205-pk.pdf",
+   "quote": "Small tiles 6 mm ~ 2 - 3 kg/m2",
+   "printed": "kg/m2",
+   "pack_qty": 25
+  },
+  {
+   "category": "Tile adhesive",
+   "material": "Tile adhesive — 20×20 to 40×40 cm tiles, 8 mm notch",
+   "product": "Sika Pakistan - SikaCeram-205 PK",
+   "coverage_low": 3,
+   "coverage_high": 4,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Normal size tiles (20*20 cm - 40*40 cm); trowel size 8 mm; depends on substrate levelness, tile size and placing technique",
+   "pack": "25 kg bag",
+   "s": "sika-pk",
+   "ref": "SikaCeram-205 PK Product Data Sheet, Version 01.02",
+   "d": "Oct-2023",
+   "url": "https://pak.sika.com/dms/getdocument.get/e738c6f7-284b-4a37-800b-229d94259a64/sikaceram-205-pk.pdf",
+   "quote": "Normal size tiles (20*20 cm - 40*40 cm) 8 mm ~ 3 - 4 kg/m2",
+   "printed": "kg/m2",
+   "pack_qty": 25
+  },
+  {
+   "category": "Tile adhesive",
+   "material": "Tile adhesive — large tiles / double spread, 10 mm notch",
+   "product": "Sika Pakistan - SikaCeram-205 PK",
+   "coverage_low": 4,
+   "coverage_high": 7,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Large tiles and double spreading; trowel size 10 mm; depends on substrate levelness, tile size and placing technique",
+   "pack": "25 kg bag",
+   "s": "sika-pk",
+   "ref": "SikaCeram-205 PK Product Data Sheet, Version 01.02",
+   "d": "Oct-2023",
+   "url": "https://pak.sika.com/dms/getdocument.get/e738c6f7-284b-4a37-800b-229d94259a64/sikaceram-205-pk.pdf",
+   "quote": "Large tiles and double spreading 10 mm ~ 4 - 7 kg/m2",
+   "printed": "kg/m2",
+   "pack_qty": 25
+  },
+  {
+   "category": "Tile adhesive",
+   "material": "Tile adhesive — thin bed 2–3 mm",
+   "product": "Sika Pakistan - SikaCeram-90 PK",
+   "coverage_low": 4.5,
+   "coverage_high": 6.6,
+   "coverage_unit": "m2/bag",
+   "per_coat": false,
+   "conditions": "Thin bed 2-3 mm layer; V-notch trowel for small tiles, square notch for bigger tiles",
+   "pack": "20 kg & 40 kg bag",
+   "s": "sika-pk",
+   "ref": "SikaCeram-90 PK Product Data Sheet, Version 01.02",
+   "d": "Oct-2023",
+   "url": "https://pak.sika.com/dms/getdocument.get/8815081e-a6e3-4c0f-9784-c7ffe631b186/sikaceram-90-pk.pdf",
+   "quote": "One 20 kg bag will cover approximately 4.5 - 6.6 m² at 2-3 mm",
+   "printed": "m² per 20 kg bag"
+  },
+  {
+   "category": "Tile adhesive",
+   "material": "Tile adhesive — 2–3 mm bed",
+   "product": "Sika Pakistan - SikaCeram-51",
+   "coverage_low": 4.9,
+   "coverage_high": 7.3,
+   "coverage_unit": "m2/bag",
+   "per_coat": false,
+   "conditions": "Grey 25 kg bag; 3-2 mm thickness (thicker bed = lower coverage)",
+   "pack": "Grey 25 kg bag; White 20 kg bag",
+   "s": "sika-pk",
+   "ref": "SikaCeram-51 Product Data Sheet, Version 03.01",
+   "d": "May-2021",
+   "url": "https://pak.sika.com/dam/dms/pakdms/l/sikaceram-51.pdf",
+   "quote": "One 25 kg bag will cover approximately 4.9 - 7.3 m2 at 3 - 2 mm thickness.",
+   "printed": "m2 per 25 kg bag"
+  },
+  {
+   "category": "Tile adhesive",
+   "material": "Tile / marble / stone adhesive — 8–10 mm bed",
+   "product": "Sika Pakistan - SikaCeram-103 PK",
+   "coverage_low": 5,
+   "coverage_high": 7,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Bed thickness 8-10 mm (max 10 mm); ceramic, porcelain, marble and natural stone",
+   "pack": "20 kg",
+   "s": "sika-pk",
+   "ref": "SikaCeram-103 PK Product Data Sheet, Version 06.01",
+   "d": "Jun-2025",
+   "url": "https://pak.sika.com/dms/getdocument.get/813ff515-2c3b-48f6-b3cd-5f61800f2e26/sikaceram-103-pk.pdf",
+   "quote": "As a guide:5-7 kg/m2 / 8 - 10 mm.",
+   "printed": "kg/m2 per 8-10 mm",
+   "pack_qty": 20
+  },
+  {
+   "category": "Tile adhesive",
+   "material": "Tile adhesive — 6×6×6 mm notch",
+   "product": "Mapei - Keraflex",
+   "coverage_low": 6,
+   "coverage_high": 7.5,
+   "coverage_unit": "m2/bag",
+   "per_coat": false,
+   "conditions": "Square notched trowel 6 x 6 x 6 mm (Mapei GB-edition TDS hosted by Australian retailer)",
+   "pack": "20 kg bags; 4x5 kg boxes",
+   "s": "mapei",
+   "ref": "Mapei Keraflex Technical Data Sheet (GB), via Bretts",
+   "d": "20-Jun-2016",
+   "url": "https://img.bretts.com.au/Mapei-Keraflex.pdf",
+   "quote": "A 20kg bag covers 6 to 7.5m2 with a square notched trowel 6 x 6 x 6 mm",
+   "printed": "m2 per 20kg bag"
+  },
+  {
+   "category": "Tile adhesive",
+   "material": "Tile adhesive — 6×10×6 mm notch",
+   "product": "Mapei - Keraflex",
+   "coverage_low": 4,
+   "coverage_high": 5,
+   "coverage_unit": "m2/bag",
+   "per_coat": false,
+   "conditions": "Square notched trowel 6 x 10 x 6 mm",
+   "pack": "20 kg bags; 4x5 kg boxes",
+   "s": "mapei",
+   "ref": "Mapei Keraflex Technical Data Sheet (GB), via Bretts",
+   "d": "20-Jun-2016",
+   "url": "https://img.bretts.com.au/Mapei-Keraflex.pdf",
+   "quote": "and 4 to 5m2 with a 6 x 10 x 6 mm square notched trowel.",
+   "printed": "m2 per 20kg bag"
+  },
+  {
+   "category": "Grout",
+   "material": "Tile grout — 200×200 tiles, 1 mm joint",
+   "product": "Sika Pakistan - SikaCeram-600 Tile Grout PK",
+   "coverage_low": 0.48,
+   "coverage_high": 0.48,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Tile size 200x200x6 mm; joint width 1 mm (values as printed in PDS table)",
+   "pack": "1 kg Pouch",
+   "s": "sika-pk",
+   "ref": "SikaCeram-600 Tile Grout PK Product Data Sheet, Version 01.01",
+   "d": "Jun-2024",
+   "url": "https://pak.sika.com/dms/getdocument.get/1571d42f-8994-4589-bbda-e602a7f8861c/sikaceram-600-tilegroutpk.pdf",
+   "quote": "Tile size (mm) 200x200x6 Joint Width (mm) 1 Consumption (kg/m2) 0.48",
+   "printed": "kg/m2"
+  },
+  {
+   "category": "Grout",
+   "material": "Tile grout — 200×200 tiles, 3 mm joint",
+   "product": "Sika Pakistan - SikaCeram-600 Tile Grout PK",
+   "coverage_low": 1.44,
+   "coverage_high": 1.44,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Tile size 200x200x6 mm; joint width 3 mm (values as printed in PDS table)",
+   "pack": "1 kg Pouch",
+   "s": "sika-pk",
+   "ref": "SikaCeram-600 Tile Grout PK Product Data Sheet, Version 01.01",
+   "d": "Jun-2024",
+   "url": "https://pak.sika.com/dms/getdocument.get/1571d42f-8994-4589-bbda-e602a7f8861c/sikaceram-600-tilegroutpk.pdf",
+   "quote": "Tile size (mm) 200x200x6 Joint Width (mm) 3 Consumption (kg/m2) 1.44",
+   "printed": "kg/m2"
+  },
+  {
+   "category": "Grout",
+   "material": "Tile grout — 300×300 tiles, 1 mm joint",
+   "product": "Sika Pakistan - SikaCeram-600 Tile Grout PK",
+   "coverage_low": 0.36,
+   "coverage_high": 0.36,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Tile size 300x300x6 mm; joint width 1 mm (values as printed in PDS table)",
+   "pack": "1 kg Pouch",
+   "s": "sika-pk",
+   "ref": "SikaCeram-600 Tile Grout PK Product Data Sheet, Version 01.01",
+   "d": "Jun-2024",
+   "url": "https://pak.sika.com/dms/getdocument.get/1571d42f-8994-4589-bbda-e602a7f8861c/sikaceram-600-tilegroutpk.pdf",
+   "quote": "Tile size (mm) 300x300x6 Joint Width (mm) 1 Consumption (kg/m2) 0.36",
+   "printed": "kg/m2"
+  },
+  {
+   "category": "Grout",
+   "material": "Tile grout — 300×300 tiles, 3 mm joint",
+   "product": "Sika Pakistan - SikaCeram-600 Tile Grout PK",
+   "coverage_low": 1.08,
+   "coverage_high": 1.08,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Tile size 300x300x6 mm; joint width 3 mm (values as printed in PDS table)",
+   "pack": "1 kg Pouch",
+   "s": "sika-pk",
+   "ref": "SikaCeram-600 Tile Grout PK Product Data Sheet, Version 01.01",
+   "d": "Jun-2024",
+   "url": "https://pak.sika.com/dms/getdocument.get/1571d42f-8994-4589-bbda-e602a7f8861c/sikaceram-600-tilegroutpk.pdf",
+   "quote": "Tile size (mm) 300x300x6 Joint Width (mm) 3 Consumption (kg/m2) 1.08",
+   "printed": "kg/m2"
+  },
+  {
+   "category": "Grout",
+   "material": "Tile grout — 400×400 tiles, 1 mm joint",
+   "product": "Sika Pakistan - SikaCeram-600 Tile Grout PK",
+   "coverage_low": 0.24,
+   "coverage_high": 0.24,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Tile size 400x400x6 mm; joint width 1 mm (values as printed in PDS table)",
+   "pack": "1 kg Pouch",
+   "s": "sika-pk",
+   "ref": "SikaCeram-600 Tile Grout PK Product Data Sheet, Version 01.01",
+   "d": "Jun-2024",
+   "url": "https://pak.sika.com/dms/getdocument.get/1571d42f-8994-4589-bbda-e602a7f8861c/sikaceram-600-tilegroutpk.pdf",
+   "quote": "Tile size (mm) 400x400x6 Joint Width (mm) 1 Consumption (kg/m2) 0.24",
+   "printed": "kg/m2"
+  },
+  {
+   "category": "Grout",
+   "material": "Tile grout — 400×400 tiles, 3 mm joint",
+   "product": "Sika Pakistan - SikaCeram-600 Tile Grout PK",
+   "coverage_low": 0.72,
+   "coverage_high": 0.72,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Tile size 400x400x6 mm; joint width 3 mm (values as printed in PDS table)",
+   "pack": "1 kg Pouch",
+   "s": "sika-pk",
+   "ref": "SikaCeram-600 Tile Grout PK Product Data Sheet, Version 01.01",
+   "d": "Jun-2024",
+   "url": "https://pak.sika.com/dms/getdocument.get/1571d42f-8994-4589-bbda-e602a7f8861c/sikaceram-600-tilegroutpk.pdf",
+   "quote": "Tile size (mm) 400x400x6 Joint Width (mm) 3 Consumption (kg/m2) 0.72",
+   "printed": "kg/m2"
+  },
+  {
+   "category": "Grout",
+   "material": "Tile grout — 600×600 tiles, 1 mm joint",
+   "product": "Sika Pakistan - SikaCeram-600 Tile Grout PK",
+   "coverage_low": 0.2,
+   "coverage_high": 0.2,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Tile size 600x600x10 mm; joint width 1 mm (values as printed in PDS table)",
+   "pack": "1 kg Pouch",
+   "s": "sika-pk",
+   "ref": "SikaCeram-600 Tile Grout PK Product Data Sheet, Version 01.01",
+   "d": "Jun-2024",
+   "url": "https://pak.sika.com/dms/getdocument.get/1571d42f-8994-4589-bbda-e602a7f8861c/sikaceram-600-tilegroutpk.pdf",
+   "quote": "Tile size (mm) 600x600x10 Joint Width (mm) 1 Consumption (kg/m2) 0.2",
+   "printed": "kg/m2"
+  },
+  {
+   "category": "Grout",
+   "material": "Tile grout — 600×600 tiles, 3 mm joint",
+   "product": "Sika Pakistan - SikaCeram-600 Tile Grout PK",
+   "coverage_low": 0.6,
+   "coverage_high": 0.6,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Tile size 600x600x10 mm; joint width 3 mm (values as printed in PDS table)",
+   "pack": "1 kg Pouch",
+   "s": "sika-pk",
+   "ref": "SikaCeram-600 Tile Grout PK Product Data Sheet, Version 01.01",
+   "d": "Jun-2024",
+   "url": "https://pak.sika.com/dms/getdocument.get/1571d42f-8994-4589-bbda-e602a7f8861c/sikaceram-600-tilegroutpk.pdf",
+   "quote": "Tile size (mm) 600x600x10 Joint Width (mm) 3 Consumption (kg/m2) 0.6",
+   "printed": "kg/m2"
+  },
+  {
+   "category": "Waterproofing",
+   "material": "Cementitious waterproofing slurry (2-component)",
+   "product": "Sika Pakistan - SikaTop-107 Seal PK",
+   "coverage_low": 1,
+   "coverage_high": 1,
+   "coverage_unit": "kg/m2",
+   "per_coat": true,
+   "conditions": "2 coats recommended; min 0.75 mm per coat; do not exceed 2 kg/m2 per coat",
+   "pack": "25 kg set (5 kg comp. A + 20 kg comp. B)",
+   "s": "sika-pk",
+   "ref": "SikaTop-107 Seal PK Product Data Sheet, Version 03.02",
+   "d": "May-2026",
+   "url": "https://pak.sika.com/dms/getdocument.get/34c19e8a-cd19-4486-adab-e9d379d6138f/sikatop-107-sealpk.pdf",
+   "quote": "Consumption 1 Kg / m2 / coat (2 coats recommended) ... Do not use more than 2 kg/m2 per coat",
+   "printed": "Kg / m2 / coat",
+   "pack_qty": 25
+  },
+  {
+   "category": "Waterproofing",
+   "material": "Liquid-applied acrylic roof membrane",
+   "product": "Sika Pakistan - Sikalastic-510 PK",
+   "coverage_low": 0.5,
+   "coverage_high": 0.5,
+   "coverage_unit": "kg/m2",
+   "per_coat": true,
+   "conditions": "Exposed roof slabs; 2-3 coats; total ~1.2 mm with Sika Fab1 fabric, ~1 mm without",
+   "pack": "16 kg bucket",
+   "s": "sika-pk",
+   "ref": "Sikalastic-510 PK Product Data Sheet, Version 03.01",
+   "d": "Jun-2025",
+   "url": "https://pak.sika.com/dms/getdocument.get/b3c774b8-df3d-4cf3-82ca-813ac0619f80/sikalastic-510-pk.pdf",
+   "quote": "Sikalastic-510 PK: 0.5 kg /m2 per coat (2-3 coats recommended). Total thickness - 1.2 mm approx with Sika Fab1 and 1mm without",
+   "printed": "kg /m2 per coat",
+   "pack_qty": 16
+  },
+  {
+   "category": "Waterproofing",
+   "material": "Primer for liquid roof membrane",
+   "product": "Sika Pakistan - Sikalastic-510 PK Primer",
+   "coverage_low": 0.2,
+   "coverage_high": 0.2,
+   "coverage_unit": "kg/m2",
+   "per_coat": true,
+   "conditions": "Depending on substrate",
+   "pack": "not stated",
+   "s": "sika-pk",
+   "ref": "Sikalastic-510 PK Product Data Sheet, Version 03.01",
+   "d": "Jun-2025",
+   "url": "https://pak.sika.com/dms/getdocument.get/b3c774b8-df3d-4cf3-82ca-813ac0619f80/sikalastic-510-pk.pdf",
+   "quote": "Sikalastic-510 PK Primer: 0.200 kg/m2 per coat depending on the substrate.",
+   "printed": "kg/m2 per coat"
+  },
+  {
+   "category": "Waterproofing",
+   "material": "Elastomeric roof waterproof coating",
+   "product": "Dulux Pakistan (AkzoNobel) - Dulux Aquashield Waterproof Roofcoat",
+   "coverage_low": 0.7,
+   "coverage_high": 0.9,
+   "coverage_unit": "m2/L",
+   "per_coat": false,
+   "conditions": "For the full 3-coat system, as printed on the Dulux page — looks low, confirm with Dulux before ordering",
+   "pack": "4L, 16L",
+   "s": "dulux",
+   "ref": "Dulux Pakistan product page - Dulux Aquashield Waterproof Roofcoat",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://www.dulux.com.pk/en/products/dulux-aquashield-waterproof-roofcoat",
+   "quote": "Coverage 0.7-0.9 m²/L/3 coats",
+   "printed": "m²/L/3 coats",
+   "pack_qty": 4
+  },
+  {
+   "category": "Waterproofing",
+   "material": "Heat-reflective roof waterproof coating",
+   "product": "Dulux Pakistan (AkzoNobel) - Dulux Aquashield Waterproof Roof Guard",
+   "coverage_low": 8,
+   "coverage_high": 10,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Roofs; 3 coats",
+   "pack": "4L, 16L",
+   "s": "dulux",
+   "ref": "Dulux Pakistan product page - Dulux Aquashield Waterproof Roof Guard",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://www.dulux.com.pk/en/products/dulux-aquashield-waterproof-roof-guard",
+   "quote": "Coverage 8-10 m²/L/coat ... Coats 3",
+   "printed": "m²/L/coat",
+   "pack_qty": 4
+  },
+  {
+   "category": "Waterproofing",
+   "material": "Flexible waterproof basecoat (exterior walls)",
+   "product": "Dulux Pakistan (AkzoNobel) - Dulux Aquashield Flexible Waterproof Basecoat",
+   "coverage_low": 14,
+   "coverage_high": 16,
+   "coverage_unit": "m2/L",
+   "per_coat": true,
+   "conditions": "Exterior walls; 2-3 coats at 4-6 h interval",
+   "pack": "1 L, 4 L, 16 L",
+   "s": "dulux",
+   "ref": "Dulux Pakistan product page - Dulux Aquashield Flexible Waterproof Basecoat",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://www.dulux.com.pk/en/products/dulux-aquashield-flexible-waterproof-basecoat",
+   "quote": "14-16m2 /litre ... Apply 2-3 coats",
+   "printed": "m2 /litre",
+   "pack_qty": 4
+  },
+  {
+   "category": "Waterproofing",
+   "material": "Bitumen emulsion primer (water based)",
+   "product": "Sika - Sika Igolflex P-01",
+   "coverage_low": 0.3,
+   "coverage_high": 0.5,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "On concrete (metal: 0.2-0.3 kg/m2); theoretical, no allowance for porosity/wastage",
+   "pack": "10 L container",
+   "s": "sika",
+   "ref": "Sika Igolflex P-01 Product Data Sheet (Sika Ireland), Version 02.01",
+   "d": "Feb-2025",
+   "url": "https://irl.sika.com/dam/dms/ie01/x/pds-sika-igolflexp-01it.pdf",
+   "quote": "Consumption Concrete 0.3-0.5 kg/m2 Metal 0.2-0.3 kg/m2",
+   "printed": "kg/m2"
+  },
+  {
+   "category": "Waterproofing",
+   "material": "Bitumen primer under torch-on membrane",
+   "product": "Sika - Sika Igolflex P10+",
+   "coverage_low": 6,
+   "coverage_high": 8,
+   "coverage_unit": "m2/L",
+   "per_coat": false,
+   "conditions": "Primer under torch-applied SBS membrane; varies with substrate type and porosity",
+   "pack": "not stated",
+   "s": "sika",
+   "ref": "SikaShield E54 PE Helastoplay 3 mm Product Data Sheet (Sika Australia), Version 02.02",
+   "d": "Apr-2023",
+   "url": "https://aus.sika.com/dam/dms/au01/j/sikashield-e54-pehelastoplay3mm.pdf",
+   "quote": "Apply Sika® Igolflex P10+ primer at a rate of 6-8m2 per litre.",
+   "printed": "m2 per litre"
+  },
+  {
+   "category": "Waterproofing",
+   "material": "Water-based primer for liquid membranes",
+   "product": "Fosroc - Nitoprime 120 (Fosroc Australia TDS)",
+   "coverage_low": 6,
+   "coverage_high": 8,
+   "coverage_unit": "m2/L",
+   "per_coat": false,
+   "conditions": "General porous substrates; theoretical - practical coverage may be substantially lower",
+   "pack": "15 litre",
+   "s": "fosroc",
+   "ref": "Fosroc Nitoprime 120 Technical Data Sheet (Australia)",
+   "d": "Jul-2019",
+   "url": "https://www.fosroc.com.au/sites/default/files/products_file_storage/Fosroc_Nitoprime_120_TDS.pdf",
+   "quote": "Approximately - 1 litre will cover 6-8m² on general porous substrates.",
+   "printed": "m² per litre",
+   "pack_qty": 15
+  },
+  {
+   "category": "Waterproofing",
+   "material": "Torch-on APP membrane 4 mm — net per roll (after laps)",
+   "product": "Polyglass - Polyflex (APP)",
+   "coverage_low": 9.3,
+   "coverage_high": 9.3,
+   "coverage_unit": "m2/roll",
+   "per_coat": false,
+   "conditions": "Roll 10 m x 1 m; net of laps: min 6 in end lap, 3 in side lap",
+   "pack": "Roll 10 m x 1 m; 23 rolls/pallet",
+   "s": "polyglass",
+   "ref": "Polyglass Polyflex APP Technical Data Sheet (hosted by RCABC)",
+   "d": "Dec-2023",
+   "url": "https://www.rpm.rcabc.org/images/9/9f/Polyglass_Polyflex_APP_TDS.pdf",
+   "quote": "Net Coverage (Approx)............ 9.3 m2 (100 ft2) Roll Size.............10 m x 1 m",
+   "printed": "m2 (100 ft2) net coverage per roll"
+  },
+  {
+   "category": "Gypsum",
+   "material": "Plasterboard jointing compound (setting, dual purpose)",
+   "product": "Siniat (Etex) UK - Siniat Multipurpose Joint Compound",
+   "coverage_low": 35,
+   "coverage_high": 35,
+   "coverage_unit": "m2/bag",
+   "per_coat": false,
+   "conditions": "Area of board covered by full taping operation; approximate",
+   "pack": "10 kg bag",
+   "s": "siniat",
+   "ref": "Siniat TDS - Multipurpose Joint Compound",
+   "d": "31-Oct-2019",
+   "url": "https://media.siniat.co.uk/pi48483/original/1911703743/siniat_tds_multipurpose_joint_compound_20191031_wm.pdf",
+   "quote": "Coverage per bag* 35m2** ... **Area of the board covered by full taping operation",
+   "printed": "m2 per bag"
+  },
+  {
+   "category": "Gypsum",
+   "material": "Plasterboard joint filler (tape bedding)",
+   "product": "Siniat (Etex) UK - Siniat Joint Filler",
+   "coverage_low": 25,
+   "coverage_high": 25,
+   "coverage_unit": "m2/bag",
+   "per_coat": false,
+   "conditions": "Area of board covered by applying compound for tape bedding; approximate",
+   "pack": "12.5 kg bag",
+   "s": "siniat",
+   "ref": "Siniat TDS - Joint Filler",
+   "d": "31-Oct-2019",
+   "url": "https://media.siniat.co.uk/pi48479/original/-1965235071/siniat-tds-joint-filler-20191031.pdf",
+   "quote": "Coverage per bag* 25m2** ... **Area of the board covered by applying compound for tape bedding",
+   "printed": "m2 per bag"
+  },
+  {
+   "category": "Epoxy",
+   "material": "Epoxy floor primer",
+   "product": "Sika - Sikafloor-263 SL",
+   "coverage_low": 0.2,
+   "coverage_high": 0.3,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Epoxy primer coat; depends on surface porosity",
+   "pack": "Full unit A+B+C = 30 kg (1.5-3 mm) / 33.75 kg (>3 mm)",
+   "s": "sika",
+   "ref": "Sikafloor-263 SL Product Data Sheet (Sika Egypt), Version 07.01",
+   "d": "Jun-2020",
+   "url": "https://egy.sika.com/dam/dms/eg01/i/sikafloor_-263_sl.pdf",
+   "quote": "Primer : ~ 0.2 - 0.3 Kg/m2 ( depends on the surface porosity )",
+   "printed": "Kg/m2"
+  },
+  {
+   "category": "Epoxy",
+   "material": "Epoxy self-smoothing body coat — per 1 mm thick (up to 3 mm)",
+   "product": "Sika - Sikafloor-263 SL",
+   "coverage_low": 1.85,
+   "coverage_high": 1.85,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Self-smoothing body layer up to 3 mm thickness",
+   "pack": "Full unit A+B+C = 30 kg (1.5-3 mm) / 33.75 kg (>3 mm)",
+   "s": "sika",
+   "ref": "Sikafloor-263 SL Product Data Sheet (Sika Egypt), Version 07.01",
+   "d": "Jun-2020",
+   "url": "https://egy.sika.com/dam/dms/eg01/i/sikafloor_-263_sl.pdf",
+   "quote": "Body Layer up to 3mm thickness : ~ 1.85 Kg/m2/mm",
+   "printed": "Kg/m2/mm"
+  },
+  {
+   "category": "Epoxy",
+   "material": "Epoxy self-smoothing body coat — per 1 mm thick (over 3 mm)",
+   "product": "Sika - Sikafloor-263 SL",
+   "coverage_low": 1.9,
+   "coverage_high": 1.9,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Self-smoothing body layer > 3 mm thickness",
+   "pack": "Full unit A+B+C = 30 kg (1.5-3 mm) / 33.75 kg (>3 mm)",
+   "s": "sika",
+   "ref": "Sikafloor-263 SL Product Data Sheet (Sika Egypt), Version 07.01",
+   "d": "Jun-2020",
+   "url": "https://egy.sika.com/dam/dms/eg01/i/sikafloor_-263_sl.pdf",
+   "quote": "Body Layer > 3mm thickness : ~ 1.9 Kg/m2/mm",
+   "printed": "Kg/m2/mm"
+  },
+  {
+   "category": "Epoxy",
+   "material": "Epoxy floor top coat",
+   "product": "Sika - Sikafloor-263 SL",
+   "coverage_low": 0.25,
+   "coverage_high": 0.35,
+   "coverage_unit": "kg/m2",
+   "per_coat": false,
+   "conditions": "Top coat",
+   "pack": "Full unit A+B+C = 30 kg (1.5-3 mm) / 33.75 kg (>3 mm)",
+   "s": "sika",
+   "ref": "Sikafloor-263 SL Product Data Sheet (Sika Egypt), Version 07.01",
+   "d": "Jun-2020",
+   "url": "https://egy.sika.com/dam/dms/eg01/i/sikafloor_-263_sl.pdf",
+   "quote": "Top Coat : ~ 0.25 - 0.35 Kg/m2",
+   "printed": "Kg/m2"
+  },
+  {
+   "category": "Self-levelling",
+   "material": "Self-levelling underlayment — ⅛\" (3.2 mm) deep",
+   "product": "Sika Pakistan - SikaLevel",
+   "coverage_low": 42,
+   "coverage_high": 42,
+   "coverage_unit": "sft/bag",
+   "per_coat": false,
+   "conditions": "Depth 1/8 in (3.2 mm); per 50 lb (22.7 kg) bag per packaging; excludes surface profile, porosity, waste",
+   "pack": "50 lb. (22.7 kg) bag",
+   "s": "sika-pk",
+   "ref": "SikaLevel Product Data Sheet (pak.sika.com), Version 01.01",
+   "d": "May-2021",
+   "url": "https://pak.sika.com/dam/dms/pakdms/z/sikalevel.pdf",
+   "quote": "Consumption Depth Sq. Ft. 1/8\" (3.2mm) 42 ft2",
+   "printed": "ft2 (per 50 lb bag)"
+  },
+  {
+   "category": "Self-levelling",
+   "material": "Self-levelling underlayment — ¼\" (6.3 mm) deep",
+   "product": "Sika Pakistan - SikaLevel",
+   "coverage_low": 21,
+   "coverage_high": 21,
+   "coverage_unit": "sft/bag",
+   "per_coat": false,
+   "conditions": "Depth 1/4 in (6.3 mm); (1/2 in = 11 ft2; 1 in = 5.3 ft2)",
+   "pack": "50 lb. (22.7 kg) bag",
+   "s": "sika-pk",
+   "ref": "SikaLevel Product Data Sheet (pak.sika.com), Version 01.01",
+   "d": "May-2021",
+   "url": "https://pak.sika.com/dam/dms/pakdms/z/sikalevel.pdf",
+   "quote": "1/4\" (6.3mm) 21 ft2 1/2\" (12.5mm) 11 ft2 1\" (25mm) 5.3 ft2",
+   "printed": "ft2 (per 50 lb bag)"
+  },
+  {
+   "category": "Bonding/curing",
+   "material": "SBR bonding agent (slurry primer)",
+   "product": "Fosroc - Nitobond SBR (Fosroc Australia TDS)",
+   "coverage_low": 2,
+   "coverage_high": 3,
+   "coverage_unit": "m2/L",
+   "per_coat": false,
+   "conditions": "As slurry primer: 1 vol Nitobond SBR : 1 vol water : 3 vol cement; theoretical",
+   "pack": "20 litre",
+   "s": "fosroc",
+   "ref": "Fosroc Nitobond SBR Technical Data Sheet (Australia)",
+   "d": "Feb-2020",
+   "url": "https://prod.fosroc.com.au/sites/default/files/products_file_storage/Fosroc_Nitobond_SBR_TDS.pdf",
+   "quote": "Nitobond SBR (as slurry primer): Approximately 2 to 3m²/litre",
+   "printed": "m²/litre",
+   "pack_qty": 20
+  },
+  {
+   "category": "Bonding/curing",
+   "material": "Concrete curing compound",
+   "product": "Sika Pakistan - Sika Antisol-90",
+   "coverage_low": 5.0,
+   "coverage_high": 5.5,
+   "coverage_unit": "m2/L",
+   "per_coat": false,
+   "conditions": "Fresh concrete; depending on wind, humidity and temperature",
+   "pack": "20 L pail, 200 L drum",
+   "s": "sika-pk",
+   "ref": "Sika Antisol-90 Product Data Sheet (pak.sika.com), Version 01.01",
+   "d": "Jul-2021",
+   "url": "https://pak.sika.com/dms/getdocument.get/2aaa18ee-460b-40fb-85de-8a8eaa47c441/sika-antisol-90.pdf",
+   "quote": "Sika Antisol-90 is applied at a rate of between 5.0-5.5 m² per litre, depending on wind, humidity and temperature.",
+   "printed": "m² per litre",
+   "pack_qty": 20
+  },
+  {
+   "category": "Admixture",
+   "material": "Superplasticiser (PCE)",
+   "product": "Sika Pakistan - Sika ViscoCrete-20 HE PK",
+   "coverage_low": 0.2,
+   "coverage_high": 0.8,
+   "coverage_unit": "%cement",
+   "per_coat": false,
+   "conditions": "Medium workability; trial mixes advised",
+   "pack": "5 L, 20 L, 200 L, 1000 L IBC",
+   "s": "sika-pk",
+   "ref": "Sika ViscoCrete-20 HE PK Product Data Sheet, Version 02.01",
+   "d": "Jun-2025",
+   "url": "https://pak.sika.com/dms/getdocument.get/61aa82a6-daed-4d5a-9c80-b3fc66313e1a/sika-viscocrete-20hepk.pdf",
+   "quote": "Recommended Dosage For medium workability: 0.2-0.8% by weight of cement",
+   "printed": "% by weight of cement"
+  },
+  {
+   "category": "Admixture",
+   "material": "Superplasticiser (PCE)",
+   "product": "Sika Pakistan - Sika ViscoCrete-20 HE PK",
+   "coverage_low": 1.0,
+   "coverage_high": 2.0,
+   "coverage_unit": "%cement",
+   "per_coat": false,
+   "conditions": "High workability, very low w/c, self-compacting concrete",
+   "pack": "5 L, 20 L, 200 L, 1000 L IBC",
+   "s": "sika-pk",
+   "ref": "Sika ViscoCrete-20 HE PK Product Data Sheet, Version 02.01",
+   "d": "Jun-2025",
+   "url": "https://pak.sika.com/dms/getdocument.get/61aa82a6-daed-4d5a-9c80-b3fc66313e1a/sika-viscocrete-20hepk.pdf",
+   "quote": "for Self Compacting Concrete: 1.0 - 2.0% by weight of cement.",
+   "printed": "% by weight of cement"
+  },
+  {
+   "category": "Admixture",
+   "material": "Superplasticiser (PCE)",
+   "product": "Sika Pakistan - Sika ViscoCrete-3110 PK",
+   "coverage_low": 0.2,
+   "coverage_high": 0.4,
+   "coverage_unit": "%binder",
+   "per_coat": false,
+   "conditions": "Soft plastic concrete",
+   "pack": "5 L, 20 L, 200 L, 1000 L IBC",
+   "s": "sika-pk",
+   "ref": "Sika ViscoCrete-3110 PK Product Data Sheet, Version 02.01",
+   "d": "Jun-2025",
+   "url": "https://pak.sika.com/dms/getdocument.get/b120dab3-86f0-4942-8f47-d95868a73c0e/sika-viscocrete-3110pk.pdf",
+   "quote": "For soft plastic concrete 0.2 - 0.4% by weight of binder.",
+   "printed": "% by weight of binder"
+  },
+  {
+   "category": "Admixture",
+   "material": "Superplasticiser (PCE)",
+   "product": "Sika Pakistan - Sika ViscoCrete-3110 PK",
+   "coverage_low": 0.4,
+   "coverage_high": 1.5,
+   "coverage_unit": "%binder",
+   "per_coat": false,
+   "conditions": "Flowing and self-compacting concrete; up to 1.7% depending on mix design",
+   "pack": "5 L, 20 L, 200 L, 1000 L IBC",
+   "s": "sika-pk",
+   "ref": "Sika ViscoCrete-3110 PK Product Data Sheet, Version 02.01",
+   "d": "Jun-2025",
+   "url": "https://pak.sika.com/dms/getdocument.get/b120dab3-86f0-4942-8f47-d95868a73c0e/sika-viscocrete-3110pk.pdf",
+   "quote": "For flowing and self-compacting concrete 0.4 - 1.5% by weight of binder. Higher dosages up to 1.7 % by weight of binder can be used",
+   "printed": "% by weight of binder"
+  },
+  {
+   "category": "Masonry units",
+   "material": "Concrete blocks 8×16 in face (incl. 5% waste)",
+   "product": "generic (NCMA TEK 04-02A, hosted by CMHA)",
+   "coverage_low": 119,
+   "coverage_high": 119,
+   "coverage_unit": "nos/100sft",
+   "per_coat": false,
+   "conditions": "Nominal 8 x 16 in unit face (8/9 ft2 each); INCLUDES 5% waste/breakage allowance",
+   "pack": "n/a",
+   "s": "ncma",
+   "ref": "NCMA TEK 04-02A - Concrete Masonry Construction (CMHA resource page)",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://www.cmha.org/resource/tek-04-02a/",
+   "quote": "this translates to 119 units per 100 ft2 (9.29 m2) of wall area",
+   "printed": "units per 100 ft2 (9.29 m2) of wall area"
+  },
+  {
+   "category": "Masonry units",
+   "material": "Masonry cement for hollow blocks (face-shell bedding)",
+   "product": "generic (NCMA TEK 04-02A, hosted by CMHA)",
+   "coverage_low": 30,
+   "coverage_high": 30,
+   "coverage_unit": "units/bag",
+   "per_coat": false,
+   "conditions": "Face shell bedding; 1 ton sand per 8 bags masonry cement",
+   "pack": "70 lb (31.8 kg) bag",
+   "s": "ncma",
+   "ref": "NCMA TEK 04-02A - Concrete Masonry Construction (CMHA resource page)",
+   "d": "accessed 20-Oct-2026",
+   "url": "https://www.cmha.org/resource/tek-04-02a/",
+   "quote": "One 70 lb (31.8 kg) bag of masonry cement will generally lay approximately 30 hollow units if face shell bedding is used.",
+   "printed": "hollow units per 70 lb (31.8 kg) bag of masonry cement"
+  },
+  {
+   "category": "Bulk materials",
+   "material": "Cement (OPC) — bulk density",
+   "product": "generic (IS 875 Part 1:1987)",
+   "coverage_low": 1440,
+   "coverage_high": 1440,
+   "coverage_unit": "kg/m3",
+   "per_coat": false,
+   "conditions": "Ordinary and aluminous cement (see IS 269); 14.10 kN/m3",
+   "pack": "n/a",
+   "s": "is875",
+   "ref": "IS 875 (Part 1):1987 Table 1 Unit Weight of Building Materials (Bureau of Indian Standards)",
+   "d": "30-Oct-1987",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.875.1.1987.pdf",
+   "quote": "19. Cement (see IS : 269-1976) Ordinary and aluminous 14.10 [kN] 1 440 [kg per m3]",
+   "printed": "kg per m3"
+  },
+  {
+   "category": "Bulk materials",
+   "material": "Sand, dry & clean — bulk density",
+   "product": "generic (IS 875 Part 1:1987)",
+   "coverage_low": 1540,
+   "coverage_high": 1600,
+   "coverage_unit": "kg/m3",
+   "per_coat": false,
+   "conditions": "Aggregate, fine - Sand: dry, clean; 15.10 to 15.70 kN/m3",
+   "pack": "n/a",
+   "s": "is875",
+   "ref": "IS 875 (Part 1):1987 Table 1 Unit Weight of Building Materials (Bureau of Indian Standards)",
+   "d": "30-Oct-1987",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.875.1.1987.pdf",
+   "quote": "3 Aggregate, Fine Sand: Dry, clean 15.10 to 15.70 [kN] 1 540 to 1 600 [kg per m3]",
+   "printed": "kg per m3"
+  },
+  {
+   "category": "Bulk materials",
+   "material": "Sand, river — bulk density",
+   "product": "generic (IS 875 Part 1:1987)",
+   "coverage_low": 1840,
+   "coverage_high": 1840,
+   "coverage_unit": "kg/m3",
+   "per_coat": false,
+   "conditions": "Aggregate, fine - Sand: river; 18.05 kN/m3 (wet sand 1 760 to 2 000)",
+   "pack": "n/a",
+   "s": "is875",
+   "ref": "IS 875 (Part 1):1987 Table 1 Unit Weight of Building Materials (Bureau of Indian Standards)",
+   "d": "30-Oct-1987",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.875.1.1987.pdf",
+   "quote": "River 18.05 [kN] 1 840 [kg per m3]; Wet 17.25 to 19.60 [kN] 1 760 to 2 000",
+   "printed": "kg per m3"
+  },
+  {
+   "category": "Bulk materials",
+   "material": "Coarse aggregate (crush) — bulk density",
+   "product": "generic (IS 875 Part 1:1987)",
+   "coverage_low": 1600,
+   "coverage_high": 1870,
+   "coverage_unit": "kg/m3",
+   "per_coat": false,
+   "conditions": "Aggregate, coarse - broken stone ballast, dry well-shaken; perfectly wet 1 920 to 2 240",
+   "pack": "n/a",
+   "s": "is875",
+   "ref": "IS 875 (Part 1):1987 Table 1 Unit Weight of Building Materials (Bureau of Indian Standards)",
+   "d": "30-Oct-1987",
+   "url": "https://law.resource.org/pub/in/bis/S03/is.875.1.1987.pdf",
+   "quote": "2 Aggregate, Coarse Broken stone ballast: Dry, well-shaken 15.70 to 18.35 [kN] 1 600 to 1 870 [kg per m3]",
+   "printed": "kg per m3"
+  }
+ ]
+}

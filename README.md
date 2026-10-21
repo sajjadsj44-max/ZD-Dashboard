@@ -1066,6 +1066,55 @@ git clone --depth 1 https://github.com/osdag-admin/Osdag.git /tmp/osdag
 tools/calc_data.py --osdag /tmp/osdag zameen-developments/index.html
 ```
 
+## Productivity tab
+
+Sidebar → **Productivity** (after Calculator), or the start screen's **Productivity** card
+(`?app=prod`, password as the dashboard), added 20-Oct-2026. It answers "how many men, how
+many days, how much material" for a QS / estimator:
+
+- **Labour Output Norms** — 122 activities (earthwork, concrete, formwork, rebar, masonry,
+  plaster, flooring, tiling, painting, waterproofing, ceilings, doors & windows, plumbing,
+  drainage, electrical, fire fighting, HVAC, steel, demolition) with the crew, output per
+  8-hour crew-day, output per worker, man-hours per unit and labour PKR per unit. Up to three
+  sources sit side by side: the **Pakistan library** (Master RA Rev07 sheet 13, each output
+  checked against Punjab MRS 2026 / MAK Mall-35 / Lahore piece rates; 8 outputs without a
+  dated benchmark are badged *assumed*), **IS 7272 (Part 1):1974 North Zone** and **CPWD DAR
+  2023** (civil) / **DAR (E&M) 2022**. Each row shows the constant as printed, the clause and
+  a quote, and the **Punjab MRS 2nd Bi-Annual 2026 (Lahore) labour share** of the nearest item
+  as a cross-check.
+- **Labour & Duration Estimator** — quantities × norms → crew-days, man-days by trade, crews,
+  duration, finish date (Sundays, or Saturdays and Sundays, off), men on site per day
+  (programme bars + manpower histogram) and labour cost. Plan by "crews I have → duration"
+  or "days allowed → crews needed"; lines run one after another or together; hours per day,
+  site efficiency and your own output per line; brickwork, RCC / formwork and floor finishes
+  slow down on upper floors by the **MRS extra-labour items** (factor = base labour ÷ (base +
+  extra)). Several estimates, export / import, CSV, Excel and print.
+- **Material Coverage** — 72 rows from manufacturers' data sheets (Nippon, Berger, Dulux,
+  Diamond, Sika Pakistan, Mapei, Fosroc, Polyglass, Siniat) and standards (IS 875-1, NCMA):
+  paint, primer, putty, tile adhesive and grout by tile size / joint, waterproofing, epoxy,
+  self-levelling, curing, admixture dosage, blocks, bulk densities — each with its document,
+  date, link and quote — and a quick quantity (area × coats → litres / kg and packs).
+- **Site Output Check** — what a gang actually did against the norm: productivity %, output
+  per man-day, man-days used and labour PKR per unit.
+- **Wages Used** — the day-rate for each trade: your own (this device) → the QS Cost Control
+  Rate Database (read only) → the dated rate built into the page.
+
+Estimates, own outputs and own day-rates live in the viewer's browser only.
+
+**Data rules.** No norm or coverage figure is typed into the UI code. `tools/productivity_data.py`
+builds the `<script type="application/json" id="prodData">` block from the RA Master Rev07
+workbook, `tools/productivity_refs.json` (IS 7272 / CPWD constants and coverage rows, each with
+the figure as printed, clause / page, date, link and a quote) and the page's own MRS register and
+Rate Database blocks. Metric constants are converted with the exact foot; a constant (days of
+each trade per unit) becomes a crew with the first skilled trade the source prints as 1.
+
+```sh
+pip install openpyxl
+tools/productivity_data.py zameen-developments/index.html
+python -m unittest tools/test_productivity_data.py
+node tools/test_productivity.js        # browser tests (python -m http.server 8765 from the repo root)
+```
+
 ## How publishing is wired
 
 Pages `Source` is set to **GitHub Actions**, so
@@ -1161,6 +1210,10 @@ tools/test_takeoff_accuracy.js      accuracy and reconciliation of the takeoff a
 tools/test_takeoff_agentcmds.js     the agent's QS commands on it, done or refused (playwright)
 docs/takeoff-accuracy-engine-2026-10-20.md  accuracy audit: root causes, fixes, before / after figures, limits
 tools/calc_data.py                  build the Calculator tab's section / pipe / material data block
+tools/productivity_data.py          build the Productivity tab's norms / coverage / day-rate data block
+tools/productivity_refs.json        IS 7272, CPWD DAR and data-sheet rows behind it (as printed, with quotes)
+tools/test_productivity_data.py     tests for the block
+tools/test_productivity.js          browser tests for the Productivity tab (playwright)
 .github/workflows/rate-watch.yml    runs the rate watch daily and offers updates as a pull request
 .github/workflows/deploy-pages.yml  deploy to Pages + mirror main onto gh-pages
 .nojekyll                           serve files as-is (no Jekyll processing)
