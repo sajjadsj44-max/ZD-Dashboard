@@ -4616,7 +4616,7 @@ function measSvg(it, c, o){
   if (a.blend === "multiply" && out.length) out.splice(0, out.length, apBlendG(a, out.join("")));
   const ks = (+S.lbl.scale || 1) * (ded ? +S.lbl.dedScale || 1 : 1), lo = o.lo !== undefined ? o.lo : it.lo;   // ks: View → Labels size (cut-outs have their own); lo: the label moved by hand (Bluebeam), its offset in page units
   const k = o.k, lz = o.lz || z, lzs = o.sel ? Math.max(lz * ks, LBL_SEL_Z) : lz * ks;   // lz: the labels' size (on screen it follows the zoom), z: the lines'; the selected object's label stays readable
-  if (k && o.lbl && a.lpos !== "none" && (+a.fsz || 11.5) * lzs >= LBL_MIN_PX) {   // smaller than that it could not be read: left out (hover still tells)
+  if (k && o.lbl && a.lpos !== "none" && (!o.screen || (+a.fsz || 11.5) * lzs >= LBL_MIN_PX)) {   // on screen smaller than that it could not be read: left out (hover still tells)
     const big = area ? polyArea(scr) > 2500 * lz * lz : polyLen(scr) > 60 * lz;
     if (big || o.sel || !o.small || lo) { const L = capLines(it, c, k, a);
       if (L.length) { const p0 = apLabelPt(scr, area, a, lzs), p = lo ? [p0[0] + lo[0] * sp, p0[1] + lo[1] * sp] : p0, d = apLabelDims(L, a, lzs), lc = ded ? "#9b2222" : a.fcol;
@@ -4627,7 +4627,7 @@ function measSvg(it, c, o){
         else out.push(svg); } }
   }
   const segOn = a.seg === "on" || (a.seg !== "off" && (o.seg || o.sel));
-  if (k && segOn && it.shape !== "circle" && (+a.fsz || 11.5) * 0.87 * lzs >= LBL_MIN_PX * 0.85) out.push(segLabels(it.pts.map(T), it.pts, k, area, lzs, a));
+  if (k && segOn && it.shape !== "circle" && (!o.screen || (+a.fsz || 11.5) * 0.87 * lzs >= LBL_MIN_PX * 0.85)) out.push(segLabels(it.pts.map(T), it.pts, k, area, lzs, a));
   return out.join("");
 }
 
@@ -4799,10 +4799,13 @@ function lblSize(key, d){ const v = lblStep(S.lbl[key], d); lblSet({[key]: v}); 
 /* what a label shows: full (the ticks in View → Labels), name + quantity, quantity only, name only — cut-outs / deductions have their own
    choice, which can also hide them (their quantity stays on the sheet) */
 const LBL_SHOW = {full: "Full", nameqty: "Name + qty", qty: "Qty only", name: "Name only"}, LBL_DED = {full: "Full", nameqty: "Name + qty", qty: "Qty only", off: "Hidden"};
-/* labels on screen are sized as the drawing's own text: they grow and shrink with the zoom (100 % = their set size, up to 2.5 ×) and are
-   left out below 6 px, where they could not be read; View → Labels can keep them one size. The selected object's label stays readable. */
-const LBL_MIN_PX = 6, LBL_SEL_Z = 0.85, LBL_MAX_Z = 2.5;
-function lblZ(s){ return S.lbl && S.lbl.zoom === false ? 1 : Math.min(LBL_MAX_Z, s); }
+/* labels are sized on the sheet, as Bluebeam's: on screen they grow and shrink with the zoom at every zoom (100 % = their set size), in
+   step with the drawing, and are left out below 6 px, where they could not be read; View → Labels can keep them one size. The selected
+   object's label stays readable. An AutoCAD drawing's sheet is laid at the plot scale that fits its whole model space (1:960 for one of
+   many plans), where a label of its set size would stand taller than a room: there labels are as on a sheet plotted at 1/8" = 1'-0". */
+const LBL_MIN_PX = 6, LBL_SEL_Z = 0.85, LBL_CAD_PPF = 9;
+function lblPageK(fid, pn){ const m = pn === 1 && cadMeta(fid); return m && m.ptPerFt > 0 ? Math.min(1, m.ptPerFt / LBL_CAD_PPF) : 1; }   // a label's size on this sheet, × its set size
+function lblZ(s){ return S.lbl && S.lbl.zoom === false ? 1 : s * lblPageK(S.fileId, S.pageNo); }
 /* labels that would sit on one another: the selected object's and then the biggest object's stay, the others are left out (hover still shows them) */
 function placeLabels(L, dec){   // a label placed by hand is never left out; every label drawn is remembered (S.lblBoxes) so it can be grabbed
   const put = [], pad = 2; L.sort((a, b) => (b.sel - a.sel) || (b.pin - a.pin) || (b.pri - a.pri)); S.lblBoxes = [];
@@ -7397,7 +7400,7 @@ function pageOverlaySvg0(file, page, sc, W, H, legend){
     if (c.type === "area" && it.kind === "shape" && k) per[c.id] = (per[c.id] || 0) + (+it.nos || 1) * polyLen(itemPoly(it), true) / k;   // (as P in the bill)
     if (c.type === "count") { h.push(countSvg(c, it.pts, T, z, -1)); return; }
     if (it.kind === "open") { const a = T(it.pts[0]), b = T(it.pts[1]); h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${4 * z * wz}" stroke-linecap="round"/>`); return; }
-    h.push(measSvg(it, c, {T, z, wz, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false}));
+    h.push(measSvg(it, c, {T, z, lz: o.z > 0 ? z : z * lblPageK(file, page), wz, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false}));   // (a plot gives its labels' size on paper)
   });
   (P.proj.marks || []).filter(m => m.file === file && m.page === page && (m.type === "redact" || (o.mk !== false && m.type !== "fence" && !mkHidden(m)))).forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
   const sh = (P.proj.sheets || {})[keyOf(file, page)] || {}, lz = z * ({s: 0.8, m: 1, l: 1.3}[o.lsz] || 1), pos = o.legend || "none";
