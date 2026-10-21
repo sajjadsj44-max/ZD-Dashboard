@@ -827,7 +827,7 @@ function showDrop(on){ $("drop").style.display = on ? "flex" : "none"; }
 /* layer roles, from the layer names: what bounds a room (walls, doors and windows, columns, railings) and what does
    not (furniture, fixtures, glass screens, hatch, text, clouds). Used by auto area, the agents and the presets. */
 const ROLES = [["column", /column|^col\b/i], ["hatch", /hatch|patt/i], ["glass", /glass|glaz/i], ["wall", /\bwalls?\b|r\.?c\.?c|partition|block ?work|masonry|parapet/i],
-  ["tag", /^\s*d\s*-\s*w\s*$|tag/i], ["opening", /door|window|gate|vent/i], ["railing", /railing|balcon|metal.*frame/i], ["unit", /apartment|appartment|\bunit\b/i],
+  ["tag", /^\s*d\s*-\s*w\s*$|tag/i], ["opening", /door|window|gate|vent|\bwin\b|^wn$/i], ["railing", /railing|balcon|metal.*frame|\brall\b/i], ["unit", /apartment|appartment|\bunit\b/i],
   ["text", /text|title|area|size|dim|grid|note|section|seal|cloud|label|tag|lable/i], ["fixture", /fixt|fict|furn|bath|kit|sanit|plant|tree|equip|mep|elect|light|lcd|marble|stair|step|\bwh\b|d\.b|j\.b|access|trap|cupboard|ac |wood|landscape|ramp|parking|ceiling|beam|lintel/i]];
 const BOUND = new Set(["wall", "opening", "column", "railing"]);
 function layerRole(name){ for (const [r, rx] of ROLES) if (rx.test(name)) return r; return "other"; }
@@ -2768,7 +2768,7 @@ async function autoAt(p, nc){   // nc: a new area condition, added with the outl
     }
   }
   const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "", kk = hereScale(p);
-  const det = {how: res.trace ? "trace" : "auto", src: res.trace ? "PDF wall layers (vector trace)" : autoOpt().src === "vector" ? "vector lines" : "drawing image", gap: +(res.gap || autoOpt().gap), note: res.note || "",
+  const det = {how: res.trace ? "trace" : "auto", src: res.trace ? trSrc() : autoOpt().src === "vector" ? "vector lines" : "drawing image", gap: +(res.gap || autoOpt().gap), note: res.note || "",
     flag: res.leak ? "leaks — " + res.leak : res.short ? res.short : res.warn ? res.warn : res.rect || (res.holes || []).length ? "" : "not square — check the outline", a0: kk ? +(polyArea(res.pts) / kk / kk).toFixed(4) : null, pts0: res.pts.map(q => q.slice()), at: new Date().toISOString(),
     holes: (res.holes || []).map(h => ({name: h.name, a: kk ? +(polyArea(h.pts) / kk / kk).toFixed(4) : null}))};
   mutate(() => { if (nc && !P.proj.conds.includes(nc)) P.proj.conds.push(nc);
@@ -2854,13 +2854,15 @@ function squareTrace(r, p){   // a trace's outline (and holes) squared onto the 
   r.pts = squareToWalls(r.pts, k, g); (r.holes || []).forEach(h => { if (h.pts) h.pts = squareToWalls(h.pts, k, g); }); return r;
 }
 async function autoRoomGuarded(p){ return squareTrace(await autoRoomRetried(p), p); }   // the retried trace, squared
-/* ------------------------------------------------------------------ vector trace (trace.js): the whole floor from the PDF's wall layers
+/* ------------------------------------------------------------------ vector trace (trace.js): the whole floor from the drawing's wall layers
+   (a CAD PDF that keeps its layers, or an AutoCAD drawing — each plan of its model space on its own)
    A CAD-plotted PDF that keeps its layers is read once per page, off the page's thread: every space's clear outline on its wall
    faces, the doors closed at both faces (the threshold its own piece), each outline checked against the size written in it.
    Auto area clicks, the agents' room measuring and the window scan take their outlines from it; "Trace the whole floor" puts
    every space, threshold, shaft and washroom / corridor wall run into their own conditions in one step. A page with no layers
    (a scan, a PDF printed without them) keeps the trace from the drawing image. */
-const TRC = {}, TRACE_SIG = "1";   // page key -> {sig, res} | {sig, wait}
+const trSrc = () => (S.geo[S.key] && S.geo[S.key].cad ? "AutoCAD layers" : "PDF wall layers") + " (vector trace)";   // where a traced outline came from
+const TRC = {}, TRACE_SIG = "2";   // page key (an AutoCAD sheet: key#plan) -> {sig, res} | {sig, wait}
 let trW = null, trN = 0; const trWait = new Map();
 function traceWorker(){
   if (trW === false) return null; if (trW) return trW;
@@ -2873,21 +2875,56 @@ async function traceRun(inp, opt){   // in the worker; on the page's thread if w
   const w = traceWorker(); if (w) { const r = await new Promise(ok => { const id = ++trN; trWait.set(id, ok); w.postMessage({id, inp, opt}); }); if (r) return r; }
   const T = await import("./trace.js" + CADV); return T.traceFloor(inp, opt);
 }
-async function traceInput(key){
-  const g = S.geo[key], [fid, pg] = [key.slice(0, key.lastIndexOf(":")), +key.slice(key.lastIndexOf(":") + 1)], L = layerInfo(g.file || fid) || {};
-  const layers = (g.layerIds || []).map(id => id && L[id] ? {name: L[id].name, role: L[id].role} : {name: "", role: ""}), off = layerOffIx(g), segs = [];
-  for (const s of g.segs) { if (off && off.has(s[7])) continue; segs.push([s[0], s[1], s[2], s[3], s[4], s[7]]); }   // (layers switched off are left out, as everywhere)
-  const lines = textLines(await pageTexts(fid, pg)).map(l => ({s: l.s, x: l.x, y: l.y, w: l.w, h: l.h, r: l.r || 0, cx: l.cx, cy: l.cy}));
+const TIX = new Map();   // an AutoCAD page's index with its hatches' pattern lines (the trace's, not snapping's), made again when the drawing is edited
+async function traceInput(key, box){   // box: only what is in it (one plan of an AutoCAD sheet)
+  const g = S.geo[key], [fid, pg] = [key.slice(0, key.lastIndexOf(":")), +key.slice(key.lastIndexOf(":") + 1)], off = layerOffIx(g), segs = [];
+  const inB = box ? (x, y) => x >= box[0] && x <= box[2] && y >= box[1] && y <= box[3] : null;
+  let layers, src = g.segs;
+  if (g.cad) {   // an AutoCAD drawing: its own layers by name, and its hatches too (a wall's poché tells a 9" wall from a 9" gap, a column from a pocket)
+    const sc = S.cadSc && S.cadSc[fid], cp = sc && sc.pages[0]; if (!cp || !CAD) return null;
+    layers = sc.layers.map(l => ({name: l.name, role: layerRole(l.name)}));
+    const tk = key + "|" + (g.edv || ""); let ix = TIX.get(tk); if (!ix) { TIX.clear(); ix = CAD.cadIndex(cp, 0, cedC(fid, cp), {hatch: true}); TIX.set(tk, ix); } src = ix.segs;
+  } else { const L = layerInfo(g.file || fid) || {}; layers = (g.layerIds || []).map(id => id && L[id] ? {name: L[id].name, role: L[id].role} : {name: "", role: ""}); }
+  for (const s of src) { if (off && off.has(s[7])) continue; if (inB && !inB(s[0], s[1]) && !inB(s[2], s[3])) continue; segs.push([s[0], s[1], s[2], s[3], s[4], s[7], s[5]]); }   // (layers switched off are left out, as everywhere; s[5]: the subpath — a fill's outline is one)
+  let lines = textLines(await pageTexts(fid, pg)).map(l => ({s: l.s, x: l.x, y: l.y, w: l.w, h: l.h, r: l.r || 0, cx: l.cx, cy: l.cy}));
+  if (inB) lines = lines.filter(l => inB(l.cx, l.cy));
   return {segs, layers, lines};
 }
-async function traceGet(key, quiet){   // -> the page's trace, or null (no lines, no layers, no scale)
+async function traceGet(key, quiet, at){   // -> the page's trace, or null (no lines, no layers, no scale); at: on an AutoCAD sheet, the point / box worked at
   key = key || S.key; const g = S.geo[key], sc = P.proj && P.proj.scales[key], k = sc && +sc.ptPerFt;
-  if (!g || !g.segs || g.segs.length < 50 || !(k > 0) || g.cad || !g.layerIds || !g.layerIds.some(Boolean)) return null;   // (PDF pages: an AutoCAD drawing keeps its own reader)
+  if (!g || !g.segs || g.segs.length < 50 || !(k > 0)) return null;
+  if (g.cad) return traceGetCad(key, quiet, at, k);
+  if (!g.layerIds || !g.layerIds.some(Boolean)) return null;
   const off = layerOffIx(g), sig = [TRACE_SIG, g.segs.length, k.toFixed(5), off ? [...off].sort((a, b) => a - b).join(".") : "", (S.texts[key] || []).length].join("|");
   const c = TRC[key]; if (c && c.sig === sig) return c.wait ? await c.wait : c.res;
   const run = (async () => { if (!quiet) busy("Reading the whole floor from the drawing's wall layers (once for this page)…");
     try { const inp = await traceInput(key); inp.k = k; return await traceRun(inp, {}); } catch (e) { return {err: String(e.message || e)}; } finally { if (!quiet) busy(""); } })();
   TRC[key] = {sig, wait: run}; const res = await run; TRC[key] = {sig, res}; return res;
+}
+/* an AutoCAD drawing's model space holds every plan of the job side by side (floors, basements, the site plan): its plans are found
+   once (clusters of wall lines with names in them) and each one is traced on its own when it is first worked on — the one clicked
+   in, the ones in a scanned window, the one on screen for "Trace the whole floor" — then kept */
+const TRB = {};   // AutoCAD page key -> {sig, boxes, T}
+async function traceGetCad(key, quiet, at, k){
+  const g = S.geo[key], off = layerOffIx(g), sig = [TRACE_SIG, g.segs.length, k.toFixed(5), off ? [...off].sort((a, b) => a - b).join(".") : "", (S.texts[key] || []).length, g.edv || ""].join("|");
+  let B = TRB[key];
+  if (!B || B.sig !== sig) { const inp = await traceInput(key); if (!inp) return null; inp.k = k; const T = await import("./trace.js" + CADV); B = TRB[key] = {sig, boxes: T.planBoxes(inp), T}; }
+  if (!B.boxes.length) return {err: "no wall layers", why: "no floor plan with wall lines and room names was found in the drawing"};
+  const all = B.boxes.map((b, i) => i), inBox = (p, b) => p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3];
+  let pick;
+  if (at && at.length === 2) pick = all.filter(i => inBox(at, B.boxes[i]));
+  else { const w = at || viewRect(); pick = all.filter(i => inBox([(B.boxes[i][0] + B.boxes[i][2]) / 2, (B.boxes[i][1] + B.boxes[i][3]) / 2], w));
+    if (!at && pick.length > 3) return {err: "too many plans", why: "this drawing shows " + pick.length + " floor plans at once — zoom to the one to trace (" + B.boxes.length + " plans on the sheet)"}; }
+  if (!pick.length) return null;   // (no plan there)
+  const parts = [];
+  for (const i of pick) {
+    const ck = key + "#" + i, s2 = sig + "|" + B.boxes[i].map(v => Math.round(v)).join(","), c = TRC[ck];
+    if (c && c.sig === s2) { parts.push(c.wait ? await c.wait : c.res); continue; }
+    const run = (async () => { if (!quiet) busy("Reading " + (B.boxes.length > 1 ? "plan " + (i + 1) + " of " + B.boxes.length + " on this drawing" : "the floor") + " from its wall layers (once)…");
+      try { const inp = await traceInput(key, B.boxes[i]); if (!inp) return null; inp.k = k; const r = await traceRun(inp, {}); if (r && !r.err) r.box = B.boxes[i]; return r; } catch (e) { return {err: String(e.message || e)}; } finally { if (!quiet) busy(""); } })();
+    TRC[ck] = {sig: s2, wait: run}; const res = await run; TRC[ck] = {sig: s2, res}; parts.push(res); }
+  const ok = parts.filter(r => r && !r.err); if (!ok.length) return parts[0] || null;
+  return ok.length === 1 ? ok[0] : B.T.traceMerge(ok);
 }
 // a plan the trace reads: the rooms named in the page's text, and the walls' hatch on a layer (it tells a 9" wall from a 9" gap) —
 // or, for a drawing plotted without its wall hatch, rooms the trace found at their written size. Else (single-line boxes, no
@@ -2910,15 +2947,15 @@ function traceOne(s, p, thr){   // a traced space as autoRoom's result (the part
 async function traceAt(seed){   // the traced space at a point of this page, as autoRoom's result — or null (no trace here)
   if (autoOpt().trace === false) return null;
   if (!trScaleOk(seed)) return null;
-  const T = await traceGet(); if (!traceUsable(T)) return null;
+  const T = await traceGet(null, false, seed); if (!traceUsable(T)) return null;
   const s = T.spaces.find(x => trInside(seed, x)); if (s) return traceOne(s, seed, false);
   const t = T.thresholds.find(x => trInside(seed, x)); if (t) return traceOne(t, seed, true);
   return null;
 }
 async function traceWindow(win, c){   // every traced floor space whose middle is in the window, into condition c -> autoAreaWindow's result, or null
   if (autoOpt().trace === false) return null;
-  const T = await traceGet(); if (!traceUsable(T)) return null;
   const x0 = Math.min(win[0], win[2]), y0 = Math.min(win[1], win[3]), x1 = Math.max(win[0], win[2]), y1 = Math.max(win[1], win[3]);
+  const T = await traceGet(null, false, [x0, y0, x1, y1]); if (!traceUsable(T)) return null;
   const have = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.kind === "shape" && (cond(i.cond) || {}).type === "area" && !hiddenItem(i)), cand = [], skipped = {failed: 0, existing: 0, overlap: 0, large: 0, small: 0, thin: 0};
   T.spaces.filter(s => !["lift", "stair", "chute", "void"].includes(s.kind)).forEach(s => s.outer.forEach(P0 => {
     const m = polyCentroid(P0); if (!(m[0] >= x0 && m[0] <= x1 && m[1] >= y0 && m[1] <= y1) || !trScaleOk(m)) return;
@@ -2958,7 +2995,7 @@ async function traceFloorTakeoff(o){
   o = o || {}; if (!P.proj || !S.page) return {err: "Open a page first."};
   const key = S.key, k = curScale(); if (!k) return {err: "Set the page scale first (K) — the trace works in feet."};
   if (scaleDoubt()) return {err: "The page scale is doubtful (the drawing measures " + scaleDoubt().label + ") — settle it first (scale chip)."};
-  const T = await traceGet(key); if (!T) return {err: "This page has no PDF layers to read the walls from — use Auto area (it reads the drawing image) or the window scan."};
+  const T = await traceGet(key); if (!T) return {err: S.geo[key] && S.geo[key].cad ? "No floor plan of this drawing is on screen — zoom to the plan to trace." : "This page has no PDF layers to read the walls from — use Auto area (it reads the drawing image) or the window scan."};
   if (T.err) return {err: "Vector trace: " + (T.why || T.err)}; if (!traceUsable(T)) return {err: "The vector trace can't read this page: " + traceWhyNot(T) + " — use Auto area (it reads the drawing image) or the window scan."};
   if (S.key !== key) return {err: "The page changed while the floor was read — nothing added."};
   // an earlier trace of this page (in the trace's own layers, or one imported from a traced takeoff file) is replaced, never doubled
@@ -2967,7 +3004,7 @@ async function traceFloorTakeoff(o){
     "l-04 other rooms / spaces"]));
   const old = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && i.det && i.det.how === "trace" && lay.has(String((cond(i.cond) || {}).name || "").toLowerCase()));
   if (old.length && !o.replace) { const ok = await ask("Trace the whole floor", `<p>This page already has <b>${old.length}</b> measurements from an earlier trace. Replace them with this trace?</p><p class="small">Measurements you drew yourself (not traced) are kept. Ctrl+Z undoes.</p>`, "Replace"); if (!ok) return {err: "cancelled"}; }
-  const at = new Date().toISOString(), batch = uid("B"), src = "PDF wall layers (vector trace)", sh = (P.proj.sheets || {})[key] || {}, conds = [], CID = {};
+  const at = new Date().toISOString(), batch = uid("B"), src = (S.geo[key] && S.geo[key].cad ? "AutoCAD layers" : "PDF wall layers") + " (vector trace)", sh = (P.proj.sheets || {})[key] || {}, conds = [], CID = {};
   TRACE_LAYERS.forEach(([code, name, type, unit, color, note]) => { let c = P.proj.conds.find(x => x.type === type && x.name.toLowerCase() === name.toLowerCase());
     if (!c) { c = {id: uid("C"), name, type, unit, color, group: "Vector trace", h: "", t: "", faces: 1, dedMin: 0, hidden: code === "L-07" || code === "L-09"}; conds.push(c); } CID[code] = c.id; });
   const items = [], r3p = v => Math.round(v * 1000) / 1000;
@@ -3048,7 +3085,7 @@ async function autoSettings(){
     <div class="fg"><label>Ignore marks smaller than (ft)</label><input type="text" id="aoMin" value="${f3(o.minLen)}"><span class="small">text, dashes, hatching (image: at least 1 ft)</span></div>
     <div class="fg"><label>Wall lines</label><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="small" id="aoWall">${o.wall ? "colour " + esc(o.wall.split("|")[0]) + ", " + esc(o.wall.split("|")[1]) + " pt and heavier" : "any drawing line"}</span>
       <button class="btn sm" id="aoPick" type="button">Pick a wall…</button>${o.wall ? '<button class="btn sm" id="aoClr" type="button">Any line</button>' : ""}</div></div>
-    <div class="fg w2"><label><input type="checkbox" id="aoTrace" style="width:auto"${o.trace !== false ? " checked" : ""}> Read the whole floor from the PDF's wall layers when it has them (vector trace — each room on its wall faces, doors closed at both faces, checked against its written size; recommended for CAD PDFs)</label>
+    <div class="fg w2"><label><input type="checkbox" id="aoTrace" style="width:auto"${o.trace !== false ? " checked" : ""}> Read the whole floor from the drawing's wall layers when it has them — a CAD PDF that keeps its layers, or an AutoCAD drawing (DWG / DXF: each plan of its model space on its own) — vector trace: each room on its wall faces, doors closed at both faces, an open plan split on its wall lines, checked against its written size</label>
       <div style="margin-top:4px"><button class="btn sm" id="aoTraceAll" type="button" title="Every room, washroom, corridor, threshold and wall run of this page in their own conditions">Trace the whole floor now…</button></div></div>
     <div class="fg w2"><label><input type="checkbox" id="aoLay" style="width:auto"${o.layers ? " checked" : ""}> Use the PDF's layers: only walls, doors / windows, columns and railings bound a room (furniture, fixtures, glass screens, hatch, text and clouds ignored) — when the PDF has them</label></div>
     <div class="fg w2"><label><input type="checkbox" id="aoDoor" style="width:auto"${o.skipDoors ? " checked" : ""}> Ignore door swings and door leaves</label></div>
@@ -10222,7 +10259,7 @@ function paletteCmds(){
   if (S.page) add((S.unmOn ? "Hide" : "Show") + " what is not measured yet — the spaces inside the walls no area covers, shaded red", () => unmToggle(), "Check");
   if (S.page) add("Name rooms by contents (this page) — Bath, Kitchen, Stair, Lift/Shaft, Balcony, Store from the lines in each (by layer)", nameRooms, "Modify");
   add("Combine the selected areas into one (union)", () => combineAreas(), "Modify");
-  if (S.page) add("Trace the whole floor — every room, washroom, corridor, threshold and wall run from the PDF's wall layers", traceFloorUI, "Tool");
+  if (S.page) add("Trace the whole floor — every room, washroom, corridor, threshold and wall run from the drawing's wall layers (a CAD PDF, or the AutoCAD plan on screen)", traceFloorUI, "Tool");
   if (S.page) add("Auto area: every room in a window…", async () => { const w = await pickWindow("Auto area: click one corner of the area to scan, then the opposite corner"); if (!w) return;
     busy("Auto area: finding the rooms…"); try { const r = await autoAreaWindow(w); if (r.err) { toast(r.err, 6000); return; } const sk = r.skipped;
       const more = [sk.failed ? sk.failed + " could not be traced" : "", r.flagged ? r.flagged + " to check (flagged)" : "", sk.existing ? sk.existing + " already measured" : "", sk.overlap ? sk.overlap + " ran into a neighbour (left out)" : "", sk.large ? sk.large + " over 3,000 Sft (click those)" : "", sk.small + sk.thin ? (sk.small + sk.thin) + " under 12 Sft or narrower than 3 ft" : ""].filter(Boolean);
@@ -12036,7 +12073,7 @@ function autoAreaAdd(cand, c, src){   // src: what found them (default: the agen
   const ids = {}, at = new Date().toISOString();
   mutate(() => cand.forEach(x => { const id = uid("I"), k = hereScale(x.pts[0]) || curScale(); ids[x.name] = id;   // (each at its own scale: a viewport drawn at another)
     P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: x.pts, nos: 1, ai: true, label: x.name.slice(0, 60), ...(x.ver ? {ver: x.ver} : {}),
-      det: {how: x.ver ? "trace" : "auto", src: src || (x.ver ? "PDF wall layers (vector trace)" : autoOpt().src === "vector" ? "vector lines" : "drawing image") + " (agent)", gap: +x.gap, note: x.note, flag: x.flag, a0: +(polyArea(x.pts) / k / k).toFixed(4), pts0: x.pts.map(q => q.slice()), at, holes: x.holes.map(h => ({name: h.name, a: +(polyArea(h.pts) / k / k).toFixed(4)}))}});
+      det: {how: x.ver ? "trace" : "auto", src: src || (x.ver ? trSrc() : autoOpt().src === "vector" ? "vector lines" : "drawing image") + " (agent)", gap: +x.gap, note: x.note, flag: x.flag, a0: +(polyArea(x.pts) / k / k).toFixed(4), pts0: x.pts.map(q => q.slice()), at, holes: x.holes.map(h => ({name: h.name, a: +(polyArea(h.pts) / k / k).toFixed(4)}))}});
     x.holes.forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, ai: true, label: h.name + " (void in " + x.name + ")"})); }), "Agent: Auto area");
   refresh(); return ids;
 }
@@ -13120,6 +13157,7 @@ function agentHelp(){
     • <i>full takeoff</i> (or ⚡) — rooms, walls, doors / windows and finishes in one run, on this page, <i>every page</i> or the <i>whole project</i>; one Ctrl+Z takes it back<br>
     • <i>drawing details</i> — rooms, sizes, door/window tags, levels, scale, unit types, stairs<br>
     • <i>measure all rooms</i> or <i>measure bedroom</i> — auto area at each room name, checked against its written size; add <i>on every page</i> for the whole PDF; a typing slip (<i>bedrom</i>) still finds it<br>
+    • <i>trace the whole floor</i> — on a drawing with wall layers (a CAD PDF, or an AutoCAD DWG / DXF: the plan on screen), every space into its own layer — rooms, kitchen + lounge, passages and foyers, corridors, washrooms, balconies; lifts, stairs and shafts apart — an open plan split on its wall lines, each room checked against its written size<br>
     • <i>count doors</i>, <i>count windows</i>, <i>count D1</i>, <i>count all tags</i> — add <i>on all pages</i> or <i>in the project</i>; 🚪 <b>Doors / windows</b> scans, shows what it found (with the schedule's sizes and quantities) and counts what you tick<br>
     • <i>count door swings</i> — doors from their swing symbols, for drawings with no door tags<br>
     • <i>apartment 107</i> (or just <i>107</i>) — every room of one apartment, with its total<br>
@@ -13235,16 +13273,16 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
     got.push({name: nm, a: best.a, pts: best.pts, with: inside.filter(q => !got.some(o => sameRoom(o.room, q))), room: r});
     const dup = done.has(nm.toLowerCase());
     mutate(() => { P.proj.items.push(Object.assign({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: best.pts, nos: 1, ai: true, label: nm}, best.ver ? {ver: best.ver,
-      det: {how: "trace", src: "PDF wall layers (vector trace) (agent)", gap: 8.6, note: best.ver.note || "", flag: best.ver.st === "auto" ? (best.ver.note || "check against the drawing") : "", a0: +best.a.toFixed(4), pts0: best.pts.map(q => q.slice()), at: new Date().toISOString()}}
+      det: {how: "trace", src: trSrc() + " (agent)", gap: 8.6, note: best.ver.note || "", flag: best.ver.st === "auto" ? (best.ver.note || "check against the drawing") : "", a0: +best.a.toFixed(4), pts0: best.pts.map(q => q.slice()), at: new Date().toISOString()}}
       : {det: {how: "auto", src: (autoOpt().src === "vector" ? "vector lines" : "drawing image") + " (agent, from the room's name)", gap: +(over.gap || autoOpt().gap), flag: r.sft && best.err > 0.05 ? "differs from its written size " + r.size : "", a0: +best.a.toFixed(4), pts0: best.pts.map(q => q.slice()), at: new Date().toISOString()}})); });   // (as found: kept to show and restore, and to tell an edit from the detection)
     const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;   // best.err is against the written sizes of every room in the space
     res.push({name: nm, area_sft: +best.a.toFixed(2), written_sft: r.sft ? +wrt.toFixed(2) : null, check: !!bad, open_plan_with: others.map(q => q.name)});
     say("tool", `${esc(nm)}: <b>${fq(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? fq(wrt) + " Sft together" : esc(r.size) + " = " + fq(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + fq(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
   }
   busy(""); refresh();
-  const failed = res.filter(x => x.error);
+  const failed = res.filter(x => x.error), traced = P.proj.items.some(i => onPage(i) && i.cond === c.id && i.ai && i.det && i.det.how === "trace");
   if (!(ok + chk)) say("err", `Nothing was measured — ${rooms.length} room${rooms.length > 1 ? "s" : ""} tried: ${res.map(x => esc(x.name) + " (" + esc(x.error || (x.shared_with ? "with " + x.shared_with : "not closed")) + ")").join(", ")}.`);
-  else say("bot", `Measured ${ok + chk} of ${rooms.length} into <b>${esc(c.name)}</b>${chk ? ` — <b>${chk} to check</b> (more than 5% off the written size: fix with Fence, or the room is not a rectangle)` : ""}${same2 ? ` — <b>${same2}</b> leaked into a neighbour, not added` : ""}${failed.length > same2 ? ` — <b>${failed.length - same2}</b> could not be closed` : ""}. Each is marked AI until you check it. Undo (Ctrl+Z, or “undo the last AI measurement”) takes them back.`);
+  else say("bot", `Measured ${ok + chk} of ${rooms.length} into <b>${esc(c.name)}</b>${chk ? ` — <b>${chk} to check</b> (more than 5% off the written size: fix with Fence, or the room is not a rectangle)` : ""}${same2 ? ` — <b>${same2}</b> leaked into a neighbour, not added` : ""}${failed.length > same2 ? ` — <b>${failed.length - same2}</b> could not be closed` : ""}. Each is marked AI until you check it. Undo (Ctrl+Z, or “undo the last AI measurement”) takes them back.${traced ? ` <span class="small">Tip: <i>trace the whole floor</i> puts every room into its own layer instead — rooms, kitchen + lounge, passages, corridors, washrooms, balconies.</span>` : ""}`);
   return {condition: c.name, rooms: res, measured: ok + chk, to_check: chk, failed: failed.length};
 }
 /* apartments: the unit numbers written on the plan — a 2-4 digit number with TYPE-… / n BED / … SFT under it. Each room
