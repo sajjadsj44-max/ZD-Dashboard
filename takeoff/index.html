@@ -258,7 +258,7 @@ table.sh .rn:hover{color:var(--purple)}
 .stg *{-webkit-user-select:none;user-select:none}.stg input,.stg textarea,.stg [contenteditable]{-webkit-user-select:text;user-select:text}
 .stg canvas{position:absolute;left:0;top:0;transform-origin:0 0}
 .cvlow{image-rendering:auto}
-.ov1,.ov2{position:absolute;inset:0;width:100%;height:100%}.ov2{pointer-events:none}
+.ov1,.ov2{position:absolute;left:0;top:0;width:100vw;height:100vh;overflow:visible}.ov2{pointer-events:none}
 .stg.pan{cursor:grab}.stg.panning{cursor:grabbing}.stg.draw{cursor:crosshair}.stg.lasso{cursor:crosshair}.stg.zoomwin{cursor:zoom-in}
 /* split window: two panes, each with its own page, zoom and (optionally) its own project */
 .panes{flex:1;min-height:0;display:flex;position:relative;background:#c5ccd8}
@@ -813,6 +813,7 @@ table.sktbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}ta
       <div class="rpanel" data-rp="takeoff" hidden>
         <div class="rg"><div class="rgb">
           <button class="tool" data-tool="draw" title="Length / run — draw along the drawing with the active condition: click each point, Enter to finish (A)"><svg class="ic"><use href="#i-draw"/></svg><span class="tl">Length</span> <kbd>A</kbd></button>
+          <button class="tool" data-tool="linepick" title="Line pick — click one line of the drawing: the whole run joined to it is taken off with the active condition in one click (a closed outline as an area); Shift+click goes on through junctions (Shift+A)"><svg class="ic"><use href="#i-linepick"/></svg><span class="tl">Line pick</span> <kbd>Shift+A</kbd></button>
           <button class="tool" data-tool="rect" title="Rectangle area (R)"><svg class="ic"><use href="#i-rect"/></svg><span class="tl">Rect</span> <kbd>R</kbd></button>
           <button class="tool" data-tool="circle" title="Circle — round slab, column, tank: centre then edge (E)"><svg class="ic"><use href="#i-circle"/></svg><span class="tl">Circle</span> <kbd>E</kbd></button>
           <button class="tool" data-tool="polygon" title="Polygon — regular n-sided outline (hexagonal column, pad): centre then a corner; type pol 8 for 8 sides"><svg class="ic"><use href="#i-polygon"/></svg><span class="tl">Polygon</span></button>
@@ -995,6 +996,7 @@ table.sktbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}ta
       <symbol id="i-lasso" viewBox="0 0 24 24"><path d="M12 4c5 0 9 2 9 5s-4 5-9 5-9-2-9-5 4-5 9-5z"/><path d="M9 15c0 3 1 4 3 6"/></symbol>
       <symbol id="i-pan" viewBox="0 0 24 24"><path d="M8 12V6a1.5 1.5 0 013 0v5M11 11V4.5a1.5 1.5 0 013 0V11M14 11V6a1.5 1.5 0 013 0v8c0 4-2.5 7-6.5 7-3 0-4.5-2-6.5-5l-1.8-2.8a1.5 1.5 0 012.4-1.7L8 14"/></symbol>
       <symbol id="i-draw" viewBox="0 0 24 24"><path d="M3 18l6-9 5 5 7-9"/><circle cx="3" cy="18" r="1.5"/><circle cx="9" cy="9" r="1.5"/><circle cx="14" cy="14" r="1.5"/><circle cx="21" cy="5" r="1.5"/></symbol>
+      <symbol id="i-linepick" viewBox="0 0 24 24"><path d="M2 15V5h12v4" stroke-width="2.6"/><path d="M13 12l3.5 9 1.6-3.6 3.6-1.6z"/></symbol>
       <symbol id="i-rect" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/><path d="M4 11l5-5M4 16l10-10M9 18L20 7M15 18l5-5" opacity=".45"/></symbol>
       <symbol id="i-auto" viewBox="0 0 24 24"><path d="M12 3l2 5.5L19.5 10 14 12l-2 5.5L10 12 4.5 10 10 8.5z"/><path d="M19 16v4M17 18h4"/></symbol>
       <symbol id="i-fence" viewBox="0 0 24 24"><path d="M5 4v16M12 4v16M19 4v16M3 9h18M3 15h18"/></symbol>
