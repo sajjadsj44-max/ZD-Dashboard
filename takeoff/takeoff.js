@@ -9,7 +9,7 @@ const EXCELJS = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"
 const COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948",
                 "#00a3c4", "#8e44ad", "#c0392b", "#d35400", "#16a085", "#7f8c8d", "#2c3e50", "#b8860b",
                 "#ff1493", "#6b8e23", "#1e90ff", "#a0522d", "#20b2aa", "#9acd32", "#ff6347", "#000000"];
-const SNAP_PX = 11, HIT_PX = 7;
+let SNAP_PX = 11, HIT_PX = 7;          // Settings → Snap & drafting can change them (setApply)
 let pdfjs = null;
 const CADV = (() => { try { return new URL(import.meta.url).search; } catch (e) { return ""; } })();   // cad.js comes with takeoff.js's ?v=
 let CAD = null;                       // cad.js (AutoCAD drawings), loaded on first use
@@ -580,7 +580,7 @@ async function openProject(id){
   buildPageSel();
   const first = pr.last && pr.last.file && pr.files.some(f => f.id === pr.last.file) ? pr.last : pr.files[0] ? {file: pr.files[0].id, page: 1} : null;
   if (first) await gotoPage(first.file, first.page || 1); else showDrop(true);
-  setTool(S.cond ? "draw" : "select");
+  S.ribHold = true; try { setTool(S.cond ? "draw" : "select"); } finally { S.ribHold = false; }   // opening a project leaves the ribbon on its tab (My tools after a refresh)
   refresh();
   backupNow("opened").catch(() => {});
 }
@@ -8314,8 +8314,11 @@ function snapKinds(){
 function ribShow(tab){
   document.querySelectorAll("#tools [data-rtab]").forEach(b => { const on = b.dataset.rtab === tab; b.classList.toggle("on", on); b.setAttribute("aria-selected", on ? "true" : "false"); });
   document.querySelectorAll("#tools [data-rp]").forEach(pn => { pn.hidden = pn.dataset.rp !== tab; });
+  if (tab !== S.ribTab) { S.ribTab = tab; pref("zdTakeoffRibLast", tab); }   // for Settings → General "the tab used last"
 }
 function ribFollow(t){   // the tab of the tool just picked (Select / Match / Lasso / Pan are always on show and change nothing)
+  const m = setPref().ribFollow; if (S.ribHold || m === "never") return;   // Settings → General: smart (default) / always / never
+  if (m !== "always" && S.ribTab === "mine" && [...document.querySelectorAll("#mineBox [data-mine]")].some(c => c.__src && c.__src.dataset.tool === t)) return;   // the tool is in My tools: stay there
   const b = document.querySelector(`#tools [data-tool="${t}"]`), pn = b && b.closest("[data-rp]");
   if (pn) ribShow(pn.dataset.rp); else if (mkIsTool(t)) ribShow("markup");
 }
@@ -8396,7 +8399,7 @@ function mineRemove(k){ const o = tbPref(), L = (o.mine || []).filter(x => x !==
 function mineBuild(){
   const box = $("mineBox"), L = tbPref().mine || [], all = tbAll(); box.innerHTML = "";
   L.forEach(k => { const src = all.find(x => x.k === k); if (!src) return; const c = document.createElement("button"); c.className = "tool"; c.dataset.mine = k; c.title = src.b.title + " — right-click to take it out, or use Customize → My tools"; c.innerHTML = src.b.innerHTML; c.__src = src.b;
-    c.addEventListener("click", () => { src.b.click(); setTimeout(syncMine, 60); });
+    c.addEventListener("click", () => { S.ribHold = true; try { src.b.click(); } finally { S.ribHold = false; } setTimeout(syncMine, 60); });   // a tool picked from My tools keeps My tools open
     c.addEventListener("contextmenu", e => { e.preventDefault(); mineRemove(k); });
     box.appendChild(c); });
   $("mineHint").style.display = box.children.length ? "none" : "";
@@ -8448,16 +8451,292 @@ async function tbDialog(){
   const r = await pr; if (!r) return;
   pref(TB_KEY, JSON.stringify(r.n)); wsSet({tb: r.icons ? "icons" : "full"}); tbApply(); toast("Toolbar updated — Customize → Reset brings everything back", 2600);
 }
+/* ------------------------------------------------------------------ Settings (⚙ Settings in the top bar, Ctrl+,)
+   Every option in one window, as Bluebeam's Preferences and PlanSwift's Options: a page per subject on the left, one search over all of
+   them, a Reset on each page. A change applies at once (Close only closes). The options set elsewhere (View tab, Customize, Labels ⚙,
+   the snap list, Workspace) are the same ones, read and written here through the same functions; the new ones (the tab the ribbon opens
+   on, whether it follows the tool picked, snap and pick distances, your own shortcuts) are kept under SET_KEY. All of it stays in this
+   browser — Settings → Backup & reset saves it to a file for another computer. */
+const SET_KEY = "zdTakeoffSet";
+const SET_DEF = {homeTab: "mine", ribFollow: "smart", openLast: true, snapStart: true, snapPx: 11, hitPx: 7, keys: []};
+let SETV = null;
+function setPref(){ if (!SETV) { let o = null; try { o = JSON.parse(pref(SET_KEY) || "null"); } catch (e) { o = null; } SETV = Object.assign({}, SET_DEF, o && typeof o === "object" ? o : {}); if (!Array.isArray(SETV.keys)) SETV.keys = []; } return SETV; }
+function setSave(ch){ SETV = Object.assign({}, setPref(), ch); pref(SET_KEY, JSON.stringify(SETV)); setApply(); return SETV; }
+function setApply(){ const o = setPref(); SNAP_PX = Math.max(4, Math.min(40, Math.round(+o.snapPx) || 11)); HIT_PX = Math.max(3, Math.min(30, Math.round(+o.hitPx) || 7)); }
+function ribHome(){   // the tab the ribbon opens on: My tools unless Settings → General says otherwise (a tab hidden in Customize is skipped)
+  const o = setPref(), h = o.homeTab === "last" ? pref("zdTakeoffRibLast") || "mine" : o.homeTab, b = [...document.querySelectorAll("#tools .rtab")].find(x => x.dataset.rtab === h);
+  if (b && b.style.display !== "none") ribShow(h);
+}
+/* your own shortcuts: Ctrl or Alt with a key, or F1–F12, run any command of the palette (Ctrl+K) by its name; they come before the built-in keys */
+const KEY_BUILTIN = ["Ctrl+K", "Ctrl+S", "Ctrl+P", "Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+Y", "Ctrl+A", "Ctrl+I", "Ctrl+C", "Ctrl+X", "Ctrl+V", "Ctrl+Shift+V", "Ctrl+D", "Ctrl+F", "Ctrl+Shift+L", "Ctrl+\\", "Ctrl+,", "Alt+L", "F2", "F6", "F8", "F10"];
+function keyCombo(e){   // "Ctrl+Alt+L", "F3", "Ctrl+Shift+1" — "" for a modifier alone
+  if (/^(Control|Shift|Alt|Meta|AltGraph|CapsLock|Dead|Unidentified)$/.test(e.key || "")) return "";
+  const c = e.code || "", n = /^Key[A-Z]$/.test(c) ? c.slice(3) : /^Digit\d$/.test(c) ? c.slice(5) : e.key === " " ? "Space" : String(e.key).length === 1 ? String(e.key).toUpperCase() : String(e.key);
+  return [e.ctrlKey || e.metaKey ? "Ctrl" : "", e.altKey ? "Alt" : "", e.shiftKey ? "Shift" : "", n].filter(Boolean).join("+");
+}
+const keyOk = k => /^F([1-9]|1[0-2])$/.test(String(k).split("+").pop()) || /^(Ctrl|Alt)\+./.test(String(k));
+function keyCmd(t){ const L = paletteCmds(), t0 = String(t || "").split(" — ")[0]; return L.find(c => c.t === t) || L.find(c => c.t.split(" — ")[0] === t0) || null; }
+function settingsInit(){
+  setApply(); $("snapOn").checked = setPref().snapStart !== false;
+  document.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === ",") { e.preventDefault(); e.stopImmediatePropagation(); if (!$("dlgBack").classList.contains("on")) settingsDialog(); return; }
+    const L = setPref().keys; if (!L.length || e.repeat) return;
+    const a = e.target; if ($("dlgBack").classList.contains("on") || ($("pal") && $("pal").classList.contains("on")) || (a && (/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) || a.isContentEditable))) return;
+    const k = keyCombo(e), m = k && L.find(x => x.k === k); if (!m) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const c = keyCmd(m.c); if (!c) { toast(k + ": “" + m.c + "” is not available here" + (P.proj ? "" : " — open a project first"), 3000); return; }
+    Promise.resolve().then(c.run).catch(er => toast(String(er && er.message || er), 5000));
+  }, true);
+}
+/* settings in a file: every zdTakeoff… option of this browser but the AI key and what is only a record (last project, chat, history, KPIs) */
+const SET_SKIP = /^zdTakeoff(ApiKey|Last|Chat|CmdHist|Kpi|Bench|Pal|PalUse|RibLast|SetPg)$/;
+const SET_KEEP = /^zdTakeoff(ToolChest|Stamps|AgentRules|User|LocalUrl|LocalModel|LocalCtx|CcModel|AiEngine)$/;   // your own content and AI setup: a Reset all keeps them
+function setKeys(){ const out = []; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (/^zdTakeoff/.test(k) && !SET_SKIP.test(k)) out.push(k); } } catch (e) {} return out.sort(); }
+function setExport(){
+  const o = {app: "ZD Takeoff settings", v: 1, at: new Date().toISOString(), keys: {}}; setKeys().forEach(k => { o.keys[k] = pref(k); });
+  saveBlob(new Blob([JSON.stringify(o, null, 1)], {type: "application/json"}), "zd-takeoff-settings-" + today() + ".json");
+  toast("Settings saved to a file (" + Object.keys(o.keys).length + " groups) — Load settings on another computer to use them there", 3500);
+}
+function setImport(){
+  const f = document.createElement("input"); f.type = "file"; f.accept = ".json,application/json";
+  f.onchange = async () => { const file = f.files && f.files[0]; if (!file) return; let o = null;
+    try { o = JSON.parse(await file.text()); } catch (e) { o = null; }
+    if (!o || o.app !== "ZD Takeoff settings" || !o.keys || typeof o.keys !== "object") { toast("That is not a ZD Takeoff settings file", 4000); return; }
+    const K = Object.entries(o.keys).filter(([k, v]) => /^zdTakeoff/.test(k) && !SET_SKIP.test(k) && typeof v === "string");
+    if (!K.length) { toast("Nothing to load in that file", 3000); return; }
+    K.forEach(([k, v]) => pref(k, v)); toast("Settings loaded (" + K.length + " groups) — reloading…", 2500);
+    try { await flushSave(); } catch (e) {} setTimeout(() => location.reload(), 700); };
+  f.click();
+}
+async function setResetAll(btn){   // two clicks: the first arms the button for 4 s
+  if (!btn.dataset.armed) { btn.dataset.armed = "1"; btn.textContent = "Click again to reset"; setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = "Reset all…"; } }, 4000); return false; }
+  const mine = tbPref().mine || [];
+  setKeys().filter(k => !SET_KEEP.test(k)).forEach(k => pref(k, ""));
+  if (mine.length) pref(TB_KEY, JSON.stringify({mine}));   // My tools stays
+  toast("Every setting is back to how the app came — reloading…", 2500);
+  try { await flushSave(); } catch (e) {} setTimeout(() => location.reload(), 700);
+}
+function stoInfo(){   // Saving & backups: how much this site keeps, and whether the browser may clear it
+  const el = $("stoInfo"); if (!el) return;
+  if (!navigator.storage || !navigator.storage.estimate) { el.textContent = "This browser does not report its storage."; return; }
+  Promise.all([navigator.storage.estimate(), navigator.storage.persisted ? navigator.storage.persisted() : false]).then(([e, p]) => {
+    const mb = v => ((+v || 0) / 1048576).toLocaleString("en-US", {maximumFractionDigits: 1}) + " MB";
+    el.innerHTML = `This site keeps <b>${mb(e.usage)}</b> (projects, PDFs, backups) of about ${mb(e.quota)} the browser allows · ` + (p ? "<b>persistent</b> — the browser will not clear it" : "<b>not persistent</b> — the browser may clear it when the disk is nearly full");
+  }).catch(() => { el.textContent = "Could not read the storage."; });
+}
+function keysHtml(){
+  const L = setPref().keys, cmds = paletteCmds().filter(c => c.g !== "Page");
+  return `<p class="small" style="margin:0 0 6px">Click the box and press the keys — <b>Ctrl</b> or <b>Alt</b> with a letter or number, or <b>F1</b>–<b>F12</b> — then pick a command and <b>Add</b>. Yours come before the built-in keys.${P.proj ? "" : " Open a project to list every command."}</p>
+    <div class="skadd"><input type="text" id="skKey" readonly placeholder="Press keys…" aria-label="Shortcut keys"><input type="text" id="skCmd" list="skCmds" placeholder="Command — type to search" aria-label="Command"><datalist id="skCmds">${cmds.map(c => `<option value="${esc(c.t)}">`).join("")}</datalist><button class="btn sm pri" id="skAdd">Add</button></div>
+    <table class="sktbl">${L.length ? L.map((x, i) => `<tr><td><kbd>${esc(x.k)}</kbd></td><td>${esc(x.c)}${KEY_BUILTIN.includes(x.k) ? ' <span class="small">(instead of the built-in ' + esc(x.k) + ")</span>" : ""}</td><td><button class="btn sm dng" data-skrm="${i}" title="Remove this shortcut" aria-label="Remove">&#10005;</button></td></tr>`).join("") : '<tr><td class="small">No shortcuts of your own yet.</td></tr>'}</table>`;
+}
+function keysWire(paint){
+  const kI = $("skKey"); if (!kI) return;
+  kI.addEventListener("keydown", e => { if (e.key === "Escape" || e.key === "Tab") return; e.preventDefault(); const k = keyCombo(e); if (k) kI.value = k; });
+  $("skAdd").onclick = () => { const k = kI.value, c = keyCmd($("skCmd").value.trim());
+    if (!k) return toast("Click the box and press the keys first", 2500);
+    if (!keyOk(k)) return toast(k + ": use Ctrl or Alt with a key, or F1–F12 — single keys are the tools' own", 3500);
+    if (!c) return toast("Pick a command from the list", 2500);
+    setSave({keys: setPref().keys.filter(x => x.k !== k).concat([{k, c: c.t}])}); toast(k + " → " + c.t + (KEY_BUILTIN.includes(k) ? " (instead of the built-in " + k + ")" : ""), 3000); paint(); };
+  document.querySelectorAll("#dlgB [data-skrm]").forEach(b => b.addEventListener("click", () => { const L = setPref().keys.slice(); L.splice(+b.dataset.skrm, 1); setSave({keys: L}); paint(); }));
+}
+function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a row: {t: tog | sel | num | col | txt | btn | html, n, d, get, set …} or {h: heading}
+  const tabs = [...document.querySelectorAll("#tools .rtab")].map(b => [b.dataset.rtab, b.textContent.replace(/\s+/g, " ").trim()]);
+  const pcOn = k => !(pcPref().off || []).includes(k), pcSet = (k, v) => { const o = pcPref(), s = new Set(o.off || []); if (v) s.delete(k); else s.add(k); pcSave({off: [...s], compact: o.compact}); };
+  const td = k => () => toolDefaults()[k], tdSet = k => v => saveToolDefaults(Object.assign(toolDefaults(), {[k]: v}));
+  const lb = (k, n, d) => ({t: "tog", n, d, get: () => k === "zoom" || k === "declutter" ? S.lbl[k] !== false : !!S.lbl[k], set: v => lblSet({[k]: v})});
+  const chest = {t: "btn", n: "Tool Chest", d: "saved tool profiles — colour, line weight, markup style — with favourites", b: "Open…", fn: () => toolChestDialog()};
+  return [
+    {id: "general", n: "General", d: "start-up, the ribbon, your name", rows: [
+      {t: "sel", n: "Ribbon tab when the app opens", d: "shown on opening or refreshing the page", o: tabs.concat([["last", "The tab used last"]]), get: () => setPref().homeTab, set: v => { setSave({homeTab: v}); }},
+      {t: "sel", n: "When a tool is picked by its key or a menu", d: "which ribbon tab shows", o: [["smart", "Its tab — but stay on My tools when the tool is there"], ["always", "Always its tab"], ["never", "Keep the tab I am on"]], get: () => setPref().ribFollow, set: v => { setSave({ribFollow: v}); }},
+      {t: "tog", n: "Open the last project when the app starts", d: "off: start on the list of projects", get: () => setPref().openLast !== false, set: v => { setSave({openLast: v}); }},
+      {t: "txt", n: "Your name", d: "on markups, checks, comments and legends", get: qaUser, set: v => pref("zdTakeoffUser", String(v).trim().slice(0, 60))},
+      {t: "btn", n: "Command palette", d: "every tool, export and dialog by name (Ctrl+K)", b: "Open", fn: openPalette}],
+     reset: () => setSave({homeTab: SET_DEF.homeTab, ribFollow: SET_DEF.ribFollow, openLast: true})},
+    {id: "ribbon", n: "Ribbon & toolbar", d: "tabs, My tools, icons, compact ribbon", rows: [
+      {t: "tog", n: "Compact ribbon", d: "the same tools, about half the height", get: () => !!pcPref().compact, set: v => pcSave({off: pcPref().off || [], compact: v})},
+      {t: "tog", n: "Icons only", d: "no names under the tools (pointing at one still names it)", get: () => wsPref().tb === "icons", set: v => wsSet({tb: v ? "icons" : "full"})},
+      {t: "tog", n: "Ribbon tabs row", d: "Takeoff, Modify, Markup … with Select, Ortho, Snap on the right", get: () => pcOn("ui-tabs"), set: v => pcSet("ui-tabs", v)},
+      {t: "tog", n: "Ribbon tools", d: "off: collapsed for more drawing room (double-click a tab does the same)", get: () => pcOn("ui-ribbon"), set: v => pcSet("ui-ribbon", v)},
+      {h: "Tabs shown"},
+      ...tabs.map(([id, n]) => ({t: "tog", n: n + " tab", d: id === "mine" ? (tbPref().mine || []).length + " tool(s) in it — drag a tool onto the tab to add it" : "", get: () => !(tbPref().tabs || []).includes(id),
+        set: v => { const o = tbPref(), s = new Set(o.tabs || []); if (v) s.delete(id); else s.add(id); if (s.size >= tabs.length) return "Keep at least one tab"; o.tabs = [...s]; pref(TB_KEY, JSON.stringify(o)); tbApply(); }})),
+      {h: "Tools"},
+      {t: "btn", n: "Customize toolbar", d: "the tools on each tab and their order, the top-bar buttons, the tools in My tools", b: "Customize…", fn: tbDialog, back: true}, chest],
+     reset: () => { const o = tbPref(); o.tabs = []; pref(TB_KEY, JSON.stringify(o)); tbApply(); wsSet({tb: "full"}); pcSave({off: (pcPref().off || []).filter(k => k !== "ui-tabs" && k !== "ui-ribbon"), compact: true}); }},
+    {id: "panels", n: "Panels & layout", d: "left and right panels, bars, ready-made layouts", rows: [
+      {t: "html", n: "Ready-made layouts", html: () => `<div class="presets">${Object.entries(PC_PRESETS).map(([k, p]) => `<button class="btn" data-setp="${k}"><b>${esc(p.n)}</b><small>${esc(p.d)}</small></button>`).join("")}</div>`,
+        wire: paint => document.querySelectorAll("#dlgB [data-setp]").forEach(b => b.addEventListener("click", () => { const p = PC_PRESETS[b.dataset.setp]; S.lw = p.lw; S.rw = p.rw; S.lHide = p.lHide; S.rHide = p.rHide; pcSave({off: p.off.slice(), compact: p.compact}); setPanels(); toast("Layout: " + p.n, 1600); paint(); }))},
+      {h: "Left panel"},
+      {t: "tog", n: "Left panel", d: "conditions, pages, layers and properties", get: () => !S.lHide, set: v => { S.lHide = !v; setPanels(); }},
+      {t: "num", n: "Left panel width", u: "px", min: 160, max: 520, step: 10, get: () => S.lw, set: v => { S.lw = v; setPanels(); }},
+      ...PC_ITEMS.l.map(([k, n]) => ({t: "tog", n: n.replace(/^— /, ""), d: /^— /.test(n) ? "in the Properties box" : "", get: () => pcOn(k), set: v => pcSet(k, v)})),
+      {h: "Right panel"},
+      {t: "tog", n: "Right panel", d: "the measurement sheet and the bill", get: () => !S.rHide, set: v => { S.rHide = !v; setPanels(); }},
+      {t: "num", n: "Right panel width", u: "px", min: 260, max: 820, step: 10, get: () => S.rw, set: v => { S.rw = v; setPanels(); }},
+      ...PC_ITEMS.r.map(([k, n]) => ({t: "tog", n, get: () => pcOn(k), set: v => pcSet(k, v)})),
+      {h: "Bars and navigation"},
+      ...PC_ITEMS.u.filter(([k]) => k === "ui-cbar" || k === "ui-status").map(([k, n]) => ({t: "tog", n, get: () => pcOn(k), set: v => pcSet(k, v)})),
+      {t: "tog", n: "Minimap", d: "the whole page in a corner while zoomed in", get: () => !!wsPref().mini, set: v => wsSet({mini: v})},
+      {t: "sel", n: "Page thumbnails", o: [["s", "Small"], ["m", "Medium"], ["l", "Large"]], get: () => S.pgSz || "m", set: v => { S.pgSz = v; pref("zdTakeoffPgSz", v); renderPages(); }}],
+     reset: () => { const o = pcPref(); pcSave({off: ["l-keys", "r-info", "l-strip"].concat((o.off || []).filter(k => k === "ui-tabs" || k === "ui-ribbon" || k === "ui-agent")), compact: o.compact}); S.lw = 260; S.rw = 360; S.lHide = false; S.rHide = false; setPanels(); wsSet({mini: false}); S.pgSz = "m"; pref("zdTakeoffPgSz", ""); renderPages(); }},
+    {id: "view", n: "Drawing & display", d: "edit mode, background, dimmer, line weights, cursor", rows: [
+      {t: "sel", n: "Edit mode", d: "PDF: dimmer 60 %, white, monochrome · AutoCAD: no dimming, black, the drawing's colours — and the lines Offset, Trim, Fillet … edit", o: [["pdf", "PDF mode"], ["cad", "AutoCAD mode"]], get: () => S.edMode === "cad" ? "cad" : "pdf", set: v => setEdMode(v, true)},
+      {t: "sel", n: "Background", o: [["auto", "Auto — black for AutoCAD drawings, white for PDFs"], ["white", "White"], ["black", "Black"]], get: () => S.bg || "auto", set: v => setBg(v)},
+      {t: "tog", n: "Monochrome drawing", d: "the drawing's lines in one colour; the takeoff keeps its colours", get: () => !!S.mono, set: v => setMono(v)},
+      {t: "num", n: "Dimmer", d: "fades the drawing so the takeoff stands out — 0 is off", u: "%", min: 0, max: 90, step: 5, get: () => S.dim ? S.dimPct : 0, set: v => setDim(v)},
+      {t: "tog", n: "Line weights", d: "off: every line drawn thin", get: () => !S.thin, set: v => setThin(!v)},
+      {t: "tog", n: "Enhance faint lines when zoomed out", d: "the picture only — never the PDF or a quantity", get: () => !!S.boost, set: v => setBoost(v)},
+      {t: "tog", n: "Markups shown", d: "measurements and notes on the drawing", get: () => !S.hideMk, set: v => { if (!S.hideMk !== v) $("bHideMk").click(); }},
+      {t: "tog", n: "Takeoff legend on the drawing", get: () => !!S.legendOn, set: v => setLegendOn(v)},
+      {h: "Cursor"},
+      {t: "tog", n: "Cross-hair", d: "hair-lines across the whole window through the pointer (Shift+C)", get: () => !!S.xh, set: v => setXh(v, true)},
+      {t: "tog", n: "Magnifier", d: "a 3× glass at the cursor while drawing and measuring (Shift+G)", get: () => !!MAG.on, set: v => setMag(v, true)}],
+     reset: () => { setBg("auto"); setMono(false); setDim(0); setThin(false); setBoost(true); setXh(false, true); setMag(false, true); setLegendOn(true); if (S.hideMk) $("bHideMk").click(); }},
+    {id: "snap", n: "Snap & drafting", d: "object snaps, snap and pick distances, Ortho, Polar", rows: [
+      {t: "tog", n: "Snap to drawing lines", d: "on when the app opens — S switches it for now", get: () => setPref().snapStart !== false, set: v => { setSave({snapStart: v}); $("snapOn").checked = v; }},
+      {t: "num", n: "Snap distance", d: "how near the pointer must come to a point or a line to snap to it", u: "px", min: 4, max: 40, step: 1, get: () => SNAP_PX, set: v => { setSave({snapPx: v}); }},
+      {t: "num", n: "Pick distance", d: "how near a click must be to a line or a point to select it", u: "px", min: 3, max: 30, step: 1, get: () => HIT_PX, set: v => { setSave({hitPx: v}); }},
+      {h: "Object snaps"},
+      ...SNAP_KINDS.map(([k, n]) => ({t: "tog", n, get: () => !!snapKinds()[k], set: v => { snapKinds()[k] = v; pref(SNAP_KEY, JSON.stringify(snapKinds())); }})),
+      {h: "Tracking"},
+      {t: "tog", n: "Ortho", d: "points go straight across or up / down (F8)", get: () => !!S.ortho, set: v => setOrtho(v, true)},
+      {t: "tog", n: "Polar tracking", d: "a point near the angle set is pulled onto it (F10)", get: () => !!S.polar, set: v => setPolar(v, true)},
+      {t: "sel", n: "Polar angle", o: [5, 10, 15, 30, 45, 90].map(d => [String(d), "every " + d + "°"]), get: () => String(polarDeg()), set: v => pref("zdTakeoffPolarDeg", v)},
+      {t: "num", n: "Polygon sides", d: "for the Polygon tool (or type pol 8)", min: 3, max: 64, step: 1, get: () => polySides(), set: v => { polySides(v); }}],
+     reset: () => { S.snapK = null; pref(SNAP_KEY, ""); setOrtho(false, true); setPolar(false, true); pref("zdTakeoffPolarDeg", ""); polySides(6); setSave({snapStart: true, snapPx: SET_DEF.snapPx, hitPx: SET_DEF.hitPx}); $("snapOn").checked = true; }},
+    {id: "measure", n: "Measurements", d: "new conditions, auto area, columns, scale", rows: [
+      {t: "col", n: "Colour of new conditions", get: td("condColor"), set: tdSet("condColor")},
+      {t: "num", n: "Line weight of new conditions", min: 0, max: 24, step: 0.25, get: td("condWidth"), set: v => tdSet("condWidth")(swN(v, 2))},
+      {t: "btn", n: "Give every condition in this project this colour and weight", b: "Apply", need: 1, stay: true, fn: () => { const d = toolDefaults(); mutate(() => P.proj.conds.forEach(c => { c.color = d.condColor; c.sw = d.condWidth; }), "Default colour and weight"); toast("Every condition has the default colour and line weight", 2400); }},
+      {h: "This project"},
+      {t: "btn", n: "Auto area", d: "door gap, furniture, wall lines — kept with the project", b: "Settings…", need: 1, fn: autoSettings, back: true},
+      {t: "btn", n: "Custom columns", d: "your own figures per condition by formula (Tiles = Q / 4 * 1.05)", b: "Columns…", need: 1, fn: colsDialog, back: true},
+      {t: "btn", n: "Scale of this page", d: "from the drawing's scale note or a known length (K)", b: "Set scale…", need: 2, fn: scaleDialog}],
+     reset: () => saveToolDefaults(Object.assign(toolDefaults(), {condColor: DEFAULTS.condColor, condWidth: DEFAULTS.condWidth}))},
+    {id: "markup", n: "Markups & dimensions", d: "colours, line weights, dimension text and arrows, highlights", rows: [
+      {t: "col", n: "Markup colour", get: td("markColor"), set: tdSet("markColor")},
+      {t: "num", n: "Markup line weight", min: 0, max: 24, step: 0.25, get: td("markWidth"), set: v => tdSet("markWidth")(swN(v, 2))},
+      {h: "Dimensions"},
+      {t: "col", n: "Dimension colour", get: td("dimColor"), set: tdSet("dimColor")},
+      {t: "num", n: "Dimension line weight", min: 0, max: 24, step: 0.25, get: td("dimWidth"), set: v => tdSet("dimWidth")(swN(v, 2))},
+      {t: "num", n: "Dimension text size", min: 8, max: 48, step: 1, get: td("dimSize"), set: tdSet("dimSize")},
+      {t: "num", n: "Arrow size", min: 5, max: 40, step: 1, get: td("dimArrow"), set: tdSet("dimArrow")},
+      {t: "num", n: "Offset from the measured line", min: 0, max: 500, step: 1, get: td("dimOffset"), set: tdSet("dimOffset")},
+      {h: "Highlights"},
+      {t: "col", n: "Highlight colour", get: td("hiliteColor"), set: tdSet("hiliteColor")},
+      {t: "num", n: "Highlight opacity", u: "%", min: 5, max: 100, step: 5, get: () => Math.round(toolDefaults().hiliteOpacity * 100), set: v => tdSet("hiliteOpacity")(v / 100)},
+      {h: "Apply"},
+      {t: "btn", n: "Give every markup in this project these", d: "colour, weight, dimension and highlight settings", b: "Apply", need: 1, stay: true, fn: () => { const v = toolDefaults();
+        mutate(() => (P.proj.marks || []).forEach(m => { m.color = m.type === "dimension" ? v.dimColor : m.type === "hilite" ? v.hiliteColor : v.markColor; m.width = m.type === "dimension" ? v.dimWidth : v.markWidth; if (m.type === "dimension") { m.size = v.dimSize; m.arrow = v.dimArrow; m.offset = v.dimOffset; } if (m.type === "hilite") m.opacity = v.hiliteOpacity; }), "Markup defaults"); toast("Every markup has the default style", 2400); }},
+      {t: "btn", n: "Forget the styles set with ‘Set as default’ on a markup", d: "text boxes, clouds, arrows … go back to the house style", b: "Forget", stay: true, fn: () => { pref(MK_STYLE_KEY, ""); toast("Markup styles back to the house style", 2200); }},
+      {t: "btn", n: "Markups list", d: "filter, statuses, replies, summaries (Alt+L)", b: "Open", need: 1, fn: () => mlToggle(true)}, chest],
+     reset: () => saveToolDefaults(Object.assign(toolDefaults(), ...["markColor", "markWidth", "dimColor", "dimWidth", "dimSize", "dimArrow", "dimOffset", "hiliteColor", "hiliteOpacity"].map(k => ({[k]: DEFAULTS[k]}))))},
+    {id: "labels", n: "Labels", d: "what labels on the drawing show, and their size", rows: [
+      {t: "tog", n: "Labels on the drawing", d: "L shows or hides them", get: () => !!S.lbl.on, set: v => setLblOn(v)},
+      {t: "sel", n: "Every label shows", o: Object.entries(LBL_SHOW), get: () => LBL_SHOW[S.lbl.show] ? S.lbl.show : "full", set: v => lblSet({show: v})},
+      {t: "sel", n: "Cut-out / deduction labels show", o: Object.entries(LBL_DED), get: () => LBL_DED[S.lbl.dedShow] ? S.lbl.dedShow : "qty", set: v => lblSet({dedShow: v})},
+      {t: "num", n: "Label size", d: "[ and ] step it", u: "%", min: 50, max: 300, step: 5, get: () => Math.round((+S.lbl.scale || 1) * 100), set: v => lblSet({scale: v / 100})},
+      {t: "num", n: "Cut-out label size", d: "Shift + [ and ]", u: "%", min: 50, max: 300, step: 5, get: () => Math.round((+S.lbl.dedScale || 1) * 100), set: v => lblSet({dedScale: v / 100})},
+      {h: "A full label shows"},
+      lb("name", "Name (room / label)"), lb("cond", "Condition name"), lb("qty", "Quantity in the condition's unit"), lb("units", "Units (Sft, ft, cft, Nos)"),
+      lb("area", "Area Sft", "when the unit is not Sft — in Sft the quantity is the area"), lb("perim", "Perimeter ft", "shown as P"), lb("dims", "L × W of rectangles · Ø of circles · H / T of walls"), lb("len", "Length ft"),
+      {h: "Display"},
+      lb("seg", "Length of every side", "always shown on the selected one"), lb("small", "Hide labels on shapes too small to read"), lb("zoom", "Labels grow and shrink with the zoom", "off: always one size on screen"),
+      lb("declutter", "Leave out a label that would cover another", "the bigger object's label stays"), lb("autoName", "Name new areas from the room name written inside them")],
+     reset: () => { S.lbl = Object.assign({}, LBL_DEF); lblSet({}); setLblOn(true); }},
+    {id: "keys", n: "Keyboard shortcuts", d: "your own keys for any command", rows: [
+      {t: "html", n: "Your shortcuts", html: keysHtml, wire: keysWire},
+      {t: "btn", n: "Built-in keys and mouse", d: "every shortcut the app has", b: "Show…", fn: keysDialog}],
+     reset: () => setSave({keys: []})},
+    {id: "export", n: "Export & print", d: "preview, exports, plot, report", rows: [
+      {t: "tog", n: "Preview before printing or saving a PDF", get: () => prevAlways(), set: v => pref("zdTakeoffPrev", v ? "" : "0")},
+      {t: "btn", n: "Export", d: "Excel, CSV, marked-up PDF / PNG, report, project — with the check before export", b: "Export…", need: 1, fn: exportMenu},
+      {t: "btn", n: "Export pages", d: "PDF, a PDF per page, PNG or JPEG — pages, resolution, legend", b: "Pages…", need: 1, fn: () => exportPagesDialog()},
+      {t: "btn", n: "Plot / print", d: "a window, the view or the page, at a scale (Ctrl+P)", b: "Plot…", need: 2, fn: plotDialog},
+      {t: "btn", n: "Report", d: "rows by condition, page or floor, your columns — Excel or CSV", b: "Report…", need: 1, fn: reportDialog}],
+     reset: () => pref("zdTakeoffPrev", "")},
+    {id: "ai", n: "AI & takeoff agent", d: "engine, instructions, knowledge", rows: [
+      {t: "tog", n: "Takeoff-agent bar at the bottom", get: () => pcOn("ui-agent"), set: v => pcSet("ui-agent", v)},
+      {t: "btn", n: "AI engine", d: "Claude, or a free local AI that runs offline — set up, test, benchmark", b: "Set up…", need: 1, fn: locSetup},
+      {t: "btn", n: "Agent instructions", d: "the working rules the AI follows", b: "Edit…", need: 1, fn: rulesDialog},
+      {t: "btn", n: "Project knowledge", d: "documents and offline search", b: "Open…", need: 1, fn: kbDialog},
+      {t: "btn", n: "KPIs", d: "Auto area and agent performance from recorded results", b: "Open…", need: 1, fn: kpiDialog}],
+     reset: () => pcSet("ui-agent", true)},
+    {id: "save", n: "Saving & backups", d: "where projects are kept, backups, storage", rows: [
+      {t: "html", n: "Storage in this browser", html: () => '<div id="stoInfo" class="small">Reading…</div>', wire: stoInfo},
+      {t: "btn", n: "Keep projects safe from browser clean-up", d: "asks the browser never to clear this site's storage when the disk is nearly full", b: "Ask the browser", stay: true, fn: async () => { const ok = navigator.storage && navigator.storage.persist ? await navigator.storage.persist() : false; toast(ok ? "Storage is persistent — the browser will not clear your projects" : "The browser did not allow it — bookmark the page or install it as an app, then try again", 4500); }},
+      {t: "btn", n: "Save now", d: "projects are also saved on every change (Ctrl+S)", b: "Save", need: 1, stay: true, fn: () => { savePr = P.proj; return flushSave().then(ok => toast(ok ? "Saved in this browser" : "Not saved — see the message above", 2400)); }},
+      {t: "btn", n: "Backups of this project", d: "go back to an earlier state", b: "Backups…", need: 1, fn: () => backupsDialog()},
+      {t: "btn", n: "Copy a project to another computer", d: "the project with its PDFs (.zdtakeoff)", b: "Export…", need: 1, fn: exportBundle},
+      {t: "btn", n: "Recover a deleted project", d: "deleted projects are kept " + TRASH_DAYS + " days", b: "Recover…", fn: recoverDialog}]},
+    {id: "file", n: "Backup & reset settings", d: "settings to a file, on another computer, reset", rows: [
+      {t: "btn", n: "Save my settings to a file", d: "every option here, My tools, Tool Chest, stamps, markup styles, agent rules — not your projects, not the AI key", b: "Export…", stay: true, fn: setExport},
+      {t: "btn", n: "Load settings from a file", d: "the settings in the file replace these, then the page reloads", b: "Import…", stay: true, fn: setImport},
+      {t: "btn", n: "Reset every setting", d: "back to how the app came — your projects, My tools, Tool Chest, stamps, agent rules and AI setup are kept", b: "Reset all…", dng: true, stay: true, fn: setResetAll}]}
+  ];
+}
+async function settingsDialog(page){
+  const PG = setPages(); let cur = PG.some(p => p.id === page) ? page : PG.some(p => p.id === pref("zdTakeoffSetPg")) ? pref("zdTakeoffSetPg") : "general", q = "", R = [];
+  const ctl = (r, i) => { const id = "stc" + i, v = r.get ? r.get() : "";
+    if (r.t === "tog") return `<input type="checkbox" class="stog" id="${id}" data-si="${i}"${v ? " checked" : ""} aria-label="${esc(r.n)}">`;
+    if (r.t === "sel") return `<select id="${id}" data-si="${i}" aria-label="${esc(r.n)}">${r.o.map(([x, t]) => `<option value="${esc(x)}"${String(x) === String(v) ? " selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+    if (r.t === "num") return `<span class="snum"><input type="number" id="${id}" data-si="${i}" min="${r.min}" max="${r.max}" step="${r.step || 1}" value="${esc(+(+v).toFixed(3))}" aria-label="${esc(r.n)}">${r.u ? `<span class="small">${esc(r.u)}</span>` : ""}</span>`;
+    if (r.t === "col") return `<input type="color" id="${id}" data-si="${i}" value="${esc(HEXCOL.test(v || "") ? v : "#000000")}" aria-label="${esc(r.n)}">`;
+    if (r.t === "txt") return `<input type="text" id="${id}" data-si="${i}" value="${esc(v)}" maxlength="60" aria-label="${esc(r.n)}">`;
+    if (r.t === "btn") { const no = (r.need === 1 && !P.proj) || (r.need === 2 && !(P.proj && S.page)); return `<button class="btn sm${r.dng ? " dng" : ""}" data-sb="${i}"${no ? ` disabled title="${r.need === 2 ? "Open a drawing page first" : "Open a project first"}"` : ""}>${esc(r.b)}</button>`; }
+    return ""; };
+  const row = (r, i, sec) => r.h ? `<h4 class="sh">${esc(r.h)}</h4>` : r.t === "html" ? `<div class="srow full"><div class="sl"><b>${esc(r.n)}</b>${sec ? `<small>${esc(sec)}</small>` : ""}</div>${r.html()}</div>`
+    : `<div class="srow"><div class="sl"${r.t === "tog" ? ` data-stl="${i}"` : ""}><b>${esc(r.n)}</b>${r.d || sec ? `<small>${esc([sec, r.d].filter(Boolean).join(" · "))}</small>` : ""}</div><div class="sc">${ctl(r, i)}</div></div>`;
+  const paint = () => {
+    const box = $("stgBody"), nav = $("stgNav"); if (!box || !nav) return;
+    const top = box.scrollTop, Q = q.trim().toLowerCase(), fid = document.activeElement && box.contains(document.activeElement) ? document.activeElement.id : ""; R = [];
+    nav.querySelectorAll("[data-spg]").forEach(b => b.classList.toggle("on", !Q && b.dataset.spg === cur));
+    let html = "";
+    if (Q) {
+      PG.forEach(p => p.rows.forEach(r => { if (r.h || !(r.n + " " + (r.d || "") + " " + p.n).toLowerCase().includes(Q)) return; html += row(r, R.push(r) - 1, p.n); }));
+      if (!html) html = '<p class="small" style="padding:20px 0">No setting matches — try fewer letters.</p>';
+    } else { const p = PG.find(x => x.id === cur);
+      html = `<div class="shead"><b>${esc(p.n)}</b><span class="small">${esc(p.d)}</span></div>` + p.rows.map(r => row(r, r.h ? -1 : R.push(r) - 1)).join("") + (p.reset ? `<div class="sfoot"><button class="btn sm" id="stgReset">Reset this page</button></div>` : ""); }
+    box.innerHTML = html; box.scrollTop = Q ? 0 : top;
+    R.forEach(r => { if (r.t === "html" && r.wire) r.wire(paint); });
+    if (fid && $(fid)) $(fid).focus({preventScroll: true});   // the keyboard stays where it was
+    const rs = $("stgReset"); if (rs) rs.onclick = () => { const p = PG.find(x => x.id === cur); try { p.reset(); } catch (e) { toast(String(e && e.message || e), 4000); } toast(p.n + ": back to the defaults", 1800); paint(); };
+  };
+  const body = `<div class="setw"><nav id="stgNav" aria-label="Settings pages"><input type="search" id="stgQ" placeholder="Search settings" aria-label="Search settings" autocomplete="off">${PG.map(p => `<button class="spg" data-spg="${p.id}">${esc(p.n)}</button>`).join("")}</nav><div class="sb" id="stgBody"></div></div>`;
+  const pr = ask("Settings", body, null, () => { const a = document.activeElement; if (!(a && a.closest && a.closest("#dlgB") && /^(INPUT|SELECT)$/.test(a.tagName))) return true;
+    if (a.dataset.si != null) a.dispatchEvent(new Event("change", {bubbles: true})); return ""; });   // Enter in a field applies it and never closes the window
+  $("dlgCancel").textContent = "Close";
+  const B = $("dlgB").querySelector(".setw");   // (made new with each window: its listeners go with it)
+  B.addEventListener("input", e => { const i = e.target.dataset && e.target.dataset.si, r = i != null && R[+i]; if (r && r.t === "txt") r.set(e.target.value); });   // a name is kept as it is typed
+  $("stgNav").addEventListener("click", e => { const b = e.target.closest("[data-spg]"); if (!b) return; cur = b.dataset.spg; pref("zdTakeoffSetPg", cur); q = ""; $("stgQ").value = ""; $("stgBody").scrollTop = 0; paint(); });
+  $("stgQ").addEventListener("input", e => { q = e.target.value; paint(); });
+  B.addEventListener("change", e => { const el = e.target, i = el.dataset && el.dataset.si; if (i == null) return; const r = R[+i]; if (!r) return;
+    let v = r.t === "tog" ? el.checked : el.value;
+    if (r.t === "num") { v = parseFloat(v); if (!isFinite(v)) { paint(); return; } v = Math.max(r.min, Math.min(r.max, v)); }
+    let err = null; try { err = r.set(v); } catch (er) { err = String(er && er.message || er); }
+    if (typeof err === "string" && err) toast(err, 3000);
+    paint(); });
+  B.addEventListener("click", async e => {
+    const l = e.target.closest("[data-stl]"); if (l) { const c = $("stc" + l.dataset.stl); if (c) { c.checked = !c.checked; c.dispatchEvent(new Event("change", {bubbles: true})); } return; }   // the words of a switch flip it too
+    const b = e.target.closest("[data-sb]"); if (!b || b.disabled) return; const r = R[+b.dataset.sb]; if (!r) return;
+    if (r.stay) { let res; try { res = await r.fn(b); } catch (er) { toast(String(er && er.message || er), 4000); } if (res !== false) paint(); return; }
+    if (ask.cur) ask.cur(null);   // the window closes for the dialog it opens; back: it opens again on this page when that one is closed
+    try { await r.fn(); } catch (er) { toast(String(er && er.message || er), 4000); }
+    if (r.back) settingsDialog(cur);
+  });
+  paint();
+  await pr;
+}
 function ribbonInit(){
   $("bPanL").onclick = () => panelDialog("l"); $("bPanR").onclick = () => panelDialog("r");
   const ribTog = () => { const o = pcPref(), n = new Set(o.off || []); if (n.has("ui-ribbon")) n.delete("ui-ribbon"); else n.add("ui-ribbon"); pcSave({off: [...n], compact: o.compact}); };
   $("bRibbon").onclick = ribTog;
   document.querySelectorAll("#tools .rtab").forEach(t => { t.addEventListener("dblclick", ribTog); t.addEventListener("click", () => { const o = pcPref(); if ((o.off || []).includes("ui-ribbon")) pcSave({off: o.off.filter(k => k !== "ui-ribbon"), compact: o.compact}); }); });
-  pcApply();
+  pcApply(); settingsInit();
   $("bCustTb").onclick = () => tbDialog(); tbApply();
-  /* open on the My tools tab every time the page is loaded / refreshed (unless that tab is hidden in Customize) */
-  const mineHome = document.querySelector('#tools .rtab[data-rtab="mine"]');
-  if (mineHome && mineHome.style.display !== "none") ribShow("mine");
+  ribHome();   // open on My tools every time the page is loaded / refreshed (Settings → General can choose another tab)
   /* drag a tool from any tab onto the My tools tab or panel to keep it there as a favourite */
   const mineTab = document.querySelector('#tools .rtab[data-rtab="mine"]');
   const dropTargets = [mineTab, $("mineBox"), $("mineHint")].filter(Boolean);
@@ -8473,7 +8752,8 @@ function ribbonInit(){
     el.addEventListener("drop", dropHere); });
   /* ribbon tabs added for Costing / Export / View: each button runs an existing control or dialog */
   const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog()};
-  document.querySelectorAll("#tools [data-px]").forEach(b => b.addEventListener("click", () => { const t = $(b.dataset.px); if (t && !t.disabled) t.click(); setTimeout(syncPx, 60); }));
+  const PX = {bDefaults: () => settingsDialog("measure")};   // Costing → Defaults: the top bar's Defaults is now in Settings (the tool keeps its name, so My tools keeps it)
+  document.querySelectorAll("#tools [data-px]").forEach(b => b.addEventListener("click", () => { if (PX[b.dataset.px]) return PX[b.dataset.px](); const t = $(b.dataset.px); if (t && !t.disabled) t.click(); setTimeout(syncPx, 60); }));
   document.querySelectorAll("#tools [data-fn]").forEach(b => b.addEventListener("click", () => { if (P.proj && FN[b.dataset.fn]) FN[b.dataset.fn](); else toast("Open a project first", 2000); }));
   const syncPx = () => document.querySelectorAll("#tools [data-px]").forEach(b => { const t = $(b.dataset.px); b.classList.toggle("on", !!t && t.classList.contains("tg2") && t.classList.contains("on")); });
   setInterval(() => { syncPx(); syncMine(); }, 800);
@@ -9899,6 +10179,7 @@ function paletteCmds(){
   };
   if (!P.proj) {
     add("New project", () => $("bNewProj").click(), "Project"); add("Import project (.json or .zdtakeoff)", () => $("impIn").click(), "Project"); add("Recover a deleted project (from its backups)", recoverDialog, "Project"); add("Full screen", fullScreen, "View");
+    add("Settings — every option in one window", () => settingsDialog(), "Settings", "Ctrl+,");
     return L;
   }
   document.querySelectorAll("#tools [data-tool]").forEach(b => btn(b, "Tool"));
@@ -9952,6 +10233,8 @@ function paletteCmds(){
   add("Undo", undoAny, "Edit", "Ctrl+Z"); add("Redo", redoAny, "Edit", "Ctrl+Y");
   add("Find text on the drawings", () => { $("findIn").focus(); $("findIn").select(); }, "View", "Ctrl+F");
   add("Set scale", scaleDialog, "Page", "K"); add("Keyboard shortcuts", keysDialog, "Help");
+  add("Settings — every option in one window", () => settingsDialog(), "Settings", "Ctrl+,"); add("Professional defaults — and apply them to what is drawn…", defaultsDialog, "Settings");
+  setPages().forEach(p => add("Settings: " + p.n + " — " + p.d, () => settingsDialog(p.id), "Settings"));
   add("AI engine — local AI (free, offline) setup and benchmark", locSetup, "AI"); add("KPIs — Auto area and agent performance (from recorded results)", kpiDialog, "AI"); add("Project knowledge — documents and offline search", kbDialog, "AI"); add("Agent instructions — the working rules the AI follows", rulesDialog, "AI");
   add("Invert selection", invertSel, "Select", "Ctrl+I"); add("Quick select… (by condition, kind, markup type, check state)", quickSelect, "Select"); add("Deselect all", clearSel, "Select", "Esc");
     add("New condition", () => editCond(null), "Condition"); add("Custom columns… — your own figures per condition by formula (Tiles = Q / 4 * 1.05)", colsDialog, "Condition");
@@ -10194,7 +10477,7 @@ function keysDialog(){
   const G = (t, rows) => `<tr><td colspan="2" style="padding:8px 0 2px;font-weight:700;color:var(--navy)">${esc(t)}</td></tr>` + rows.map(x => R(x[0], x[1])).join("");
   ask("Keyboard & mouse", `<table class="keyt" style="font-size:12px;border-collapse:collapse;width:100%">
     ${G("Select & edit (Bluebeam / PlanSwift)", [["Click", "select (smallest area, or a line / marker on top)"], ["Drag → (left to right)", "window: selects what is wholly inside"], ["Drag ← (right to left)", "crossing: selects what the box touches"], ["Shift+O", "lasso select (free shape)"], ["Shift+V", "select AutoCAD objects (DWG / DXF): click, box, Ctrl+A — then take off, count, select similar, quick select, layer off"], ["Shift | Ctrl+click", "add to / take out of the selection"], ["Ctrl+I", "invert the selection (this page)"], ["Quick select… (right-click the page, or type qs)", "select by condition, kind of measurement, markup type, check state"], ["Tab", "next object under the cursor"], ["Drag a selected object", "move it (Shift: straight)"], ["Ctrl+drag", "copy it"], ["Alt+drag", "move without selecting first"], ["Drag a point", "move the point (Ctrl: no snap)"], ["Double-click a side | Shift+click a side", "add a point"], ["Double-click a point | Shift+click a point", "remove the point"], ["+ at a side's middle", "drag out a new point"], ["Right-click", "menu for what is under the cursor (right-drag pans)"], ["Delete", "selected point, then the object"], ["Arrows | Shift+arrows", "nudge 1 px / 10 px"], ["F2", "rename"], ["Ctrl+Shift+L", "lock / unlock"]])}
-    ${G("Find anything", [["Ctrl+K", "command palette: type the name of any tool, export, dialog, page or condition — or an AutoCAD alias (tr, ex, f, cha, s, sc, ro, o, co, m…) or ‘ro 37’, ‘sc 1.5’, ‘f 0.5’"], ["Ctrl+F", "find text on the drawings"]])}
+    ${G("Find anything", [["Ctrl+K", "command palette: type the name of any tool, export, dialog, page or condition — or an AutoCAD alias (tr, ex, f, cha, s, sc, ro, o, co, m…) or ‘ro 37’, ‘sc 1.5’, ‘f 0.5’"], ["Ctrl+F", "find text on the drawings"], ["Ctrl+,", "Settings — every option in one window; Settings → Keyboard shortcuts adds keys of your own for any command"]])}
     ${G("AutoCAD-style editing (Modify tab)", [["Shift+T | Shift+X", "Trim · Extend (Shift+click flips one into the other)"], ["Fillet | Chamfer", "pick two runs, or two legs of one run · Enter changes the radius / distances"], ["Shift+S", "Stretch: crossing window, base point, destination"], ["Rotate… | Scale…", "any angle · any factor (or reference), about the selection's middle, in place or as a copy"], ["Shift+C", "full-screen cross-hair"], ["Shift+G", "magnifier: a 3× glass at the cursor while drawing, measuring or moving a point"]])}
     ${G("Pages (Forma Takeoff sheets)", [["Tick a thumbnail | Shift+tick", "tick pages to export, read sheet info or OCR together · Shift: the pages in between"], ["Ctrl+click | Shift+click a thumbnail", "tick / untick it without opening it"], ["☆ on a thumbnail", "pin the page to the top"], ["Double-click a sheet no. on the drawing", "open that sheet (right-click lists the sheets referenced)"]])}
     ${G("Markups (Bluebeam)", [["T | Q | N", "text box · callout · note"], ["Shift+L | Y | G", "line · polyline · polygon"], ["Shift+R | Shift+E | U", "rectangle · ellipse · cloud"], ["P | Shift+H", "pen · highlighter pen"], ["X | I", "stamp · image"], ["Markup ▾", "every markup tool: hyperlink, file attachment, redaction, erase…"], ["Dbl-click a markup", "edit its text · open a link or an attached file"], ["Drag a handle", "resize a box, move a line's end or a point"], ["Alt+L", "Markups list: every markup — filter, sort, status, replies, layers, CSV / XML / PDF summary"]])}
@@ -10586,7 +10869,7 @@ function wire(){
   pick("impPdfIn", importDialog); pick("imgIn", importDialog);
   pick("dirIn", L => { const ok = L.filter(f => isPdfFile(f) || isImgFile(f) || isCadFile(f)); if (!ok.length) return toast("No PDF, DWG, DXF, JPG or PNG in that folder", 3000); importDialog(ok); });
   $("bToolChest").onclick = () => toolChestDialog();
-  $("bDefaults").onclick = () => defaultsDialog();
+  $("bSettings").onclick = () => settingsDialog();
   $("bWs").onclick = e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); wsMenu(Math.max(4, r.right - 300), r.bottom + 4); };
   $("bCmd").onclick = () => openPalette(); cmdWire();
   $("bMini").onclick = () => { wsSet({mini: !wsPref().mini}); toast(wsPref().mini ? "Minimap on — it shows when you zoom in" : "Minimap off", 1800); };
@@ -15295,10 +15578,12 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
-    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig};   // for tests and the console
+    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
+    settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow, get SNAP_PX(){ return SNAP_PX; }, get HIT_PX(){ return HIT_PX; }};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
-  if (last && all.some(p => p.id === last)) await openProject(last); else await showStart();
+  if (last && setPref().openLast !== false && all.some(p => p.id === last)) await openProject(last); else await showStart();
+  ribHome();   // the start-up tab (My tools by default), whatever opening the project did
   loadPdfjs().catch(e => toast(e.message, 6000));
   setTimeout(verCheck, 4000); setInterval(verCheck, 1800000); document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") verCheck(); });   // a new release out: say so
 })();
