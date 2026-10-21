@@ -155,9 +155,10 @@ function makePdf(){
   ok(await T(() => getComputedStyle(document.getElementById("ov")).width) === "1440px", "the takeoff layer is the screen's size, not the window's, so a resize does not lay it out again");
 
   console.log("layout");
-  const sh0 = await T(() => document.getElementById("status").offsetHeight);
-  await T(() => { document.getElementById("stMeas").innerHTML = "<b>" + "a very long measurement text ".repeat(20) + "</b>"; });
-  ok(await T(() => document.getElementById("status").offsetHeight) === sh0, "a long status text keeps the bar one line (" + sh0 + " px)");
+  const g0 = await T(() => ({st: document.getElementById("stage").clientHeight, ov: document.getElementById("ov").getBoundingClientRect().height}));
+  await T(() => { document.getElementById("stMeas").innerHTML = "<b>" + "a very long measurement text ".repeat(20) + "</b>"; }); await wait(100);
+  const g1 = await T(() => ({st: document.getElementById("stage").clientHeight, ov: document.getElementById("ov").getBoundingClientRect().height}));
+  ok(g1.ov === g0.ov, "a status text that wraps the bar (window " + g0.st + " → " + g1.st + " px) leaves the takeoff layer's size as it was (" + g1.ov + " px)");
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
   await browser.close();
   console.log(`\n${passes} passed, ${fails} failed`);
