@@ -4309,6 +4309,23 @@ async function finish(pts){
 
 /* ------------------------------------------------------------------ overlay */
 let raf = 0;
+/* a heavy takeoff (the layer slower to draw than OV_FAST_MS) is not drawn again at every step of a zoom or pan: the layer as drawn is
+   moved and scaled with the view, as the page's own picture is (applyView), and drawn again once the view has been still for 160 ms */
+const OV_FAST_MS = 12;
+function ovMove(svg, vk){
+  const v0 = svg.__v; if (!v0 || svg.__force || !(svg.__cost > OV_FAST_MS)) return false;
+  if (svg.__tvk !== vk) { const v = S.view, k = v.s / v0.s; svg.__tvk = vk;
+    Object.assign(svg.style, {transformOrigin: "0 0", overflow: "visible", transform: `translate(${v.tx - v0.tx * k}px,${v.ty - v0.ty * k}px) scale(${k})`});
+    clearTimeout(svg.__t); svg.__t = setTimeout(() => { svg.__force = true; draw(); }, 160); }
+  return true;
+}
+function ovFlat(svg, vk, cost){ clearTimeout(svg.__t); svg.style.transform = ""; svg.__v = {s: S.view.s, tx: S.view.tx, ty: S.view.ty}; svg.__vk = vk; svg.__tvk = null; svg.__force = false; svg.__cost = cost; }
+function hoverGlow(it){
+  const c = cond(it.cond); if (!c) return "";
+  const Q = it.shape === "circle" ? itemPoly(it) : it.pts, pq = p => toScr(p).map(v => v.toFixed(1)).join(",");
+  if (c.type === "count") return Q.map(p => { const q = toScr(p); return `<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(15 * cntZ()).toFixed(1)}" fill="none" stroke="${c.color}" stroke-width="4" opacity=".35"/>`; }).join("");
+  return `<${c.type === "area" || it.shape === "circle" ? "polygon" : "polyline"} points="${Q.map(pq).join(" ")}" fill="none" stroke="${c.color}" stroke-width="9" stroke-linejoin="round" stroke-linecap="round" opacity=".22"/>`;
+}
 function draw(){ if (!raf) raf = requestAnimationFrame(() => { raf = 0; drawNow(); if (SPLIT.on) { linkMark(ACT); PANES.forEach(pn => { if (pn !== ACT) drawPane(pn); }); } if (MAG.on && !MAG.raf && MAG.el && MAG.el.style.display === "block") magDraw(); }); }
 function drawNow(){
   const E = ACT.el, svg = E.ov, svg2 = E.ov2, tip = E.tip;
@@ -4317,8 +4334,10 @@ function drawNow(){
      what follows the cursor (the shape being drawn, snap marker, selection box). A mouse move over a page with a
      thousand measurements then redraws only the cursor layer. */
   let k = curScale(); const h = [], dyn = [];
-  const sig = [P.proj.id, S.ver, S.key, S.view.s, S.view.tx, S.view.ty, S.sel, S.selMark, [...S.multi].join(","), S.hover, S.selPt, S.tool, S.hideMk, JSON.stringify(S.lbl), S.drag || S.typ ? Math.random() : 0, S.autoShow ? S.autoShow.key + S.autoShow.url.length : "", S.unm && S.unm.url ? S.unm.key + S.unm.url.length + "/" + S.unm.sft : "", S.cadSel ? S.cadSelV + "|" + cadKey(ACT) : ""].join("|");
-  const keep = sig === S.ovSig;
+  const sig = [P.proj.id, S.ver, S.key, S.sel, S.selMark, [...S.multi].join(","), S.selPt, S.tool, S.hideMk, JSON.stringify(S.lbl), (S.drag && !S.drag.pan) || S.typ ? Math.random() : 0, S.autoShow ? S.autoShow.key + S.autoShow.url.length : "", S.unm && S.unm.url ? S.unm.key + S.unm.url.length + "/" + S.unm.sft : "", S.cadSel ? S.cadSelV + "|" + cadKey(ACT) : ""].join("|");
+  const vk = S.view.s + "," + S.view.tx + "," + S.view.ty, t0 = performance.now();
+  let keep = sig === S.ovSig && svg.__vk === vk;
+  if (!keep && sig === S.ovSig && ovMove(svg, vk)) keep = true;   // only the view moved and the takeoff is heavy to draw: the layer follows the zoom / pan as drawn
   if (!keep) h.push('<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="rgba(208,59,59,.08)"/><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(208,59,59,.55)" stroke-width="1.5"/></pattern></defs>');
   const ptsS = P => P.map(p => toScr(p).map(v => v.toFixed(1)).join(",")).join(" ");
   const A = S.autoShow; if (!keep && A && A.key === S.key) { const q = toScr([A.x0, A.y0]); h.push(`<image href="${A.url}" x="${q[0].toFixed(1)}" y="${q[1].toFixed(1)}" width="${(A.W * A.px * S.view.s).toFixed(1)}" height="${(A.H * A.px * S.view.s).toFixed(1)}" preserveAspectRatio="none" style="image-rendering:pixelated"/>`); }
@@ -4361,7 +4380,7 @@ function drawNow(){
     const c = cond(it.cond); if (!c) return;
     const col = c.color, sel = it.id === S.sel || S.multi.has(it.id), k = itemScale(it), pts0 = it.pts;
     if (it.shape === "circle") it = Object.assign({}, it, {pts: itemPoly(it), _pts: pts0});
-    if ((it.id === S.hover && S.tool === "select" && !S.drag) || (sel && S.multi.size)) {   // hover glow (Bluebeam), and every object of a multiple selection
+    if (sel && S.multi.size) {   // every object of a multiple selection (the hover glow goes with the cursor: hoverGlow)
       const gc = sel ? "#4b3b8f" : col;
       if (c.type === "count") it.pts.forEach(p => { const q = toScr(p); h.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(15 * cntZ()).toFixed(1)}" fill="none" stroke="${gc}" stroke-width="4" opacity=".35"/>`); });
       else h.push(`<${c.type === "area" || it._pts ? "polygon" : "polyline"} points="${ptsS(it.pts)}" fill="none" stroke="${gc}" stroke-width="9" stroke-linejoin="round" stroke-linecap="round" opacity="${sel ? 0.28 : 0.22}"/>`);
@@ -4385,6 +4404,8 @@ function drawNow(){
     }
   });
   if (LB) h.push(placeLabels(LB, S.lbl.declutter !== false));
+  { const it = S.hover && S.tool === "select" && !S.drag && !S.hideMk ? P.proj.items.find(i => i.id === S.hover) : null;   // hover glow (Bluebeam), drawn with the cursor so a hover never redraws the takeoff
+    if (it && it.file === S.fileId && it.page === S.pageNo && !hiddenItem(it) && !(S.multi.size && (it.id === S.sel || S.multi.has(it.id)))) dyn.push(hoverGlow(it)); }
   const c = S.cond ? cond(S.cond) : null, cur = S.cursor;
   let live = "";
   if (S.tool === "stretch" && S.str && cur) dyn.push(...stretchPreview(cur));
@@ -4443,7 +4464,7 @@ function drawNow(){
     else if (/midpoint/.test(t)) dyn.push(`<path d="M${q[0]} ${q[1] - 7}L${q[0] + 6} ${q[1] + 5}L${q[0] - 6} ${q[1] + 5}Z" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
     else dyn.push(`<circle cx="${q[0]}" cy="${q[1]}" r="5" fill="none" stroke="#1baf7a" stroke-width="2"/>`);
   }
-  if (!keep) { S.ovSig = sig; const html = h.join(""); if (html !== S.ovHtml) { svg.innerHTML = html; S.ovHtml = html; } }
+  if (!keep) { S.ovSig = sig; const html = h.join(""); if (html !== S.ovHtml) { svg.innerHTML = html; S.ovHtml = html; } ovFlat(svg, vk, performance.now() - t0); }
   svg2.innerHTML = dyn.join("");
   if (!S.passive) $("stMeas").innerHTML = live ? "<b>" + esc(live) + "</b>" : "";
   if (S.typed && S.draft.length) live = (S.tool === "rect" || S.tool === "dedrect" ? "L x W: " : "Length: ") + S.typed + " ▏ Enter to place · Esc clears";
@@ -10225,7 +10246,7 @@ function magDraw(){
     const fx = cv.width / b.width, fy = cv.height / b.height; c.drawImage(cv, (MAG.x - w / 2 - b.left) * fx, (MAG.y - w / 2 - b.top) * fy, w * fx, w * fy, 0, 0, D, D); });   // (the part outside a canvas is clipped by drawImage)
   c.filter = "none";
   const vk = S.view.s + "," + S.view.tx + "," + S.view.ty;
-  [E.ov, E.ov2].forEach((svg, n) => { const im = magOv(n, svg, st, vk); if (im) c.drawImage(im, cx - w / 2, cy - w / 2, w, w, 0, 0, D, D); });
+  [E.ov, E.ov2].forEach((svg, n) => { if (!n && svg.__vk && svg.__vk !== vk) return; const im = magOv(n, svg, st, vk); if (im) c.drawImage(im, cx - w / 2, cy - w / 2, w, w, 0, 0, D, D); });   // (the takeoff layer moved with a zoom / pan, ovMove: left out until drawn again)
   const m = D / 2, line = (col, lw) => { c.strokeStyle = col; c.lineWidth = lw; c.beginPath(); c.moveTo(0, m); c.lineTo(m - 7, m); c.moveTo(m + 7, m); c.lineTo(D, m); c.moveTo(m, 0); c.lineTo(m, m - 7); c.moveTo(m, m + 7); c.lineTo(m, D); c.stroke(); };
   line("rgba(255,255,255,.85)", 3); line("#d03b3b", 1);
   if (S.snap && S.snap.p) { const q = toScr(S.snap.p), sx = m + (q[0] - cx) * k, sy = m + (q[1] - cy) * k; c.strokeStyle = "#16a34a"; c.lineWidth = 2; c.strokeRect(sx - 6, sy - 6, 12, 12); }
