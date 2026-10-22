@@ -7,6 +7,8 @@
      - right-click → Move to floor (a cut-out goes with its outline), New floor…, back to the boundary
      - a floor's menu (⋯): rename, delete (measurements kept); the Floors dialog (📂): rename, order, found plans added in one undo step
      - "Find floor plans" on a page with no wall lines says so; names from plan titles
+     - each floor its own conditions ("Room Area — Ground floor"): on / off, colour, deductions and totals per floor; a new
+       measurement goes to the copy of the floor it is in; a floor renamed renames its copies; "One condition for all floors" undoes it
 
      python3 -m http.server 8765 &            # from the repo root
      TK_LIBS=<dir with pdfjs-dist/ and exceljs/> node tools/test_takeoff_floors.js
@@ -43,6 +45,8 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.01 : t);
     document.querySelectorAll("#condList .ctree > *").forEach(el => { if (el.matches(".ctr.fl")) { cur = out[el.dataset.fl] = {}; return; } if (el.matches(".ctr")) { cur = null; return; }
       if (cur && el.matches(".crow")) cur[el.querySelector(".cn").textContent] = parseFloat(el.querySelector(".cq").textContent.replace(/,/g, "")); });
     return out; });
+  /* the measurements of a condition and of its floors' own copies */
+  const fam = id => T(id => zdTakeoff.P.proj.items.filter(i => { const c = zdTakeoff.P.proj.conds.find(x => x.id === i.cond); return c && (c.id === id || c.src === id); }).map(i => i.id), id);
 
   await page.goto(URL, {waitUntil: "load"}); await wait(600);
   await page.click("#bNewProj"); await page.fill("#dlgName", "Floors"); await page.click("#dlgOk"); await wait(400);
@@ -90,8 +94,10 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.01 : t);
   ok(Object.keys(t).join("|") === "Ground floor|1st floor", "floor rows under the page: " + Object.keys(t).join(", "));
   ok(near(t["Ground floor"]["Room Area"], 180) && near(t["Ground floor"].Wall, 30) && t["Ground floor"].Doors === 2, `Ground floor: Room Area ${t["Ground floor"]["Room Area"]} (200 − 20 cut-out), Wall ${t["Ground floor"].Wall}, Doors ${t["Ground floor"].Doors}`);
   ok(near(t["1st floor"]["Room Area"], 100) && near(t["1st floor"].Wall, 15) && t["1st floor"].Doors === 1, `1st floor: Room Area ${t["1st floor"]["Room Area"]}, Wall ${t["1st floor"].Wall}, Doors ${t["1st floor"].Doors}`);
-  ok(await T(() => { const Z = zdTakeoff, P = Z.P.proj; return P.items.filter(i => i.cond === "cD").length === 2 && P.items.filter(i => i.cond === "cD").reduce((a, i) => a + i.pts.length, 0) === 3; }), "the count's markers were split by boundary (2 + 1), none lost");
-  ok(await T(() => { const Z = zdTakeoff, c = Z.P.proj.conds.find(x => x.id === "cA"); return Math.abs(Z.condTotals(c).net - 280) < 0.01; }), "the condition's total is unchanged (280 Sft)");
+  { const D = await fam("cD"); ok(D.length === 2 && await T(D => D.reduce((a, id) => a + zdTakeoff.P.proj.items.find(i => i.id === id).pts.length, 0), D) === 3, "the count's markers were split by boundary (2 + 1), none lost"); }
+  ok(await T(() => { const Z = zdTakeoff; return Math.abs(Z.P.proj.conds.filter(c => c.id === "cA" || c.src === "cA").reduce((a, c) => a + Z.condTotals(c).net, 0) - 280) < 0.01; }), "the condition's total over its floors is unchanged (280 Sft)");
+  ok(await T(() => { const P = zdTakeoff.P.proj, n = i => P.conds.find(c => c.id === P.items.find(x => x.id === i).cond).name; return n("a1") === "Room Area — Ground floor" && n("d1") === "Room Area — Ground floor" && n("a2") === "Room Area — 1st floor" && n("w2") === "Wall — 1st floor"; }),
+    "each floor has its own conditions: Room Area — Ground floor (with its cut-out), Room Area — 1st floor, Wall — 1st floor");
   ok(await T(() => document.querySelectorAll("#ov .flbox, svg .flbox").length >= 2), "both boundaries drawn on the sheet");
   ok(await T(() => [...document.querySelectorAll("svg text")].some(x => x.textContent === "Ground floor")), "with the floor's name");
   // fold a floor
@@ -104,10 +110,10 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.01 : t);
   ok((await ctxTexts()).includes("Move to floor"), "the right-click menu of a measurement has Move to floor");
   ok(await ctxPick("Move to floor", "1st floor"), "Move to floor ▸ 1st floor"); await wait(250);
   ok(await T(() => zdTakeoff.P.proj.items.find(i => i.id === "w1").floor === "1st floor"), "the run is in 1st floor (its own floor now)");
-  t = await tree(); ok(near(t["1st floor"].Wall, 45) && !("Wall" in t["Ground floor"]), "tree: Wall 45 ft on 1st floor, none on Ground floor");
+  t = await tree(); ok(near(t["1st floor"].Wall, 45) && !t["Ground floor"].Wall, "tree: Wall 45 ft on 1st floor, none on Ground floor");
   await T(() => zdTakeoff.setSel(["a1"])); await T(() => { const Z = zdTakeoff; Z.floorMove(["a1"], "1st floor"); });
   ok(await T(() => { const P = zdTakeoff.P.proj; return P.items.find(i => i.id === "a1").floor === "1st floor" && P.items.find(i => i.id === "d1").floor === "1st floor"; }), "an area's cut-out goes with it");
-  t = await tree(); ok(near(t["1st floor"]["Room Area"], 280) && !("Room Area" in t["Ground floor"]), "tree: Room Area 280 on 1st floor");
+  t = await tree(); ok(near(t["1st floor"]["Room Area"], 280) && !t["Ground floor"]["Room Area"], "tree: Room Area 280 on 1st floor");
   await page.keyboard.press("Control+z"); await wait(200);
   t = await tree(); ok(near(t["Ground floor"]["Room Area"], 180) && near(t["1st floor"]["Room Area"], 100), "Ctrl+Z puts the area and its cut-out back");
   await click([80 + 15 * G.k, 380], {button: "right"}); await wait(200);
@@ -145,7 +151,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.01 : t);
   ok(await T(() => zdTakeoff.floorNext(zdTakeoff.S.key)) === "9th floor", "the next floor after “Typical 1st to 8th floor” is offered as 9th floor");
 
   console.log("the legend, floor by floor");
-  const lgOf = () => T(() => { const Z = zdTakeoff; return Z.P.proj.marks.filter(m => m.type === "legend").map(m => ({id: m.id, floor: m.floor || "", pts: m.pts, title: Z.legendTitle(m), rows: Z.legendRows(m).map(r => r.sec != null ? "§" + r.sec : r.c.name + "=" + (+r.q).toFixed(2))})); });
+  const lgOf = () => T(() => { const Z = zdTakeoff; return Z.P.proj.marks.filter(m => m.type === "legend").map(m => ({id: m.id, floor: m.floor || "", pts: m.pts, title: Z.legendTitle(m), rows: Z.legendRows(m).map(r => r.sec != null ? "§" + r.sec : (r.nm || r.c.name) + "=" + (+r.q).toFixed(2))})); });
   await page.click('#condList .ctr.pg [data-flfind]'); await wait(400);
   ok(await page.isVisible('#dlgB [data-fla="legs"]') && await page.isVisible('#dlgB [data-fla="leg1"]'), "the Floors dialog offers a legend for each floor, and one split by floor");
   await page.click('#dlgB [data-fla="legs"]'); await wait(400);
@@ -171,6 +177,34 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.01 : t);
   LG = await lgOf(); ok(LG[0].floor === "Ground" && LG[0].rows.length === 3, "a floor renamed: its legend follows");
   await T(() => zdTakeoff.floorRename(zdTakeoff.S.key, "Ground", "Ground floor")); await wait(200);
   await T(() => { const Z = zdTakeoff, P = Z.P.proj; P.marks = P.marks.filter(m => m.type !== "legend"); Z.refresh(); });
+
+  console.log("each floor its own conditions");
+  const cOf = id => T(id => { const P = zdTakeoff.P.proj, c = P.conds.find(x => x.id === P.items.find(i => i.id === id).cond); return c ? {id: c.id, name: c.name, src: c.src || "", fl: c.fl || "", hidden: !!c.hidden, color: c.color} : null; }, id);
+  const gA = await cOf("a1"), tA = await cOf("a2");
+  ok(gA.src === "cA" && gA.fl === "Ground floor" && tA.src === "cA" && tA.fl === "Typical 1st to 8th floor" && tA.name === "Room Area — Typical 1st to 8th floor", "the floor renamed: its own condition follows (" + tA.name + ")");
+  await T(() => { const rows = [...document.querySelectorAll("#condList .ctree > *")]; let inG = false;
+    for (const el of rows) { if (el.matches(".ctr")) { inG = el.matches(".ctr.fl") && el.dataset.fl === "Ground floor"; continue; } if (inG && el.matches(".crow") && el.querySelector(".cn").textContent === "Room Area") { el.querySelector("[data-eye]").click(); return; } } }); await wait(200);
+  ok(await T(() => { const Z = zdTakeoff, P = Z.P.proj, h = id => Z.S && P.conds.find(c => c.id === P.items.find(i => i.id === id).cond).hidden; return h("a1") && h("d1") && !h("a2") && !P.conds.find(c => c.id === "cA").hidden; }), "the bulb of Room Area under Ground floor hides that floor's rooms and cut-out only");
+  await T(id => { const c = zdTakeoff.P.proj.conds.find(x => x.id === id); c.hidden = false; c.color = "#ff0000"; zdTakeoff.save(); zdTakeoff.refresh(); }, gA.id); await wait(150);
+  ok((await cOf("a2")).color !== "#ff0000" && (await cOf("a1")).color === "#ff0000", "a floor's colour is its own");
+  ok(await T(() => { const Z = zdTakeoff, P = Z.P.proj, tot = id => Z.condTotals(P.conds.find(c => c.id === P.items.find(i => i.id === id).cond)); return Math.abs(tot("a1").net - 180) < 0.01 && Math.abs(tot("a1").ded - 20) < 0.01 && Math.abs(tot("a2").net - 100) < 0.01 && !tot("a2").ded; }),
+    "deductions per floor: Ground floor 200 − 20 = 180, the typical floor 100 with none");
+  // drawn with the condition itself (or another floor's copy): it goes to the copy of the floor it is in
+  await T(k => { const Z = zdTakeoff, P = Z.P.proj, R = (x, y, w, h) => [[x, y], [x + w * k, y], [x + w * k, y + h * k], [x, y + h * k]];
+    P.items.push({id: "a3", cond: "cA", file: Z.S.fileId, page: 1, kind: "shape", nos: 1, pts: R(600, 200, 5, 4)}, {id: "a4", cond: P.items.find(i => i.id === "a1").cond, file: Z.S.fileId, page: 1, kind: "shape", nos: 1, pts: R(650, 260, 2, 2)}); Z.save(); Z.refresh(); }, G.k); await wait(200);
+  ok((await cOf("a3")).id === tA.id && (await cOf("a4")).id === tA.id, "an area drawn in the typical floor with Room Area (or Ground floor's copy) goes to the typical floor's own");
+  t = await tree(); ok(near(t["Typical 1st to 8th floor"]["Room Area"], 124) && near(t["Ground floor"]["Room Area"], 180), "tree: typical floor Room Area 124 (100 + 20 + 4), Ground floor 180");
+  await T(() => { const Z = zdTakeoff; Z.S.cond = "cD"; Z.setTool("count"); }); await click([600, 330]); await wait(200); await T(() => zdTakeoff.setTool("select"));
+  { const D = await fam("cD"); ok(D.length === 2 && near((await tree())["Typical 1st to 8th floor"].Doors, 2), "a door counted in the typical floor joins that floor's Doors (2), still one count per floor");
+    ok(await T(() => zdTakeoff.P.proj.conds.find(c => c.id === zdTakeoff.S.cond).fl === "Typical 1st to 8th floor"), "the condition drawn with follows to the floor's own"); }
+  await page.click('#condList .ctr.fl[data-fl="Ground floor"] [data-flmenu]'); await wait(200);
+  ok(await ctxPick("One condition for all floors of this page"), "a floor's menu → One condition for all floors of this page"); await wait(300);
+  ok(await T(() => { const P = zdTakeoff.P.proj; return !P.conds.some(c => c.src) && P.items.every(i => ["cA", "cW", "cD"].includes(i.cond)); }), "the floors' copies go back into Room Area, Wall and Doors");
+  t = await tree(); ok(near(t["Ground floor"]["Room Area"], 180) && near(t["Typical 1st to 8th floor"]["Room Area"], 124) && near(t["Typical 1st to 8th floor"].Doors, 2), "the tree still splits the quantities by floor");
+  await page.keyboard.press("Control+z"); await wait(250);
+  ok((await cOf("a1")).id === gA.id && (await cOf("a1")).color === "#ff0000" && (await cOf("a3")).id === tA.id, "Ctrl+Z: each floor has its own conditions again, with their colours");
+  await T(() => { const Z = zdTakeoff, P = Z.P.proj; P.items = P.items.filter(i => i.id !== "a3" && i.id !== "a4"); Z.save(); Z.refresh(); });
+  ok(await T(() => zdTakeoff.condShort({name: "Kitchen — Ground floor", fl: "Ground floor"}) === "Kitchen" && zdTakeoff.condShort({name: "Kitchen GF", fl: "Ground floor"}) === "Kitchen GF"), "condShort: the floor's name off a copy's name");
 
   console.log("floors found on a sheet: added in one step");
   await T(() => zdTakeoff.gotoPage(zdTakeoff.S.fileId, 2)); await wait(600);

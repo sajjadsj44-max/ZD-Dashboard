@@ -374,6 +374,8 @@ function migrate(p, rep){
     ["rate"].forEach(k => { if (c[k] != null && !isFinite(num(c[k]))) c[k] = 0; });
     if (c.asm != null && !arr(c.asm)) c.asm = [];
     if (arr(c.asm)) c.asm = c.asm.filter(obj).map(a => { a.w = Math.max(0, Math.min(100, num(a.w) || 0)); return a; });   // waste % of an assembly line
+    if (c.fl != null || c.flpk != null || c.src != null) { const fl = typeof c.fl === "string" ? c.fl.trim().slice(0, 60).trim() : "";   // a floor's own copy of a condition (floorSplitConds)
+      if (fl && typeof c.flpk === "string" && c.flpk && c.src != null && String(c.src) && String(c.src) !== c.id) { c.fl = fl; c.src = String(c.src); } else { delete c.fl; delete c.flpk; delete c.src; } }
   });
   p.asmTpl = arr(p.asmTpl) ? p.asmTpl.filter(x => obj(x) && typeof x.name === "string" && x.name.trim() && arr(x.rows)).slice(0, 60).map(x => ({id: String(x.id || uid("T")).slice(0, 40), name: x.name.trim().slice(0, 80), rows: x.rows.filter(obj).slice(0, 60)})) : [];   // assembly templates saved with the project
   if (p.cols != null) { const seen = new Set(), ids = new Set(), L = arr(p.cols) ? p.cols : []; if (!arr(p.cols)) note("Custom columns are not a list — cleared");   // custom columns: a name that cannot be used in a formula, a repeated one or garbage is left out
@@ -423,7 +425,7 @@ function migrate(p, rep){
   const pgOk = k => { if (typeof k !== "string") return false; const m = /^(.+):(\d+)$/.exec(k), f = m && p.files.find(x => x.id === m[1]); return !!f && +m[2] >= 1 && +m[2] <= f.pages; };   // a page of this project
   const cadF = k => { const f = p.files.find(x => x.id === String(k).split(":")[0]); return !!(f && f.cad); };   // an AutoCAD drawing is turned in AutoCAD, never here
   p.rot = obj(p.rot) ? Object.fromEntries(Object.entries(p.rot).filter(([k, r]) => pgOk(k) && !cadF(k) && [90, 180, 270].includes(num(r))).map(([k, r]) => [k, num(r)])) : {};   // pages turned in the project
-  ["pageOrder", "pageHide"].forEach(n => { p[n] = arr(p[n]) ? [...new Set(p[n].filter(pgOk))] : []; });   // the project's own page order, and pages hidden from it
+  ["pageOrder", "pageHide", "flShare"].forEach(n => { p[n] = arr(p[n]) ? [...new Set(p[n].filter(pgOk))] : []; });   // the project's own page order, pages hidden from it, pages whose floors share their conditions
   p.openings = p.openings.filter(o => { const ok = obj(o) && o.id != null && num(o.w) > 0 && num(o.h) > 0; if (!ok) note("Opening schedule mark " + (obj(o) ? o.mark : "?") + " has no valid size — removed"); else { o.w = num(o.w); o.h = num(o.h); o.mark = String(o.mark == null ? "" : o.mark); } return ok; });
   p.v = SCHEMA;
   return from;
@@ -492,7 +494,7 @@ if (TABCH) TABCH.onmessage = e => { const m = e.data || {}; if (!P.proj || m.tab
   if (m.t === "open") tabSay({t: "here", id: P.proj.id});
   S.otherTab = m.t === "saved" ? "changed in another tab or window at " + dmyHm(m.at).slice(-5) : "also open in another tab or window";
   renderSheet(); };
-const UNDO_KEYS = ["conds", "items", "scales", "viewports", "floors", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd", "bbImp", "cols", "rot", "pageOrder", "pageHide"];
+const UNDO_KEYS = ["conds", "items", "scales", "viewports", "floors", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd", "bbImp", "cols", "rot", "pageOrder", "pageHide", "flShare"];
 function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 /* every change goes through mutate(): the project before it is kept for Ctrl+Z (200 steps), with a name for the
    undo / redo buttons ("Undo: Move 3 measurements") */
@@ -584,6 +586,7 @@ async function openProject(id){
     if (PANES.some(p => p !== ACT && p.sess === ACT.sess)) ACT.sess = mkSess(null);   // this window leaves the project it shared with the other one
     P.proj = pr; S.undo = []; S.redo = []; S.sel = null; S.multi.clear(); S.selMark = null; S.otherTab = "";
     S.pgSel = new Set(); S.pgLast = null; S.pgQ = ""; S.pgF = ""; S.condSel = new Set();
+    if (floorSplitSafe()) save();   // (a project from before each floor had its own conditions)
   }
   draftClear(); S.page = null; S.fileId = null; S.iso = null; S.docs = S.docs || {}; freeCadBitmap();
   pruneCaches(prev !== pr ? prev : null);
@@ -4224,7 +4227,7 @@ function addCount(p){
   let it = countHost(c.id, S.fileId, S.pageNo, p);   // (the page's count — on a page with floor boundaries, the one in p's)
   mutate(() => {
     if (!it) { it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
-    it.pts.push(p);
+    it.pts.push(p); if (it.cond !== c.id) S.cond = it.cond;   // (a floor's own count: the condition follows to it)
   }, "Count " + c.name);
 }
 async function finish(pts){
@@ -5016,11 +5019,11 @@ function legendCols(m){const src=Array.isArray(m.columns)?m.columns:LEGEND_COLS.
    floor's name: that floor only (a legend for each floor). Floors are those of the By page tree (floor boundaries, Move to floor) */
 function legendRows(m){
   const list = m.scope === 'all' ? P.proj.items.filter(i => !hiddenItem(i)) : P.proj.items.filter(i => i.file === m.file && i.page === m.page && !hiddenItem(i)), fl = m.scope === 'all' ? "" : String(m.floor || "");
-  if (fl && fl !== "*") return legendRowsOf(list.filter(it => flLow(locOf(it).floor) === flLow(fl)), m);
+  if (fl && fl !== "*") return legendRowsOf(list.filter(it => flLow(locOf(it).floor) === flLow(fl)), m).map(r => Object.assign(r, {nm: condShort(r.c)}));
   if (fl === "*") { const by = new Map(); list.forEach(it => { const n = flLow(locOf(it).floor); if (!by.has(n)) by.set(n, []); by.get(n).push(it); });
     if (by.size > 1 || !by.has("")) { const out = [], names = floorsOf(keyOf(m.file, m.page)).map(f => f.name).concat([""]);
       [...by.keys()].forEach(n => { if (!names.some(x => flLow(x) === n)) names.push(n); });
-      names.forEach(n => { const L = by.get(flLow(n)); by.delete(flLow(n)); const rs = L ? legendRowsOf(L, m) : []; if (rs.length) out.push({sec: n || "No floor"}, ...rs); });
+      names.forEach(n => { const L = by.get(flLow(n)); by.delete(flLow(n)); const rs = L ? legendRowsOf(L, m).map(r => Object.assign(r, {nm: condShort(r.c)})) : []; if (rs.length) out.push({sec: n || "No floor"}, ...rs); });
       return out; } }
   return legendRowsOf(list, m);
 }
@@ -5069,7 +5072,7 @@ function legendSvg0(m,T,z){
  const widths=Array.isArray(m.colWidths)?m.colWidths.map(Number):[],weights=cols.map((c,i)=>Math.max(.05,Number(widths[i])||LEG_W0[c.id]||.15)),sum=weights.reduce((a,b)=>a+b,0);for(let i=0;i<weights.length;i++)weights[i]/=sum;const xs=[];let xx=x0;cols.forEach((c,i)=>{xs.push(xx);xx+=W*weights[i]});
  if(hh){out+='<rect x="'+x0.toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+hh.toFixed(1)+'" fill="'+head+'"/>';cols.forEach((c,i)=>{out+='<text x="'+(xs[i]+pad).toFixed(1)+'" y="'+(yy+hh*.67).toFixed(1)+'" font-size="'+Math.max(5,fs*.9).toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(c.label)+'</text>'});yy+=hh}
  const cell=function(x,y,w,s,al,bold){al=al||'start';const tx=al==='end'?x+w-pad:al==='middle'?x+w/2:x+pad;return '<text x="'+tx.toFixed(1)+'" y="'+y.toFixed(1)+'" text-anchor="'+(al==='end'?'end':al==='middle'?'middle':'start')+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="'+(bold?700:400)+'" fill="'+textCol+'">'+esc(s==null?'—':s)+'</text>';};
- rows.forEach(function(r,ri){const y=yy+ri*rh,c=r.c;if(r.sec!=null){out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="'+head+'"/><text x="'+(x0+pad).toFixed(1)+'" y="'+(y+rh*.67).toFixed(1)+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(r.sec)+'</text>';return}if(ri%2)out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="#f7f9fb"/>';cols.forEach(function(col,i){const cw=W*weights[i],x=xs[i];if(col.id==='symbol'){const hs=Math.min(cw-pad*2,rh*.46);out+=legSym(c,r.ap||apOf(c),x+pad,y+(rh-hs)/2,cw-pad*2,hs,z)}else if(col.id==='boq')out+=cell(x,y+rh*.67,cw,c.boq||'—');else if(col.id==='description'){const nm=String(c.name||'—'),n=Math.max(4,Math.floor((cw-pad*2)/(fs*.55))),t=nm.length>n?nm.slice(0,n-1)+'…':nm;out+=(t!==nm?'<g><title>'+esc(nm)+'</title>':'')+cell(x,y+rh*.67,cw,t)+(t!==nm?'</g>':'')}
+ rows.forEach(function(r,ri){const y=yy+ri*rh,c=r.c;if(r.sec!=null){out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="'+head+'"/><text x="'+(x0+pad).toFixed(1)+'" y="'+(y+rh*.67).toFixed(1)+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(r.sec)+'</text>';return}if(ri%2)out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="#f7f9fb"/>';cols.forEach(function(col,i){const cw=W*weights[i],x=xs[i];if(col.id==='symbol'){const hs=Math.min(cw-pad*2,rh*.46);out+=legSym(c,r.ap||apOf(c),x+pad,y+(rh-hs)/2,cw-pad*2,hs,z)}else if(col.id==='boq')out+=cell(x,y+rh*.67,cw,c.boq||'—');else if(col.id==='description'){const nm=String(r.nm||c.name||'—'),n=Math.max(4,Math.floor((cw-pad*2)/(fs*.55))),t=nm.length>n?nm.slice(0,n-1)+'…':nm;out+=(t!==nm?'<g><title>'+esc(nm)+'</title>':'')+cell(x,y+rh*.67,cw,t)+(t!==nm?'</g>':'')}
    else if(col.id==='perim')out+=cell(x,y+rh*.67,cw,c.type==='area'&&r.has?legendQty({has:true,q:r.per},m)+' ft':'—','end');else if(col.id==='unit')out+=cell(x,y+rh*.67,cw,c.unit||'—','middle');else if(col.id==='qty')out+=cell(x,y+rh*.67,cw,legendQty(r,m),'end');else if(col.id==='rate')out+=cell(x,y+rh*.67,cw,legendRate(c,m),'end');else{const rate=Number(c.rate),amt=isFinite(rate)&&rate?(+r.q||0)*rate:null;out+=cell(x,y+rh*.67,cw,amt==null?'—':f2(amt),'end')}})});
  if(cols.length>1)for(let i=1;i<cols.length;i++){out+='<line x1="'+xs[i].toFixed(1)+'" y1="'+(y0+pad).toFixed(1)+'" x2="'+xs[i].toFixed(1)+'" y2="'+Math.min(y1,y0+pad+th+hh+rows.length*rh).toFixed(1)+'" stroke="'+border+'" stroke-opacity=".22" stroke-width=".6"/>'}
  out+='</g>';return out;
@@ -5295,7 +5298,7 @@ async function removePdf(fid){
   savePr = P.proj; await flushSave(); await backupNow("before removing " + f.name).catch(() => {});
   const pr = P.proj, mine = k => String(k).split(":")[0] === fid;
   pr.files = pr.files.filter(x => x.id !== fid); pr.items = pr.items.filter(i => i.file !== fid); pr.marks = (pr.marks || []).filter(m => m.file !== fid);
-  ["scales", "viewports", "floors", "sheets", "ocr", "rot"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) delete pr[n][k]; })); ["pageOrder", "pageHide"].forEach(n => { if (pr[n]) pr[n] = pr[n].filter(k => !mine(k)); });
+  ["scales", "viewports", "floors", "sheets", "ocr", "rot"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) delete pr[n][k]; })); ["pageOrder", "pageHide", "flShare"].forEach(n => { if (pr[n]) pr[n] = pr[n].filter(k => !mine(k)); });
   if (pr.pins) pr.pins = pr.pins.filter(k => !mine(k)); if (S.pgSel) [...S.pgSel].forEach(k => { if (mine(k)) S.pgSel.delete(k); });
   if (pr.layersOff) delete pr.layersOff[fid]; if (pr.last && pr.last.file === fid) pr.last = {};
   S.undo = []; S.redo = []; S.multi.clear(); S.sel = null; S.selMark = null; Object.keys(S.thumbs || {}).forEach(k => { if (mine(k)) delete S.thumbs[k]; });
@@ -5338,9 +5341,10 @@ function renderConds(){
    In the By page tree a row carries that page's quantity and opens that page when clicked. */
 function condView(){ const v = S.condView || pref("tkCondView") || "tree"; return ["tree", "list", "cards"].includes(v) ? v : "tree"; }
 function condRowHtml(c, q, lvl, pg){
+  const nm = pg && c.flpk === pg ? condShort(c) : c.name;   // (a floor's own condition, under its floor: "Kitchen")
   const its = P.proj.items.filter(x => x.cond === c.id), ck = its.filter(x => x.qa === "checked").length, ty = c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count";
   return `<div class="crow${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"${pg ? ` data-cpg="${esc(pg)}"` : ""} style="padding-left:${4 + 10 * lvl}px" title="${esc(c.name)} — ${ty}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""} · ${its.length} measurement${its.length === 1 ? "" : "s"}${its.length ? ", " + ck + " checked" : ""}${(P.proj.cols || []).length ? "\n" + esc(colTip(c)) : ""}${pg ? "\nClick: this condition on this page" : ""}">
-    <input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several"><i class="cic ${c.type}" style="--cc:${esc(c.color)}"></i><span class="cn">${esc(c.name)}</span>
+    <input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several"><i class="cic ${c.type}" style="--cc:${esc(c.color)}"></i><span class="cn">${esc(nm)}</span>
     <span class="cq">${fq(q, c.unit)}</span><span class="cu">${esc(c.unit)}</span><button class="sw" style="background:${esc(c.color)}" title="Change colour" data-color="${esc(c.id)}"></button>
     <button class="ed eye bulb${c.hidden ? " out" : ""}" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">&#128161;</button><button class="ed pen" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`;
 }
@@ -5363,7 +5367,9 @@ function condTreeHtml(shown){
       const T0 = floorTotals(pk), T = {}, fls = floorsOf(pk).map(x => x.name);   // (by name in any case, as floorsOf)
       Object.keys(T0).forEach(n => { const t = T[flLow(n)] = T[flLow(n)] || {}; Object.keys(T0[n]).forEach(c => { t[c] = (t[c] || 0) + T0[n][c]; }); });
       if (Object.keys(T[""] || {}).length) fls.push("");   // the page's floors, then what is in none
-      fls.forEach(fn => { const q = T[flLow(fn)] || {}, lk = "l:" + pk + "|" + flLow(fn), n = shown.filter(c => c.id in q).length, fo = floorNamed(pk, fn);
+      fls.forEach(fn => { const q = Object.assign({}, T[flLow(fn)] || {}), lk = "l:" + pk + "|" + flLow(fn), fo = floorNamed(pk, fn);
+        if (fn) shown.forEach(c => { if (c.flpk === pk && flLow(c.fl) === flLow(fn) && !(c.id in q)) { q[c.id] = 0; used.add(c.id); } });   // (its own conditions with nothing measured yet)
+        const n = shown.filter(c => c.id in q).length;
         h += `<div class="ctr fl" data-cgrp="${esc(lk)}" data-flpk="${esc(pk)}" data-fl="${esc(fn)}" style="padding-left:26px" title="${fn ? esc(fn) + (fo && fo.r ? " — measurements inside its boundary" : "") + " · click to fold / unfold · double-click to zoom to it · right-click or ⋯ for its menu" : "Measurements in no floor of this page · double-click to zoom to them"}"><span class="car">${off.has(lk) ? "&#9656;" : "&#9662;"}</span>${fn ? "&#128194;" : "&#9675;"} <b>${esc(fn || "No floor")}</b><span class="small">${n}</span><button class="ed" data-flmenu="1" title="Floor menu: zoom, move the selected here, rename, boundary, order, delete">&#8943;</button></div>`;
         if (off.has(lk)) return;
         h += shown.filter(c => c.id in q).map(c => condRowHtml(c, q[c.id], 3, pk)).join("") || '<div class="small" style="padding:2px 0 4px 56px">nothing measured on this floor yet — draw its boundary (⋯), or select measurements and right-click → Move to floor</div>'; });
@@ -9576,6 +9582,7 @@ function floorRename(pk, oldName, newName){
   mutate(() => { P.proj.floors = P.proj.floors || {}; const L = P.proj.floors[pk] = P.proj.floors[pk] || [], held = P.proj.items.filter(it => flPk(it) === pk && flLow(locOf(it).floor) === lo);
     const f = L.find(x => flLow(x.name) === lo); if (f) f.name = nn; else L.push({id: uid("FL"), name: nn, r: null});
     held.forEach(it => { if (it.floor || flLow(locOf(it).floor) !== flLow(nn)) it.floor = nn; });   // (in it by the sheet's floor: given the name)
+    P.proj.conds.forEach(c => { if (c.flpk === pk && flLow(c.fl) === lo) { const b = condShort(c); if (b !== c.name) c.name = b + " — " + nn; c.fl = nn; } });   // (its own conditions too)
     (P.proj.marks || []).forEach(m => { if (m.type === "legend" && keyOf(m.file, m.page) === pk && m.floor && m.floor !== "*" && flLow(m.floor) === lo) m.floor = nn; }); }, "Rename floor “" + cur.name + "” to “" + nn + "”");   // (its legends follow)
   return true;
 }
@@ -9619,10 +9626,50 @@ function floorSplitCounts(){
     if (stay.length !== h.pts.length) { h.pts = stay; if (S.sel === h.id) S.selPt = -1; } });
   return n;
 }
-function floorSplitSafe(){ try { if (P.proj && !S.drag) floorSplitCounts(); } catch (e) { console.warn("floor counts", e); } }
+function floorSplitSafe(){ let n = 0; try { if (P.proj && !S.drag) n = floorSplitCounts() + floorSplitConds(); } catch (e) { console.warn("floor counts", e); } return n; }
+/* each floor its own conditions: on a page split by floor, what is measured in a floor goes in that floor's own copy of its condition
+   ("Kitchen — Ground floor": c.src the condition it was copied from, c.fl the floor, c.flpk the page), so its colour, fill, on / off,
+   deductions and quantities are that floor's alone. Whatever condition it was drawn with (the condition itself, or another floor's copy),
+   a measurement goes to the copy of the floor it is in — made when there is none — and one in no floor to the condition itself (made
+   again when it was deleted). P.proj.flShare lists the pages whose floors share one condition (as before). A copy is removed once it
+   is empty and its floor is gone. Runs with floorSplitCounts on every change -> how many measurements changed condition */
+const flShared = pk => (P.proj.flShare || []).includes(pk);
+const flSplitPg = pk => !!floorList(pk).length && !flShared(pk);
+const condShort = c => { const s = " — " + (c.fl || ""); return c.fl && c.name.length > s.length && c.name.endsWith(s) ? c.name.slice(0, -s.length) : c.name; };   // "Kitchen — Ground floor" -> "Kitchen"
+function floorSplitConds(){
+  const pr = P.proj, pgs = new Set(Object.keys(pr.floors || {}).filter(flSplitPg)); if (!pgs.size && !pr.conds.some(c => c.flpk)) return 0;
+  const byId = new Map(pr.conds.map(c => [c.id, c])), copy = new Map(), drop = new Set(); let n = 0;
+  pr.conds.forEach(c => { if (c.flpk) copy.set(c.src + "|" + c.flpk + "|" + flLow(c.fl), c); });
+  const put = (c, after) => { const L = pr.conds; let at = -1; L.forEach((x, i) => { if (x.id === after || x.src === after) at = i; }); L.splice(at < 0 ? L.length : at + 1, 0, c); byId.set(c.id, c); return c; };   // (after its condition's last copy)
+  const base = (src, tpl) => byId.get(src) || (() => { const b = JSON.parse(JSON.stringify(tpl)), i = pr.conds.findIndex(x => x.src === src); b.id = src; b.name = condShort(tpl); delete b.src; delete b.fl; delete b.flpk;
+    pr.conds.splice(i < 0 ? pr.conds.length : i, 0, b); byId.set(src, b); return b; })();   // (before its copies)
+  const own = (src, tpl, pk, F) => copy.get(src + "|" + pk + "|" + flLow(F)) || (() => { const c = Object.assign(JSON.parse(JSON.stringify(tpl)), {id: uid("C"), name: condShort(tpl) + " — " + F, src, fl: F, flpk: pk});
+    copy.set(src + "|" + pk + "|" + flLow(F), c); return put(c, src); })();
+  pr.items.forEach(it => {
+    const c = byId.get(it.cond), pk = flPk(it); if (!c || drop.has(it) || (!c.flpk && !pgs.has(pk))) return;
+    const src = c.flpk ? c.src : c.id, F0 = pgs.has(pk) ? locOf(it).floor : "", F = F0 ? (floorNamed(pk, F0) || {name: String(F0)}).name : "";
+    const to = F ? own(src, c, pk, F) : c.flpk ? base(src, c) : c; if (to === c) return;
+    if (c.type === "count" && it.kind === "shape") {   // a count keeps one measurement per condition and floor of a page: its markers join the one there
+      const h = pr.items.find(o => o !== it && !drop.has(o) && o.cond === to.id && o.file === it.file && o.page === it.page && o.kind === "shape" && (+o.nos || 1) === (+it.nos || 1) && (o.label || "") === (it.label || "") && flLow(o.floor) === flLow(it.floor) && flLow(locOf(o).floor) === flLow(F0));
+      if (h) { h.pts.push(...it.pts); drop.add(it); if (S.sel === it.id) S.sel = h.id; if (S.multi.has(it.id)) { S.multi.delete(it.id); S.multi.add(h.id); } n++; if (S.cond === c.id && pk === S.key) S.cond = to.id; return; } }
+    it.cond = to.id; n++; if (S.cond === c.id && pk === S.key) S.cond = to.id; });   // (the condition drawn with follows to the floor drawn in)
+  if (drop.size) pr.items = pr.items.filter(it => !drop.has(it));
+  const used = new Set(pr.items.map(it => it.cond)), gone = pr.conds.filter(c => c.flpk && !used.has(c.id) && !(pgs.has(c.flpk) && floorNamed(c.flpk, c.fl)));
+  if (gone.length) { const g = new Set(gone); pr.conds = pr.conds.filter(c => !g.has(c)); gone.forEach(c => { S.condSel.delete(c.id); if (S.cond === c.id) S.cond = byId.has(c.src) && !g.has(byId.get(c.src)) ? c.src : (pr.conds[0] || {}).id || null; }); }
+  return n + gone.length;
+}
+/* a page's floors sharing one condition again (share) — each floor's copies go back into the condition they came from — or each floor
+   given its own conditions again (the copies are made afresh) -> true when it changed */
+function floorShareSet(pk, share){
+  pk = pk || S.key; if (!pk || flShared(pk) === !!share) return false;
+  mutate(() => { const s = new Set(P.proj.flShare || []); if (share) s.add(pk); else s.delete(pk); P.proj.flShare = [...s]; }, share ? "One condition for all floors of " + keyName(pk) : "Each floor its own conditions on " + keyName(pk));
+  return true;
+}
 /* the page's count of a condition a new marker at p joins: on a page with floor boundaries, the one in p's boundary (a count with no floor
    of its own whose first marker is there, else one whose own floor is that boundary's) — null: start one */
 function countHost(cid, file, page, p){
+  { const pk = keyOf(file, page), c = cond(cid); if (c && p && flSplitPg(pk)) { const f = floorAt(file, page, p), F = f ? f.name : ((P.proj.sheets || {})[pk] || {}).floor || "", src = c.flpk ? c.src : c.id;   // (the floor's own copy of it)
+      const o = F ? P.proj.conds.find(x => x.flpk === pk && x.src === src && flLow(x.fl) === flLow(F)) : c.flpk ? cond(src) : c; if (o) cid = o.id; } }
   const L = P.proj.items.filter(i => i.cond === cid && i.file === file && i.page === page && i.kind === "shape"); if (!L.length) return null;
   if (!p || !flHasBox(keyOf(file, page))) return L.find(i => !i.floor) || L[0];
   const f = floorAt(file, page, p), g = f ? f.name : "";
@@ -9797,7 +9844,9 @@ function floorMenu(x, y, pk, name){
     f && f.r ? {t: "Remove its boundary (keep the floor)", fn: () => floorSetBox(pk, name, null)} : null,
     f ? {t: "Move up", fn: () => floorOrder(pk, name, -1), dis: at <= 0} : null, f ? {t: "Move down", fn: () => floorOrder(pk, name, 1), dis: at < 0 || at >= L.length - 1} : null,
     name && n ? {t: "Legend for this floor", fn: () => floorLegendsAsk(pk, name)} : null,
-    {sep: 1}, {t: "Floors on this page…", fn: () => floorsDialog(pk)},
+    {sep: 1}, flShared(pk) ? {t: "Each floor its own conditions (colour, on / off, deductions)", fn: () => { floorShareSet(pk, false); toast("Each floor of this page has its own conditions now", 2600); }}
+      : {t: "One condition for all floors of this page", fn: () => { floorShareSet(pk, true); toast("The floors of this page share one condition again — Ctrl+Z to undo", 3000); }},
+    {t: "Floors on this page…", fn: () => floorsDialog(pk)},
     name ? {sep: 1} : null, name ? {t: "Delete this floor (its measurements are kept)", dng: 1, fn: () => { const k = floorDelete(pk, name); toast("Floor “" + name + "” deleted" + (k ? " — its " + k + " measurement" + (k > 1 ? "s are" : " is") + " under No floor now" : ""), 3000); }} : null], x, y);
 }
 /* Floors on a page: "Find floor plans" (each plan on the sheet a floor named from its title, ticked to add) and the page's floors —
@@ -16331,7 +16380,7 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
     mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
-    floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
+    floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
     floorsDialog, floorAddMany, floorNext, floorTitleIn, floorZoom, floorMenu, floorBoxStart, floorNewAsk, floorLegends, floorLegendSplit, legendFloorSet, legendFit, legendTitle, floorTitleOf,
     get SNAP_PX(){ return SNAP_PX; }, get HIT_PX(){ return HIT_PX; }};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
