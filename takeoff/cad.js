@@ -290,7 +290,7 @@ function normDwg(db){
     if (k && !/^\*(MODEL|PAPER)_SPACE/.test(k)) md.blocks.set(k, {name: b.name, base: P2(b.basePoint), ents: normList(b.entities, true, {bogus: 0, real: 0})}); });
   // the reader lists the layouts' objects (title blocks, viewports) with the model's: only model space is drawn, as AutoCAD's zoom extents
   md.ents = normList((db.entities || []).filter(e => !(e && paper.has(String(e.ownerBlockRecordSoftId)))), true, st); md.bogus = st.bogus;
-  if (st.bogus > 50 && st.bogus > 9 * st.real) throw new Error("this DWG came out unreadable in the browser's DWG reader (" + st.bogus.toLocaleString() + " of its objects could not be read) — open it in AutoCAD, save it again as DWG 2018 or as DXF (SAVEAS → DXF), and add that file");
+  if (st.bogus > 50 && st.bogus > 9 * st.real) throw new Error("this DWG came out unreadable in the browser's DWG reader (" + st.bogus.toLocaleString() + " of its objects could not be read) — start the AutoCAD helper on this computer (tools/cad-bridge.js: it opens the DWG in AutoCAD, whole) and add it again, or in AutoCAD use SAVEAS → DXF and add the .dxf");
   return md;
 }
 function normDxf(dx){
