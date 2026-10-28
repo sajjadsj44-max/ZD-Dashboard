@@ -290,7 +290,7 @@ function normDwg(db){
     if (k && !/^\*(MODEL|PAPER)_SPACE/.test(k)) md.blocks.set(k, {name: b.name, base: P2(b.basePoint), ents: normList(b.entities, true, {bogus: 0, real: 0})}); });
   // the reader lists the layouts' objects (title blocks, viewports) with the model's: only model space is drawn, as AutoCAD's zoom extents
   md.ents = normList((db.entities || []).filter(e => !(e && paper.has(String(e.ownerBlockRecordSoftId)))), true, st); md.bogus = st.bogus;
-  if (st.bogus > 50 && st.bogus > 9 * st.real) throw new Error("this DWG came out unreadable in the browser's DWG reader (" + st.bogus.toLocaleString() + " of its objects could not be read) — start the AutoCAD helper on this computer (tools/cad-bridge.js: it opens the DWG in AutoCAD, whole) and add it again, or in AutoCAD use SAVEAS → DXF and add the .dxf");
+  if (st.bogus > 50 && st.bogus > 9 * st.real) throw new Error("this DWG came out unreadable in the browser's DWG reader (" + st.bogus.toLocaleString() + " of its objects could not be read) — start the AutoCAD helper on this computer (it opens the DWG in AutoCAD, whole — set it up once with tools\cad-bridge-setup.cmd) and add it again, or in AutoCAD use SAVEAS → DXF and add the .dxf");
   return md;
 }
 function normDxf(dx){
@@ -900,7 +900,7 @@ function pdfRes(L, doc, page, pg, fonts){   // the page's font and transparency 
 export async function cadPdf(sc, L, meta){
   meta = meta || {};
   const doc = await L.PDFDocument.create(), font = await doc.embedFont(L.StandardFonts.Helvetica), ctx = doc.context, N = L.PDFName.of;
-  doc.setTitle(meta.title || "AutoCAD drawing"); doc.setCreator("ZD PDF Takeoff — " + sc.fmt + " import"); doc.setProducer("ZD PDF Takeoff");
+  doc.setTitle(meta.title || "AutoCAD drawing"); doc.setCreator("Sajjad QS PDF TAKEOFF Software — " + sc.fmt + " import"); doc.setProducer("Sajjad QS PDF TAKEOFF Software");
   const used = new Set(); sc.pages.forEach(pg => { pg.lay.forEach(l => used.add(l)); pg.tL.forEach(l => used.add(l)); });
   const ocg = sc.layers.map((l, i) => used.has(i) ? ctx.register(ctx.obj({Type: "OCG", Name: L.PDFHexString.fromText(l.name)})) : null), refs = ocg.filter(Boolean);
   doc.catalog.set(N("OCProperties"), ctx.obj({OCGs: refs, D: {Name: L.PDFHexString.fromText("AutoCAD layers"), Order: refs, ON: refs, OFF: [], BaseState: N("ON")}}));

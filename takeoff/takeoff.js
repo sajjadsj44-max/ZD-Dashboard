@@ -30,7 +30,25 @@ const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct
 const dmy = iso => { const p = String(iso || "").slice(0, 10).split("-"); return p.length === 3 ? p[2] + "-" + MON[+p[1] - 1] + "-" + p[0] : "—"; };
 const dmyHm = iso => { const d = new Date(iso), z = n => String(n).padStart(2, "0"); return isNaN(d) ? "—" : dmy(d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate())) + " " + z(d.getHours()) + ":" + z(d.getMinutes()); };   // a stored (UTC) time as the clock on the wall shows it
 function toast(msg, ms){ const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => { t.style.display = "none"; }, ms || 2600); }
-function busy(msg){ const b = $("busy"); b.textContent = msg || ""; b.style.display = msg ? "block" : "none"; }
+function busy(msg){ const b = $("busy"); b.textContent = msg || ""; b.style.display = msg ? "block" : "none";
+  if (msg && AG.n) { const s = document.createElement("button"); s.type = "button"; s.className = "busyStop"; s.textContent = AG.stop ? "Stopping…" : "■ Stop"; s.disabled = AG.stop; s.title = "Stop the agent (Esc)"; s.onclick = agentStop; s.onpointerdown = s.onmousedown = e => e.stopPropagation(); b.append(" ", s); } }
+/* an agent run and its Stop: AG.n runs going (one inside another — a dialog's agent sent from the panel — counts once), AG.stop
+   asked for. A run stops at its next room, page, step or AI turn, and what it did by then stays (one Ctrl+Z takes it back) */
+const AG = {n: 0, stop: false, ctl: null};
+const agStopped = () => AG.stop;
+const agStopErr = () => Object.assign(new Error("Stopped by you — what was done before it stopped stays (Ctrl+Z takes it back)"), {stopped: true});
+async function agentDo(fn){
+  if (!AG.n++) { AG.stop = false; AG.ctl = new AbortController(); agStopUi(); }
+  try { return await fn(); } finally { if (!--AG.n) { AG.stop = false; AG.ctl = null; agStopUi(); } }
+}
+function agentStop(){
+  if (!AG.n || AG.stop) return false; AG.stop = true; try { AG.ctl.abort(); } catch (e) {}
+  agStopUi(); toast("Stopping the agent — after the room or page it is on…", 3000); return true;
+}
+function agStopUi(){
+  document.querySelectorAll(".agStop").forEach(b => { b.style.display = AG.n ? "" : "none"; b.disabled = AG.stop; b.textContent = AG.stop ? "Stopping…" : "■ Stop"; });
+  const s = document.querySelector("#busy .busyStop"); if (s) { s.disabled = AG.stop; s.textContent = AG.stop ? "Stopping…" : "■ Stop"; }
+}
 
 /* the page's text with foot and inch marks as typed: PDF fonts give ' and " back as ’ ‘ ′ and ” “ ″ (12’-0"x12’-0") */
 const normQ = s => String(s).replace(/[’‘′`´]/g, "'").replace(/[”“″]/g, '"');
@@ -7537,7 +7555,7 @@ function rowDesc(x){ const {r, it, i} = x, c = cond(it.cond); return (r.sign < 0
 async function exportExcel(){
   busy("Building Excel…");
   try {
-    const X = await loadExcel(), wb = new X.Workbook(); wb.creator = "ZD PDF Takeoff"; wb.created = new Date();
+    const X = await loadExcel(), wb = new X.Workbook(); wb.creator = "Sajjad QS PDF TAKEOFF Software"; wb.created = new Date();
     const BLUE = {type: "pattern", pattern: "solid", fgColor: {argb: "FFDDEBFF"}}, GREEN = {type: "pattern", pattern: "solid", fgColor: {argb: "FFE2F4E8"}},
           GREY = {type: "pattern", pattern: "solid", fgColor: {argb: "FFE6E9EE"}}, YELLOW = {type: "pattern", pattern: "solid", fgColor: {argb: "FFFFF2C2"}}, HEAD = {type: "pattern", pattern: "solid", fgColor: {argb: "FF12263F"}};
     const ws = wb.addWorksheet("Measurement", {views: [{state: "frozen", ySplit: 4}], pageSetup: {paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0}});
@@ -9023,9 +9041,10 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
       {t: "sel", n: "Ribbon tab when the app opens", d: "shown on opening or refreshing the page", o: tabs.concat([["last", "The tab used last"]]), get: () => setPref().homeTab, set: v => { setSave({homeTab: v}); }},
       {t: "sel", n: "When a tool is picked by its key or a menu", d: "which ribbon tab shows", o: [["smart", "Its tab — but stay on My tools when the tool is there"], ["always", "Always its tab"], ["never", "Keep the tab I am on"]], get: () => setPref().ribFollow, set: v => { setSave({ribFollow: v}); }},
       {t: "tog", n: "Open the last project when the app starts", d: "off: start on the list of projects", get: () => setPref().openLast !== false, set: v => { setSave({openLast: v}); }},
+      {t: "tog", n: "Load a new version by itself", d: "when the app is opened or you come back to its tab, after saving — no Ctrl + F5; off: a bar offers Reload. The same for every ZD page", get: autoUpd, set: v => pref("zd-auto-update", v ? "" : "0")},
       {t: "txt", n: "Your name", d: "on markups, checks, comments and legends", get: qaUser, set: v => pref("zdTakeoffUser", String(v).trim().slice(0, 60))},
       {t: "btn", n: "Command palette", d: "every tool, export and dialog by name (Ctrl+K)", b: "Open", fn: openPalette}],
-     reset: () => setSave({homeTab: SET_DEF.homeTab, ribFollow: SET_DEF.ribFollow, openLast: true})},
+     reset: () => { setSave({homeTab: SET_DEF.homeTab, ribFollow: SET_DEF.ribFollow, openLast: true}); pref("zd-auto-update", ""); }},
     {id: "ribbon", n: "Ribbon & toolbar", d: "tabs, My tools, icons, compact ribbon", rows: [
       {t: "tog", n: "Compact ribbon", d: "the same tools, about half the height", get: () => !!pcPref().compact, set: v => pcSave({off: pcPref().off || [], compact: v})},
       {t: "tog", n: "Icons only", d: "no names under the tools (pointing at one still names it)", get: () => wsPref().tb === "icons", set: v => wsSet({tb: v ? "icons" : "full"})},
@@ -9341,7 +9360,7 @@ function reportPrint(){
     table{width:100%;border-collapse:collapse}th{background:#12263f;color:#fff;font-size:10.5px;text-align:left;padding:5px 6px}td{padding:4px 6px;border-bottom:1px solid #e3e8ef;vertical-align:top}td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     tr.g td{background:#f1f4f9;font-weight:700}.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}.cov{border:1px solid #dde5ee;border-radius:8px;padding:14px 16px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px 18px}
     .cov b{display:block;font-size:16px;color:#0f2942}.muted{color:#6b7d92}.st{font-weight:700;color:${lvlCol(V.lvl)}}@media print{body{margin:10mm}h2{break-after:avoid}tr{break-inside:avoid}}</style></head><body>
-    <h1>${esc(P.proj.name)}</h1><div class="muted">Quantity takeoff report · ${esc(dmy(today()))} · decimal feet, deductions as their own rows · ZD PDF Takeoff</div>
+    <h1>${esc(P.proj.name)}</h1><div class="muted">Quantity takeoff report · ${esc(dmy(today()))} · decimal feet, deductions as their own rows · Sajjad QS PDF TAKEOFF Software</div>
     <h2>Summary</h2><div class="cov"><div><span class="muted">Drawings</span><b>${P.proj.files.length} PDF · ${allPages().length} pages</b></div><div><span class="muted">Measurements</span><b>${q.n}</b></div><div><span class="muted">Checked</span><b>${q.checked} of ${q.n}</b></div>
     <div><span class="muted">AI / copied to check</span><b>${q.review}</b></div><div><span class="muted">Takeoff check</span><b class="st">${esc(V.lvl)}</b></div><div><span class="muted">Bill amount</span><b>${tot ? "PKR " + f2(tot) : "—"}</b></div></div>
     <h2>Quantities by condition</h2><table><thead><tr><th>Condition</th><th class="n">Measurements</th><th class="n">Gross</th><th class="n">Deductions</th><th class="n">Net</th><th>Unit</th></tr></thead><tbody>${P.proj.conds.map(row).join("")}</tbody></table>
@@ -9427,7 +9446,7 @@ async function reportExcel(o){
   const R = reportBuild(o); if (!R.n) return toast("Nothing measured on a page with a scale yet");
   busy("Building Excel…");
   try {
-    const X = await loadExcel(), wb = new X.Workbook(); wb.creator = "ZD PDF Takeoff"; wb.created = new Date();
+    const X = await loadExcel(), wb = new X.Workbook(); wb.creator = "Sajjad QS PDF TAKEOFF Software"; wb.created = new Date();
     const HEAD = {type: "pattern", pattern: "solid", fgColor: {argb: "FF12263F"}}, GREY = {type: "pattern", pattern: "solid", fgColor: {argb: "FFE6E9EE"}}, GRP = {type: "pattern", pattern: "solid", fgColor: {argb: "FFDDEBFF"}};
     const ws = wb.addWorksheet("Report", {views: [{state: "frozen", ySplit: 4}], pageSetup: {paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0}});
     const cols = R.cols, nc = cols.length, WD = {cond: 30, boq: 12, page: 32, lbl: 28, nos: 8, qty: 14, unit: 7, rate: 12, amt: 15, n: 13, note: 26}, ci = k => cols.indexOf(k);
@@ -11816,8 +11835,10 @@ function wire(){
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
   $("aiDetails").onclick = () => agentCmd("drawing details");
-  $("agRooms").onclick = () => agentCmd("measure all rooms"); $("agUnit").onclick = () => unitDialog(); $("agWalls").onclick = () => wallsDialog(); if ($("agBlock")) $("agBlock").onclick = () => blockMasonryDialog(); $("agTags").onclick = () => doorWinDialog();
-  $("agFull").onclick = () => fullTakeoffDialog(); $("agFin").onclick = () => finishesDialog(); $("agCheck").onclick = () => P.proj && agentCheck("all");
+  $("agRooms").onclick = () => agentDo(() => agentCmd("measure all rooms")); $("agUnit").onclick = () => agentDo(unitDialog); $("agWalls").onclick = () => agentDo(wallsDialog); if ($("agBlock")) $("agBlock").onclick = () => agentDo(blockMasonryDialog); $("agTags").onclick = () => agentDo(doorWinDialog);
+  $("agFull").onclick = () => agentDo(fullTakeoffDialog); $("agFin").onclick = () => agentDo(finishesDialog); $("agCheck").onclick = () => P.proj && agentDo(() => agentCheck("all"));
+  document.querySelectorAll(".agStop").forEach(b => { b.onclick = agentStop; }); agStopUi();
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && AG.n && !$("dlgBack").classList.contains("on") && agentStop()) e.preventDefault(); }, true);
   $("aiRead").onclick = () => aiSend($("aiIn").value.trim() || "Measure the floor area of every room in this view.", true).then(() => { $("aiIn").value = ""; });
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
@@ -12282,7 +12303,8 @@ function aiToolMsg(name, inp, out){   // one line in the panel for a tool step
 }
 function aiLog(kind, html){ const d = document.createElement("div"); d.className = "aimsg " + kind; d.innerHTML = html; $("aiLog").appendChild(d); $("aiLog").scrollTop = 1e9; return d; }
 const aiText = t => esc(t).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
-async function aiSend(text, fresh){
+function aiSend(text, fresh){ return agentDo(() => aiSend0(text, fresh)); }
+async function aiSend0(text, fresh){
   if (AI.busy || !P.proj) return;
   { const t = await ruleTeach(text); if (t === true) return; if (typeof t === "string") text = t.slice(5); }   // "remember: …" — a working rule, asked where to keep it
   if (!S.page) return aiLog("err", "Open a PDF page first.");
@@ -12305,12 +12327,13 @@ async function aiSend(text, fresh){
     content.push({type: "text", text});
     AI.history.push({role: "user", content});
     for (let turn = 0; turn < 16; turn++) {
+      if (agStopped()) throw agStopErr();
       const res = await client.beta.messages.create({
         model: AI_MODEL, max_tokens: 16000, output_config: {effort: "high"},
         betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
         system: [{type: "text", text: AI_SYSTEM, cache_control: {type: "ephemeral"}}].concat(rulesPrompt() ? [{type: "text", text: rulesPrompt()}] : []),
         tools: AI_TOOLS_ALL(), messages: AI.history
-      }); replied = true;
+      }, AG.ctl ? {signal: AG.ctl.signal} : undefined); replied = true;
       if (res.stop_reason === "refusal") { AI.history = []; aiLog("err", "Claude declined this request" + (res.stop_details && res.stop_details.explanation ? ": " + esc(res.stop_details.explanation) : "") + ". The chat was reset."); break; }
       AI.history.push({role: "assistant", content: res.content});
       res.content.forEach(b => { if (b.type === "text" && b.text.trim()) aiLog("bot", aiText(b.text)); });
@@ -12326,8 +12349,12 @@ async function aiSend(text, fresh){
       refresh();
     }
   } catch (e) {
-    const st = e && e.status; free = !replied && (st === 401 || st === 403 || !st);
-    aiLog("err", (st === 401 ? "The API key was not accepted — check it (above)." : st === 429 ? "Rate limited by the API — wait a minute and try again." : esc("Request failed: " + (e.message || e)))
+    const st = e && e.status, stopped = agStopped();
+    if (stopped) {   // the tools' answers kept, and a turn of Claude's after them: the next message carries on from here
+      aiLog("bot", esc(agStopErr().message) + ".");
+      const last = AI.history[AI.history.length - 1]; if (last && last.role === "user" && (last.content || []).some(x => x.type === "tool_result")) AI.history.push({role: "assistant", content: [{type: "text", text: "(Stopped by the user.)"}]}); }
+    free = !stopped && !replied && (st === 401 || st === 403 || !st);
+    if (!stopped) aiLog("err", (st === 401 ? "The API key was not accepted — check it (above)." : st === 429 ? "Rate limited by the API — wait a minute and try again." : esc("Request failed: " + (e.message || e)))
       + (free ? " Answering with the <b>free agent</b> instead — to use it always, remove the key: <b>Key</b> → clear the box → <b>Save</b>." : ""));
     if (st === 401) aiShowKey(true);
     // keep the conversation valid: drop a trailing user turn the API never answered
@@ -12653,6 +12680,7 @@ async function aiSendLocal(text){
     const msgs = [{role: "system", content: AI_SYSTEM + (ccOn() ? CC_SYS : LOC_SYS) + rulesPrompt()}, ...locHist(), user];
     let final = "";
     for (let turn = 0; turn < 10; turn++) {
+      if (agStopped()) throw agStopErr();
       const r = await locChat(msgs, toOllamaTools(tools)); met.turns++; met.ms += r._ms; if (r._load) met.load = r._load; met.tok += r.eval_count || 0; met.evalNs += r.eval_duration || 0;
       const msg = r.message || {}, {calls, inText} = locCalls(msg), said = String(msg.content || "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
       msgs.push({role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls});
@@ -12676,6 +12704,7 @@ async function aiSendLocal(text){
     kpiLog("agent", {route: ccOn() ? "claude-code" : "local", ms: Math.round(met.ms), calls: met.calls, bad: met.bad, turns: met.turns, load: met.load || 0, tps: +tps.toFixed(1)});
   } catch (e) { fallback = e; }
   wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
+  if (fallback && fallback.stopped) { aiLog("bot", esc(fallback.message) + (met.calls ? ` — after ${met.calls} tool call${met.calls === 1 ? "" : "s"}.` : ".")); return; }
   if (fallback && met.calls) { aiLog("err", esc(fallback.message || String(fallback)) + ` — the local AI stopped after ${met.calls} tool call${met.calls === 1 ? "" : "s"}. What it did stays (nothing was repeated): look it over, or say “undo the last AI measurement”.`); return; }   // (re-running it with the rule agent would do the work twice)
   if (fallback) { kpiLog("agent", {route: "rules", fallback: true}); aiLog("err", esc(fallback.message || String(fallback)) + " — answered by the <b>built-in rule agent</b> instead (offline; nothing sent to a cloud service)."); await agentCmd(text, true); }
 }
@@ -12888,7 +12917,7 @@ async function autoAreaPage(inp){
     if (VOID_RX.test(nm) || ex.some(w => up.includes(w))) { out.push({name: nm, status: "excluded", why: VOID_RX.test(nm) ? "shaft / duct / void — not floor" : "excluded by the user"}); continue; }
     if (house && !want.length && !house.take(up)) { out.push({name: nm, status: "excluded", why: house.why}); continue; }
     const seed = [r.cx != null ? r.cx : r.x + r.w / 2, r.cy != null ? r.cy : r.y - r.h / 2];
-    if (existing.some(i => pointInPoly(seed, i.pts))) { out.push({name: nm, status: "skipped", why: "already measured here"}); continue; }
+    if (existing.some(i => pointInPoly(seed, i.pts))) { out.push({name: nm, status: "skipped", why: "already measured here"}); continue; } if (agStopped()) { out.push({name: nm, status: "stopped", why: "not traced — the user stopped the agent"}); continue; }
     const t0 = performance.now(); let res; try { res = inp.gap_ft > 0 ? await autoRoom(seed, {gap: +inp.gap_ft}) : await autoRoomGuarded(seed); } catch (e) { res = {err: e.message || String(e)}; }
     kpiLog("auto", {ms: Math.round(performance.now() - t0), err: !!res.err, flag: !!(res.leak || res.short || res.warn), agent: true});
     if (res.err) { out.push({name: nm, status: "failed", why: res.err}); continue; }
@@ -13182,7 +13211,7 @@ function aiSampler(){
 async function aiSendPlan(smp, text){
   AI.busy = true; $("aiSend").disabled = true; $("aiRead").disabled = true;
   aiLog("user", esc(text));
-  const ctl = new AbortController(); AI.stop = ctl;
+  const ctl = new AbortController(); AI.stop = ctl; if (AG.ctl) AG.ctl.signal.addEventListener("abort", () => ctl.abort());
   const wait = aiLog("wait", `Claude is reading the drawing… <a href="#" class="aiStop">Stop</a>`);
   wait.querySelector(".aiStop").onclick = e => { e.preventDefault(); ctl.abort(); };
   let bubble = null, said = "", from = 0;   // text after a tool step goes in a new bubble below it
@@ -13407,7 +13436,7 @@ function doorSwings(){
 async function scanTags(scope){   // -> [{f, i, key, T: tagsOf}] for this page, this PDF, or every PDF of the project
   const pages = scope === "page" ? [{f: P.proj.files.find(x => x.id === S.fileId), i: S.pageNo}] : allPages().filter(o => scope === "all" || o.f.id === S.fileId);
   const out = [];
-  for (const [n, o] of pages.entries()) { if (pages.length > 1) busy("Reading tags — page " + (n + 1) + " of " + pages.length + "…"); out.push({f: o.f, i: o.i, key: keyOf(o.f.id, o.i), T: tagsOf(await pageTexts(o.f.id, o.i))}); }
+  for (const [n, o] of pages.entries()) { if (pages.length > 1 && agStopped()) { busy(""); throw agStopErr(); } if (pages.length > 1) busy("Reading tags — page " + (n + 1) + " of " + pages.length + "…"); out.push({f: o.f, i: o.i, key: keyOf(o.f.id, o.i), T: tagsOf(await pageTexts(o.f.id, o.i))}); }
   busy(""); return out;
 }
 const tagWanted = (k, f) => !f || f === "ALL" || f === "TAGS" ? true : /^DOORS?$/.test(f) ? tagKind(k) === "Doors" : /^WINDOWS?$/.test(f) ? tagKind(k) === "Windows" : /^VENT/.test(f) ? tagKind(k) === "Ventilators" : (tagParse(f) || {k: f}).k === k;
@@ -13671,7 +13700,7 @@ const QS_COMMANDS = {
         const c = S.cond && (cond(S.cond) || {}).type === "area" ? cond(S.cond) : aiAreaCond(), home = [S.fileId, S.pageNo], rep = [], added = [];
         const pages = allPages().filter(o => a.scope === "all" || o.f.id === S.fileId);
         for (const [n, pg] of pages.entries()) {
-          const R = {page: pageName({file: pg.f.id, page: pg.i}), n: 0}; rep.push(R); busy(`Measuring rooms — ${R.page} (${n + 1} of ${pages.length})…`);
+          const R = {page: pageName({file: pg.f.id, page: pg.i}), n: 0}; rep.push(R); if (agStopped()) { R.skip = "not reached — stopped by you"; continue; } busy(`Measuring rooms — ${R.page} (${n + 1} of ${pages.length})…`);
           if (!await agentGoto(pg.f.id, pg.i)) { R.skip = "could not be opened"; continue; }
           if (!curScale()) { R.skip = "no scale — set it (K)"; continue; }
           if (scaleDoubt()) { R.skip = "scale doubtful — the drawing measures " + scaleDoubt().label; continue; }
@@ -13682,7 +13711,7 @@ const QS_COMMANDS = {
         busy(""); await agentGoto(home[0], home[1]); S.cond = c.id; refresh();
         const skipped = rep.filter(x => x.skip), none = rep.filter(x => x.none);
         return {ok: added.length > 0, changed: added.map(i => i.id), review: added.map(i => i.id),
-          error: added.length ? "" : "no room was measured on " + pages.length + " page" + (pages.length === 1 ? "" : "s") + (skipped.length ? " (" + skipped.length + " skipped: " + skipped.slice(0, 4).map(x => x.page + " — " + x.skip).join("; ") + ")" : ""),
+          error: added.length ? "" : (agStopped() ? "stopped by you — " : "") + "no room was measured on " + pages.length + " page" + (pages.length === 1 ? "" : "s") + (skipped.length ? " (" + skipped.length + " skipped: " + skipped.slice(0, 4).map(x => x.page + " — " + x.skip).join("; ") + ")" : ""),
           message: `${added.length} room${added.length === 1 ? "" : "s"} measured into <b>${esc(c.name)}</b> on ${pages.length - skipped.length} of ${pages.length} pages (${rep.map(x => esc(x.page) + " " + (x.skip ? "skipped" : x.none ? "none named" : x.n)).join(", ")})${skipped.length ? ` — <b>${skipped.length} skipped</b> (${skipped.slice(0, 4).map(x => esc(x.page + ": " + x.skip)).join("; ")}) — this is <b>not a complete project quantity</b> until they are measured` : ""}`};
       }
       const before = new Set(P.proj.items.map(i => i.id)), r = await agentMeasure(names, null, {whole: true}), added = P.proj.items.filter(i => !before.has(i.id) && i.ai);
@@ -13881,7 +13910,7 @@ async function agentCmd(text, echoed){   // echoed: the message is already in th
   if (!echoed) aiLog("user", esc(text));
   const steps = cmdSteps(text); let out;
   if (steps.length > 1) aiLog("bot", `${steps.length} steps, one after another: ${steps.map((s, i) => (i + 1) + ". <i>" + esc(s) + "</i>").join(" · ")}`);
-  for (const s of steps) out = await agentStep(s);
+  for (const [n, s] of steps.entries()) { if (agStopped()) { aiLog("bot", esc(agStopErr().message) + (n ? ` — ${n} of ${steps.length} steps done.` : ".")); break; } out = await agentStep(s); }
   return out;
 }
 const CMD_VERB = /(?:measure|count|find|walls?|check|audit|make|do|run|finish(?:es)?|plaster|skirting|paint|take\s*-?\s*off|details?|apartment|unit|flat|list|schedule|how|total|trace)\b/.source;
@@ -14080,7 +14109,9 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
     say("bot", `${had.length === 1 ? "1 room is" : had.length + " rooms are"} already measured in <b>${esc(c.name)}</b> and left as ${had.length === 1 ? "it is" : "they are"} (delete one to measure it again): ${had.map(r => esc(r.name)).join(", ")}.`);
     if (!rooms.length) return {condition: c.name, rooms: res};
   }
+  let stopAt = -1;
   for (const [n, r] of rooms.entries()) {
+    if (agStopped()) { stopAt = n; break; }
     busy(`Measuring ${n + 1} of ${rooms.length}: ${r.name}…`); await new Promise(q => setTimeout(q, 10));
     const cx = r.x + r.w / 2, below = r.sizeY != null ? r.sizeY : r.y, lc = nameCentre(r);   // (the name's own centre, turned with the page)   // lc: the name itself — the room it is written in is the one wanted
     const seeds = [lc, [cx, r.y - r.h * 1.7], [cx, below + r.h * 0.9], [r.x - r.h, r.y - r.h / 2], [r.x + r.w + r.h, r.y - r.h / 2], [cx, below + r.h * 2.5], [cx, r.y - r.h * 3.5]];
@@ -14088,6 +14119,7 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
     let best = null; const dd = sizeDims(r.size), tried = [];
     const over = Object.assign({own: lc}, dd ? {gap: Math.max(2.5, Math.min(autoOpt().gap, 0.6 * Math.min(dd[0], dd[1])))} : {});   // a 5 ft bath: close gaps up to 3 ft, not 4
     for (const sd of seeds) {
+      if (agStopped() && best) break;
       const res = await autoRoom(sd, over); if (!res.pts) { if (/leaks/.test(res.err || "") && tried.length === 0 && seeds.indexOf(sd) >= 1) break; continue; }
       const a = polyArea(res.pts) / k / k; if (!(a > 4)) continue;
       const own = pointInPoly(lc, res.pts);   // an outline that misses the room's own name is a neighbouring compartment (the shower of a bath, a wardrobe)
@@ -14097,6 +14129,7 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
       tried.push(a);
     }
     if (best && best.err >= 10) best.err -= 10;
+    if (!best && agStopped()) { stopAt = n; break; }
     if (!best) { res.push({name: r.name, error: "could not close the room"}); say("err", `${esc(r.name)}: auto area could not close the room — use the Fence tool on the open side, or draw it`); continue; }
     const cen = q => [q.reduce((a, v) => a + v[0], 0) / q.length, q.reduce((a, v) => a + v[1], 0) / q.length];
     const same = got.find(o => Math.abs(o.a - best.a) / best.a < 0.005 && dist(cen(o.pts), cen(best.pts)) < k);
@@ -14118,10 +14151,11 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
     say("tool", `${esc(nm)}: <b>${fq(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? fq(wrt) + " Sft together" : esc(r.size) + " = " + fq(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + fq(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
   }
   busy(""); refresh();
+  if (stopAt >= 0) say("bot", `Stopped by you — ${rooms.length - stopAt} of ${rooms.length} room${rooms.length > 1 ? "s" : ""} not measured: ${rooms.slice(stopAt).map(r => esc(r.name)).slice(0, 12).join(", ")}${rooms.length - stopAt > 12 ? "…" : ""}.`);
   const failed = res.filter(x => x.error), traced = P.proj.items.some(i => onPage(i) && i.cond === c.id && i.ai && i.det && i.det.how === "trace");
-  if (!(ok + chk)) say("err", `Nothing was measured — ${rooms.length} room${rooms.length > 1 ? "s" : ""} tried: ${res.map(x => esc(x.name) + " (" + esc(x.error || (x.shared_with ? "with " + x.shared_with : "not closed")) + ")").join(", ")}.`);
+  if (stopAt >= 0 && !(ok + chk) && !res.length) { /* stopped before the first room: said above */ } else if (!(ok + chk)) say("err", `Nothing was measured — ${rooms.length} room${rooms.length > 1 ? "s" : ""} tried: ${res.map(x => esc(x.name) + " (" + esc(x.error || (x.shared_with ? "with " + x.shared_with : "not closed")) + ")").join(", ")}.`);
   else say("bot", `Measured ${ok + chk} of ${rooms.length} into <b>${esc(c.name)}</b>${chk ? ` — <b>${chk} to check</b> (more than 5% off the written size: fix with Fence, or the room is not a rectangle)` : ""}${same2 ? ` — <b>${same2}</b> leaked into a neighbour, not added` : ""}${failed.length > same2 ? ` — <b>${failed.length - same2}</b> could not be closed` : ""}. Each is marked AI until you check it. Undo (Ctrl+Z, or “undo the last AI measurement”) takes them back.${traced ? ` <span class="small">Tip: <i>trace the whole floor</i> puts every room into its own layer instead — rooms, kitchen + lounge, passages, corridors, washrooms, balconies.</span>` : ""}`);
-  return {condition: c.name, rooms: res, measured: ok + chk, to_check: chk, failed: failed.length};
+  return Object.assign({condition: c.name, rooms: res, measured: ok + chk, to_check: chk, failed: failed.length}, stopAt >= 0 ? {stopped: rooms.slice(stopAt).map(r => r.name)} : {});
 }
 /* apartments: the unit numbers written on the plan — a 2-4 digit number with TYPE-… / n BED / … SFT under it. Each room
    belongs to the nearest unit number. */
@@ -14760,6 +14794,7 @@ async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, 
   try { await asOneStep("Full takeoff", async () => {
     for (const [n, p] of pages.entries()) {
       const R = {page: pageName({file: p.f.id, page: p.i}), file: p.f.id, no: p.i}; rep.push(R);
+      if (agStopped()) { R.skip = "not reached — stopped by you"; continue; }
       busy(`⚡ Full takeoff — ${R.page}${pages.length > 1 ? ` (${n + 1} of ${pages.length})` : ""}…`);
       if (!await agentGoto(p.f.id, p.i)) { R.skip = "could not be opened (or another page was opened meanwhile)"; continue; }
       if (!S.geo[S.key].segs.length && !S.texts[S.key].length) { R.skip = "blank — no lines or text"; continue; }
@@ -14778,6 +14813,7 @@ async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, 
             r.rooms.forEach(x => { if (x.error) R.rooms.bad.push(x.name + " — " + x.error); else if (x.already) R.rooms.had++; else if (x.area_sft != null) { R.rooms.sft += x.area_sft; if (x.check) R.rooms.chk.push(x.name); else R.rooms.ok++; } }); }
         }
       }
+      if (agStopped()) { R.stop = true; continue; }
       if (o.walls) {
         busy(`⚡ Full takeoff — ${R.page}: walls…`); await new Promise(r => setTimeout(r, 10));
         const found = wallThicknesses(null), seen = new Set(); R.walls = []; R.wallOther = found.filter(w => !stdWall(w.t)).map(w => ({t: w.t, len: w.len}));
@@ -14786,6 +14822,7 @@ async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, 
           if (!r.error && !ex) { const c = P.proj.conds.find(x => x.type === "linear" && x.name === r.condition); if (c) c.agentWall = true; }
           R.walls.push(r.error ? {t: T, err: r.error} : {t: T, name: r.condition, ft: r.total_length_ft, runs: r.runs, unit: r.unit}); }
       }
+      if (agStopped()) { R.stop = true; continue; }
       if (o.doors) {
         const res = await scanTags("page"), T = res[0].T, keys = Object.keys(T.plan).filter(k2 => tagKind(k2) !== "Tags").sort(natSort);
         const newSch = Object.keys(T.sched).filter(k2 => !(P.proj.openings || []).some(x => String(x.mark).toUpperCase() === k2));
@@ -14793,6 +14830,7 @@ async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, 
         if (keys.length || newSch.length) mutate(() => { if (keys.length) putCounts(res, keys, "mark");
           newSch.forEach(k2 => { const sc = T.sched[k2]; P.proj.openings.push({id: uid("O"), mark: k2, type: tagKind(k2) === "Doors" ? "door" : tagKind(k2) === "Windows" ? "window" : "other", w: sc.w, h: sc.h, src: "read from the drawing's schedule (" + sc.how + ")"}); }); }, "Count doors / windows");
       }
+      if (agStopped()) { R.stop = true; continue; }
       if (o.fin) R.fin = !P.proj.items.some(i => onPage(i) && isRoomArea(i)) ? {none: true} : finishesRun({H: o.H, DH: o.DH, cond: roomC && P.proj.items.some(i => onPage(i) && i.cond === roomC && isRoomArea(i)) ? roomC : roomCondOf(), ceiling: true});
     }
   }); } finally { S.agentRun = false; busy(""); if (cond0 && cond(cond0)) S.cond = cond0; }   // the condition the user had picked stays picked
@@ -14809,7 +14847,7 @@ function fullReport(o, rep, ms){
     + (R.wallOther.length ? `<br><span class="small">Not taken: ${R.wallOther.map(w => inchOf(w.t) + " (" + Math.round(w.len) + " ft)").join(", ")} — window glass, counters and the like; 🧱 Walls takes one if it is a wall.</span>` : "");
   const tagsL = R => (Object.keys(R.tags).length ? Object.entries(R.tags).map(([m, n]) => esc(m) + " <b>×" + n + "</b>").join(" · ") : "no door / window tags") + (R.newSch.length ? `<br><span class="small">Sizes of ${R.newSch.map(esc).join(", ")} read from the schedule into the opening schedule.</span>` : "");
   const finL = R => R.fin.none ? "no rooms measured on this page" : R.fin.error ? `<span style="color:var(--red)">${esc(R.fin.error)}</span>` : `${R.fin.rooms.length} rooms · wall finish <b>${fq(sum(R.fin.rooms, x => x.wallNet))} Sft</b> net · skirting <b>${fq(sum(R.fin.rooms, x => x.skirt))} ft</b>${sum(R.fin.rooms, x => x.notes.length) ? ` · <b style="color:var(--amber)">${sum(R.fin.rooms, x => x.notes.length)} opening${sum(R.fin.rooms, x => x.notes.length) > 1 ? "s" : ""} not deducted</b> <span class="small">(no size — see 🎨 Finishes)</span>` : ""}`;
-  const blk = R => `<div style="margin-top:7px"><b>${esc(R.page)}</b>${R.rooms ? "<br>🏠 " + roomsL(R) : ""}${R.walls ? "<br>🧱 " + wallsL(R) : ""}${R.tags ? "<br>🚪 " + tagsL(R) : ""}${R.fin ? "<br>🎨 " + finL(R) : ""}</div>`;
+  const blk = R => `<div style="margin-top:7px"><b>${esc(R.page)}</b>${R.rooms ? "<br>🏠 " + roomsL(R) : ""}${R.walls ? "<br>🧱 " + wallsL(R) : ""}${R.tags ? "<br>🚪 " + tagsL(R) : ""}${R.fin ? "<br>🎨 " + finL(R) : ""}${R.stop ? `<br><span class="small">■ Stopped by you part-way through this page</span>` : ""}</div>`;
   let tot = "";
   if (done.length > 1) {   // the run's totals, and the counts against the schedule's quantities
     const W = {}, G = {}; done.forEach(R => { (R.walls || []).forEach(w => { if (!w.err) W[w.t] = (W[w.t] || 0) + w.ft; }); Object.entries(R.tags || {}).forEach(([m, n]) => { G[m] = (G[m] || 0) + n; }); });
@@ -15354,8 +15392,30 @@ const ACAD_URL = "http://127.0.0.1:11436";
 async function acadHelper(){   // (the first time, the browser asks to let this site reach this computer's apps: time to answer it — with no helper, or the answer given, it is back at once)
   busy("Looking for AutoCAD on this computer… (if the browser asks, allow this site to reach apps on this device)");
   try { const r = await fetch(ACAD_URL + "/", {cache: "no-store", signal: AbortSignal.timeout(60000)}); const j = r.ok ? await r.json() : null; return j && j.app === "zd-cad-bridge" && j.autocad && j.autocad.length ? j : null; } catch (e) { return null; } }
+/* no helper answering: it is started through its zd-cad: link (tools/cad-bridge-setup.cmd registers the link on this computer
+   once, and starts the helper with Windows). A page opens an app's link only from a click, so it is asked; turned down, or not
+   set up on this computer, it is not asked again until the page is opened again */
+let acadAsk = true;
+async function acadStart(name){   // -> what the started helper says (as acadHelper), or null
+  if (!acadAsk) return null;
+  busy("");
+  const v = await choose("Open " + name + " in AutoCAD?", `<p>The AutoCAD helper is not running on this computer. It opens the DWG in AutoCAD, whole — the browser's own DWG reader loses most of some big drawings.</p>
+    <p class="small">If the browser asks whether this site may open <b>ZD AutoCAD helper</b>, tick <b>Always allow</b>. Not set up on this computer yet: in the ZD-Dashboard folder double-click <b>tools\\cad-bridge-setup.cmd</b> once — it also starts the helper with Windows.</p>`,
+    [{t: "Read in the browser", v: "web"}, {t: "Start the AutoCAD helper", v: "go", pri: true}]);
+  if (v !== "go") { acadAsk = false; return null; }
+  location.href = "zd-cad:start";
+  for (const t0 = Date.now(); Date.now() - t0 < 30000;) {
+    busy("Starting the AutoCAD helper… " + Math.round((Date.now() - t0) / 1000) + " s");
+    await new Promise(r => setTimeout(r, 1000));
+    try { const r = await fetch(ACAD_URL + "/", {cache: "no-store", signal: AbortSignal.timeout(2000)}); const j = r.ok ? await r.json() : null;
+      if (j && j.app === "zd-cad-bridge") return j.autocad && j.autocad.length ? j : null; } catch (e) {}
+  }
+  acadAsk = false;
+  toast("The AutoCAD helper did not start — on this computer double-click tools\\cad-bridge-setup.cmd in the ZD-Dashboard folder once. " + name + " is read in the browser instead.", 9000);
+  return null;
+}
 async function acadOpen(buf, name){   // -> {dxf: ArrayBuffer, acad: "AutoCAD 2024"}, or null when no helper answers; throws when AutoCAD could not open it
-  const h = await acadHelper(); if (!h) return null;
+  const h = await acadHelper() || await acadStart(name); if (!h) return null;
   const t0 = Date.now(), say = () => busy("Opening " + name + " in " + h.autocad[0] + " on this computer…" + (Date.now() - t0 > 3000 ? " " + Math.round((Date.now() - t0) / 1000) + " s" : "")), tick = setInterval(say, 1000);
   say();
   try { const r = await fetch(ACAD_URL + "/convert?name=" + encodeURIComponent(name), {method: "POST", headers: {"Content-Type": "application/octet-stream"}, body: buf});
@@ -15398,7 +15458,7 @@ function cadSay(name, m){
   const off = m.layers.filter(l => l.off || l.frozen).length, sk = Object.entries(m.stats.skipped || {}).map(([t, n]) => n + " " + t).join(", ");
   /* the browser's DWG reader can lose most of a big drawing that AutoCAD reads without fault (its objects come back empty): said first, with the way round it */
   const jk = m.stats.junk || 0, lost = m.fmt === "DWG" && jk > 0.1 * (jk + (m.stats.ents || 0));
-  return (lost ? "⚠ Only part of this drawing could be read — " + jk.toLocaleString() + " objects came out empty in the browser's DWG reader. Start the AutoCAD helper on this computer (tools/cad-bridge.js — it opens every DWG whole) and add the drawing again, or in AutoCAD use SAVEAS → DXF and add the .dxf. " : "") + name + (m.via ? " — opened by " + m.via + " on this computer" : "") + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
+  return (lost ? "⚠ Only part of this drawing could be read — " + jk.toLocaleString() + " objects came out empty in the browser's DWG reader. Start the AutoCAD helper on this computer (it opens every DWG whole — set it up once with tools\cad-bridge-setup.cmd) and add the drawing again, or in AutoCAD use SAVEAS → DXF and add the .dxf. " : "") + name + (m.via ? " — opened by " + m.via + " on this computer" : "") + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
     (m.assumed ? " — ⚠ the drawing has no units set: check the scale (chip → Verify)" : m.unitFix ? " — ⚠ its dimensions disagree with its units setting: check the scale (chip → Verify)" : " — scale exact") +
     " · " + m.layers.length + " layers" + (off ? " (" + off + " off / frozen)" : "") + " · " + (m.stats.ents || 0).toLocaleString() + " objects" +
     (sk ? " · not shown: " + sk : "") + (m.stats.missing ? " · " + m.stats.missing + " block(s) missing (xrefs?)" : "") + (m.stats.far ? " · " + m.stats.far + " far-off object(s) left off the page" : "") + (m.stats.junk ? " · " + m.stats.junk + " damaged object(s) left out" : "") + (m.stats.trunc ? " · ⚠ very large: shown in part" : "");
@@ -16371,7 +16431,7 @@ async function plotRun(o, go, b0){
 }
 async function plotPdf(o){
   const Lb = await loadPdfLib(), out = await Lb.PDFDocument.create(), lo = plotLayout(o, plotWin(o)), win = lo.win, f = S.fileId, p = S.pageNo, pgp = S.page;
-  out.setTitle(P.proj.name + " — " + pageName({file: f, page: p})); out.setCreator("ZD PDF Takeoff — plot"); out.setProducer("ZD PDF Takeoff");
+  out.setTitle(P.proj.name + " — " + pageName({file: f, page: p})); out.setCreator("Sajjad QS PDF TAKEOFF Software — plot"); out.setProducer("Sajjad QS PDF TAKEOFF Software");
   const page = out.addPage([lo.PW, lo.PH]), font = await out.embedFont(Lb.StandardFonts.Helvetica), cp = cadOn() ? cadPage() : null;
   if (cp) {
     const sc = S.cadSc[f], hid = cadHidden(f, sc); if (o.np) sc.layers.forEach((l, i) => { if (!l.plot || /^defpoints$/i.test(l.name)) hid[i] = 1; });
@@ -16501,21 +16561,32 @@ function ocFix(Lb, out, fids){
    past every cache, at start, every 30 min and when the tab comes back into view: when it names another takeoff.js?v= than the one
    running (import.meta.url), a bar offers Reload — the open project saved first */
 const APP_V = (() => { try { return new URL(import.meta.url).searchParams.get("v") || ""; } catch (e) { return ""; } })();
-async function verCheck(force){   // -> the new ?v= when one is out (the bar shown), else ""
-  if (!APP_V || location.protocol === "file:" || (!force && Date.now() - (verCheck.at || 0) < 60000)) return "";
+const OWN_BUILD = document.documentElement.getAttribute("data-zd-build") || "", BUILD = /^[0-9a-f]{12}$/;   // this page's build, written in by the deploy (tools/stamp_build.py); not deployed: no hash
+const autoUpd = () => pref("zd-auto-update") !== "0";   // Settings › General "Load a new version by itself", one setting for every ZD page
+async function verReload(){   // the open project saved, then the page reloaded; false (nothing reloaded) when the save failed
+  try { await flushSave(); if (SAVE_PEND.size) await Promise.all([...SAVE_PEND.values()].map(pp => flushOne(pp))); } catch (e) {}   // a write that failed before: tried once more, and waited for
+  if (SAVE_ERR.size || SAVE_PEND.size) return false;   // a reload now would lose what is not saved
+  location.reload(); return true;
+}
+async function verCheck(force, now){   // -> the new version when one is out (loaded, or the bar shown), else ""
+  // now: the app was just opened or its tab shown again, when a new version loads by itself (Auto-update); never while you are on the tab, then the bar
+  if (!APP_V || location.protocol === "file:" || (!force && !now && Date.now() - (verCheck.at || 0) < 60000)) return "";
   verCheck.at = Date.now();
-  let v = ""; try { const r = await fetch("index.html?check=" + Date.now(), {cache: "no-store"}); if (!r.ok) return ""; const m = /<script[^>]*\ssrc="takeoff\.js\?v=([^"&]+)"/.exec(await r.text()); v = m ? m[1] : ""; } catch (e) { return ""; }   // offline: nothing to say
-  if (!v || v === APP_V || v === verCheck.no) return "";
+  let v = "", nb = ""; try { const r = await fetch("index.html?check=" + Date.now(), {cache: "no-store"}); if (!r.ok) return ""; const t = await r.text(), m = /<script[^>]*\ssrc="takeoff\.js\?v=([^"&]+)"/.exec(t), mb = /<html[^>]*\sdata-zd-build="([0-9a-f]{12})"/.exec(t); v = m ? m[1] : ""; nb = mb ? mb[1] : ""; } catch (e) { return ""; }   // offline: nothing to say
+  if (!v) return "";
+  const nv = v !== APP_V ? v : BUILD.test(OWN_BUILD) && nb && nb !== OWN_BUILD ? nb : "";   // a new takeoff.js, or the page itself changed
+  if (!nv || nv === verCheck.no) return "";
+  if (autoUpd() && (now || document.visibilityState === "hidden")) {   // once per version: a copy still old after the reload gets the bar, not a loop
+    let tried = null; try { tried = sessionStorage.getItem("zd-upd-takeoff"); sessionStorage.setItem("zd-upd-takeoff", nv); } catch (e) {}
+    if (tried !== nv && await verReload()) return nv; }
   let b = $("verBar"); if (!b) { b = document.createElement("div"); b.id = "verBar"; b.setAttribute("role", "status");
     b.style.cssText = "position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:99999;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 32px);padding:8px 8px 8px 14px;border-radius:8px;background:var(--navy,#0f2942);color:#fff;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.3)";
-    b.innerHTML = '<span>A new version of PDF Takeoff is ready</span><button class="btn sm pri" id="verGo">Reload</button><button class="btn sm" id="verNo" title="Not now (asked again when another version is out)" aria-label="Not now">×</button>';
+    b.innerHTML = '<span>A new version of Sajjad QS PDF TAKEOFF Software is ready</span><button class="btn sm pri" id="verGo">Reload</button><button class="btn sm" id="verNo" title="Not now (asked again when another version is out)" aria-label="Not now">×</button>';
     document.body.appendChild(b);
     $("verGo").onclick = async () => { const g = $("verGo"); g.disabled = true;
-      try { await flushSave(); if (SAVE_PEND.size) await Promise.all([...SAVE_PEND.values()].map(pp => flushOne(pp))); } catch (e) {}   // a write that failed before: tried once more, and waited for
-      if (SAVE_ERR.size || SAVE_PEND.size) { g.disabled = false; toast("Not saved — export a copy first: this browser would not store the project" + (SAVE_ERR.size ? " (" + [...SAVE_ERR.values()][0] + ")" : "") + ". Reload after that.", 9000); return; }   // a reload now would lose what is not saved
-      location.reload(); };
+      if (!(await verReload())) { g.disabled = false; toast("Not saved — export a copy first: this browser would not store the project" + (SAVE_ERR.size ? " (" + [...SAVE_ERR.values()][0] + ")" : "") + ". Reload after that.", 9000); } };
     $("verNo").onclick = () => { verCheck.no = b.dataset.v; b.remove(); }; }
-  b.dataset.v = v; return v;
+  b.dataset.v = nv; return nv;
 }
 /* ------------------------------------------------------------------ start */
 (async function init(){
@@ -16524,11 +16595,11 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
-  window.zdTakeoff = {qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
-    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
+    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, verReload, autoUpd, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
     floorsDialog, floorAddMany, floorNext, floorTitleIn, floorZoom, floorMenu, floorBoxStart, floorNewAsk, floorLegends, floorLegendSplit, legendFloorSet, legendFit, legendTitle, floorTitleOf,
@@ -16538,5 +16609,6 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
   if (last && setPref().openLast !== false && all.some(p => p.id === last)) await openProject(last); else await showStart();
   ribHome();   // the start-up tab (My tools by default), whatever opening the project did
   loadPdfjs().catch(e => toast(e.message, 6000));
-  setTimeout(verCheck, 4000); setInterval(verCheck, 1800000); document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") verCheck(); });   // a new release out: say so
+  setTimeout(() => verCheck(false, true), 1500); setInterval(verCheck, 1800000);   // a new release out: loaded by itself on opening / coming back (Auto-update), else the bar
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") verCheck(false, true); }); addEventListener("pageshow", e => { if (e.persisted) verCheck(false, true); });
 })();

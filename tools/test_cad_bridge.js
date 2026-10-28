@@ -2,6 +2,8 @@
 /* The AutoCAD helper: tools/cad-bridge.js with a fake AutoCAD console (tools/fake_accore.js), then the takeoff page adding a DWG
    through it — the drawing read from the DXF "AutoCAD" saved, and said so. Also: only the allowed site, only this computer's
    host name, the browser's local-network preflight, a text DXF when a binary one does not come out, a file that is no DWG.
+   With no helper running the page offers to start it (its zd-cad: link, registered by tools/cad-bridge-setup.cmd): turned
+   down, the browser reads the DWG; accepted, the page waits for the helper (started here, as the link would) and uses it.
 
      python -m http.server 8765 --bind 127.0.0.1      (from the repo root)
      node tools/test_cad_bridge.js                     (TK_URL / TK_LIBS as for test_takeoff_cad.js; uses port 11436)
@@ -42,7 +44,7 @@ function start(extra){
   console.log("takeoff page: a DWG through the helper");
   h = start(); await h.ready();
   const browser = await pw.chromium.launch(), errs = [];
-  const addDwg = async name => {   // a fresh browser session (the projects screen), a new project, the fixture DWG added -> its drawing's metadata
+  const addDwg = async (name, dlg) => {   // a fresh browser session (the projects screen), a new project, the fixture DWG added -> its drawing's metadata; dlg(page): answers the "start the helper?" question
     const ctx = await browser.newContext({viewport: {width: 1500, height: 900}});
     await require("./zd_unlock")(ctx);
     if (LIBS) await ctx.route(/cdn\.jsdelivr\.net/, r => {   // (the CDN libraries from TK_LIBS, as test_takeoff_cad.js)
@@ -59,6 +61,7 @@ function start(extra){
     await page.goto(URL, {waitUntil: "load"}); await page.waitForTimeout(800);
     await page.click("#bNewProj"); await page.fill("#dlgName", name); await page.click("#dlgOk"); await page.waitForTimeout(400);
     await page.setInputFiles("#fileIn", DWG);
+    if (dlg) { await page.waitForSelector("#dlgBack.on", {timeout: 30000}); await dlg(page); }
     await page.waitForFunction(() => window.zdTakeoff && zdTakeoff.S.page && zdTakeoff.P.proj.files.length, null, {timeout: 120000});
     const f = await page.evaluate(() => zdTakeoff.P.proj.files[0]); await ctx.close(); return f;
   };
@@ -67,8 +70,18 @@ function start(extra){
     ok(m.via === "test console" && m.fmt === "DXF" && m.stats.ents > 0 && !m.stats.junk, "the page sends the DWG to the helper and reads what AutoCAD saved (" + m.stats.ents + " objects, via " + m.via + ")");
     ok(f.name === "zd_test_2018.dwg", "the drawing keeps its own name in the project");
     h.br.kill(); await new Promise(r => setTimeout(r, 300));
-    const m2 = (await addDwg("No helper")).cad;
-    ok(!m2.via && m2.fmt === "DWG" && m2.stats.ents > 0, "with no helper the browser reads the DWG itself, as before (" + m2.stats.ents + " objects)");
+    let asked = "";
+    const m2 = (await addDwg("No helper", async page => { asked = await page.textContent("#dlgT"); await page.click('#dlgF button:has-text("Read in the browser")'); })).cad;
+    ok(asked === "Open zd_test_2018.dwg in AutoCAD?", "with no helper the page offers to start it: " + asked);
+    ok(!m2.via && m2.fmt === "DWG" && m2.stats.ents > 0, "turned down: the browser reads the DWG itself, as before (" + m2.stats.ents + " objects)");
+    let stayed = false;
+    const m3 = (await addDwg("Started", async page => {
+      await page.click('#dlgF button:has-text("Start the AutoCAD helper")');
+      await page.waitForTimeout(1500); h = start(); await h.ready();   // what the zd-cad: link does on a computer set up for it
+      stayed = new globalThis.URL(page.url()).pathname === new globalThis.URL(URL).pathname;
+    })).cad;
+    ok(stayed, "opening the zd-cad: link leaves the takeoff page where it is");
+    ok(m3.via === "test console" && m3.fmt === "DXF" && m3.stats.ents > 0, "accepted: the page waits for the helper to start and reads what AutoCAD saved (via " + m3.via + ")");
     ok(!errs.length, "no page errors" + (errs.length ? ": " + errs[0] : ""));
   } finally { await browser.close(); try { h.br.kill(); } catch (e) {} }
   console.log("\n" + passes + " passed, " + fails + " failed"); process.exit(fails ? 1 : 0);

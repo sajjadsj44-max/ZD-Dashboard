@@ -10,9 +10,50 @@
   Sources are minified; this is not the authoring copy.
 -->
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-zd-build="__ZD_BUILD__">
 <head>
 <meta charset="utf-8">
+<script>
+/* ZD auto-update (the same on every ZD page; PDF Takeoff has its own in takeoff.js). The deploy (tools/stamp_build.py) writes
+   a hash of this file into <html data-zd-build> and every page's hash into version.json. A copy older than the one published
+   (a tab the browser restored, its 10-minute copy, a tab left open) then loads the new one by itself, with no Ctrl + F5: when
+   the page is opened and when you come back to its tab, never while you are on it (then a bar offers Reload). Off ("Load new
+   versions by itself" unticked: local storage zd-auto-update = 0, one setting for every ZD page): the bar only. Not deployed
+   (no hash): nothing. */
+(function () {
+  var PAGE = 'zameen-developments/index.html', own = document.documentElement.getAttribute('data-zd-build') || '', H = /^[0-9a-f]{12}$/, last = 0, no = '';
+  if (!H.test(own) || location.protocol === 'file:' || !window.fetch) return;
+  function auto() { try { return localStorage.getItem('zd-auto-update') !== '0'; } catch (e) { return true; } }
+  function tried(v) { try { if (v === undefined) return sessionStorage.getItem('zd-upd-' + PAGE); sessionStorage.setItem('zd-upd-' + PAGE, v); } catch (e) { return null; } }   // one reload per version: a copy still old after it gets the bar, not a loop
+  function bar(v) {
+    if (v === no) return;
+    if (!document.body) { document.addEventListener('DOMContentLoaded', function () { bar(v); }); return; }   // the answer came before the page was read
+    var b = document.getElementById('zd-upd'); if (b) { b.setAttribute('data-v', v); return; }
+    b = document.createElement('div'); b.id = 'zd-upd'; b.setAttribute('role', 'status'); b.setAttribute('data-v', v);
+    b.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:2147483000;display:flex;align-items:center;flex-wrap:wrap;gap:10px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:8px 8px 8px 14px;border-radius:8px;background:#0f2942;color:#fff;font:13px Segoe UI,Arial,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.3)';
+    var bs = 'border:0;border-radius:6px;padding:5px 12px;font:inherit;font-weight:600;cursor:pointer';
+    b.innerHTML = '<span>A new version of this page is ready</span><button type="button" data-a="go" style="' + bs + ';background:#2b7de9;color:#fff">Reload</button>'
+      + '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;color:#c9d8ea"><input type="checkbox"' + (auto() ? ' checked' : '') + ' style="margin:0"> Load new versions by itself</label>'
+      + '<button type="button" data-a="no" title="Not now (asked again when another version is out)" aria-label="Not now" style="' + bs + ';background:transparent;color:#fff;padding:5px 8px">&times;</button>';
+    b.querySelector('[data-a="go"]').onclick = function () { location.reload(); };
+    b.querySelector('[data-a="no"]').onclick = function () { no = b.getAttribute('data-v'); b.remove(); };
+    b.querySelector('input').onchange = function () { try { if (this.checked) localStorage.removeItem('zd-auto-update'); else localStorage.setItem('zd-auto-update', '0'); } catch (e) {} };
+    document.body.appendChild(b);
+  }
+  function check(now) {   // now: the page was just opened or shown again, the moment a new version may load by itself
+    if (!now && Date.now() - last < 60000) return; last = Date.now();
+    fetch('../version.json?t=' + Date.now(), {cache: 'no-store'}).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      var v = j && j[PAGE]; if (!H.test(v || '') || v === own) return;
+      if (auto() && (now || document.visibilityState === 'hidden') && tried() !== v) { tried(v); location.reload(); return; }
+      bar(v);
+    }).catch(function () {});   // offline: nothing to say
+  }
+  check(true);
+  setInterval(function () { check(false); }, 1800000);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') check(true); });
+  addEventListener('pageshow', function (e) { if (e.persisted) check(true); });   // Back / Forward to a page kept in memory
+})();
+</script>
 <meta name="author" content="Sajjad">
 <meta name="copyright" content="© 2026 Sajjad — SAJ QSCOST">
 <meta name="application-name" content="SAJ QSCOST">
@@ -9710,6 +9751,7 @@ window.zdProd={open:showProd,data:D,rowCalc:rowCalc,schedule:schedule,liftFactor
     all:  {pw: 'sa',  name: 'ZD Dashboard'},
     pay:  {pw: '123', name: 'Payments',          btn: 'tabPAY',  app: 'appPAY',  nav: 'navgroup-pay'},
     cm:   {pw: 'sa',  name: 'Change Management', btn: 'tabCM',   app: 'appCM',   nav: 'navgroup-cm'},
+    ra:   {pw: 'sa',  name: 'QS Cost Control',   btn: 'tabRA',   app: 'appRA',   nav: 'navgroup-ra'},
     calc: {pw: 'sa',  name: 'Calculator',        btn: 'modCalc', app: 'appCALC', nav: 'navgroup-calc'},
     prod: {pw: 'sa',  name: 'Productivity',      btn: 'modProd', app: 'appPROD', nav: 'navgroup-prod'}
   };
@@ -9718,6 +9760,7 @@ window.zdProd={open:showProd,data:D,rowCalc:rowCalc,schedule:schedule,liftFactor
     ['takeoff', 'PDF Takeoff', 'Measure quantities from PDF and CAD drawings', '<path d="M3.5 3.5v17h17z"/><path d="M7.5 16.5v-4l4 4z"/>'],
     ['pay', 'Payments', 'Payment dashboard, bill register and payment history only', '<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19"/><path d="M6.5 15h4"/>'],
     ['cm', 'Change Management', 'RFI &amp; design change register and its analysis only', '<path d="M17 2.5 20.5 6 17 9.5"/><path d="M3.5 11v-1a4 4 0 0 1 4-4h13"/><path d="M7 21.5 3.5 18 7 14.5"/><path d="M20.5 13v1a4 4 0 0 1-4 4h-13"/>'],
+    ['ra', 'QS Cost Control', 'Rate library, GRN, MRS &amp; PBS rates, rate analysis, project BOQ, RFQs and price trends only', '<rect x="5" y="4" width="14" height="17.5" rx="2.5"/><path d="M9 2.5h6V6H9z"/><path d="M8.5 11h7M8.5 14.5h7M8.5 18h4"/>'],
     ['calc', 'Calculator', 'QS calculators, unit converter and section database only', '<rect x="4.5" y="2.5" width="15" height="19" rx="2.5"/><rect x="7.5" y="5.5" width="9" height="4" rx="1"/><path stroke-width="2.6" d="M8.5 13.5h.01M12 13.5h.01M15.5 13.5h.01M8.5 17.5h.01M12 17.5h.01M15.5 17.5h.01"/>'],
     ['prod', 'Productivity', 'Labour output per day, material coverage and the labour &amp; duration estimator only', '<path d="M2.5 18.5h19"/><path d="M4.5 18.5V16a7.5 7.5 0 0 1 15 0v2.5"/><path d="M10 9.3V5.5h4v3.8"/>']
   ];
@@ -9726,7 +9769,7 @@ window.zdProd={open:showProd,data:D,rowCalc:rowCalc,schedule:schedule,liftFactor
   var dots = !!(window.CSS && CSS.supports && CSS.supports('-webkit-text-security', 'disc'));
   var style = document.createElement('style');
   style.textContent = '.zd-locked > :not(#zd-lock):not(#zd-start){filter:blur(5px);pointer-events:none;user-select:none}.zd-lock{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:20px;background:rgba(15,41,66,.72)}.zd-lock-card{width:min(100%,360px);padding:28px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.25);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a}.zd-lock-card .mark{width:40px;height:40px;border:2px solid #0f2942;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;margin-bottom:16px;color:#0f2942}.zd-lock-card h2{color:#0f2942;font-size:21px;margin:0 0 6px}.zd-lock-card p{color:#6b7d92;margin:0 0 18px}.zd-lock-card label{display:block;color:#0f2942;font-size:12px;font-weight:600;margin-bottom:6px}.zd-lock-card input{width:100%;padding:11px 12px;border:1px solid #dde5ee;border-radius:7px;font:inherit;margin-bottom:12px;box-sizing:border-box;-webkit-text-security:disc}.zd-lock-card button{width:100%;border:0;border-radius:7px;padding:11px;background:#2b7de9;color:#fff;font:inherit;font-weight:700;cursor:pointer}.zd-lock-error{margin-top:10px;color:#b42318;font-size:12px}.zd-lock-note{margin-top:12px;color:#6b7d92;font-size:11.5px}.zd-lock-back{display:inline-block;margin-top:12px;color:#2b7de9;font-size:12.5px;text-decoration:none}.zd-lock-back:hover{text-decoration:underline}.zd-lock-wait{background:none}.zd-lock-wait .zd-lock-card{visibility:hidden}'
-    + '.zd-start{position:fixed;inset:0;z-index:99999;overflow:auto;padding:40px 16px;background:linear-gradient(160deg,#0f2942,#17375e 60%,#1d4a7a);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a;box-sizing:border-box}.zd-start-in{max-width:980px;margin:0 auto}.zd-start-hd{display:flex;align-items:center;gap:14px;color:#fff;margin-bottom:28px}.zd-start-hd .mark{width:46px;height:46px;border:2px solid #fff;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;flex:none}.zd-start-hd h1{font-size:24px;margin:0 0 2px;font-weight:700}.zd-start-hd p{margin:0;color:#b9cbe0}.zd-start-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}.zd-start-card{box-sizing:border-box;width:100%;margin:0;justify-self:stretch;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;padding:22px;border:0;border-radius:14px;background:#fff;color:inherit;font:inherit;cursor:pointer;box-shadow:0 10px 30px rgba(0,0,0,.2);transition:transform .12s,box-shadow .12s}.zd-start-card:hover,.zd-start-card:focus-visible{transform:translateY(-2px);box-shadow:0 16px 38px rgba(0,0,0,.3);outline:none}.zd-start-card:focus-visible{box-shadow:0 0 0 3px #7fb3f5,0 16px 38px rgba(0,0,0,.3)}.zd-start-card .ic{width:42px;height:42px;border-radius:10px;background:#e8f0fb;color:#2b7de9;display:flex;align-items:center;justify-content:center}.zd-start-card .ic svg{width:24px;height:24px}.zd-start-card b{font-size:17px;color:#0f2942}.zd-start-card span.d{color:#6b7d92;font-size:13px;line-height:1.45}.zd-start-card.main{grid-column:1/-1;background:#fff}.zd-start-card.main .ic{background:#0f2942;color:#fff}.zd-start-ft{margin-top:26px;color:#b9cbe0;font-size:12px}.zd-start-ft b{color:#fff}.zd-start-ft button{margin-left:6px;padding:0;border:0;background:none;color:#9cc4f5;font:inherit;text-decoration:underline;cursor:pointer}'
+    + '.zd-start{position:fixed;inset:0;z-index:99999;overflow:auto;padding:40px 16px;background:linear-gradient(160deg,#0f2942,#17375e 60%,#1d4a7a);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a;box-sizing:border-box}.zd-start-in{max-width:980px;margin:0 auto}.zd-start-hd{display:flex;align-items:center;gap:14px;color:#fff;margin-bottom:28px}.zd-start-hd .mark{width:46px;height:46px;border:2px solid #fff;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;flex:none}.zd-start-hd h1{font-size:24px;margin:0 0 2px;font-weight:700}.zd-start-hd p{margin:0;color:#b9cbe0}.zd-start-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}.zd-start-card{box-sizing:border-box;width:100%;margin:0;justify-self:stretch;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;padding:22px;border:0;border-radius:14px;background:#fff;color:inherit;font:inherit;cursor:pointer;box-shadow:0 10px 30px rgba(0,0,0,.2);transition:transform .12s,box-shadow .12s}.zd-start-card:hover,.zd-start-card:focus-visible{transform:translateY(-2px);box-shadow:0 16px 38px rgba(0,0,0,.3);outline:none}.zd-start-card:focus-visible{box-shadow:0 0 0 3px #7fb3f5,0 16px 38px rgba(0,0,0,.3)}.zd-start-card .ic{width:42px;height:42px;border-radius:10px;background:#e8f0fb;color:#2b7de9;display:flex;align-items:center;justify-content:center}.zd-start-card .ic svg{width:24px;height:24px}.zd-start-card b{font-size:17px;color:#0f2942}.zd-start-card span.d{color:#6b7d92;font-size:13px;line-height:1.45}.zd-start-card.main{grid-column:1/-1;background:#fff}.zd-start-card.main .ic{background:#0f2942;color:#fff}.zd-start-ft{margin-top:26px;color:#b9cbe0;font-size:12px}.zd-start-ft b{color:#fff}.zd-start-ft button{margin-left:6px;padding:0;border:0;background:none;color:#9cc4f5;font:inherit;text-decoration:underline;cursor:pointer}.zd-start-upd{display:inline-flex;align-items:center;gap:6px;margin-top:8px;color:#b9cbe0;font-size:12px;cursor:pointer}.zd-start-upd input{margin:0}'
     + 'body[data-zd-app] .zd-solo-off{display:none!important}.modbtn.zd-home{text-decoration:none}';
   document.head.appendChild(style);
 
@@ -9814,8 +9857,13 @@ window.zdProd={open:showProd,data:D,rowCalc:rowCalc,schedule:schedule,liftFactor
       + CARDS.map(function (c) {
         return '<button type="button" class="zd-start-card' + (c[0] === 'all' ? ' main' : '') + '" data-zd-pick="' + c[0] + '"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + c[3] + '</svg></span><b>' + c[1] + '</b><span class="d">' + c[2] + '</span></button>';
       }).join('')
-      + '</div><div class="zd-start-ft" aria-live="polite"></div></div>';
+      + '</div><div class="zd-start-ft" aria-live="polite"></div>'
+      + '<label class="zd-start-upd" title="When a page is opened or you come back to it, never while you are on it. The same for every ZD page."><input type="checkbox"> Load new versions by itself (no Ctrl + F5)</label></div>';
     trustNote(el.querySelector('.zd-start-ft'));
+    (function (cb) {   // the auto-update setting (local storage zd-auto-update = 0 when off), shared with every ZD page
+      try { cb.checked = localStorage.getItem('zd-auto-update') !== '0'; } catch (e) { cb.checked = true; }
+      cb.addEventListener('change', function () { try { if (cb.checked) localStorage.removeItem('zd-auto-update'); else localStorage.setItem('zd-auto-update', '0'); } catch (e) {} });
+    })(el.querySelector('.zd-start-upd input'));
     var uncover = cover(el);
     el.addEventListener('click', function (e) {
       var b = e.target.closest('[data-zd-pick]'); if (!b) return;

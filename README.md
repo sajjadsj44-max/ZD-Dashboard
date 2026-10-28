@@ -83,6 +83,14 @@ received, or change a `Pending Entry` row's status to `In Progress` /
 `Waiting` / `Received`; the dashboard just reflects the sheet live, it never
 invents a status.
 
+## QS Cost Control on the start screen
+
+Added 28-Oct-2026. The `zameen-developments/` start screen has a **QS Cost Control**
+card (`?app=ra`, password as the dashboard). It opens the QS Cost Control module on
+its own (rate library, GRN / MRS / PBS rates, Rate Analysis, Project BOQ, RFQ
+Tracker, Price Trends) with the other modules hidden, like the Payments,
+Change Management, Calculator and Productivity cards.
+
 ## GRN Price Register (Rate Analysis)
 
 QS Cost Control → **GRN Price Register** lists every item received on site with
@@ -642,6 +650,15 @@ the root `index.html` sends the browser on to `takeoff/` (a `location.replace`, 
 fallbacks), so the takeoff's projects — kept per site in the browser — are the same ones as before. The dashboards
 list moved to `dashboards/`; every dashboard keeps its own address. `tools/test_root.js` checks the landing, that
 `takeoff/` does not loop, and that every dashboard link still opens.
+
+- **AutoCAD helper, started by itself** (28-Oct-2026): a DWG is opened by the AutoCAD on this computer through
+  `tools/cad-bridge.js` (whole — the browser's own DWG reader loses most of some big drawings). Set it up once per
+  computer: double-click `tools\cad-bridge-setup.cmd` (needs AutoCAD and Node.js; no administrator rights). It copies the
+  helper to `%LOCALAPPDATA%\ZD\cad-bridge`, starts it with Windows, registers the `zd-cad:` link, and starts it now. If the
+  helper is not running when a DWG is added, the takeoff asks to start it and opens `zd-cad:start` (the browser asks once
+  whether the site may open it — tick *Always allow*); "Read in the browser" skips it until the page is opened again.
+  Run the setup again after `cad-bridge.js` changes; `cad-bridge-setup.cmd -Remove` takes it all away. Its log:
+  `%LOCALAPPDATA%\ZD\cad-bridge\cad-bridge.log`. Tests: `tools/test_cad_bridge.js`.
 
 - **Command line** (status bar, 11-Oct-2026): type an AutoCAD alias or a command's name and Enter — `l`, `rec`, `ci`,
   `pol 8`, `tr`, `ex`, `f 0.5`, `cha 0.5 0.75`, `o 0.375`, `ro 37`, `sc 1.5`, `qs`, `inv`… Enter on an empty line repeats

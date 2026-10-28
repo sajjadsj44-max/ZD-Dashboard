@@ -44,7 +44,7 @@
 - The same for any password an app asks for (e.g. a locked PDF's open
   password): ask each time, never keep it — not in the browser, not in exports.
 - Passwords: `123` for Payments on its own (`zameen-developments/?app=pay`), `sa` for everything else
-  (the complete Dashboard `?app=all`, `?app=cm`, `?app=calc`, PDF Takeoff, Drawing Tracker, the dashboards list).
+  (the complete Dashboard `?app=all`, `?app=cm`, `?app=ra` (QS Cost Control), `?app=calc`, `?app=prod`, PDF Takeoff, Drawing Tracker, the dashboards list).
   `zameen-developments/` with no `?app=` opens the start screen that picks one of them.
 - One exception, asked for by the owner: a **trusted computer** (the owner's laptop) is never asked, on any
   page. Its browser keeps a random key in localStorage `zd-trusted-computer`; every page with a lock
@@ -54,3 +54,15 @@
   password itself is still never stored. To trust another computer, add its key's hash to all four lists.
 - Browser tests type the password in with `tools/zd_unlock.js`;
   `tools/test_lock.js` checks the lock on every page.
+
+# Auto-update (no Ctrl + F5)
+
+- Every page carries `<html … data-zd-build="__ZD_BUILD__">`; the deploy (`tools/stamp_build.py` in
+  `deploy-pages.yml`) writes a hash of each page's own file there and lists them all in `version.json`.
+  A copy older than the published one loads the new one by itself when the page is opened or its tab is
+  shown again (never while you are on it: then a bar offers Reload), once per version.
+- The setting "Load new versions by itself" is one for every page (localStorage `zd-auto-update` = `0` when
+  off): Takeoff Settings › General, the Zameen Developments start screen, the dashboards list, the bar.
+- zameen-developments, dashboards and drawing-tracker share the same inline `ZD auto-update` script (keep
+  them the same, only `PAGE` differs); PDF Takeoff's is `verCheck` in takeoff.js. A new page gets the
+  attribute and that script too. `tools/test_autoupdate.js` checks them.

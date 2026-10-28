@@ -1,7 +1,48 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-zd-build="__ZD_BUILD__">
 <head>
 <meta charset="utf-8">
+<script>
+/* ZD auto-update (the same on every ZD page; PDF Takeoff has its own in takeoff.js). The deploy (tools/stamp_build.py) writes
+   a hash of this file into <html data-zd-build> and every page's hash into version.json. A copy older than the one published
+   (a tab the browser restored, its 10-minute copy, a tab left open) then loads the new one by itself, with no Ctrl + F5: when
+   the page is opened and when you come back to its tab, never while you are on it (then a bar offers Reload). Off ("Load new
+   versions by itself" unticked: local storage zd-auto-update = 0, one setting for every ZD page): the bar only. Not deployed
+   (no hash): nothing. */
+(function () {
+  var PAGE = 'drawing-tracker/index.html', own = document.documentElement.getAttribute('data-zd-build') || '', H = /^[0-9a-f]{12}$/, last = 0, no = '';
+  if (!H.test(own) || location.protocol === 'file:' || !window.fetch) return;
+  function auto() { try { return localStorage.getItem('zd-auto-update') !== '0'; } catch (e) { return true; } }
+  function tried(v) { try { if (v === undefined) return sessionStorage.getItem('zd-upd-' + PAGE); sessionStorage.setItem('zd-upd-' + PAGE, v); } catch (e) { return null; } }   // one reload per version: a copy still old after it gets the bar, not a loop
+  function bar(v) {
+    if (v === no) return;
+    if (!document.body) { document.addEventListener('DOMContentLoaded', function () { bar(v); }); return; }   // the answer came before the page was read
+    var b = document.getElementById('zd-upd'); if (b) { b.setAttribute('data-v', v); return; }
+    b = document.createElement('div'); b.id = 'zd-upd'; b.setAttribute('role', 'status'); b.setAttribute('data-v', v);
+    b.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:2147483000;display:flex;align-items:center;flex-wrap:wrap;gap:10px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:8px 8px 8px 14px;border-radius:8px;background:#0f2942;color:#fff;font:13px Segoe UI,Arial,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.3)';
+    var bs = 'border:0;border-radius:6px;padding:5px 12px;font:inherit;font-weight:600;cursor:pointer';
+    b.innerHTML = '<span>A new version of this page is ready</span><button type="button" data-a="go" style="' + bs + ';background:#2b7de9;color:#fff">Reload</button>'
+      + '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;color:#c9d8ea"><input type="checkbox"' + (auto() ? ' checked' : '') + ' style="margin:0"> Load new versions by itself</label>'
+      + '<button type="button" data-a="no" title="Not now (asked again when another version is out)" aria-label="Not now" style="' + bs + ';background:transparent;color:#fff;padding:5px 8px">&times;</button>';
+    b.querySelector('[data-a="go"]').onclick = function () { location.reload(); };
+    b.querySelector('[data-a="no"]').onclick = function () { no = b.getAttribute('data-v'); b.remove(); };
+    b.querySelector('input').onchange = function () { try { if (this.checked) localStorage.removeItem('zd-auto-update'); else localStorage.setItem('zd-auto-update', '0'); } catch (e) {} };
+    document.body.appendChild(b);
+  }
+  function check(now) {   // now: the page was just opened or shown again, the moment a new version may load by itself
+    if (!now && Date.now() - last < 60000) return; last = Date.now();
+    fetch('../version.json?t=' + Date.now(), {cache: 'no-store'}).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      var v = j && j[PAGE]; if (!H.test(v || '') || v === own) return;
+      if (auto() && (now || document.visibilityState === 'hidden') && tried() !== v) { tried(v); location.reload(); return; }
+      bar(v);
+    }).catch(function () {});   // offline: nothing to say
+  }
+  check(true);
+  setInterval(function () { check(false); }, 1800000);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') check(true); });
+  addEventListener('pageshow', function (e) { if (e.persisted) check(true); });   // Back / Forward to a page kept in memory
+})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ZD Drawing Tracker</title>
 <style>
