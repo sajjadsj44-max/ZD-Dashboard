@@ -44,7 +44,7 @@
 - The same for any password an app asks for (e.g. a locked PDF's open
   password): ask each time, never keep it — not in the browser, not in exports.
 - Passwords: `123` for Payments on its own (`zameen-developments/?app=pay`), `sa` for everything else
-  (the complete Dashboard `?app=all`, `?app=cm`, `?app=calc`, PDF Takeoff, Drawing Tracker, the dashboards list).
+  (the complete Dashboard `?app=all`, `?app=cm`, `?app=ra` (QS Cost Control), `?app=calc`, `?app=prod`, PDF Takeoff, Drawing Tracker, the dashboards list).
   `zameen-developments/` with no `?app=` opens the start screen that picks one of them.
 - One exception, asked for by the owner: a **trusted computer** (the owner's laptop) is never asked, on any
   page. Its browser keeps a random key in localStorage `zd-trusted-computer`; every page with a lock

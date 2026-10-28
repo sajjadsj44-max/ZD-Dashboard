@@ -83,6 +83,14 @@ received, or change a `Pending Entry` row's status to `In Progress` /
 `Waiting` / `Received`; the dashboard just reflects the sheet live, it never
 invents a status.
 
+## QS Cost Control on the start screen
+
+Added 28-Oct-2026. The `zameen-developments/` start screen has a **QS Cost Control**
+card (`?app=ra`, password as the dashboard). It opens the QS Cost Control module on
+its own (rate library, GRN / MRS / PBS rates, Rate Analysis, Project BOQ, RFQ
+Tracker, Price Trends) with the other modules hidden, like the Payments,
+Change Management, Calculator and Productivity cards.
+
 ## GRN Price Register (Rate Analysis)
 
 QS Cost Control → **GRN Price Register** lists every item received on site with
