@@ -566,7 +566,7 @@ function pruneCaches(prev){
   const keep = new Set(); PANES.forEach(pn => pn.sess.proj && pn.sess.proj.files.forEach(f => keep.add(f.id)));
   if (prev && prev.files && prev.files.reduce((a, f) => a + (+f.size || 0) * (f.cad ? 10 : 1), 0) <= WARM_MB * 1048576) prev.files.forEach(f => keep.add(f.id));   // (an AutoCAD drawing, held as its scene, takes some ten times its file)
   const fid = k => String(k).split(":")[0];
-  Object.keys(S.docs || {}).forEach(id => { if (!keep.has(id)) { const d = S.docs[id]; if (d && d.destroy) d.destroy(); delete S.docs[id]; } });
+  Object.keys(S.docs || {}).forEach(id => { if (!keep.has(id)) { const d = S.docs[id]; if (d && d.destroy) d.destroy(); delete S.docs[id]; } }); rcDrop(id => keep.has(id));
   ["geo", "texts", "sizes", "thumbs", "ocgs", "ocBound", "cadSc", "cadP", "cedCache"].forEach(n => { const o = S[n]; if (o) Object.keys(o).forEach(k => { if (!keep.has(fid(k))) delete o[k]; }); });
   S.thumbQ = []; rotSync(P.proj);
 }
@@ -1100,9 +1100,60 @@ async function revisionDiff(){
     setSel(ids); setTool("select"); zoomTo(ids); refresh(); toast(ids.length + " measurement" + (ids.length === 1 ? "" : "s") + " flagged for review against " + cmp.name, 4000);
   } catch (e) { busy(""); toast("Revision diff failed: " + e.message, 5000); }
 }
+/* pictures of the drawing already drawn, kept to go back to: a page's whole-page picture (low) and the sharp pictures of the last
+   views (hi). Back to a page, a zoom or a project seen a moment ago, the picture shows at once instead of pdf.js drawing the page
+   again (a big CAD sheet: a second or more each time). An entry is used only for the same page of the same open PDF, drawn the
+   same way (its turn, layers, faint / thin lines, black & white, background, the PDF's own markups) — never for a revision
+   overlay. About 140 MB of pictures at most, the least recently used let go first. */
+const RC = [], RC_PX = 3.5e7;
+function rcSig(pn){
+  const f = pn.fileId, proj = pn.sess.proj, cfg = S.ocgs && S.ocgs[f]; let off = "";
+  if (cfg) { try { Object.keys(cfg.getGroups() || {}).forEach(id => { if (!ocOn(cfg, id)) off += id + ","; }); } catch (e) {} }
+  return [pgRot(pn.page, proj), S.boost ? 1 : 0, S.thin ? 1 : 0, S.mono ? 1 : 0, darkNow(f, proj) ? 1 : 0, bbOffOf(f) ? 1 : 0, off].join("|");
+}
+function rcGet(pn, kind, fit){
+  if (pn.cmp || !pn.page) return null; const sig = rcSig(pn), i = RC.findIndex(e => e.kind === kind && e.page === pn.page && e.sig === sig && fit(e));
+  if (i < 0) return null; const e = RC[i]; if (i) { RC.splice(i, 1); RC.unshift(e); } return e;
+}
+function rcPut(pn, kind, cv, v){
+  if (pn.cmp || !pn.page) return; const e = {kind, page: pn.page, file: pn.fileId, sig: rcSig(pn), cv, v, px: cv.width * cv.height};
+  for (let i = RC.length - 1; i >= 0; i--) { const o = RC[i]; if (o.kind === kind && o.page === e.page && o.sig === e.sig && (kind === "low" || (o.v.s === v.s && o.v.tx === v.tx && o.v.ty === v.ty && o.cv.width === cv.width && o.cv.height === cv.height))) RC.splice(i, 1); }
+  RC.unshift(e); let px = 0; for (let i = 0; i < RC.length; i++) { px += RC[i].px; if (px > RC_PX && i) { RC.splice(i).forEach(o => { o.cv.width = 1; }); break; } }
+}
+function rcDrop(keep){ for (let i = RC.length - 1; i >= 0; i--) if (!keep(RC[i].file)) { RC[i].cv.width = 1; RC.splice(i, 1); } }   // the pictures of drawings let go
+const hiSize = pn => { const st = pn.el.stage, dpr = Math.min(window.devicePixelRatio || 1, 2); return {st, dpr, w: Math.max(1, Math.floor(st.clientWidth * dpr)), h: Math.max(1, Math.floor(st.clientHeight * dpr))}; };
+function hiShow(pn, cv, v, dpr){   // a sharp picture onto the screen
+  const {st} = hiSize(pn), c = pn.el.hi; c.width = cv.width; c.height = cv.height; c.style.width = st.clientWidth + "px"; c.style.height = st.clientHeight + "px";
+  c.getContext("2d").drawImage(cv, 0, 0); pn.rendered = Object.assign({dpr}, v); applyView(pn);
+}
+/* a page's whole-page picture is kept in this browser as well (Cache Storage, by the PDF's fingerprint, page and how it is drawn):
+   reopened in a later session, the page shows at once while pdf.js draws the sharp view. The last LOW_KEEP pages are kept */
+const LOW_CACHE = "zd-pages-v1", LOW_KEEP = 300;
+const strHash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); };
+const lowSc = pn => Math.min(3, 3000 / Math.max(pn.base.width, pn.base.height));
+const lowUrl = pn => { const u = !pn.cmp && pn.page && thumbUrl(pn.sess.proj, pn.fileId, pn.pageNo); return u ? u.replace("/zd-thumb/", "/zd-page/").replace(/\.png$/, "-" + strHash(rcSig(pn)) + ".png") : ""; };
+async function cacheTrim(name, keep){ try { const c = await caches.open(name), ks = await c.keys(); if (ks.length > keep) await Promise.all(ks.slice(0, ks.length - keep).map(k => c.delete(k))); } catch (e) {} }
+async function lowKept(pn){
+  const u = lowUrl(pn); if (!u || !window.caches || !window.createImageBitmap) return null;
+  try { const r = await (await caches.open(LOW_CACHE)).match(u); if (!r) return null; const bm = await createImageBitmap(await r.blob()), vp = vpOf(pn.page, pn.sess.proj, {scale: lowSc(pn)});
+    if (bm.width !== Math.ceil(vp.width) || bm.height !== Math.ceil(vp.height)) { bm.close(); return null; }
+    const cv = document.createElement("canvas"); cv.width = bm.width; cv.height = bm.height; cv.getContext("2d").drawImage(bm, 0, 0); bm.close(); return cv; } catch (e) { return null; }
+}
+function lowKeep(pn, cv){ const u = lowUrl(pn); if (!u || !window.caches) return;
+  try { cv.toBlob(b => { if (b) caches.open(LOW_CACHE).then(c => c.put(u, new Response(b, {headers: {"Content-Type": "image/png"}}))).then(() => { if (Math.random() < 0.1) cacheTrim(LOW_CACHE, LOW_KEEP); }).catch(() => {}); }, "image/png"); } catch (e) {} }
+function lowShow(pn, cv, s){ const c = pn.el.low; c.width = cv.width; c.height = cv.height; c.getContext("2d").drawImage(cv, 0, 0); pn.low = {s}; applyView(pn); }
 async function renderLow(pn = ACT){   // drawn off screen, then shown only if the page is still the one on screen
   if (cadOn(pn)) return cadLow(pn);   // an AutoCAD drawing: from its scene
-  const page = pn.page, fileId = pn.fileId, longSide = Math.max(pn.base.width, pn.base.height), sc = Math.min(3, 3000 / longSide);
+  { const e = rcGet(pn, "low", () => true); if (e) return lowShow(pn, e.cv, e.v.s); }   // drawn a moment ago: at once
+  pn.lowBusy = true;
+  try { const page = pn.page, kept = await lowKept(pn);
+    if (kept && pn.page === page) { const s = lowSc(pn); rcPut(pn, "low", kept, {s}); return lowShow(pn, kept, s); }   // drawn in an earlier session
+    if (pn.page !== page) return;
+    return await renderLow0(pn); } finally { pn.lowBusy = false; }
+}
+async function renderLow0(pn){
+  thumbHalt();
+  const page = pn.page, fileId = pn.fileId, sc = lowSc(pn);
   const vp = vpOf(page, pn.sess.proj, {scale: sc}), off = document.createElement("canvas");
   off.width = Math.ceil(vp.width); off.height = Math.ceil(vp.height);
   const ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
@@ -1112,17 +1163,20 @@ async function renderLow(pn = ACT){   // drawn off screen, then shown only if th
   await overlayCmp(ctx, off.width, off.height, sc, 0, 0, pn);
   if (pn.page !== page) return;
   const c = pn.el.low; c.width = off.width; c.height = off.height; c.getContext("2d").drawImage(off, 0, 0);
-  pn.low = {s: sc};
+  pn.low = {s: sc}; rcPut(pn, "low", off, {s: sc}); lowKeep(pn, off);
   applyView(pn);
 }
 function renderHi(now, pn = ACT){
   clearTimeout(pn.hiT);
   if (cadOn(pn)) { if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; } return cadHi(!!now, pn); }   // a CAD drawing: drawn from its scene, at once
+  if (pn.page) { const {dpr, w, h} = hiSize(pn), v0 = pn.view;   // this view drawn a moment ago (back to a zoom, a page, a project): shown at once
+    const e = rcGet(pn, "hi", o => o.v.dpr === dpr && o.cv.width === w && o.cv.height === h && Math.abs(o.v.s - v0.s) <= 1e-6 * v0.s && Math.abs(o.v.tx - v0.tx) < 0.5 && Math.abs(o.v.ty - v0.ty) < 0.5);
+    if (e) { if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (er) {} pn.renderTask = null; } pn.hiWait = false; hiShow(pn, e.cv, e.v, dpr); return; } }
+  pn.hiWait = true; thumbHalt();
   pn.hiT = setTimeout(async () => {
     const page = pn.page; if (!page) return;
     if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} }
-    const st = pn.el.stage, dpr = Math.min(window.devicePixelRatio || 1, 2), c = pn.el.hi, v = Object.assign({}, pn.view), fileId = pn.fileId;
-    const w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
+    const {st, dpr, w, h} = hiSize(pn), c = pn.el.hi, v = Object.assign({}, pn.view), fileId = pn.fileId;
     const off = document.createElement("canvas"); off.width = w; off.height = h;
     const ptPx = v.s * dpr, ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && ptPx < 1.6 && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
     const task = sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vpOf(page, pn.sess.proj, {scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}));
@@ -1132,10 +1186,10 @@ function renderHi(now, pn = ACT){
     if (!darkNow(fileId, pn.sess.proj)) boostInk(off.getContext("2d"), w, h, v.s * dpr);
     await overlayCmp(ctx, w, h, v.s * dpr, v.tx * dpr, v.ty * dpr, pn);
     if (pn.renderTask !== task) return;
-    pn.renderTask = null;
+    pn.renderTask = null; pn.hiWait = false;
     c.width = w; c.height = h; c.style.width = st.clientWidth + "px"; c.style.height = st.clientHeight + "px";
     c.getContext("2d").drawImage(off, 0, 0);
-    pn.rendered = Object.assign({dpr}, v);
+    pn.rendered = Object.assign({dpr}, v); rcPut(pn, "hi", off, pn.rendered);
     applyView(pn);
   }, now ? 0 : 140);
 }
@@ -5272,6 +5326,25 @@ function renderPages(){
   el.querySelectorAll("img[data-th]").forEach(im => { if (!im.getAttribute("src")) S.thumbIO.observe(im); });
 }
 function thumbWant(k){ S.thumbQ = S.thumbQ || []; if ((S.thumbs || {})[k] || S.thumbQ.includes(k)) return; S.thumbQ.push(k); thumbRun(); }
+/* a page's thumbnail is drawn once and kept in this browser (Cache Storage, by the PDF's fingerprint, page and turn): opening the
+   project again, or going back to it, shows them without drawing every page again. Drawing one takes pdf.js as long as the whole
+   page (a CAD sheet's every line, only smaller), so a thumbnail waits while the page on screen is being drawn and while the user
+   zooms, pans or works (THUMB_QUIET ms) — they were slowing every zoom and page change down. */
+const THUMB_CACHE = "zd-thumbs-v1", THUMB_QUIET = 600;
+let lastInput = 0, thumbTask = null;
+const thumbHalt = () => { if (thumbTask) { try { thumbTask.cancel(); } catch (e) {} } };   // a thumbnail being drawn gives way at once (drawn again later)
+const onInput = () => { lastInput = performance.now(); thumbHalt(); };
+["wheel", "pointerdown", "keydown"].forEach(t => addEventListener(t, onInput, {capture: true, passive: true}));
+addEventListener("pointermove", e => { if (e.buttons) onInput(); }, {capture: true, passive: true});
+const thumbUrl = (pr, f, p) => { const m = pr.files.find(x => x.id === f); if (!m) return ""; const fp = m.sha || [m.size, m.replaced || m.added || ""].join("-");
+  return location.origin + "/zd-thumb/" + encodeURIComponent(m.id + "-" + fp) + "/" + p + "-" + rotOf(pr, keyOf(f, p)) + ".png"; };
+async function thumbKept(u){ try { if (!u || !window.caches) return ""; const r = await (await caches.open(THUMB_CACHE)).match(u); return r ? URL.createObjectURL(await r.blob()) : ""; } catch (e) { return ""; } }
+function thumbKeep(u, cv){ try { if (u && window.caches) cv.toBlob(b => { if (b) caches.open(THUMB_CACHE).then(c => c.put(u, new Response(b, {headers: {"Content-Type": "image/png"}}))).then(() => { if (Math.random() < 0.02) cacheTrim(THUMB_CACHE, 5000); }).catch(() => {}); }, "image/png"); } catch (e) {} }
+async function thumbQuiet(pr){   // until the page on screen is drawn and the user has paused (a few seconds at most)
+  for (let n = 0; n < 50 && P.proj === pr; n++) {
+    if (!PANES.some(pn => pn.page && (pn.renderTask || pn.hiWait || pn.lowBusy)) && performance.now() - lastInput > THUMB_QUIET) return;
+    await new Promise(r => setTimeout(r, 120)); }
+}
 async function thumbRun(){
   if (S.thumbBusy) return; S.thumbBusy = true;
   const pr = P.proj;
@@ -5280,9 +5353,14 @@ async function thumbRun(){
     try { const csc = CAD && +p === 1 && S.cadSc && S.cadSc[f], cpg = csc && csc.pages[0];
       if (cpg) { const s2 = 200 / Math.max(cpg.w, cpg.h), cv = document.createElement("canvas"); cv.width = Math.ceil(cpg.w * s2); cv.height = Math.ceil(cpg.h * s2);   // a CAD page: from its scene
         await CAD.cadDrawAsync(cv.getContext("2d"), cpg, {s: s2, tx: 0, ty: 0, W: cv.width, H: cv.height}, {dark: false, mono: false, hidden: cadHidden(f, csc), dpr: 1}); S.thumbs[k] = cv.toDataURL("image/png"); }
-      else { const pg = await (await doc(f)).getPage(+p), r0 = rotOf(pr, k), v0 = vpOf(pg, pr, {scale: 1}), vp = vpOf(pg, pr, {scale: 200 / Math.max(v0.width, v0.height)}), cv = document.createElement("canvas");
+      else { const u = thumbUrl(pr, f, p), kept = await thumbKept(u);
+      if (kept) { if (P.proj !== pr) continue; S.thumbs[k] = kept; }   // drawn before, in this browser
+      else { await thumbQuiet(pr); if (P.proj !== pr) continue;
+      const pg = await (await doc(f)).getPage(+p), r0 = rotOf(pr, k), v0 = vpOf(pg, pr, {scale: 1}), vp = vpOf(pg, pr, {scale: 200 / Math.max(v0.width, v0.height)}), cv = document.createElement("canvas");
       cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height); const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
-      await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp})).promise; if (rotOf(pr, k) === r0 && P.proj === pr) S.thumbs[k] = cv.toDataURL("image/png"); else continue; } }   // (turned meanwhile, or another project now: drawn again when wanted)
+      const task = thumbTask = sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp}));
+      try { await task.promise; } catch (e) { if (e && e.name === "RenderingCancelledException") { if (P.proj === pr && !S.thumbQ.includes(k)) S.thumbQ.unshift(k); continue; } throw e; } finally { if (thumbTask === task) thumbTask = null; }
+      if (rotOf(pr, k) === r0 && P.proj === pr) { S.thumbs[k] = cv.toDataURL("image/png"); thumbKeep(u, cv); } else continue; } } }   // (turned meanwhile, or another project now: drawn again when wanted)
     catch (e) { S.thumbs[k] = "x"; }   // PDF not attached in this browser: left blank
     const im = [...document.querySelectorAll("#pageList img[data-th], #pageStrip img[data-th]")].find(x => x.dataset.th === k); if (im && S.thumbs[k] !== "x") im.src = S.thumbs[k];
     PANES.forEach(pn => { if (pn.key === k) miniUpdate(pn); });
