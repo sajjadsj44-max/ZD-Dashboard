@@ -9,7 +9,8 @@
    system's temp folder and deleted at the end. The browser runs on a profile of its own on the disk (as a person's does: a test
    browser's in-memory profile has room for only a few hundred MB), deleted at the end. Every Blob read the page makes
    (Blob.arrayBuffer — pdf.js's range requests, the fingerprint) is counted, so "never read whole" is checked, not assumed.
-   A page of the 1 GB set is exported marked up (as a picture: the set is too big for pdf-lib). Last, a browser with no room left to
+   A page of the 1 GB set is exported marked up (as a picture: the set is too big for pdf-lib), and the project with its PDF is saved
+   in one file and opened in a second browser (its own profile), neither side reading the PDF whole. Last, a browser with no room left to
    keep a copy (its put refused as QuotaExceededError) still opens a big PDF, for that visit, and a revision it cannot keep never
    has the old drawing opened in its place. */
 const path = require("path"), fs = require("fs"), os = require("os");
@@ -30,11 +31,10 @@ const make = (file, n) => { if (fs.existsSync(file) && fs.statSync(file).size >=
   make(file, MB); make(small, 64); make(rev, 64);
   const size = fs.statSync(file).size, pages = 1 + Math.max(1, Math.ceil((MB * 1048576 - 65536) / (BIG.IMG * BIG.IMG)));
 
-  const prof = fs.mkdtempSync(path.join(os.tmpdir(), "zdbig_"));
-  const ctx = await pw.chromium.launchPersistentContext(prof, {viewport: {width: 1440, height: 900}}); await require("./zd_unlock")(ctx);
-  const tidy = async () => { try { await ctx.close(); } catch (e) {} try { fs.rmSync(prof, {recursive: true, force: true}); } catch (e) {}   // (the profile holds a copy of the 1 GB PDF)
-    if (!keep) try { fs.unlinkSync(file); } catch (e) {} try { fs.unlinkSync(small); } catch (e) {} try { fs.rmSync(revDir, {recursive: true, force: true}); } catch (e) {} };
-  try {
+  const profs = [], ctxs = [];
+  const browserOn = async () => {   // a browser on a profile of its own on the disk (each holds a copy of the 1 GB PDF: deleted at the end)
+    const prof = fs.mkdtempSync(path.join(os.tmpdir(), "zdbig_")); profs.push(prof);
+    const ctx = await pw.chromium.launchPersistentContext(prof, {viewport: {width: 1440, height: 900}}); ctxs.push(ctx); await require("./zd_unlock")(ctx);
     await ctx.route(/cdn\.jsdelivr\.net/, r => { const u = r.request().url(), hd = {"Access-Control-Allow-Origin": "*"};
       if (/pdf\.worker\.min\.mjs/.test(u)) return r.fulfill({path: path.join(LIBS, "pdfjs-dist/build/pdf.worker.min.mjs"), contentType: "text/javascript", headers: hd});
       if (/pdf\.min\.mjs/.test(u)) return r.fulfill({path: path.join(LIBS, "pdfjs-dist/build/pdf.min.mjs"), contentType: "text/javascript", headers: hd});
@@ -45,8 +45,15 @@ const make = (file, n) => { if (fs.existsSync(file) && fs.statSync(file).size >=
       Blob.prototype.arrayBuffer = function(){ window.__rd += this.size; window.__rdMax = Math.max(window.__rdMax, this.size); return ab.call(this); };
       const put = IDBObjectStore.prototype.put;   // (sessionStorage zdNoRoom: this browser has no room left for a big PDF's copy)
       IDBObjectStore.prototype.put = function(v){ if (sessionStorage.getItem("zdNoRoom") && v && v.data instanceof Blob) throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); return put.apply(this, arguments); }; });
-    const page = await ctx.newPage(), errors = []; page.on("pageerror", e => errors.push(String(e))); page.on("dialog", d => d.dismiss());
-    const T = (fn, a) => page.evaluate(fn, a), wait = ms => page.waitForTimeout(ms || 150);
+    const page = await ctx.newPage(); page.on("pageerror", e => errors.push(String(e))); page.on("dialog", d => d.dismiss());
+    return page;
+  };
+  const errors = [];
+  const tidy = async () => { for (const c of ctxs) try { await c.close(); } catch (e) {} for (const d of profs) try { fs.rmSync(d, {recursive: true, force: true}); } catch (e) {}
+    if (!keep) try { fs.unlinkSync(file); } catch (e) {} try { fs.unlinkSync(small); } catch (e) {} try { fs.rmSync(revDir, {recursive: true, force: true}); } catch (e) {} };
+  try {
+    let page = await browserOn();
+    const T = (fn, a) => page.evaluate(fn, a), wait = ms => page.waitForTimeout(ms || 150);   // (page: the browser in use)
     const sharp = ms => page.waitForFunction(() => { const pn = zdTakeoff.ACT, r = pn.rendered, v = pn.view; return pn.page && r && Math.abs(r.s - v.s) <= 1e-6 * v.s && Math.abs(r.tx - v.tx) < 0.5 && Math.abs(r.ty - v.ty) < 0.5 && !pn.renderTask; }, null, {timeout: ms || 120000, polling: 50});
     const reads = () => T(() => { const r = {all: window.__rd, max: window.__rdMax}; window.__rd = 0; window.__rdMax = 0; return r; });
     const shown = name => page.waitForFunction(n => { const Z = zdTakeoff, f = Z.P.proj && Z.P.proj.name === n && Z.P.proj.files[0]; return f && Z.S.fileId === f.id && Z.S.page; }, name, {timeout: 600000, polling: 100});
@@ -103,6 +110,25 @@ const make = (file, n) => { if (fs.existsSync(file) && fs.statSync(file).size >=
     await page.setInputFiles("#fileIn", file); await toastHas(/same drawing/);
     ok(await T(() => zdTakeoff.P.proj.files.length) === 1, "it is known by its fingerprint: re-attached, not added twice");
     await sharp(); ok(await dark() > 2000, "…and drawn");
+
+    console.log("the project with its PDF in one file, opened on another computer");
+    const sha0 = await T(() => zdTakeoff.P.proj.files[0].sha); await reads();
+    const [db] = await Promise.all([page.waitForEvent("download", {timeout: 600000}), T(() => { zdTakeoff.exportBundle(); })]);
+    const bpath = await db.path(), bsize = fs.statSync(bpath).size, r6 = await reads();
+    ok(bsize > size && bsize < size + 50 * 1048576, "saved in one file with its 1 GB PDF (" + mb(bsize) + ", " + db.suggestedFilename() + ")");
+    ok(r6.max < 100 * 1048576, "…the PDF going in as the browser keeps it, never read whole into the page (largest read " + mb(r6.max) + ")");
+    const page1 = page; page = await browserOn();
+    await page.goto(URL); await wait(600); await reads(); t = Date.now();
+    await page.setInputFiles("#impIn", bpath);
+    await page.waitForFunction(() => window.zdTakeoff && zdTakeoff.S.lastImport && zdTakeoff.P.proj && zdTakeoff.P.proj.name === "Big set", null, {timeout: 600000, polling: 200}); await sharp();
+    const tIm = (Date.now() - t) / 1000, r7 = await reads(), imp = await T(() => ({lvl: zdTakeoff.S.lastImport.lvl, bad: zdTakeoff.S.lastImport.rows.filter(r => r.st !== "PASS").map(r => r.what + ": " + r.note), sha: zdTakeoff.P.proj.files[0].sha}));
+    await page.keyboard.press("Escape");
+    ok(imp.lvl === "PASS", "opened in the second browser: its import check passes (" + tIm.toFixed(1) + " s)" + (imp.bad.length ? " — " + imp.bad.join("; ") : ""));
+    ok(imp.sha === sha0 && await stored(), "…the same drawing (its fingerprint), kept in that browser");
+    ok(r7.max < 100 * 1048576, "…the 1 GB file read a piece at a time, never whole (largest read " + mb(r7.max) + ", " + mb(r7.all) + " in all)");
+    ok(await dark() > 2000, "…and its plan drawn");
+    await T(() => zdTakeoff.gotoPage(zdTakeoff.S.fileId, 6)); await sharp(); ok(await dark() > 5000, "…and a scan page");
+    await ctxs[1].close(); page = page1;
 
     console.log("no room left in this browser for a copy");
     await T(() => sessionStorage.setItem("zdNoRoom", "1"));

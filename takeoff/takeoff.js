@@ -812,8 +812,8 @@ function shaJs(){   // SHA-256 (FIPS 180-4) fed a piece at a time: .add(Uint8Arr
       return Array.from(h, v => (v >>> 0).toString(16).padStart(8, "0")).join(""); } };
 }
 async function pdfSha(id){   // the stored PDF's fingerprint (worked out once for a PDF stored before fingerprints); null = not in this browser
-  const rec = await dbGet("pdfs", id); if (!rec) return null; if (rec.sha) return rec.sha;
-  const h = await sha256(rec.data); if (h) { rec.sha = h; await dbPut("pdfs", rec, id).catch(() => {}); } return h;
+  const rec = await dbGetRaw("pdfs", id); if (!rec) return null; if (rec.sha) return rec.sha;   // (as kept: a big PDF is not read whole for a fingerprint it has)
+  const h = rec.data instanceof Blob ? await blobSha(rec.data) : await sha256(rec.data); if (h) { rec.sha = h; await dbPut("pdfs", rec, id).catch(() => {}); } return h;
 }
 /* a dialog with its own buttons: resolves to the chosen button's v, or null (Cancel / Esc / Enter) */
 function choose(title, body, btns){
@@ -1261,7 +1261,7 @@ function renderHi(now, pn = ACT){
     const ptPx = v.s * dpr, ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && ptPx < 1.6 && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
     const task = sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vpOf(page, pn.sess.proj, {scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}));
     pn.renderTask = task;
-    try { await task.promise; } catch (e) { return; }
+    try { await task.promise; } catch (e) { if (pn.renderTask === task) { pn.renderTask = null; pn.hiWait = false; } return; }   // (failed, not given up for a newer view: the pane is not left "drawing" — thumbnails would wait on it)
     if (pn.renderTask !== task) return;
     if (!darkNow(fileId, pn.sess.proj)) boostInk(off.getContext("2d"), w, h, v.s * dpr);
     await overlayCmp(ctx, w, h, v.s * dpr, v.tx * dpr, v.ty * dpr, pn);
@@ -7829,10 +7829,11 @@ async function exportBundle(){
   try {
     const exported = new Date().toISOString(), parts = [], pdfs = [], miss = []; let off = 0;
     for (const f of P.proj.files) {
-      const rec = await dbGet("pdfs", f.id); if (!rec) { miss.push(f.name); continue; }
-      const sha = rec.src ? rec.pdfSha || await sha256(rec.data) : rec.sha || await sha256(rec.data), e = {id: f.id, name: f.name, size: rec.data.byteLength, sha, off};
-      parts.push(rec.data); off += rec.data.byteLength;
-      if (rec.src) { e.srcSha = rec.sha || await sha256(rec.src); e.srcOff = off; e.srcSize = rec.src.byteLength; parts.push(rec.src); off += rec.src.byteLength; }   // the DWG / DXF too
+      const rec = await dbGetRaw("pdfs", f.id); if (!rec) { miss.push(f.name); continue; }   // (as kept: a big PDF goes into the file as the Blob it is, never read into the page)
+      const n = v => v instanceof Blob ? v.size : v.byteLength, fp = v => v instanceof Blob ? blobSha(v) : sha256(v);
+      const sha = rec.src ? rec.pdfSha || await fp(rec.data) : rec.sha || await fp(rec.data), e = {id: f.id, name: f.name, size: n(rec.data), sha, off};
+      parts.push(rec.data); off += n(rec.data);
+      if (rec.src) { e.srcSha = rec.sha || await fp(rec.src); e.srcOff = off; e.srcSize = n(rec.src); parts.push(rec.src); off += n(rec.src); }   // the DWG / DXF too
       pdfs.push(e);
     }
     const assets = [];   // pictures and files of markups
@@ -7847,30 +7848,37 @@ async function exportBundle(){
 function isBundle(buf){ const m = new TextEncoder().encode(BUNDLE_MAGIC), u = new Uint8Array(buf, 0, Math.min(buf.byteLength, m.length)); return u.length === m.length && m.every((b, i) => u[i] === b); }
 async function importBundle(buf){ const u = await bundleUnpack(buf); return importProject(u.text, u.pre); }
 async function bundleUnpack(buf, known){   // a .zdtakeoff's PDFs and pictures stored in this browser -> {text: its project (ids moved off ones taken here), pre: check rows}; known: fingerprints not stored again (a merge: drawings the open project has)
-  const start = BUNDLE_MAGIC.length + 4;
-  if (buf.byteLength < start) throw new Error("the file is cut short");
-  const hl = new DataView(buf, BUNDLE_MAGIC.length, 4).getUint32(0);
-  let h; try { h = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, start, Math.min(hl, buf.byteLength - start)))); } catch (e) { throw new Error("the file is damaged (its header cannot be read)"); }
+  /* buf: the file's bytes, or the file itself (a Blob, read a piece at a time: a big PDF in it is stored straight from the file,
+     never held whole in the page) */
+  const start = BUNDLE_MAGIC.length + 4, size = buf instanceof Blob ? buf.size : buf.byteLength;
+  const bytes = async (a, b) => { const x = buf.slice(a, b); return x instanceof Blob ? x.arrayBuffer() : x; };
+  const part = async (a, b) => { const x = buf.slice(a, b); return x instanceof Blob && x.size <= BIG_REC ? x.arrayBuffer() : x; };   // (a big one stays a Blob)
+  const n = v => v instanceof Blob ? v.size : v.byteLength, fp = v => v instanceof Blob ? blobSha(v) : sha256(v);
+  if (size < start) throw new Error("the file is cut short");
+  const hl = new DataView(await bytes(BUNDLE_MAGIC.length, start)).getUint32(0);
+  let h; try { h = JSON.parse(new TextDecoder().decode(await bytes(start, start + Math.min(hl, size - start)))); } catch (e) { throw new Error("the file is damaged (its header cannot be read)"); }
   if (!h || h.format !== "zd-takeoff-bundle" || !h.project || !Array.isArray(h.pdfs)) throw new Error("not a takeoff project file");
   let text = JSON.stringify(h.project); const base = start + hl, pre = [];
   busy("Unpacking the PDFs…");
   try {
     for (const p of h.pdfs) {
       const a = base + (+p.off || 0), b = a + (+p.size || 0);
-      if (!(p.size > 0) || b > buf.byteLength) { pre.push({what: "PDF in the file: " + p.name, a: "1", b: "0", st: "FAIL", note: "cut short — not attached"}); continue; }
-      const data = buf.slice(a, b), sha = await sha256(data);
+      if (!(p.size > 0) || b > size) { pre.push({what: "PDF in the file: " + p.name, a: "1", b: "0", st: "FAIL", note: "cut short — not attached"}); continue; }
+      const data = await part(a, b), sha = await fp(data);
       if (p.sha && sha && sha !== p.sha) { pre.push({what: "PDF in the file: " + p.name, a: "1", b: "0", st: "FAIL", note: "damaged — its fingerprint does not match — not attached"}); continue; }
-      let src = null; if (p.srcSize > 0) { const a2 = base + (+p.srcOff || 0), b2 = a2 + +p.srcSize; if (b2 <= buf.byteLength) { src = buf.slice(a2, b2); if (p.srcSha && await sha256(src) !== p.srcSha) src = null; } }
+      let src = null; if (p.srcSize > 0) { const a2 = base + (+p.srcOff || 0), b2 = a2 + +p.srcSize; if (b2 <= size) { src = await part(a2, b2); if (p.srcSha && await fp(src) !== p.srcSha) src = null; } }
       let id = String(p.id); const have = await pdfSha(id), ident = src ? p.srcSha || sha : sha;
       if (have !== null && have === ident && ident) continue;   // the same drawing is already in this browser
       if (known && ident && known.has(ident)) continue;   // … or in the project it is merged into
       if (have !== null) { const nid = uid("F"); text = remapFileId(text, id, nid); id = nid; }   // another drawing already uses this id here: this one gets its own
-      await dbPut("pdfs", Object.assign({name: p.name, size: src ? src.byteLength : data.byteLength, data, sha: ident}, src ? {src, pdfSha: sha} : {}), id);
+      const rec = Object.assign({name: p.name, size: n(src || data), data, sha: ident}, src ? {src, pdfSha: sha} : {}), bl = ["data", "src"].filter(k => rec[k] instanceof Blob);
+      if (bl.length) rec.blobs = bl;   // (read back as bytes by everything but pdf.js, as recOut would mark them)
+      await dbPut("pdfs", rec, id);
     }
     for (const x of Array.isArray(h.assets) ? h.assets : []) {   // pictures and files of markups (kept as they are when already here)
       const a = base + (+x.off || 0), b = a + (+x.size || 0);
-      if (!x || typeof x.aid !== "string" || !/^[A-Za-z0-9_-]{1,60}$/.test(x.aid) || !(x.size > 0) || b > buf.byteLength || await assetRec(x.aid)) continue;
-      await dbPut("pdfs", {asset: true, name: String(x.name || "").slice(0, 200), type: String(x.type || "application/octet-stream").slice(0, 100), size: x.size, data: buf.slice(a, b), at: new Date().toISOString()}, assetKey(x.aid));
+      if (!x || typeof x.aid !== "string" || !/^[A-Za-z0-9_-]{1,60}$/.test(x.aid) || !(x.size > 0) || b > size || await assetRec(x.aid)) continue;
+      await dbPut("pdfs", {asset: true, name: String(x.name || "").slice(0, 200), type: String(x.type || "application/octet-stream").slice(0, 100), size: x.size, data: await bytes(a, b), at: new Date().toISOString()}, assetKey(x.aid));
     }
   } finally { busy(""); }
   if (!pre.length) pre.push({what: "PDFs in the file", a: h.pdfs.length, b: h.pdfs.length, st: "PASS", note: "fingerprints checked"});
@@ -10592,13 +10600,14 @@ async function importProject(text, pre){
 async function mergeFile(){
   if (!P.proj) return toast("Open a project first — or use Import project to start a new one");
   const [f] = await pickFiles(".json,.zdtakeoff,application/json"); if (!f) return;
-  try { return await mergeBuf(await f.arrayBuffer()); } catch (e) { busy(""); toast("Could not import: " + (e.message || e), 5000); }
+  try { return await mergeBuf(f); } catch (e) { busy(""); toast("Could not import: " + (e.message || e), 5000); }
 }
 async function mergeBuf(buf){
   if (!P.proj) throw new Error("open a project first");
   savePr = P.proj; await flushSave();
   for (const x of P.proj.files) if (!x.sha) { const h = await pdfSha(x.id); if (h) x.sha = h; }   // PDFs added before fingerprints
-  if (!isBundle(buf)) return mergeProject(new TextDecoder().decode(buf), undefined, {scales: "ask"});
+  const blob = buf instanceof Blob;   // (buf: the file's bytes, or the file itself)
+  if (!isBundle(blob ? await buf.slice(0, 64).arrayBuffer() : buf)) return mergeProject(new TextDecoder().decode(blob ? await buf.arrayBuffer() : buf), undefined, {scales: "ask"});
   const u = await bundleUnpack(buf, new Set(P.proj.files.map(x => x.sha).filter(Boolean)));
   return mergeProject(u.text, u.pre, {scales: "ask"});
 }
@@ -11885,7 +11894,7 @@ function wire(){
     if (!v) return; const pr = newProject(v.name); await dbPut("projects", pr); await openProject(pr.id); };
   $("bImport").onclick = () => $("impIn").click();
   $("impIn").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return;
-    try { const buf = await f.arrayBuffer(); await (isBundle(buf) ? importBundle(buf) : importProject(new TextDecoder().decode(buf))); } catch (er) { toast("Could not import: " + er.message, 5000); } };
+    try { await (isBundle(await f.slice(0, 64).arrayBuffer()) ? importBundle(f) : importProject(new TextDecoder().decode(await f.arrayBuffer()))); } catch (er) { toast("Could not import: " + er.message, 5000); } };   // (a project file with its PDFs: read a piece at a time)
   $("projList").addEventListener("click", async e => {
     const o = e.target.closest("[data-open],[data-edit],[data-dup],[data-del],[data-bak]"); if (!o) return;
     if (o.dataset.open) return openProject(o.dataset.open);
