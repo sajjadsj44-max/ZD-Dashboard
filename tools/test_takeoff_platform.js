@@ -161,7 +161,7 @@ function bundleOf(project, pdfs){   // a .zdtakeoff as exportBundle writes it: m
   ok(/searchParams\.has\("check"\)/.test(fs.readFileSync(path.join(__dirname, "../takeoff/sw.js"), "utf8")), "sw.js lets the version check through to the network (never cached)");
   ok((await T(() => zdTakeoff.APP_V)) && (await T(() => zdTakeoff.verCheck(true))) === "", "the running takeoff.js is the one index.html names: no bar");
   await page.route(/index\.html\?check=/, r => r.fulfill({contentType: "text/html", body: '<!doctype html><html><body><script type="module" src="takeoff.js?v=2099-01-01z"></script></body></html>'}));
-  ok((await T(() => zdTakeoff.verCheck(true))) === "2099-01-01z" && /A new version of PDF Takeoff is ready/.test(await T(() => (document.getElementById("verBar") || {}).textContent || "")), "a newer takeoff.js?v= in index.html: the bar says a new version is ready");
+  ok((await T(() => zdTakeoff.verCheck(true))) === "2099-01-01z" && /A new version of Sajjad QS PDF TAKEOFF Software is ready/.test(await T(() => (document.getElementById("verBar") || {}).textContent || "")), "a newer takeoff.js?v= in index.html: the bar says a new version is ready");
   await newProj("Version check", null); await T(() => { zdTakeoff.P.proj.name = "Saved before reload"; zdTakeoff.save(); });
   await T(() => { const p = IDBObjectStore.prototype.put; window.__put = p; IDBObjectStore.prototype.put = function(){ if (this.name === "projects") throw new DOMException("disk full (test)", "QuotaExceededError"); return p.apply(this, arguments); }; zdTakeoff.save(); });
   { let nav = false; const on = f => { if (f === page.mainFrame()) nav = true; }; page.on("framenavigated", on);

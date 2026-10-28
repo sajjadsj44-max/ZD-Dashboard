@@ -8891,9 +8891,10 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
       {t: "sel", n: "Ribbon tab when the app opens", d: "shown on opening or refreshing the page", o: tabs.concat([["last", "The tab used last"]]), get: () => setPref().homeTab, set: v => { setSave({homeTab: v}); }},
       {t: "sel", n: "When a tool is picked by its key or a menu", d: "which ribbon tab shows", o: [["smart", "Its tab — but stay on My tools when the tool is there"], ["always", "Always its tab"], ["never", "Keep the tab I am on"]], get: () => setPref().ribFollow, set: v => { setSave({ribFollow: v}); }},
       {t: "tog", n: "Open the last project when the app starts", d: "off: start on the list of projects", get: () => setPref().openLast !== false, set: v => { setSave({openLast: v}); }},
+      {t: "tog", n: "Load a new version by itself", d: "when the app is opened or you come back to its tab, after saving — no Ctrl + F5; off: a bar offers Reload. The same for every ZD page", get: autoUpd, set: v => pref("zd-auto-update", v ? "" : "0")},
       {t: "txt", n: "Your name", d: "on markups, checks, comments and legends", get: qaUser, set: v => pref("zdTakeoffUser", String(v).trim().slice(0, 60))},
       {t: "btn", n: "Command palette", d: "every tool, export and dialog by name (Ctrl+K)", b: "Open", fn: openPalette}],
-     reset: () => setSave({homeTab: SET_DEF.homeTab, ribFollow: SET_DEF.ribFollow, openLast: true})},
+     reset: () => { setSave({homeTab: SET_DEF.homeTab, ribFollow: SET_DEF.ribFollow, openLast: true}); pref("zd-auto-update", ""); }},
     {id: "ribbon", n: "Ribbon & toolbar", d: "tabs, My tools, icons, compact ribbon", rows: [
       {t: "tog", n: "Compact ribbon", d: "the same tools, about half the height", get: () => !!pcPref().compact, set: v => pcSave({off: pcPref().off || [], compact: v})},
       {t: "tog", n: "Icons only", d: "no names under the tools (pointing at one still names it)", get: () => wsPref().tb === "icons", set: v => wsSet({tb: v ? "icons" : "full"})},
@@ -16388,21 +16389,32 @@ function ocFix(Lb, out, fids){
    past every cache, at start, every 30 min and when the tab comes back into view: when it names another takeoff.js?v= than the one
    running (import.meta.url), a bar offers Reload — the open project saved first */
 const APP_V = (() => { try { return new URL(import.meta.url).searchParams.get("v") || ""; } catch (e) { return ""; } })();
-async function verCheck(force){   // -> the new ?v= when one is out (the bar shown), else ""
-  if (!APP_V || location.protocol === "file:" || (!force && Date.now() - (verCheck.at || 0) < 60000)) return "";
+const OWN_BUILD = document.documentElement.getAttribute("data-zd-build") || "", BUILD = /^[0-9a-f]{12}$/;   // this page's build, written in by the deploy (tools/stamp_build.py); not deployed: no hash
+const autoUpd = () => pref("zd-auto-update") !== "0";   // Settings › General "Load a new version by itself", one setting for every ZD page
+async function verReload(){   // the open project saved, then the page reloaded; false (nothing reloaded) when the save failed
+  try { await flushSave(); if (SAVE_PEND.size) await Promise.all([...SAVE_PEND.values()].map(pp => flushOne(pp))); } catch (e) {}   // a write that failed before: tried once more, and waited for
+  if (SAVE_ERR.size || SAVE_PEND.size) return false;   // a reload now would lose what is not saved
+  location.reload(); return true;
+}
+async function verCheck(force, now){   // -> the new version when one is out (loaded, or the bar shown), else ""
+  // now: the app was just opened or its tab shown again, when a new version loads by itself (Auto-update); never while you are on the tab, then the bar
+  if (!APP_V || location.protocol === "file:" || (!force && !now && Date.now() - (verCheck.at || 0) < 60000)) return "";
   verCheck.at = Date.now();
-  let v = ""; try { const r = await fetch("index.html?check=" + Date.now(), {cache: "no-store"}); if (!r.ok) return ""; const m = /<script[^>]*\ssrc="takeoff\.js\?v=([^"&]+)"/.exec(await r.text()); v = m ? m[1] : ""; } catch (e) { return ""; }   // offline: nothing to say
-  if (!v || v === APP_V || v === verCheck.no) return "";
+  let v = "", nb = ""; try { const r = await fetch("index.html?check=" + Date.now(), {cache: "no-store"}); if (!r.ok) return ""; const t = await r.text(), m = /<script[^>]*\ssrc="takeoff\.js\?v=([^"&]+)"/.exec(t), mb = /<html[^>]*\sdata-zd-build="([0-9a-f]{12})"/.exec(t); v = m ? m[1] : ""; nb = mb ? mb[1] : ""; } catch (e) { return ""; }   // offline: nothing to say
+  if (!v) return "";
+  const nv = v !== APP_V ? v : BUILD.test(OWN_BUILD) && nb && nb !== OWN_BUILD ? nb : "";   // a new takeoff.js, or the page itself changed
+  if (!nv || nv === verCheck.no) return "";
+  if (autoUpd() && (now || document.visibilityState === "hidden")) {   // once per version: a copy still old after the reload gets the bar, not a loop
+    let tried = null; try { tried = sessionStorage.getItem("zd-upd-takeoff"); sessionStorage.setItem("zd-upd-takeoff", nv); } catch (e) {}
+    if (tried !== nv && await verReload()) return nv; }
   let b = $("verBar"); if (!b) { b = document.createElement("div"); b.id = "verBar"; b.setAttribute("role", "status");
     b.style.cssText = "position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:99999;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 32px);padding:8px 8px 8px 14px;border-radius:8px;background:var(--navy,#0f2942);color:#fff;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.3)";
     b.innerHTML = '<span>A new version of Sajjad QS PDF TAKEOFF Software is ready</span><button class="btn sm pri" id="verGo">Reload</button><button class="btn sm" id="verNo" title="Not now (asked again when another version is out)" aria-label="Not now">×</button>';
     document.body.appendChild(b);
     $("verGo").onclick = async () => { const g = $("verGo"); g.disabled = true;
-      try { await flushSave(); if (SAVE_PEND.size) await Promise.all([...SAVE_PEND.values()].map(pp => flushOne(pp))); } catch (e) {}   // a write that failed before: tried once more, and waited for
-      if (SAVE_ERR.size || SAVE_PEND.size) { g.disabled = false; toast("Not saved — export a copy first: this browser would not store the project" + (SAVE_ERR.size ? " (" + [...SAVE_ERR.values()][0] + ")" : "") + ". Reload after that.", 9000); return; }   // a reload now would lose what is not saved
-      location.reload(); };
+      if (!(await verReload())) { g.disabled = false; toast("Not saved — export a copy first: this browser would not store the project" + (SAVE_ERR.size ? " (" + [...SAVE_ERR.values()][0] + ")" : "") + ". Reload after that.", 9000); } };
     $("verNo").onclick = () => { verCheck.no = b.dataset.v; b.remove(); }; }
-  b.dataset.v = v; return v;
+  b.dataset.v = nv; return nv;
 }
 /* ------------------------------------------------------------------ start */
 (async function init(){
@@ -16415,7 +16427,7 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
-    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
+    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, verReload, autoUpd, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
     floorsDialog, floorAddMany, floorNext, floorTitleIn, floorZoom, floorMenu, floorBoxStart, floorNewAsk, floorLegends, floorLegendSplit, legendFloorSet, legendFit, legendTitle, floorTitleOf,
@@ -16425,5 +16437,6 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
   if (last && setPref().openLast !== false && all.some(p => p.id === last)) await openProject(last); else await showStart();
   ribHome();   // the start-up tab (My tools by default), whatever opening the project did
   loadPdfjs().catch(e => toast(e.message, 6000));
-  setTimeout(verCheck, 4000); setInterval(verCheck, 1800000); document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") verCheck(); });   // a new release out: say so
+  setTimeout(() => verCheck(false, true), 1500); setInterval(verCheck, 1800000);   // a new release out: loaded by itself on opening / coming back (Auto-update), else the bar
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") verCheck(false, true); }); addEventListener("pageshow", e => { if (e.persisted) verCheck(false, true); });
 })();

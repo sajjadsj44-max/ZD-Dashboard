@@ -29,6 +29,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Stamp each page's build (the pages load a new version by themselves)
+        run: python3 tools/stamp_build.py
+
       - name: Package the site
         uses: actions/upload-pages-artifact@v3
         with:
