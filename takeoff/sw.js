@@ -6,7 +6,7 @@
    Only GET is handled: the password lock, Claude API calls and anything else is passed through untouched and never cached. */
 const APP = "zd-takeoff-app-v1", LIBS = "zd-takeoff-libs-v1";
 const CDN = /^https:\/\/(?:cdn\.jsdelivr\.net\/npm\/|cdnjs\.cloudflare\.com\/|unpkg\.com\/|tessdata\.projectnaptha\.com\/)/;
-self.addEventListener("install", e => { e.waitUntil(caches.open(APP).then(c => c.addAll(["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"].map(u => new Request(u, {cache: "reload"})))).then(() => self.skipWaiting()).catch(() => self.skipWaiting())); });
+self.addEventListener("install", e => { e.waitUntil(caches.open(APP).then(c => c.addAll(["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png"].map(u => new Request(u, {cache: "reload"})))).then(() => self.skipWaiting()).catch(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.startsWith("zd-takeoff-") && k !== APP && k !== LIBS).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 async function appFirstNet(req){
   const c = await caches.open(APP);
