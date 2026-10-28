@@ -15242,8 +15242,30 @@ const ACAD_URL = "http://127.0.0.1:11436";
 async function acadHelper(){   // (the first time, the browser asks to let this site reach this computer's apps: time to answer it — with no helper, or the answer given, it is back at once)
   busy("Looking for AutoCAD on this computer… (if the browser asks, allow this site to reach apps on this device)");
   try { const r = await fetch(ACAD_URL + "/", {cache: "no-store", signal: AbortSignal.timeout(60000)}); const j = r.ok ? await r.json() : null; return j && j.app === "zd-cad-bridge" && j.autocad && j.autocad.length ? j : null; } catch (e) { return null; } }
+/* no helper answering: it is started through its zd-cad: link (tools/cad-bridge-setup.cmd registers the link on this computer
+   once, and starts the helper with Windows). A page opens an app's link only from a click, so it is asked; turned down, or not
+   set up on this computer, it is not asked again until the page is opened again */
+let acadAsk = true;
+async function acadStart(name){   // -> what the started helper says (as acadHelper), or null
+  if (!acadAsk) return null;
+  busy("");
+  const v = await choose("Open " + name + " in AutoCAD?", `<p>The AutoCAD helper is not running on this computer. It opens the DWG in AutoCAD, whole — the browser's own DWG reader loses most of some big drawings.</p>
+    <p class="small">If the browser asks whether this site may open <b>ZD AutoCAD helper</b>, tick <b>Always allow</b>. Not set up on this computer yet: in the ZD-Dashboard folder double-click <b>tools\\cad-bridge-setup.cmd</b> once — it also starts the helper with Windows.</p>`,
+    [{t: "Read in the browser", v: "web"}, {t: "Start the AutoCAD helper", v: "go", pri: true}]);
+  if (v !== "go") { acadAsk = false; return null; }
+  location.href = "zd-cad:start";
+  for (const t0 = Date.now(); Date.now() - t0 < 30000;) {
+    busy("Starting the AutoCAD helper… " + Math.round((Date.now() - t0) / 1000) + " s");
+    await new Promise(r => setTimeout(r, 1000));
+    try { const r = await fetch(ACAD_URL + "/", {cache: "no-store", signal: AbortSignal.timeout(2000)}); const j = r.ok ? await r.json() : null;
+      if (j && j.app === "zd-cad-bridge") return j.autocad && j.autocad.length ? j : null; } catch (e) {}
+  }
+  acadAsk = false;
+  toast("The AutoCAD helper did not start — on this computer double-click tools\\cad-bridge-setup.cmd in the ZD-Dashboard folder once. " + name + " is read in the browser instead.", 9000);
+  return null;
+}
 async function acadOpen(buf, name){   // -> {dxf: ArrayBuffer, acad: "AutoCAD 2024"}, or null when no helper answers; throws when AutoCAD could not open it
-  const h = await acadHelper(); if (!h) return null;
+  const h = await acadHelper() || await acadStart(name); if (!h) return null;
   const t0 = Date.now(), say = () => busy("Opening " + name + " in " + h.autocad[0] + " on this computer…" + (Date.now() - t0 > 3000 ? " " + Math.round((Date.now() - t0) / 1000) + " s" : "")), tick = setInterval(say, 1000);
   say();
   try { const r = await fetch(ACAD_URL + "/convert?name=" + encodeURIComponent(name), {method: "POST", headers: {"Content-Type": "application/octet-stream"}, body: buf});
@@ -15286,7 +15308,7 @@ function cadSay(name, m){
   const off = m.layers.filter(l => l.off || l.frozen).length, sk = Object.entries(m.stats.skipped || {}).map(([t, n]) => n + " " + t).join(", ");
   /* the browser's DWG reader can lose most of a big drawing that AutoCAD reads without fault (its objects come back empty): said first, with the way round it */
   const jk = m.stats.junk || 0, lost = m.fmt === "DWG" && jk > 0.1 * (jk + (m.stats.ents || 0));
-  return (lost ? "⚠ Only part of this drawing could be read — " + jk.toLocaleString() + " objects came out empty in the browser's DWG reader. Start the AutoCAD helper on this computer (tools/cad-bridge.js — it opens every DWG whole) and add the drawing again, or in AutoCAD use SAVEAS → DXF and add the .dxf. " : "") + name + (m.via ? " — opened by " + m.via + " on this computer" : "") + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
+  return (lost ? "⚠ Only part of this drawing could be read — " + jk.toLocaleString() + " objects came out empty in the browser's DWG reader. Start the AutoCAD helper on this computer (it opens every DWG whole — set it up once with tools\cad-bridge-setup.cmd) and add the drawing again, or in AutoCAD use SAVEAS → DXF and add the .dxf. " : "") + name + (m.via ? " — opened by " + m.via + " on this computer" : "") + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
     (m.assumed ? " — ⚠ the drawing has no units set: check the scale (chip → Verify)" : m.unitFix ? " — ⚠ its dimensions disagree with its units setting: check the scale (chip → Verify)" : " — scale exact") +
     " · " + m.layers.length + " layers" + (off ? " (" + off + " off / frozen)" : "") + " · " + (m.stats.ents || 0).toLocaleString() + " objects" +
     (sk ? " · not shown: " + sk : "") + (m.stats.missing ? " · " + m.stats.missing + " block(s) missing (xrefs?)" : "") + (m.stats.far ? " · " + m.stats.far + " far-off object(s) left off the page" : "") + (m.stats.junk ? " · " + m.stats.junk + " damaged object(s) left out" : "") + (m.stats.trunc ? " · ⚠ very large: shown in part" : "");
