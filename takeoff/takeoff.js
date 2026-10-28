@@ -30,7 +30,25 @@ const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct
 const dmy = iso => { const p = String(iso || "").slice(0, 10).split("-"); return p.length === 3 ? p[2] + "-" + MON[+p[1] - 1] + "-" + p[0] : "—"; };
 const dmyHm = iso => { const d = new Date(iso), z = n => String(n).padStart(2, "0"); return isNaN(d) ? "—" : dmy(d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate())) + " " + z(d.getHours()) + ":" + z(d.getMinutes()); };   // a stored (UTC) time as the clock on the wall shows it
 function toast(msg, ms){ const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => { t.style.display = "none"; }, ms || 2600); }
-function busy(msg){ const b = $("busy"); b.textContent = msg || ""; b.style.display = msg ? "block" : "none"; }
+function busy(msg){ const b = $("busy"); b.textContent = msg || ""; b.style.display = msg ? "block" : "none";
+  if (msg && AG.n) { const s = document.createElement("button"); s.type = "button"; s.className = "busyStop"; s.textContent = AG.stop ? "Stopping…" : "■ Stop"; s.disabled = AG.stop; s.title = "Stop the agent (Esc)"; s.onclick = agentStop; s.onpointerdown = s.onmousedown = e => e.stopPropagation(); b.append(" ", s); } }
+/* an agent run and its Stop: AG.n runs going (one inside another — a dialog's agent sent from the panel — counts once), AG.stop
+   asked for. A run stops at its next room, page, step or AI turn, and what it did by then stays (one Ctrl+Z takes it back) */
+const AG = {n: 0, stop: false, ctl: null};
+const agStopped = () => AG.stop;
+const agStopErr = () => Object.assign(new Error("Stopped by you — what was done before it stopped stays (Ctrl+Z takes it back)"), {stopped: true});
+async function agentDo(fn){
+  if (!AG.n++) { AG.stop = false; AG.ctl = new AbortController(); agStopUi(); }
+  try { return await fn(); } finally { if (!--AG.n) { AG.stop = false; AG.ctl = null; agStopUi(); } }
+}
+function agentStop(){
+  if (!AG.n || AG.stop) return false; AG.stop = true; try { AG.ctl.abort(); } catch (e) {}
+  agStopUi(); toast("Stopping the agent — after the room or page it is on…", 3000); return true;
+}
+function agStopUi(){
+  document.querySelectorAll(".agStop").forEach(b => { b.style.display = AG.n ? "" : "none"; b.disabled = AG.stop; b.textContent = AG.stop ? "Stopping…" : "■ Stop"; });
+  const s = document.querySelector("#busy .busyStop"); if (s) { s.disabled = AG.stop; s.textContent = AG.stop ? "Stopping…" : "■ Stop"; }
+}
 
 /* the page's text with foot and inch marks as typed: PDF fonts give ' and " back as ’ ‘ ′ and ” “ ″ (12’-0"x12’-0") */
 const normQ = s => String(s).replace(/[’‘′`´]/g, "'").replace(/[”“″]/g, '"');
@@ -11666,8 +11684,10 @@ function wire(){
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
   $("aiDetails").onclick = () => agentCmd("drawing details");
-  $("agRooms").onclick = () => agentCmd("measure all rooms"); $("agUnit").onclick = () => unitDialog(); $("agWalls").onclick = () => wallsDialog(); if ($("agBlock")) $("agBlock").onclick = () => blockMasonryDialog(); $("agTags").onclick = () => doorWinDialog();
-  $("agFull").onclick = () => fullTakeoffDialog(); $("agFin").onclick = () => finishesDialog(); $("agCheck").onclick = () => P.proj && agentCheck("all");
+  $("agRooms").onclick = () => agentDo(() => agentCmd("measure all rooms")); $("agUnit").onclick = () => agentDo(unitDialog); $("agWalls").onclick = () => agentDo(wallsDialog); if ($("agBlock")) $("agBlock").onclick = () => agentDo(blockMasonryDialog); $("agTags").onclick = () => agentDo(doorWinDialog);
+  $("agFull").onclick = () => agentDo(fullTakeoffDialog); $("agFin").onclick = () => agentDo(finishesDialog); $("agCheck").onclick = () => P.proj && agentDo(() => agentCheck("all"));
+  document.querySelectorAll(".agStop").forEach(b => { b.onclick = agentStop; }); agStopUi();
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && AG.n && !$("dlgBack").classList.contains("on") && agentStop()) e.preventDefault(); }, true);
   $("aiRead").onclick = () => aiSend($("aiIn").value.trim() || "Measure the floor area of every room in this view.", true).then(() => { $("aiIn").value = ""; });
   $("aiSend").onclick = () => { const t = $("aiIn").value.trim(); if (t) aiSend(t, false).then(() => { $("aiIn").value = ""; }); };
   $("aiIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiSend").click(); } });
@@ -12132,7 +12152,8 @@ function aiToolMsg(name, inp, out){   // one line in the panel for a tool step
 }
 function aiLog(kind, html){ const d = document.createElement("div"); d.className = "aimsg " + kind; d.innerHTML = html; $("aiLog").appendChild(d); $("aiLog").scrollTop = 1e9; return d; }
 const aiText = t => esc(t).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
-async function aiSend(text, fresh){
+function aiSend(text, fresh){ return agentDo(() => aiSend0(text, fresh)); }
+async function aiSend0(text, fresh){
   if (AI.busy || !P.proj) return;
   { const t = await ruleTeach(text); if (t === true) return; if (typeof t === "string") text = t.slice(5); }   // "remember: …" — a working rule, asked where to keep it
   if (!S.page) return aiLog("err", "Open a PDF page first.");
@@ -12155,12 +12176,13 @@ async function aiSend(text, fresh){
     content.push({type: "text", text});
     AI.history.push({role: "user", content});
     for (let turn = 0; turn < 16; turn++) {
+      if (agStopped()) throw agStopErr();
       const res = await client.beta.messages.create({
         model: AI_MODEL, max_tokens: 16000, output_config: {effort: "high"},
         betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
         system: [{type: "text", text: AI_SYSTEM, cache_control: {type: "ephemeral"}}].concat(rulesPrompt() ? [{type: "text", text: rulesPrompt()}] : []),
         tools: AI_TOOLS_ALL(), messages: AI.history
-      }); replied = true;
+      }, AG.ctl ? {signal: AG.ctl.signal} : undefined); replied = true;
       if (res.stop_reason === "refusal") { AI.history = []; aiLog("err", "Claude declined this request" + (res.stop_details && res.stop_details.explanation ? ": " + esc(res.stop_details.explanation) : "") + ". The chat was reset."); break; }
       AI.history.push({role: "assistant", content: res.content});
       res.content.forEach(b => { if (b.type === "text" && b.text.trim()) aiLog("bot", aiText(b.text)); });
@@ -12176,8 +12198,12 @@ async function aiSend(text, fresh){
       refresh();
     }
   } catch (e) {
-    const st = e && e.status; free = !replied && (st === 401 || st === 403 || !st);
-    aiLog("err", (st === 401 ? "The API key was not accepted — check it (above)." : st === 429 ? "Rate limited by the API — wait a minute and try again." : esc("Request failed: " + (e.message || e)))
+    const st = e && e.status, stopped = agStopped();
+    if (stopped) {   // the tools' answers kept, and a turn of Claude's after them: the next message carries on from here
+      aiLog("bot", esc(agStopErr().message) + ".");
+      const last = AI.history[AI.history.length - 1]; if (last && last.role === "user" && (last.content || []).some(x => x.type === "tool_result")) AI.history.push({role: "assistant", content: [{type: "text", text: "(Stopped by the user.)"}]}); }
+    free = !stopped && !replied && (st === 401 || st === 403 || !st);
+    if (!stopped) aiLog("err", (st === 401 ? "The API key was not accepted — check it (above)." : st === 429 ? "Rate limited by the API — wait a minute and try again." : esc("Request failed: " + (e.message || e)))
       + (free ? " Answering with the <b>free agent</b> instead — to use it always, remove the key: <b>Key</b> → clear the box → <b>Save</b>." : ""));
     if (st === 401) aiShowKey(true);
     // keep the conversation valid: drop a trailing user turn the API never answered
@@ -12503,6 +12529,7 @@ async function aiSendLocal(text){
     const msgs = [{role: "system", content: AI_SYSTEM + (ccOn() ? CC_SYS : LOC_SYS) + rulesPrompt()}, ...locHist(), user];
     let final = "";
     for (let turn = 0; turn < 10; turn++) {
+      if (agStopped()) throw agStopErr();
       const r = await locChat(msgs, toOllamaTools(tools)); met.turns++; met.ms += r._ms; if (r._load) met.load = r._load; met.tok += r.eval_count || 0; met.evalNs += r.eval_duration || 0;
       const msg = r.message || {}, {calls, inText} = locCalls(msg), said = String(msg.content || "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
       msgs.push({role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls});
@@ -12526,6 +12553,7 @@ async function aiSendLocal(text){
     kpiLog("agent", {route: ccOn() ? "claude-code" : "local", ms: Math.round(met.ms), calls: met.calls, bad: met.bad, turns: met.turns, load: met.load || 0, tps: +tps.toFixed(1)});
   } catch (e) { fallback = e; }
   wait.remove(); AI.busy = false; $("aiSend").disabled = false; $("aiRead").disabled = false; refresh();
+  if (fallback && fallback.stopped) { aiLog("bot", esc(fallback.message) + (met.calls ? ` — after ${met.calls} tool call${met.calls === 1 ? "" : "s"}.` : ".")); return; }
   if (fallback && met.calls) { aiLog("err", esc(fallback.message || String(fallback)) + ` — the local AI stopped after ${met.calls} tool call${met.calls === 1 ? "" : "s"}. What it did stays (nothing was repeated): look it over, or say “undo the last AI measurement”.`); return; }   // (re-running it with the rule agent would do the work twice)
   if (fallback) { kpiLog("agent", {route: "rules", fallback: true}); aiLog("err", esc(fallback.message || String(fallback)) + " — answered by the <b>built-in rule agent</b> instead (offline; nothing sent to a cloud service)."); await agentCmd(text, true); }
 }
@@ -12738,7 +12766,7 @@ async function autoAreaPage(inp){
     if (VOID_RX.test(nm) || ex.some(w => up.includes(w))) { out.push({name: nm, status: "excluded", why: VOID_RX.test(nm) ? "shaft / duct / void — not floor" : "excluded by the user"}); continue; }
     if (house && !want.length && !house.take(up)) { out.push({name: nm, status: "excluded", why: house.why}); continue; }
     const seed = [r.cx != null ? r.cx : r.x + r.w / 2, r.cy != null ? r.cy : r.y - r.h / 2];
-    if (existing.some(i => pointInPoly(seed, i.pts))) { out.push({name: nm, status: "skipped", why: "already measured here"}); continue; }
+    if (existing.some(i => pointInPoly(seed, i.pts))) { out.push({name: nm, status: "skipped", why: "already measured here"}); continue; } if (agStopped()) { out.push({name: nm, status: "stopped", why: "not traced — the user stopped the agent"}); continue; }
     const t0 = performance.now(); let res; try { res = inp.gap_ft > 0 ? await autoRoom(seed, {gap: +inp.gap_ft}) : await autoRoomGuarded(seed); } catch (e) { res = {err: e.message || String(e)}; }
     kpiLog("auto", {ms: Math.round(performance.now() - t0), err: !!res.err, flag: !!(res.leak || res.short || res.warn), agent: true});
     if (res.err) { out.push({name: nm, status: "failed", why: res.err}); continue; }
@@ -13032,7 +13060,7 @@ function aiSampler(){
 async function aiSendPlan(smp, text){
   AI.busy = true; $("aiSend").disabled = true; $("aiRead").disabled = true;
   aiLog("user", esc(text));
-  const ctl = new AbortController(); AI.stop = ctl;
+  const ctl = new AbortController(); AI.stop = ctl; if (AG.ctl) AG.ctl.signal.addEventListener("abort", () => ctl.abort());
   const wait = aiLog("wait", `Claude is reading the drawing… <a href="#" class="aiStop">Stop</a>`);
   wait.querySelector(".aiStop").onclick = e => { e.preventDefault(); ctl.abort(); };
   let bubble = null, said = "", from = 0;   // text after a tool step goes in a new bubble below it
@@ -13257,7 +13285,7 @@ function doorSwings(){
 async function scanTags(scope){   // -> [{f, i, key, T: tagsOf}] for this page, this PDF, or every PDF of the project
   const pages = scope === "page" ? [{f: P.proj.files.find(x => x.id === S.fileId), i: S.pageNo}] : allPages().filter(o => scope === "all" || o.f.id === S.fileId);
   const out = [];
-  for (const [n, o] of pages.entries()) { if (pages.length > 1) busy("Reading tags — page " + (n + 1) + " of " + pages.length + "…"); out.push({f: o.f, i: o.i, key: keyOf(o.f.id, o.i), T: tagsOf(await pageTexts(o.f.id, o.i))}); }
+  for (const [n, o] of pages.entries()) { if (pages.length > 1 && agStopped()) { busy(""); throw agStopErr(); } if (pages.length > 1) busy("Reading tags — page " + (n + 1) + " of " + pages.length + "…"); out.push({f: o.f, i: o.i, key: keyOf(o.f.id, o.i), T: tagsOf(await pageTexts(o.f.id, o.i))}); }
   busy(""); return out;
 }
 const tagWanted = (k, f) => !f || f === "ALL" || f === "TAGS" ? true : /^DOORS?$/.test(f) ? tagKind(k) === "Doors" : /^WINDOWS?$/.test(f) ? tagKind(k) === "Windows" : /^VENT/.test(f) ? tagKind(k) === "Ventilators" : (tagParse(f) || {k: f}).k === k;
@@ -13521,7 +13549,7 @@ const QS_COMMANDS = {
         const c = S.cond && (cond(S.cond) || {}).type === "area" ? cond(S.cond) : aiAreaCond(), home = [S.fileId, S.pageNo], rep = [], added = [];
         const pages = allPages().filter(o => a.scope === "all" || o.f.id === S.fileId);
         for (const [n, pg] of pages.entries()) {
-          const R = {page: pageName({file: pg.f.id, page: pg.i}), n: 0}; rep.push(R); busy(`Measuring rooms — ${R.page} (${n + 1} of ${pages.length})…`);
+          const R = {page: pageName({file: pg.f.id, page: pg.i}), n: 0}; rep.push(R); if (agStopped()) { R.skip = "not reached — stopped by you"; continue; } busy(`Measuring rooms — ${R.page} (${n + 1} of ${pages.length})…`);
           if (!await agentGoto(pg.f.id, pg.i)) { R.skip = "could not be opened"; continue; }
           if (!curScale()) { R.skip = "no scale — set it (K)"; continue; }
           if (scaleDoubt()) { R.skip = "scale doubtful — the drawing measures " + scaleDoubt().label; continue; }
@@ -13532,7 +13560,7 @@ const QS_COMMANDS = {
         busy(""); await agentGoto(home[0], home[1]); S.cond = c.id; refresh();
         const skipped = rep.filter(x => x.skip), none = rep.filter(x => x.none);
         return {ok: added.length > 0, changed: added.map(i => i.id), review: added.map(i => i.id),
-          error: added.length ? "" : "no room was measured on " + pages.length + " page" + (pages.length === 1 ? "" : "s") + (skipped.length ? " (" + skipped.length + " skipped: " + skipped.slice(0, 4).map(x => x.page + " — " + x.skip).join("; ") + ")" : ""),
+          error: added.length ? "" : (agStopped() ? "stopped by you — " : "") + "no room was measured on " + pages.length + " page" + (pages.length === 1 ? "" : "s") + (skipped.length ? " (" + skipped.length + " skipped: " + skipped.slice(0, 4).map(x => x.page + " — " + x.skip).join("; ") + ")" : ""),
           message: `${added.length} room${added.length === 1 ? "" : "s"} measured into <b>${esc(c.name)}</b> on ${pages.length - skipped.length} of ${pages.length} pages (${rep.map(x => esc(x.page) + " " + (x.skip ? "skipped" : x.none ? "none named" : x.n)).join(", ")})${skipped.length ? ` — <b>${skipped.length} skipped</b> (${skipped.slice(0, 4).map(x => esc(x.page + ": " + x.skip)).join("; ")}) — this is <b>not a complete project quantity</b> until they are measured` : ""}`};
       }
       const before = new Set(P.proj.items.map(i => i.id)), r = await agentMeasure(names, null, {whole: true}), added = P.proj.items.filter(i => !before.has(i.id) && i.ai);
@@ -13731,7 +13759,7 @@ async function agentCmd(text, echoed){   // echoed: the message is already in th
   if (!echoed) aiLog("user", esc(text));
   const steps = cmdSteps(text); let out;
   if (steps.length > 1) aiLog("bot", `${steps.length} steps, one after another: ${steps.map((s, i) => (i + 1) + ". <i>" + esc(s) + "</i>").join(" · ")}`);
-  for (const s of steps) out = await agentStep(s);
+  for (const [n, s] of steps.entries()) { if (agStopped()) { aiLog("bot", esc(agStopErr().message) + (n ? ` — ${n} of ${steps.length} steps done.` : ".")); break; } out = await agentStep(s); }
   return out;
 }
 const CMD_VERB = /(?:measure|count|find|walls?|check|audit|make|do|run|finish(?:es)?|plaster|skirting|paint|take\s*-?\s*off|details?|apartment|unit|flat|list|schedule|how|total|trace)\b/.source;
@@ -13930,7 +13958,9 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
     say("bot", `${had.length === 1 ? "1 room is" : had.length + " rooms are"} already measured in <b>${esc(c.name)}</b> and left as ${had.length === 1 ? "it is" : "they are"} (delete one to measure it again): ${had.map(r => esc(r.name)).join(", ")}.`);
     if (!rooms.length) return {condition: c.name, rooms: res};
   }
+  let stopAt = -1;
   for (const [n, r] of rooms.entries()) {
+    if (agStopped()) { stopAt = n; break; }
     busy(`Measuring ${n + 1} of ${rooms.length}: ${r.name}…`); await new Promise(q => setTimeout(q, 10));
     const cx = r.x + r.w / 2, below = r.sizeY != null ? r.sizeY : r.y, lc = nameCentre(r);   // (the name's own centre, turned with the page)   // lc: the name itself — the room it is written in is the one wanted
     const seeds = [lc, [cx, r.y - r.h * 1.7], [cx, below + r.h * 0.9], [r.x - r.h, r.y - r.h / 2], [r.x + r.w + r.h, r.y - r.h / 2], [cx, below + r.h * 2.5], [cx, r.y - r.h * 3.5]];
@@ -13938,6 +13968,7 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
     let best = null; const dd = sizeDims(r.size), tried = [];
     const over = Object.assign({own: lc}, dd ? {gap: Math.max(2.5, Math.min(autoOpt().gap, 0.6 * Math.min(dd[0], dd[1])))} : {});   // a 5 ft bath: close gaps up to 3 ft, not 4
     for (const sd of seeds) {
+      if (agStopped() && best) break;
       const res = await autoRoom(sd, over); if (!res.pts) { if (/leaks/.test(res.err || "") && tried.length === 0 && seeds.indexOf(sd) >= 1) break; continue; }
       const a = polyArea(res.pts) / k / k; if (!(a > 4)) continue;
       const own = pointInPoly(lc, res.pts);   // an outline that misses the room's own name is a neighbouring compartment (the shower of a bath, a wardrobe)
@@ -13947,6 +13978,7 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
       tried.push(a);
     }
     if (best && best.err >= 10) best.err -= 10;
+    if (!best && agStopped()) { stopAt = n; break; }
     if (!best) { res.push({name: r.name, error: "could not close the room"}); say("err", `${esc(r.name)}: auto area could not close the room — use the Fence tool on the open side, or draw it`); continue; }
     const cen = q => [q.reduce((a, v) => a + v[0], 0) / q.length, q.reduce((a, v) => a + v[1], 0) / q.length];
     const same = got.find(o => Math.abs(o.a - best.a) / best.a < 0.005 && dist(cen(o.pts), cen(best.pts)) < k);
@@ -13968,10 +14000,11 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
     say("tool", `${esc(nm)}: <b>${fq(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? fq(wrt) + " Sft together" : esc(r.size) + " = " + fq(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + fq(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
   }
   busy(""); refresh();
+  if (stopAt >= 0) say("bot", `Stopped by you — ${rooms.length - stopAt} of ${rooms.length} room${rooms.length > 1 ? "s" : ""} not measured: ${rooms.slice(stopAt).map(r => esc(r.name)).slice(0, 12).join(", ")}${rooms.length - stopAt > 12 ? "…" : ""}.`);
   const failed = res.filter(x => x.error), traced = P.proj.items.some(i => onPage(i) && i.cond === c.id && i.ai && i.det && i.det.how === "trace");
-  if (!(ok + chk)) say("err", `Nothing was measured — ${rooms.length} room${rooms.length > 1 ? "s" : ""} tried: ${res.map(x => esc(x.name) + " (" + esc(x.error || (x.shared_with ? "with " + x.shared_with : "not closed")) + ")").join(", ")}.`);
+  if (stopAt >= 0 && !(ok + chk) && !res.length) { /* stopped before the first room: said above */ } else if (!(ok + chk)) say("err", `Nothing was measured — ${rooms.length} room${rooms.length > 1 ? "s" : ""} tried: ${res.map(x => esc(x.name) + " (" + esc(x.error || (x.shared_with ? "with " + x.shared_with : "not closed")) + ")").join(", ")}.`);
   else say("bot", `Measured ${ok + chk} of ${rooms.length} into <b>${esc(c.name)}</b>${chk ? ` — <b>${chk} to check</b> (more than 5% off the written size: fix with Fence, or the room is not a rectangle)` : ""}${same2 ? ` — <b>${same2}</b> leaked into a neighbour, not added` : ""}${failed.length > same2 ? ` — <b>${failed.length - same2}</b> could not be closed` : ""}. Each is marked AI until you check it. Undo (Ctrl+Z, or “undo the last AI measurement”) takes them back.${traced ? ` <span class="small">Tip: <i>trace the whole floor</i> puts every room into its own layer instead — rooms, kitchen + lounge, passages, corridors, washrooms, balconies.</span>` : ""}`);
-  return {condition: c.name, rooms: res, measured: ok + chk, to_check: chk, failed: failed.length};
+  return Object.assign({condition: c.name, rooms: res, measured: ok + chk, to_check: chk, failed: failed.length}, stopAt >= 0 ? {stopped: rooms.slice(stopAt).map(r => r.name)} : {});
 }
 /* apartments: the unit numbers written on the plan — a 2-4 digit number with TYPE-… / n BED / … SFT under it. Each room
    belongs to the nearest unit number. */
@@ -14610,6 +14643,7 @@ async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, 
   try { await asOneStep("Full takeoff", async () => {
     for (const [n, p] of pages.entries()) {
       const R = {page: pageName({file: p.f.id, page: p.i}), file: p.f.id, no: p.i}; rep.push(R);
+      if (agStopped()) { R.skip = "not reached — stopped by you"; continue; }
       busy(`⚡ Full takeoff — ${R.page}${pages.length > 1 ? ` (${n + 1} of ${pages.length})` : ""}…`);
       if (!await agentGoto(p.f.id, p.i)) { R.skip = "could not be opened (or another page was opened meanwhile)"; continue; }
       if (!S.geo[S.key].segs.length && !S.texts[S.key].length) { R.skip = "blank — no lines or text"; continue; }
@@ -14628,6 +14662,7 @@ async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, 
             r.rooms.forEach(x => { if (x.error) R.rooms.bad.push(x.name + " — " + x.error); else if (x.already) R.rooms.had++; else if (x.area_sft != null) { R.rooms.sft += x.area_sft; if (x.check) R.rooms.chk.push(x.name); else R.rooms.ok++; } }); }
         }
       }
+      if (agStopped()) { R.stop = true; continue; }
       if (o.walls) {
         busy(`⚡ Full takeoff — ${R.page}: walls…`); await new Promise(r => setTimeout(r, 10));
         const found = wallThicknesses(null), seen = new Set(); R.walls = []; R.wallOther = found.filter(w => !stdWall(w.t)).map(w => ({t: w.t, len: w.len}));
@@ -14636,6 +14671,7 @@ async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, 
           if (!r.error && !ex) { const c = P.proj.conds.find(x => x.type === "linear" && x.name === r.condition); if (c) c.agentWall = true; }
           R.walls.push(r.error ? {t: T, err: r.error} : {t: T, name: r.condition, ft: r.total_length_ft, runs: r.runs, unit: r.unit}); }
       }
+      if (agStopped()) { R.stop = true; continue; }
       if (o.doors) {
         const res = await scanTags("page"), T = res[0].T, keys = Object.keys(T.plan).filter(k2 => tagKind(k2) !== "Tags").sort(natSort);
         const newSch = Object.keys(T.sched).filter(k2 => !(P.proj.openings || []).some(x => String(x.mark).toUpperCase() === k2));
@@ -14643,6 +14679,7 @@ async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, 
         if (keys.length || newSch.length) mutate(() => { if (keys.length) putCounts(res, keys, "mark");
           newSch.forEach(k2 => { const sc = T.sched[k2]; P.proj.openings.push({id: uid("O"), mark: k2, type: tagKind(k2) === "Doors" ? "door" : tagKind(k2) === "Windows" ? "window" : "other", w: sc.w, h: sc.h, src: "read from the drawing's schedule (" + sc.how + ")"}); }); }, "Count doors / windows");
       }
+      if (agStopped()) { R.stop = true; continue; }
       if (o.fin) R.fin = !P.proj.items.some(i => onPage(i) && isRoomArea(i)) ? {none: true} : finishesRun({H: o.H, DH: o.DH, cond: roomC && P.proj.items.some(i => onPage(i) && i.cond === roomC && isRoomArea(i)) ? roomC : roomCondOf(), ceiling: true});
     }
   }); } finally { S.agentRun = false; busy(""); if (cond0 && cond(cond0)) S.cond = cond0; }   // the condition the user had picked stays picked
@@ -14659,7 +14696,7 @@ function fullReport(o, rep, ms){
     + (R.wallOther.length ? `<br><span class="small">Not taken: ${R.wallOther.map(w => inchOf(w.t) + " (" + Math.round(w.len) + " ft)").join(", ")} — window glass, counters and the like; 🧱 Walls takes one if it is a wall.</span>` : "");
   const tagsL = R => (Object.keys(R.tags).length ? Object.entries(R.tags).map(([m, n]) => esc(m) + " <b>×" + n + "</b>").join(" · ") : "no door / window tags") + (R.newSch.length ? `<br><span class="small">Sizes of ${R.newSch.map(esc).join(", ")} read from the schedule into the opening schedule.</span>` : "");
   const finL = R => R.fin.none ? "no rooms measured on this page" : R.fin.error ? `<span style="color:var(--red)">${esc(R.fin.error)}</span>` : `${R.fin.rooms.length} rooms · wall finish <b>${fq(sum(R.fin.rooms, x => x.wallNet))} Sft</b> net · skirting <b>${fq(sum(R.fin.rooms, x => x.skirt))} ft</b>${sum(R.fin.rooms, x => x.notes.length) ? ` · <b style="color:var(--amber)">${sum(R.fin.rooms, x => x.notes.length)} opening${sum(R.fin.rooms, x => x.notes.length) > 1 ? "s" : ""} not deducted</b> <span class="small">(no size — see 🎨 Finishes)</span>` : ""}`;
-  const blk = R => `<div style="margin-top:7px"><b>${esc(R.page)}</b>${R.rooms ? "<br>🏠 " + roomsL(R) : ""}${R.walls ? "<br>🧱 " + wallsL(R) : ""}${R.tags ? "<br>🚪 " + tagsL(R) : ""}${R.fin ? "<br>🎨 " + finL(R) : ""}</div>`;
+  const blk = R => `<div style="margin-top:7px"><b>${esc(R.page)}</b>${R.rooms ? "<br>🏠 " + roomsL(R) : ""}${R.walls ? "<br>🧱 " + wallsL(R) : ""}${R.tags ? "<br>🚪 " + tagsL(R) : ""}${R.fin ? "<br>🎨 " + finL(R) : ""}${R.stop ? `<br><span class="small">■ Stopped by you part-way through this page</span>` : ""}</div>`;
   let tot = "";
   if (done.length > 1) {   // the run's totals, and the counts against the schedule's quantities
     const W = {}, G = {}; done.forEach(R => { (R.walls || []).forEach(w => { if (!w.err) W[w.t] = (W[w.t] || 0) + w.ft; }); Object.entries(R.tags || {}).forEach(([m, n]) => { G[m] = (G[m] || 0) + n; }); });
@@ -16374,7 +16411,7 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
-  window.zdTakeoff = {qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
