@@ -33,8 +33,7 @@ input:focus,select:focus{outline:2px solid #b9adf0;outline-offset:-1px;border-co
 /* the bar wraps onto a second row on narrower screens: every control stays on screen (none hidden off the right edge) */
 :root{--hh:48px}
 header{min-height:48px;background:linear-gradient(135deg,var(--navy),var(--navy2));color:#fff;display:flex;align-items:center;flex-wrap:wrap;gap:8px;row-gap:6px;padding:6px 10px;position:relative;z-index:8}
-header .mark{width:30px;height:30px;border:2px solid #fff;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex:none}
-header .ttl{font-weight:700;font-size:14px;white-space:nowrap}
+header .homebtn{width:38px;height:38px;border:0;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none;padding:0;cursor:pointer;background:linear-gradient(135deg,#2b7de9,#7b5cff);color:#fff;box-shadow:0 4px 12px -4px rgba(91,92,255,.75)}header .homebtn svg{width:26px;height:26px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.25))}header .homebtn:hover{filter:brightness(1.1);transform:translateY(-1px)}header .homebtn{transition:transform .12s,filter .12s}header .homebtn:focus-visible{outline:2px solid var(--navy);outline-offset:2px}
 header .sep{width:1px;height:26px;background:rgba(255,255,255,.2);flex:none}
 header .btn{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.25);color:#fff}
 header .btn:hover{background:rgba(255,255,255,.16)}
@@ -177,7 +176,6 @@ header a.back{color:#cfe0f5;font-size:12px;text-decoration:none;white-space:nowr
 #viewPop .seg{display:flex}#viewPop .seg .btn:first-child{flex:1}
 #bView .vdot{display:none;width:7px;height:7px;border-radius:50%;background:#fab219;margin-left:3px;vertical-align:1px}#bView.mod .vdot{display:inline-block}
 #viewPop .vh{font-size:9.5px;letter-spacing:.5px;color:var(--muted);font-weight:700;text-transform:uppercase}
-@media (max-width:1700px){header .ttl{display:none}}
 
 /* layout */
 .app{display:grid;grid-template-columns:250px minmax(0,1fr) 420px;height:calc(100% - var(--hh))}
@@ -460,8 +458,6 @@ input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, nev
 html,body{height:100%}
 body{display:flex;flex-direction:column;background:var(--bg)}
 header{flex:none;background:#fff;color:var(--txt);border-bottom:1px solid var(--line);min-height:54px;padding:7px 14px;gap:8px;box-shadow:0 1px 0 rgba(15,41,66,.03)}
-header .mark{background:var(--blue);border:0;color:#fff;border-radius:9px;width:32px;height:32px;font-size:12.5px}
-header .ttl{color:var(--navy);font-size:15px;font-weight:700;margin-right:4px}
 header .btn{background:#fff;border-color:var(--line);color:#3c4c60}
 header .btn:hover{background:#f1f5fd;border-color:#b9c9e6}
 header .btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}
@@ -471,7 +467,6 @@ header .btn.tg2.on{background:#eaf0ff;color:var(--blue);border-color:#b9c9e6}
 #bClaude.on{box-shadow:0 0 0 2px #cdbdf7}
 header select,header input{height:30px}
 .projpill{display:flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:9px;padding:2px 4px;background:#f8fafd;flex:none}
-.projpill .psl{color:#a8b5c7}
 header .projpill .btn{border-color:transparent;background:transparent}
 header .projpill .btn:hover{background:#eaf0ff}
 .projpill #projName{width:190px;border-color:transparent;background:transparent;font-weight:600;color:var(--navy)}
@@ -614,8 +609,8 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
 .propsbox{max-height:46%}
 .lyrbar .small{display:none}
 @media (max-width:1750px){header #bToolChest .tl,header #bWs .tl,header .projpill .tl{display:none}.projpill #projName{width:150px}header #findIn{width:220px}}
-@media (max-width:1500px){header #bCmd .tl,header #bClaude .tl{display:none}header .ttl{display:none}}
-@media (max-width:860px){.rgb{flex-wrap:wrap}.rrow{overflow-x:auto}.rpanel{flex-wrap:wrap}header #findIn{max-width:none;width:100%;flex:1 1 100%}.projpill{flex:1 1 100%;max-width:100%;min-width:0}.projpill #projName{flex:1;width:auto;min-width:60px}.cbar #pageSel{max-width:150px}.agentbar .agch{display:none}.app .panel{min-width:0}.rtabs{overflow-x:auto;flex-wrap:nowrap}.rtab{white-space:nowrap}}
+@media (max-width:1500px){header #bCmd .tl,header #bClaude .tl{display:none}}
+@media (max-width:860px){.rgb{flex-wrap:wrap}.rrow{overflow-x:auto}.rpanel{flex-wrap:wrap}header #findIn{max-width:none;width:100%;flex:1 1 100%}.projpill{flex:1 1 calc(100% - 46px);max-width:calc(100% - 46px);min-width:0}.projpill #projName{flex:1;width:auto;min-width:60px}.cbar #pageSel{max-width:150px}.agentbar .agch{display:none}.app .panel{min-width:0}.rtabs{overflow-x:auto;flex-wrap:nowrap}.rtab{white-space:nowrap}}
 
 .panel:not(.right) .ph{flex-wrap:nowrap}
 .pbh{cursor:pointer;user-select:none}.pbh::after{content:"\25BE";color:#8a98ac;font-size:12px}
@@ -641,7 +636,7 @@ body.pc-compact .rrow .tool{min-width:44px;padding:4px 5px;gap:1px;font-size:10.
 body.pc-compact .rrow .tool .ic{width:18px;height:18px}
 body.pc-compact .rrow .tool kbd{display:none}
 body.pc-compact .rg{padding:0 8px}
-body.pc-compact header{min-height:46px;padding:4px 12px}
+body.pc-compact header{min-height:46px;padding:4px 12px}body.pc-compact header .homebtn{width:34px;height:34px}
 body.pc-compact .cbar{padding:4px 10px}
 body.pc-compact .agentbar{padding:4px 12px}
 body.pc-compact .status{min-height:22px;padding:2px 10px}
@@ -757,17 +752,14 @@ table.sktbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}ta
 </head>
 <body>
 <header>
-  <div class="mark">ZD</div>
-  <div class="ttl">ZD Takeoff</div>
+  <button class="homebtn" id="bProjects" title="Home — all projects" aria-label="Home — all projects"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="15.4" y="4.6" width="2.6" height="4.6" rx=".6" fill="#ff6b6b"/><path d="M5.6 10.6V19.6a.9.9 0 0 0 .9.9h11a.9.9 0 0 0 .9-.9V10.6L12 5.4z" fill="#fff"/><rect x="10.1" y="14" width="3.8" height="6.5" rx=".9" fill="#ffc531"/><rect x="14.9" y="11.6" width="2.4" height="2.4" rx=".5" fill="#5cc8ff"/><rect x="6.7" y="11.6" width="2.4" height="2.4" rx=".5" fill="#5cc8ff"/><path d="M2.9 11.7 12 4.2l9.1 7.5" fill="none" stroke="#ff9f1c" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   <div class="projpill">
-    <button class="btn sm" id="bProjects" title="Home — all projects">&#127968; Home</button>
-    <span class="psl">/</span>
     <input type="text" id="projName" title="Project name" aria-label="Project name">
     <button class="btn sm" id="bRename" title="Change / rename the current project">&#9998; Rename</button>
     <button class="btn sm" id="bSaveProj" title="Save the current project now (Ctrl+S)">&#128190; Save</button>
   </div>
   <button class="btn sm" id="bNewTop" title="Create a new separate project">+ New</button>
-  <button class="btn sm" id="bAdd" title="Add PDFs or AutoCAD drawings (DWG / DXF) to this project">+ PDF</button><button class="btn sm" id="bAddM" title="Import: choose pages and a version set, a folder of PDFs, photos / scans as pages, sheet info, OCR" aria-haspopup="true">&#9662;</button>
+  <button class="btn sm" id="bAdd" title="Open a PDF or an AutoCAD drawing (DWG / DXF) in this project">+ PDF / CAD</button><button class="btn sm" id="bAddM" title="Import: choose pages and a version set, a folder of PDFs, photos / scans as pages, sheet info, OCR" aria-haspopup="true">&#9662;</button>
   <span id="saveSt" class="savest" role="status" aria-live="polite"></span>
   <input type="file" id="fileIn" accept="application/pdf,.pdf,.dwg,.dxf" multiple hidden>
   <input type="file" id="impPdfIn" accept="application/pdf,.pdf,.dwg,.dxf,image/jpeg,image/png,image/webp" multiple hidden>
