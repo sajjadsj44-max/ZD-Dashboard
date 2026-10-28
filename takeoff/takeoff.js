@@ -7407,7 +7407,7 @@ function rowDesc(x){ const {r, it, i} = x, c = cond(it.cond); return (r.sign < 0
 async function exportExcel(){
   busy("Building Excel…");
   try {
-    const X = await loadExcel(), wb = new X.Workbook(); wb.creator = "ZD PDF Takeoff"; wb.created = new Date();
+    const X = await loadExcel(), wb = new X.Workbook(); wb.creator = "Sajjad QS PDF TAKEOFF Software"; wb.created = new Date();
     const BLUE = {type: "pattern", pattern: "solid", fgColor: {argb: "FFDDEBFF"}}, GREEN = {type: "pattern", pattern: "solid", fgColor: {argb: "FFE2F4E8"}},
           GREY = {type: "pattern", pattern: "solid", fgColor: {argb: "FFE6E9EE"}}, YELLOW = {type: "pattern", pattern: "solid", fgColor: {argb: "FFFFF2C2"}}, HEAD = {type: "pattern", pattern: "solid", fgColor: {argb: "FF12263F"}};
     const ws = wb.addWorksheet("Measurement", {views: [{state: "frozen", ySplit: 4}], pageSetup: {paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0}});
@@ -9209,7 +9209,7 @@ function reportPrint(){
     table{width:100%;border-collapse:collapse}th{background:#12263f;color:#fff;font-size:10.5px;text-align:left;padding:5px 6px}td{padding:4px 6px;border-bottom:1px solid #e3e8ef;vertical-align:top}td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     tr.g td{background:#f1f4f9;font-weight:700}.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}.cov{border:1px solid #dde5ee;border-radius:8px;padding:14px 16px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px 18px}
     .cov b{display:block;font-size:16px;color:#0f2942}.muted{color:#6b7d92}.st{font-weight:700;color:${lvlCol(V.lvl)}}@media print{body{margin:10mm}h2{break-after:avoid}tr{break-inside:avoid}}</style></head><body>
-    <h1>${esc(P.proj.name)}</h1><div class="muted">Quantity takeoff report · ${esc(dmy(today()))} · decimal feet, deductions as their own rows · ZD PDF Takeoff</div>
+    <h1>${esc(P.proj.name)}</h1><div class="muted">Quantity takeoff report · ${esc(dmy(today()))} · decimal feet, deductions as their own rows · Sajjad QS PDF TAKEOFF Software</div>
     <h2>Summary</h2><div class="cov"><div><span class="muted">Drawings</span><b>${P.proj.files.length} PDF · ${allPages().length} pages</b></div><div><span class="muted">Measurements</span><b>${q.n}</b></div><div><span class="muted">Checked</span><b>${q.checked} of ${q.n}</b></div>
     <div><span class="muted">AI / copied to check</span><b>${q.review}</b></div><div><span class="muted">Takeoff check</span><b class="st">${esc(V.lvl)}</b></div><div><span class="muted">Bill amount</span><b>${tot ? "PKR " + f2(tot) : "—"}</b></div></div>
     <h2>Quantities by condition</h2><table><thead><tr><th>Condition</th><th class="n">Measurements</th><th class="n">Gross</th><th class="n">Deductions</th><th class="n">Net</th><th>Unit</th></tr></thead><tbody>${P.proj.conds.map(row).join("")}</tbody></table>
@@ -9295,7 +9295,7 @@ async function reportExcel(o){
   const R = reportBuild(o); if (!R.n) return toast("Nothing measured on a page with a scale yet");
   busy("Building Excel…");
   try {
-    const X = await loadExcel(), wb = new X.Workbook(); wb.creator = "ZD PDF Takeoff"; wb.created = new Date();
+    const X = await loadExcel(), wb = new X.Workbook(); wb.creator = "Sajjad QS PDF TAKEOFF Software"; wb.created = new Date();
     const HEAD = {type: "pattern", pattern: "solid", fgColor: {argb: "FF12263F"}}, GREY = {type: "pattern", pattern: "solid", fgColor: {argb: "FFE6E9EE"}}, GRP = {type: "pattern", pattern: "solid", fgColor: {argb: "FFDDEBFF"}};
     const ws = wb.addWorksheet("Report", {views: [{state: "frozen", ySplit: 4}], pageSetup: {paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0}});
     const cols = R.cols, nc = cols.length, WD = {cond: 30, boq: 12, page: 32, lbl: 28, nos: 8, qty: 14, unit: 7, rate: 12, amt: 15, n: 13, note: 26}, ci = k => cols.indexOf(k);
@@ -16258,7 +16258,7 @@ async function plotRun(o, go, b0){
 }
 async function plotPdf(o){
   const Lb = await loadPdfLib(), out = await Lb.PDFDocument.create(), lo = plotLayout(o, plotWin(o)), win = lo.win, f = S.fileId, p = S.pageNo, pgp = S.page;
-  out.setTitle(P.proj.name + " — " + pageName({file: f, page: p})); out.setCreator("ZD PDF Takeoff — plot"); out.setProducer("ZD PDF Takeoff");
+  out.setTitle(P.proj.name + " — " + pageName({file: f, page: p})); out.setCreator("Sajjad QS PDF TAKEOFF Software — plot"); out.setProducer("Sajjad QS PDF TAKEOFF Software");
   const page = out.addPage([lo.PW, lo.PH]), font = await out.embedFont(Lb.StandardFonts.Helvetica), cp = cadOn() ? cadPage() : null;
   if (cp) {
     const sc = S.cadSc[f], hid = cadHidden(f, sc); if (o.np) sc.layers.forEach((l, i) => { if (!l.plot || /^defpoints$/i.test(l.name)) hid[i] = 1; });
@@ -16395,7 +16395,7 @@ async function verCheck(force){   // -> the new ?v= when one is out (the bar sho
   if (!v || v === APP_V || v === verCheck.no) return "";
   let b = $("verBar"); if (!b) { b = document.createElement("div"); b.id = "verBar"; b.setAttribute("role", "status");
     b.style.cssText = "position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:99999;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 32px);padding:8px 8px 8px 14px;border-radius:8px;background:var(--navy,#0f2942);color:#fff;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.3)";
-    b.innerHTML = '<span>A new version of PDF Takeoff is ready</span><button class="btn sm pri" id="verGo">Reload</button><button class="btn sm" id="verNo" title="Not now (asked again when another version is out)" aria-label="Not now">×</button>';
+    b.innerHTML = '<span>A new version of Sajjad QS PDF TAKEOFF Software is ready</span><button class="btn sm pri" id="verGo">Reload</button><button class="btn sm" id="verNo" title="Not now (asked again when another version is out)" aria-label="Not now">×</button>';
     document.body.appendChild(b);
     $("verGo").onclick = async () => { const g = $("verGo"); g.disabled = true;
       try { await flushSave(); if (SAVE_PEND.size) await Promise.all([...SAVE_PEND.values()].map(pp => flushOne(pp))); } catch (e) {}   // a write that failed before: tried once more, and waited for

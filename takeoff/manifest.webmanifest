@@ -1,6 +1,6 @@
 {
-  "name": "ZD PDF Takeoff",
-  "short_name": "ZD Takeoff",
+  "name": "Sajjad QS PDF TAKEOFF Software",
+  "short_name": "Sajjad QS Takeoff",
   "description": "Measure PDF drawings in the browser. Works offline once opened; projects stay on this device.",
   "start_url": "./index.html",
   "scope": "./",

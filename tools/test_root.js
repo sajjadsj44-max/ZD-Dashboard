@@ -17,7 +17,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   const land = async u => { await page.goto(u, {waitUntil: "domcontentloaded"}); await page.waitForURL(/takeoff\//, {timeout: 5000}).catch(() => {}); return page.url(); };
   console.log("site address");
   ok(/\/takeoff\/$/.test(await land(BASE)), "the site's address opens takeoff/ (" + page.url() + ")");
-  ok(await page.title() === "ZD PDF Takeoff", "the PDF Takeoff page itself is shown");
+  ok(await page.title() === "Sajjad QS PDF TAKEOFF Software", "the PDF Takeoff page itself is shown");
   ok(/\/takeoff\/$/.test(await land(BASE + "index.html")), "index.html opens takeoff/ too");
   ok(/\/takeoff\/\?a=1#x$/.test(await land(BASE + "?a=1#x")), "a query and hash are carried over");
   await page.goto(BASE + "takeoff/", {waitUntil: "domcontentloaded"}); await page.waitForTimeout(300);
