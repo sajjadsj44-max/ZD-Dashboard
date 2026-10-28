@@ -52,7 +52,9 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
   /* a page point of the drawing (inches / mm in model space) */
   const pp = (X, Y) => T(([X, Y]) => { const m = zdTakeoff.cadMeta(zdTakeoff.S.fileId).map, k = 72 * m.uIn / m.den; return [m.ox + (X - m.x0) * k, m.oy + (m.y1 - Y) * k]; }, [X, Y]);
   const pix = async (X, Y) => { const p = await pp(X, Y), q = await scr(p[0], p[1]); return T(([x, y]) => { const c = document.getElementById("hi"), r = c.getBoundingClientRect(), d = Math.min(window.devicePixelRatio || 1, 2), g = c.getContext("2d").getImageData(Math.round((x - r.left) * d), Math.round((y - r.top) * d), 1, 1).data; return [g[0], g[1], g[2]]; }, q); };
-  const add = async f => { await page.setInputFiles("#fileIn", path.join(FIX, f)); await page.waitForFunction(n => { const Z = zdTakeoff, F = Z.P.proj && Z.P.proj.files.find(x => x.name === n); return F && Z.S.fileId === F.id && Z.S.page && Z.S.cadSc && Z.S.cadSc[F.id]; }, f, {timeout: 60000}); await wait(500); };
+  const add = async f => { await page.setInputFiles("#fileIn", path.join(FIX, f)); await page.waitForFunction(n => { const Z = zdTakeoff, F = Z.P.proj && Z.P.proj.files.find(x => x.name === n);
+    const web = [...document.querySelectorAll("#dlgBack.on #dlgF button")].find(x => x.textContent === "Read in the browser"); if (web) web.click();   // no AutoCAD helper here: read in the browser
+    return F && Z.S.fileId === F.id && Z.S.page && Z.S.cadSc && Z.S.cadSc[F.id]; }, f, {timeout: 60000}); await wait(500); };
 
   await page.goto(URL, {waitUntil: "load"}); await wait(500);
   await page.click("#bNewProj"); await page.fill("#dlgName", "CAD test"); await page.click("#dlgOk"); await wait(400);
