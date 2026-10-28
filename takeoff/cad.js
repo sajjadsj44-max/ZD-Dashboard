@@ -900,7 +900,7 @@ function pdfRes(L, doc, page, pg, fonts){   // the page's font and transparency 
 export async function cadPdf(sc, L, meta){
   meta = meta || {};
   const doc = await L.PDFDocument.create(), font = await doc.embedFont(L.StandardFonts.Helvetica), ctx = doc.context, N = L.PDFName.of;
-  doc.setTitle(meta.title || "AutoCAD drawing"); doc.setCreator("ZD PDF Takeoff — " + sc.fmt + " import"); doc.setProducer("ZD PDF Takeoff");
+  doc.setTitle(meta.title || "AutoCAD drawing"); doc.setCreator("Sajjad QS PDF TAKEOFF Software — " + sc.fmt + " import"); doc.setProducer("Sajjad QS PDF TAKEOFF Software");
   const used = new Set(); sc.pages.forEach(pg => { pg.lay.forEach(l => used.add(l)); pg.tL.forEach(l => used.add(l)); });
   const ocg = sc.layers.map((l, i) => used.has(i) ? ctx.register(ctx.obj({Type: "OCG", Name: L.PDFHexString.fromText(l.name)})) : null), refs = ocg.filter(Boolean);
   doc.catalog.set(N("OCProperties"), ctx.obj({OCGs: refs, D: {Name: L.PDFHexString.fromText("AutoCAD layers"), Order: refs, ON: refs, OFF: [], BaseState: N("ON")}}));

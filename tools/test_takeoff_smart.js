@@ -152,7 +152,7 @@ const sheet = (o = {}) => ["0.6 w"].concat(
   ok(["index.html", "takeoff.js", "manifest.webmanifest"].every(f => cached.includes(f)), "app files cached for offline use: " + [...new Set(cached)].join(", "));
   await ctx2.setOffline(true);
   const off = await p2.reload({waitUntil: "load"}).then(() => true, e => String(e));
-  ok(off === true && (await T2(() => document.title)) === "ZD PDF Takeoff", "reload with no network: the app still opens from the cache");
+  ok(off === true && (await T2(() => document.title)) === "Sajjad QS PDF TAKEOFF Software", "reload with no network: the app still opens from the cache");
   await ctx2.setOffline(false);
 
   console.log("no page errors");
