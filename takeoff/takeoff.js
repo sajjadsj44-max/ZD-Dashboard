@@ -653,7 +653,7 @@ async function doc(fileId, ask1){
   S.docP = S.docP || {}; S.pwNo = S.pwNo || new Set();
   if (S.docP[fileId]) return S.docP[fileId];
   const f = P.proj && P.proj.files.find(x => x.id === fileId);
-  if ((S.pwNo.has(fileId) || (f && f.locked)) && !ask1) throw new Error(((f && f.name) || "The PDF") + " is locked with a password — open one of its pages to enter it");   // (known to be locked: what runs in the background — thumbnails, agents, exports — never asks for it)
+  if (S.pwNo.has(fileId) && !ask1) throw new Error(((f && f.name) || "The PDF") + " is locked with a password — open one of its pages to enter it");
   S.docP[fileId] = (async () => {
     const rec = await dbGetRaw("pdfs", fileId);   // (a big one: its Blob, which pdf.js reads a piece at a time)
     if (!rec) throw new Error("PDF missing — add “" + ((f || {}).name || fileId) + "” again with + PDF to re-attach it.");
@@ -5459,7 +5459,8 @@ async function thumbRun(){
         await CAD.cadDrawAsync(cv.getContext("2d"), cpg, {s: s2, tx: 0, ty: 0, W: cv.width, H: cv.height}, {dark: false, mono: false, hidden: cadHidden(f, csc), dpr: 1}); S.thumbs[k] = cv.toDataURL("image/png"); }
       else { const u = thumbUrl(pr, f, p), kept = await thumbKept(u);
       if (kept) { if (P.proj !== pr) continue; S.thumbs[k] = kept; S.thumbHits = (S.thumbHits || 0) + 1; }   // drawn before, in this browser
-      else { await thumbQuiet(pr); if (P.proj !== pr) continue;
+      else { if ((pr.files.find(x => x.id === f) || {}).locked && !S.docs[f]) continue;   // a locked PDF not opened this visit: its thumbnail waits (never a password question out of nowhere)
+      await thumbQuiet(pr); if (P.proj !== pr) continue;
       const pg = await (await doc(f)).getPage(+p), r0 = rotOf(pr, k), v0 = vpOf(pg, pr, {scale: 1}), vp = vpOf(pg, pr, {scale: 200 / Math.max(v0.width, v0.height)}), cv = document.createElement("canvas");
       cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height); const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
       const task = thumbTask = sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp}));

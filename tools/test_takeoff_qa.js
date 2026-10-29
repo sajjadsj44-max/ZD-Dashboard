@@ -179,6 +179,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
       ok(lk.kept === 0, "…and no picture of its pages is kept in the browser (" + lk.kept + ")");
       const lp = await dl("#exPdf1"), PL = require(path.join(LIBS, "pdf-lib")); let lpd = null; try { lpd = await PL.PDFDocument.load(fs.readFileSync(lp)); } catch (e) {}
       ok(lpd && lpd.getPageCount() === 1 && !lpd.isEncrypted, "marked-up PDF of the locked drawing: opens with no password, one page (flattened)");
+      await T(() => { zdTakeoff.removePdf(zdTakeoff.P.proj.files.find(x => x.name === "locked.pdf").id); }); await page.click("#dlgOk");   // (taken out again: reopened later its password would be asked)
+      ok(await page.waitForFunction(() => !zdTakeoff.P.proj.files.some(x => x.name === "locked.pdf"), null, {timeout: 10000}).then(() => true, () => false), "the locked PDF is removed again");
     } else R.notTested.push({what: "Password-protected PDF in the QA run", why: "no encrypted fixture (python3 + pypdf not available to build one)"});
     await closeDlg();
   });
