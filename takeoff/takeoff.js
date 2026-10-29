@@ -8979,6 +8979,22 @@ async function tbDialog(){
    typical floor or unit measured once; a count stays one marker a click. *3 + Enter while drawing gives one shape Nos 3. */
 function ribRepeatable(t){ return ["draw", "linepick", "rect", "circle", "polygon", "auto", "count", "vsearch", "ded", "dedrect", "open", "measure", "angle", "radius"].indexOf(t) >= 0; }
 function nosTool(t){ return ["draw", "linepick", "rect", "circle", "polygon", "auto", "ded", "dedrect", "open"].indexOf(t) >= 0; }
+/* the contact number: shown on a click of the phone button in the top bar (no longer in the window's title) */
+const CONTACT_NO = "03016-5486522";
+function contactPop(show){
+  let p = $("ctPop"); const b = $("bContact"), on = !!p && p.classList.contains("on");
+  if (show === false || (show == null && on)) { if (p) p.classList.remove("on"); b.setAttribute("aria-expanded", "false"); return; }
+  if (!p) {
+    p = document.createElement("div"); p.id = "ctPop"; p.className = "ctpop"; p.setAttribute("role", "dialog"); p.setAttribute("aria-label", "Contact");
+    p.innerHTML = `<svg class="ic" style="color:var(--accent,#1d4ed8)"><use href="#i-phone"/></svg><b>${CONTACT_NO}</b><a class="btn sm pri" href="tel:${CONTACT_NO.replace(/\D/g, "")}">Call</a><button type="button" class="btn sm" id="ctCopy">Copy</button>`;
+    document.body.appendChild(p);
+    $("ctCopy").onclick = () => { (navigator.clipboard ? navigator.clipboard.writeText(CONTACT_NO) : Promise.reject()).then(() => toast("Number copied", 1500), () => toast(CONTACT_NO, 4000)); };
+    document.addEventListener("pointerdown", e => { const q = $("ctPop"); if (q && q.classList.contains("on") && !q.contains(e.target) && !e.target.closest("#bContact")) contactPop(false); }, true);
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && $("ctPop") && $("ctPop").classList.contains("on")) contactPop(false); });
+  }
+  p.classList.add("on"); b.setAttribute("aria-expanded", "true");
+  const r = b.getBoundingClientRect(); p.style.top = (r.bottom + 6) + "px"; p.style.left = Math.max(6, Math.min(r.right - p.offsetWidth, innerWidth - p.offsetWidth - 6)) + "px";
+}
 function condMru(){   // the conditions used last in this session, the active one first
   if (!P.proj) return [];
   const L = S.condMru = (S.condMru || []).filter(id => cond(id));
@@ -12100,6 +12116,7 @@ function wire(){
   $("bZw").onclick = () => P.proj && S.page && setTool("zoomwin");
   $("bUndo").onclick = undoAny; $("bRedo").onclick = redoAny;
   $("bExport").onclick = exportMenu;
+  $("bContact").onclick = () => contactPop();
   $("scaleChip").onclick = scaleDialog;
   $("bNewCond").onclick = () => P.proj && editCond(null); $("bCols").onclick = () => P.proj && colsDialog();
   $("bProjects").onclick = showStart;
@@ -16847,7 +16864,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
     floorsDialog, floorAddMany, floorNext, floorTitleIn, floorZoom, floorMenu, floorBoxStart, floorNewAsk, floorLegends, floorLegendSplit, legendFloorSet, legendFit, legendTitle, floorTitleOf,
-    quickItemsDialog, quickItemsAdd, qkCat, qkNeed, qkFind, PRESETS, condPop, condUse, condBack, condMru, renderCondPick, nosSet, nosNow, nosNew, nosMenu, nosTyped, nosSelDialog, autoMenu, autoWindowUI, mineSet, tbGroups, tbPref, MINE_START, applyChestProfile,
+    contactPop, CONTACT_NO, quickItemsDialog, quickItemsAdd, qkCat, qkNeed, qkFind, PRESETS, condPop, condUse, condBack, condMru, renderCondPick, nosSet, nosNow, nosNew, nosMenu, nosTyped, nosSelDialog, autoMenu, autoWindowUI, mineSet, tbGroups, tbPref, MINE_START, applyChestProfile,
     get SNAP_PX(){ return SNAP_PX; }, get HIT_PX(){ return HIT_PX; }};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
