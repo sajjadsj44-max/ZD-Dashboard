@@ -803,7 +803,127 @@ body.pc-compact .rpanel[data-rp="takeoff"] .tool{min-width:42px;padding:4px 3px}
 @container stg (max-width:1300px){body.pc-compact .rpanel[data-rp="takeoff"] .tool{min-width:38px;padding:4px 1px}body.pc-compact .rpanel[data-rp="takeoff"] .rg{padding:0 2px}}
 </style>
 <style id="zdTheme">
-/* the colourful look (Settings → Ribbon & toolbar → Colourful look; off = the classic look above) */
+/* the colourful look (Settings → Ribbon & toolbar → Colourful look; off = the classic look above). Colours, borders, radii,
+   shadows and icon tiles only — no size, padding or margin changes, so every bar keeps its height and the drawing its size. */
+:root{--accent:#1d4ed8;--accent-h:#1e40af;--body:#1e293b;--edge:#dbe3ee;--sh-pop:0 12px 32px rgba(15,23,42,.22);
+  --c-takeoff:#1d4ed8;--t-takeoff:#dbeafe;--s-takeoff:#eff6ff;--c-modify:#c2410c;--t-modify:#ffedd5;--s-modify:#fff7ed;
+  --c-markup:#be185d;--t-markup:#fce7f3;--s-markup:#fdf2f8;--c-review:#15803d;--t-review:#dcfce7;--s-review:#f0fdf4;
+  --c-costing:#6d28d9;--t-costing:#ede9fe;--s-costing:#f5f3ff;--c-export:#0f766e;--t-export:#ccfbf1;--s-export:#f0fdfa;
+  --c-mine:#a16207;--t-mine:#fef9c3;--s-mine:#fefce8;--c-view:#334155;--t-view:#e2e8f0;--s-view:#f1f5f9}
+html[data-look="colour"]{--muted:#56657a;--purple:var(--accent);accent-color:var(--accent)}
+
+/* a colour per tab, its panel and its tools' copies in My tools */
+.rtab[data-rtab="takeoff"],.rpanel[data-rp="takeoff"],#mineBox [data-mine^="takeoff/"]{--cat:var(--c-takeoff);--tile:var(--t-takeoff);--soft:var(--s-takeoff)}
+.rtab[data-rtab="modify"],.rpanel[data-rp="modify"],#mineBox [data-mine^="modify/"]{--cat:var(--c-modify);--tile:var(--t-modify);--soft:var(--s-modify)}
+.rtab[data-rtab="markup"],.rpanel[data-rp="markup"],#mineBox [data-mine^="markup/"]{--cat:var(--c-markup);--tile:var(--t-markup);--soft:var(--s-markup)}
+.rtab[data-rtab="review"],.rpanel[data-rp="review"],#mineBox [data-mine^="review/"]{--cat:var(--c-review);--tile:var(--t-review);--soft:var(--s-review)}
+.rtab[data-rtab="costing"],.rpanel[data-rp="costing"],#mineBox [data-mine^="costing/"]{--cat:var(--c-costing);--tile:var(--t-costing);--soft:var(--s-costing)}
+.rtab[data-rtab="export"],.rpanel[data-rp="export"],#mineBox [data-mine^="export/"]{--cat:var(--c-export);--tile:var(--t-export);--soft:var(--s-export)}
+.rtab[data-rtab="mine"],.rpanel[data-rp="mine"]{--cat:var(--c-mine);--tile:var(--t-mine);--soft:var(--s-mine)}
+.rtab[data-rtab="view"],.rpanel[data-rp="view"],#mineBox :is([data-mine^="view/"],[data-mine^="top/"]){--cat:var(--c-view);--tile:var(--t-view);--soft:var(--s-view)}
+/* within the Takeoff tab, a colour per way of measuring */
+.rpanel[data-rp="takeoff"] .rg[data-g="fast"]{--cat:#7c3aed;--tile:#ede9fe;--soft:#f5f3ff}
+.rpanel[data-rp="takeoff"] :is([data-tool="auto"],[data-fn="autowin"],[data-tool="fence"],#bAutoSet){--cat:#047857;--tile:#d1fae5;--soft:#ecfdf5}
+.rpanel[data-rp="takeoff"] :is([data-tool="count"],[data-tool="vsearch"]){--cat:#c2410c;--tile:#ffedd5;--soft:#fff7ed}
+.rpanel[data-rp="takeoff"] :is([data-tool="dedrect"],[data-tool="ded"],[data-tool="open"]){--cat:#b91c1c;--tile:#fee2e2;--soft:#fef2f2}
+.rpanel[data-rp="takeoff"] :is([data-tool="measure"],[data-tool="angle"],[data-tool="radius"],[data-tool="cal"]){--cat:#0e7490;--tile:#cffafe;--soft:#ecfeff}
+.rpanel[data-rp="takeoff"] :is([data-fn="floors"],[data-tool="floorbox"]){--cat:#4338ca;--tile:#e0e7ff;--soft:#eef2ff}
+
+/* header: brand navy to indigo (same height; no filter or transform — #findRes is fixed inside it) */
+html[data-look="colour"] header{background:linear-gradient(100deg,#0f2942 0%,#1e3a8a 55%,#3730a3 100%);border-bottom-color:#0b1f33;color:#fff}
+html[data-look="colour"] header .btn{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.24);color:#fff}
+html[data-look="colour"] header .btn:hover{background:rgba(255,255,255,.2);border-color:rgba(255,255,255,.45)}
+html[data-look="colour"] header .btn:disabled{opacity:.4}
+html[data-look="colour"] header .btn.tg2.on{background:#fff;border-color:#fff;color:#1e3a8a}
+html[data-look="colour"] header .btn.pri{background:#c9a24b;border-color:#c9a24b;color:#0f2942;font-weight:700}
+html[data-look="colour"] header .btn.pri:hover{background:#d6b25e}
+html[data-look="colour"] :is(header .btn,header .homebtn):focus-visible{outline:2px solid #fde68a;outline-offset:2px}
+html[data-look="colour"] .projpill{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.24)}
+html[data-look="colour"] .projpill #projName{color:#fff}
+html[data-look="colour"] .projpill #projName:focus{background:#fff;color:#0f2942}
+html[data-look="colour"] header #findIn{background:#fff;border-color:transparent}
+html[data-look="colour"] header .savest{color:#86efac}
+html[data-look="colour"] header .savest.bad{color:#fff}
+html[data-look="colour"] header a.back{color:#c7d2fe}
+html[data-look="colour"] #bClaude{box-shadow:0 0 0 1px rgba(255,255,255,.35)}
+html[data-look="colour"] #bClaude.on{box-shadow:0 0 0 2px #fde68a}
+
+/* ribbon tabs: a white active tab with a cap in its colour, a coloured dot on each */
+html[data-look="colour"] .tools{background:#fff;border-bottom-color:var(--edge)}
+html[data-look="colour"] .rtabs{background:linear-gradient(180deg,#f8fafc,#eef2f7);border-bottom-color:var(--edge)}
+html[data-look="colour"] .rtab{color:#334155;border-radius:8px 8px 0 0;background-image:radial-gradient(circle,var(--cat) 0 2.5px,transparent 3px);background-repeat:no-repeat;background-size:8px 8px;background-position:3px 50%}
+html[data-look="colour"] .rtab:hover{background-color:var(--soft);color:var(--cat)}
+html[data-look="colour"] .rtab.on{background-color:#fff;color:var(--cat);border-bottom-color:#fff;box-shadow:inset 0 3px 0 var(--cat),inset 1px 0 0 var(--edge),inset -1px 0 0 var(--edge)}
+html[data-look="colour"] .rtab:focus-visible{outline:2px solid var(--cat);outline-offset:-2px}
+html[data-look="colour"] .rtab.dropok{background-color:var(--s-mine);outline-color:var(--c-mine)}
+
+/* ribbon body: tinted icon tiles (box-shadow, so nothing moves), the active tool filled in its colour */
+html[data-look="colour"] .rrow{background:#fff}
+html[data-look="colour"] .rg{border-right-color:#e2e8f0}
+html[data-look="colour"] .rgl{color:#475569;font-weight:600}
+html[data-look="colour"] .rrow .tool{color:var(--body)}
+html[data-look="colour"] .rrow .tool .ic{color:var(--cat,#334155);background:var(--tile,transparent);border-radius:6px;box-shadow:0 0 0 2px var(--tile,transparent)}
+html[data-look="colour"] .rrow .tool .ic.ch{background:none;box-shadow:none}
+html[data-look="colour"] .rrow .tool.tlg .ic{color:#fff;background:linear-gradient(135deg,#7c3aed,#2563eb);box-shadow:0 0 0 2px #7c3aed22,0 2px 6px rgba(124,58,237,.35)}
+html[data-look="colour"] .rrow .tool:hover:not(.on){background:var(--soft,#f1f5f9);color:var(--cat,var(--body))}
+html[data-look="colour"] .rrow .tool.on{background:var(--cat,var(--accent));border-color:var(--cat,var(--accent));color:#fff;box-shadow:0 2px 8px color-mix(in srgb,var(--cat,var(--accent)) 35%,transparent)}
+html[data-look="colour"] .rrow .tool.on .ic{color:#fff;background:rgba(255,255,255,.16);box-shadow:0 0 0 2px rgba(255,255,255,.16)}
+html[data-look="colour"] .rrow .tool kbd{color:#475569}
+html[data-look="colour"] .rrow .tool.on kbd{color:#fff}
+html[data-look="colour"] .rrow .tool:focus-visible{outline:2px solid var(--cat,var(--accent));outline-offset:1px}
+html[data-look="colour"] .rrow .tool:disabled .ic{filter:grayscale(1)}
+html[data-look="colour"] #mineHint b{color:var(--c-mine)}
+html[data-look="colour"] #rbNos.on{background:#7c3aed;border-color:#7c3aed}
+
+/* always-on tools right of the tabs, and the condition button */
+html[data-look="colour"] .rtabs .tool{background:#fff;border-color:var(--edge);color:#334155}
+html[data-look="colour"] .rtabs .tool:hover:not(:disabled,.on){background:#f8fafc;border-color:#94a3b8}
+html[data-look="colour"] :is(.rtabs .tool.on,.tool.tgl.on){background:var(--accent);border-color:var(--accent);color:#fff}
+html[data-look="colour"] #bDel:not(:disabled):hover{color:#b91c1c;border-color:#fca5a5;background:#fef2f2}
+html[data-look="colour"] #snapLbl:has(#snapOn:checked) .ic{color:#15803d}
+html[data-look="colour"] .rcond{border-color:#c7d2fe;background:linear-gradient(180deg,#fff,#f5f7ff);box-shadow:0 1px 2px rgba(30,58,138,.08)}
+html[data-look="colour"] .rcond:hover{border-color:var(--accent);box-shadow:0 2px 8px rgba(29,78,216,.18)}
+html[data-look="colour"] .rcond .rcq{color:#1d4ed8;font-weight:600}
+
+/* one primary / selected colour everywhere (purple → blue), costing keeps violet */
+html[data-look="colour"] .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+html[data-look="colour"] .btn.pri:hover{background:var(--accent-h)}
+html[data-look="colour"] :is(.seg .btn.on,#viewPop .btn.tg2.on,#splitPop .btn.tg2.on){background:var(--accent);border-color:var(--accent);color:#fff}
+html[data-look="colour"] :is(.cbar .btn.tg2.on,#bSplit.on){background:var(--s-takeoff);border-color:#93c5fd;color:var(--accent)}
+html[data-look="colour"] #ctx .ci:hover{background:var(--s-takeoff);color:var(--accent)}
+html[data-look="colour"] .boq{color:var(--c-costing);background:var(--t-costing)}
+html[data-look="colour"] .pgt.on{box-shadow:0 0 0 2px #bfdbfe}
+html[data-look="colour"] .panes.split .pane.act .pstrip{background:var(--s-takeoff)}
+
+/* canvas bar, status bar, agent bar */
+html[data-look="colour"] .cbar{background:#f8fafc;border-bottom-color:#e2e8f0}
+html[data-look="colour"] .cbar .btn{background:#fff;border-color:var(--edge);color:#334155}
+html[data-look="colour"] .cbar .btn:hover{border-color:var(--accent);color:var(--accent)}
+html[data-look="colour"] .status{background:#f8fafc;border-top-color:#e2e8f0;color:#334155}
+html[data-look="colour"] .agentbar{background:linear-gradient(90deg,#f5f3ff,#eff6ff 45%,#fff)}
+html[data-look="colour"] .agch [data-agx="agFull"]{color:#6d28d9;border-color:#ddd6fe}
+html[data-look="colour"] .agch [data-agx="agRooms"]{color:#1d4ed8;border-color:#bfdbfe}
+html[data-look="colour"] .agch [data-agx="agTags"]{color:#0f766e;border-color:#99f6e4}
+html[data-look="colour"] .agch [data-agx="agFin"]{color:#be185d;border-color:#fbcfe8}
+html[data-look="colour"] .agch [data-agx="agCheck"]{color:#15803d;border-color:#bbf7d0}
+
+/* popovers, palette, dialogs, toast, start screen */
+html[data-look="colour"] :is(#viewPop,#splitPop,#snapPop,#ctx,#ctx .cm,#pop,#findRes,.cpop){border-color:var(--edge);border-radius:10px;box-shadow:var(--sh-pop)}
+html[data-look="colour"] #pal .pi.on{background:var(--s-takeoff);box-shadow:inset 3px 0 0 var(--accent)}
+html[data-look="colour"] .dlg{border-radius:12px;box-shadow:0 24px 60px rgba(15,23,42,.35)}
+html[data-look="colour"] .dlg .dh{background:linear-gradient(90deg,#eff6ff,#f5f3ff);border-radius:12px 12px 0 0;color:#0f2942}
+html[data-look="colour"] .dlg .df{background:#f8fafc;border-radius:0 0 12px 12px}
+html[data-look="colour"] #toast{background:#0f172a;box-shadow:0 10px 30px rgba(15,23,42,.35);border-left:4px solid #60a5fa}
+html[data-look="colour"] #start{background:radial-gradient(900px 320px at 0 0,#dbeafe,transparent 70%),radial-gradient(700px 280px at 100% 0,#ede9fe,transparent 70%),var(--bg)}
+html[data-look="colour"] .card{border-color:var(--edge);box-shadow:0 1px 3px rgba(15,23,42,.06)}
+html[data-look="colour"] .qkch.on{background:var(--accent);border-color:var(--accent)}
+html[data-look="colour"] .qkgh{color:#334155}
+
+/* contrast for small text and glyph buttons */
+html[data-look="colour"] :is(.props .psec,.ctypes button b,table.sh tr.below td){color:#56657a}
+html[data-look="colour"] :is(.hidebtn,.cond .ed,.crow .ed,.ctr .car,.cgrp2 .car){color:#64748b}
+@media (forced-colors:active){html[data-look="colour"] :is(.rrow .tool.on,.rtabs .tool.on,.rtab.on){outline:2px solid Highlight;outline-offset:-2px}}
+@media (prefers-reduced-motion:reduce){html[data-look="colour"] *{transition:none!important}}
 </style>
 </head>
 <body>
