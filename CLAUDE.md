@@ -46,6 +46,11 @@
 - Passwords: `123` for Payments on its own (`zameen-developments/?app=pay`), `sa` for everything else
   (the complete Dashboard `?app=all`, `?app=cm`, `?app=ra` (QS Cost Control), `?app=calc`, `?app=prod`, PDF Takeoff, Drawing Tracker, the dashboards list).
   `zameen-developments/` with no `?app=` opens the start screen that picks one of them.
+- PDF Takeoff's friends' link `takeoff/?team` asks a **username + password** per friend instead of `sa`
+  (checked against `takeoff/users.json`: salted PBKDF2-SHA256 hashes only, never a plain password). The owner
+  adds / removes them in Settings › Team logins, which saves users.json to main with a GitHub token asked
+  when saving (kept only while the page is open) or downloads it. The team view hides backups, Recover,
+  Settings › Backup & reset and the links to the other ZD pages. `tools/test_takeoff_team.js` checks it.
 - One exception, asked for by the owner: a **trusted computer** (the owner's laptop) is never asked, on any
   page. Its browser keeps a random key in localStorage `zd-trusted-computer`; every page with a lock
   (zameen-developments, takeoff, dashboards, drawing-tracker) lists only the key's SHA-256 in `TRUSTED` —

@@ -1,0 +1,5 @@
+{
+ "about": "PDF Takeoff team logins for takeoff/?team. Passwords are salted PBKDF2-SHA256 hashes. Edited from Settings > Team logins.",
+ "iter": 150000,
+ "users": []
+}
