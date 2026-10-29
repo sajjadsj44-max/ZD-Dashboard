@@ -171,6 +171,12 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
       ok(/not right/.test(await page.innerText("#dlgB")), "wrong password: asked again");
       await page.fill("#dlgPw", "open123"); await page.click("#dlgOk");
       ok(await page.waitForFunction(() => zdTakeoff.P.proj.files.some(f => f.name === "locked.pdf") && zdTakeoff.S.geo[zdTakeoff.S.key], null, {timeout: 10000}).then(() => true, () => false), "right password: the locked PDF opens and is indexed");
+      await wait(1500);   // (the whole-page picture and thumbnails would be kept by now)
+      const lk = await T(async () => { const f = zdTakeoff.P.proj.files.find(x => x.name === "locked.pdf"), id = encodeURIComponent(f.id), ks = [];
+        for (const n of ["zd-pages-v1", "zd-thumbs-v1"]) ks.push(...(await (await caches.open(n)).keys()).map(r => r.url));
+        return {locked: !!f.locked, kept: ks.filter(u => u.includes(id)).length, pw: JSON.stringify(zdTakeoff.P.proj).includes("open123")}; });
+      ok(lk.locked && !lk.pw, "the locked PDF is marked locked in the project, its password nowhere in it");
+      ok(lk.kept === 0, "…and no picture of its pages is kept in the browser (" + lk.kept + ")");
       const lp = await dl("#exPdf1"), PL = require(path.join(LIBS, "pdf-lib")); let lpd = null; try { lpd = await PL.PDFDocument.load(fs.readFileSync(lp)); } catch (e) {}
       ok(lpd && lpd.getPageCount() === 1 && !lpd.isEncrypted, "marked-up PDF of the locked drawing: opens with no password, one page (flattened)");
     } else R.notTested.push({what: "Password-protected PDF in the QA run", why: "no encrypted fixture (python3 + pypdf not available to build one)"});
@@ -1088,7 +1094,7 @@ let LOCKED = null;
 function lockedPdf(){
   if (LOCKED) return LOCKED;
   try { const cp = require("child_process"), src = path.join(tmp, "plain.pdf"), dst = path.join(tmp, "locked.pdf"); fs.writeFileSync(src, makePdf());
-    cp.execFileSync("python3", ["-c", `from pypdf import PdfReader, PdfWriter\nr=PdfReader(${JSON.stringify(src)});w=PdfWriter()\nfor p in r.pages: w.add_page(p)\nw.encrypt(user_password="open123", owner_password="own", algorithm="AES-128")\nw.write(${JSON.stringify(dst)})`], {stdio: "ignore"});
+    for (const py of ["python3", "python"]) try { cp.execFileSync(py, ["-c", `from pypdf import PdfReader, PdfWriter\nr=PdfReader(${JSON.stringify(src)});w=PdfWriter()\nfor p in r.pages: w.add_page(p)\nw.encrypt(user_password="open123", owner_password="own", algorithm="AES-128")\nw.write(${JSON.stringify(dst)})`], {stdio: "ignore"}); break; } catch (e) {}   // (python3, else python: on Windows python3 may be only the Store stub)
     LOCKED = fs.readFileSync(dst); } catch (e) { LOCKED = Buffer.alloc(0); }
   return LOCKED;
 }

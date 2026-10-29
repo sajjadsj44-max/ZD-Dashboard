@@ -584,7 +584,7 @@ function restore(js){ const o = JSON.parse(js), bb0 = P.proj.bbImp || {}, rt0 = 
    and let go for the rest — a project left behind frees its memory as before */
 const WARM_MB = 400;   // the project just left keeps its opened drawings while they come to no more than this: switching back and forth is then instant
 function pruneCaches(prev){
-  const keep = new Set(); PANES.forEach(pn => pn.sess.proj && pn.sess.proj.files.forEach(f => keep.add(f.id)));
+  const keep = new Set(S.visitOnly || []); PANES.forEach(pn => pn.sess.proj && pn.sess.proj.files.forEach(f => keep.add(f.id)));   // (a PDF open for this visit only cannot be opened again)
   if (prev && prev.files && prev.files.reduce((a, f) => a + (+f.size || 0) * (f.cad ? 10 : 1), 0) <= WARM_MB * 1048576) prev.files.forEach(f => keep.add(f.id));   // (an AutoCAD drawing, held as its scene, takes some ten times its file)
   const fid = k => String(k).split(":")[0];
   Object.keys(S.docs || {}).forEach(id => { if (!keep.has(id)) { const d = S.docs[id]; if (d && d.destroy) d.destroy(); delete S.docs[id]; } }); rcDrop(id => keep.has(id));
@@ -658,7 +658,9 @@ async function doc(fileId, ask1){
     const rec = await dbGetRaw("pdfs", fileId);   // (a big one: its Blob, which pdf.js reads a piece at a time)
     if (!rec) throw new Error("PDF missing — add “" + ((f || {}).name || fileId) + "” again with + PDF to re-attach it.");
     if (rec.pw) { delete rec.pw; await dbPut("pdfs", rec, fileId).catch(() => {}); }   // a password an earlier version kept with the PDF: not kept any more
-    try { const {d} = await openPdfData(await loadPdfjs(), rec.data, (f && f.name) || rec.name || "the PDF", "opened"); S.pwNo.delete(fileId); return S.docs[fileId] = rotDoc(d, fileId); }
+    try { const {d, pw} = await openPdfData(await loadPdfjs(), rec.data, (f && f.name) || rec.name || "the PDF", "opened"); S.pwNo.delete(fileId);
+      if (pw) { d.zdLocked = true; if (f && !f.locked) { f.locked = true; save(); } }   // (locked: no picture of its pages is kept in the browser — only that it is locked, never the password)
+      return S.docs[fileId] = rotDoc(d, fileId); }
     catch (e) { if (e && e.pwNo) S.pwNo.add(fileId); throw e; }
   })().finally(() => { delete S.docP[fileId]; });
   return S.docP[fileId];
@@ -747,8 +749,10 @@ async function openPdfData(lib, data, name, verb, pw0){
   let pw = pw0, turn = null;
   try {
     for (let tries = 0; ; tries++) {
-      try { return {d: await lib.getDocument(pdfSrc(lib, data, pw)).promise, pw}; }   // (pw: for the caller to open the same PDF again at once — never kept)
+      const o = pdfSrc(lib, data, pw);
+      try { return {d: pdfOwn(await lib.getDocument(o).promise, o), pw}; }   // (pw: for the caller to open the same PDF again at once — never kept)
       catch (e) {
+        if (o.worker) { o.zdT.dead = true; try { o.worker.destroy(); } catch (er) {} }
         if (!e || e.name !== "PasswordException") throw e;
         if (!turn) { const prev = openPdfData.q; let go; openPdfData.q = new Promise(r => { go = r; }); turn = go; await prev; }   // one password question at a time
         busy("");
@@ -769,18 +773,28 @@ const PDF_CHUNK = 1 << 20;
 function pdfSrc(lib, data, pw){
   const o = {isEvalSupported: false, password: pw};
   if (!(data instanceof Blob)) return Object.assign(o, {data: new Uint8Array(data.slice(0))});
-  const t = new lib.PDFDataRangeTransport(data.size, null);
-  t.requestDataRange = (a, b) => { const go = n => data.slice(a, b).arrayBuffer().then(buf => t.onDataRange(a, new Uint8Array(buf)),
-    e => n ? setTimeout(() => go(n - 1), 300) : toast("The PDF could not be read (" + (e && e.message || e) + ") — was the file moved or changed? Add it again with + PDF", 9000)); go(1); };   // (a piece not read: tried once more, then said — pdf.js would wait for it for ever)
-  return Object.assign(o, {range: t, length: data.size, rangeChunkSize: PDF_CHUNK, disableAutoFetch: true, disableStream: true});
+  const t = new lib.PDFDataRangeTransport(data.size, null), w = new lib.PDFWorker();   // (a worker of its own: see pdfOwn)
+  t.requestDataRange = (a, b) => { const go = n => data.slice(a, b).arrayBuffer().then(buf => { if (!t.dead) try { t.onDataRange(a, new Uint8Array(buf)); } catch (e) {} },
+    e => { if (t.dead) return; if (n) return setTimeout(() => go(n - 1), 300);
+      toast("The PDF could not be read (" + (e && e.message || e) + ") — was the file moved or changed? Add it again with + PDF", 9000); pdfKill(o); }); go(1); };   // (a piece not read: tried once more, then said, and the document let go — pdf.js would wait for it for ever)
+  return Object.assign(o, {range: t, length: data.size, rangeChunkSize: PDF_CHUNK, disableAutoFetch: true, disableStream: true, worker: w, zdT: t});
 }
+/* a document read by ranges is destroyed with its worker: pdf.js does not finish destroying one whose page was still waiting for a
+   piece (its worker would live on, holding the file's full length and every piece read), and it ends only workers it made itself */
+function pdfOwn(d, o){
+  if (!o.worker) return d; const des = d.destroy.bind(d); o.zdDoc = d;
+  d.destroy = () => { o.zdT.dead = true; const r = Promise.resolve().then(des).catch(() => {}); try { o.worker.destroy(); } catch (e) {} return r; };
+  return d;
+}
+function pdfKill(o){ o.zdT.dead = true; const d = o.zdDoc; if (d) { Object.keys(S.docs || {}).forEach(k => { if (S.docs[k] === d) delete S.docs[k]; }); d.destroy(); } else try { o.worker.destroy(); } catch (e) {} }
 /* a PDF is known by a fingerprint of its content (SHA-256), not by its name and size: the same drawing added again
    (under any name) is re-attached to its measurements; a different drawing under a name already in the project is asked
    about — add it as a new drawing, or replace the old one as its revision — never swapped in silently */
 /* the stored PDF opened in pdf-lib, for its pages to be copied as they are (vectors); null for one over PDFLIB_MAX — pdf-lib holds it
    whole, several times over — whose pages go in as pictures drawn by pdf.js instead, as a turned page's do */
 async function libDoc(L, f){
-  const rec = await dbGetRaw("pdfs", f); if (!rec) throw new Error("PDF missing — add “" + ((P.proj.files.find(x => x.id === f) || {}).name || f) + "” again with + PDF");
+  const rec = await dbGetRaw("pdfs", f); if (!rec && S.docs[f]) return null;   // (open for this visit only: its pages as pictures)
+  if (!rec) throw new Error("PDF missing — add “" + ((P.proj.files.find(x => x.id === f) || {}).name || f) + "” again with + PDF");
   return recSize(rec) > PDFLIB_MAX ? null : L.PDFDocument.load(await recBuf(rec), {ignoreEncryption: true});
 }
 async function sha256(buf){ try { const h = await crypto.subtle.digest("SHA-256", buf); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join(""); } catch (e) { return ""; } }
@@ -877,16 +891,18 @@ async function addFiles(files){
       try { await dbPut("pdfs", Object.assign({name, size: f.size, data, sha}, big ? {blobs: ["data"]} : {}, cad ? {src: cad.src, scene: cad.scene, pdfSha: await sha256(data)} : {}), id); }   // stored first: a PDF listed in the project is always one that can be opened
       catch (e) { if (!big || !/quota/i.test((e && e.name) + " " + (e && e.message))) throw e; kept = false; }   // (no room left in this browser for a copy of a big PDF: open for this visit only, read from the file itself)
       if (!kept) { const old = await dbGetRaw("pdfs", id).catch(() => null);
-        if (old && (how === "same" || (sha && old.sha === sha))) kept = true;   // the same drawing, kept before: that copy is used
-        else if (old && how === "replace") {   // the drawing it replaces stays kept as it is: the project's references move to a new id (its PDF added again next time), so the old copy is never opened in place of the new one
+        if (old && (sha && old.sha ? old.sha === sha : how === "same")) kept = true;   // the same drawing (by its fingerprint), kept before: that copy is used
+        else if (old) {   // another drawing kept under this id (the one a revision replaces): it stays as it is and the project's references move to a new id (its PDF added again next time), so it is never opened in place of this one
           const nid = uid("F"), o = JSON.parse(remapFileId(JSON.stringify(P.proj), meta.id, nid));
           dropFileCache(meta.id); Object.keys(o).forEach(k => { P.proj[k] = o[k]; }); S.undo = []; S.redo = []; S.sel = null; S.selMark = null; S.multi.clear();
           meta = P.proj.files.find(x => x.id === nid); } }
       if (big && kept) { const back = await dbGetRaw("pdfs", id), o = back && back.data instanceof Blob ? await openPdfData(lib, back.data, f.name, "", pw).catch(() => null) : null;   // read from the browser's copy from now on (the file added may be moved or changed on the disk)
         if (o) { d.destroy(); d = o.d; } }
-      pw = null;
+      const locked = !!pw; pw = null;
       if (!meta) { meta = {id, name, size: f.size, sha, pages: d.numPages, added: new Date().toISOString()}; if (cad) meta.cad = cad.meta; P.proj.files.push(meta); }
       else { meta.pages = d.numPages; meta.size = f.size; if (sha) meta.sha = sha; if (how === "replace") meta.replaced = new Date().toISOString(); if (cad) meta.cad = cad.meta; else delete meta.cad; }
+      if (locked) meta.locked = true; else delete meta.locked;   // (locked with a password: no picture of its pages is kept in the browser)
+      S.visitOnly = S.visitOnly || new Set(); if (kept) S.visitOnly.delete(meta.id); else S.visitOnly.add(meta.id);   // (open for this visit only: pruneCaches keeps it open)
       if (cad) cadAdopt(meta, cad, how);
       dropFileCache(meta.id);
       S.docs[meta.id] = rotDoc(d, meta.id); if (cad) { S.cadSc = S.cadSc || {}; S.cadSc[meta.id] = cad.scene; }
@@ -998,7 +1014,7 @@ async function gotoPage(fileId, pageNo, pn = ACT){
   if (cadMeta(fileId, proj)) { await cadLoad(fileId, proj); if (stale()) return; }   // an AutoCAD drawing: its scene draws the screen
   let pg; try { pg = await d.getPage(pageNo); } catch (e) { if (!stale()) toast("Page " + pageNo + " could not be read: " + (e.message || e), 6000); return; }
   if (stale()) return;
-  if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; }
+  if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; } pn.hiWait = false;
   pn.fileId = fileId; pn.pageNo = pageNo; pn.key = keyOf(fileId, pageNo);
   pn.page = pg;
   if (pn.cadBmp && pn.cadBmp.page !== pg) freeCadBitmap(pn);
@@ -1186,17 +1202,17 @@ async function revisionDiff(){
    same way (its turn, layers, faint / thin lines, black & white, background, the PDF's own markups) — never for a revision
    overlay. About 140 MB of pictures at most, the least recently used let go first. */
 const RC = [], RC_PX = 3.5e7;
+function ocOff(f){ const cfg = S.ocgs && S.ocgs[f]; let off = ""; if (cfg) { try { Object.keys(cfg.getGroups() || {}).forEach(id => { if (!ocOn(cfg, id)) off += id + ","; }); } catch (e) {} } return off; }   // the PDF's layers switched off
 function rcSig(pn){
-  const f = pn.fileId, proj = pn.sess.proj, cfg = S.ocgs && S.ocgs[f]; let off = "";
-  if (cfg) { try { Object.keys(cfg.getGroups() || {}).forEach(id => { if (!ocOn(cfg, id)) off += id + ","; }); } catch (e) {} }
-  return [pgRot(pn.page, proj), S.boost ? 1 : 0, S.thin ? 1 : 0, S.mono ? 1 : 0, darkNow(f, proj) ? 1 : 0, bbOffOf(f) ? 1 : 0, off].join("|");
+  const f = pn.fileId, proj = pn.sess.proj;
+  return [pgRot(pn.page, proj), S.boost ? 1 : 0, S.thin ? 1 : 0, S.mono ? 1 : 0, darkNow(f, proj) ? 1 : 0, bbOffOf(f) ? 1 : 0, ocOff(f)].join("|");
 }
 function rcGet(pn, kind, fit){
   if (pn.cmp || !pn.page) return null; const sig = rcSig(pn), i = RC.findIndex(e => e.kind === kind && e.page === pn.page && e.sig === sig && fit(e));
   if (i < 0) return null; const e = RC[i]; if (i) { RC.splice(i, 1); RC.unshift(e); } return e;
 }
-function rcPut(pn, kind, cv, v){
-  if (pn.cmp || !pn.page) return; const e = {kind, page: pn.page, file: pn.fileId, sig: rcSig(pn), cv, v, px: cv.width * cv.height};
+function rcPut(pn, kind, cv, v, sig){   // sig: how it was drawn (rcSig when it was started)
+  if (pn.cmp || !pn.page) return; const e = {kind, page: pn.page, file: pn.fileId, sig: sig || rcSig(pn), cv, v, px: cv.width * cv.height};
   for (let i = RC.length - 1; i >= 0; i--) { const o = RC[i]; if (o.kind === kind && o.page === e.page && o.sig === e.sig && (kind === "low" || (o.v.s === v.s && o.v.tx === v.tx && o.v.ty === v.ty && o.cv.width === cv.width && o.cv.height === cv.height))) RC.splice(i, 1); }
   RC.unshift(e); let px = 0; for (let i = 0; i < RC.length; i++) { px += RC[i].px; if (px > RC_PX && i) { RC.splice(i).forEach(o => { o.cv.width = 1; }); break; } }
 }
@@ -1219,21 +1235,21 @@ async function lowKept(pn){
     if (bm.width !== Math.ceil(vp.width) || bm.height !== Math.ceil(vp.height)) { bm.close(); return null; }
     const cv = document.createElement("canvas"); cv.width = bm.width; cv.height = bm.height; cv.getContext("2d").drawImage(bm, 0, 0); bm.close(); return cv; } catch (e) { return null; }
 }
-function lowKeep(pn, cv){ const u = lowUrl(pn); if (!u || !window.caches) return;
+function lowKeep(pn, cv, u){ if (!u || !window.caches || (S.docs[pn.fileId] || {}).zdLocked) return;
   try { cv.toBlob(b => { if (b) caches.open(LOW_CACHE).then(c => c.put(u, new Response(b, {headers: {"Content-Type": "image/png"}}))).then(() => { if (Math.random() < 0.1) cacheTrim(LOW_CACHE, LOW_KEEP); }).catch(() => {}); }, "image/png"); } catch (e) {} }
 function lowShow(pn, cv, s){ const c = pn.el.low; c.width = cv.width; c.height = cv.height; c.getContext("2d").drawImage(cv, 0, 0); pn.low = {s}; applyView(pn); }
 async function renderLow(pn = ACT){   // drawn off screen, then shown only if the page is still the one on screen
   if (cadOn(pn)) return cadLow(pn);   // an AutoCAD drawing: from its scene
   { const e = rcGet(pn, "low", () => true); if (e) return lowShow(pn, e.cv, e.v.s); }   // drawn a moment ago: at once
   pn.lowBusy = true;
-  try { const page = pn.page, kept = await lowKept(pn);
-    if (kept && pn.page === page) { const s = lowSc(pn); rcPut(pn, "low", kept, {s}); return lowShow(pn, kept, s); }   // drawn in an earlier session
+  try { const page = pn.page, sig = rcSig(pn), kept = await lowKept(pn);
+    if (kept && pn.page === page && rcSig(pn) === sig) { const s = lowSc(pn); rcPut(pn, "low", kept, {s}, sig); return lowShow(pn, kept, s); }   // drawn in an earlier session
     if (pn.page !== page) return;
     return await renderLow0(pn); } finally { pn.lowBusy = false; }
 }
 async function renderLow0(pn){
   thumbHalt();
-  const page = pn.page, fileId = pn.fileId, sc = lowSc(pn);
+  const page = pn.page, fileId = pn.fileId, sc = lowSc(pn), cmp0 = pn.cmp, sig = rcSig(pn), u0 = lowUrl(pn);   // (kept only as drawn: not if the settings or the compare changed meanwhile)
   const vp = vpOf(page, pn.sess.proj, {scale: sc}), off = document.createElement("canvas");
   off.width = Math.ceil(vp.width); off.height = Math.ceil(vp.height);
   const ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
@@ -1243,12 +1259,12 @@ async function renderLow0(pn){
   await overlayCmp(ctx, off.width, off.height, sc, 0, 0, pn);
   if (pn.page !== page) return;
   const c = pn.el.low; c.width = off.width; c.height = off.height; c.getContext("2d").drawImage(off, 0, 0);
-  pn.low = {s: sc}; rcPut(pn, "low", off, {s: sc}); lowKeep(pn, off);
+  pn.low = {s: sc}; if (!cmp0 && !pn.cmp && rcSig(pn) === sig) { rcPut(pn, "low", off, {s: sc}, sig); lowKeep(pn, off, u0); }
   applyView(pn);
 }
 function renderHi(now, pn = ACT){
   clearTimeout(pn.hiT);
-  if (cadOn(pn)) { if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; } return cadHi(!!now, pn); }   // a CAD drawing: drawn from its scene, at once
+  if (cadOn(pn)) { if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; } pn.hiWait = false; return cadHi(!!now, pn); }   // a CAD drawing: drawn from its scene, at once
   if (pn.page) { const {dpr, w, h} = hiSize(pn), v0 = pn.view;   // this view drawn a moment ago (back to a zoom, a page, a project): shown at once
     const e = rcGet(pn, "hi", o => o.v.dpr === dpr && o.cv.width === w && o.cv.height === h && Math.abs(o.v.s - v0.s) <= 1e-6 * v0.s && Math.abs(o.v.tx - v0.tx) < 0.5 && Math.abs(o.v.ty - v0.ty) < 0.5);
     if (e) { if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (er) {} pn.renderTask = null; } pn.hiWait = false; hiShow(pn, e.cv, e.v, dpr); return; } }
@@ -1256,7 +1272,7 @@ function renderHi(now, pn = ACT){
   pn.hiT = setTimeout(async () => {
     const page = pn.page; if (!page) return;
     if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} }
-    const {st, dpr, w, h} = hiSize(pn), c = pn.el.hi, v = Object.assign({}, pn.view), fileId = pn.fileId;
+    const {st, dpr, w, h} = hiSize(pn), c = pn.el.hi, v = Object.assign({}, pn.view), fileId = pn.fileId, cmp0 = pn.cmp, sig = rcSig(pn);
     const off = document.createElement("canvas"); off.width = w; off.height = h;
     const ptPx = v.s * dpr, ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && ptPx < 1.6 && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
     const task = sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vpOf(page, pn.sess.proj, {scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}));
@@ -1269,7 +1285,7 @@ function renderHi(now, pn = ACT){
     pn.renderTask = null; pn.hiWait = false;
     c.width = w; c.height = h; c.style.width = st.clientWidth + "px"; c.style.height = st.clientHeight + "px";
     c.getContext("2d").drawImage(off, 0, 0);
-    pn.rendered = Object.assign({dpr}, v); rcPut(pn, "hi", off, pn.rendered);
+    pn.rendered = Object.assign({dpr}, v); if (!cmp0 && rcSig(pn) === sig) rcPut(pn, "hi", off, pn.rendered, sig);
     applyView(pn);
   }, now ? 0 : 140);
 }
@@ -5424,9 +5440,9 @@ const thumbHalt = () => { if (thumbTask) { try { thumbTask.cancel(); } catch (e)
 const onInput = () => { lastInput = performance.now(); thumbHalt(); };
 ["wheel", "pointerdown", "keydown"].forEach(t => addEventListener(t, onInput, {capture: true, passive: true}));
 addEventListener("pointermove", e => { if (e.buttons) onInput(); }, {capture: true, passive: true});
-const thumbUrl = (pr, f, p) => { const m = pr.files.find(x => x.id === f); if (!m) return ""; const fp = m.sha || [m.size, m.replaced || m.added || ""].join("-");
-  return location.origin + "/zd-thumb/" + encodeURIComponent(m.id + "-" + fp) + "/" + p + "-" + rotOf(pr, keyOf(f, p)) + ".png"; };
-async function thumbKept(u){ try { if (!u || !window.caches) return ""; const r = await (await caches.open(THUMB_CACHE)).match(u); return r ? URL.createObjectURL(await r.blob()) : ""; } catch (e) { return ""; } }
+const thumbUrl = (pr, f, p) => { const m = pr.files.find(x => x.id === f); if (!m || m.locked || (S.docs[f] || {}).zdLocked) return ""; const fp = m.sha || [m.size, m.replaced || m.added || ""].join("-");   // (a locked PDF: no picture kept)
+  return location.origin + "/zd-thumb/" + encodeURIComponent(m.id + "-" + fp) + "/" + p + "-" + rotOf(pr, keyOf(f, p)) + "-" + strHash((bbOffOf(f) ? 1 : 0) + "|" + ocOff(f)) + ".png"; };
+async function thumbKept(u){ try { if (!u || !window.caches) return ""; const r = await (await caches.open(THUMB_CACHE)).match(u); return r ? await dataUrlOf(await r.blob()) : ""; } catch (e) { return ""; } }
 function thumbKeep(u, cv){ try { if (u && window.caches) cv.toBlob(b => { if (b) caches.open(THUMB_CACHE).then(c => c.put(u, new Response(b, {headers: {"Content-Type": "image/png"}}))).then(() => { if (Math.random() < 0.02) cacheTrim(THUMB_CACHE, 5000); }).catch(() => {}); }, "image/png"); } catch (e) {} }
 async function thumbQuiet(pr){   // until the page on screen is drawn and the user has paused (a few seconds at most)
   for (let n = 0; n < 50 && P.proj === pr; n++) {
@@ -5442,13 +5458,13 @@ async function thumbRun(){
       if (cpg) { const s2 = 200 / Math.max(cpg.w, cpg.h), cv = document.createElement("canvas"); cv.width = Math.ceil(cpg.w * s2); cv.height = Math.ceil(cpg.h * s2);   // a CAD page: from its scene
         await CAD.cadDrawAsync(cv.getContext("2d"), cpg, {s: s2, tx: 0, ty: 0, W: cv.width, H: cv.height}, {dark: false, mono: false, hidden: cadHidden(f, csc), dpr: 1}); S.thumbs[k] = cv.toDataURL("image/png"); }
       else { const u = thumbUrl(pr, f, p), kept = await thumbKept(u);
-      if (kept) { if (P.proj !== pr) continue; S.thumbs[k] = kept; }   // drawn before, in this browser
+      if (kept) { if (P.proj !== pr) continue; S.thumbs[k] = kept; S.thumbHits = (S.thumbHits || 0) + 1; }   // drawn before, in this browser
       else { await thumbQuiet(pr); if (P.proj !== pr) continue;
       const pg = await (await doc(f)).getPage(+p), r0 = rotOf(pr, k), v0 = vpOf(pg, pr, {scale: 1}), vp = vpOf(pg, pr, {scale: 200 / Math.max(v0.width, v0.height)}), cv = document.createElement("canvas");
       cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height); const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
       const task = thumbTask = sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp}));
       try { await task.promise; } catch (e) { if (e && e.name === "RenderingCancelledException") { if (P.proj === pr && !S.thumbQ.includes(k)) S.thumbQ.unshift(k); continue; } throw e; } finally { if (thumbTask === task) thumbTask = null; }
-      if (rotOf(pr, k) === r0 && P.proj === pr) { S.thumbs[k] = cv.toDataURL("image/png"); thumbKeep(u, cv); } else continue; } } }   // (turned meanwhile, or another project now: drawn again when wanted)
+      if (rotOf(pr, k) === r0 && P.proj === pr) { S.thumbs[k] = cv.toDataURL("image/png"); thumbKeep(thumbUrl(pr, f, p), cv); } else continue; } } }   // (turned meanwhile, or another project now: drawn again when wanted)
     catch (e) { S.thumbs[k] = "x"; }   // PDF not attached in this browser: left blank
     const im = [...document.querySelectorAll("#pageList img[data-th], #pageStrip img[data-th]")].find(x => x.dataset.th === k); if (im && S.thumbs[k] !== "x") im.src = S.thumbs[k];
     PANES.forEach(pn => { if (pn.key === k) miniUpdate(pn); });
@@ -11678,7 +11694,7 @@ function paneShow(B, A){
   B.view = Object.assign({}, A.view); B.el.drop.style.display = "none"; renderLow(B).then(() => renderHi(true, B)); applyView(B); paneStrips(true); pruneCaches(); draw();
 }
 function paneBlank(pn){   // a window left without a drawing (its PDF was removed): empty, with the drop box
-  pn.navSeq = (pn.navSeq || 0) + 1; if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; }
+  pn.navSeq = (pn.navSeq || 0) + 1; if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; } pn.hiWait = false;
   clearTimeout(pn.hiT); freeCadBitmap(pn); Object.assign(pn, {fileId: null, page: null, base: null, key: "", low: null, rendered: null, cmp: null, autoShow: null});
   pn.el.hi.style.display = "none"; { const lc = pn.el.low; lc.width = lc.width; } pn.el.ov.innerHTML = ""; pn.el.ov2.innerHTML = ""; pn.el.drop.style.display = "flex"; paneStrip(pn, true);
 }

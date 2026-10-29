@@ -652,8 +652,8 @@ list moved to `dashboards/`; every dashboard keeps its own address. `tools/test_
 `takeoff/` does not loop, and that every dashboard link still opens.
 
 - **Big PDFs and speed** (28-Oct-2026): a PDF over 32 MB is opened as the file it is. pdf.js reads it a piece at a time
-  (its cross-reference, then only the pages drawn), first from the file added, then from the browser's copy, so the
-  file is never held whole. On a 1 GB, 17-page set: added in about 25 s, a 64 MB scan page drawn in about 3 s, reopened
+  (its cross-reference, then only the pages drawn), first from the file added, then from the browser's copy, so opening and drawing
+  never hold the file whole (only its fingerprint is worked out on the file read once, at once up to 1 GB). On a 1 GB, 17-page set: added in about 25 s, a 64 MB scan page drawn in about 3 s, reopened
   in seconds. pdf-lib only gets PDFs up to 320 MB; a bigger one's pages go into exports and plots as pictures. If the
   browser has no room left for a copy, the PDF still opens for that visit; add it again later to re-attach it. Pages,
   zooms and projects seen a moment ago show again at once, and whole-page pictures and thumbnails are kept in the

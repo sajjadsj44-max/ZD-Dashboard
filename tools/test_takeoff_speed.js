@@ -77,7 +77,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   ok(kept.pages >= 3, "the whole-page pictures are kept in the browser (" + kept.pages + ")");
   ok(kept.thumbs >= 1, "the thumbnails are kept in the browser (" + kept.thumbs + ")");
   await page.reload(); await page.waitForFunction(() => window.zdTakeoff && zdTakeoff.S.page && zdTakeoff.ACT.low, null, {timeout: 30000});
-  const after = await T(async () => { const S = zdTakeoff.S; await new Promise(r => setTimeout(r, 1500)); return {thumbs: Object.values(S.thumbs || {}).filter(u => /^blob:/.test(u)).length, page: S.pageNo}; });
+  const after = await T(async () => { const S = zdTakeoff.S; await new Promise(r => setTimeout(r, 1500)); return {thumbs: S.thumbHits || 0, page: S.pageNo}; });   // (thumbnails taken from the browser's Cache Storage, not drawn)
   ok(after.thumbs >= 1, "after a reload the thumbnails come from the browser, not drawn again (" + after.thumbs + ")");
   r = await goto(await T(() => zdTakeoff.S.fileId), 2);
   ok(await T(() => !!zdTakeoff.ACT.low), "after a reload a page seen before shows its whole-page picture straight from the browser (" + r.ms + " ms)");
