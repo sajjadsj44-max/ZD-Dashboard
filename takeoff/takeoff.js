@@ -653,7 +653,7 @@ async function doc(fileId, ask1){
   S.docP = S.docP || {}; S.pwNo = S.pwNo || new Set();
   if (S.docP[fileId]) return S.docP[fileId];
   const f = P.proj && P.proj.files.find(x => x.id === fileId);
-  if (S.pwNo.has(fileId) && !ask1) throw new Error(((f && f.name) || "The PDF") + " is locked with a password — open one of its pages to enter it");
+  if ((S.pwNo.has(fileId) || (f && f.locked)) && !ask1) throw new Error(((f && f.name) || "The PDF") + " is locked with a password — open one of its pages to enter it");   // (known to be locked: what runs in the background — thumbnails, agents, exports — never asks for it)
   S.docP[fileId] = (async () => {
     const rec = await dbGetRaw("pdfs", fileId);   // (a big one: its Blob, which pdf.js reads a piece at a time)
     if (!rec) throw new Error("PDF missing — add “" + ((f || {}).name || fileId) + "” again with + PDF to re-attach it.");
