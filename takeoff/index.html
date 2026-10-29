@@ -1406,7 +1406,7 @@ html[data-look="colour"] :is(.hidebtn,.cond .ed,.crow .ed,.ctr .car,.cgrp2 .car)
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-29d"></script>
+<script type="module" src="takeoff.js?v=2026-10-29e"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
@@ -1439,6 +1439,7 @@ html[data-look="colour"] :is(.hidebtn,.cond .ed,.crow .ed,.ctr .car,.cgrp2 .car)
   }
   function teamCheck(name, pw) {   // the user's entry when name and password match, null when not; rejected when the list can't be read
     return teamList().then(function (L) {
+      if (!L.length) return 'none';   // no login saved to the site yet
       var u = L.filter(function (x) { return x && x.u === name; })[0];
       if (!u || !pw) return null;
       return pbkdf2(pw, u.s, +u.iter || 150000).then(function (h) { return h === u.h ? u : null; });
@@ -1497,8 +1498,8 @@ html[data-look="colour"] :is(.hidebtn,.cond .ed,.crow .ed,.ctr .car,.cgrp2 .car)
       button.disabled = true; error.hidden = true;
       teamCheck(name, pw).then(function (u) {
         button.disabled = false;
-        if (u) { open(); signedIn(u); return; }
-        error.textContent = 'Incorrect username or password.'; error.hidden = false; input.focus();
+        if (u && u !== 'none') { open(); signedIn(u); return; }
+        error.textContent = u === 'none' ? 'No team logins are saved yet — the owner adds them in Settings › Team logins and clicks Save to the site.' : 'Incorrect username or password.'; error.hidden = false; input.focus();
       }, function () { button.disabled = false; error.textContent = 'Could not read the users list — check the internet connection and try again.'; error.hidden = false; });
     }
     button.addEventListener('click', unlock);

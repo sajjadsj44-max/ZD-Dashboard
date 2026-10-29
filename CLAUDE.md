@@ -71,3 +71,9 @@
 - zameen-developments, dashboards and drawing-tracker share the same inline `ZD auto-update` script (keep
   them the same, only `PAGE` differs); PDF Takeoff's is `verCheck` in takeoff.js. A new page gets the
   attribute and that script too. `tools/test_autoupdate.js` checks them.
+
+# Windows app (`app/`)
+
+- `app/ZD-Takeoff.exe` (friends: opens `takeoff/?team`) and `app/ZD-Takeoff-Pro.exe` (owner: the full app) are
+  built from `tools/takeoff-app/App.cs` by `tools/takeoff-app/build.ps1` (Windows' own csc, WebView2 inside the
+  .exe). They load the live site, so a takeoff change needs no new .exe; rebuild only when App.cs changes.

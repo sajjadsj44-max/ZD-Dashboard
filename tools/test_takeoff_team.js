@@ -59,6 +59,7 @@ const entry = (u, pw) => { const s = crypto.randomBytes(16).toString("hex"); ret
   await page.fill("#zd-lock-user", "bilal"); await page.fill("#zd-lock-input", "takeoff9"); await page.press("#zd-lock-input", "Enter");
   await page.waitForSelector(".zd-lock-error:not([hidden])");
   ok(await page.isVisible("#zd-lock"), "and can't sign in again");
+  ok(/No team logins are saved yet/.test(await page.textContent(".zd-lock-error")), "an empty list says no logins are saved yet (not 'incorrect')");
   ok(errs.length === 0, "no page errors" + (errs.length ? ": " + errs[0] : ""));
   await page.close();
 
