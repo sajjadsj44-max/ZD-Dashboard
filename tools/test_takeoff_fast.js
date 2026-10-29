@@ -180,6 +180,14 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   ok(await T(() => zdTakeoff.P.proj.last.oh) === 7 && await T(() => zdTakeoff.P.proj.last.page) === 2, "the opening height typed (7 ft) is kept on the next page");
   await T(() => { const Z = zdTakeoff; Z.gotoPage(Z.S.fileId, 1); }); await wait(500);
 
+  console.log("Tool Chest and the block agent take the conditions already there");
+  const nTile = () => T(() => zdTakeoff.P.proj.conds.filter(c => c.name === "Floor tile").length);
+  await T(() => zdTakeoff.applyChestProfile({kind: "condition", name: "Floor tile", condition: {type: "area", unit: "Sft", color: "#123456", faces: 1, dedMin: 0}})); await wait(100);
+  ok(await nTile() === 1 && await T(() => zdTakeoff.P.proj.conds.find(x => x.id === zdTakeoff.S.cond).name) === "Floor tile", "a Tool Chest profile named like a condition in the project takes it — no second Floor tile splitting the totals");
+  await T(() => { const Z = zdTakeoff; Z.mutate(() => Z.P.proj.conds.push({id: "Cblk8i", name: 'Block masonry 8"x8"x12" (internal)', type: "linear", unit: "cft", color: "#2a78d6", h: 11.375, t: 0.67, faces: 1, dedMin: 1})); });
+  await T(() => zdTakeoff.blockMasonryAgent({floor: 12, slab: 7.5, beamD: 21, beam: {"4": 0, "8i": 0, "8e": 0}, tags: {}, page: true})); await wait(200);
+  ok(await T(() => { const L = zdTakeoff.P.proj.conds; return !L.some(c => c.name === 'Block masonry 8"x8"x12"') && L.find(c => c.id === "Cblk8i").blockKey === "8i"; }), "Block masonry takes the preset's “8\"x8\"x12\" (internal)” condition instead of making a second 8\" one");
+
   console.log("command line and palette");
   ok(await T(() => /^Rect/.test(zdTakeoff.cmdFind("rec").t)), "rec → Rect (it matched nothing before)");
   ok(await T(() => zdTakeoff.cmdFind("w").t === "Auto area" && zdTakeoff.cmdFind("aa").t === "Auto area"), "w / aa → the Auto area tool (not “every room in a window…”)");

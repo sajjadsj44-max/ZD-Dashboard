@@ -14739,7 +14739,8 @@ function blockMasonryAgent(o){
   const learnt = (P.proj.blockLearn || []).filter(l => l.file === S.fileId && l.page === S.pageNo);   // the user's corrections on this page
   if (learnt.length) pieces.forEach(q => { const mid = [(q.a[0] + q.b[0]) / 2, (q.a[1] + q.b[1]) / 2], l = learnt.find(l => l.pts.some((a, i) => i && distSeg(mid, l.pts[i - 1], a) <= 0.6 * k)); if (l) q.type = l.to; });
   const H = r3(o.floor - o.slab / 12), conds = {};
-  BLOCK_TYPES.forEach(b => { let c = P.proj.conds.find(x => x.type === "linear" && x.name === b.name);
+  BLOCK_TYPES.forEach(b => { const as = [b.name, b.name + (b.key === "8i" ? " (internal)" : b.key === "8e" ? " (external)" : "")];   // (the Quick items / New condition preset names carry "(internal)" / "(external)")
+    let c = P.proj.conds.find(x => x.type === "linear" && x.name === b.name) || P.proj.conds.find(x => x.type === "linear" && as.includes(x.name));
     if (!c) c = {id: uid("C"), name: b.name, type: "linear", unit: "cft", color: COLORS[(P.proj.conds.length + 3) % COLORS.length], faces: 1, dedMin: 0};
     Object.assign(c, {unit: "cft", t: b.t, h: H, agentWall: true, blockKey: b.key}); conds[b.key] = c; });
   const ids = Object.values(conds).map(c => c.id), inR = it => !rect || it.pts.every(q => q[0] >= rect[0] && q[0] <= rect[2] && q[1] >= rect[1] && q[1] <= rect[3]);
@@ -15314,6 +15315,8 @@ function applyChestProfile(p){
   }
   if (!P.proj) return toast("Open a project before using a measurement profile");
   const c = Object.assign({id: uid("C"), name: p.name, hidden: false}, JSON.parse(JSON.stringify(p.condition || {})));
+  const have = P.proj.conds.find(x => x.type === c.type && String(x.name).trim().toLowerCase() === String(p.name).trim().toLowerCase());
+  if (have) { S.cond = have.id; setTool(have.type === "count" ? "count" : "draw"); refresh(); toast("Using " + have.name + " — already in this project (a second copy would split its totals)", 2800); return; }
   c.id = uid("C"); c.name = p.name; c.color = /^#[0-9a-f]{6}$/i.test(c.color || "") ? c.color : toolDefaults().condColor;
   mutate(() => { P.proj.conds.push(c); }, "Add condition from Tool Chest");
   S.cond = c.id; setTool(c.type === "count" ? "count" : "draw"); refresh(); toast("Condition profile ready: " + p.name, 2500);
@@ -16668,7 +16671,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
     floorsDialog, floorAddMany, floorNext, floorTitleIn, floorZoom, floorMenu, floorBoxStart, floorNewAsk, floorLegends, floorLegendSplit, legendFloorSet, legendFit, legendTitle, floorTitleOf,
-    quickItemsDialog, quickItemsAdd, qkCat, qkNeed, qkFind, PRESETS, condPop, condUse, condBack, condMru, renderCondPick, nosSet, nosNow, nosNew, nosMenu, nosTyped, nosSelDialog, autoMenu, autoWindowUI, mineSet, tbGroups, tbPref, MINE_START,
+    quickItemsDialog, quickItemsAdd, qkCat, qkNeed, qkFind, PRESETS, condPop, condUse, condBack, condMru, renderCondPick, nosSet, nosNow, nosNew, nosMenu, nosTyped, nosSelDialog, autoMenu, autoWindowUI, mineSet, tbGroups, tbPref, MINE_START, applyChestProfile,
     get SNAP_PX(){ return SNAP_PX; }, get HIT_PX(){ return HIT_PX; }};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
