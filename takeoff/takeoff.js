@@ -1022,7 +1022,7 @@ async function gotoPage(fileId, pageNo, pn = ACT){
   pn.rendered = null; pn.el.hi.style.display = "none"; { const lc = pn.el.low; lc.width = lc.width; }   // the last page's picture goes at once
   pn.autoShow = null; pn.cmp = null; pn.el.cmpLegend.style.display = "none"; pn.iso = null;
   if (here()) { draftClear(); S.resume = null; S.gap = null; S.multi.clear(); S.hover = null; S.measure = null; S.measures = []; S.snap = null; S.typeHint = null; if ($("stType")) $("stType").textContent = ""; }
-  proj.last = {file: fileId, page: pageNo}; if (proj === P.proj) save(); else dbPut("projects", proj).catch(() => {});
+  proj.last = Object.assign(proj.last && proj.last.oh ? {oh: proj.last.oh} : {}, {file: fileId, page: pageNo}); if (proj === P.proj) save(); else dbPut("projects", proj).catch(() => {});
   if (here()) { $("pageSel").value = fileId + "|" + pageNo; if ($("pageSel").value !== fileId + "|" + pageNo || (proj.pageHide || []).length) buildPageSel(); pgMark(); }   // (a hidden page is listed only while it is open)
   pn.el.drop.style.display = "none"; if (here()) bgMark();
   fit(pn); if (here()) renderLayers();
@@ -2948,11 +2948,12 @@ async function autoAt(p, nc){   // nc: a new area condition, added with the outl
   const det = {how: res.trace ? "trace" : "auto", src: res.trace ? trSrc() : autoOpt().src === "vector" ? "vector lines" : "drawing image", gap: +(res.gap || autoOpt().gap), note: res.note || "",
     flag: res.leak ? "leaks — " + res.leak : res.short ? res.short : res.warn ? res.warn : res.rect || (res.holes || []).length ? "" : "not square — check the outline", a0: kk ? +(polyArea(res.pts) / kk / kk).toFixed(4) : null, pts0: res.pts.map(q => q.slice()), at: new Date().toISOString(),
     holes: (res.holes || []).map(h => ({name: h.name, a: kk ? +(polyArea(h.pts) / kk / kk).toFixed(4) : null}))};
+  const nn = nosNew();
   mutate(() => { if (nc && !P.proj.conds.includes(nc)) P.proj.conds.push(nc);
-    P.proj.items.push(Object.assign({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, label: nm || (res.trace && res.trace.kind !== "threshold" ? res.trace.names.join(" + ").slice(0, 60) : ""), det}, res.ver ? {ver: res.ver} : {}));
-    (res.holes || []).forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: 1, label: h.name + " (void in " + (nm || "room") + ")", det: {how: "auto-void", of: id, src: det.src, gap: det.gap, pts0: h.pts.map(q => q.slice()), a0: kk ? +(polyArea(h.pts) / kk / kk).toFixed(4) : null, at: det.at, flag: ""}})); }, "Auto area");
+    P.proj.items.push(Object.assign({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: nn, label: nm || (res.trace && res.trace.kind !== "threshold" ? res.trace.names.join(" + ").slice(0, 60) : ""), det}, res.ver ? {ver: res.ver} : {}));
+    (res.holes || []).forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: nn, label: h.name + " (void in " + (nm || "room") + ")", det: {how: "auto-void", of: id, src: det.src, gap: det.gap, pts0: h.pts.map(q => q.slice()), a0: kk ? +(polyArea(h.pts) / kk / kk).toFixed(4) : null, at: det.at, flag: ""}})); }, "Auto area");
   if (nc) { S.cond = nc.id; renderConds(); }
-  S.sel = id; draw(); renderSheet();
+  S.sel = id; draw(); renderSheet(); renderProps();   // (Properties shows the room just traced, which its edits go to)
   const k = hereScale(p), per = " · perimeter " + f3(polyLen(res.pts, true) / k) + " ft";   // the area and its perimeter
   if (res.short && !res.leak) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + per + " — " + res.short + ".", 9000);
   if (res.leak) { if (!autoOpt().show) { P.proj.auto = Object.assign({}, P.proj.auto || {}, {show: true}); save(); }
@@ -3801,6 +3802,7 @@ function setTool(t){
   if (t !== "cadsel" && t !== "pan" && t !== "zoomwin") S.cadSel = null;
   S.cbox = null; S.cadHov = -1;
   S.tool = t; draftClear(); S.draftRedo = []; S.measure = t === "measure" ? S.measure : null; S.press = null; S.lasso = null; S.zbox = null; S.hover = null;
+  if (ribRepeatable(t)) S.lastTool = t; S.nosOnce = 0;   // (Enter with nothing drawn or selected starts the last measuring tool again; a one-shape *N ends with its tool)
   if (t === "match" && S.sel) {
     const it = P.proj.items.find(i => i.id === S.sel);
     if (it && onPage(it) && !hiddenItem(it)) S.matchSource = matchSourceOf(it);
@@ -3847,6 +3849,7 @@ function hint(){
   let h = H[t] || MK_HINTS[t] || "";
   if (cedHere()) h = cedHint();
   if (S.arcMode) h = S.arcMid ? "Arc: click the end of the arc." : "Arc: click a point on the arc (then its end) · A again for straight.";
+  { const n = S.nosOnce > 0 ? S.nosOnce : nosNow(); if (n > 1 && nosTool(t)) h = "Nos ×" + n + (S.nosOnce > 0 ? " for this one" : " for each new measurement (ribbon: Nos)") + " · " + h; }
   $("stHint").textContent = h;
 }
 function evPos(e){ const r = stage().getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
@@ -4461,7 +4464,7 @@ async function finish(pts){
     if (v) mutate(() => {
       let sch = v.sch; if (!sch && v.add) { sch = {id: uid("O"), mark: v.lbl, type: v.type, w: r3(v.W), h: r3(v.H)}; P.proj.openings.push(sch); }
       P.proj.last.oh = v.H;
-      const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "open", pts, nos: 1, label: v.lbl, oh: v.H, ow: Math.abs(v.W - w) > 0.0005 ? v.W : 0};
+      const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "open", pts, nos: nosNew(), label: v.lbl, oh: v.H, ow: Math.abs(v.W - w) > 0.0005 ? v.W : 0};
       if (sch) { it.sch = sch.id; it.ow = sch.w; it.oh = sch.h; }
       P.proj.items.push(it);
       if (v.keep && sch) S.openMark = sch.id;
@@ -4471,10 +4474,10 @@ async function finish(pts){
   if (t === "polygon") {   // AutoCAD's POLYGON (inscribed): the centre, then a corner — kept as an ordinary outline, so every edit and the sheet work on it
     if (dist(pts[0], pts[1]) < 0.5) { draw(); return; }
     const Q = polyPts(pts[0], pts[1], polySides()); if (c.type !== "area") Q.push(Q[0].slice());
-    const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: Q, nos: 1, label: ""};
+    const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: Q, nos: nosNew(), label: ""};
     mutate(() => { P.proj.items.push(it); }, "Polygon (" + polySides() + " sides)"); return;
   }
-  if (t === "circle") { if (dist(pts[0], pts[1]) < 0.5) { draw(); return; } mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", shape: "circle", pts, nos: 1, label: ""}); }); return; }
+  if (t === "circle") { if (dist(pts[0], pts[1]) < 0.5) { draw(); return; } mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", shape: "circle", pts, nos: nosNew(), label: ""}); }); return; }
   const area = c.type === "area";
   if (area && (pts.length < 3 || polyArea(pts) < 1e-6)) { if (selfCross(pts)) toast("⚠ This outline crosses itself and its two halves cancel out (0 Sft) — nothing added. Draw it again without crossing the sides.", 7000); draw(); return; }   // a figure of eight with equal halves: said why, never dropped silently
   if (!area && pts.length < 2) { draw(); return; }
@@ -4486,7 +4489,7 @@ async function finish(pts){
   }
   const ded = t === "ded" || t === "dedrect";
   const nm = area && !ded && S.lbl.autoName ? roomNameAt(pts) : "";
-  const ni = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: ded ? "ded" : "shape", pts, nos: 1, label: nm};
+  const ni = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: ded ? "ded" : "shape", pts, nos: nosNew(), label: nm};
   if (arcs.length) ni.arcs = arcs;
   mutate(() => { P.proj.items.push(ni); }, (t === "dedrect" ? "Rectangular cut-out" : ded ? "Deduction" : area ? "Area" : "Run") + " in " + c.name);
   if (area && crossed(ni)) toast(crossMsg, 7000);
@@ -4567,7 +4570,7 @@ function lpClick(sp, e){
   if (c.type === "area" && !r.closed) return toast("Those lines do not close round an area" + (r.stop === "junction" ? " — they meet other lines at a junction; Shift+click goes on through it the straightest way" : "") + " (for a room, Auto area W traces it from the walls)", 5000);
   const pts = r.closed && c.type !== "area" ? r.pts.concat([r.pts[0].slice()]) : r.pts;
   const nm = c.type === "area" && S.lbl.autoName ? roomNameAt(pts) : "";
-  const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, label: nm};
+  const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: nosNew(), label: nm};
   mutate(() => { P.proj.items.push(it); }, "Line pick in " + c.name);
   S.lpk = null;
   toast((nm ? nm + " — " : "") + "Line pick: " + lpText(r, c) + " → " + c.name, 3500);
@@ -4740,7 +4743,7 @@ function drawNow(){
   if (!keep) { S.ovSig = sig; const html = h.join(""); if (html !== S.ovHtml) { svg.innerHTML = html; S.ovHtml = html; } ovFlat(svg, vk, performance.now() - t0); }
   svg2.innerHTML = dyn.join("");
   if (!S.passive) $("stMeas").innerHTML = live ? "<b>" + esc(live) + "</b>" : "";
-  if (S.typed && S.draft.length) live = (S.tool === "rect" || S.tool === "dedrect" ? "L x W: " : "Length: ") + S.typed + " ▏ Enter to place · Esc clears";
+  if (S.typed && S.draft.length) live = S.typed[0] === "*" ? "Nos × " + S.typed.slice(1) + " ▏ Enter: this shape gets that Nos · Esc clears" : (S.tool === "rect" || S.tool === "dedrect" ? "L x W: " : "Length: ") + S.typed + " ▏ Enter to place · Esc clears";
   if (!live && S.tool === "select" && S.hover && !S.drag && !S.box && S.cursorScr) live = hoverText(S.hover);   // what is under the cursor, as Bluebeam's tooltip
   if (!live && S.tool === "cadsel" && S.cadHov >= 0 && !S.cbox && S.cursorScr) live = cadHoverText();   // the AutoCAD object under it
   if (live && S.cursorScr) { tip.textContent = live; tip.style.display = "block"; tip.style.left = Math.min(S.cursorScr[0] + 16, E.stage.clientWidth - 220) + "px"; tip.style.top = (S.cursorScr[1] + 18) + "px"; }
@@ -5367,7 +5370,7 @@ function renderPageStrip(){
     return `<div class="pgt${o.key === S.key ? " on" : ""}" data-pg="${esc(o.f.id)}|${o.i}" title="${esc(o.f.name)} p.${o.i}${sh.title ? " — " + esc(sh.title) : ""}"><img data-th="${esc(o.key)}" alt=""${th && th !== "x" ? ` src="${th}"` : ""}><div class="pgl">p.${o.i}</div></div>`; }).join("") + "</div>";
   const on = el.querySelector(".pgt.on"); if (on && on.scrollIntoView) on.scrollIntoView({block: "nearest", inline: "center"});
 }
-function refresh(){ mlSoon(); renderPageStrip(); lblSync(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); renderLiveLegend(); if (SPLIT.on) paneStrips(); if (S.unmOn) unmSoon(); draw(); draftBtns(); }
+function refresh(){ mlSoon(); renderPageStrip(); lblSync(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); renderLiveLegend(); if (SPLIT.on) paneStrips(); if (S.unmOn) unmSoon(); draw(); draftBtns(); renderCondPick(); }
 let sheetT = null;
 function refreshSheetSoon(){ clearTimeout(sheetT); sheetT = setTimeout(() => { renderSheet(); renderConds(); }, 120); }
 function renderScaleChip(){
@@ -8920,7 +8923,7 @@ function mineBuild(){
   $("mineHint").style.display = box.children.length ? "none" : "";
 }
 function syncMine(){ document.querySelectorAll("#mineBox [data-mine]").forEach(c => { c.classList.toggle("on", !!c.__src && c.__src.classList.contains("on")); }); }
-const tbGroups = () => [...document.querySelectorAll('#tools .rpanel[data-rp]:not([data-rp="mine"])')].flatMap(pn => [...pn.querySelectorAll(".rg")].map((g, i) => ({id: pn.dataset.rp + "/" + i, panel: pn.dataset.rp, g, box: g.querySelector(".rgb"), label: (g.querySelector(".rgl") || {}).textContent || ""})));
+const tbGroups = () => [...document.querySelectorAll('#tools .rpanel[data-rp]:not([data-rp="mine"])')].flatMap(pn => { let n = 0; return [...pn.querySelectorAll(".rg")].map(g => ({id: pn.dataset.rp + "/" + (g.dataset.g || n++), panel: pn.dataset.rp, g, box: g.querySelector(".rgb"), label: (g.querySelector(".rgl") || {}).textContent || ""})); });   // (a group added later carries data-g: the others keep their numbers, and with them their saved order)
 function tbApply(){
   const o = tbPref(), off = new Set(o.off || []), tabsOff = new Set(o.tabs || []), ord = o.order || {};
   tbGroups().forEach(G => {   // original order remembered once, so Reset can put it back; then the saved order is applied inside each group
@@ -8966,6 +8969,211 @@ async function tbDialog(){
   const r = await pr; if (!r) return;
   pref(TB_KEY, JSON.stringify(r.n)); wsSet({tb: r.icons ? "icons" : "full"}); tbApply(); toast("Toolbar updated — Customize → Reset brings everything back", 2600);
 }
+/* ------------------------------------------------------------------ fast takeoff: the condition picker, Quick items, Auto takeoff, Nos ×N
+   The condition being measured is on show beside the ribbon tabs (its colour, name and total) and changed there in one click: the
+   recent ones first, then every condition by kind (1–9 as the keys), a filter, Quick items and New condition — ` goes back to the
+   condition used before, J opens the list. Quick items is PRESETS as a gallery: a click makes the condition (or takes the one of
+   that name already in the project), asks H / T only where the item needs them (never assumed, as in the New condition dialog) and
+   starts its tool; several ticked are added in one step. Auto takeoff puts the free agents and the fast tools (rooms in a window,
+   the whole floor traced) in one menu. Nos ×N gives every new area, run, cut-out and opening that Nos until set back to ×1 — a
+   typical floor or unit measured once; a count stays one marker a click. *3 + Enter while drawing gives one shape Nos 3. */
+function ribRepeatable(t){ return ["draw", "linepick", "rect", "circle", "polygon", "auto", "count", "vsearch", "ded", "dedrect", "open", "measure", "angle", "radius"].indexOf(t) >= 0; }
+function nosTool(t){ return ["draw", "linepick", "rect", "circle", "polygon", "auto", "ded", "dedrect", "open"].indexOf(t) >= 0; }
+function condMru(){   // the conditions used last in this session, the active one first
+  if (!P.proj) return [];
+  const L = S.condMru = (S.condMru || []).filter(id => cond(id));
+  if (S.cond && cond(S.cond) && L[0] !== S.cond) { const i = L.indexOf(S.cond); if (i >= 0) L.splice(i, 1); L.unshift(S.cond); if (L.length > 6) L.length = 6; }
+  return L;
+}
+function renderCondPick(){
+  const b = $("rbCond"); if (!b) return;
+  const c = P.proj && S.cond ? cond(S.cond) : null; condMru();
+  b.classList.toggle("none", !c); b.disabled = !P.proj;
+  $("rbCondSw").style.background = c ? c.color : "";
+  $("rbCondNm").textContent = c ? c.name : !P.proj ? "No project open" : P.proj.conds.length ? "Pick a condition" : "Quick items or a new condition";
+  $("rbCondQ").textContent = c ? fq(condTotals(c).net, c.unit) + " " + c.unit : "";
+  const p = $("condPop"); if (p && p.classList.contains("on")) condPopFill();
+}
+function condUse(id){   // as the keys 1–9: the condition becomes the active one, and from Select or Pan its drawing tool starts
+  const c = P.proj && cond(id); if (!c) return;
+  S.cond = c.id; setTool(S.tool === "select" || S.tool === "pan" ? (c.type === "count" ? "count" : "draw") : S.tool); refresh();
+  toast("Condition: " + c.name, 1600);
+}
+function condBack(){   // ` — back to the condition used before this one
+  const id = condMru().find(x => x !== S.cond);
+  if (id) condUse(id); else toast(P.proj && P.proj.conds.length > 1 ? "Pick another condition first — ` then comes back to this one" : "Only one condition so far — Quick items or New condition adds more", 2600);
+}
+function condPop(show){
+  let pop = $("condPop"); const btn = $("rbCond"), on = !!pop && pop.classList.contains("on");
+  if (show === false || (show == null && on)) { if (pop) pop.classList.remove("on"); if (btn) btn.setAttribute("aria-expanded", "false"); return; }
+  if (!P.proj) { toast("Open a project first", 2000); return; }
+  if (!pop) {
+    pop = document.createElement("div"); pop.id = "condPop"; pop.className = "cpop"; pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", "Conditions");
+    pop.innerHTML = '<div class="cph"><input type="search" id="cpQ" placeholder="Filter — name, BOQ code, unit" aria-label="Filter the conditions" autocomplete="off" spellcheck="false"></div><div class="cpl" id="cpL" role="listbox" aria-label="Conditions"></div>'
+      + '<div class="cpf"><button type="button" class="btn sm pri" data-cpa="quick">Quick items…</button><button type="button" class="btn sm" data-cpa="new">+ New condition…</button><span class="cpk">1–9 · ` before · J list</span></div>';
+    document.body.appendChild(pop);
+    pop.addEventListener("click", e => { const r = e.target.closest("[data-cpk]"); if (r) { condPop(false); condUse(r.dataset.cpk); return; }
+      const a = e.target.closest("[data-cpa]"); if (!a) return; condPop(false); if (a.dataset.cpa === "quick") quickItemsDialog(); else editCond(null); });
+    $("cpQ").addEventListener("input", condPopFill);
+    $("cpQ").addEventListener("keydown", e => { e.stopPropagation();   // (typed letters never reach the tool keys)
+      const rows = [...pop.querySelectorAll("[data-cpk]")], i = rows.findIndex(r => r.classList.contains("hi"));
+      if (e.key === "Escape") { e.preventDefault(); condPop(false); $("rbCond").focus(); }
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); const j = Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowDown" ? 1 : -1))); rows.forEach((r, k) => r.classList.toggle("hi", k === j)); if (rows[j]) rows[j].scrollIntoView({block: "nearest"}); }
+      else if (e.key === "Enter") { e.preventDefault(); const r = rows[i >= 0 ? i : 0]; if (r) { condPop(false); condUse(r.dataset.cpk); } } });
+    document.addEventListener("pointerdown", e => { const p = $("condPop"); if (p && p.classList.contains("on") && !p.contains(e.target) && !e.target.closest("#rbCond")) condPop(false); }, true);
+  }
+  $("cpQ").value = ""; condPopFill();
+  pop.classList.add("on"); btn.setAttribute("aria-expanded", "true");
+  const r = btn.getBoundingClientRect(); pop.style.left = Math.max(6, Math.min(r.left, innerWidth - pop.offsetWidth - 6)) + "px"; pop.style.top = (r.bottom + 6) + "px";
+  $("cpQ").focus();
+}
+function condPopFill(){
+  const L = $("cpL"); if (!L || !P.proj) return;
+  const q = ($("cpQ").value || "").trim().toLowerCase(), all = P.proj.conds, hit = c => !q || q.split(/\s+/).every(w => [c.name, c.boq, c.ra, c.unit, c.group].join(" ").toLowerCase().includes(w));
+  const row = c => { const i = all.indexOf(c), ty = c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count";
+    return `<button type="button" class="cpi${c.id === S.cond ? " on" : ""}" role="option" aria-selected="${c.id === S.cond}" data-cpk="${esc(c.id)}" title="${esc(c.name)} — ${ty}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.group ? " · " + esc(c.group) : ""}"><i class="cpsw" style="background:${esc(c.color)}"></i><span class="cpn">${esc(c.name)}</span><span class="cpq">${fq(condTotals(c).net, c.unit)} ${esc(c.unit)}</span>${i < 9 ? "<kbd>" + (i + 1) + "</kbd>" : '<kbd class="cpnk"></kbd>'}</button>`; };
+  let h = "";
+  if (!all.length) h = '<div class="cpe">No conditions yet — <b>Quick items</b> makes a ready QS item in one click, or <b>+ New condition</b>.</div>';
+  else {
+    const mru = condMru().map(cond).filter(c => c && hit(c));
+    if (!q && mru.length > 1) h += '<div class="cpgh">Recent</div>' + mru.map(row).join("");
+    [["area", "Area"], ["linear", "Length"], ["count", "Count"]].forEach(([ty, n]) => { const m = all.filter(c => c.type === ty && hit(c)); if (m.length) h += `<div class="cpgh">${n} <span>${m.length}</span></div>` + m.map(row).join(""); });
+    if (!h) h = '<div class="cpe">No condition matches “' + esc(q) + '” — <b>Quick items</b> has the common ones ready.</div>';
+  }
+  L.innerHTML = h;
+}
+/* Quick items: PRESETS grouped by trade */
+const QK_CATS = [["floor", "Floors & roofs"], ["ceil", "Ceilings"], ["wall", "Wall finishes"], ["mas", "Masonry"], ["conc", "Concrete & formwork"], ["run", "Skirting, sills & trims"], ["cnt", "Doors, windows & counts"], ["custom", "Custom"]];
+const QK_TOOLS = {area: [["draw", "Draw"], ["rect", "Rect"], ["auto", "Auto area"]], linear: [["draw", "Draw"], ["linepick", "Line pick"]], count: [["count", "Count"], ["vsearch", "Find similar"]]};
+function qkCat(p){ const n = p.name.toLowerCase();
+  return /^custom/.test(n) ? "custom" : p.type === "count" ? "cnt" : /masonry|partition/.test(n) ? "mas" : /rcc|pcc|formwork/.test(n) ? "conc" : /ceiling/.test(n) ? "ceil"
+    : /skirting|sill|rubbing|railing|molding|moulding/.test(n) ? "run" : p.type === "area" ? "floor" : p.unit === "ft" ? "run" : "wall"; }
+function qkNeed(p){ return {h: !!p.needH || (p.type === "linear" && p.unit !== "ft"), t: !!p.needT || (p.unit === "cft" && !(+p.t > 0))}; }   // as the dialog's rules: a wall in Sft / cft needs H, a cft item T
+function qkFind(p){ return P.proj.conds.find(x => x.type === p.type && String(x.name).trim().toLowerCase() === p.name.toLowerCase()) || null; }
+function qkColor(taken){ const used = new Set(P.proj.conds.map(c => String(c.color).toLowerCase()).concat(taken || [])), n = P.proj.conds.length + (taken || []).length; return COLORS.find(x => !used.has(x.toLowerCase())) || COLORS[n % COLORS.length]; }   // (taken: the colours of the items made with it, not in the project yet)
+function qkMake(p, v, taken){   // the condition a preset makes, as the New condition dialog makes it from the same preset — H / T as typed for this project
+  const d = toolDefaults(), c = {id: uid("C"), name: p.name, type: p.type, unit: p.unit, color: qkColor(taken), sw: d.condWidth, h: +v.h > 0 ? +v.h : "", t: +v.t > 0 ? +v.t : +p.t > 0 ? +p.t : "", faces: p.faces || 1, dedMin: p.dedMin || 0};
+  if (d.apBy && d.apBy[p.type]) c.ap = JSON.parse(JSON.stringify(d.apBy[p.type]));
+  try { const m = boqMatches(p.name, p.unit, true)[0]; if (m && m.score >= 0.6) { c.ra = String(m.it.code || m.it.id).toUpperCase(); c.boq = m.it.code || m.it.id; } } catch (e) {}   // a clear Rate Analysis match, as the dialog picks by itself
+  return c;
+}
+async function quickItemsDialog(){
+  if (!P.proj) { toast("Open a project first", 2000); return null; }
+  const cats = QK_CATS.filter(([k]) => PRESETS.some(p => qkCat(p) === k)), ic = {area: "i-rect", linear: "i-draw", count: "i-count"};
+  const card = (p, i) => { const have = qkFind(p), n = qkNeed(p), ty = p.type === "area" ? "Area" : p.type === "linear" ? "Length" : "Count";
+    const needs = [n.h ? "asks H" + (p.hHint ? " (usually " + p.hHint + ")" : "") : "", n.t ? "asks T" : ""].filter(Boolean).join(" · ");
+    return `<div class="qkc${have ? " have" : ""}" data-qk="${i}" data-qcat="${qkCat(p)}" tabindex="0" role="button" title="${esc(p.name)} — ${ty} in ${esc(p.unit)}${+p.t > 0 ? " · T " + f3(+p.t) + " ft" : ""}${p.faces > 1 ? " · " + p.faces + " faces" : ""}${p.dedMin ? " · openings over " + f2(p.dedMin) + " deducted" : ""}${have ? " · already in this project: a click takes it" : ""}">`
+      + `<label class="qkck" title="Tick to add several at once"><input type="checkbox" data-qkck="${i}" aria-label="Tick ${esc(p.name)}"></label>`
+      + `<i class="qkic ${p.type}" style="--qc:${have ? esc(have.color) : "var(--qk-" + p.type + ")"}"><svg class="ic"><use href="#${ic[p.type]}"/></svg></i>`
+      + `<span class="qkt"><b>${esc(p.name)}</b><small>${ty} · ${esc(p.unit)}${needs ? " · " + esc(needs) : ""}${have ? " · in project" : ""}</small></span>`
+      + `<span class="qktl">${QK_TOOLS[p.type].map(([t, nm]) => `<button type="button" class="qkb" data-qkt="${t}" title="${esc(nm)} — ${esc(p.name)}">${esc(nm)}</button>`).join("")}</span></div>`; };
+  const body = `<div class="qkw"><div class="qkbar"><input type="search" id="qkQ" placeholder="Search — tile, plaster, 9&quot;, block, slab, door…" aria-label="Search the quick items" autocomplete="off" spellcheck="false">`
+    + `<span class="qkchips">${[["", "All"]].concat(cats).map(([k, n]) => `<button type="button" class="qkch${k ? "" : " on"}" data-qcf="${k}">${esc(n)}</button>`).join("")}</span></div>`
+    + `<div class="qkgrid" id="qkG">${cats.map(([k, n]) => `<div class="qkgh" data-qgh="${k}">${esc(n)}</div>` + PRESETS.map((p, i) => qkCat(p) === k ? card(p, i) : "").join("")).join("")}</div>`
+    + `<p class="small">A click makes the item — or takes the one already in this project — and starts its tool; the buttons on a card pick another way to measure it. H and T are asked where the item needs them, never assumed. Tick several and <b>Add ticked</b> to set up a whole trade at once.</p></div>`;
+  const pr = ask("Quick items — ready QS conditions", body, ""), done = ask.cur;
+  $("dlgF").insertAdjacentHTML("beforeend", '<button class="btn pri" id="qkAdd" disabled>Add ticked</button>');
+  const G = $("qkG"), ticked = () => [...G.querySelectorAll("[data-qkck]:checked")].map(x => +x.dataset.qkck);
+  const upd = () => { const n = ticked().length; $("qkAdd").disabled = !n; $("qkAdd").textContent = n ? "Add ticked (" + n + ")" : "Add ticked"; };
+  const shown = () => [...G.querySelectorAll("[data-qk]")].filter(el => !el.hidden);
+  const filt = () => { const q = $("qkQ").value.trim().toLowerCase(), cf = ($("dlgB").querySelector(".qkch.on") || {dataset: {}}).dataset.qcf || "";
+    G.querySelectorAll("[data-qk]").forEach(el => { const p = PRESETS[+el.dataset.qk]; el.hidden = !!((cf && el.dataset.qcat !== cf) || (q && !q.split(/\s+/).every(w => (p.name + " " + p.unit + " " + p.type + " " + qkCat(p)).toLowerCase().includes(w)))); });
+    G.querySelectorAll("[data-qgh]").forEach(h => { h.hidden = !G.querySelector(`[data-qcat="${h.dataset.qgh}"]:not([hidden])`); }); };
+  $("qkQ").addEventListener("input", filt);
+  $("dlgB").querySelector(".qkchips").addEventListener("click", e => { const b = e.target.closest("[data-qcf]"); if (!b) return; $("dlgB").querySelectorAll(".qkch").forEach(x => x.classList.toggle("on", x === b)); filt(); });
+  G.addEventListener("change", upd);
+  G.addEventListener("click", e => { if (e.target.closest(".qkck")) return; const c = e.target.closest("[data-qk]"); if (!c) return; const t = e.target.closest("[data-qkt]"); done({pick: [+c.dataset.qk], tool: t ? t.dataset.qkt : ""}); });
+  G.addEventListener("keydown", e => { if (e.key !== " " || e.target.closest("button,input")) return; const c = e.target.closest("[data-qk]"); if (c) { e.preventDefault(); done({pick: [+c.dataset.qk], tool: ""}); } });
+  $("qkAdd").onclick = () => done({pick: ticked(), tool: ""});
+  $("qkQ").focus();
+  let v = await pr;
+  if (v === true) { const tk = ticked(), f = document.activeElement && document.activeElement.closest && document.activeElement.closest("#qkG [data-qk]"), sh = shown();   // Enter: the ticked ones, the card in focus, or the only / first card the search left
+    v = tk.length ? {pick: tk, tool: ""} : f ? {pick: [+f.dataset.qk], tool: ""} : $("qkQ").value.trim() && sh.length ? {pick: [+sh[0].dataset.qk], tool: ""} : null; }
+  if (!v || !v.pick || !v.pick.length) return null;
+  return quickItemsAdd(v.pick, v.tool);
+}
+async function qkAskHT(L){   // H / T for the new items that need them — typed for this project, never assumed
+  const inp = (attr, i, ph, ti, first) => `<input type="text" ${first ? 'id="qkF0" ' : ""}${attr}="${i}" placeholder="${esc(ph)}" title="${esc(ti)}" autocomplete="off">`;
+  let first = true;
+  const row = (p, i) => { const n = qkNeed(p); let h = `<div class="qkhr"><b>${esc(p.name)}</b>`;
+    if (n.h) { h += `<label>H ft ${inp("data-qkh", i, p.hHint ? "usually " + p.hHint : "e.g. 10'-6\"", p.hWhy ? "Usually " + p.hHint + " ft in " + p.hWhy + " — check it for this project" : "Floor to ceiling / slab soffit, from the section", first)}</label>`; first = false; }
+    if (n.t) { h += `<label>T ${inp("data-qkt2", i, "e.g. 0'-5\" for 5\"", "Thickness — ft-in (0'-5\" or 5\") or decimal ft (0.42)", first)}</label>`; first = false; }
+    return h + "</div>"; };
+  return ask(L.length === 1 ? L[0].name + " — the size it needs" : "Sizes for the " + L.length + " new items", `<p class="small">Typed for this project — never assumed. Decimal feet or ft-in (10'-6"); inches as 5"; mm and m work too.</p><div class="qkhs">${L.map(row).join("")}</div>`, L.length === 1 ? "Create" : "Create " + L.length, () => {
+    const out = {};
+    for (let i = 0; i < L.length; i++) { const p = L[i], n = qkNeed(p), o = {};
+      if (n.h) { const x = parseFt((document.querySelector(`#dlgB [data-qkh="${i}"]`) || {}).value || ""); if (!(x > 0)) return "Enter the height H of " + p.name + (p.hHint ? " — usually " + p.hHint + " ft; check it for this project" : " (floor to ceiling, from the section)"); o.h = r3(x); }
+      if (n.t) { const x = parseFt((document.querySelector(`#dlgB [data-qkt2="${i}"]`) || {}).value || ""); if (!(x > 0)) return "Enter the thickness T of " + p.name + " (e.g. 0'-5\" for 5 inches)"; if (x > 3) return "T " + f3(x) + " ft looks too thick for " + p.name + " — inches are typed as 5\" or 0'-5\""; o.t = r3(x); }
+      out[p.name] = o; }
+    return out; }, "qkF0");
+}
+async function quickItemsAdd(picks, tool){   // -> the condition now active, or null
+  const L = picks.map(i => PRESETS[i]).filter(Boolean); if (!L.length || !P.proj) return null;
+  const make = L.filter(p => !qkFind(p)), asks = make.filter(p => { const n = qkNeed(p); return n.h || n.t; });
+  let vals = {}; if (asks.length) { vals = await qkAskHT(asks); if (!vals) return null; }
+  const made = [], taken = []; make.forEach(p => { const c = qkMake(p, vals[p.name] || {}, taken); taken.push(c.color.toLowerCase()); made.push(c); });   // each its own colour
+  const first = qkFind(L[0]) || made.find(c => c.name === L[0].name);
+  if (made.length) mutate(() => { made.forEach(c => P.proj.conds.push(c)); S.cond = first.id; }, made.length === 1 ? "Quick item " + made[0].name : made.length + " quick items");
+  else S.cond = first.id;
+  const c = cond(S.cond) || first;
+  setTool(tool || (c.type === "count" ? "count" : "draw")); refresh();
+  toast((made.length > 1 ? made.length + " items added — " : made.length ? "Added " + c.name + " — " : "Using " + c.name + " — ") + (c.type === "count" ? "click each one to count it" : c.type === "area" ? "draw it, Rect (R) or Auto area (W)" : "draw along the run (Enter finishes) or Line pick (Shift+A)") + (made.length > 1 ? " · the condition button beside the tabs switches between them" : ""), 4200);
+  return c;
+}
+/* Auto takeoff: the free agents and the fast tools, one menu under the ribbon button */
+function ribAnchor(id){ const b = $(id); return [b].concat([...document.querySelectorAll('#mineBox [data-mine$="/' + id + '"]')]).filter(Boolean).find(x => x.offsetParent) || b; }   // the visible one: the ribbon button or its My tools copy
+function autoMenu(){
+  const r = ribAnchor("rbAuto").getBoundingClientRect(), pg = !!S.page, ag = id => () => { const t = $(id); if (t) t.click(); };
+  ctxShow([{h: "Auto takeoff", s: "free — no API key · one Ctrl+Z takes each run back"},
+    {t: "Full takeoff — rooms, walls, doors / windows, finishes…", fn: ag("agFull")},
+    {t: "Rooms — every named room on this page", fn: ag("agRooms"), dis: !pg}, {t: "Rooms in a window — box part of the plan", fn: autoWindowUI, dis: !pg},
+    {t: "Trace the whole floor — from the drawing's wall layers", fn: traceFloorUI, dis: !pg}, {t: "Apartment — one unit by its number…", fn: ag("agUnit"), dis: !pg}, {sep: 1},
+    {t: "Walls — from their two face lines…", fn: ag("agWalls"), dis: !pg}, {t: "Block masonry — 4\" and 8\" with deductions and block count…", fn: ag("agBlock"), dis: !pg || !$("agBlock")},
+    {t: "Doors / windows — tags and schedules…", fn: ag("agTags"), dis: !pg}, {t: "Finishes — plaster, paint, skirting, ceiling per room…", fn: ag("agFin"), dis: !pg},
+    {t: "Name rooms by contents (this page)", fn: nameRooms, dis: !pg}, {sep: 1},
+    {t: "Check the takeoff — rooms missed, counted twice…", fn: ag("agCheck")}, {t: "Drawing details — rooms, sizes, tags, levels", fn: ag("aiDetails"), dis: !pg},
+    {t: "Ask the takeoff agent (Claude)…", fn: () => { if (!$("aiPanel").classList.contains("on")) $("bClaude").click(); }}], r.left, r.bottom + 4);
+}
+async function autoWindowUI(){
+  const w = await pickWindow("Auto area: click one corner of the area to scan, then the opposite corner"); if (!w) return;
+    busy("Auto area: finding the rooms…"); try { const r = await autoAreaWindow(w); if (r.err) { toast(r.err, 6000); return; } const sk = r.skipped;
+      const more = [sk.failed ? sk.failed + " could not be traced" : "", r.flagged ? r.flagged + " to check (flagged)" : "", sk.existing ? sk.existing + " already measured" : "", sk.overlap ? sk.overlap + " ran into a neighbour (left out)" : "", sk.large ? sk.large + " over 3,000 Sft (click those)" : "", sk.small + sk.thin ? (sk.small + sk.thin) + " under 12 Sft or narrower than 3 ft" : ""].filter(Boolean);
+      toast("Auto area: " + r.added + " room" + (r.added === 1 ? "" : "s") + ", " + fq(r.sft) + " Sft added to " + (r.cond || "—") + (more.length ? " — " + more.join(", ") : "") + (!r.added && !sk.failed ? " — no closed room found in the window" : "")
+        + (r.narrow ? " · " + r.narrow + " of them narrower than the door gap (" + f3(r.gap) + " ft), traced again with a " + f3(r.gap2) + " ft gap" + (r.open ? ", " + r.open + " open-ended — check" : "") : "")
+        + (() => { const s2 = r.skip2 || {}, L = [s2.failed ? s2.failed + " could not be traced" : "", s2.overlap ? s2.overlap + " ran into a neighbour" : "", s2.small ? s2.small + " under 12 Sft" : ""].filter(Boolean); return L.length ? " · narrower spaces left out: " + L.join(", ") : ""; })(), 10000); }
+    catch (e) { toast("Auto area: " + (e.message || e), 6000); } finally { busy(""); }
+}
+/* Nos ×N — sticky for every new area, run, cut-out and opening; *N + Enter for one shape */
+function nosNow(){ return Math.max(1, Math.min(100000, Math.round(+S.nosNext || 1))); }
+function nosNew(){ const n = S.nosOnce > 0 ? S.nosOnce : nosNow(); S.nosOnce = 0; return Math.max(1, Math.min(100000, Math.round(n))); }   // the Nos of a measurement being made (a one-shape *N is used up)
+function nosPaint(){ const n = nosNow(); [$("rbNos")].concat([...document.querySelectorAll('#mineBox [data-mine$="/rbNos"]')]).forEach(b => { if (!b) return; b.classList.toggle("on", n > 1); const t = b.querySelector(".tl"); if (t) t.textContent = "Nos ×" + n; }); }
+function nosSet(n){ S.nosNext = Math.max(1, Math.min(100000, Math.round(+n || 1))); nosPaint(); hint();
+  toast(S.nosNext > 1 ? "Nos ×" + S.nosNext + " for every new area, run, cut-out and opening — set ×1 when done (a count stays one a click)" : "Nos ×1 — new measurements count once", 3600); }
+function nosMenu(){
+  const r = ribAnchor("rbNos").getBoundingClientRect(), n = nosNow();
+  ctxShow([{h: "Nos for each new measurement", s: "areas, runs, cut-outs, openings · a count stays one a click"}].concat([1, 2, 3, 4, 5, 6, 8, 10, 12].map(k => ({t: "× " + k + (k === 1 ? " — each counts once" : ""), on: n === k, fn: () => nosSet(k)})),
+    [{t: "Other…", fn: async () => { const v = await ask("Nos for each new measurement", `<div class="fg"><label>Nos</label><input type="number" id="nosIn" min="1" max="100000" step="1" value="${n}"></div><p class="small" style="margin-top:6px">e.g. 8 for a typical floor measured once for 8 floors. Counts are not multiplied.</p>`, "Set", () => { const x = Math.round(+$("nosIn").value); return x >= 1 && x <= 100000 ? x : "A whole number, 1 or more"; }, "nosIn"); if (v) nosSet(v); }},
+      {sep: 1}, {t: "Set Nos of the selection…", fn: nosSelDialog, dis: !selIds().size}]), r.left, r.bottom + 4);
+}
+function nosTyped(buf){   // *3 + Enter while drawing: this shape gets Nos 3 (finished at once when it can be)
+  S.typed = ""; const m = /^\*\s*(\d+)$/.exec(String(buf).trim()), n = m ? +m[1] : 0;
+  if (!(n >= 1 && n <= 100000)) { toast("Nos: type * and a whole number, e.g. *3, then Enter", 2600); draw(); return; }
+  S.nosOnce = n; const two = S.tool === "rect" || S.tool === "dedrect";
+  if (!two && S.draft.length >= (isAreaDraft() ? 3 : 2)) { endDraft(); return; }
+  hint(); draw(); toast("Nos " + n + " for this " + (two ? "rectangle — click its other corner" : "shape — finish it as usual"), 2600);
+}
+async function nosSelDialog(){
+  const its = [...selIds()].map(objById).filter(o => o && o.cond && onPage(o) && !o.locked);
+  if (!its.length) { setTool("select"); toast("Select the measurements first — click them, or drag a box round them", 2800); return; }
+  const cnt = its.filter(o => (cond(o.cond) || {}).type === "count").length, n0 = its.every(o => (+o.nos || 1) === (+its[0].nos || 1)) ? +its[0].nos || 1 : "";
+  const v = await ask("Set Nos — " + its.length + " measurement" + (its.length === 1 ? "" : "s"), `<div class="fg"><label>Nos</label><input type="number" id="nosSel" min="1" max="100000" step="1" value="${n0}"></div>`
+    + `<p class="small" style="margin-top:6px">Each selected measurement is multiplied by this Nos on the sheet (Nos × L × W × H).${cnt ? " " + cnt + (cnt === 1 ? " is a count: its Nos multiplies every marker of it on this page." : " are counts: each one's Nos multiplies every marker of it on this page.") : ""}</p>`, "Set",
+    () => { const x = Math.round(+$("nosSel").value); return x >= 1 && x <= 100000 ? x : "A whole number, 1 or more"; }, "nosSel");
+  if (!v) return;
+  mutate(() => { its.forEach(o => { o.nos = v; }); }, "Nos " + v + " for " + its.length + " measurement" + (its.length === 1 ? "" : "s"));
+  toast("Nos " + v + " on " + its.length + " measurement" + (its.length === 1 ? "" : "s"), 2400);
+}
+const MINE_START = ["takeoff/quick", "takeoff/draw", "takeoff/rect", "takeoff/auto", "takeoff/linepick", "takeoff/count", "takeoff/vsearch", "takeoff/dedrect", "takeoff/open", "takeoff/cal", "takeoff/rbAuto"];   // My tools filled in one click on first use
 /* ------------------------------------------------------------------ Settings (⚙ Settings in the top bar, Ctrl+,)
    Every option in one window, as Bluebeam's Preferences and PlanSwift's Options: a page per subject on the left, one search over all of
    them, a Reset on each page. A change applies at once (Close only closes). The options set elsewhere (View tab, Customize, Labels ⚙,
@@ -8973,11 +9181,11 @@ async function tbDialog(){
    on, whether it follows the tool picked, snap and pick distances, your own shortcuts) are kept under SET_KEY. All of it stays in this
    browser — Settings → Backup & reset saves it to a file for another computer. */
 const SET_KEY = "zdTakeoffSet";
-const SET_DEF = {homeTab: "mine", ribFollow: "smart", openLast: true, snapStart: true, snapPx: 11, hitPx: 7, keys: []};
+const SET_DEF = {homeTab: "mine", ribFollow: "smart", openLast: true, snapStart: true, snapPx: 11, hitPx: 7, keys: [], look: "colour"};
 let SETV = null;
 function setPref(){ if (!SETV) { let o = null; try { o = JSON.parse(pref(SET_KEY) || "null"); } catch (e) { o = null; } SETV = Object.assign({}, SET_DEF, o && typeof o === "object" ? o : {}); if (!Array.isArray(SETV.keys)) SETV.keys = []; } return SETV; }
 function setSave(ch){ SETV = Object.assign({}, setPref(), ch); pref(SET_KEY, JSON.stringify(SETV)); setApply(); return SETV; }
-function setApply(){ const o = setPref(); SNAP_PX = Math.max(4, Math.min(40, Math.round(+o.snapPx) || 11)); HIT_PX = Math.max(3, Math.min(30, Math.round(+o.hitPx) || 7)); }
+function setApply(){ const o = setPref(); SNAP_PX = Math.max(4, Math.min(40, Math.round(+o.snapPx) || 11)); HIT_PX = Math.max(3, Math.min(30, Math.round(+o.hitPx) || 7)); document.documentElement.setAttribute("data-look", o.look === "classic" ? "classic" : "colour"); }
 function ribHome(){   // the tab the ribbon opens on: My tools unless Settings → General says otherwise (a tab hidden in Customize is skipped)
   const o = setPref(), h = o.homeTab === "last" ? pref("zdTakeoffRibLast") || "mine" : o.homeTab, b = [...document.querySelectorAll("#tools .rtab")].find(x => x.dataset.rtab === h);
   if (b && b.style.display !== "none") ribShow(h);
@@ -9070,7 +9278,8 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
       {t: "txt", n: "Your name", d: "on markups, checks, comments and legends", get: qaUser, set: v => pref("zdTakeoffUser", String(v).trim().slice(0, 60))},
       {t: "btn", n: "Command palette", d: "every tool, export and dialog by name (Ctrl+K)", b: "Open", fn: openPalette}],
      reset: () => { setSave({homeTab: SET_DEF.homeTab, ribFollow: SET_DEF.ribFollow, openLast: true}); pref("zd-auto-update", ""); }},
-    {id: "ribbon", n: "Ribbon & toolbar", d: "tabs, My tools, icons, compact ribbon", rows: [
+    {id: "ribbon", n: "Ribbon & toolbar", d: "the look, tabs, My tools, icons, compact ribbon", rows: [
+      {t: "tog", n: "Colourful look", d: "a colour for each tool family, colour icons, the navy title bar — off: the classic look", get: () => setPref().look !== "classic", set: v => { setSave({look: v ? "colour" : "classic"}); }},
       {t: "tog", n: "Compact ribbon", d: "the same tools, about half the height", get: () => !!pcPref().compact, set: v => pcSave({off: pcPref().off || [], compact: v})},
       {t: "tog", n: "Icons only", d: "no names under the tools (pointing at one still names it)", get: () => wsPref().tb === "icons", set: v => wsSet({tb: v ? "icons" : "full"})},
       {t: "tog", n: "Ribbon tabs row", d: "Takeoff, Modify, Markup … with Select, Ortho, Snap on the right", get: () => pcOn("ui-tabs"), set: v => pcSet("ui-tabs", v)},
@@ -9080,7 +9289,7 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
         set: v => { const o = tbPref(), s = new Set(o.tabs || []); if (v) s.delete(id); else s.add(id); if (s.size >= tabs.length) return "Keep at least one tab"; o.tabs = [...s]; pref(TB_KEY, JSON.stringify(o)); tbApply(); }})),
       {h: "Tools"},
       {t: "btn", n: "Customize toolbar", d: "the tools on each tab and their order, the top-bar buttons, the tools in My tools", b: "Customize…", fn: tbDialog, back: true}, chest],
-     reset: () => { const o = tbPref(); o.tabs = []; pref(TB_KEY, JSON.stringify(o)); tbApply(); wsSet({tb: "full"}); pcSave({off: (pcPref().off || []).filter(k => k !== "ui-tabs" && k !== "ui-ribbon"), compact: true}); }},
+     reset: () => { const o = tbPref(); o.tabs = []; pref(TB_KEY, JSON.stringify(o)); tbApply(); wsSet({tb: "full"}); pcSave({off: (pcPref().off || []).filter(k => k !== "ui-tabs" && k !== "ui-ribbon"), compact: true}); setSave({look: SET_DEF.look}); }},
     {id: "panels", n: "Panels & layout", d: "left and right panels, bars, ready-made layouts", rows: [
       {t: "html", n: "Ready-made layouts", html: () => `<div class="presets">${Object.entries(PC_PRESETS).map(([k, p]) => `<button class="btn" data-setp="${k}"><b>${esc(p.n)}</b><small>${esc(p.d)}</small></button>`).join("")}</div>`,
         wire: paint => document.querySelectorAll("#dlgB [data-setp]").forEach(b => b.addEventListener("click", () => { const p = PC_PRESETS[b.dataset.setp]; S.lw = p.lw; S.rw = p.rw; S.lHide = p.lHide; S.rHide = p.rHide; pcSave({off: p.off.slice(), compact: p.compact}); setPanels(); toast("Layout: " + p.n, 1600); paint(); }))},
@@ -9252,6 +9461,9 @@ function ribbonInit(){
   document.querySelectorAll("#tools .rtab").forEach(t => { t.addEventListener("dblclick", ribTog); t.addEventListener("click", () => { const o = pcPref(); if ((o.off || []).includes("ui-ribbon")) pcSave({off: o.off.filter(k => k !== "ui-ribbon"), compact: o.compact}); }); });
   pcApply(); settingsInit();
   $("bCustTb").onclick = () => tbDialog(); tbApply();
+  $("rbCond").addEventListener("click", () => condPop()); $("rbAuto").addEventListener("click", () => autoMenu()); $("rbNos").addEventListener("click", () => nosMenu()); nosPaint();
+  $("bMineStart").onclick = e => { e.preventDefault(); mineSet(MINE_START.filter(k => tbAll().some(x => x.k === k))); ribShow("mine"); toast("My tools: the usual takeoff tools — drag more onto the tab, right-click one to take it out, or Customize → My tools", 3600); };
+  $("bMineQuick").onclick = e => { e.preventDefault(); if (P.proj) quickItemsDialog(); else toast("Open a project first", 2000); };
   ribHome();   // open on My tools every time the page is loaded / refreshed (Settings → General can choose another tab)
   /* drag a tool from any tab onto the My tools tab or panel to keep it there as a favourite */
   const mineTab = document.querySelector('#tools .rtab[data-rtab="mine"]');
@@ -9267,7 +9479,7 @@ function ribbonInit(){
     el.addEventListener("dragleave", e => { if (!el.contains(e.relatedTarget)) el.classList.remove("dropok"); });
     el.addEventListener("drop", dropHere); });
   /* ribbon tabs added for Costing / Export / View: each button runs an existing control or dialog */
-  const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog(), floors: () => floorsDialog()};
+  const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog(), floors: () => floorsDialog(), quick: () => quickItemsDialog(), autowin: () => S.page ? autoWindowUI() : toast("Open a drawing first", 2000)};
   const PX = {bDefaults: () => settingsDialog("measure")};   // Costing → Defaults: the top bar's Defaults is now in Settings (the tool keeps its name, so My tools keeps it)
   document.querySelectorAll("#tools [data-px]").forEach(b => b.addEventListener("click", () => { if (PX[b.dataset.px]) return PX[b.dataset.px](); const t = $(b.dataset.px); if (t && !t.disabled) t.click(); setTimeout(syncPx, 60); }));
   document.querySelectorAll("#tools [data-fn]").forEach(b => b.addEventListener("click", () => { if (P.proj && FN[b.dataset.fn]) FN[b.dataset.fn](); else toast("Open a project first", 2000); }));
@@ -9318,6 +9530,7 @@ function modAct(a){
   if (!P.proj || !S.page) return;
   const items = [...selIds()].map(objById).filter(o => o && onPage(o)), meas = items.filter(o => o.cond);
   const need = () => { setTool("select"); toast("Select what to change first — click it, or drag a box round it", 2800); };
+  if (a === "nos") return nosSelDialog();
   if (a === "move") { setTool("select"); return toast(items.length ? "Drag the selection to move it · Shift keeps it straight · arrow keys nudge · Alt+drag moves without selecting" : "Click an object, then drag it to move it", 3600); }
   if (a === "copy") { if (!items.length) return need(); copySel(); setTool("stamp"); return; }
   if (a === "dup") return items.length ? duplicateSel() : need();
@@ -11126,7 +11339,7 @@ function paletteCmds(){
     return L;
   }
   document.querySelectorAll("#tools [data-tool]").forEach(b => btn(b, "Tool"));
-  document.querySelectorAll("#tools [data-mod]").forEach(b => btn(b, "Modify")); document.querySelectorAll("#tools [data-rv]").forEach(b => btn(b, "Check"));
+  document.querySelectorAll("#tools [data-mod]").forEach(b => btn(b, "Modify")); document.querySelectorAll("#tools [data-rv]").forEach(b => btn(b, "Check")); document.querySelectorAll("#tools [data-fn]").forEach(b => btn(b, "Tool"));
   add("Ortho on / off", () => setOrtho(!S.ortho), "Tool", "F8"); add("Polar tracking on / off", () => setPolar(!S.polar), "Tool", "F10"); add("Object snaps…", () => snapPopToggle(true), "Tool");
   add("Search the measurement sheet", () => { const q = $("shQ"); if (q) { q.focus(); q.select(); } }, "View");
   Object.entries(MK_TOOL_NAMES).forEach(([t, n]) => add("Markup: " + n, () => setTool(t), "Tool"));
@@ -11136,13 +11349,7 @@ function paletteCmds(){
   if (S.page) add("Name rooms by contents (this page) — Bath, Kitchen, Stair, Lift/Shaft, Balcony, Store from the lines in each (by layer)", nameRooms, "Modify");
   add("Combine the selected areas into one (union) — merge them, small gaps between them filled", () => combineAreas(), "Modify");
   if (S.page) add("Trace the whole floor — every room, washroom, corridor, threshold and wall run from the drawing's wall layers (a CAD PDF, or the AutoCAD plan on screen)", traceFloorUI, "Tool");
-  if (S.page) add("Auto area: every room in a window…", async () => { const w = await pickWindow("Auto area: click one corner of the area to scan, then the opposite corner"); if (!w) return;
-    busy("Auto area: finding the rooms…"); try { const r = await autoAreaWindow(w); if (r.err) { toast(r.err, 6000); return; } const sk = r.skipped;
-      const more = [sk.failed ? sk.failed + " could not be traced" : "", r.flagged ? r.flagged + " to check (flagged)" : "", sk.existing ? sk.existing + " already measured" : "", sk.overlap ? sk.overlap + " ran into a neighbour (left out)" : "", sk.large ? sk.large + " over 3,000 Sft (click those)" : "", sk.small + sk.thin ? (sk.small + sk.thin) + " under 12 Sft or narrower than 3 ft" : ""].filter(Boolean);
-      toast("Auto area: " + r.added + " room" + (r.added === 1 ? "" : "s") + ", " + fq(r.sft) + " Sft added to " + (r.cond || "—") + (more.length ? " — " + more.join(", ") : "") + (!r.added && !sk.failed ? " — no closed room found in the window" : "")
-        + (r.narrow ? " · " + r.narrow + " of them narrower than the door gap (" + f3(r.gap) + " ft), traced again with a " + f3(r.gap2) + " ft gap" + (r.open ? ", " + r.open + " open-ended — check" : "") : "")
-        + (() => { const s2 = r.skip2 || {}, L = [s2.failed ? s2.failed + " could not be traced" : "", s2.overlap ? s2.overlap + " ran into a neighbour" : "", s2.small ? s2.small + " under 12 Sft" : ""].filter(Boolean); return L.length ? " · narrower spaces left out: " + L.join(", ") : ""; })(), 10000); }
-    catch (e) { toast("Auto area: " + (e.message || e), 6000); } finally { busy(""); } }, "Tool");
+  if (S.page) add("Auto area: every room in a window…", autoWindowUI, "Tool");
   add("Check before export (errors and warnings)", exportMenu, "Check");
   add("Excel measurement sheet", exportExcel, "Export"); add("CSV", exportCsv, "Export");
   if (S.page) add("DXF (AutoCAD) — this page's takeoff as drawing layers", exportDxf, "Export");
@@ -11180,6 +11387,9 @@ function paletteCmds(){
   setPages().forEach(p => add("Settings: " + p.n + " — " + p.d, () => settingsDialog(p.id), "Settings"));
   add("AI engine — local AI (free, offline) setup and benchmark", locSetup, "AI"); add("KPIs — Auto area and agent performance (from recorded results)", kpiDialog, "AI"); add("Project knowledge — documents and offline search", kbDialog, "AI"); add("Agent instructions — the working rules the AI follows", rulesDialog, "AI");
   add("Invert selection", invertSel, "Select", "Ctrl+I"); add("Quick select… (by condition, kind, markup type, check state)", quickSelect, "Select"); add("Deselect all", clearSel, "Select", "Esc");
+    add("Pick a condition — the recent ones and every one, with a filter", () => condPop(true), "Condition", "J"); add("Back to the condition used before", condBack, "Condition", "`");
+    add("Nos for each new measurement — ×2, ×3 … typical rooms, units, floors", nosMenu, "Tool"); add("Set Nos of the selection…", nosSelDialog, "Modify"); add("Auto takeoff — the free agents and fast tools in one menu", autoMenu, "Tool");
+    add("Zoom window — drag a box round the part to see", () => setTool("zoomwin"), "View", "Z"); add("Fit page", () => { fit(); renderHi(); }, "View", "F");
     add("New condition", () => editCond(null), "Condition"); add("Custom columns… — your own figures per condition by formula (Tiles = Q / 4 * 1.05)", colsDialog, "Condition");
   add("Apply to pages / typical floors… — the selection, or a condition on this page, to the same place on other pages", () => copyToPagesDialog(selIds().size ? null : S.cond), "Edit"); add("All projects", showStart, "Project");
   document.querySelectorAll("header button[id], #viewPop button[id], #qaBar button, aside button[id], .panel button[id]").forEach(b => btn(b, b.closest("#viewPop") ? "View" : b.closest("#qaBar") ? "Check" : "Button"));
@@ -11191,11 +11401,11 @@ function paletteCmds(){
 /* AutoCAD command aliases: type tr + Enter for Trim, f for Fillet, sc for Scale… (the command whose name starts so; a "…" one — the dialog — first) */
 const PAL_ALIAS = [["tr", "trim"], ["ex", "extend"], ["f", "fillet"], ["fil", "fillet"], ["cha", "chamfer"], ["s", "stretch"], ["str", "stretch"], ["sc", "scale selection"], ["scale", "scale selection"],
   ["ro", "rotate…"], ["rotate", "rotate…"], ["o", "offset"], ["off", "offset"], ["m", "move"], ["mo", "move"], ["co", "copy"], ["cp", "copy"], ["mi", "mirror"], ["br", "break"], ["j", "join"], ["x", "explode"], ["mer", "merge areas"], ["merge", "merge areas"], ["uni", "merge areas"], ["union", "merge areas"],
-  ["ar", "array"], ["l", "length"], ["rec", "rectangle"], ["ci", "circle"], ["pol", "polygon"], ["qs", "quick select"], ["qselect", "quick select"], ["inv", "invert selection"], ["di", "measure"], ["dist", "measure"], ["dan", "angle"], ["dimangular", "angle"], ["dra", "radius"], ["dimradius", "radius"], ["ddi", "radius"], ["z", "zoom window"], ["pl", "plot"], ["xh", "cross-hair"], ["cross", "cross-hair"],
-  ["dxf", "dxf"], ["dxfout", "dxf"], ["u", "undo"], ["re", "redo"], ["or", "ortho"], ["po", "polar"], ["os", "object snaps"], ["lock", "lock"], ["w", "auto area"], ["aa", "auto area"]];
+  ["ar", "array"], ["l", "length"], ["rec", "rect"], ["qi", "quick items"], ["ci", "circle"], ["pol", "polygon"], ["qs", "quick select"], ["qselect", "quick select"], ["inv", "invert selection"], ["di", "measure"], ["dist", "measure"], ["dan", "angle"], ["dimangular", "angle"], ["dra", "radius"], ["dimradius", "radius"], ["ddi", "radius"], ["z", "zoom window"], ["pl", "plot"], ["xh", "cross-hair"], ["cross", "cross-hair"],
+  ["dxf", "dxf"], ["dxfout", "dxf"], ["u", "undo"], ["re", "redo"], ["or", "ortho"], ["po", "polar"], ["os", "object snaps"], ["lock", "lock"], ["w", "auto area", 1], ["aa", "auto area", 1]];   // (1: the command of exactly that name — the Auto area tool, not "Auto area: every room in a window…")
 function palAlias(L){
-  PAL_ALIAS.forEach(([a, pre]) => {
-    const m = L.filter(c => c.t.toLowerCase().startsWith(pre)), c = m.find(x => x.t.includes("…")) || m[0];
+  PAL_ALIAS.forEach(([a, pre, ex]) => {
+    const m = L.filter(c => c.t.toLowerCase().startsWith(pre)), c = (ex && m.find(x => x.t.toLowerCase() === pre)) || m.find(x => x.t.includes("…")) || m[0];
     if (c) (c.al = c.al || []).push(a);
   });
   return L;
@@ -11378,6 +11588,7 @@ function ctxItem(hi, sp, q, e){
   { const pk = flPk(it), fls = floorsOf(pk), now = new Set(sel.map(i => flLow(locOf(i).floor)));   // the floor they are in (Ground floor, 1st floor …): a floor of the page, a new one, or back to their boundary's
     L.push({t: "Move to floor", sub: fls.map(f => ({t: f.name, on: now.size === 1 && now.has(flLow(f.name)), fn: () => { const n = floorMove(ids, f.name, pk); toast(n ? n + " moved to “" + f.name + "”" : "Already in “" + f.name + "”", 2200); }}))
       .concat(fls.length ? [{sep: 1}] : [], [{t: "New floor…", fn: () => floorNewAsk(pk, sel.map(i => i.id))}], sel.some(i => i.floor) ? [{t: "Out of the floor set by hand (by its boundary again)", fn: () => floorMove(ids, "", pk)}] : [], [{t: "Floors on this page…", fn: () => floorsDialog(pk)}])}); }
+  L.push({t: many ? "Set Nos of the " + ids.size + " selected…" : "Set Nos… (now " + (+it.nos || 1) + ")", fn: nosSelDialog, dis: allLk});   // typical rooms / units / floors: one Nos for all
   L.push({t: "Select all “" + c.name + "” on this page", fn: () => selectSimilar(it)});
   L.push({t: "Condition", sub: [{t: "Edit “" + c.name + "”…", fn: () => editCond(c)}, {t: "Change colour…", fn: () => colorPop({getBoundingClientRect: () => ({left: e.clientX, bottom: e.clientY})}, c)},
     {t: "Hide this condition", fn: () => { c.hidden = true; setSel([]); save(); refresh(); }}, {t: "Show only this condition", fn: () => { P.proj.conds.forEach(x => { x.hidden = x.id !== c.id; }); save(); refresh(); }},
@@ -11431,6 +11642,7 @@ function keysDialog(){
     ${G("Markups (Bluebeam)", [["T | Q | N", "text box · callout · note"], ["Shift+L | Y | G", "line · polyline · polygon"], ["Shift+R | Shift+E | U", "rectangle · ellipse · cloud"], ["P | Shift+H", "pen · highlighter pen"], ["X | I", "stamp · image"], ["Markup ▾", "every markup tool: hyperlink, file attachment, redaction, erase…"], ["Dbl-click a markup", "edit its text · open a link or an attached file"], ["Drag a handle", "resize a box, move a line's end or a point"], ["Alt+L", "Markups list: every markup — filter, sort, status, replies, layers, CSV / XML / PDF summary"]])}
     ${G("Command line (status bar)", [[":", "put the cursor in the command line"], ["alias + Enter", "l, rec, ci, pol, tr, ex, f, cha, o, m, co, ro, sc, mi, br, j, x, ar, qs, inv, u, re…"], ["with a number", "pol 8 · ro 37 · sc 1.5 · f 0.5 · cha 0.5 0.75 · o 0.375"], ["Enter on an empty line", "repeat the last command"], ["↑ | ↓", "history"], ["Esc", "leave the command line"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
+    ${G("Fast takeoff", [["J", "the condition list — the recent ones first, a filter, Quick items, New condition (also the condition button beside the ribbon tabs)"], ["`", "back to the condition used before"], ["1 … 9", "the first nine conditions"], ["*3 | Enter", "while drawing: this shape gets Nos 3 (the ribbon's Nos sets it for every new one)"], ["Enter", "with nothing drawn or selected: the last measuring tool again"]])}
     ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["F8 | F10", "Ortho (0° / 90°) · Polar tracking (every 15°…) — Shift frees one click while Ortho is on"], ["Snap ▾ (toolbar)", "choose the object snaps: endpoint, midpoint, intersection, perpendicular, nearest"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"], ["M | Shift+M", "measure · angle (arm, corner, arm) — not saved, Esc clears"], ["Radius (ribbon / Ctrl+K)", "centre, edge → R, Ø, circumference — not saved"]])}
     ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"], ["Ctrl+\\", "split window: this drawing in two windows (own zoom each) — again to close"], ["F6", "split window: work in the other window"], ["Split ▾ (toolbar)", "stacked, another project in the second window, sync zoom & pan, link cursor, match, swap"]])}
   </table>`, "Close");
@@ -12070,7 +12282,7 @@ function wire(){
     if (e.key === "Escape") { if (S.autoShow) { S.autoShow = null; }
       if (S.pickWall) { S.pickWall = false; hint(); }
       else if (S.arcMode) { S.arcMode = 0; S.arcMid = null; hint(); }
-      else if (S.draft.length) { if (S.resume) toast("Run left as it was", 1500); S.resume = null; draftClear(); hint(); }
+      else if (S.draft.length) { if (S.resume) toast("Run left as it was", 1500); S.resume = null; S.nosOnce = 0; draftClear(); hint(); }
       else if (["gap", "stamp", "break", "zoomwin", "lasso", "match", "floorbox", "trim", "extend", "fillet", "chamfer", "stretch", "cedoffset", "cedjoin", "cedexplode"].indexOf(S.tool) >= 0) setTool("select");
       else if (S.measures.length || S.measure) { S.measures = []; S.measure = null; }
       else if (S.sel || S.selMark) { setSel([]); }
@@ -12079,14 +12291,15 @@ function wire(){
       refresh(); return; }
     if (S.draft.length && ["draw", "ded", "measure", "fence", "rect", "dedrect", "mk_polyline", "mk_polygon"].indexOf(S.tool) >= 0 && !S.arcMid) {   // Bluebeam "sketch to scale": type a length (12'-6", 12.5) — or L x W for a rectangle — and Enter
       const ch = e.key, buf = S.typed || "";
-      if (/^[0-9.'"\/]$/.test(ch) || (buf && /^[- xX×]$/.test(ch))) { S.typed = buf + ch; e.preventDefault(); draw(); return; }
+      if (/^[0-9.'"\/]$/.test(ch) || (buf && /^[- xX×]$/.test(ch)) || (!buf && ch === "*" && ["draw", "ded", "rect", "dedrect"].indexOf(S.tool) >= 0)) { S.typed = buf + ch; e.preventDefault(); draw(); return; }   // (*3: Nos 3 for this shape)
       if (buf && e.key === "Backspace") { S.typed = buf.slice(0, -1); e.preventDefault(); draw(); return; }
       if (buf && e.key === "Escape") { S.typed = ""; draw(); return; }
-      if (buf && e.key === "Enter") { e.preventDefault(); typedPoint(buf); return; }
+      if (buf && e.key === "Enter") { e.preventDefault(); if (buf[0] === "*") nosTyped(buf); else typedPoint(buf); return; }
     }
     if (e.key === "Enter") {
       if (S.tool === "measure" && S.verify && S.measure && S.measure.length > 1) return verifyMeasure();
       if (S.draft.length) endDraft();
+      else if (S.tool === "select" && S.lastTool && !selIds().size && !S.selMark && (e.target === document.body || (e.target.closest && e.target.closest(".stg")))) { setTool(S.lastTool); toast("Again: " + ((document.querySelector(`#tools [data-tool="${S.tool}"] .tl`) || {}).textContent || S.tool) + " — Enter starts the last tool again", 1800); }
       return;
     }
     if (e.key === "Backspace" || e.key === "Delete") {
@@ -12100,6 +12313,8 @@ function wire(){
     if (e.key === "}" || e.key === "{") { lblSize("dedScale", e.key === "}" ? 1 : -1); return; }   // Shift: the cut-out labels'
     if (e.shiftKey && k === "c") { setXh(!S.xh); return; }   // full-screen cross-hair
     if (e.shiftKey && k === "g") { setMag(!MAG.on); return; }   // magnifier (Shift+M is the Angle tool)
+    if (e.key === "`") { e.preventDefault(); return condBack(); }   // the condition used before
+    if (k === "j" && !e.shiftKey) { e.preventDefault(); return condPop(true); }   // the condition list (the button beside the tabs)
     if (e.shiftKey) { const ST = {m: "angle", l: "mk_line", r: "mk_box", e: "mk_ellipse", h: "mk_hpen", v: "cadsel", t: "trim", x: "extend", s: "stretch", d: "dedrect", a: "linepick"}; if (ST[k]) { setTool(ST[k]); return; } }
     const T = {v: "select", h: "pan", a: "draw", r: "rect", w: "auto", c: "count", e: "circle", n: "note", u: "cloud", d: "ded", o: "open", m: "measure", k: "cal", b: "break", z: "zoomwin",
       t: "mk_text", q: "mk_callout", p: "mk_pen", g: "mk_polygon", y: "mk_polyline", x: "mk_stamp", i: "mk_image"};
@@ -14700,7 +14915,8 @@ function blockMasonryAgent(o){
   const learnt = (P.proj.blockLearn || []).filter(l => l.file === S.fileId && l.page === S.pageNo);   // the user's corrections on this page
   if (learnt.length) pieces.forEach(q => { const mid = [(q.a[0] + q.b[0]) / 2, (q.a[1] + q.b[1]) / 2], l = learnt.find(l => l.pts.some((a, i) => i && distSeg(mid, l.pts[i - 1], a) <= 0.6 * k)); if (l) q.type = l.to; });
   const H = r3(o.floor - o.slab / 12), conds = {};
-  BLOCK_TYPES.forEach(b => { let c = P.proj.conds.find(x => x.type === "linear" && x.name === b.name);
+  BLOCK_TYPES.forEach(b => { const as = [b.name, b.name + (b.key === "8i" ? " (internal)" : b.key === "8e" ? " (external)" : "")];   // (the Quick items / New condition preset names carry "(internal)" / "(external)")
+    let c = P.proj.conds.find(x => x.type === "linear" && x.name === b.name) || P.proj.conds.find(x => x.type === "linear" && as.includes(x.name));
     if (!c) c = {id: uid("C"), name: b.name, type: "linear", unit: "cft", color: COLORS[(P.proj.conds.length + 3) % COLORS.length], faces: 1, dedMin: 0};
     Object.assign(c, {unit: "cft", t: b.t, h: H, agentWall: true, blockKey: b.key}); conds[b.key] = c; });
   const ids = Object.values(conds).map(c => c.id), inR = it => !rect || it.pts.every(q => q[0] >= rect[0] && q[0] <= rect[2] && q[1] >= rect[1] && q[1] <= rect[3]);
@@ -15275,6 +15491,8 @@ function applyChestProfile(p){
   }
   if (!P.proj) return toast("Open a project before using a measurement profile");
   const c = Object.assign({id: uid("C"), name: p.name, hidden: false}, JSON.parse(JSON.stringify(p.condition || {})));
+  const have = P.proj.conds.find(x => x.type === c.type && String(x.name).trim().toLowerCase() === String(p.name).trim().toLowerCase());
+  if (have) { S.cond = have.id; setTool(have.type === "count" ? "count" : "draw"); refresh(); toast("Using " + have.name + " — already in this project (a second copy would split its totals)", 2800); return; }
   c.id = uid("C"); c.name = p.name; c.color = /^#[0-9a-f]{6}$/i.test(c.color || "") ? c.color : toolDefaults().condColor;
   mutate(() => { P.proj.conds.push(c); }, "Add condition from Tool Chest");
   S.cond = c.id; setTool(c.type === "count" ? "count" : "draw"); refresh(); toast("Condition profile ready: " + p.name, 2500);
@@ -16629,6 +16847,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
     floorsDialog, floorAddMany, floorNext, floorTitleIn, floorZoom, floorMenu, floorBoxStart, floorNewAsk, floorLegends, floorLegendSplit, legendFloorSet, legendFit, legendTitle, floorTitleOf,
+    quickItemsDialog, quickItemsAdd, qkCat, qkNeed, qkFind, PRESETS, condPop, condUse, condBack, condMru, renderCondPick, nosSet, nosNow, nosNew, nosMenu, nosTyped, nosSelDialog, autoMenu, autoWindowUI, mineSet, tbGroups, tbPref, MINE_START, applyChestProfile,
     get SNAP_PX(){ return SNAP_PX; }, get HIT_PX(){ return HIT_PX; }};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
