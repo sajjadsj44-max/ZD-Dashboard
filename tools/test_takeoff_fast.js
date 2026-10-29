@@ -188,6 +188,13 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   await T(() => zdTakeoff.blockMasonryAgent({floor: 12, slab: 7.5, beamD: 21, beam: {"4": 0, "8i": 0, "8e": 0}, tags: {}, page: true})); await wait(200);
   ok(await T(() => { const L = zdTakeoff.P.proj.conds; return !L.some(c => c.name === 'Block masonry 8"x8"x12"') && L.find(c => c.id === "Cblk8i").blockKey === "8i"; }), "Block masonry takes the preset's “8\"x8\"x12\" (internal)” condition instead of making a second 8\" one");
 
+  console.log("contact");
+  ok(await T(() => document.title) === "Sajjad QS PDF TAKEOFF Software" && !/5486522/.test(await page.innerText("header")), "the number is not in the title or on the top bar");
+  await page.click("#bContact"); await wait(120);
+  ok(await T(() => { const p = document.getElementById("ctPop"); return !!p && p.classList.contains("on") && /03016-5486522/.test(p.textContent) && p.querySelector('a[href="tel:030165486522"]') !== null; }), "the phone button shows the number, with Call and Copy");
+  await page.keyboard.press("Escape"); await wait(80);
+  ok(await T(() => !document.getElementById("ctPop").classList.contains("on")), "Esc closes it");
+
   console.log("command line and palette");
   ok(await T(() => /^Rect/.test(zdTakeoff.cmdFind("rec").t)), "rec → Rect (it matched nothing before)");
   ok(await T(() => zdTakeoff.cmdFind("w").t === "Auto area" && zdTakeoff.cmdFind("aa").t === "Auto area"), "w / aa → the Auto area tool (not “every room in a window…”)");
