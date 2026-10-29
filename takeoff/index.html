@@ -9,6 +9,8 @@ if (matchMedia("(display-mode: standalone), (display-mode: minimal-ui), (display
 <script>/* the look (Settings → Ribbon & toolbar → Colourful look) is set before the page is drawn, so the other one never flashes */
 try { var zdSet = JSON.parse(localStorage.getItem("zdTakeoffSet") || "{}"); if (zdSet && zdSet.look === "classic") document.documentElement.setAttribute("data-look", "classic"); } catch (e) {}</script>
 <link rel="manifest" href="manifest.webmanifest">
+<script>/* the friends' link takeoff/?team: its own installable app (which opens on ?team again) and the team view from the first paint */
+if (new URLSearchParams(location.search).has("team")) { document.documentElement.classList.add("zd-team"); document.querySelector('link[rel="manifest"]').href = "manifest-team.webmanifest"; }</script>
 <meta name="theme-color" content="#0f2942">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -434,6 +436,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 }
 @media print{body{overflow:visible}}
 input.secret{-webkit-text-security:disc}   /* a secret field: drawn as dots, never a browser password field (nothing offered to save) */
+.zd-team [data-bak],.zd-team #bRecover,.zd-team #exBak,.zd-team a.back,.zd-team #start h2 > a.btn{display:none !important}   /* the friends' link (?team): no backups, no links to the other ZD pages */
 .stgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;max-height:260px;overflow:auto;padding:2px}   /* the stamp picker */
 .stp{position:relative;border:2px solid var(--sc);border-radius:7px;background:#fff;color:var(--sc);font:800 11px/1.2 "Segoe UI",Arial,sans-serif;letter-spacing:.3px;padding:10px 6px;cursor:pointer;text-align:center}
 .stp.on{box-shadow:0 0 0 3px rgba(43,125,233,.35);background:#f4f8ff}
@@ -1400,7 +1403,7 @@ html[data-look="colour"] :is(.hidebtn,.cond .ed,.crow .ed,.ctr .car,.cgrp2 .car)
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-29c"></script>
+<script type="module" src="takeoff.js?v=2026-10-29d"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
@@ -1415,7 +1418,37 @@ html[data-look="colour"] :is(.hidebtn,.cond .ed,.crow .ed,.ctr .car,.cgrp2 .car)
   var TRUSTED = ['d3c1ca597a243ba81f1e2f79539fb1aeadf9929f87d90ab4736905cd6e49e83c'];   // the owner's laptop; the same list on every page
   function sha(s) {   // hex SHA-256 of s, as a promise (rejected where the browser has no Web Crypto, e.g. a file:// page)
     return Promise.resolve().then(function () { return crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); })
-      .then(function (b) { return Array.prototype.map.call(new Uint8Array(b), function (x) { return (x | 256).toString(16).slice(1); }).join(''); });
+      .then(hexOf);
+  }
+  function hexOf(b) { return Array.prototype.map.call(new Uint8Array(b), function (x) { return (x | 256).toString(16).slice(1); }).join(''); }
+  /* The friends' link (?team) asks for a username and a password instead, checked against takeoff/users.json (Settings › Team
+     logins): PBKDF2-SHA256 of the password with the user's salt. The list is read fresh each time and again every 5 minutes —
+     a user removed, or given a new password, is signed out. */
+  var TEAM = new URLSearchParams(location.search).has('team'), signed = null;
+  function teamList() {
+    return fetch('users.json?check=' + Date.now(), {cache: 'no-store'}).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (j) { return (j && j.users) || []; });
+  }
+  function pbkdf2(pw, salt, iter) {
+    var te = new TextEncoder();
+    return crypto.subtle.importKey('raw', te.encode(pw), 'PBKDF2', false, ['deriveBits'])
+      .then(function (k) { return crypto.subtle.deriveBits({name: 'PBKDF2', hash: 'SHA-256', salt: te.encode(salt), iterations: iter}, k, 256); }).then(hexOf);
+  }
+  function teamCheck(name, pw) {   // the user's entry when name and password match, null when not; rejected when the list can't be read
+    return teamList().then(function (L) {
+      var u = L.filter(function (x) { return x && x.u === name; })[0];
+      if (!u || !pw) return null;
+      return pbkdf2(pw, u.s, +u.iter || 150000).then(function (h) { return h === u.h ? u : null; });
+    });
+  }
+  function signedIn(u) {   // the takeoff shows who is signed in (Sign out asks again); a removed user or a changed password locks the page
+    signed = u;
+    document.documentElement.setAttribute('data-zd-user', u ? u.u : '');
+    window.dispatchEvent(new Event('zd-signed-in'));
+    if (!u) return;
+    var still = function () { teamList().then(function (L) { if (!L.some(function (x) { return x && x.u === u.u && x.h === u.h; })) location.reload(); }, function () {}); };
+    setInterval(still, 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') still(); });
   }
   var trusted = (function () {   // null: no key kept here (asked as usual); else a promise of whether it is a trusted computer's key
     var k = ''; try { k = localStorage.getItem('zd-trusted-computer') || ''; } catch (e) {}
@@ -1423,18 +1456,20 @@ html[data-look="colour"] :is(.hidebtn,.cond .ed,.crow .ed,.ctr .car,.cgrp2 .car)
   }());
   var dots = !!(window.CSS && CSS.supports && CSS.supports('-webkit-text-security', 'disc'));
   var style = document.createElement('style');
-  style.textContent = '.zd-locked > :not(#zd-lock){filter:blur(5px);pointer-events:none;user-select:none}.zd-lock{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:20px;background:rgba(15,41,66,.72)}.zd-lock-card{width:min(100%,360px);padding:28px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.25);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a}.zd-lock-card .mark{width:40px;height:40px;border:2px solid #0f2942;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;margin-bottom:16px;color:#0f2942}.zd-lock-card h2{color:#0f2942;font-size:21px;margin:0 0 6px}.zd-lock-card p{color:#6b7d92;margin:0 0 18px}.zd-lock-card label{display:block;color:#0f2942;font-size:12px;font-weight:600;margin-bottom:6px}.zd-lock-card input{width:100%;padding:11px 12px;border:1px solid #dde5ee;border-radius:7px;font:inherit;margin-bottom:12px;box-sizing:border-box;-webkit-text-security:disc}.zd-lock-card button{width:100%;border:0;border-radius:7px;padding:11px;background:#2b7de9;color:#fff;font:inherit;font-weight:700;cursor:pointer}.zd-lock-error{margin-top:10px;color:#b42318;font-size:12px}.zd-lock-note{margin-top:12px;color:#6b7d92;font-size:11.5px}.zd-lock-wait{background:none}.zd-lock-wait .zd-lock-card{visibility:hidden}';
+  style.textContent = '.zd-locked > :not(#zd-lock){filter:blur(5px);pointer-events:none;user-select:none}.zd-lock{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:20px;background:rgba(15,41,66,.72)}.zd-lock-card{width:min(100%,360px);padding:28px;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.25);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a}.zd-lock-card .mark{width:40px;height:40px;border:2px solid #0f2942;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;margin-bottom:16px;color:#0f2942}.zd-lock-card h2{color:#0f2942;font-size:21px;margin:0 0 6px}.zd-lock-card p{color:#6b7d92;margin:0 0 18px}.zd-lock-card label{display:block;color:#0f2942;font-size:12px;font-weight:600;margin-bottom:6px}.zd-lock-card input{width:100%;padding:11px 12px;border:1px solid #dde5ee;border-radius:7px;font:inherit;margin-bottom:12px;box-sizing:border-box;-webkit-text-security:disc}.zd-lock-card button{width:100%;border:0;border-radius:7px;padding:11px;background:#2b7de9;color:#fff;font:inherit;font-weight:700;cursor:pointer}.zd-lock-error{margin-top:10px;color:#b42318;font-size:12px}.zd-lock-note{margin-top:12px;color:#6b7d92;font-size:11.5px}.zd-lock-wait{background:none}.zd-lock-wait .zd-lock-card{visibility:hidden}.zd-lock-card input.zd-lock-user{-webkit-text-security:none}';
   document.head.appendChild(style);
   function lockNow() {
     if (document.getElementById('zd-lock')) return;
     var lock = document.createElement('div'), secret = '', inert = [];
     lock.id = 'zd-lock';
     lock.className = trusted ? 'zd-lock zd-lock-wait' : 'zd-lock';   // while a kept key is checked, no password card is shown
-    lock.innerHTML = '<div class="zd-lock-card" role="dialog" aria-modal="true" aria-labelledby="zd-lock-title"><div class="mark">ZD</div><h2 id="zd-lock-title">ZD Dashboard</h2><p>Enter the password to continue.</p><label for="zd-lock-input">Password</label><input id="zd-lock-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"><button type="button">Unlock</button><div class="zd-lock-error" role="alert" hidden>Incorrect password.</div><div class="zd-lock-note">Never saved in this browser &mdash; asked each time a page is opened.</div></div>';
+    lock.innerHTML = '<div class="zd-lock-card" role="dialog" aria-modal="true" aria-labelledby="zd-lock-title"><div class="mark">ZD</div>' + (TEAM
+      ? '<h2 id="zd-lock-title">PDF Takeoff &mdash; Team</h2><p>Sign in with your username and password.</p><label for="zd-lock-user">Username</label><input id="zd-lock-user" class="zd-lock-user" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other">'
+      : '<h2 id="zd-lock-title">ZD Dashboard</h2><p>Enter the password to continue.</p>') + '<label for="zd-lock-input">Password</label><input id="zd-lock-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"><button type="button">Unlock</button><div class="zd-lock-error" role="alert" hidden>Incorrect password.</div><div class="zd-lock-note">Never saved in this browser &mdash; asked each time a page is opened.</div></div>';
     Array.prototype.forEach.call(document.body.children, function (el) { if (!el.inert && el.tagName !== 'SCRIPT') { el.inert = true; inert.push(el); } });
     document.body.appendChild(lock);
     document.body.classList.add('zd-locked');
-    var input = lock.querySelector('input'), button = lock.querySelector('button'), error = lock.querySelector('.zd-lock-error');
+    var input = lock.querySelector('#zd-lock-input'), button = lock.querySelector('button'), error = lock.querySelector('.zd-lock-error');
     ['copy', 'cut', 'dragstart'].forEach(function (t) { input.addEventListener(t, function (e) { e.preventDefault(); }); });
     function keep(e) {   // a browser that cannot draw the field as dots: dots are typed and the characters kept aside
       if (dots || (e && e.isComposing)) return;
@@ -1450,18 +1485,27 @@ html[data-look="colour"] :is(.hidebtn,.cond .ed,.crow .ed,.ctr .car,.cgrp2 .car)
       lock.remove(); document.body.classList.remove('zd-locked');
       inert.forEach(function (el) { el.inert = false; }); inert = [];
     }
+    var user = lock.querySelector('#zd-lock-user'), first = user || input;
     function unlock() {
-      var ok = (dots ? input.value : secret) === 'sa';
+      var pw = dots ? input.value : secret;
       input.value = ''; secret = '';
-      if (ok) open(); else { error.hidden = false; input.focus(); }
+      if (!TEAM) { if (pw === 'sa') open(); else { error.hidden = false; input.focus(); } return; }
+      var name = user.value.trim().toLowerCase();
+      button.disabled = true; error.hidden = true;
+      teamCheck(name, pw).then(function (u) {
+        button.disabled = false;
+        if (u) { open(); signedIn(u); return; }
+        error.textContent = 'Incorrect username or password.'; error.hidden = false; input.focus();
+      }, function () { button.disabled = false; error.textContent = 'Could not read the users list — check the internet connection and try again.'; error.hidden = false; });
     }
     button.addEventListener('click', unlock);
     input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); unlock(); } });
-    if (trusted) trusted.then(function (t) { if (t) open(); else { lock.classList.remove('zd-lock-wait'); input.focus(); } });
-    else input.focus();
+    if (user) user.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); input.focus(); } });
+    if (trusted) trusted.then(function (t) { if (t) { open(); if (TEAM) signedIn(null); } else { lock.classList.remove('zd-lock-wait'); first.focus(); } });
+    else first.focus();
   }
   lockNow();
-  window.addEventListener('load', function () { var i = document.getElementById('zd-lock-input'); if (i) i.focus(); });
+  window.addEventListener('load', function () { var i = document.getElementById('zd-lock-user') || document.getElementById('zd-lock-input'); if (i && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('#zd-lock'))) i.focus(); });
   window.addEventListener('pageshow', function (e) { if (e.persisted) lockNow(); });   // back from the browser's page cache: asked again
 }());
 </script>

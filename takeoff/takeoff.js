@@ -29,6 +29,8 @@ const today = () => { const d = new Date(); return d.getFullYear() + "-" + ("0" 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const dmy = iso => { const p = String(iso || "").slice(0, 10).split("-"); return p.length === 3 ? p[2] + "-" + MON[+p[1] - 1] + "-" + p[0] : "—"; };
 const dmyHm = iso => { const d = new Date(iso), z = n => String(n).padStart(2, "0"); return isNaN(d) ? "—" : dmy(d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate())) + " " + z(d.getHours()) + ":" + z(d.getMinutes()); };   // a stored (UTC) time as the clock on the wall shows it
+/* the friends' link takeoff/?team: a sign-in per person (Settings › Team logins), and no backups, settings file or links to the other ZD pages */
+const TEAM = new URLSearchParams(location.search).has("team");
 function toast(msg, ms){ const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => { t.style.display = "none"; }, ms || 2600); }
 function busy(msg){ const b = $("busy"); b.textContent = msg || ""; b.style.display = msg ? "block" : "none";
   if (msg && AG.n) { const s = document.createElement("button"); s.type = "button"; s.className = "busyStop"; s.textContent = AG.stop ? "Stopping…" : "■ Stop"; s.disabled = AG.stop; s.title = "Stop the agent (Esc)"; s.onclick = agentStop; s.onpointerdown = s.onmousedown = e => e.stopPropagation(); b.append(" ", s); } }
@@ -9269,7 +9271,7 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
   const td = k => () => toolDefaults()[k], tdSet = k => v => saveToolDefaults(Object.assign(toolDefaults(), {[k]: v}));
   const lb = (k, n, d) => ({t: "tog", n, d, get: () => k === "zoom" || k === "declutter" ? S.lbl[k] !== false : !!S.lbl[k], set: v => lblSet({[k]: v})});
   const chest = {t: "btn", n: "Tool Chest", d: "saved tool profiles — colour, line weight, markup style — with favourites", b: "Open…", fn: () => toolChestDialog()};
-  return [
+  const PG = [
     {id: "general", n: "General", d: "start-up, the ribbon, your name", rows: [
       {t: "sel", n: "Ribbon tab when the app opens", d: "shown on opening or refreshing the page", o: tabs.concat([["last", "The tab used last"]]), get: () => setPref().homeTab, set: v => { setSave({homeTab: v}); }},
       {t: "sel", n: "When a tool is picked by its key or a menu", d: "which ribbon tab shows", o: [["smart", "Its tab — but stay on My tools when the tool is there"], ["always", "Always its tab"], ["never", "Keep the tab I am on"]], get: () => setPref().ribFollow, set: v => { setSave({ribFollow: v}); }},
@@ -9401,6 +9403,101 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
       {t: "btn", n: "Load settings from a file", d: "the settings in the file replace these, then the page reloads", b: "Import…", stay: true, fn: setImport},
       {t: "btn", n: "Reset every setting", d: "back to how the app came — your projects, My tools, Tool Chest, stamps, agent rules and AI setup are kept", b: "Reset all…", dng: true, stay: true, fn: setResetAll}]}
   ];
+  if (!TEAM) return PG.concat(teamPage());
+  const NO = new Set(["Backups of this project", "Recover a deleted project"]);   // the team view: no backups, no settings file or reset
+  return PG.filter(p => p.id !== "file").map(p => Object.assign({}, p, {rows: p.rows.filter(r => !NO.has(r.n))}));
+}
+/* ------------------------------------------------------------------ team logins (the friends' link takeoff/?team)
+   Each friend signs in with a username and password listed in takeoff/users.json — the lock at the end of index.html checks them,
+   asks every time the page is opened (nothing is kept) and signs a friend out within minutes of being removed. Only a salted
+   PBKDF2-SHA256 hash of each password is in the file. The owner adds and removes logins here: Save writes users.json to main
+   through the GitHub API (a token with Contents: write on the repo, asked when saving and kept only while this page is open), or
+   Download gives the file to commit by hand. */
+const TEAM_REPO = "sajjadsj44-max/ZD-Dashboard", TEAM_FILE = "takeoff/users.json", TEAM_ITER = 150000;
+const TM = {list: null, err: "", log: [], token: "", busy: false};
+const teamHex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
+async function teamHash(pw, salt, iter){   // the same as the lock's: PBKDF2-SHA256 of the password, the salt's text as the salt, 32 bytes in hex
+  const te = new TextEncoder(), k = await crypto.subtle.importKey("raw", te.encode(pw), "PBKDF2", false, ["deriveBits"]);
+  return teamHex(await crypto.subtle.deriveBits({name: "PBKDF2", hash: "SHA-256", salt: te.encode(salt), iterations: iter}, k, 256));
+}
+async function teamLoad(){
+  try { const r = await fetch("users.json?check=" + Date.now(), {cache: "no-store"});   // ?check: past the service worker and the site's 10-minute cache
+    if (r.status === 404) { TM.list = []; TM.err = ""; return; }
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json(); TM.list = Array.isArray(j.users) ? j.users.filter(u => u && u.u && u.s && u.h) : []; TM.err = ""; }
+  catch (e) { TM.list = []; TM.err = "Could not read the users list (" + (e.message || e) + ") — what you add here replaces it when saved."; }
+  TM.log = [];
+}
+function teamText(){
+  const L = TM.list.slice().sort((a, b) => a.u.localeCompare(b.u));
+  return '{\n "about": "PDF Takeoff team logins for takeoff/?team. Passwords are salted PBKDF2-SHA256 hashes. Edited from Settings > Team logins.",\n "iter": ' + TEAM_ITER +
+    ',\n "users": [' + (L.length ? "\n" + L.map(u => "  " + JSON.stringify({u: u.u, s: u.s, h: u.h, iter: u.iter || TEAM_ITER, at: u.at || ""})).join(",\n") + "\n " : "") + "]\n}\n";
+}
+async function teamSave(){
+  if (!TM.token) {
+    const t = await ask("Save the team logins to the site", `<p class="small">Writes <b>${esc(TEAM_FILE)}</b> to the <b>main</b> branch of ${esc(TEAM_REPO)}; the site is published again in a minute or two and the logins work from then on.</p>
+      <div class="fg" style="margin-top:8px"><label>GitHub token (fine-grained, this repository, Contents: read and write)</label><input type="text" class="secret" id="tmTok" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"></div>
+      <p class="small" style="margin-top:6px">Kept only while this page is open — never saved in the browser. Make one at github.com › Settings › Developer settings › Fine-grained tokens.</p>`, "Save", () => $("tmTok").value.trim() || "Paste the token", "tmTok");
+    if (!t) return settingsDialog("team");
+    TM.token = t;
+  }
+  TM.busy = true; toast("Saving the team logins…", 8000);
+  const api = "https://api.github.com/repos/" + TEAM_REPO + "/contents/" + TEAM_FILE, H = {Authorization: "Bearer " + TM.token, Accept: "application/vnd.github+json"};
+  try {
+    const g = await fetch(api + "?ref=main&t=" + Date.now(), {headers: H, cache: "no-store"});
+    if (g.status === 401 || g.status === 403) throw Object.assign(new Error("the token was refused (" + g.status + ")"), {tok: 1});
+    if (!g.ok && g.status !== 404) throw new Error("GitHub answered " + g.status);
+    const sha = g.ok ? (await g.json()).sha : "", bytes = new TextEncoder().encode(teamText());
+    let bin = ""; for (const b of bytes) bin += String.fromCharCode(b);
+    const p = await fetch(api, {method: "PUT", headers: H, body: JSON.stringify(Object.assign({message: "PDF Takeoff: team logins — " + (TM.log.join(", ") || "saved"), content: btoa(bin), branch: "main"}, sha ? {sha} : {}))});
+    if (!p.ok) { const m = await p.json().catch(() => ({})); throw Object.assign(new Error(m.message || "GitHub answered " + p.status), {tok: p.status === 401 || p.status === 403}); }
+    TM.log = []; toast("Saved — the logins work once the site is published (a minute or two)", 5000);
+  } catch (e) { if (e.tok) TM.token = ""; toast("Not saved: " + (e.message || e) + (e.tok ? " — check the token" : ""), 7000); }
+  TM.busy = false; settingsDialog("team");
+}
+function teamPage(){
+  const link = new URL("./?team", location.href).href;
+  const html = () => !TM.list ? '<div class="small" id="tmBox">Reading the users list…</div>' : `<div id="tmBox" style="width:100%">
+    <p class="small">Friends open the link below and sign in with their own username and password, asked each time. They get the takeoff only — no backups, no settings file, no links to the other ZD pages — and their projects stay in their own browser. A removed user is signed out within 5 minutes of the site being published.</p>
+    <div style="display:flex;gap:6px;margin:8px 0"><input type="text" readonly id="tmLink" value="${esc(link)}" style="flex:1" aria-label="Friends' link"><button class="btn sm" id="tmCopy">Copy link</button></div>
+    ${TM.err ? `<p class="small" style="color:#b42318">${esc(TM.err)}</p>` : ""}
+    ${TM.list.length ? `<table class="sh" style="margin:6px 0"><thead><tr><th>User</th><th>Added</th><th></th></tr></thead><tbody>${TM.list.map((u, i) => `<tr><td>${esc(u.u)}</td><td>${esc(u.at ? dmy(u.at) : "—")}</td><td class="n" style="white-space:nowrap"><button class="btn sm" data-tmpw="${i}">New password…</button> <button class="btn sm dng" data-tmdel="${i}">Remove</button></td></tr>`).join("")}</tbody></table>` : '<p class="small" style="margin:6px 0">No team users yet.</p>'}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0"><input type="text" id="tmU" data-enter="tmAdd" placeholder="Username" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="New user's name" style="width:140px"><input type="text" class="secret" id="tmP" data-enter="tmAdd" placeholder="Password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" aria-label="New user's password" style="width:140px"><button class="btn sm" id="tmAdd">Add user</button></div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="small" style="flex:1">${TM.log.length ? "<b>Not saved to the site yet:</b> " + esc(TM.log.join(", ")) : "As on the site."}</span><button class="btn sm" id="tmDl" title="users.json to commit in takeoff/ by hand">Download users.json</button><button class="btn sm pri" id="tmSave"${TM.log.length && !TM.busy ? "" : " disabled"}>Save to the site…</button></div></div>`;
+  const wire = paint => {
+    if (!TM.list) { teamLoad().then(paint); return; }
+    const box = $("tmBox"); if (!box || box.dataset.w) return; box.dataset.w = 1;
+    const add = async () => {
+      const u = $("tmU").value.trim().toLowerCase(), pw = $("tmP").value;
+      if (!/^[a-z0-9._-]{2,32}$/.test(u)) return toast("A username is 2–32 letters, digits, dots, dashes or underscores", 3500);
+      if (TM.list.some(x => x.u === u)) return toast(u + " is already a user — use New password to change theirs", 3500);
+      if (pw.length < 4) return toast("Give a password of at least 4 characters", 3000);
+      const s = teamHex(crypto.getRandomValues(new Uint8Array(16)));
+      TM.list.push({u, s, h: await teamHash(pw, s, TEAM_ITER), iter: TEAM_ITER, at: today()}); TM.log.push("added " + u); paint();
+    };
+    $("tmAdd").onclick = add;
+    $("tmCopy").onclick = () => { navigator.clipboard.writeText(link).then(() => toast("Link copied", 1800), () => { $("tmLink").select(); toast("Press Ctrl+C to copy", 2000); }); };
+    $("tmDl").onclick = () => saveBlob(new Blob([teamText()], {type: "application/json"}), "users.json");
+    $("tmSave").onclick = () => { if (ask.cur) ask.cur(null); teamSave(); };
+    box.addEventListener("click", async e => {
+      const d = e.target.closest("[data-tmdel]"), w = e.target.closest("[data-tmpw]");
+      if (d) { const u = TM.list.splice(+d.dataset.tmdel, 1)[0]; TM.log.push("removed " + u.u); paint(); }
+      if (w) { const u = TM.list[+w.dataset.tmpw];
+        const pw = await ask("New password — " + u.u, `<div class="fg"><label>New password</label><input type="text" class="secret" id="tmNp" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"></div><p class="small" style="margin-top:6px">${esc(u.u)} is signed out with the old one once this is saved to the site.</p>`, "Set", () => $("tmNp").value.length >= 4 ? $("tmNp").value : "At least 4 characters", "tmNp");
+        if (pw) { u.s = teamHex(crypto.getRandomValues(new Uint8Array(16))); u.h = await teamHash(pw, u.s, TEAM_ITER); u.iter = TEAM_ITER; TM.log.push("new password for " + u.u); }
+        settingsDialog("team"); }
+    });
+  };
+  return [{id: "team", n: "Team logins", d: "a link for friends, their users and passwords", rows: [{t: "html", n: "Friends' link", html, wire}]}];
+}
+function teamInit(){   // the team view: who is signed in, and Sign out (the page asks again)
+  if (!TEAM) return;
+  document.documentElement.classList.add("zd-team");
+  const show = () => { const n = document.documentElement.getAttribute("data-zd-user"); if (n == null || $("teamWho")) return;
+    const s = document.createElement("span"); s.id = "teamWho"; s.className = "small"; s.style.cssText = "white-space:nowrap;margin-left:6px";
+    s.innerHTML = `&#128100; ${esc(n || "owner")} <button class="btn sm" id="bSignOut" title="Sign out — the page asks for a username and password again">Sign out</button>`;
+    $("bExport").after(s); $("bSignOut").onclick = async () => { try { await flushSave(); } catch (e) {} location.reload(); }; };
+  show(); window.addEventListener("zd-signed-in", show);
 }
 async function settingsDialog(page){
   const PG = setPages(); let cur = PG.some(p => p.id === page) ? page : PG.some(p => p.id === pref("zdTakeoffSetPg")) ? pref("zdTakeoffSetPg") : "general", q = "", R = [];
@@ -9431,7 +9528,7 @@ async function settingsDialog(page){
   };
   const body = `<div class="setw"><nav id="stgNav" aria-label="Settings pages"><input type="search" id="stgQ" placeholder="Search settings" aria-label="Search settings" autocomplete="off">${PG.map(p => `<button class="spg" data-spg="${p.id}">${esc(p.n)}</button>`).join("")}</nav><div class="sb" id="stgBody"></div></div>`;
   const pr = ask("Settings", body, null, () => { const a = document.activeElement; if (!(a && a.closest && a.closest("#dlgB") && /^(INPUT|SELECT)$/.test(a.tagName))) return true;
-    if (a.dataset.si != null) a.dispatchEvent(new Event("change", {bubbles: true})); return ""; });   // Enter in a field applies it and never closes the window
+    if (a.dataset.si != null) a.dispatchEvent(new Event("change", {bubbles: true})); else if (a.dataset.enter && $(a.dataset.enter)) $(a.dataset.enter).click(); return ""; });   // Enter in a field applies it (or presses the button it names) and never closes the window
   $("dlgCancel").textContent = "Close";
   const B = $("dlgB").querySelector(".setw");   // (made new with each window: its listeners go with it)
   B.addEventListener("input", e => { const i = e.target.dataset && e.target.dataset.si, r = i != null && R[+i]; if (r && r.t === "txt") r.set(e.target.value); });   // a name is kept as it is typed
@@ -10653,6 +10750,7 @@ async function backupNow(why, pr){
   return true;
 }
 async function backupsDialog(pid){
+  if (TEAM) return;   // the team view does not show the backups
   pid = pid || (P.proj && P.proj.id); if (!pid) return;
   const pr = await dbGet("projects", pid), list = await backupsOf(pid);
   const fmt = dmyHm;
@@ -10751,6 +10849,7 @@ async function trashPurge(pids){   // the trash emptied of what is older than 30
   return n;
 }
 async function recoverDialog(){
+  if (TEAM) return;
   let groups; try { groups = await orphanBackups(); } catch (e) { return toast("Could not read the backups: " + e.message, 5000); }
   const fmt = dmyHm, fresh = () => { if ($("start").classList.contains("on")) showStart(); };   // the start screen's Recover button follows what is left
   ask("Recover a deleted project", `<p class="small">Projects deleted from this browser whose backups are still here (the last ${BAK_KEEP} copies of each). Restore brings the newest copy back as a project, with its drawings when it was deleted in the last ${TRASH_DAYS} days — after that add the drawing again with <b>+ PDF</b>.</p>
@@ -11359,7 +11458,7 @@ function paletteCmds(){
   add("All project sheets (.pdf)", () => exportPdf(true, "ui"), "Export"); add("Project (.json) — measurements only", exportJson, "Export");
   add("Project + PDFs (.zdtakeoff) — to move to another computer", exportBundle, "Export");
   if (S.page && !cadMeta(S.fileId)) { add("Bluebeam: import this PDF's markups — measurements become conditions", () => bbImport(S.fileId), "Page");
-    const bf = (P.proj.bbImp || {})[S.fileId]; if (bf && bf.off) add("Bluebeam: show the PDF's own markups (as printed by Bluebeam)", () => bbShowPdf(S.fileId, true), "View"); else if (bf) add("Bluebeam: hide the PDF's own markups", () => bbShowPdf(S.fileId, false), "View"); } add("Backups of this project", () => backupsDialog(), "Project"); add("Import measurements into this project (.json or .zdtakeoff)…", mergeFile, "Project");
+    const bf = (P.proj.bbImp || {})[S.fileId]; if (bf && bf.off) add("Bluebeam: show the PDF's own markups (as printed by Bluebeam)", () => bbShowPdf(S.fileId, true), "View"); else if (bf) add("Bluebeam: hide the PDF's own markups", () => bbShowPdf(S.fileId, false), "View"); } if (!TEAM) add("Backups of this project", () => backupsDialog(), "Project"); add("Import measurements into this project (.json or .zdtakeoff)…", mergeFile, "Project");
   if (S.page) add("Plot / print — a window, the view or the page, at a scale", plotDialog, "Export", "Ctrl+P");
   if (S.page && cadMeta(S.fileId)) add("AutoCAD quantities — lengths, areas and blocks from the drawing", () => cadQtyDialog(), "Page");
   add("Background: black, as AutoCAD's model space", () => setBg("black"), "View"); add("Background: white", () => setBg("white"), "View"); add("Background: auto — black for AutoCAD drawings, white for PDFs", () => setBg("auto"), "View");
@@ -12096,7 +12195,7 @@ function wire(){
   $("bLayers").onclick = () => { vOpen(false); S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };
   $("bDel").onclick = () => delSelected();
   $("bKeys").onclick = keysDialog;
-  ribbonInit();
+  ribbonInit(); teamInit();
   $("bZw").onclick = () => P.proj && S.page && setTool("zoomwin");
   $("bUndo").onclick = undoAny; $("bRedo").onclick = redoAny;
   $("bExport").onclick = exportMenu;
