@@ -9476,6 +9476,7 @@ function teamPage(){
   const html = () => !TM.list ? '<div class="small" id="tmBox">Reading the users list…</div>' : `<div id="tmBox" style="width:100%">
     <p class="small">Friends open the link below and sign in with their own username and password, asked each time. They get the takeoff only — no backups, no settings file, no links to the other ZD pages — and their projects stay in their own browser. A removed user is signed out within 5 minutes of the site being published.</p>
     <div style="display:flex;gap:6px;margin:8px 0"><input type="text" readonly id="tmLink" value="${esc(link)}" style="flex:1" aria-label="Friends' link"><button class="btn sm" id="tmCopy">Copy link</button></div>
+    <p class="small">Or give them the Windows app — its own window, no web address: <a href="${esc(new URL("../app/ZD-Takeoff.exe", location.href).href)}" download>ZD-Takeoff.exe</a> (run it once: it installs with a Desktop shortcut).</p>
     ${TM.err ? `<p class="small" style="color:#b42318">${esc(TM.err)}</p>` : ""}
     ${TM.list.length ? `<table class="sh" style="margin:6px 0"><thead><tr><th>User</th><th>Added</th><th></th></tr></thead><tbody>${TM.list.map((u, i) => `<tr><td>${esc(u.u)}</td><td>${esc(u.at ? dmy(u.at) : "—")}</td><td class="n" style="white-space:nowrap"><button class="btn sm" data-tmpw="${i}">New password…</button> <button class="btn sm dng" data-tmdel="${i}">Remove</button></td></tr>`).join("")}</tbody></table>` : '<p class="small" style="margin:6px 0">No team users yet.</p>'}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0"><input type="text" id="tmU" data-enter="tmAdd" placeholder="Username" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="New user's name" style="width:140px"><input type="text" class="secret" id="tmP" data-enter="tmAdd" placeholder="Password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" aria-label="New user's password" style="width:140px"><button class="btn sm" id="tmAdd">Add user</button></div>
@@ -9490,6 +9491,7 @@ function teamPage(){
       if (pw.length < 4) return toast("Give a password of at least 4 characters", 3000);
       const s = teamHex(crypto.getRandomValues(new Uint8Array(16)));
       TM.list.push({u, s, h: await teamHash(pw, s, TEAM_ITER), iter: TEAM_ITER, at: today()}); TM.log.push("added " + u); paint();
+      toast("Added " + u + " — click Save to the site so they can sign in (until then the login is only on this page)", 6000);
     };
     $("tmAdd").onclick = add;
     $("tmCopy").onclick = () => { navigator.clipboard.writeText(link).then(() => toast("Link copied", 1800), () => { $("tmLink").select(); toast("Press Ctrl+C to copy", 2000); }); };
