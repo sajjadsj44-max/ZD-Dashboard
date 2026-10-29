@@ -651,6 +651,14 @@ fallbacks), so the takeoff's projects — kept per site in the browser — are t
 list moved to `dashboards/`; every dashboard keeps its own address. `tools/test_root.js` checks the landing, that
 `takeoff/` does not loop, and that every dashboard link still opens.
 
+- **Big PDFs and speed** (28-Oct-2026): a PDF over 32 MB is opened as the file it is. pdf.js reads it a piece at a time
+  (its cross-reference, then only the pages drawn), first from the file added, then from the browser's copy, so opening and drawing
+  never hold the file whole (only its fingerprint is worked out on the file read once, at once up to 1 GB). On a 1 GB, 17-page set: added in about 25 s, a 64 MB scan page drawn in about 3 s, reopened
+  in seconds. pdf-lib only gets PDFs up to 320 MB; a bigger one's pages go into exports and plots as pictures. If the
+  browser has no room left for a copy, the PDF still opens for that visit; add it again later to re-attach it. Pages,
+  zooms and projects seen a moment ago show again at once, and whole-page pictures and thumbnails are kept in the
+  browser for the next visit. Tests: `tools/test_takeoff_bigpdf.js` (the 1 GB PDF is written by
+  `tools/takeoff_bigpdf_fixture.js`) and `tools/test_takeoff_speed.js`.
 - **AutoCAD helper, started by itself** (28-Oct-2026): a DWG is opened by the AutoCAD on this computer through
   `tools/cad-bridge.js` (whole — the browser's own DWG reader loses most of some big drawings). Set it up once per
   computer: double-click `tools\cad-bridge-setup.cmd` (needs AutoCAD and Node.js; no administrator rights). It copies the

@@ -278,6 +278,9 @@ const prOut = pr => { if (!pr || !pr.cadEd) return pr; let o = pr;   // (a copy:
 const prIn = pr => { if (pr && pr.cadEd) for (const [f, e] of Object.entries(pr.cadEd)) if (e && e.apk) { const c = {}; for (const [k, v] of Object.entries(e)) c[k === "apk" ? "add" : k] = k === "apk" ? edUnpack(v) : v; pr.cadEd[f] = c; } return pr; };
 const dbPut = (store, v, k) => { const w = store === "pdfs" ? recOut(v) : store === "projects" ? prOut(v) : v; return tx(store, "readwrite", s => k === undefined ? s.put(w) : s.put(w, k)); };
 const dbGet = (store, k) => tx(store, "readonly", s => s.get(k)).then(v => store === "pdfs" ? recIn(v) : store === "projects" ? prIn(v) : v);
+const dbGetRaw = (store, k) => tx(store, "readonly", s => s.get(k));   // a big PDF's bytes left as the Blob they are kept as (read a piece at a time, never whole)
+const recSize = rec => rec && rec.data ? (rec.data instanceof Blob ? rec.data.size : rec.data.byteLength) : 0;
+const recBuf = async rec => rec.data instanceof Blob ? rec.data.arrayBuffer() : rec.data;
 const dbDel = (store, k) => tx(store, "readwrite", s => s.delete(k));
 const dbAll = store => tx(store, "readonly", s => s.getAll()).then(L => store === "projects" ? L.map(prIn) : L);
 
@@ -581,10 +584,10 @@ function restore(js){ const o = JSON.parse(js), bb0 = P.proj.bbImp || {}, rt0 = 
    and let go for the rest — a project left behind frees its memory as before */
 const WARM_MB = 400;   // the project just left keeps its opened drawings while they come to no more than this: switching back and forth is then instant
 function pruneCaches(prev){
-  const keep = new Set(); PANES.forEach(pn => pn.sess.proj && pn.sess.proj.files.forEach(f => keep.add(f.id)));
+  const keep = new Set(S.visitOnly || []); PANES.forEach(pn => pn.sess.proj && pn.sess.proj.files.forEach(f => keep.add(f.id)));   // (a PDF open for this visit only cannot be opened again)
   if (prev && prev.files && prev.files.reduce((a, f) => a + (+f.size || 0) * (f.cad ? 10 : 1), 0) <= WARM_MB * 1048576) prev.files.forEach(f => keep.add(f.id));   // (an AutoCAD drawing, held as its scene, takes some ten times its file)
   const fid = k => String(k).split(":")[0];
-  Object.keys(S.docs || {}).forEach(id => { if (!keep.has(id)) { const d = S.docs[id]; if (d && d.destroy) d.destroy(); delete S.docs[id]; } });
+  Object.keys(S.docs || {}).forEach(id => { if (!keep.has(id)) { const d = S.docs[id]; if (d && d.destroy) d.destroy(); delete S.docs[id]; } }); rcDrop(id => keep.has(id));
   ["geo", "texts", "sizes", "thumbs", "ocgs", "ocBound", "cadSc", "cadP", "cedCache"].forEach(n => { const o = S[n]; if (o) Object.keys(o).forEach(k => { if (!keep.has(fid(k))) delete o[k]; }); });
   S.thumbQ = []; rotSync(P.proj);
 }
@@ -652,10 +655,12 @@ async function doc(fileId, ask1){
   const f = P.proj && P.proj.files.find(x => x.id === fileId);
   if (S.pwNo.has(fileId) && !ask1) throw new Error(((f && f.name) || "The PDF") + " is locked with a password — open one of its pages to enter it");
   S.docP[fileId] = (async () => {
-    const rec = await dbGet("pdfs", fileId);
+    const rec = await dbGetRaw("pdfs", fileId);   // (a big one: its Blob, which pdf.js reads a piece at a time)
     if (!rec) throw new Error("PDF missing — add “" + ((f || {}).name || fileId) + "” again with + PDF to re-attach it.");
     if (rec.pw) { delete rec.pw; await dbPut("pdfs", rec, fileId).catch(() => {}); }   // a password an earlier version kept with the PDF: not kept any more
-    try { const {d} = await openPdfData(await loadPdfjs(), rec.data, (f && f.name) || rec.name || "the PDF", "opened"); S.pwNo.delete(fileId); return S.docs[fileId] = rotDoc(d, fileId); }
+    try { const {d, pw} = await openPdfData(await loadPdfjs(), rec.data, (f && f.name) || rec.name || "the PDF", "opened"); S.pwNo.delete(fileId);
+      if (pw) { d.zdLocked = true; if (f && !f.locked) { f.locked = true; save(); } }   // (locked: no picture of its pages is kept in the browser — only that it is locked, never the password)
+      return S.docs[fileId] = rotDoc(d, fileId); }
     catch (e) { if (e && e.pwNo) S.pwNo.add(fileId); throw e; }
   })().finally(() => { delete S.docP[fileId]; });
   return S.docP[fileId];
@@ -740,12 +745,14 @@ const secretVal = el => !el ? "" : DOTS ? el.value : SECRETS.get(el) || "";
 function secretSet(el, v){ v = v || ""; if (DOTS) el.value = v; else { SECRETS.set(el, v); el.value = "\u2022".repeat(v.length); } }
 /* a PDF locked with an open password: asked for each time it is opened (wrong → asked again) — never kept, in this browser or in an
    exported project */
-async function openPdfData(lib, data, name, verb){
-  let pw, turn = null;
+async function openPdfData(lib, data, name, verb, pw0){
+  let pw = pw0, turn = null;
   try {
     for (let tries = 0; ; tries++) {
-      try { return {d: await lib.getDocument({data: new Uint8Array(data.slice(0)), isEvalSupported: false, password: pw}).promise}; }
+      const o = pdfSrc(lib, data, pw);
+      try { return {d: pdfOwn(await lib.getDocument(o).promise, o), pw}; }   // (pw: for the caller to open the same PDF again at once — never kept)
       catch (e) {
+        if (o.worker) { o.zdT.dead = true; try { o.worker.destroy(); } catch (er) {} }
         if (!e || e.name !== "PasswordException") throw e;
         if (!turn) { const prev = openPdfData.q; let go; openPdfData.q = new Promise(r => { go = r; }); turn = go; await prev; }   // one password question at a time
         busy("");
@@ -759,13 +766,68 @@ async function openPdfData(lib, data, name, verb){
     }
   } finally { if (turn) turn(); }
 }
+/* what pdf.js opens: the bytes — or, for a big PDF kept as a Blob (a file added, or as stored in this browser), the Blob read a piece
+   at a time as pdf.js asks for it (its cross-reference first, then only the pages drawn): a 1 GB drawing set opens in seconds and is
+   never held whole, in this page or in pdf.js's worker */
+const PDF_CHUNK = 1 << 20;
+function pdfSrc(lib, data, pw){
+  const o = {isEvalSupported: false, password: pw};
+  if (!(data instanceof Blob)) return Object.assign(o, {data: new Uint8Array(data.slice(0))});
+  const t = new lib.PDFDataRangeTransport(data.size, null), w = new lib.PDFWorker();   // (a worker of its own: see pdfOwn)
+  t.requestDataRange = (a, b) => { const go = n => data.slice(a, b).arrayBuffer().then(buf => { if (!t.dead) try { t.onDataRange(a, new Uint8Array(buf)); } catch (e) {} },
+    e => { if (t.dead) return; if (n) return setTimeout(() => go(n - 1), 300);
+      toast("The PDF could not be read (" + (e && e.message || e) + ") — was the file moved or changed? Add it again with + PDF", 9000); pdfKill(o); }); go(1); };   // (a piece not read: tried once more, then said, and the document let go — pdf.js would wait for it for ever)
+  return Object.assign(o, {range: t, length: data.size, rangeChunkSize: PDF_CHUNK, disableAutoFetch: true, disableStream: true, worker: w, zdT: t});
+}
+/* a document read by ranges is destroyed with its worker: pdf.js does not finish destroying one whose page was still waiting for a
+   piece (its worker would live on, holding the file's full length and every piece read), and it ends only workers it made itself */
+function pdfOwn(d, o){
+  if (!o.worker) return d; const des = d.destroy.bind(d); o.zdDoc = d;
+  d.destroy = () => { o.zdT.dead = true; const r = Promise.resolve().then(des).catch(() => {}); try { o.worker.destroy(); } catch (e) {} return r; };
+  return d;
+}
+function pdfKill(o){ o.zdT.dead = true; const d = o.zdDoc; if (d) { Object.keys(S.docs || {}).forEach(k => { if (S.docs[k] === d) delete S.docs[k]; }); d.destroy(); } else try { o.worker.destroy(); } catch (e) {} }
 /* a PDF is known by a fingerprint of its content (SHA-256), not by its name and size: the same drawing added again
    (under any name) is re-attached to its measurements; a different drawing under a name already in the project is asked
    about — add it as a new drawing, or replace the old one as its revision — never swapped in silently */
+/* the stored PDF opened in pdf-lib, for its pages to be copied as they are (vectors); null for one over PDFLIB_MAX — pdf-lib holds it
+   whole, several times over — whose pages go in as pictures drawn by pdf.js instead, as a turned page's do */
+async function libDoc(L, f){
+  const rec = await dbGetRaw("pdfs", f); if (!rec && S.docs[f]) return null;   // (open for this visit only: its pages as pictures)
+  if (!rec) throw new Error("PDF missing — add “" + ((P.proj.files.find(x => x.id === f) || {}).name || f) + "” again with + PDF");
+  return recSize(rec) > PDFLIB_MAX ? null : L.PDFDocument.load(await recBuf(rec), {ignoreEncryption: true});
+}
 async function sha256(buf){ try { const h = await crypto.subtle.digest("SHA-256", buf); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join(""); } catch (e) { return ""; } }
+/* a big file's fingerprint: the same SHA-256 as sha256() of its bytes. Up to SHA_WHOLE the browser's own does it on the file read
+   at once (fast); a bigger one is read 16 MB at a time through shaJs (the browser's own SHA-256 takes only whole buffers) */
+const SHA_WHOLE = 1024 * 1048576, SHA_STEP = 16 * 1048576;
+async function blobSha(b, say){
+  if (b.size <= SHA_WHOLE) return sha256(await b.arrayBuffer());
+  try { const H = shaJs(); for (let at = 0; at < b.size; at += SHA_STEP) { if (say) say(Math.floor(100 * at / b.size)); H.add(new Uint8Array(await b.slice(at, at + SHA_STEP).arrayBuffer())); } return H.hex(); }
+  catch (e) { return ""; }
+}
+function shaJs(){   // SHA-256 (FIPS 180-4) fed a piece at a time: .add(Uint8Array) …, then .hex()
+  const pr = []; for (let n = 2; pr.length < 64; n++) if (pr.every(p => n % p)) pr.push(n);
+  const fr = x => (x - Math.floor(x)) * 4294967296 >>> 0, K = Int32Array.from(pr, p => fr(Math.cbrt(p))), h = Int32Array.from(pr.slice(0, 8), p => fr(Math.sqrt(p)));
+  const w = new Int32Array(64), buf = new Uint8Array(64); let bn = 0, len = 0;
+  const block = (d, o) => {
+    for (let i = 0; i < 16; i++, o += 4) w[i] = d[o] << 24 | d[o + 1] << 16 | d[o + 2] << 8 | d[o + 3];
+    for (let i = 16; i < 64; i++) { const a = w[i - 15], b = w[i - 2]; w[i] = ((a >>> 7 | a << 25) ^ (a >>> 18 | a << 14) ^ a >>> 3) + ((b >>> 17 | b << 15) ^ (b >>> 19 | b << 13) ^ b >>> 10) + w[i - 7] + w[i - 16] | 0; }
+    let A = h[0], B = h[1], C = h[2], D = h[3], E = h[4], F = h[5], G = h[6], H = h[7];
+    for (let i = 0; i < 64; i++) {
+      const t1 = H + ((E >>> 6 | E << 26) ^ (E >>> 11 | E << 21) ^ (E >>> 25 | E << 7)) + (E & F ^ ~E & G) + K[i] + w[i] | 0, t2 = ((A >>> 2 | A << 30) ^ (A >>> 13 | A << 19) ^ (A >>> 22 | A << 10)) + (A & B ^ A & C ^ B & C) | 0;
+      H = G; G = F; F = E; E = D + t1 | 0; D = C; C = B; B = A; A = t1 + t2 | 0; }
+    h[0] += A; h[1] += B; h[2] += C; h[3] += D; h[4] += E; h[5] += F; h[6] += G; h[7] += H; };
+  return {
+    add(d){ len += d.length; let i = 0; if (bn) { while (bn < 64 && i < d.length) buf[bn++] = d[i++]; if (bn < 64) return; block(buf, 0); bn = 0; }
+      for (; i + 64 <= d.length; i += 64) block(d, i); while (i < d.length) buf[bn++] = d[i++]; },
+    hex(){ const hi = Math.floor(len / 536870912), lo = len * 8 >>> 0; buf[bn++] = 0x80; if (bn > 56) { buf.fill(0, bn); block(buf, 0); bn = 0; } buf.fill(0, bn, 56);
+      for (let k = 0; k < 4; k++) { buf[56 + k] = hi >>> 24 - 8 * k & 255; buf[60 + k] = lo >>> 24 - 8 * k & 255; } block(buf, 0);
+      return Array.from(h, v => (v >>> 0).toString(16).padStart(8, "0")).join(""); } };
+}
 async function pdfSha(id){   // the stored PDF's fingerprint (worked out once for a PDF stored before fingerprints); null = not in this browser
-  const rec = await dbGet("pdfs", id); if (!rec) return null; if (rec.sha) return rec.sha;
-  const h = await sha256(rec.data); if (h) { rec.sha = h; await dbPut("pdfs", rec, id).catch(() => {}); } return h;
+  const rec = await dbGetRaw("pdfs", id); if (!rec) return null; if (rec.sha) return rec.sha;   // (as kept: a big PDF is not read whole for a fingerprint it has)
+  const h = rec.data instanceof Blob ? await blobSha(rec.data) : await sha256(rec.data); if (h) { rec.sha = h; await dbPut("pdfs", rec, id).catch(() => {}); } return h;
 }
 /* a dialog with its own buttons: resolves to the chosen button's v, or null (Cancel / Esc / Enter) */
 function choose(title, body, btns){
@@ -790,19 +852,20 @@ async function addFiles(files){
     if (!cadF && !/\.pdf$/i.test(f.name) && f.type !== "application/pdf") { toast(f.name + " is not a PDF or an AutoCAD drawing (DWG / DXF)"); continue; }
     busy("Opening " + f.name + "…");
     try {
-      let data = await f.arrayBuffer(), cad = null; const sha = await sha256(data);
+      const big = !cadF && f.size > BIG_REC;   // a big PDF: fingerprinted, opened and kept as the file it is — never read whole into the page
+      let data = big ? f : await f.arrayBuffer(), cad = null; const sha = big ? await blobSha(f, p => busy("Opening " + f.name + "… " + p + " %")) : await sha256(data);
       if (cadF) { const pre = P.proj.files.find(x => x.sha === sha && x.cad), held = pre && (P.proj.items.some(i => i.file === pre.id) || ((P.proj.floors || {})[keyOf(pre.id, 1)] || []).some(x => x.r));   // the same drawing again: onto its old page while measurements (or floor boundaries) sit on it — else laid out afresh (read whole now, it may reach further)
         cad = await cadImport(f, data, held ? pre.cad.map : null); data = cad.pdf; }   // the drawing as a layered vector PDF (+ its scene)
       const lib = await loadPdfjs();
-      const {d} = await openPdfData(lib, data, f.name);
+      let {d, pw} = await openPdfData(lib, data, f.name);
       for (const x of P.proj.files) if (!x.sha) { const h = await pdfSha(x.id); if (h) x.sha = h; }   // PDFs added before fingerprints
       let meta = sha ? P.proj.files.find(x => x.sha === sha) : null, name = f.name, how = meta ? "same" : "new";
       const named = meta ? null : P.proj.files.find(x => x.name === f.name);
       if (named && !sha) { if (named.size === f.size) { meta = named; how = "same"; } }   // no fingerprint in this browser: the old name + size rule
-      else if (named && !named.sha && named.size === f.size && !(await dbGet("pdfs", named.id))) { meta = named; how = "same"; }   // nothing to compare with: re-attached as before
+      else if (named && !named.sha && named.size === f.size && !(await dbGetRaw("pdfs", named.id))) { meta = named; how = "same"; }   // nothing to compare with: re-attached as before
       else if (named) {
         busy("");
-        const here = !!(await dbGet("pdfs", named.id)), n = P.proj.items.filter(i => i.file === named.id).length;
+        const here = !!(await dbGetRaw("pdfs", named.id)), n = P.proj.items.filter(i => i.file === named.id).length;
         const v = await choose("Different drawing, same name — " + f.name, `<p><b>${esc(f.name)}</b> is already in this project, but the file you added is a <b>different drawing</b> (its content does not match${here ? "" : " the one the project was measured on"}).</p>
           <p style="margin-top:6px"><b>${n}</b> measurement${n === 1 ? " is" : "s are"} on the drawing already here.</p>
           <ul class="small" style="margin:6px 0 0 18px"><li><b>Add as new drawing</b> — kept side by side; nothing already measured moves.</li>
@@ -823,9 +886,23 @@ async function addFiles(files){
         }
       }
       const id = meta ? meta.id : uid("F");
-      await dbPut("pdfs", Object.assign({name, size: f.size, data, sha}, cad ? {src: cad.src, scene: cad.scene, pdfSha: await sha256(data)} : {}), id);   // stored first: a PDF listed in the project is always one that can be opened
+      if (big) busy("Keeping " + f.name + " in this browser…");
+      let kept = true;
+      try { await dbPut("pdfs", Object.assign({name, size: f.size, data, sha}, big ? {blobs: ["data"]} : {}, cad ? {src: cad.src, scene: cad.scene, pdfSha: await sha256(data)} : {}), id); }   // stored first: a PDF listed in the project is always one that can be opened
+      catch (e) { if (!big || !/quota/i.test((e && e.name) + " " + (e && e.message))) throw e; kept = false; }   // (no room left in this browser for a copy of a big PDF: open for this visit only, read from the file itself)
+      if (!kept) { const old = await dbGetRaw("pdfs", id).catch(() => null);
+        if (old && (sha && old.sha ? old.sha === sha : how === "same")) kept = true;   // the same drawing (by its fingerprint), kept before: that copy is used
+        else if (old) {   // another drawing kept under this id (the one a revision replaces): it stays as it is and the project's references move to a new id (its PDF added again next time), so it is never opened in place of this one
+          const nid = uid("F"), o = JSON.parse(remapFileId(JSON.stringify(P.proj), meta.id, nid));
+          dropFileCache(meta.id); Object.keys(o).forEach(k => { P.proj[k] = o[k]; }); S.undo = []; S.redo = []; S.sel = null; S.selMark = null; S.multi.clear();
+          meta = P.proj.files.find(x => x.id === nid); } }
+      if (big && kept) { const back = await dbGetRaw("pdfs", id), o = back && back.data instanceof Blob ? await openPdfData(lib, back.data, f.name, "", pw).catch(() => null) : null;   // read from the browser's copy from now on (the file added may be moved or changed on the disk)
+        if (o) { d.destroy(); d = o.d; } }
+      const locked = !!pw; pw = null;
       if (!meta) { meta = {id, name, size: f.size, sha, pages: d.numPages, added: new Date().toISOString()}; if (cad) meta.cad = cad.meta; P.proj.files.push(meta); }
       else { meta.pages = d.numPages; meta.size = f.size; if (sha) meta.sha = sha; if (how === "replace") meta.replaced = new Date().toISOString(); if (cad) meta.cad = cad.meta; else delete meta.cad; }
+      if (locked) meta.locked = true; else delete meta.locked;   // (locked with a password: no picture of its pages is kept in the browser)
+      S.visitOnly = S.visitOnly || new Set(); if (kept) S.visitOnly.delete(meta.id); else S.visitOnly.add(meta.id);   // (open for this visit only: pruneCaches keeps it open)
       if (cad) cadAdopt(meta, cad, how);
       dropFileCache(meta.id);
       S.docs[meta.id] = rotDoc(d, meta.id); if (cad) { S.cadSc = S.cadSc || {}; S.cadSc[meta.id] = cad.scene; }
@@ -833,6 +910,7 @@ async function addFiles(files){
       await gotoPage(meta.id, 1);
       toast(how === "replace" ? f.name + " replaced — " + d.numPages + " page" + (d.numPages > 1 ? "s" : "") + " · check the measurements sit on the new drawing"
         : name + (name !== f.name ? " (added as a new drawing)" : how === "same" ? " (same drawing — re-attached)" : "") + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""), how === "new" && name === f.name ? 2600 : 5000);
+      if (!kept) setTimeout(() => toast("⚠ " + name + " is open for this visit only — this browser has no room left to keep a copy of a " + fmtBytes(f.size) + " file (free some disk space). Next time, add it again with + PDF: its measurements come back with it.", 20000), 300);
       if (cad) setTimeout(() => { const t = cadSay(name, cad.meta); toast(t, /^⚠/.test(t) ? 30000 : 9000); }, 300);
       else if (how !== "replace") await bbImport(meta.id, {auto: true}).catch(e => toast("Bluebeam markups could not be read: " + (e.message || e), 6000));   // markups taken in Bluebeam: brought in as conditions
     } catch (e) { const m = e && e.message || String(e); toast(/password/i.test(m) ? m : f.name + " could not be opened — " + m + (/Invalid PDF|empty/i.test(m) ? " (is it a PDF, and complete?)" : ""), 6000); }
@@ -936,7 +1014,7 @@ async function gotoPage(fileId, pageNo, pn = ACT){
   if (cadMeta(fileId, proj)) { await cadLoad(fileId, proj); if (stale()) return; }   // an AutoCAD drawing: its scene draws the screen
   let pg; try { pg = await d.getPage(pageNo); } catch (e) { if (!stale()) toast("Page " + pageNo + " could not be read: " + (e.message || e), 6000); return; }
   if (stale()) return;
-  if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; }
+  if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; } pn.hiWait = false;
   pn.fileId = fileId; pn.pageNo = pageNo; pn.key = keyOf(fileId, pageNo);
   pn.page = pg;
   if (pn.cadBmp && pn.cadBmp.page !== pg) freeCadBitmap(pn);
@@ -1118,9 +1196,60 @@ async function revisionDiff(){
     setSel(ids); setTool("select"); zoomTo(ids); refresh(); toast(ids.length + " measurement" + (ids.length === 1 ? "" : "s") + " flagged for review against " + cmp.name, 4000);
   } catch (e) { busy(""); toast("Revision diff failed: " + e.message, 5000); }
 }
+/* pictures of the drawing already drawn, kept to go back to: a page's whole-page picture (low) and the sharp pictures of the last
+   views (hi). Back to a page, a zoom or a project seen a moment ago, the picture shows at once instead of pdf.js drawing the page
+   again (a big CAD sheet: a second or more each time). An entry is used only for the same page of the same open PDF, drawn the
+   same way (its turn, layers, faint / thin lines, black & white, background, the PDF's own markups) — never for a revision
+   overlay. About 140 MB of pictures at most, the least recently used let go first. */
+const RC = [], RC_PX = 3.5e7;
+function ocOff(f){ const cfg = S.ocgs && S.ocgs[f]; let off = ""; if (cfg) { try { Object.keys(cfg.getGroups() || {}).forEach(id => { if (!ocOn(cfg, id)) off += id + ","; }); } catch (e) {} } return off; }   // the PDF's layers switched off
+function rcSig(pn){
+  const f = pn.fileId, proj = pn.sess.proj;
+  return [pgRot(pn.page, proj), S.boost ? 1 : 0, S.thin ? 1 : 0, S.mono ? 1 : 0, darkNow(f, proj) ? 1 : 0, bbOffOf(f) ? 1 : 0, ocOff(f)].join("|");
+}
+function rcGet(pn, kind, fit){
+  if (pn.cmp || !pn.page) return null; const sig = rcSig(pn), i = RC.findIndex(e => e.kind === kind && e.page === pn.page && e.sig === sig && fit(e));
+  if (i < 0) return null; const e = RC[i]; if (i) { RC.splice(i, 1); RC.unshift(e); } return e;
+}
+function rcPut(pn, kind, cv, v, sig){   // sig: how it was drawn (rcSig when it was started)
+  if (pn.cmp || !pn.page) return; const e = {kind, page: pn.page, file: pn.fileId, sig: sig || rcSig(pn), cv, v, px: cv.width * cv.height};
+  for (let i = RC.length - 1; i >= 0; i--) { const o = RC[i]; if (o.kind === kind && o.page === e.page && o.sig === e.sig && (kind === "low" || (o.v.s === v.s && o.v.tx === v.tx && o.v.ty === v.ty && o.cv.width === cv.width && o.cv.height === cv.height))) RC.splice(i, 1); }
+  RC.unshift(e); let px = 0; for (let i = 0; i < RC.length; i++) { px += RC[i].px; if (px > RC_PX && i) { RC.splice(i).forEach(o => { o.cv.width = 1; }); break; } }
+}
+function rcDrop(keep){ for (let i = RC.length - 1; i >= 0; i--) if (!keep(RC[i].file)) { RC[i].cv.width = 1; RC.splice(i, 1); } }   // the pictures of drawings let go
+const hiSize = pn => { const st = pn.el.stage, dpr = Math.min(window.devicePixelRatio || 1, 2); return {st, dpr, w: Math.max(1, Math.floor(st.clientWidth * dpr)), h: Math.max(1, Math.floor(st.clientHeight * dpr))}; };
+function hiShow(pn, cv, v, dpr){   // a sharp picture onto the screen
+  const {st} = hiSize(pn), c = pn.el.hi; c.width = cv.width; c.height = cv.height; c.style.width = st.clientWidth + "px"; c.style.height = st.clientHeight + "px";
+  c.getContext("2d").drawImage(cv, 0, 0); pn.rendered = Object.assign({dpr}, v); applyView(pn);
+}
+/* a page's whole-page picture is kept in this browser as well (Cache Storage, by the PDF's fingerprint, page and how it is drawn):
+   reopened in a later session, the page shows at once while pdf.js draws the sharp view. The last LOW_KEEP pages are kept */
+const LOW_CACHE = "zd-pages-v1", LOW_KEEP = 300;
+const strHash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); };
+const lowSc = pn => Math.min(3, 3000 / Math.max(pn.base.width, pn.base.height));
+const lowUrl = pn => { const u = !pn.cmp && pn.page && thumbUrl(pn.sess.proj, pn.fileId, pn.pageNo); return u ? u.replace("/zd-thumb/", "/zd-page/").replace(/\.png$/, "-" + strHash(rcSig(pn)) + ".png") : ""; };
+async function cacheTrim(name, keep){ try { const c = await caches.open(name), ks = await c.keys(); if (ks.length > keep) await Promise.all(ks.slice(0, ks.length - keep).map(k => c.delete(k))); } catch (e) {} }
+async function lowKept(pn){
+  const u = lowUrl(pn); if (!u || !window.caches || !window.createImageBitmap) return null;
+  try { const r = await (await caches.open(LOW_CACHE)).match(u); if (!r) return null; const bm = await createImageBitmap(await r.blob()), vp = vpOf(pn.page, pn.sess.proj, {scale: lowSc(pn)});
+    if (bm.width !== Math.ceil(vp.width) || bm.height !== Math.ceil(vp.height)) { bm.close(); return null; }
+    const cv = document.createElement("canvas"); cv.width = bm.width; cv.height = bm.height; cv.getContext("2d").drawImage(bm, 0, 0); bm.close(); return cv; } catch (e) { return null; }
+}
+function lowKeep(pn, cv, u){ if (!u || !window.caches || (S.docs[pn.fileId] || {}).zdLocked) return;
+  try { cv.toBlob(b => { if (b) caches.open(LOW_CACHE).then(c => c.put(u, new Response(b, {headers: {"Content-Type": "image/png"}}))).then(() => { if (Math.random() < 0.1) cacheTrim(LOW_CACHE, LOW_KEEP); }).catch(() => {}); }, "image/png"); } catch (e) {} }
+function lowShow(pn, cv, s){ const c = pn.el.low; c.width = cv.width; c.height = cv.height; c.getContext("2d").drawImage(cv, 0, 0); pn.low = {s}; applyView(pn); }
 async function renderLow(pn = ACT){   // drawn off screen, then shown only if the page is still the one on screen
   if (cadOn(pn)) return cadLow(pn);   // an AutoCAD drawing: from its scene
-  const page = pn.page, fileId = pn.fileId, longSide = Math.max(pn.base.width, pn.base.height), sc = Math.min(3, 3000 / longSide);
+  { const e = rcGet(pn, "low", () => true); if (e) return lowShow(pn, e.cv, e.v.s); }   // drawn a moment ago: at once
+  pn.lowBusy = true;
+  try { const page = pn.page, sig = rcSig(pn), kept = await lowKept(pn);
+    if (kept && pn.page === page && rcSig(pn) === sig) { const s = lowSc(pn); rcPut(pn, "low", kept, {s}, sig); return lowShow(pn, kept, s); }   // drawn in an earlier session
+    if (pn.page !== page) return;
+    return await renderLow0(pn); } finally { pn.lowBusy = false; }
+}
+async function renderLow0(pn){
+  thumbHalt();
+  const page = pn.page, fileId = pn.fileId, sc = lowSc(pn), cmp0 = pn.cmp, sig = rcSig(pn), u0 = lowUrl(pn);   // (kept only as drawn: not if the settings or the compare changed meanwhile)
   const vp = vpOf(page, pn.sess.proj, {scale: sc}), off = document.createElement("canvas");
   off.width = Math.ceil(vp.width); off.height = Math.ceil(vp.height);
   const ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
@@ -1130,30 +1259,33 @@ async function renderLow(pn = ACT){   // drawn off screen, then shown only if th
   await overlayCmp(ctx, off.width, off.height, sc, 0, 0, pn);
   if (pn.page !== page) return;
   const c = pn.el.low; c.width = off.width; c.height = off.height; c.getContext("2d").drawImage(off, 0, 0);
-  pn.low = {s: sc};
+  pn.low = {s: sc}; if (!cmp0 && !pn.cmp && rcSig(pn) === sig) { rcPut(pn, "low", off, {s: sc}, sig); lowKeep(pn, off, u0); }
   applyView(pn);
 }
 function renderHi(now, pn = ACT){
   clearTimeout(pn.hiT);
-  if (cadOn(pn)) { if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; } return cadHi(!!now, pn); }   // a CAD drawing: drawn from its scene, at once
+  if (cadOn(pn)) { if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; } pn.hiWait = false; return cadHi(!!now, pn); }   // a CAD drawing: drawn from its scene, at once
+  if (pn.page) { const {dpr, w, h} = hiSize(pn), v0 = pn.view;   // this view drawn a moment ago (back to a zoom, a page, a project): shown at once
+    const e = rcGet(pn, "hi", o => o.v.dpr === dpr && o.cv.width === w && o.cv.height === h && Math.abs(o.v.s - v0.s) <= 1e-6 * v0.s && Math.abs(o.v.tx - v0.tx) < 0.5 && Math.abs(o.v.ty - v0.ty) < 0.5);
+    if (e) { if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (er) {} pn.renderTask = null; } pn.hiWait = false; hiShow(pn, e.cv, e.v, dpr); return; } }
+  pn.hiWait = true; thumbHalt();
   pn.hiT = setTimeout(async () => {
     const page = pn.page; if (!page) return;
     if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} }
-    const st = pn.el.stage, dpr = Math.min(window.devicePixelRatio || 1, 2), c = pn.el.hi, v = Object.assign({}, pn.view), fileId = pn.fileId;
-    const w = Math.max(1, Math.floor(st.clientWidth * dpr)), h = Math.max(1, Math.floor(st.clientHeight * dpr));
+    const {st, dpr, w, h} = hiSize(pn), c = pn.el.hi, v = Object.assign({}, pn.view), fileId = pn.fileId, cmp0 = pn.cmp, sig = rcSig(pn);
     const off = document.createElement("canvas"); off.width = w; off.height = h;
     const ptPx = v.s * dpr, ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && ptPx < 1.6 && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
     const task = sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vpOf(page, pn.sess.proj, {scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}));
     pn.renderTask = task;
-    try { await task.promise; } catch (e) { return; }
+    try { await task.promise; } catch (e) { if (pn.renderTask === task) { pn.renderTask = null; pn.hiWait = false; } return; }   // (failed, not given up for a newer view: the pane is not left "drawing" — thumbnails would wait on it)
     if (pn.renderTask !== task) return;
     if (!darkNow(fileId, pn.sess.proj)) boostInk(off.getContext("2d"), w, h, v.s * dpr);
     await overlayCmp(ctx, w, h, v.s * dpr, v.tx * dpr, v.ty * dpr, pn);
     if (pn.renderTask !== task) return;
-    pn.renderTask = null;
+    pn.renderTask = null; pn.hiWait = false;
     c.width = w; c.height = h; c.style.width = st.clientWidth + "px"; c.style.height = st.clientHeight + "px";
     c.getContext("2d").drawImage(off, 0, 0);
-    pn.rendered = Object.assign({dpr}, v);
+    pn.rendered = Object.assign({dpr}, v); if (!cmp0 && rcSig(pn) === sig) rcPut(pn, "hi", off, pn.rendered, sig);
     applyView(pn);
   }, now ? 0 : 140);
 }
@@ -1470,14 +1602,21 @@ function scaleCandidates(key){
    page as printed, but it is still only "from the PDF" — not verified until a known dimension is measured. */
 const FT_PER = [[/^(ft|feet|foot|')$/, 1], [/^(in|inch|inches|")$/, 1 / 12], [/^mm$/, 1 / 304.8], [/^cm$/, 1 / 30.48], [/^(m|meter|meters|metre|metres)$/, 1 / 0.3048], [/^(yd|yard|yards)$/, 3], [/^km$/, 1000 / 0.3048]];
 function bytesHave(b, s){ const c = [...s].map(x => x.charCodeAt(0)), n = c.length; outer: for (let i = 0; i + n <= b.length; i++) { if (b[i] !== c[0]) continue; for (let j = 1; j < n; j++) if (b[i + j] !== c[j]) continue outer; return true; } return false; }
+/* bytesHave on a stored PDF: a big one (kept as a Blob) read 32 MB at a time, the pieces overlapping — never whole */
+async function recHas(rec, s){
+  if (!(rec.data instanceof Blob)) return bytesHave(new Uint8Array(rec.data), s);
+  const B = rec.data, step = 32 * 1048576;
+  for (let at = 0; at < B.size; at += step) if (bytesHave(new Uint8Array(await B.slice(at, at + step + s.length - 1).arrayBuffer()), s)) return true;
+  return false;
+}
 function pdfVpRead(fileId){   // -> {pageNo: [{bbox, ptPerFt, label, name}]}; {} when the PDF has none or cannot be read
   S.pdfVp = S.pdfVp || {};
   return S.pdfVp[fileId] = S.pdfVp[fileId] || (async () => {
     const out = {};
     try {
-      const rec = await dbGet("pdfs", fileId); if (!rec) return out;
-      const raw = new Uint8Array(rec.data.slice(0));
-      if (!bytesHave(raw, "/VP") && !bytesHave(raw, "/ObjStm")) return out;   // no viewport anywhere (and none hidden in a compressed object stream)
+      const rec = await dbGetRaw("pdfs", fileId); if (!rec || recSize(rec) > PDFLIB_MAX) return out;   // (a PDF too big for pdf-lib: its pages are scaled by calibration)
+      if (!(await recHas(rec, "/VP")) && !(await recHas(rec, "/ObjStm"))) return out;   // no viewport anywhere (and none hidden in a compressed object stream)
+      const raw = new Uint8Array(await recBuf(rec));
       const L = await loadPdfLib(), d = await L.PDFDocument.load(raw, {ignoreEncryption: true, updateMetadata: false, throwOnInvalidObject: false, parseSpeed: 1500});
       const N = n => L.PDFName.of(n), num = o => o instanceof L.PDFNumber ? o.asNumber() : NaN, txt = o => { try { return o && o.decodeText ? o.decodeText() : ""; } catch (e) { return ""; } };
       d.getPages().forEach((pg, i) => {
@@ -1544,8 +1683,9 @@ function bbKind(a){   // area | len | perim | count | a markup type | "" (not br
    every page's markups, and when none of them can be a measurement — pdf.js gives no /Measure, /Subj, /IC, /Cutouts, and a /Line
    only as a box, its direction lost — they are taken from pdf.js (without their Bluebeam subject and fill); otherwise pdf-lib
    reads the file as for a small one. Either way the progress is shown */
+const PDFLIB_MAX = 320 * 1048576;   // a PDF bigger than this is never handed whole to pdf-lib (it would hold several copies of it): its Bluebeam markups are read with pdf.js
 const BB_BIG = 40 * 1024 * 1024, BB_SUBS = /^(Polygon|PolyLine|Line|Square|Circle|FreeText|Ink|Stamp|Text|Caret|Highlight|FileAttachment|Sound)$/;
-async function bbReadJs(pd, raw, say){   // -> {pages, n, via: "pdfjs"} | null (pdf-lib is needed) — markups read with pdf.js
+async function bbReadJs(pd, has, say){   // -> {pages, n, via: "pdfjs"} | null (pdf-lib is needed) — markups read with pdf.js; has(s): is s in the file (recHas)
   const out = {pages: {}, n: 0, via: "pdfjs"}, A = [], col = c => c && c.length === 3 ? Array.from(c, v => v / 255) : null, arr = v => v && v.length ? Array.from(v) : null;
   for (let i = 1; i <= pd.numPages; i++) {
     if (i === 1 || i % 5 === 0) say("page " + i + " of " + pd.numPages);
@@ -1554,7 +1694,7 @@ async function bbReadJs(pd, raw, say){   // -> {pages, n, via: "pdfjs"} | null (
   }
   if (!A.some(({x}) => /^(Polygon|PolyLine|Line|Square|Circle|FreeText|Ink)$/.test(x.subtype))) return out;
   const meas = /Dimension|Count|Area|Perimeter|Volume|Measure/i, noIt = A.some(({x}) => !x.it && /^(Polygon|PolyLine|Square|Circle)$/.test(x.subtype));
-  if (A.some(({x}) => x.subtype === "Line" || meas.test(x.it || "")) || (noIt && !bytesHave(raw, "/ObjStm") && bytesHave(raw, "Measure"))) return null;   // a /Measure (or a line's direction) only pdf-lib reads
+  if (has && (A.some(({x}) => x.subtype === "Line" || meas.test(x.it || "")) || (noIt && !(await has("/ObjStm")) && await has("Measure")))) return null;   // (has null: a PDF too big for pdf-lib, read with pdf.js all the same)   // a /Measure (or a line's direction) only pdf-lib reads
   A.forEach(({i, j, x}) => {
     const sub = x.subtype, bs = x.borderStyle || null, da = x.defaultAppearanceData || {};
     const o = {page: i, nm: "p" + i + "#" + (x.id || j), sub, it: x.it || "", subj: "", label: "", contents: (x.contentsObj && x.contentsObj.str) || "", author: String((x.titleObj && x.titleObj.str) || "").trim(), c: col(x.color), ic: null,
@@ -1570,14 +1710,14 @@ function bbRead(fileId){   // -> {pages: {pageNo: [annotation in PDF user space]
     const out = {pages: {}, n: 0, via: "pdflib"};
     let big = false;
     try {
-      const rec = await dbGet("pdfs", fileId); if (!rec || rec.src) return out;   // (an AutoCAD drawing has no markups)
+      const rec = await dbGetRaw("pdfs", fileId); if (!rec || rec.src) return out;   // (an AutoCAD drawing has no markups)
       const pd = await doc(fileId); let any = false;   // pdf.js has the PDF open already: a page with a markup on it, before reading the file again
       const nm = ((P.proj && P.proj.files.find(x => x.id === fileId)) || {}).name || "the PDF", say = t => busy("Reading the markups in " + nm + "… " + t);
-      big = rec.data.byteLength > (S.bbBig || BB_BIG);
-      if (big) { const r = await bbReadJs(pd, new Uint8Array(rec.data), say); if (r) return r; say("(a big file: this can take a minute)"); any = true; }
+      big = recSize(rec) > (S.bbBig || BB_BIG);
+      if (big) { const r = await bbReadJs(pd, recSize(rec) > PDFLIB_MAX ? null : t => recHas(rec, t), say); if (r) return r; say("(a big file: this can take a minute)"); any = true; }
       for (let i = 1; i <= pd.numPages && !any; i++) any = (await (await pd.getPage(i)).getAnnotations()).some(x => /^(Polygon|PolyLine|Line|Square|Circle|FreeText|Ink)$/.test(x.subtype));
       if (!any) return out;
-      const raw = new Uint8Array(rec.data.slice(0));
+      const raw = new Uint8Array(await recBuf(rec));
       if (!bytesHave(raw, "/ObjStm") && (!bytesHave(raw, "/Annots") || !["/Subj", "/Measure", "/FreeText", "/PolyLine", "/Polygon", "/Square", "/Ink"].some(s => bytesHave(raw, s)))) return out;   // (in compressed object streams nothing shows as plain text)
       const L = await loadPdfLib(), d = await L.PDFDocument.load(raw, {ignoreEncryption: true, updateMetadata: false, throwOnInvalidObject: false, parseSpeed: 1500});
       const N = n => L.PDFName.of(n), num = o => o instanceof L.PDFNumber ? o.asNumber() : NaN, txt = o => { try { return o && o.decodeText ? o.decodeText() : ""; } catch (e) { return ""; } };
@@ -5293,6 +5433,25 @@ function renderPages(){
   el.querySelectorAll("img[data-th]").forEach(im => { if (!im.getAttribute("src")) S.thumbIO.observe(im); });
 }
 function thumbWant(k){ S.thumbQ = S.thumbQ || []; if ((S.thumbs || {})[k] || S.thumbQ.includes(k)) return; S.thumbQ.push(k); thumbRun(); }
+/* a page's thumbnail is drawn once and kept in this browser (Cache Storage, by the PDF's fingerprint, page and turn): opening the
+   project again, or going back to it, shows them without drawing every page again. Drawing one takes pdf.js as long as the whole
+   page (a CAD sheet's every line, only smaller), so a thumbnail waits while the page on screen is being drawn and while the user
+   zooms, pans or works (THUMB_QUIET ms) — they were slowing every zoom and page change down. */
+const THUMB_CACHE = "zd-thumbs-v1", THUMB_QUIET = 600;
+let lastInput = 0, thumbTask = null;
+const thumbHalt = () => { if (thumbTask) { try { thumbTask.cancel(); } catch (e) {} } };   // a thumbnail being drawn gives way at once (drawn again later)
+const onInput = () => { lastInput = performance.now(); thumbHalt(); };
+["wheel", "pointerdown", "keydown"].forEach(t => addEventListener(t, onInput, {capture: true, passive: true}));
+addEventListener("pointermove", e => { if (e.buttons) onInput(); }, {capture: true, passive: true});
+const thumbUrl = (pr, f, p) => { const m = pr.files.find(x => x.id === f); if (!m || m.locked || (S.docs[f] || {}).zdLocked) return ""; const fp = m.sha || [m.size, m.replaced || m.added || ""].join("-");   // (a locked PDF: no picture kept)
+  return location.origin + "/zd-thumb/" + encodeURIComponent(m.id + "-" + fp) + "/" + p + "-" + rotOf(pr, keyOf(f, p)) + "-" + strHash((bbOffOf(f) ? 1 : 0) + "|" + ocOff(f)) + ".png"; };
+async function thumbKept(u){ try { if (!u || !window.caches) return ""; const r = await (await caches.open(THUMB_CACHE)).match(u); return r ? await dataUrlOf(await r.blob()) : ""; } catch (e) { return ""; } }
+function thumbKeep(u, cv){ try { if (u && window.caches) cv.toBlob(b => { if (b) caches.open(THUMB_CACHE).then(c => c.put(u, new Response(b, {headers: {"Content-Type": "image/png"}}))).then(() => { if (Math.random() < 0.02) cacheTrim(THUMB_CACHE, 5000); }).catch(() => {}); }, "image/png"); } catch (e) {} }
+async function thumbQuiet(pr){   // until the page on screen is drawn and the user has paused (a few seconds at most)
+  for (let n = 0; n < 50 && P.proj === pr; n++) {
+    if (!PANES.some(pn => pn.page && (pn.renderTask || pn.hiWait || pn.lowBusy)) && performance.now() - lastInput > THUMB_QUIET) return;
+    await new Promise(r => setTimeout(r, 120)); }
+}
 async function thumbRun(){
   if (S.thumbBusy) return; S.thumbBusy = true;
   const pr = P.proj;
@@ -5301,9 +5460,15 @@ async function thumbRun(){
     try { const csc = CAD && +p === 1 && S.cadSc && S.cadSc[f], cpg = csc && csc.pages[0];
       if (cpg) { const s2 = 200 / Math.max(cpg.w, cpg.h), cv = document.createElement("canvas"); cv.width = Math.ceil(cpg.w * s2); cv.height = Math.ceil(cpg.h * s2);   // a CAD page: from its scene
         await CAD.cadDrawAsync(cv.getContext("2d"), cpg, {s: s2, tx: 0, ty: 0, W: cv.width, H: cv.height}, {dark: false, mono: false, hidden: cadHidden(f, csc), dpr: 1}); S.thumbs[k] = cv.toDataURL("image/png"); }
-      else { const pg = await (await doc(f)).getPage(+p), r0 = rotOf(pr, k), v0 = vpOf(pg, pr, {scale: 1}), vp = vpOf(pg, pr, {scale: 200 / Math.max(v0.width, v0.height)}), cv = document.createElement("canvas");
+      else { const u = thumbUrl(pr, f, p), kept = await thumbKept(u);
+      if (kept) { if (P.proj !== pr) continue; S.thumbs[k] = kept; S.thumbHits = (S.thumbHits || 0) + 1; }   // drawn before, in this browser
+      else { if ((pr.files.find(x => x.id === f) || {}).locked && !S.docs[f]) continue;   // a locked PDF not opened this visit: its thumbnail waits (never a password question out of nowhere)
+      await thumbQuiet(pr); if (P.proj !== pr) continue;
+      const pg = await (await doc(f)).getPage(+p), r0 = rotOf(pr, k), v0 = vpOf(pg, pr, {scale: 1}), vp = vpOf(pg, pr, {scale: 200 / Math.max(v0.width, v0.height)}), cv = document.createElement("canvas");
       cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height); const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
-      await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp})).promise; if (rotOf(pr, k) === r0 && P.proj === pr) S.thumbs[k] = cv.toDataURL("image/png"); else continue; } }   // (turned meanwhile, or another project now: drawn again when wanted)
+      const task = thumbTask = sliced(pg.render({...lay(f), canvasContext: ctx, viewport: vp}));
+      try { await task.promise; } catch (e) { if (e && e.name === "RenderingCancelledException") { if (P.proj === pr && !S.thumbQ.includes(k)) S.thumbQ.unshift(k); continue; } throw e; } finally { if (thumbTask === task) thumbTask = null; }
+      if (rotOf(pr, k) === r0 && P.proj === pr) { S.thumbs[k] = cv.toDataURL("image/png"); thumbKeep(thumbUrl(pr, f, p), cv); } else continue; } } }   // (turned meanwhile, or another project now: drawn again when wanted)
     catch (e) { S.thumbs[k] = "x"; }   // PDF not attached in this browser: left blank
     const im = [...document.querySelectorAll("#pageList img[data-th], #pageStrip img[data-th]")].find(x => x.dataset.th === k); if (im && S.thumbs[k] !== "x") im.src = S.thumbs[k];
     PANES.forEach(pn => { if (pn.key === k) miniUpdate(pn); });
@@ -7654,8 +7819,8 @@ async function exportPdf(all, how){   // how "ui": shown in the preview first wh
       const pg = await (await doc(f)).getPage(p), base = pg.getViewport({scale: 1}), sc = Math.min(3, 4000 / Math.max(base.width, base.height));
       const W = Math.ceil(base.width * sc), H = Math.ceil(base.height * sc), cv = document.createElement("canvas"); cv.width = W; cv.height = H;
       const ctx = cv.getContext("2d");
-      if (!srcCache[f]) { const rec = await dbGet("pdfs", f); srcCache[f] = await L.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); }
-      const flat = pgRot(pg) !== 0 || srcCache[f].isEncrypted || mkRedacted(f, p);   // an encrypted PDF cannot be copied page for page (its content would stay encrypted), and a redacted page must lose what is under the redaction: flattened like a turned page
+      if (!(f in srcCache)) srcCache[f] = await libDoc(L, f);
+      const flat = pgRot(pg) !== 0 || !srcCache[f] || srcCache[f].isEncrypted || mkRedacted(f, p);   // (a PDF too big for pdf-lib: its pages as pictures) an encrypted PDF cannot be copied page for page (its content would stay encrypted), and a redacted page must lose what is under the redaction: flattened like a turned page
       if (flat) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); await loadLayers(f); await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})})).promise; }
       await mkAssetsFor(f, p); await svgOnto(ctx, pageOverlaySvg(f, p, sc, W, H, true));
       const png = await out.embedPng(await (await new Promise(r => cv.toBlob(r, "image/png"))).arrayBuffer());
@@ -7684,10 +7849,11 @@ async function exportBundle(){
   try {
     const exported = new Date().toISOString(), parts = [], pdfs = [], miss = []; let off = 0;
     for (const f of P.proj.files) {
-      const rec = await dbGet("pdfs", f.id); if (!rec) { miss.push(f.name); continue; }
-      const sha = rec.src ? rec.pdfSha || await sha256(rec.data) : rec.sha || await sha256(rec.data), e = {id: f.id, name: f.name, size: rec.data.byteLength, sha, off};
-      parts.push(rec.data); off += rec.data.byteLength;
-      if (rec.src) { e.srcSha = rec.sha || await sha256(rec.src); e.srcOff = off; e.srcSize = rec.src.byteLength; parts.push(rec.src); off += rec.src.byteLength; }   // the DWG / DXF too
+      const rec = await dbGetRaw("pdfs", f.id); if (!rec) { miss.push(f.name); continue; }   // (as kept: a big PDF goes into the file as the Blob it is, never read into the page)
+      const n = v => v instanceof Blob ? v.size : v.byteLength, fp = v => v instanceof Blob ? blobSha(v) : sha256(v);
+      const sha = rec.src ? rec.pdfSha || await fp(rec.data) : rec.sha || await fp(rec.data), e = {id: f.id, name: f.name, size: n(rec.data), sha, off};
+      parts.push(rec.data); off += n(rec.data);
+      if (rec.src) { e.srcSha = rec.sha || await fp(rec.src); e.srcOff = off; e.srcSize = n(rec.src); parts.push(rec.src); off += n(rec.src); }   // the DWG / DXF too
       pdfs.push(e);
     }
     const assets = [];   // pictures and files of markups
@@ -7702,30 +7868,37 @@ async function exportBundle(){
 function isBundle(buf){ const m = new TextEncoder().encode(BUNDLE_MAGIC), u = new Uint8Array(buf, 0, Math.min(buf.byteLength, m.length)); return u.length === m.length && m.every((b, i) => u[i] === b); }
 async function importBundle(buf){ const u = await bundleUnpack(buf); return importProject(u.text, u.pre); }
 async function bundleUnpack(buf, known){   // a .zdtakeoff's PDFs and pictures stored in this browser -> {text: its project (ids moved off ones taken here), pre: check rows}; known: fingerprints not stored again (a merge: drawings the open project has)
-  const start = BUNDLE_MAGIC.length + 4;
-  if (buf.byteLength < start) throw new Error("the file is cut short");
-  const hl = new DataView(buf, BUNDLE_MAGIC.length, 4).getUint32(0);
-  let h; try { h = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, start, Math.min(hl, buf.byteLength - start)))); } catch (e) { throw new Error("the file is damaged (its header cannot be read)"); }
+  /* buf: the file's bytes, or the file itself (a Blob, read a piece at a time: a big PDF in it is stored straight from the file,
+     never held whole in the page) */
+  const start = BUNDLE_MAGIC.length + 4, size = buf instanceof Blob ? buf.size : buf.byteLength;
+  const bytes = async (a, b) => { const x = buf.slice(a, b); return x instanceof Blob ? x.arrayBuffer() : x; };
+  const part = async (a, b) => { const x = buf.slice(a, b); return x instanceof Blob && x.size <= BIG_REC ? x.arrayBuffer() : x; };   // (a big one stays a Blob)
+  const n = v => v instanceof Blob ? v.size : v.byteLength, fp = v => v instanceof Blob ? blobSha(v) : sha256(v);
+  if (size < start) throw new Error("the file is cut short");
+  const hl = new DataView(await bytes(BUNDLE_MAGIC.length, start)).getUint32(0);
+  let h; try { h = JSON.parse(new TextDecoder().decode(await bytes(start, start + Math.min(hl, size - start)))); } catch (e) { throw new Error("the file is damaged (its header cannot be read)"); }
   if (!h || h.format !== "zd-takeoff-bundle" || !h.project || !Array.isArray(h.pdfs)) throw new Error("not a takeoff project file");
   let text = JSON.stringify(h.project); const base = start + hl, pre = [];
   busy("Unpacking the PDFs…");
   try {
     for (const p of h.pdfs) {
       const a = base + (+p.off || 0), b = a + (+p.size || 0);
-      if (!(p.size > 0) || b > buf.byteLength) { pre.push({what: "PDF in the file: " + p.name, a: "1", b: "0", st: "FAIL", note: "cut short — not attached"}); continue; }
-      const data = buf.slice(a, b), sha = await sha256(data);
+      if (!(p.size > 0) || b > size) { pre.push({what: "PDF in the file: " + p.name, a: "1", b: "0", st: "FAIL", note: "cut short — not attached"}); continue; }
+      const data = await part(a, b), sha = await fp(data);
       if (p.sha && sha && sha !== p.sha) { pre.push({what: "PDF in the file: " + p.name, a: "1", b: "0", st: "FAIL", note: "damaged — its fingerprint does not match — not attached"}); continue; }
-      let src = null; if (p.srcSize > 0) { const a2 = base + (+p.srcOff || 0), b2 = a2 + +p.srcSize; if (b2 <= buf.byteLength) { src = buf.slice(a2, b2); if (p.srcSha && await sha256(src) !== p.srcSha) src = null; } }
+      let src = null; if (p.srcSize > 0) { const a2 = base + (+p.srcOff || 0), b2 = a2 + +p.srcSize; if (b2 <= size) { src = await part(a2, b2); if (p.srcSha && await fp(src) !== p.srcSha) src = null; } }
       let id = String(p.id); const have = await pdfSha(id), ident = src ? p.srcSha || sha : sha;
       if (have !== null && have === ident && ident) continue;   // the same drawing is already in this browser
       if (known && ident && known.has(ident)) continue;   // … or in the project it is merged into
       if (have !== null) { const nid = uid("F"); text = remapFileId(text, id, nid); id = nid; }   // another drawing already uses this id here: this one gets its own
-      await dbPut("pdfs", Object.assign({name: p.name, size: src ? src.byteLength : data.byteLength, data, sha: ident}, src ? {src, pdfSha: sha} : {}), id);
+      const rec = Object.assign({name: p.name, size: n(src || data), data, sha: ident}, src ? {src, pdfSha: sha} : {}), bl = ["data", "src"].filter(k => rec[k] instanceof Blob);
+      if (bl.length) rec.blobs = bl;   // (read back as bytes by everything but pdf.js, as recOut would mark them)
+      await dbPut("pdfs", rec, id);
     }
     for (const x of Array.isArray(h.assets) ? h.assets : []) {   // pictures and files of markups (kept as they are when already here)
       const a = base + (+x.off || 0), b = a + (+x.size || 0);
-      if (!x || typeof x.aid !== "string" || !/^[A-Za-z0-9_-]{1,60}$/.test(x.aid) || !(x.size > 0) || b > buf.byteLength || await assetRec(x.aid)) continue;
-      await dbPut("pdfs", {asset: true, name: String(x.name || "").slice(0, 200), type: String(x.type || "application/octet-stream").slice(0, 100), size: x.size, data: buf.slice(a, b), at: new Date().toISOString()}, assetKey(x.aid));
+      if (!x || typeof x.aid !== "string" || !/^[A-Za-z0-9_-]{1,60}$/.test(x.aid) || !(x.size > 0) || b > size || await assetRec(x.aid)) continue;
+      await dbPut("pdfs", {asset: true, name: String(x.name || "").slice(0, 200), type: String(x.type || "application/octet-stream").slice(0, 100), size: x.size, data: await bytes(a, b), at: new Date().toISOString()}, assetKey(x.aid));
     }
   } finally { busy(""); }
   if (!pre.length) pre.push({what: "PDFs in the file", a: h.pdfs.length, b: h.pdfs.length, st: "PASS", note: "fingerprints checked"});
@@ -7834,7 +8007,8 @@ async function stitchPages(keys, arr){
       if (!fl || !(p >= 1 && p <= fl.pages)) throw new Error("a page chosen is no longer in the project");
       if (cadMeta(f)) throw new Error(keyName(k) + " is an AutoCAD drawing — only PDF pages can be stitched");
       const pg = await (await doc(f)).getPage(p);
-      if (!src[f]) { const rec = await dbGet("pdfs", f); if (!rec) throw new Error("PDF missing — add “" + fl.name + "” again with + PDF"); src[f] = await L.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); }
+      if (!(f in src)) src[f] = await libDoc(L, f);
+      if (!src[f]) throw new Error(keyName(k) + " is in a PDF over " + Math.round(PDFLIB_MAX / 1048576) + " MB — too big for its pages to be copied onto a new sheet in the browser");
       if (src[f].isEncrypted) throw new Error(keyName(k) + " is in a password-locked PDF — it cannot be copied onto a new sheet");
       const vb = pg.view, w = vb[2] - vb[0], h = vb[3] - vb[1], r = pgRot(pg), ep = await out.embedPage(src[f].getPage(p - 1), {left: vb[0], bottom: vb[1], right: vb[2], top: vb[3]});
       parts.push({k, ep, w, h, r, W: r % 180 ? h : w, H: r % 180 ? w : h});
@@ -8005,12 +8179,13 @@ async function expPdf(o, pr){   // the drawing stays the original vector page; t
     pr.set(n, o.keys.length, keyName(key));
     const [f, p0] = key.split(":"), p = +p0, pg = await (await doc(f)).getPage(p), base = pg.getViewport({scale: 1});
     if (per) { out = await L.PDFDocument.create(); linkQ = []; byKey = {}; }
-    if (!src[f]) { const rec = await dbGet("pdfs", f); if (!rec) throw new Error("PDF missing — add “" + ((P.proj.files.find(x => x.id === f) || {}).name || f) + "” again with + PDF"); src[f] = await L.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); }
-    if (pgRot(pg) !== 0 || src[f].isEncrypted || mkRedacted(f, p)) {   // a turned, password-locked or redacted page: flattened to one picture
+    if (!(f in src)) src[f] = await libDoc(L, f);
+    if (pgRot(pg) !== 0 || !src[f] || src[f].isEncrypted || mkRedacted(f, p)) {   // a turned, password-locked or redacted page (or one of a PDF too big for pdf-lib): flattened to one picture
       const im = await expPageImage(key, o), png = await out.embedPng(await blobBuf(im.cv, "image/png")); im.cv.width = 0;
       const np = out.addPage([base.width + strip, base.height]); np.drawImage(png, {x: 0, y: 0, width: base.width + strip, height: base.height});
       byKey[key] = np; mkPdfLinks(L, out, np, f, p, (x, y) => [strip + x, base.height - y], linkQ);
       if (mkRedacted(f, p) && o.notes) o.notes.push(keyName(key) + " flattened to apply its redactions");
+      else if (!src[f] && o.notes) o.notes.push(keyName(key) + " flattened — its PDF is too big to copy as vectors in the browser");
     } else {
       const vb = pg.view, vw = vb[2] - vb[0], vh = vb[3] - vb[1], {cv, sc, W, H} = expCanvas(vw + strip, vh, o.dpi / 72); expNote(o, sc, key);
       await mkAssetsFor(f, p); await svgOnto(cv.getContext("2d"), pageOverlaySvg(f, p, sc, W, H, Object.assign({}, o, {ox: strip * sc})));
@@ -10655,13 +10830,14 @@ async function importProject(text, pre){
 async function mergeFile(){
   if (!P.proj) return toast("Open a project first — or use Import project to start a new one");
   const [f] = await pickFiles(".json,.zdtakeoff,application/json"); if (!f) return;
-  try { return await mergeBuf(await f.arrayBuffer()); } catch (e) { busy(""); toast("Could not import: " + (e.message || e), 5000); }
+  try { return await mergeBuf(f); } catch (e) { busy(""); toast("Could not import: " + (e.message || e), 5000); }
 }
 async function mergeBuf(buf){
   if (!P.proj) throw new Error("open a project first");
   savePr = P.proj; await flushSave();
   for (const x of P.proj.files) if (!x.sha) { const h = await pdfSha(x.id); if (h) x.sha = h; }   // PDFs added before fingerprints
-  if (!isBundle(buf)) return mergeProject(new TextDecoder().decode(buf), undefined, {scales: "ask"});
+  const blob = buf instanceof Blob;   // (buf: the file's bytes, or the file itself)
+  if (!isBundle(blob ? await buf.slice(0, 64).arrayBuffer() : buf)) return mergeProject(new TextDecoder().decode(blob ? await buf.arrayBuffer() : buf), undefined, {scales: "ask"});
   const u = await bundleUnpack(buf, new Set(P.proj.files.map(x => x.sha).filter(Boolean)));
   return mergeProject(u.text, u.pre, {scales: "ask"});
 }
@@ -11731,7 +11907,7 @@ function paneShow(B, A){
   B.view = Object.assign({}, A.view); B.el.drop.style.display = "none"; renderLow(B).then(() => renderHi(true, B)); applyView(B); paneStrips(true); pruneCaches(); draw();
 }
 function paneBlank(pn){   // a window left without a drawing (its PDF was removed): empty, with the drop box
-  pn.navSeq = (pn.navSeq || 0) + 1; if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; }
+  pn.navSeq = (pn.navSeq || 0) + 1; if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} pn.renderTask = null; } pn.hiWait = false;
   clearTimeout(pn.hiT); freeCadBitmap(pn); Object.assign(pn, {fileId: null, page: null, base: null, key: "", low: null, rendered: null, cmp: null, autoShow: null});
   pn.el.hi.style.display = "none"; { const lc = pn.el.low; lc.width = lc.width; } pn.el.ov.innerHTML = ""; pn.el.ov2.innerHTML = ""; pn.el.drop.style.display = "flex"; paneStrip(pn, true);
 }
@@ -11947,7 +12123,7 @@ function wire(){
     if (!v) return; const pr = newProject(v.name); await dbPut("projects", pr); await openProject(pr.id); };
   $("bImport").onclick = () => $("impIn").click();
   $("impIn").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return;
-    try { const buf = await f.arrayBuffer(); await (isBundle(buf) ? importBundle(buf) : importProject(new TextDecoder().decode(buf))); } catch (er) { toast("Could not import: " + er.message, 5000); } };
+    try { await (isBundle(await f.slice(0, 64).arrayBuffer()) ? importBundle(f) : importProject(new TextDecoder().decode(await f.arrayBuffer()))); } catch (er) { toast("Could not import: " + er.message, 5000); } };   // (a project file with its PDFs: read a piece at a time)
   $("projList").addEventListener("click", async e => {
     const o = e.target.closest("[data-open],[data-edit],[data-dup],[data-del],[data-bak]"); if (!o) return;
     if (o.dataset.open) return openProject(o.dataset.open);
@@ -16505,7 +16681,7 @@ async function plotPdf(o){
     const sc = S.cadSc[f], hid = cadHidden(f, sc); if (o.np) sc.layers.forEach((l, i) => { if (!l.plot || /^defpoints$/i.test(l.name)) hid[i] = 1; });
     await CAD.cadPlotPage(Lb, out, page, cp, {win, s: lo.s, at: [lo.x, lo.y], style: o.style, hidden: hid, lw: o.lw, font, ed: cedC(f, cp)});
   } else {
-    const rec = await dbGet("pdfs", f); let src = null; try { src = rec && await Lb.PDFDocument.load(rec.data.slice(0), {ignoreEncryption: true}); } catch (e) { src = null; }
+    let src = null; try { src = await libDoc(Lb, f); } catch (e) { src = null; }
     if (!src || src.isEncrypted || pgRot(pgp) || o.style === "mono" || mkRedacted(f, p)) {   // as a picture: a turned, locked or redacted page, or monochrome
       const cs = Math.min(200 / 72 * lo.s, 9000 / Math.max(win[2] - win[0], win[3] - win[1])), W = Math.max(1, Math.ceil((win[2] - win[0]) * cs)), H = Math.max(1, Math.ceil((win[3] - win[1]) * cs));
       const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = inkCtx(thinLines(cv.getContext("2d")), false, o.style === "mono"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
