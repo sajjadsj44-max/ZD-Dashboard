@@ -92,6 +92,25 @@ function cmp(msg, ref, got, tol, unit){   // tol: absolute, in the unit
   r = M.countObjects([[0, 0], [100, 0], [100.5, 0], [200, 0], [300, 0]], 2); ok(r.value === 4 && r.duplicates.length === 1, "5 marks, one on top of another: 4 counted, the duplicate reported");
   r = M.countObjects([], 2); ok(r.value === 0 && !r.verifiedZero && /not a verified zero/.test(r.status), "none found is not a verified zero");
 
+  console.log("earthworks: cut and fill from spot levels (TIN)");
+  ok(M.delaunay([[0, 0], [10, 0], [10, 10], [0, 10]]).length === 2, "a square of 4 levels is 2 triangles");
+  ok(M.delaunay([[0, 0], [5, 0], [10, 0]]).length === 0, "levels all on one line make no triangle");
+  ok(M.delaunay([[0, 0], [10, 0], [10, 10], [0, 10], [5, 5]]).length === 4, "a square with its centre is 4 triangles");
+  { const g = M.groundAt([2, 3], [[0, 0], [10, 0], [0, 10]], [100, 110, 103], [[0, 1, 2]]); cmp("level inside a triangle (its plane)", 100 + 10 * 0.2 + 3 * 0.3, g.z, 1e-9, "ft"); ok(!g.out, "…inside the levels"); }
+  const site = P([[0, 0], [100, 0], [100, 50], [0, 50]]), lv = L => L.map(([x, y, z]) => ({p: [x * k, y * k], z}));
+  // the ground rises 1 ft in 100 ft from 100.00: at formation 100.50 the east half is cut, the west half fill — 625 cft each
+  r = M.cutFill({outline: site, k, formation: 100.5, levels: lv([[0, 0, 100], [100, 0, 101], [100, 50, 101], [0, 50, 100]])});
+  cmp("sloping ground 100 × 50 ft, formation at mid-height: cut", 625, r.cut, 2, "Cft"); cmp("…fill", 625, r.fill, 2, "Cft"); cmp("…net", 0, r.value, 1e-6, "Cft");
+  cmp("…area", 5000, r.area, E, "Sft"); ok(r.outside === 0, "…all within the spot levels");
+  r = M.cutFill({outline: site, k, formation: 99, levels: lv([[0, 0, 100], [100, 0, 101], [100, 50, 101], [0, 50, 100]])});
+  cmp("formation below all the ground: cut = 5000 × 1.5 ft average", 7500, r.cut, 1, "Cft"); cmp("…no fill", 0, r.fill, E, "Cft");
+  r = M.cutFill({outline: site, k, formation: 102.25, levels: lv([[0, 0, 101], [100, 0, 101], [100, 50, 101], [0, 50, 101], [50, 25, 101]])});
+  cmp("level ground 101.00, formation 102.25: fill 5000 × 1.25", 6250, r.fill, 1e-6, "Cft"); cmp("…no cut", 0, r.cut, E, "Cft"); cmp("…fill depth", 1.25, r.depthFill, 1e-9, "ft");
+  r = M.cutFill({outline: P([[0, 0], [20, 0], [20, 20], [0, 20]]), k, formation: 100, levels: lv([[5, 5, 101], [15, 5, 101], [15, 15, 101], [5, 15, 101]])});
+  ok(r.outside > 0.6 && r.outside < 0.8, "levels inside a bigger outline: the share outside them is reported (" + (r.outside * 100).toFixed(1) + " %)"); cmp("…the ground there from the nearest levels", 400, r.cut, 1e-6, "Cft");
+  r = M.cutFill({outline: site, k, formation: 100, levels: lv([[0, 0, 100], [100, 0, 101]])}); ok(r.value === null && /3 spot levels/.test(r.missing.join()), "two levels are not enough — not worked out");
+  r = M.cutFill({outline: site, k, formation: "", levels: lv([[0, 0, 100], [100, 0, 101], [0, 50, 100]])}); ok(r.value === null && /formation level/.test(r.missing.join()), "no formation level — never assumed");
+
   if (process.env.TK_REPORT) fs.writeFileSync(process.env.TK_REPORT, JSON.stringify({at: new Date().toISOString(), checks: rows}, null, 1));
   console.log("\n" + passes + " passed, " + fails + " failed"); process.exit(fails ? 1 : 0);
 })().catch(e => { console.log(e); process.exit(1); });

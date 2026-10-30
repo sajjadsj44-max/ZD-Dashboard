@@ -158,6 +158,70 @@ export function slabFormwork(o){
   const d = (o.openings || []).map(x => ({name: x.name || "", area: +x.area || 0})).map(x => Object.assign(x, {below: x.area <= 5})), ded = d.reduce((s, x) => s + (x.below ? 0 : x.area), 0);
   return res(o.area - ded + o.perimeter * o.depth, "Sft", `${fmt(o.area)} − openings + ${fmt(o.perimeter)} × ${fmt(o.depth)}`, o, {soffit: o.area - ded, edges: o.perimeter * o.depth, openings: d});
 }
+/* ------------------------------------------------------------------ earthworks: cut and fill from spot levels */
+const inPoly = (q, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > q[1]) !== (b[1] > q[1]) && q[0] < (b[0] - a[0]) * (q[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+/* Delaunay triangles of points [[x, y], …] (Bowyer–Watson) -> [[i, j, k], …]; fewer than 3 points, or all on one line, give [] */
+export function delaunay(P){
+  const n = P.length; if (n < 3) return [];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; P.forEach(p => { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); });
+  const d = Math.max(x1 - x0, y1 - y0) || 1, mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+  const V = P.map(p => [p[0] - mx, p[1] - my]).concat([[-20 * d, -d], [0, 20 * d], [20 * d, -d]]);   // (worked about the middle: smaller numbers, less rounding)
+  const circ = v => { const [A, B, C] = v.map(i => V[i]), D = 2 * (A[0] * (B[1] - C[1]) + B[0] * (C[1] - A[1]) + C[0] * (A[1] - B[1]));
+    if (Math.abs(D) < 1e-12 * d * d) return {x: 0, y: 0, r2: Infinity};   // three points on a line: always replaced
+    const a2 = A[0] * A[0] + A[1] * A[1], b2 = B[0] * B[0] + B[1] * B[1], c2 = C[0] * C[0] + C[1] * C[1];
+    const x = (a2 * (B[1] - C[1]) + b2 * (C[1] - A[1]) + c2 * (A[1] - B[1])) / D, y = (a2 * (C[0] - B[0]) + b2 * (A[0] - C[0]) + c2 * (B[0] - A[0])) / D;
+    return {x, y, r2: (A[0] - x) ** 2 + (A[1] - y) ** 2}; };
+  let T = [{v: [n, n + 1, n + 2]}]; T[0].c = circ(T[0].v);
+  for (let i = 0; i < n; i++) {
+    const p = V[i], bad = [], keep = [];
+    T.forEach(t => ((p[0] - t.c.x) ** 2 + (p[1] - t.c.y) ** 2 < t.c.r2 ? bad : keep).push(t));
+    const E = new Map();   // the hole's edges: those of one bad triangle only
+    bad.forEach(t => [[0, 1], [1, 2], [2, 0]].forEach(([a, b]) => { const u = t.v[a], w = t.v[b], key = u < w ? u + "," + w : w + "," + u; if (E.has(key)) E.get(key).n++; else E.set(key, {u, w, n: 1}); }));
+    T = keep; E.forEach(e => { if (e.n === 1) { const t = {v: [e.u, e.w, i]}; t.c = circ(t.v); T.push(t); } });
+  }
+  const area2 = v => { const [A, B, C] = v.map(i => V[i]); return (B[0] - A[0]) * (C[1] - A[1]) - (C[0] - A[0]) * (B[1] - A[1]); };
+  return T.filter(t => t.v.every(i => i < n) && Math.abs(area2(t.v)) > 1e-12 * d * d).map(t => t.v);
+}
+/* the ground level at q from spot levels P (points) with levels Z and their triangles T: the plane through the triangle q is
+   in, else (outside the outermost levels) the levels weighted by 1 / distance² -> {z, out} */
+export function groundAt(q, P, Z, T){
+  for (const [a, b, c] of T) {
+    const A = P[a], B = P[b], C = P[c], D = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1]); if (!D) continue;
+    const u = ((B[1] - C[1]) * (q[0] - C[0]) + (C[0] - B[0]) * (q[1] - C[1])) / D, v = ((C[1] - A[1]) * (q[0] - C[0]) + (A[0] - C[0]) * (q[1] - C[1])) / D, w = 1 - u - v;
+    if (u >= -1e-9 && v >= -1e-9 && w >= -1e-9) return {z: u * Z[a] + v * Z[b] + w * Z[c], out: false};
+  }
+  let s = 0, sw = 0; for (let i = 0; i < P.length; i++) { const d2 = (P[i][0] - q[0]) ** 2 + (P[i][1] - q[1]) ** 2; if (d2 < 1e-18) return {z: Z[i], out: true}; s += Z[i] / d2; sw += 1 / d2; }
+  return {z: s / sw, out: true};
+}
+/* cut and fill over an outline: o = {outline (pt), levels: [{p: [x, y] (pt), z (ft)}], formation (ft), k (pt per ft), cells}.
+   The ground between the spot levels is the plane of each triangle of their Delaunay triangulation (a TIN, as a level sheet is
+   worked by hand); outside the outermost levels the nearest ones decide, and the share of the area lying there is reported
+   (outside). The outline is worked in cells (about 62,500 over its box): cut = Σ (ground − formation) where the ground is above
+   the formation, fill = Σ (formation − ground) where it is below, each cell carrying the outline's exact area ÷ the cells. The
+   formation level is never assumed. value = cut − fill (Cft) */
+export function cutFill(o){
+  const k = +o.k, F = o.formation === "" || o.formation == null ? NaN : +o.formation, L = (o.levels || []).filter(l => l && Array.isArray(l.p) && isFinite(+l.z));
+  const miss2 = []; if (!(k > 0)) miss2.push("page scale"); if (!(o.outline && o.outline.length >= 3)) miss2.push("the outline");
+  if (L.length < 3) miss2.push("3 spot levels or more (" + L.length + " given)"); if (!isFinite(F)) miss2.push("formation level (never assumed)");
+  const inputs = {k, levels: L.length, formation: F};
+  if (miss2.length) return miss("Cft", "Σ cells (ground − formation) × cell area", inputs, miss2);
+  const ft = p => [p[0] / k, p[1] / k], O = o.outline.map(ft), Pt = [], Z = [];
+  L.forEach(l => { const q = ft(l.p); if (Pt.some(x => Math.hypot(x[0] - q[0], x[1] - q[1]) < 1e-6)) return; Pt.push(q); Z.push(+l.z); });   // two levels on one point: the first
+  const T = delaunay(Pt); if (!T.length) return miss("Cft", "Σ cells (ground − formation) × cell area", inputs, ["spot levels not all on one line"]);
+  const A = polyArea(O); let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity; O.forEach(p => { bx0 = Math.min(bx0, p[0]); by0 = Math.min(by0, p[1]); bx1 = Math.max(bx1, p[0]); by1 = Math.max(by1, p[1]); });
+  const s = Math.max(Math.sqrt((bx1 - bx0) * (by1 - by0) / (+o.cells || 62500)), 1e-3), nx = Math.max(1, Math.ceil((bx1 - bx0) / s)), ny = Math.max(1, Math.ceil((by1 - by0) / s));
+  const sx = (bx1 - bx0) / nx, sy = (by1 - by0) / ny;   // a whole number of cells across the box each way: a plane comes out exact
+  let cut = 0, fill = 0, n = 0, out = 0, zl = Infinity, zh = -Infinity;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const x = bx0 + (i + 0.5) * sx, y = by0 + (j + 0.5) * sy;
+    if (!inPoly([x, y], O)) continue; n++; const g = groundAt([x, y], Pt, Z, T); if (g.out) out++;
+    zl = Math.min(zl, g.z); zh = Math.max(zh, g.z); const d = g.z - F; if (d > 0) cut += d; else fill -= d;
+  }
+  if (!n) return miss("Cft", "Σ cells (ground − formation) × cell area", inputs, ["an outline larger than one cell"]);
+  cut *= A / n; fill *= A / n;
+  return res(cut - fill, "Cft", "Σ cells (ground − formation) × cell area, ground from the TIN of the spot levels", inputs,
+    {cut, fill, area: A, cells: n, cell: [sx, sy], outside: out / n, triangles: T.length, ground: [zl, zh], depthCut: cut / A, depthFill: fill / A});
+}
 /* objects counted: distinct points (marks closer than tol are one), the reviewed ones apart. found 0 is "none found", not a
    verified zero — that needs the user to confirm the page was looked over */
 export function countObjects(pts, tol, reviewed){
