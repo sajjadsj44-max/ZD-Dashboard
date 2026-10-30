@@ -51,6 +51,11 @@
   adds / removes them in Settings › Team logins, which saves users.json to main with a GitHub token asked
   when saving (kept only while the page is open) or downloads it. The team view hides backups, Recover,
   Settings › Backup & reset and the links to the other ZD pages. `tools/test_takeoff_team.js` checks it.
+  Exception asked for by the owner: a friend stays signed in on their computer until **Sign out** (localStorage
+  `zd-team-login`: username, a sign-in id and the chat key — never the password; checked against `c` each time, so a new
+  password or a removed user asks again). **One computer / browser at a time per login:** each sign-in is announced (HMAC
+  from the chat key) on the chat relay's topic `"s-" + topic`, renewed every 20 min while open and held for 2 h; another
+  browser is refused while it is held, and a browser that was taken over after that is signed out. A new password frees it.
 - Feedback chat: friends' **Feedback** button ↔ the owner's **Inbox** (top bar). No server of our own: messages are events on
   the free relay ntfy.sh (topic in `takeoff/chat.json`; it keeps them 12 h), copied every half hour by
   `.github/workflows/chat-archive.yml` (`tools/chat_archive.py`) to `takeoff-chat.jsonl` on the `chat-archive` branch, read back

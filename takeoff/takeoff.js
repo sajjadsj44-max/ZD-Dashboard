@@ -9710,8 +9710,8 @@ function teamInit(){   // the team view: who is signed in, and Sign out (the pag
   document.documentElement.classList.add("zd-team");
   const show = () => { const n = document.documentElement.getAttribute("data-zd-user"); if (n == null || $("teamWho")) return;
     const s = document.createElement("span"); s.id = "teamWho"; s.className = "small"; s.style.cssText = "white-space:nowrap;margin-left:6px";
-    s.innerHTML = `&#128100; ${esc(n || "owner")} <button class="btn sm" id="bSignOut" title="Sign out — the page asks for a username and password again">Sign out</button>`;
-    $("bExport").after(s); $("bSignOut").onclick = async () => { try { await flushSave(); } catch (e) {} location.reload(); }; };
+    s.innerHTML = `&#128100; ${esc(n || "owner")} <button class="btn sm" id="bSignOut" title="Sign out — this computer forgets the login and the page asks for a username and password again; the login can then be used on another computer">Sign out</button>`;
+    $("bExport").after(s); $("bSignOut").onclick = async () => { try { await flushSave(); } catch (e) {} try { if (window.zdTeamSignOut) await window.zdTeamSignOut(); } catch (e) {} location.reload(); }; };
   show(); window.addEventListener("zd-signed-in", show);
 }
 async function settingsDialog(page){
