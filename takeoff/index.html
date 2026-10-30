@@ -1596,7 +1596,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-30t"></script>
+<script type="module" src="takeoff.js?v=2026-10-31a"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
@@ -1616,7 +1616,15 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
   function hexOf(b) { return Array.prototype.map.call(new Uint8Array(b), function (x) { return (x | 256).toString(16).slice(1); }).join(''); }
   /* The friends' link (?team) asks for a username and a password instead, checked against takeoff/users.json (Settings › Team
      logins): PBKDF2-SHA256 of the password with the user's salt. The list is read fresh each time and again every 5 minutes —
-     a user removed, or given a new password, is signed out. */
+     a user removed, or given a new password, is signed out.
+     Kept signed in, one computer at a time (asked for by the owner): after a friend signs in, this browser keeps the login in
+     local storage zd-team-login until Sign out — the username, a random id for this sign-in and the chat key made from the
+     password; never the password itself. It is checked each time against users.json (SHA-256 of the chat key = "c"), so a new
+     password or a removed user asks again. A login works on one computer / browser at a time: each sign-in is announced on the
+     relay of takeoff/chat.json (its own topic, "s-" + the chat topic) and renewed every 20 minutes while the page is open;
+     another browser is refused while that is fresh (2 hours, or until Sign out there), and a browser whose login was taken
+     over after that is signed out. Each announcement carries an HMAC made from the chat key, so only someone with the
+     password can make one. When the relay can't be reached, the check is skipped. */
   var TEAM = new URLSearchParams(location.search).has('team'), signed = null;
   function teamList() {
     return fetch('users.json?check=' + Date.now(), {cache: 'no-store'}).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
@@ -1641,7 +1649,45 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
     });
   }
   var chatKey = '';
-  function signedIn(u) {   // the takeoff shows who is signed in (Sign out asks again); a removed user or a changed password locks the page
+  var TL_KEY = 'zd-team-login', HOLD = 2 * 3600, RENEW = 20 * 60000, sessUrl = null;
+  function tlGet() { try { var o = JSON.parse(localStorage.getItem(TL_KEY) || 'null'); return o && o.u && o.k && o.sid ? o : null; } catch (e) { return null; } }
+  function tlSet(o) { try { if (o) localStorage.setItem(TL_KEY, JSON.stringify(o)); else localStorage.removeItem(TL_KEY); } catch (e) {} }
+  function sessTopic() {   // the relay topic for sign-ins ('' when chat.json names no relay)
+    if (!sessUrl) sessUrl = fetch('chat.json?check=' + Date.now(), {cache: 'no-store'}).then(function (r) { return r.json(); })
+      .then(function (j) { return j && j.relay && j.topic ? String(j.relay).replace(/\/+$/, '') + '/s-' + j.topic : ''; }, function () { return ''; });
+    return sessUrl;
+  }
+  function sessMac(k, m) {
+    var te = new TextEncoder();
+    return crypto.subtle.importKey('raw', te.encode(k + ':zd-session'), {name: 'HMAC', hash: 'SHA-256'}, false, ['sign'])
+      .then(function (key) { return crypto.subtle.sign('HMAC', key, te.encode([m.u, m.sid, m.k, m.t].join('|'))); }).then(hexOf);
+  }
+  function sessHolder(u, k) {   // the sign-in that holds u now ({sid, at}) or null; rejected when the relay can't be read
+    return sessTopic().then(function (url) {
+      if (!url) throw new Error('no relay');
+      return fetch(url + '/json?poll=1&since=' + (Math.floor(Date.now() / 1000) - HOLD - 600), {cache: 'no-store'});
+    }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); }).then(function (t) {
+      var ev = [];
+      t.split('\n').forEach(function (l) {
+        try { var o = JSON.parse(l), m = o.event === 'message' && JSON.parse(o.message);
+          if (m && m.zs === 1 && m.u === u && (m.k === 'claim' || m.k === 'release') && Math.abs(m.t - o.time) < 600) ev.push({m: m, at: +o.time}); } catch (e) {}
+      });
+      ev.sort(function (a, b) { return a.at - b.at; });
+      return Promise.all(ev.map(function (e) { return sessMac(k, e.m).then(function (h) { return h === e.m.h ? e : null; }); }));
+    }).then(function (ev) {
+      var cur = null;
+      ev.forEach(function (e) { if (!e) return; if (e.m.k === 'claim') cur = {sid: e.m.sid, at: e.at}; else if (cur && cur.sid === e.m.sid) cur = null; });
+      return cur && Date.now() / 1000 - cur.at < HOLD ? cur : null;
+    });
+  }
+  function sessSay(s, kind) {   // announce this sign-in (claim) or its Sign out (release): a simple request, no CORS preflight
+    var m = {zs: 1, u: s.u, sid: s.sid, k: kind, t: Math.floor(Date.now() / 1000)};
+    return sessTopic().then(function (url) {
+      if (url) return sessMac(s.k, m).then(function (h) { m.h = h; return fetch(url, {method: 'POST', body: JSON.stringify(m)}); });
+    });
+  }
+  function kicked(u) { tlSet(null); try { sessionStorage.setItem('zd-team-kicked', u); } catch (e) {} location.reload(); }
+  function signedIn(u, sess) {   // the takeoff shows who is signed in (Sign out asks again); a removed user or a changed password locks the page
     signed = u;
     if (u && chatKey) try { Object.defineProperty(window, 'zdChat', {value: Object.freeze({u: u.u, k: chatKey}), configurable: true}); } catch (e) {}
     chatKey = '';
@@ -1650,7 +1696,12 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
     if (!u) return;
     var still = function () { teamList().then(function (L) { if (!L.some(function (x) { return x && x.u === u.u && x.h === u.h; })) location.reload(); }, function () {}); };
     setInterval(still, 5 * 60 * 1000);
-    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') still(); });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { still(); if (sess) held(false); } });
+    if (!sess) return;
+    /* one computer at a time: renewed every 20 minutes; signed out here when another browser has taken the login over */
+    var held = function (renew) { sessHolder(u.u, sess.k).then(function (cur) { if (cur && cur.sid !== sess.sid) kicked(u.u); else if (renew) sessSay(sess, 'claim').catch(function () {}); }, function () {}); };
+    held(true); setInterval(function () { held(true); }, RENEW);
+    window.zdTeamSignOut = function () { tlSet(null); return sessSay(sess, 'release').catch(function () {}); };   // Sign out (takeoff.js)
   }
   var trusted = (function () {   // null: no key kept here (asked as usual); else a promise of whether it is a trusted computer's key
     var k = ''; try { k = localStorage.getItem('zd-trusted-computer') || ''; } catch (e) {}
@@ -1664,10 +1715,13 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
     if (document.getElementById('zd-lock')) return;
     var lock = document.createElement('div'), secret = '', inert = [];
     lock.id = 'zd-lock';
-    lock.className = trusted ? 'zd-lock zd-lock-wait' : 'zd-lock';   // while a kept key is checked, no password card is shown
+    var kept = TEAM ? tlGet() : null;   // a friend's login kept on this computer
+    lock.className = trusted || kept ? 'zd-lock zd-lock-wait' : 'zd-lock';   // while a kept key or login is checked, no password card is shown
     lock.innerHTML = '<div class="zd-lock-card" role="dialog" aria-modal="true" aria-labelledby="zd-lock-title"><div class="mark">ZD</div>' + (TEAM
       ? '<h2 id="zd-lock-title">PDF Takeoff &mdash; Team</h2><p>Sign in with your username and password.</p><label for="zd-lock-user">Username</label><input id="zd-lock-user" class="zd-lock-user" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other">'
-      : '<h2 id="zd-lock-title">ZD Dashboard</h2><p>Enter the password to continue.</p>') + '<label for="zd-lock-input">Password</label><input id="zd-lock-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"><button type="button">Unlock</button><div class="zd-lock-error" role="alert" hidden>Incorrect password.</div><div class="zd-lock-note">Never saved in this browser &mdash; asked each time a page is opened.</div></div>';
+      : '<h2 id="zd-lock-title">ZD Dashboard</h2><p>Enter the password to continue.</p>') + '<label for="zd-lock-input">Password</label><input id="zd-lock-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"><button type="button">' + (TEAM ? 'Sign in' : 'Unlock') + '</button><div class="zd-lock-error" role="alert" hidden>Incorrect password.</div><div class="zd-lock-note">' + (TEAM
+      ? 'Kept on this computer until you Sign out &mdash; the password itself is never saved. One computer or browser at a time per login.'
+      : 'Never saved in this browser &mdash; asked each time a page is opened.') + '</div></div>';
     Array.prototype.forEach.call(document.body.children, function (el) { if (!el.inert && el.tagName !== 'SCRIPT') { el.inert = true; inert.push(el); } });
     document.body.appendChild(lock);
     document.body.classList.add('zd-locked');
@@ -1695,16 +1749,52 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
       var name = user.value.trim().toLowerCase();
       button.disabled = true; error.hidden = true;
       teamCheck(name, pw).then(function (u) {
-        button.disabled = false;
-        if (u && u !== 'none') { open(); signedIn(u); return; }
-        error.textContent = u === 'none' ? 'No team logins are saved yet — the owner adds them in Settings › Team logins and clicks Save to the site.' : 'Incorrect username or password.'; error.hidden = false; input.focus();
+        if (!(u && u !== 'none')) {
+          button.disabled = false;
+          error.textContent = u === 'none' ? 'No team logins are saved yet — the owner adds them in Settings › Team logins and clicks Save to the site.' : 'Incorrect username or password.'; error.hidden = false; input.focus();
+          return;
+        }
+        var k = chatKey;
+        if (!k) { button.disabled = false; open(); signedIn(u); return; }   // no chat key could be made: signed in for this visit only
+        return sessHolder(u.u, k).then(null, function () { return null; }).then(function (cur) {
+          button.disabled = false;
+          if (cur) { chatKey = ''; card(inUse(u.u, cur.at)); return; }
+          go(u, {u: u.u, k: k, sid: hexOf(crypto.getRandomValues(new Uint8Array(12)))});
+        });
       }, function () { button.disabled = false; error.textContent = 'Could not read the users list — check the internet connection and try again.'; error.hidden = false; });
+    }
+    function card(msg) {   // the sign-in card, with a message
+      lock.classList.remove('zd-lock-wait');
+      if (msg) { error.textContent = msg; error.hidden = false; }
+      (user && user.value ? input : first).focus();
+    }
+    function inUse(n, at) {
+      var t = ''; try { t = new Date(at * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}); } catch (e) {}
+      return 'The login "' + n + '" is in use on another computer or browser (last active ' + t + '). Sign out there first — one computer at a time per login.';
+    }
+    function go(u, sess) { chatKey = sess.k; tlSet(sess); open(); signedIn(u, sess); }
+    function resume() {   // a kept login: still in users.json with the same password, and not taken over by another browser
+      teamList().then(function (L) {
+        var u = L.filter(function (x) { return x && x.u === kept.u; })[0];
+        if (!u || !u.c) { tlSet(null); return card(); }
+        return sha(kept.k).then(function (c) {
+          if (c !== u.c) { tlSet(null); return card(); }   // a new password: asked again
+          return sessHolder(u.u, kept.k).then(function (cur) {
+            if (cur && cur.sid !== kept.sid) { tlSet(null); user.value = u.u; return card('Signed out here: "' + u.u + '" was signed in on another computer or browser.'); }
+            go(u, kept);
+          }, function () { go(u, kept); });   // the relay can't be read: let in
+        });
+      }, function () { go({u: kept.u, h: ''}, kept); });   // offline: the kept login opens; checked again once the list can be read
     }
     button.addEventListener('click', unlock);
     input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); unlock(); } });
     if (user) user.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); input.focus(); } });
-    if (trusted) trusted.then(function (t) { if (t) { open(); if (TEAM) signedIn(null); } else { lock.classList.remove('zd-lock-wait'); first.focus(); } });
-    else first.focus();
+    var was = ''; try { was = TEAM && sessionStorage.getItem('zd-team-kicked') || ''; sessionStorage.removeItem('zd-team-kicked'); } catch (e) {}
+    if (was) user.value = was;
+    var ask = function () { card(was ? 'Signed out here: "' + was + '" was signed in on another computer or browser.' : ''); };
+    if (trusted) trusted.then(function (t) { if (t) { open(); if (TEAM) signedIn(null); } else if (kept) resume(); else ask(); });
+    else if (kept) resume();
+    else ask();
   }
   lockNow();
   window.addEventListener('load', function () { var i = document.getElementById('zd-lock-user') || document.getElementById('zd-lock-input'); if (i && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('#zd-lock'))) i.focus(); });

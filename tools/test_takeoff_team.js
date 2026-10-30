@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /* PDF Takeoff's friends' link takeoff/?team: a username and password per friend (takeoff/users.json, made in the owner's
-   Settings › Team logins), asked each time, and a team view without the backups or the links to the other ZD pages.
+   Settings › Team logins), and a team view without the backups or the links to the other ZD pages. A friend stays signed in on
+   their computer until Sign out (never the password itself), and one login works in one browser at a time — against a stand-in
+   for the relay of takeoff/chat.json.
 
      python -m http.server 8765 --bind 127.0.0.1      (from the repo root)
      node tools/test_takeoff_team.js                   (TK_URL for another address)
@@ -10,14 +12,32 @@ const crypto = require("crypto"), fs = require("fs");
 const BASE = (process.env.TK_URL || "http://127.0.0.1:8765/takeoff/").replace(/[^/]*$/, "");
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else fail++; console.log((c ? "  ok   " : "  FAIL ") + m); };
-const entry = (u, pw) => { const s = crypto.randomBytes(16).toString("hex"); return {u, s, h: crypto.pbkdf2Sync(pw, s, 150000, 32, "sha256").toString("hex"), iter: 150000, at: "2026-10-29"}; };
+const pb = (pw, s) => crypto.pbkdf2Sync(pw, s, 150000, 32, "sha256").toString("hex");
+const entry = (u, pw) => { const s = crypto.randomBytes(16).toString("hex"); return {u, s, h: pb(pw, s), c: crypto.createHash("sha256").update(pb(pw, s + ":chat")).digest("hex"), iter: 150000, at: "2026-10-29"}; };
+/* the relay (ntfy.sh) for the sign-ins: events in memory, each stamped with the time its sender's clock gives (a browser below
+   runs 3 hours ahead, as a computer used later) */
+const RELAY = "https://relay.test", TOPIC = "zd-team-test", SESS = [];
+const sessEv = () => SESS.map(e => JSON.parse(e.message));
+async function routes(ctx){
+  await ctx.addInitScript(() => { try { delete Navigator.prototype.serviceWorker; } catch (e) {} });
+  await ctx.route(/\/takeoff\/users\.json/, r => r.fulfill({status: 200, contentType: "application/json", body: LIST}));
+  await ctx.route(/\/takeoff\/chat\.json/, r => r.fulfill({status: 200, contentType: "application/json", body: JSON.stringify({relay: RELAY, topic: TOPIC})}));
+  await ctx.route(u => u.href.startsWith(RELAY + "/s-" + TOPIC), r => {
+    const q = r.request(), cors = {"access-control-allow-origin": "*"};
+    if (q.method() === "POST") { let m = {}; try { m = JSON.parse(q.postData()); } catch (e) {}
+      const e = {id: "s" + SESS.length, time: m.t || Math.floor(Date.now() / 1000), event: "message", topic: "s-" + TOPIC, message: q.postData()};
+      SESS.push(e); return r.fulfill({status: 200, contentType: "application/json", headers: cors, body: JSON.stringify(e)}); }
+    const since = +new URL(q.url()).searchParams.get("since") || 0;
+    return r.fulfill({status: 200, contentType: "application/x-ndjson", headers: cors, body: SESS.filter(e => e.time >= since).map(e => JSON.stringify(e) + "\n").join("")});
+  });
+}
+let LIST = "";
 
 (async () => {
   const browser = await chromium.launch();
-  let LIST = JSON.stringify({iter: 150000, users: [entry("bilal", "takeoff9")]});
+  LIST = JSON.stringify({iter: 150000, users: [entry("bilal", "takeoff9")]});
   const ctx = await browser.newContext({viewport: {width: 1400, height: 900}, acceptDownloads: true});
-  await ctx.addInitScript(() => { try { delete Navigator.prototype.serviceWorker; } catch (e) {} });
-  await ctx.route(/\/takeoff\/users\.json/, r => r.fulfill({status: 200, contentType: "application/json", body: LIST}));
+  await routes(ctx);
 
   console.log("the friends' link");
   const page = await ctx.newPage(), errs = [];
@@ -49,7 +69,8 @@ const entry = (u, pw) => { const s = crypto.randomBytes(16).toString("hex"); ret
   await page.fill("#stgQ", "backup"); await page.waitForTimeout(200);
   ok(!/Backups of this project|Recover a deleted/.test(await page.textContent("#stgBody")), "no backups in Settings");
   await page.keyboard.press("Escape");
-  ok(await page.evaluate(() => localStorage.length === 0 || !Object.keys(localStorage).some(k => /pass|pw|secret|user/i.test(k) && !/^zdTakeoff/.test(k))), "nothing about the sign-in kept in the browser");
+  ok(await page.evaluate(() => !Object.values(localStorage).concat(Object.values(sessionStorage), document.cookie).some(v => String(v).includes("takeoff9"))), "the password itself is not kept in the browser");
+  ok(await page.evaluate(() => { const o = JSON.parse(localStorage.getItem("zd-team-login") || "{}"); return o.u === "bilal" && /^[0-9a-f]{64}$/.test(o.k) && !!o.sid; }), "the login is kept on this computer (username, sign-in id, chat key)");
 
   LIST = JSON.stringify({iter: 150000, users: []});   // the owner removes bilal
   const nav = page.waitForNavigation({timeout: 8000}).catch(() => null);
@@ -101,6 +122,57 @@ const entry = (u, pw) => { const s = crypto.randomBytes(16).toString("hex"); ret
   await fr.click("#bSignOut"); await fr.waitForSelector("#zd-lock-user", {timeout: 8000}).catch(() => {});
   ok(!!(await fr.$("#zd-lock-user")), "Sign out asks again");
   await fr.close();
+
+  console.log("kept signed in, one computer at a time");
+  SESS.length = 0; LIST = JSON.stringify({iter: 150000, users: [entry("bilal", "takeoff9")]});
+  const signIn = async (pg, u, pw) => { await pg.evaluate(() => { const e = document.querySelector("#zd-lock .zd-lock-error"); if (e) e.hidden = true; }); await pg.fill("#zd-lock-user", u); await pg.fill("#zd-lock-input", pw); await pg.press("#zd-lock-input", "Enter");
+    await pg.waitForFunction(() => !document.getElementById("zd-lock") || !document.querySelector(".zd-lock-error").hidden, null, {timeout: 15000}).catch(() => {}); };
+  const lockMsg = pg => pg.evaluate(() => { const e = document.querySelector("#zd-lock .zd-lock-error"); return e && !e.hidden ? e.textContent : ""; });
+  const signedAs = pg => pg.waitForSelector("#teamWho", {timeout: 8000}).then(() => pg.textContent("#teamWho"), () => "");
+  const A = await browser.newContext({viewport: {width: 1300, height: 850}}); await routes(A);
+  const a = await A.newPage(), e3 = []; a.on("pageerror", e => e3.push(String(e)));
+  await a.goto(BASE + "?team", {waitUntil: "load"});
+  await signIn(a, "bilal", "takeoff9");
+  ok(!(await a.$("#zd-lock")) && /bilal/.test(await signedAs(a)), "computer A: bilal signs in");
+  await a.waitForTimeout(500);
+  ok(sessEv().some(m => m.zs === 1 && m.u === "bilal" && m.k === "claim" && /^[0-9a-f]{64}$/.test(m.h)) && !SESS.some(e => e.message.includes("takeoff9")), "the sign-in is announced on the relay (signed, no password)");
+  await a.reload({waitUntil: "load"}); await a.waitForSelector("#zd-lock", {state: "detached", timeout: 10000}).catch(() => {});
+  ok(!(await a.$("#zd-lock")) && /bilal/.test(await signedAs(a)), "kept signed in after a reload — not asked again");
+  const a2 = await A.newPage(); await a2.goto(BASE + "?team", {waitUntil: "load"}); await a2.waitForSelector("#zd-lock", {state: "detached", timeout: 10000}).catch(() => {});
+  ok(!(await a2.$("#zd-lock")), "…and in a new tab of the same browser");
+  await a2.close();
+
+  const B = await browser.newContext({viewport: {width: 1300, height: 850}}); await routes(B);
+  const b = await B.newPage(); await b.goto(BASE + "?team", {waitUntil: "load"});
+  await signIn(b, "bilal", "takeoff9");
+  ok(!!(await b.$("#zd-lock")) && /in use on another computer/.test(await lockMsg(b)), "computer B: the same login is refused while A uses it");
+  ok(await b.evaluate(() => !localStorage.getItem("zd-team-login")), "…and B keeps nothing");
+  await a.click("#bSignOut"); await a.waitForSelector("#zd-lock-user", {timeout: 8000}).catch(() => {});
+  ok(!!(await a.$("#zd-lock-user")) && await a.evaluate(() => !localStorage.getItem("zd-team-login")), "A: Sign out asks again and forgets the login");
+  ok(sessEv().some(m => m.k === "release" && m.u === "bilal"), "…and frees it on the relay");
+  await signIn(b, "bilal", "takeoff9");
+  ok(!(await b.$("#zd-lock")) && /bilal/.test(await signedAs(b)), "B: now bilal signs in");
+  await signIn(a, "bilal", "takeoff9");
+  ok(!!(await a.$("#zd-lock")) && /in use/.test(await lockMsg(a)), "A: refused now that B uses it");
+
+  const C = await browser.newContext({viewport: {width: 1300, height: 850}}); await routes(C);
+  await C.addInitScript(() => { const n = Date.now.bind(Date); Date.now = () => n() + 3 * 3600 * 1000; });   // a computer used 3 hours later
+  const c = await C.newPage(); await c.goto(BASE + "?team", {waitUntil: "load"});
+  await signIn(c, "bilal", "takeoff9");
+  ok(!(await c.$("#zd-lock")), "computer C, 3 hours after B was last used: bilal signs in (B's sign-in has lapsed)");
+  await c.waitForTimeout(500);
+  const navB = b.waitForNavigation({timeout: 10000}).catch(() => null);
+  await b.evaluate(() => document.dispatchEvent(new Event("visibilitychange"))); await navB;
+  await b.waitForSelector("#zd-lock .zd-lock-error:not([hidden])", {timeout: 8000}).catch(() => {});
+  ok(/signed in on another computer/.test(await lockMsg(b)) && await b.evaluate(() => !localStorage.getItem("zd-team-login")), "B is then signed out: the login was taken over");
+
+  LIST = JSON.stringify({iter: 150000, users: [entry("bilal", "newpass7")]});   // the owner gives bilal a new password
+  await c.reload({waitUntil: "load"}); await c.waitForSelector("#zd-lock-user", {timeout: 10000}).catch(() => {});
+  ok(!!(await c.$("#zd-lock-user")) && await c.evaluate(() => !localStorage.getItem("zd-team-login")), "a new password: the kept login is forgotten and asked again");
+  await signIn(c, "bilal", "newpass7");
+  ok(!(await c.$("#zd-lock")), "…and the new password signs in at once (the old sign-ins can't hold it)");
+  ok(e3.length === 0, "no page errors" + (e3.length ? ": " + e3[0] : ""));
+  await A.close(); await B.close(); await C.close();
 
   await browser.close();
   console.log(`\n${pass} passed, ${fail} failed`);
