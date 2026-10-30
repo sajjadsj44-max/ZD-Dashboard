@@ -9877,6 +9877,10 @@ function iconize(){   // each toolbar button's words in their own span, so "icon
   document.querySelectorAll("#tools .tool, header > button.btn, .projpill > .btn, .cbar > .btn, .cbar .cgrp > .btn").forEach(b => { const n = b.firstChild; if (!n || n.nodeType !== 3 || b.querySelector(".tl")) return;
     const m = /^\s*(\S+)\s+([\s\S]+)$/.exec(n.textContent); if (!m || !/[^\x00-\x7F]/.test(m[1])) return;
     const sp = document.createElement("span"); sp.className = "tl"; n.textContent = m[1] + " "; sp.textContent = m[2]; b.insertBefore(sp, n.nextSibling); while (sp.nextSibling) sp.appendChild(sp.nextSibling); });
+  /* a symbol (↶ ‹ ⚙ ✎ 💾 …) is not a name: it is hidden from screen readers, so a button reads as its words, or as its tooltip
+     when it shows the symbol alone (Undo, Previous page, Zoom in) — it read "↶", "✎" */
+  document.querySelectorAll("button[title]").forEach(b => { const n = b.firstChild; if (!n || n.nodeType !== 3 || !n.textContent.trim() || /[\p{L}\p{N}]/u.test(n.textContent)) return;
+    const g = document.createElement("span"); g.setAttribute("aria-hidden", "true"); b.insertBefore(g, n); g.appendChild(n); });
 }
 /* minimap (Forma): the page small, the part on screen framed; click or drag it to move there */
 function miniUpdate(pn = ACT){
@@ -11095,6 +11099,9 @@ async function recoverDialog(){
   });
 }
 setInterval(() => { if (P.proj && document.visibilityState !== "hidden") { savePr = P.proj; flushSave().then(ok => ok && backupNow("every 10 min")).catch(() => {}); } }, 600000);
+/* projects and backups live only in this browser, which may clear a site's storage when the disk is nearly full: a project made or
+   imported asks it not to (Chrome / Edge decide by themselves, Firefox asks once). Settings › Saving & backups shows the answer */
+function keepStorage(){ const st = navigator.storage; if (st && st.persist && st.persisted) st.persisted().then(p => p || st.persist()).catch(() => {}); }
 /* leaving or hiding the page writes the pending change at once (the 300 ms timer would not run) */
 window.addEventListener("pagehide", () => { flushSave(true); });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave(); });   // a hidden tab keeps running: the checked save completes there
@@ -12435,10 +12442,10 @@ function wire(){
   };
   $("bNewTop").onclick = () => $("bNewProj").click();
   $("bNewProj").onclick = async () => { const v = await ask("New project", '<div class="fg w2"><label>Project name</label><input type="text" id="dlgName" placeholder="e.g. NEO — Block A ground floor"></div>', "Create", () => ({name: $("dlgName").value.trim() || "Untitled takeoff"}), "dlgName");
-    if (!v) return; const pr = newProject(v.name); await dbPut("projects", pr); await openProject(pr.id); };
+    if (!v) return; const pr = newProject(v.name); await dbPut("projects", pr); keepStorage(); await openProject(pr.id); };
   $("bImport").onclick = () => $("impIn").click();
   $("impIn").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return;
-    try { await (isBundle(await f.slice(0, 64).arrayBuffer()) ? importBundle(f) : importProject(new TextDecoder().decode(await f.arrayBuffer()))); } catch (er) { toast("Could not import: " + er.message, 5000); } };   // (a project file with its PDFs: read a piece at a time)
+    try { await (isBundle(await f.slice(0, 64).arrayBuffer()) ? importBundle(f) : importProject(new TextDecoder().decode(await f.arrayBuffer()))); keepStorage(); } catch (er) { toast("Could not import: " + er.message, 5000); } };   // (a project file with its PDFs: read a piece at a time)
   $("projList").addEventListener("click", async e => {
     const o = e.target.closest("[data-open],[data-edit],[data-dup],[data-del],[data-bak]"); if (!o) return;
     if (o.dataset.open) return openProject(o.dataset.open);
