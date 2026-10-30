@@ -68,6 +68,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   ok(await tab() === "modify" && await vis('[data-mod="cw"]') && !(await vis('[data-tool="draw"]')), "Modify tab shows rotate / mirror / join… and hides the Takeoff tools");
 
   console.log("my tools — drag a tool from the ribbon");
+  await T(() => zdTakeoff.mineSet([]));   // (a first visit starts with the default set, which has Length in it)
   await page.click('[data-rtab="takeoff"]');
   const mine0 = await T(() => (JSON.parse(localStorage.getItem("zdTakeoffTb") || "{}").mine || []).length);
   await page.dragAndDrop('[data-tool="draw"]', '[data-rtab="mine"]'); await wait(350);
