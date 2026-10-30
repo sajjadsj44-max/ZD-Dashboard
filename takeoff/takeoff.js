@@ -9443,6 +9443,9 @@ async function teamHash(pw, salt, iter){   // the same as the lock's: PBKDF2-SHA
   const te = new TextEncoder(), k = await crypto.subtle.importKey("raw", te.encode(pw), "PBKDF2", false, ["deriveBits"]);
   return teamHex(await crypto.subtle.deriveBits({name: "PBKDF2", hash: "SHA-256", salt: te.encode(salt), iterations: iter}, k, 256));
 }
+async function teamChatC(pw, salt){   // "c": SHA-256 of the chat key a friend's sign-in makes from the password (the chat server checks it)
+  return teamHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(await teamHash(pw, salt + ":chat", TEAM_ITER))));
+}
 async function teamLoad(){
   try { const r = await fetch("users.json?check=" + Date.now(), {cache: "no-store"});   // ?check: past the service worker and the site's 10-minute cache
     if (r.status === 404) { TM.list = []; TM.err = ""; return; }
@@ -9454,7 +9457,7 @@ async function teamLoad(){
 function teamText(){
   const L = TM.list.slice().sort((a, b) => a.u.localeCompare(b.u));
   return '{\n "about": "PDF Takeoff team logins for takeoff/?team. Passwords are salted PBKDF2-SHA256 hashes. Edited from Settings > Team logins.",\n "iter": ' + TEAM_ITER +
-    ',\n "users": [' + (L.length ? "\n" + L.map(u => "  " + JSON.stringify({u: u.u, s: u.s, h: u.h, iter: u.iter || TEAM_ITER, at: u.at || ""})).join(",\n") + "\n " : "") + "]\n}\n";
+    ',\n "users": [' + (L.length ? "\n" + L.map(u => "  " + JSON.stringify({u: u.u, s: u.s, h: u.h, c: u.c || "", iter: u.iter || TEAM_ITER, at: u.at || ""})).join(",\n") + "\n " : "") + "]\n}\n";
 }
 async function teamSave(){
   if (!TM.token) {
@@ -9497,7 +9500,7 @@ function teamPage(){
       if (TM.list.some(x => x.u === u)) return toast(u + " is already a user — use New password to change theirs", 3500);
       if (pw.length < 4) return toast("Give a password of at least 4 characters", 3000);
       const s = teamHex(crypto.getRandomValues(new Uint8Array(16)));
-      TM.list.push({u, s, h: await teamHash(pw, s, TEAM_ITER), iter: TEAM_ITER, at: today()}); TM.log.push("added " + u); paint();
+      TM.list.push({u, s, h: await teamHash(pw, s, TEAM_ITER), c: await teamChatC(pw, s), iter: TEAM_ITER, at: today()}); TM.log.push("added " + u); paint();
       toast("Added " + u + " — click Save to the site so they can sign in (until then the login is only on this page)", 6000);
     };
     $("tmAdd").onclick = add;
@@ -9509,11 +9512,120 @@ function teamPage(){
       if (d) { const u = TM.list.splice(+d.dataset.tmdel, 1)[0]; TM.log.push("removed " + u.u); paint(); }
       if (w) { const u = TM.list[+w.dataset.tmpw];
         const pw = await ask("New password — " + u.u, `<div class="fg"><label>New password</label><input type="text" class="secret" id="tmNp" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"></div><p class="small" style="margin-top:6px">${esc(u.u)} is signed out with the old one once this is saved to the site.</p>`, "Set", () => $("tmNp").value.length >= 4 ? $("tmNp").value : "At least 4 characters", "tmNp");
-        if (pw) { u.s = teamHex(crypto.getRandomValues(new Uint8Array(16))); u.h = await teamHash(pw, u.s, TEAM_ITER); u.iter = TEAM_ITER; TM.log.push("new password for " + u.u); }
+        if (pw) { u.s = teamHex(crypto.getRandomValues(new Uint8Array(16))); u.h = await teamHash(pw, u.s, TEAM_ITER); u.c = await teamChatC(pw, u.s); u.iter = TEAM_ITER; TM.log.push("new password for " + u.u); }
         settingsDialog("team"); }
     });
   };
   return [{id: "team", n: "Team logins", d: "a link for friends, their users and passwords", rows: [{t: "html", n: "Friends' link", html, wire}]}];
+}
+/* ------------------------------------------------------------------ feedback chat: friends (team view) and the owner's Inbox
+   The messages are kept in the owner's Google Sheet, through its Apps Script web app (tools/feedback/Code.gs; the web app's
+   address is in takeoff/chat.json, read when the chat is first opened). A friend is known by the chat key their sign-in made
+   from their password (window.zdChat, kept only while the page is open); the owner's Inbox asks its own password each time the
+   page is opened and keeps it only in this page. Until the address is set, Feedback offers WhatsApp instead. */
+const CH = {url: null, key: "", err: "", panel: null, msgs: [], threads: [], cur: "", poll: 0, sending: false};
+async function chatUrl(){
+  if (CH.url === null) { try { const j = await (await fetch("chat.json?check=" + Date.now(), {cache: "no-store"})).json(); CH.url = String(j.url || "").trim(); } catch (e) { CH.url = ""; } }
+  return CH.url;
+}
+async function chatCall(o){
+  const u = await chatUrl(); if (!u) throw Object.assign(new Error("the chat is not set up yet"), {code: "setup"});
+  const r = await fetch(u, {method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"}, body: JSON.stringify(o)});   // a simple request: no CORS preflight
+  const j = await r.json();
+  if (j.error) throw Object.assign(new Error(j.error === "auth" ? "not signed in for the chat" : j.error), {code: j.error});
+  return j;
+}
+const chatWa = () => "https://wa.me/92" + CONTACT_NO.replace(/\D/g, "").replace(/^0/, "");
+const chatMe = () => window.zdChat || null;   // a friend signed in on the team link; else the owner (Inbox)
+const chatOn = () => !!(CH.panel && CH.panel.classList.contains("on"));
+function chatBubbles(L, mine){
+  if (!L.length) return '<p class="small chq">No messages yet.</p>';
+  return L.map(m => `<div class="chm${mine(m) ? " me" : ""}"><div>${esc(m.text).replace(/\n/g, "<br>")}</div><small>${esc(dmyHm(m.at))}${mine(m) && m.read ? " · seen" : ""}</small></div>`).join("");
+}
+function chatPanel(){
+  if (CH.panel) return CH.panel;
+  const p = document.createElement("div"); p.id = "chatPanel"; p.className = "chatp"; p.setAttribute("role", "dialog"); p.setAttribute("aria-labelledby", "chT");
+  p.innerHTML = '<div class="chh"><b id="chT"></b><span class="sp"></span><button type="button" class="btn sm" id="chX" title="Close">&times;</button></div><div class="chw" id="chW"></div><div class="chf" id="chF"></div>';
+  document.body.appendChild(p); CH.panel = p;
+  $("chX").onclick = () => chatToggle(false);
+  return p;
+}
+function chatToggle(on){
+  const p = chatPanel(); on = on == null ? !p.classList.contains("on") : on;
+  p.classList.toggle("on", on); clearInterval(CH.poll);
+  if (!on) return;
+  chatRender(); chatLoad();
+  CH.poll = setInterval(() => { if (!document.hidden) chatLoad(); }, 15000);
+}
+function chatFoot(ctx, ph, send){   // the message box: made again only when the conversation changes, so a poll never clears what is typed
+  const F = $("chF"); if (F.dataset.ctx === ctx) return; F.dataset.ctx = ctx;
+  if (!ctx) { F.innerHTML = ""; return; }
+  F.innerHTML = `<textarea id="chIn" rows="2" maxlength="4000" placeholder="${esc(ph)}" aria-label="Message"></textarea><button type="button" class="btn sm pri" id="chSend">Send</button>`;
+  const go = async () => {
+    const t = $("chIn").value.trim(); if (!t || CH.sending) return;
+    CH.sending = true; $("chSend").disabled = true;
+    try { await send(t); $("chIn").value = ""; chatRender(); } catch (e) { toast("Not sent: " + (e.message || e), 4500); }
+    CH.sending = false; if ($("chSend")) $("chSend").disabled = false; if ($("chIn")) $("chIn").focus();
+  };
+  $("chSend").onclick = go;
+  $("chIn").addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); go(); } });   // Enter sends, Shift+Enter a new line; the takeoff's keys stay out of it
+}
+function chatRender(){
+  if (!CH.panel) return;
+  const me = chatMe(), W = $("chW"), L0 = $("chL"), atEnd = !L0 || L0.scrollHeight - L0.scrollTop - L0.clientHeight < 40;
+  $("chT").textContent = me ? "Feedback — chat with Sajjad" : "Inbox — feedback from the team";
+  if (CH.url === null) { W.innerHTML = '<p class="small chq">Connecting…</p>'; chatFoot("", ""); return; }
+  if (!CH.url) {
+    W.innerHTML = me ? `<p class="chq">The chat is not switched on yet — send your feedback on WhatsApp for now.</p><p class="chq"><a class="btn sm pri" href="${chatWa()}" target="_blank" rel="noopener">Send feedback on WhatsApp</a></p>`
+      : '<p class="small chq">The chat server is not set up yet: tools/feedback/Code.gs says how (a Google Sheet + Apps Script, then its address in takeoff/chat.json).</p>';
+    chatFoot("", ""); return;
+  }
+  if (me) {
+    W.innerHTML = `<div class="chl" id="chL">${chatBubbles(CH.msgs, m => m.from !== "owner")}</div>${CH.err ? `<p class="err chq">${esc(CH.err)}</p>` : ""}`;
+    chatFoot("me", "Write your feedback, an idea or a question… (Enter sends)", t => chatCall({a: "send", u: me.u, k: me.k, text: t}).then(j => { CH.msgs = j.msgs; CH.err = ""; }));
+  } else if (!CH.key) {
+    W.innerHTML = `<div class="chq"><p class="small" style="margin-bottom:6px">Inbox password — asked each time the page is opened, never saved.</p><div style="display:flex;gap:6px"><input type="text" class="secret" id="chPw" style="flex:1" aria-label="Inbox password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"><button type="button" class="btn sm pri" id="chGo">Open</button></div>${CH.err ? `<p class="err" style="margin-top:6px">${esc(CH.err)}</p>` : ""}</div>`;
+    chatFoot("", "");
+    const go = () => { const v = $("chPw").value; if (!v) return; CH.key = v; CH.err = ""; $("chPw").value = ""; W.innerHTML = '<p class="small chq">Opening…</p>'; chatLoad(); };
+    $("chGo").onclick = go; $("chPw").addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter") go(); }); $("chPw").focus();
+    return;
+  } else {
+    W.innerHTML = `<div class="chs"><div class="cht" id="chTh">${CH.threads.length ? CH.threads.map(t => `<button type="button" data-chu="${esc(t.u)}" class="${t.u === CH.cur ? "on" : ""}">${t.unread && t.u !== CH.cur ? `<span class="n">${t.unread}</span>` : ""}<b>${esc(t.u)}</b><small>${esc(t.last ? (t.last.from === "owner" ? "You: " : "") + t.last.text : "")}</small></button>`).join("") : '<p class="small chq">No feedback yet.</p>'}</div>
+      <div class="chl" id="chL">${CH.cur ? chatBubbles(CH.msgs, m => m.from === "owner") : '<p class="small chq">Pick a conversation on the left.</p>'}</div></div>${CH.err ? `<p class="err chq">${esc(CH.err)}</p>` : ""}`;
+    W.querySelectorAll("[data-chu]").forEach(b => b.onclick = () => { CH.cur = b.dataset.chu; CH.msgs = []; chatRender(); chatLoad(); });
+    const u = CH.cur;
+    chatFoot(u ? "to:" + u : "", "Reply to " + u + "… (Enter sends)", t => chatCall({a: "reply", ok: CH.key, u, text: t}).then(j => { if (CH.cur === u) CH.msgs = j.msgs; CH.err = ""; }));
+  }
+  const L = $("chL"); if (L && atEnd) L.scrollTop = L.scrollHeight;
+}
+async function chatLoad(){
+  await chatUrl(); const me = chatMe();
+  try {
+    if (CH.url && me) CH.msgs = (await chatCall({a: "get", u: me.u, k: me.k})).msgs;
+    else if (CH.url && CH.key) {
+      if (CH.cur) CH.msgs = (await chatCall({a: "thread", ok: CH.key, u: CH.cur})).msgs;   // (read first: the list then counts it as read)
+      CH.threads = (await chatCall({a: "inbox", ok: CH.key})).threads;
+    }
+    CH.err = "";
+  } catch (e) { if (!me && e.code === "auth") { CH.key = ""; CH.err = "Wrong inbox password."; } else CH.err = "Could not reach the chat: " + (e.message || e); }
+  chatBadge(); if (chatOn()) chatRender();
+}
+async function chatPeek(){   // the button's count while the panel is closed (a friend's replies are not marked as seen by it)
+  await chatUrl(); if (!CH.url) return; const me = chatMe();
+  try { if (me) CH.msgs = (await chatCall({a: "get", u: me.u, k: me.k, peek: true})).msgs; else if (CH.key) CH.threads = (await chatCall({a: "inbox", ok: CH.key})).threads; } catch (e) {}
+  chatBadge();
+}
+function chatBadge(){
+  const n = chatMe() ? CH.msgs.filter(m => m.from === "owner" && !m.read).length : CH.threads.reduce((a, t) => a + (chatOn() && t.u === CH.cur ? 0 : t.unread), 0);
+  const e = $("chBadge"); if (e) { e.hidden = !n; e.textContent = n; }
+}
+function chatInit(){   // Feedback (a friend) or Inbox (the owner) in the top bar
+  const b = document.createElement("button"); b.className = "btn sm"; b.id = "bChat"; b.type = "button";
+  const set = () => { const me = chatMe(); b.innerHTML = (me ? "&#128172; Feedback" : "&#128229; Inbox") + '<span class="chbadge" id="chBadge" hidden></span>';
+    b.title = me ? "Feedback — chat with Sajjad: ideas, problems, questions" : "Inbox — feedback and questions from the team; reply to them"; chatBadge(); };
+  set(); $("bExport").after(b); b.onclick = () => chatToggle();
+  window.addEventListener("zd-signed-in", () => { set(); setTimeout(chatPeek, 1500); });
+  setInterval(() => { if (!document.hidden && !chatOn()) chatPeek(); }, 3 * 60 * 1000);
 }
 function teamInit(){   // the team view: who is signed in, and Sign out (the page asks again)
   if (!TEAM) return;
@@ -12220,7 +12332,7 @@ function wire(){
   $("bLayers").onclick = () => { vOpen(false); S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };
   $("bDel").onclick = () => delSelected();
   $("bKeys").onclick = keysDialog;
-  ribbonInit(); teamInit();
+  ribbonInit(); teamInit(); chatInit();
   $("bZw").onclick = () => P.proj && S.page && setTool("zoomwin");
   $("bUndo").onclick = undoAny; $("bRedo").onclick = redoAny;
   $("bExport").onclick = exportMenu;

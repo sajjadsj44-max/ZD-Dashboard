@@ -51,6 +51,10 @@
   adds / removes them in Settings › Team logins, which saves users.json to main with a GitHub token asked
   when saving (kept only while the page is open) or downloads it. The team view hides backups, Recover,
   Settings › Backup & reset and the links to the other ZD pages. `tools/test_takeoff_team.js` checks it.
+- Feedback chat: friends' **Feedback** button ↔ the owner's **Inbox** (top bar). Messages live in the owner's Google
+  Sheet via the Apps Script web app `tools/feedback/Code.gs`, whose /exec URL is in `takeoff/chat.json` (empty → WhatsApp).
+  A friend is checked by `c` in users.json = SHA-256 of PBKDF2(password, salt + ":chat"); every new login needs `c`.
+  The Inbox password's SHA-256 is OWNER_HASH in Code.gs. `tools/test_takeoff_chat.js` runs Code.gs in Node.
 - One exception, asked for by the owner: a **trusted computer** (the owner's laptop) is never asked, on any
   page. Its browser keeps a random key in localStorage `zd-trusted-computer`; every page with a lock
   (zameen-developments, takeoff, dashboards, drawing-tracker) lists only the key's SHA-256 in `TRUSTED` —
