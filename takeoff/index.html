@@ -1086,6 +1086,25 @@ html[data-look="pro"] #projList td{border-bottom:1px solid #f3f4f6}
 html[data-look="pro"] #projList tr:hover td{background:#f9fafb}
 html[data-look="pro"] #projList .plink{color:var(--accent-h)}
 html[data-look="pro"] #start .note{border:1px solid var(--edge);border-left:4px solid var(--accent);border-radius:10px;background:#fff;color:var(--sub)}
+/* the ribbon in light sky blue (as PlanSwift): a blue tab strip, the open tab joined to a pale sky body, white tiles for the tool in use */
+html[data-look="pro"]{--sky:#e6f3fd;--sky2:#d4eafb;--skyb:#a9cfee;--skyl:#bcdcf4}
+html[data-look="pro"] .tools{background:var(--sky);border-bottom:1px solid var(--skyb);box-shadow:0 1px 3px rgba(30,90,150,.12)}
+html[data-look="pro"] .rtabs{background:linear-gradient(180deg,#cfe6f9,#c1dff7);border-bottom:1px solid var(--skyb)}
+html[data-look="pro"] .rtab{color:#2b4a6b}
+html[data-look="pro"] .rtab:hover{color:#0f2f52;background:rgba(255,255,255,.45);box-shadow:none;border-radius:6px 6px 0 0}
+html[data-look="pro"] .rtab.on{color:#1d4ed8;background:var(--sky);border-radius:6px 6px 0 0;box-shadow:inset 0 2px 0 #3b82f6,inset 1px 0 0 var(--skyb),inset -1px 0 0 var(--skyb)}
+html[data-look="pro"] .rtab[data-rtab="mine"].on{color:#b45309;box-shadow:inset 0 2px 0 #d97706,inset 1px 0 0 var(--skyb),inset -1px 0 0 var(--skyb)}
+html[data-look="pro"] .rtabs .tool{background:rgba(255,255,255,.75);border-color:var(--skyl)}
+html[data-look="pro"] .rtabs .tool:hover:not(:disabled,.on){background:#fff;border-color:#7fb3e0}
+html[data-look="pro"] :is(.rtabs .tool.on,.tool.tgl.on){background:#fff;border-color:#60a5fa;color:#1d4ed8}
+html[data-look="pro"] .rtabs .rsel{border-left-color:var(--skyl)}
+html[data-look="pro"] .rrow{background:linear-gradient(180deg,var(--sky),var(--sky2))}
+html[data-look="pro"] .rg{border-right-color:var(--skyl)}
+html[data-look="pro"] .rgl{color:#5a7a9c}
+html[data-look="pro"] .rrow .tool{color:#1f3a5a}
+html[data-look="pro"] .rrow .tool .ic{color:#2f5b8a}
+html[data-look="pro"] .rrow .tool:hover:not(.on){background:rgba(255,255,255,.75);color:#0f2f52}
+html[data-look="pro"] .rrow .tool.on{background:#fff;border-color:#60a5fa;color:#1d4ed8;box-shadow:0 1px 4px rgba(37,99,235,.2)}
 /* one row each for the title bar, the tabs and My tools on a 1440 px screen: short names where an icon says it, the search takes what is left */
 html[data-look="pro"] header .hl{display:none}
 html[data-look="pro"] header{gap:4px}
@@ -1577,7 +1596,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-30p"></script>
+<script type="module" src="takeoff.js?v=2026-10-30s"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
