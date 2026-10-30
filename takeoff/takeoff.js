@@ -9519,22 +9519,84 @@ function teamPage(){
   return [{id: "team", n: "Team logins", d: "a link for friends, their users and passwords", rows: [{t: "html", n: "Friends' link", html, wire}]}];
 }
 /* ------------------------------------------------------------------ feedback chat: friends (team view) and the owner's Inbox
-   The messages are kept in the owner's Google Sheet, through its Apps Script web app (tools/feedback/Code.gs; the web app's
-   address is in takeoff/chat.json, read when the chat is first opened). A friend is known by the chat key their sign-in made
-   from their password (window.zdChat, kept only while the page is open); the owner's Inbox asks its own password each time the
-   page is opened and keeps it only in this page. Until the address is set, Feedback offers WhatsApp instead. */
-const CH = {url: null, key: "", err: "", panel: null, msgs: [], threads: [], cur: "", poll: 0, sending: false};
+   No server of our own: every message is an event published to a free relay (ntfy.sh, the topic in takeoff/chat.json), which
+   keeps them 12 hours; .github/workflows/chat-archive.yml copies them every half hour to the chat-archive branch, read back from
+   there. The text is sealed in the browser: a friend's thread key is made from the chat key their sign-in made from their password
+   (window.zdChat, kept only while the page is open); the friend sends that chat key once per visit sealed for the owner's RSA key
+   ("hi"), whose private half is locked in chat.json with the Inbox password, asked each time the page is opened. The Inbox
+   trusts a "hi" only when the chat key's SHA-256 is that user's "c" in users.json. Until chat.json names a relay, Feedback offers
+   WhatsApp instead. */
+const CH = {url: null, cfg: null, key: null, err: "", panel: null, msgs: [], threads: [], cur: "", poll: 0, sending: false, ev: new Map(), arch: 0, tk: new Map(), tried: new Set(), hi: false};
+const chB64 = b => { let s = ""; new Uint8Array(b).forEach(c => s += String.fromCharCode(c)); return btoa(s); }, chUn64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const chTe = new TextEncoder(), chTd = new TextDecoder();
+const chSha = async s => [...new Uint8Array(await crypto.subtle.digest("SHA-256", chTe.encode(s)))].map(b => b.toString(16).padStart(2, "0")).join("");
+const chThreadKey = async k => crypto.subtle.importKey("raw", await crypto.subtle.digest("SHA-256", chTe.encode(k + ":zd-chat-thread")), "AES-GCM", false, ["encrypt", "decrypt"]);
+async function chSeal(key, text){ const iv = crypto.getRandomValues(new Uint8Array(12)); return {iv: chB64(iv), ct: chB64(await crypto.subtle.encrypt({name: "AES-GCM", iv}, key, chTe.encode(text)))}; }
+async function chOpen(key, m){ try { return chTd.decode(await crypto.subtle.decrypt({name: "AES-GCM", iv: chUn64(m.iv)}, key, chUn64(m.ct))); } catch (e) { return null; } }
 async function chatUrl(){
-  if (CH.url === null) { try { const j = await (await fetch("chat.json?check=" + Date.now(), {cache: "no-store"})).json(); CH.url = String(j.url || "").trim(); } catch (e) { CH.url = ""; } }
+  if (CH.url === null) { try { const j = await (await fetch("chat.json?check=" + Date.now(), {cache: "no-store"})).json(); CH.cfg = j; CH.url = j.relay && j.topic && j.owner ? String(j.relay).replace(/\/+$/, "") + "/" + j.topic : ""; } catch (e) { CH.url = ""; } }
   return CH.url;
 }
-async function chatCall(o){
-  const u = await chatUrl(); if (!u) throw Object.assign(new Error("the chat is not set up yet"), {code: "setup"});
-  const r = await fetch(u, {method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"}, body: JSON.stringify(o)});   // a simple request: no CORS preflight
-  const j = await r.json();
-  if (j.error) throw Object.assign(new Error(j.error === "auth" ? "not signed in for the chat" : j.error), {code: j.error});
-  return j;
+function chatAdd(o){   // one relay event (from the relay or the archive), kept once by its id
+  if (!o || !o.id || CH.ev.has(o.id) || (o.event && o.event !== "message")) return;
+  let m; try { m = JSON.parse(o.message); } catch (e) { return; }
+  if (m && m.v === 1 && typeof m.u === "string") CH.ev.set(o.id, Object.assign({}, m, {id: o.id, at: +o.time || 0}));
 }
+async function chatEvents(){   // every event, oldest first: the archive (read again every 10 minutes) and the relay's last 12 hours
+  const u = await chatUrl(); if (!u) throw Object.assign(new Error("the chat is not set up yet"), {code: "setup"});
+  const lines = t => t.split("\n").forEach(l => { if (l.trim()) try { chatAdd(JSON.parse(l)); } catch (e) {} });
+  if (CH.cfg.archive && Date.now() - CH.arch > 10 * 60000) { try { const r = await fetch(CH.cfg.archive + "?t=" + Date.now(), {cache: "no-store"}); if (r.ok || r.status === 404) { if (r.ok) lines(await r.text()); CH.arch = Date.now(); } } catch (e) {} }
+  const r = await fetch(u + "/json?poll=1&since=all", {cache: "no-store"});
+  if (!r.ok) throw new Error("the relay said " + r.status);
+  lines(await r.text());
+  return [...CH.ev.values()].sort((a, b) => a.at - b.at);
+}
+async function chatPub(m, title){   // a simple request (text body, no custom headers): no CORS preflight
+  const r = await fetch(await chatUrl() + (title ? "?title=" + encodeURIComponent(title) : ""), {method: "POST", body: JSON.stringify(Object.assign({v: 1}, m))});
+  if (!r.ok) throw new Error("the relay said " + r.status);
+  chatAdd(await r.json());
+}
+async function chatUnlock(pw){   // the owner's private key, opened with the Inbox password (a wrong one fails the AES-GCM check)
+  const o = CH.cfg.owner, base = await crypto.subtle.importKey("raw", chTe.encode(pw), "PBKDF2", false, ["deriveKey"]);
+  const w = await crypto.subtle.deriveKey({name: "PBKDF2", hash: "SHA-256", salt: chUn64(o.salt), iterations: +o.iter || 200000}, base, {name: "AES-GCM", length: 256}, false, ["decrypt"]);
+  let p; try { p = await crypto.subtle.decrypt({name: "AES-GCM", iv: chUn64(o.iv)}, w, chUn64(o.key)); } catch (e) { throw Object.assign(new Error("wrong inbox password"), {code: "auth"}); }
+  return crypto.subtle.importKey("pkcs8", p, {name: "RSA-OAEP", hash: "SHA-256"}, false, ["decrypt"]);
+}
+async function chatMsgs(E, u, key){   // one conversation, as the chat shows it: {id, at, from ("owner" or the friend), text, read}
+  if (!key) return [];
+  const seen = by => E.reduce((a, e) => e.t === "seen" && e.u === u && e.by === by ? Math.max(a, +e.upto || 0) : a, 0), so = seen("o"), su = seen("u"), L = [];
+  for (const e of E) if (e.t === "m" && e.u === u) { const text = await chOpen(key, e); if (text != null) L.push({id: e.id, at: new Date(e.at * 1000).toISOString(), t: e.at, from: e.f === "o" ? "owner" : u, text, read: e.at <= (e.f === "o" ? su : so)}); }
+  return L;
+}
+async function chatSeen(u, by, L, other){   // marks the other side's messages as seen, once there are new ones
+  const n = L.filter(m => (m.from === "owner") === (other === "owner") && !m.read); if (!n.length) return;
+  await chatPub({t: "seen", u, by, upto: Math.max(...n.map(m => m.t))}).catch(() => {});
+  n.forEach(m => m.read = true);
+}
+async function chatOwnerKeys(E){   // the Inbox: each friend's thread key, from a "hi" whose chat key matches users.json
+  const fresh = E.filter(e => e.t === "hi" && !CH.tried.has(e.id)); if (!fresh.length) return;
+  let users = {}; try { (((await (await fetch("users.json?check=" + Date.now(), {cache: "no-store"})).json()).users) || []).forEach(x => { if (x && x.u && x.c) users[x.u] = x.c; }); } catch (e) { return; }
+  for (const e of fresh) {
+    CH.tried.add(e.id);
+    if (!users[e.u] || CH.tk.has(e.u)) continue;
+    try { const k = chTd.decode(await crypto.subtle.decrypt({name: "RSA-OAEP"}, CH.key, chUn64(e.ko))); if (await chSha(k) === users[e.u]) CH.tk.set(e.u, await chThreadKey(k)); } catch (e2) {}
+  }
+}
+async function chatFriendSend(me, text){
+  const key = CH.tk.get(me.u) || await chThreadKey(me.k); CH.tk.set(me.u, key);
+  if (!CH.hi) {
+    const pub = await crypto.subtle.importKey("spki", chUn64(CH.cfg.owner.pub), {name: "RSA-OAEP", hash: "SHA-256"}, false, ["encrypt"]);
+    await chatPub({t: "hi", u: me.u, ko: chB64(await crypto.subtle.encrypt({name: "RSA-OAEP"}, pub, chTe.encode(me.k)))}); CH.hi = true;
+  }
+  await chatPub(Object.assign({t: "m", u: me.u, f: "u"}, await chSeal(key, text)), "Feedback from " + me.u);
+  CH.msgs = await chatMsgs(await chatEvents(), me.u, key);
+}
+async function chatOwnerSend(u, text){
+  const key = CH.tk.get(u); if (!key) throw new Error("no key for " + u);
+  await chatPub(Object.assign({t: "m", u, f: "o"}, await chSeal(key, text)));
+  if (CH.cur === u) CH.msgs = await chatMsgs(await chatEvents(), u, key);
+}
+const chatLen = t => { if (chTe.encode(t).length > 2400) throw new Error("too long — please split it into two messages"); return t; };   // the relay takes about 4 kB per message
 const chatWa = () => "https://wa.me/92" + CONTACT_NO.replace(/\D/g, "").replace(/^0/, "");
 const chatMe = () => window.zdChat || null;   // a friend signed in on the team link; else the owner (Inbox)
 const chatOn = () => !!(CH.panel && CH.panel.classList.contains("on"));
@@ -9560,7 +9622,7 @@ function chatToggle(on){
 function chatFoot(ctx, ph, send){   // the message box: made again only when the conversation changes, so a poll never clears what is typed
   const F = $("chF"); if (F.dataset.ctx === ctx) return; F.dataset.ctx = ctx;
   if (!ctx) { F.innerHTML = ""; return; }
-  F.innerHTML = `<textarea id="chIn" rows="2" maxlength="4000" placeholder="${esc(ph)}" aria-label="Message"></textarea><button type="button" class="btn sm pri" id="chSend">Send</button>`;
+  F.innerHTML = `<textarea id="chIn" rows="2" maxlength="2000" placeholder="${esc(ph)}" aria-label="Message"></textarea><button type="button" class="btn sm pri" id="chSend">Send</button>`;
   const go = async () => {
     const t = $("chIn").value.trim(); if (!t || CH.sending) return;
     CH.sending = true; $("chSend").disabled = true;
@@ -9577,16 +9639,18 @@ function chatRender(){
   if (CH.url === null) { W.innerHTML = '<p class="small chq">Connecting…</p>'; chatFoot("", ""); return; }
   if (!CH.url) {
     W.innerHTML = me ? `<p class="chq">The chat is not switched on yet — send your feedback on WhatsApp for now.</p><p class="chq"><a class="btn sm pri" href="${chatWa()}" target="_blank" rel="noopener">Send feedback on WhatsApp</a></p>`
-      : '<p class="small chq">The chat server is not set up yet: tools/feedback/Code.gs says how (a Google Sheet + Apps Script, then its address in takeoff/chat.json).</p>';
+      : '<p class="small chq">The chat is not set up: takeoff/chat.json names no relay.</p>';
     chatFoot("", ""); return;
   }
   if (me) {
     W.innerHTML = `<div class="chl" id="chL">${chatBubbles(CH.msgs, m => m.from !== "owner")}</div>${CH.err ? `<p class="err chq">${esc(CH.err)}</p>` : ""}`;
-    chatFoot("me", "Write your feedback, an idea or a question… (Enter sends)", t => chatCall({a: "send", u: me.u, k: me.k, text: t}).then(j => { CH.msgs = j.msgs; CH.err = ""; }));
+    chatFoot("me", "Write your feedback, an idea or a question… (Enter sends)", t => chatFriendSend(me, chatLen(t)).then(() => { CH.err = ""; }));
   } else if (!CH.key) {
     W.innerHTML = `<div class="chq"><p class="small" style="margin-bottom:6px">Inbox password — asked each time the page is opened, never saved.</p><div style="display:flex;gap:6px"><input type="text" class="secret" id="chPw" style="flex:1" aria-label="Inbox password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"><button type="button" class="btn sm pri" id="chGo">Open</button></div>${CH.err ? `<p class="err" style="margin-top:6px">${esc(CH.err)}</p>` : ""}</div>`;
     chatFoot("", "");
-    const go = () => { const v = $("chPw").value; if (!v) return; CH.key = v; CH.err = ""; $("chPw").value = ""; W.innerHTML = '<p class="small chq">Opening…</p>'; chatLoad(); };
+    const go = async () => { const v = $("chPw").value; if (!v) return; $("chPw").value = ""; W.innerHTML = '<p class="small chq">Opening…</p>';
+      try { CH.key = await chatUnlock(v); CH.err = ""; } catch (e) { CH.key = null; CH.err = e.code === "auth" ? "Wrong inbox password." : "Could not open the inbox: " + (e.message || e); }
+      if (CH.key) chatLoad(); else chatRender(); };
     $("chGo").onclick = go; $("chPw").addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter") go(); }); $("chPw").focus();
     return;
   } else {
@@ -9594,25 +9658,37 @@ function chatRender(){
       <div class="chl" id="chL">${CH.cur ? chatBubbles(CH.msgs, m => m.from === "owner") : '<p class="small chq">Pick a conversation on the left.</p>'}</div></div>${CH.err ? `<p class="err chq">${esc(CH.err)}</p>` : ""}`;
     W.querySelectorAll("[data-chu]").forEach(b => b.onclick = () => { CH.cur = b.dataset.chu; CH.msgs = []; chatRender(); chatLoad(); });
     const u = CH.cur;
-    chatFoot(u ? "to:" + u : "", "Reply to " + u + "… (Enter sends)", t => chatCall({a: "reply", ok: CH.key, u, text: t}).then(j => { if (CH.cur === u) CH.msgs = j.msgs; CH.err = ""; }));
+    chatFoot(u ? "to:" + u : "", "Reply to " + u + "… (Enter sends)", t => chatOwnerSend(u, chatLen(t)).then(() => { CH.err = ""; }));
   }
   const L = $("chL"); if (L && atEnd) L.scrollTop = L.scrollHeight;
 }
+async function chatRefresh(peek){   // reads the events again; with the panel open (not peek) the other side's new messages count as seen
+  const me = chatMe(); if (!me && !CH.key) return;
+  const E = await chatEvents();
+  if (me) {
+    const key = CH.tk.get(me.u) || await chThreadKey(me.k); CH.tk.set(me.u, key);
+    CH.msgs = await chatMsgs(E, me.u, key);
+    if (!peek) await chatSeen(me.u, "u", CH.msgs, "owner");
+    return;
+  }
+  await chatOwnerKeys(E);
+  const T = [];
+  for (const [u, key] of CH.tk) {
+    const L = await chatMsgs(E, u, key); if (!L.length) continue;
+    if (!peek && u === CH.cur) { await chatSeen(u, "o", L, u); CH.msgs = L; }
+    T.push({u, last: L[L.length - 1], unread: L.filter(m => m.from !== "owner" && !m.read).length, n: L.length});
+  }
+  CH.threads = T.sort((x, y) => y.last.t - x.last.t);
+}
 async function chatLoad(){
-  await chatUrl(); const me = chatMe();
-  try {
-    if (CH.url && me) CH.msgs = (await chatCall({a: "get", u: me.u, k: me.k})).msgs;
-    else if (CH.url && CH.key) {
-      if (CH.cur) CH.msgs = (await chatCall({a: "thread", ok: CH.key, u: CH.cur})).msgs;   // (read first: the list then counts it as read)
-      CH.threads = (await chatCall({a: "inbox", ok: CH.key})).threads;
-    }
-    CH.err = "";
-  } catch (e) { if (!me && e.code === "auth") { CH.key = ""; CH.err = "Wrong inbox password."; } else CH.err = "Could not reach the chat: " + (e.message || e); }
+  await chatUrl();
+  try { if (CH.url) await chatRefresh(false); CH.err = ""; }
+  catch (e) { CH.err = "Could not reach the chat: " + (e.message || e); }
   chatBadge(); if (chatOn()) chatRender();
 }
 async function chatPeek(){   // the button's count while the panel is closed (a friend's replies are not marked as seen by it)
-  await chatUrl(); if (!CH.url) return; const me = chatMe();
-  try { if (me) CH.msgs = (await chatCall({a: "get", u: me.u, k: me.k, peek: true})).msgs; else if (CH.key) CH.threads = (await chatCall({a: "inbox", ok: CH.key})).threads; } catch (e) {}
+  await chatUrl(); if (!CH.url) return;
+  try { await chatRefresh(true); } catch (e) {}
   chatBadge();
 }
 function chatBadge(){
