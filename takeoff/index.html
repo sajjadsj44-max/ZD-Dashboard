@@ -1277,6 +1277,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
           <button class="tool" data-rv="validate" title="Check before export: errors and warnings (no scale, missing height / thickness / BOQ, zero quantity, crossing outlines)"><svg class="ic"><use href="#i-shield"/></svg><span class="tl">Check before export</span></button>
           <button class="tool" data-rv="overlap" title="Areas counted twice: areas of one condition (or two floor finishes) that overlap on a page — show and fix them"><svg class="ic"><use href="#i-overlap"/></svg><span class="tl">Overlaps</span></button>
           <button class="tool" data-rv="compare" title="Overlay another revision in colour to see what changed"><svg class="ic"><use href="#i-compare"/></svg><span class="tl">Compare</span></button>
+          <button class="tool" data-fn="cadcmp" title="DWG compare — this AutoCAD drawing against another revision of it, object by object (as AutoCAD's DWG Compare): what was added, taken out or changed, clouded on the drawing, and what it does to each layer's lengths and areas and each block's count"><svg class="ic"><use href="#i-compare"/></svg><span class="tl">DWG compare</span></button>
           <button class="tool" data-rv="typical" title="Copy this page's takeoff to other pages (typical floors)"><svg class="ic"><use href="#i-typical"/></svg><span class="tl">Typical</span></button>
         </div><div class="rgl">Revision</div></div>
         <div class="rg"><div class="rgb">
@@ -1606,7 +1607,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-31b"></script>
+<script type="module" src="takeoff.js?v=2026-10-31c"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
