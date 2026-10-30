@@ -9953,7 +9953,7 @@ function ribbonInit(){
     el.addEventListener("drop", dropHere); });
   /* ribbon tabs added for Costing / Export / View: each button runs an existing control or dialog */
   const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog(), floors: () => floorsDialog(), quick: () => quickItemsDialog(), autowin: () => S.page ? autoWindowUI() : toast("Open a drawing first", 2000),
-    symbols: () => symCountDialog(), levels: () => levelsMenu(), cutfill: () => cutFillDialog(), sheetlinks: () => sheetLinksMake(), hatchsplit: () => hatchSplitDialog()};   // (PlanSwift's: My symbols, earthworks, Auto Bookmark, ceilings by pattern)
+    symbols: () => symCountDialog(), levels: () => levelsMenu(), cutfill: () => cutFillDialog(), sheetlinks: () => sheetLinksMake(), hatchsplit: () => hatchSplitDialog(), cadcmp: () => cadCompareDialog()};   // (PlanSwift's: My symbols, earthworks, Auto Bookmark, ceilings by pattern)
   const PX = {bDefaults: () => settingsDialog("measure")};   // Costing → Defaults: the top bar's Defaults is now in Settings (the tool keeps its name, so My tools keeps it)
   document.querySelectorAll("#tools [data-px]").forEach(b => b.addEventListener("click", () => { if (PX[b.dataset.px]) return PX[b.dataset.px](); const t = $(b.dataset.px); if (t && !t.disabled) t.click(); setTimeout(syncPx, 60); }));
   document.querySelectorAll("#tools [data-fn]").forEach(b => b.addEventListener("click", () => { if (P.proj && FN[b.dataset.fn]) FN[b.dataset.fn](); else toast("Open a project first", 2000); }));
@@ -11919,7 +11919,8 @@ function palScore(c, q){
   const t = (c.t + " " + c.g).toLowerCase(), w = ql.split(/\s+/).filter(Boolean), tl = c.t.toLowerCase();
   if (w.every(x => t.includes(x))) return 10 + (tl.startsWith(w[0]) ? 6 : new RegExp("(^|[\\s:(—-])" + w[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(tl) ? 3 : 0) + (c.g === "Page" ? -2 : 0) + palUse(c) - tl.length / 200;
   const q2 = ql.replace(/\s+/g, "");   // letters in order ("shtr" -> "Shutter…"): a looser match, listed after the exact ones
-  if (q2.length >= 3) { let j = 0; for (let i = 0; i < tl.length && j < q2.length; i++) if (tl[i] === q2[j]) j++; if (j === q2.length) return 4 + palUse(c) - tl.length / 200; }
+  if (q2.length >= 3) { let j = 0, i0 = -1, i1 = 0; for (let i = 0; i < tl.length && j < q2.length; i++) if (tl[i] === q2[j]) { if (i0 < 0) i0 = i; i1 = i; j++; }
+    if (j === q2.length) return Math.max(1, 4 + palUse(c) - (i1 - i0 + 1 - q2.length) / 40 - tl.length / 400); }   // the letters close together first: "crsshr" is Cross-hair, not Cut / fill from spot levels
   return 0;
 }
 let PAL_USE = null;
@@ -17151,38 +17152,116 @@ async function cadQuickSelect(){   // AutoCAD's QSELECT: by layer, type, block n
 async function cadQtyDialog(pre){
   if (!S.page || !cadMeta(S.fileId)) return toast("Open an AutoCAD drawing first — + PDF adds a DWG or DXF", 4000);
   const sc = await cadLoad(S.fileId); if (!sc || !CAD) return toast("The drawing's objects are not in this browser — add the DWG again with + PDF", 5000);
-  pre = pre || {}; const pg = sc.pages[0], Q = CAD.cadQty(sc, pg), hid = cadHidden(S.fileId, sc), dark = darkNow();
+  pre = pre || {}; const pg = sc.pages[0], dup = CAD.cadDupes(pg), Q = CAD.cadQty(sc, pg, dup), hid = cadHidden(S.fileId, sc), dark = darkNow();
+  const twice = (v, u) => v > 0 ? ` <span class="small cqd" title="Drawn twice — a copy on top of itself: counted once">+${f2(v)} ${u} twice</span>` : "";
   const sw = c => `<span class="lsw" style="background:${CAD.cadCss(c, dark, false)}"></span>`;
   const att = b => [...b.att].map(([t, m]) => t + ": " + [...m].slice(0, 6).map(([v, n]) => v + (n > 1 ? " ×" + n : "")).join(", ") + (m.size > 6 ? ", …" : "")).join(" · ");
-  const LS = Q.layers.filter(l => l.runs || l.areas), BS = Q.blocks;
+  const LS = Q.layers.filter(l => l.runs || l.areas), BS = Q.blocks.filter(b => b.n);
   const body = `<div class="wide"></div><p>Read from the drawing's own objects, at its own scale: lines and polylines by layer (length), closed outlines — polylines, circles, hatches — by layer (area), and blocks by name (count). Tick what to take off: each becomes measurements in a condition named after its layer or block, marked <b>AI</b> for you to check.</p>
     <div class="cq"><table class="sh cqt"><thead><tr><th>Layer</th><th class="n">Lines → length</th><th class="n">Closed → area</th></tr></thead><tbody>${LS.map(l => `<tr${hid[l.li] ? ' class="dim"' : ""}><td>${sw(sc.layers[l.li].c)} ${esc(l.name)}${hid[l.li] ? ' <span class="small">(off)</span>' : ""}</td>
-      <td class="n">${l.runs ? `<label class="pk"><input type="checkbox" data-ql="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.runs} · ${f2(l.len)} ft</label>` : ""}</td>
-      <td class="n">${l.areas ? `<label class="pk"><input type="checkbox" data-qa="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.areas} · ${f2(l.area)} Sft</label>` : ""}</td></tr>`).join("") || '<tr><td colspan="3" class="small">No lines or outlines on these layers</td></tr>'}</tbody></table></div>
-    <div class="cq"><table class="sh cqt"><thead><tr><th>Block</th><th class="n">Count</th><th>Layer</th><th>Attributes</th></tr></thead><tbody>${BS.map((b, i) => `<tr><td><label class="pk"><input type="checkbox" data-qb="${i}"${pre.B === b.name ? " checked" : ""}> ${esc(b.name)}</label></td><td class="n">${b.n}${b.nn ? ` <span class="small" title="copies inside other blocks">(${b.nn} in blocks)</span>` : ""}</td><td class="small">${esc([...b.layers].join(", "))}</td><td class="small">${esc(att(b))}</td></tr>`).join("") || '<tr><td colspan="4" class="small">No blocks in model space</td></tr>'}</tbody></table></div>
+      <td class="n">${l.runs ? `<label class="pk"><input type="checkbox" data-ql="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.runs} · ${f2(l.len)} ft</label>${twice(l.dlen, "ft")}` : ""}</td>
+      <td class="n">${l.areas ? `<label class="pk"><input type="checkbox" data-qa="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.areas} · ${f2(l.area)} Sft</label>${twice(l.darea, "Sft")}` : ""}</td></tr>`).join("") || '<tr><td colspan="3" class="small">No lines or outlines on these layers</td></tr>'}</tbody></table></div>
+    <div class="cq"><table class="sh cqt"><thead><tr><th>Block</th><th class="n">Count</th><th>Layer</th><th>Attributes</th></tr></thead><tbody>${BS.map((b, i) => `<tr><td><label class="pk"><input type="checkbox" data-qb="${i}"${pre.B === b.name ? " checked" : ""}> ${esc(b.name)}</label></td><td class="n">${b.n}${b.nn ? ` <span class="small" title="copies inside other blocks">(${b.nn} in blocks)</span>` : ""}${b.dn ? ` <span class="small cqd" title="Inserted twice on one spot: counted once">+${b.dn} twice</span>` : ""}</td><td class="small">${esc([...b.layers].join(", "))}</td><td class="small">${esc(att(b))}</td></tr>`).join("") || '<tr><td colspan="4" class="small">No blocks in model space</td></tr>'}</tbody></table></div>
+    ${dup.size ? `<div class="cqdup" style="margin:8px 0;padding:8px;border:1px solid #f0c36d;background:#fff8e6;border-radius:6px"><b>${dup.size}</b> object${dup.size > 1 ? "s are" : " is"} drawn twice — a copy on top of itself, a block inserted twice on one spot, a line drawn again the other way round (AutoCAD's OVERKILL finds them). Counted once above; what they would add is shown as “twice”.
+      <div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap"><label class="pk"><input type="checkbox" id="cqDup" checked> Leave them out of the takeoff</label><button class="btn sm" type="button" id="cqDupShow" title="Select them on the drawing">Show them</button></div></div>` : ""}
     <label class="pk"><input type="checkbox" id="cqVis" checked> Only objects on layers that are switched on</label>`;
-  const v = await ask("AutoCAD quantities — " + pageName({file: S.fileId, page: 1}), body, "Add to takeoff", () => {
+  const pr = ask("AutoCAD quantities — " + pageName({file: S.fileId, page: 1}), body, "Add to takeoff", () => {
     const g = a => new Set([...document.querySelectorAll("#dlgB [data-" + a + "]")].filter(x => x.checked).map(x => x.dataset[a]));
-    const o = {lens: new Set([...g("ql")].map(Number)), areas: new Set([...g("qa")].map(Number)), blocks: new Set([...g("qb")].map(i => BS[+i].name)), vis: $("cqVis").checked};
+    const o = {lens: new Set([...g("ql")].map(Number)), areas: new Set([...g("qa")].map(Number)), blocks: new Set([...g("qb")].map(i => BS[+i].name)), vis: $("cqVis").checked, dup: $("cqDup") && $("cqDup").checked ? dup : null};
     return o.lens.size || o.areas.size || o.blocks.size ? o : "Tick at least one layer or block";
   });
+  if ($("cqDupShow")) $("cqDupShow").onclick = () => { if (ask.cur) ask.cur(null); setTool("cadsel"); cadSelSet([...dup]); toast(dup.size + " object" + (dup.size > 1 ? "s" : "") + " drawn twice selected on the drawing — each lies on top of another, so the drawing looks the same", 5000); };
+  const v = await pr;
   if (v) cadTakeoff(sc, pg, v);
 }
-function cadTakeoff(sc, pg, sel){   // sel: {lens: Set(layer index), areas: Set(layer index), blocks: Set(name), vis}
+function cadTakeoff(sc, pg, sel){   // sel: {lens: Set(layer index), areas: Set(layer index), blocks: Set(name), vis, dup: the objects drawn twice, left out (or null)}
   if (S.pageNo !== 1) return;
   const hid = sel.vis ? cadHidden(S.fileId, sc) : null, got = {area: 0, line: 0, count: 0}, counts = new Map();
   mutate(() => {
     pg.ents.forEach((r, ei) => {
-      if (r.L < 0 || (hid && hid[r.L])) return;
+      if (r.L < 0 || (hid && hid[r.L]) || (sel.dup && sel.dup.has(ei))) return;
       if (r.t === "INSERT") { if (sel.blocks.has(r.n)) got.count += cadAddGeom(sc, pg, ei, "count", null, counts); return; }
       if (r.cl && r.area > 0 && sel.areas.has(r.L)) got.area += cadAddGeom(sc, pg, ei, "area", null, null);
       else if (!r.cl && r.len > 0 && sel.lens.has(r.L)) got.line += cadAddGeom(sc, pg, ei, "line", null, null);
     });
-    if (sel.blocks.size) (pg.subs || []).forEach((r, j) => { if (r.t === "INSERT" && sel.blocks.has(r.n) && r.L >= 0 && !(hid && hid[r.L])) got.count += cadAddGeom(sc, pg, pg.ents.length + j, "count", null, counts); });   // (a block's copies inside other blocks)
+    if (sel.blocks.size) (pg.subs || []).forEach((r, j) => { if (r.t === "INSERT" && sel.blocks.has(r.n) && r.L >= 0 && !(hid && hid[r.L]) && !(sel.dup && sel.dup.has(CAD.cadTop(pg, pg.ents.length + j)))) got.count += cadAddGeom(sc, pg, pg.ents.length + j, "count", null, counts); });   // (a block's copies inside other blocks)
   }, "AutoCAD takeoff");
   refresh();
   toast("From the drawing: " + [got.area && got.area + " area" + (got.area > 1 ? "s" : ""), got.line && got.line + " run" + (got.line > 1 ? "s" : ""), got.count && got.count + " count marker" + (got.count > 1 ? "s" : "")].filter(Boolean).join(", ") + " — marked AI, check them", 5000);
   return got;
+}
+
+/* ------------------------------------------------------------------ DWG compare (AutoCAD's DWG Compare, for a QS)
+   This drawing against another revision of it in the project, object by object (CAD.cadDiff: by handle — AutoCAD keeps an
+   object's handle through every save — then by its drawing). What was added, taken out or changed is clouded on this drawing
+   (added green, taken out red, changed amber; nearby changes one cloud), and what it does to the quantities is set side by side:
+   each layer's lengths and areas and each block's count, old → new, objects drawn twice counted once. */
+const CMP_COL = {add: "#1e8e5a", del: "#c62828", chg: "#d9822b"}, CMP_SUBJ = "DWG compare";
+const cadFileName = fid => ((P.proj.files.find(f => f.id === fid) || {}).name || "the drawing").replace(/\.(dwg|dxf)$/i, "");
+async function cadCompareDialog(){
+  if (!P.proj || !S.page || !cadMeta(S.fileId) || S.pageNo !== 1) return toast("Open an AutoCAD drawing (DWG / DXF) first — DWG compare works on the drawing's own objects", 4500);
+  const others = P.proj.files.filter(f => f.id !== S.fileId && f.cad);
+  if (!others.length) return toast("Add the other revision of this drawing first (+ PDF / CAD) — DWG compare then shows what changed between them", 5000);
+  const v = await ask("DWG compare", `<p><b>${esc(cadFileName(S.fileId))}</b> against another revision of it: every object matched by its handle — AutoCAD keeps it through every save — then by its drawing. What was added, taken out or changed is clouded on this drawing, and the quantities by layer and block are set side by side.</p>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Compare with</label><select id="cmpF">${others.map(f => `<option value="${esc(f.id)}">${esc(f.name)}</option>`).join("")}</select></div>
+    <div class="fg w2"><label class="pk"><input type="checkbox" id="cmpOld" checked> That one is the older revision (this drawing is the newer)</label></div></div>`, "Compare", () => ({fid: $("cmpF").value, older: $("cmpOld").checked}));
+  if (!v) return null;
+  const r = await cadCompare(v.fid, v.older); if (r) cadCompareReport(r);
+  return r;
+}
+async function cadCompare(fid, older){   // -> {D, rows (quantities old / new), clusters on this page, n: {add, del, chg, same}, other, older} or null
+  const here = S.fileId, scH = await cadLoad(here), scX = await cadLoad(fid);
+  if (!scH || !scX) { toast("The drawing" + (scH ? " " + cadFileName(fid) : "") + " could not be read here — add it again with + PDF / CAD", 5000); return null; }
+  busy("Comparing " + cadFileName(here) + " with " + cadFileName(fid) + "…"); await new Promise(r2 => setTimeout(r2, 20));
+  try {
+    const ph = scH.pages[0], px = scX.pages[0], [so, sn, po, pn] = older ? [scX, scH, px, ph] : [scH, scX, ph, px];
+    const D = CAD.cadDiff(po, pn, so.layers.map(l => l.name), sn.layers.map(l => l.name));
+    const qo = CAD.cadQty(so, po, CAD.cadDupes(po)), qn = CAD.cadQty(sn, pn, CAD.cadDupes(pn)), rows = new Map();
+    const row = (k, name, kind) => rows.get(k) || rows.set(k, {name, kind, v: [0, 0]}).get(k);
+    [[qo, 0], [qn, 1]].forEach(([q, s2]) => { q.layers.forEach(l => { if (l.len) row("L|" + l.name, l.name, "ft").v[s2] = l.len; if (l.area) row("A|" + l.name, l.name, "Sft").v[s2] = l.area; });
+      q.blocks.forEach(b => { if (b.n) row("B|" + b.name, b.name, "Nos").v[s2] = b.n; }); });
+    const R = [...rows.values()].filter(x => Math.abs(x.v[1] - x.v[0]) > 0.0005).sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name, undefined, {numeric: true}));
+    /* each change's box on this page: from its own page through the drawing's coordinates (a moved object: where it was and where it is) */
+    const toHere = (pg, x, y) => { const X = (x - pg.ox) / pg.k + pg.x0, Y = pg.y1 - (y - pg.oy) / pg.k; return [ph.ox + (X - ph.x0) * ph.k, ph.oy + (ph.y1 - Y) * ph.k]; };
+    const box = (pg, ei) => { const eb = CAD.cadEnts(pg).eb, k = 4 * ei; if (!(eb[k] <= eb[k + 2])) return null; const a = toHere(pg, eb[k], eb[k + 1]), b = toHere(pg, eb[k + 2], eb[k + 3]); return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]; };
+    const both = (a, b) => !a ? b : !b ? a : [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])];
+    const its = []; D.added.forEach(i => its.push({k: "add", b: box(pn, i), e: pn === ph ? i : -1})); D.removed.forEach(j => its.push({k: "del", b: box(po, j), e: po === ph ? j : -1}));
+    D.changed.forEach(([j, i]) => its.push({k: "chg", b: both(box(po, j), box(pn, i)), e: pn === ph ? i : j}));
+    const pad = Math.max(6, 0.012 * Math.hypot(ph.w, ph.h)), C = [];   // changes this near each other: one cloud
+    its.filter(x => x.b).sort((a, b) => a.b[0] - b.b[0]).forEach(x => { const b = [x.b[0] - pad, x.b[1] - pad, x.b[2] + pad, x.b[3] + pad];
+      let c = C.find(c2 => c2.b[0] <= b[2] && b[0] <= c2.b[2] && c2.b[1] <= b[3] && b[1] <= c2.b[3]);
+      if (!c) C.push(c = {b, n: {add: 0, del: 0, chg: 0}, e: []}); else c.b = both(c.b, b); c.n[x.k]++; if (x.e >= 0) c.e.push(x.e); });
+    for (let again = true; again;) { again = false;   // clouds grown into each other: one
+      for (let i = 0; i < C.length && !again; i++) for (let j = i + 1; j < C.length; j++) { const a = C[i].b, b = C[j].b;
+        if (a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]) { C[i].b = both(a, b); ["add", "del", "chg"].forEach(k => { C[i].n[k] += C[j].n[k]; }); C[i].e.push(...C[j].e); C.splice(j, 1); again = true; break; } } }
+    return {D, rows: R, clusters: C, n: {add: D.added.length, del: D.removed.length, chg: D.changed.length, same: D.same}, other: fid, older, here};
+  } finally { busy(""); }
+}
+function cadCompareClouds(r){   // the clouds on this drawing (the earlier compare's own clouds go first) -> how many
+  const d = toolDefaults(), at = new Date().toISOString(), oth = cadFileName(r.other);
+  mutate(() => { P.proj.marks = (P.proj.marks || []).filter(m => !(m.subject === CMP_SUBJ && m.file === r.here));
+    r.clusters.forEach(c => { const k = c.n.chg || (c.n.add && c.n.del) ? "chg" : c.n.add ? "add" : "del";
+      P.proj.marks.push({id: uid("M"), type: "cloud", file: r.here, page: 1, pts: [[c.b[0], c.b[1]], [c.b[2], c.b[3]]], subject: CMP_SUBJ, author: qaUser(), status: "", at, color: CMP_COL[k], width: d.markWidth,
+        text: [c.n.add && "+" + c.n.add + " added", c.n.del && "−" + c.n.del + " taken out", c.n.chg && c.n.chg + " changed"].filter(Boolean).join(", ") + (r.older ? " since " : " in ") + oth}); }); }, "DWG compare clouds");
+  return r.clusters.length;
+}
+function cadCompareReport(r){
+  const oth = esc(cadFileName(r.other)), qr = x => `<tr><td>${esc(x.name)}</td><td class="small">${x.kind === "Nos" ? "block" : x.kind === "ft" ? "length" : "area"}</td><td class="n">${fq(x.v[0], x.kind)}</td><td class="n">${fq(x.v[1], x.kind)}</td><td class="n" style="color:${x.v[1] > x.v[0] ? CMP_COL.add : CMP_COL.del}">${x.v[1] > x.v[0] ? "+" : "−"}${fq(Math.abs(x.v[1] - x.v[0]), x.kind)} ${esc(x.kind)}</td></tr>`;
+  const none = !r.n.add && !r.n.del && !r.n.chg;
+  const body = `<p>${r.older ? "Since" : "Against"} <b>${oth}</b>: <b style="color:${CMP_COL.add}">${r.n.add} added</b> · <b style="color:${CMP_COL.del}">${r.n.del} taken out</b> · <b style="color:${CMP_COL.chg}">${r.n.chg} changed</b> · ${r.n.same.toLocaleString()} the same${none ? " — the two drawings are alike" : ` — in ${r.clusters.length} place${r.clusters.length === 1 ? "" : "s"} on the drawing`}.</p>
+    ${r.rows.length ? `<p style="margin-top:8px"><b>What it does to the quantities</b> <span class="small">(${r.older ? "old → new" : "this → that"}; objects drawn twice counted once)</span></p><div style="max-height:40vh;overflow:auto"><table class="sh"><thead><tr><th>Layer / block</th><th></th><th class="n">${r.older ? "Old" : "This"}</th><th class="n">${r.older ? "New" : "That"}</th><th class="n">Change</th></tr></thead><tbody>${r.rows.map(qr).join("")}</tbody></table></div>`
+      : `<p class="small" style="margin-top:8px">No layer's lengths or areas and no block's count changed.</p>`}
+    <div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap">${none ? "" : '<button class="btn sm pri" type="button" data-cmpa="clouds">Cloud the changes on the drawing</button><button class="btn sm" type="button" data-cmpa="sel">Select what was added or changed</button><button class="btn sm" type="button" data-cmpa="flag">Flag the measurements on the changes</button>'}${r.rows.length ? '<button class="btn sm" type="button" data-cmpa="copy">Copy for Excel</button>' : ""}</div>`;
+  ask("DWG compare — " + esc(cadFileName(r.here)), body, "");
+  $("dlgCancel").textContent = "Close";
+  $("dlgB").querySelectorAll("[data-cmpa]").forEach(b => b.onclick = async () => { const a = b.dataset.cmpa;
+    if (a === "copy") { const t = [["Layer / block", "Unit", r.older ? "Old" : "This", r.older ? "New" : "That", "Change"]].concat(r.rows.map(x => [x.name, x.kind, x.v[0].toFixed(3), x.v[1].toFixed(3), (x.v[1] - x.v[0]).toFixed(3)])).map(x => x.join("\t")).join("\n");
+      try { await navigator.clipboard.writeText(t); toast("Copied — paste into Excel", 2000); } catch (e) { toast("Could not copy", 2000); } return; }
+    if (ask.cur) ask.cur(null);
+    if (a === "clouds") { const n = cadCompareClouds(r); toast(n + " cloud" + (n === 1 ? "" : "s") + " on the drawing — green added, red taken out, amber changed (Markups list: subject “" + CMP_SUBJ + "”)", 5000); }
+    else if (a === "sel") { const ids = r.clusters.flatMap(c => c.e); setTool("cadsel"); cadSelSet(ids); toast(ids.length ? ids.length + " object" + (ids.length === 1 ? "" : "s") + " selected" + (r.older ? "" : " (what was taken out is not on this drawing)") : "Nothing of it is on this drawing — what was taken out is only on the older one", 4000); }
+    else if (a === "flag") { const B = r.clusters.map(c => c.b), its = P.proj.items.filter(i => i.file === r.here && i.page === 1 && (() => { const Q = itemPoly(i); let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; Q.forEach(p => { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }); return B.some(b => b[0] <= x1 && x0 <= b[2] && b[1] <= y1 && y0 <= b[3]); })());
+      if (!its.length) return toast("No measurement on this drawing touches the changes", 3500); await setQa(its, "recheck"); toast(its.length + " measurement" + (its.length === 1 ? "" : "s") + " on the changes flagged for re-check (Review › Next unchecked)", 4500); } });
 }
 
 /* ------------------------------------------------------------------ plot / print (Ctrl+P), as AutoCAD's PLOT
@@ -17509,7 +17588,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
     floorsDialog, floorAddMany, floorNext, floorTitleIn, floorZoom, floorMenu, floorBoxStart, floorNewAsk, floorLegends, floorLegendSplit, legendFloorSet, legendFit, legendTitle, floorTitleOf,
-    contactPop, CONTACT_NO, quickItemsDialog, quickItemsAdd, qkCat, qkNeed, qkFind, PRESETS, QK_CATS, symList, symKeep, symCount, symCountDialog, sheetLinksMake, textPartBox, hatchSig, hatchIds, hatchSplitDialog, lvParse, lvTexts, lvHere, levelsRead, levelsPlace, levelsList, cutFillDialog, validate, followLink, itemPoly, condPop, condUse, condBack, condMru, renderCondPick, nosSet, nosNow, nosNew, nosMenu, nosTyped, nosSelDialog, autoMenu, autoWindowUI, mineSet, tbGroups, tbPref, MINE_START, applyChestProfile,
+    contactPop, CONTACT_NO, quickItemsDialog, quickItemsAdd, qkCat, qkNeed, qkFind, PRESETS, QK_CATS, symList, symKeep, symCount, symCountDialog, sheetLinksMake, textPartBox, hatchSig, hatchIds, hatchSplitDialog, lvParse, lvTexts, lvHere, levelsRead, levelsPlace, levelsList, cutFillDialog, validate, followLink, itemPoly, cadCompareDialog, cadCompare, cadCompareClouds, cadCompareReport, cadQtyDialog, cadTakeoff, condPop, condUse, condBack, condMru, renderCondPick, nosSet, nosNow, nosNew, nosMenu, nosTyped, nosSelDialog, autoMenu, autoWindowUI, mineSet, tbGroups, tbPref, MINE_START, applyChestProfile,
     get SNAP_PX(){ return SNAP_PX; }, get HIT_PX(){ return HIT_PX; }};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");

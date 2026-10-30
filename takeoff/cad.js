@@ -11,7 +11,7 @@
    exact and needs no calibration. */
 const LDWG = "https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/dist/libredwg-web.js";
 const LDXF = "https://cdn.jsdelivr.net/npm/@mlightcad/dxf-json@1.2.8/dist/esm/bundle.mjs";
-export const CAD_VER = 9;          // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (9: justified text at a 0,0 point and backwards / upside-down text on its point; 8: lengths inside blocks stretched more one way measured as drawn; 7: text in its style's / \f font — Times for serif, condensed narrower — and LWDISPLAY; 6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
+export const CAD_VER = 10;         // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (10: each object's handle kept apart (hd) — a text's h is its height — for DWG compare; 9: justified text at a 0,0 point and backwards / upside-down text on its point; 8: lengths inside blocks stretched more one way measured as drawn; 7: text in its style's / \f font — Times for serif, condensed narrower — and LWDISPLAY; 6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
 export const INK = -1;             // colour 7 (and true black or white): white on a black background, black on white
 export const isCadName = n => /\.(dwg|dxf)$/i.test(String(n || ""));
 const CAPS_FONT = /^(technic_|techb___|techl___|coprgt[bl]?|copperplate[\w ]*|stencil|engr|castelar|felixti|alger)\.(ttf|otf)$/i;   // fonts with capitals only (their small letters are small capitals)
@@ -327,7 +327,7 @@ function ex3(e){   // the entity's extrusion when it is not +Z (a mirrored entit
 }
 function norm(e, dwg){
   const A = v => (+v || 0) * (dwg ? 1 : Math.PI / 180), t = String(e.type);
-  const o = {t, h: String(e.handle || ""), L: e.layer == null || e.layer === "" ? "0" : String(e.layer), aci: e.colorIndex == null ? 256 : +e.colorIndex,
+  const o = {t, h: String(e.handle || ""), hd: String(e.handle || ""), L: e.layer == null || e.layer === "" ? "0" : String(e.layer), aci: e.colorIndex == null ? 256 : +e.colorIndex,
     rgb: typeof e.color === "number" ? e.color : null, lw: dwg ? lwDwg(e.lineweight) : lwDxf(e.lineweight, -1),
     lt: e.lineType ? String(e.lineType).toUpperCase() : "BYLAYER", lts: +e.lineTypeScale > 0 ? +e.lineTypeScale : 1, vis: e.isVisible !== false, ex: ex3(e)};
   switch (t) {
@@ -738,7 +738,7 @@ l => { const lw = LW(l), nat = emW(l, F.f) * em; L.push({l, f: F.f, lw, wf: nat 
         else { s += Math.hypot(sx - cx, sy - cy); cx = sx; cy = sy; } } }
     return s; };
   const top = {L: null, c: INK, lw: -3, lt: "CONTINUOUS", sc: 1, d: 0};
-  for (const e of md.ents) { if (trunc) break; cur = ENTS.length; ENTS.push({t: e.t, h: e.h, L: -1}); ent(e, top); }
+  for (const e of md.ents) { if (trunc) break; cur = ENTS.length; ENTS.push({t: e.t, h: e.h, hd: e.hd, L: -1}); ent(e, top); }
   /* extents: everything drawn, less a few objects far away from the drawing (a stray block at 0,0 when the plan is at site coordinates) */
   const N = PK.length; let F = [Infinity, Infinity, -Infinity, -Infinity];
   const grow = (B, x0, y0, x1, y1) => { if (x0 < B[0]) B[0] = x0; if (y0 < B[1]) B[1] = y0; if (x1 > B[2]) B[2] = x1; if (y1 > B[3]) B[3] = y1; };
@@ -807,7 +807,7 @@ l => { const lw = LW(l), nat = emW(l, F.f) * em; L.push({l, f: F.f, lw, wf: nat 
   const fu = uIn / 12;   // drawing units -> feet
   /* a record as kept: lengths in ft, areas in Sft, points on the page — inside a block, scaled by the block and with no handle
      (the block definition's: the same in every insert) */
-  const rout = r => { const o = r.p != null ? {t: r.t, L: r.L} : {t: r.t, h: r.h, L: r.L}, s = r.k || 1; if (r.n) o.n = r.n; if (r.len) o.len = r.len * (r.kl ? 1 : s) * fu; if (r.area) o.area = r.area * s * s * fu * fu; if (r.cl) o.cl = true;
+  const rout = r => { const o = r.p != null ? {t: r.t, L: r.L} : {t: r.t, h: r.h, L: r.L}, s = r.k || 1; if (r.p == null && r.hd) o.hd = r.hd; if (r.n) o.n = r.n; if (r.len) o.len = r.len * (r.kl ? 1 : s) * fu; if (r.area) o.area = r.area * s * s * fu * fu; if (r.cl) o.cl = true;
     if (r.at) o.at = [PX(r.at[0]), PY(r.at[1])]; if (r.att && r.att.length) o.att = r.att; if (r.loops) o.loops = r.loops.map(l => l.map(p => [PX(p[0]), PY(p[1])])); if (r.p != null) o.p = dec(r.p); return o; };
   pg.ents = ENTS.map(rout); pg.subs = SUBS.map(rout);   // (ents: the drawing's own objects, as AutoCAD lists them; subs: the objects inside its blocks)
   pg.map = {den, x0: B[0], y1: B[3], ox, oy, w: W, h: H, uIn};
@@ -1150,10 +1150,14 @@ export function cadGeom(pg, ei){
 }
 /* what the drawing holds, by layer and by block: counts, lengths (ft) and areas (Sft). A block's count takes in its copies inside other
    blocks too (nn of them), as AutoCAD's BCOUNT; the layers' lengths and areas are the drawing's own objects (a block's parts not twice) */
-export function cadQty(sc, pg){
+export function cadQty(sc, pg, dup){   // dup: the objects drawn twice (cadDupes) — left out, counted apart (a layer's dn, dlen, darea; a block's dn)
   const byL = new Map(), byB = new Map();
   pg.ents.forEach((r, ei) => {
     if (r.L < 0) return; let l = byL.get(r.L); if (!l) byL.set(r.L, l = {li: r.L, name: (sc.layers[r.L] || {}).name || "?", n: 0, runs: 0, len: 0, areas: 0, area: 0, ins: 0, txt: 0});
+    if (dup && dup.has(ei)) { l.dn = (l.dn || 0) + 1;
+      if (r.t === "INSERT") { const k = r.n || "?"; let b = byB.get(k); if (!b) byB.set(k, b = {name: k, n: 0, layers: new Set(), ents: [], att: new Map()}); b.dn = (b.dn || 0) + 1; }
+      else if (r.cl && r.area > 0) l.darea = (l.darea || 0) + r.area; else if (r.len > 0) l.dlen = (l.dlen || 0) + r.len;
+      return; }
     l.n++;
     if (r.t === "INSERT") { l.ins++; const k = r.n || "?"; let b = byB.get(k); if (!b) byB.set(k, b = {name: k, n: 0, layers: new Set(), ents: [], att: new Map()}); b.n++; b.layers.add(l.name); b.ents.push(ei);
       (r.att || []).forEach(([t, v]) => { let m = b.att.get(t); if (!m) b.att.set(t, m = new Map()); m.set(v, (m.get(v) || 0) + 1); }); }
@@ -1162,9 +1166,67 @@ export function cadQty(sc, pg){
     else if (/TEXT|ATTRIB|ATTDEF/.test(r.t)) l.txt++;
   });
   const NE = pg.ents.length, E = pg.subs && pg.subs.length ? cadEnts(pg) : null;   // (blocks inside blocks: counted where they are drawn)
-  (pg.subs || []).forEach((r, j) => { const ei = NE + j; if (r.t !== "INSERT" || r.L < 0 || !(E.eb[4 * ei] <= E.eb[4 * ei + 2])) return;
+  (pg.subs || []).forEach((r, j) => { const ei = NE + j; if (r.t !== "INSERT" || r.L < 0 || !(E.eb[4 * ei] <= E.eb[4 * ei + 2]) || (dup && dup.has(cadTop(pg, ei)))) return;
     const k = r.n || "?", ln = (sc.layers[r.L] || {}).name || "?"; let b = byB.get(k); if (!b) byB.set(k, b = {name: k, n: 0, layers: new Set(), ents: [], att: new Map()});
     b.n++; b.nn = (b.nn || 0) + 1; b.layers.add(ln); b.ents.push(ei);
     (r.att || []).forEach(([t, v]) => { let m = b.att.get(t); if (!m) b.att.set(t, m = new Map()); m.set(v, (m.get(v) || 0) + 1); }); });
   return {layers: [...byL.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true})), blocks: [...byB.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name))};
+}
+/* an object's drawing as figures that do not depend on the order it was drawn in: its primitives and points, its box, and the sums
+   of its points, their squares and products — a line drawn the other way round, an outline started at another corner, are the
+   same. A hatch by its outline (not its pattern lines); its texts with where they stand. Page points. */
+function entSig(pg, ei, E){
+  let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const add = (x, y) => { n++; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; };
+  const r = cadRec(pg, ei), np = E.ps[ei + 1] - E.ps[ei];
+  if (r && r.loops) r.loops.forEach(l => l.forEach(p => add(p[0], p[1])));
+  else for (let j = E.ps[ei]; j < E.ps[ei + 1]; j++) { const i = E.pl[j]; if (pg.pf[i] === 1) continue; primPaths(pg, i).forEach(P => P.forEach(p => add(p[0], p[1]))); }
+  const T = []; for (let j = E.ts[ei]; j < E.ts[ei + 1]; j++) { const t = E.tl[j], M = pg.tM; T.push(pg.tS[t] + "@" + M[6 * t + 4].toFixed(2) + "," + M[6 * t + 5].toFixed(2)); }
+  if (!n && !T.length) return "";
+  const f = v => (Math.round(v * 100) / 100).toString(), g = v => v.toPrecision(10);
+  return [np, n, f(x0), f(y0), f(x1), f(y1), g(sx), g(sy), g(sxx), g(syy), g(sxy)].join(",") + "|" + T.sort().join(";");
+}
+/* objects drawn twice, as AutoCAD's OVERKILL finds them: the same type on the same layer (a block: the same block) drawing what an
+   object before it draws — a copy pasted on top of itself, a block inserted twice on one spot, a line drawn again the other way
+   round. Only what CAD quantities counts: runs, closed outlines, blocks. -> Set of the later ones' indices (the first is kept) */
+export function cadDupes(pg){
+  const E = cadEnts(pg), seen = new Set(), out = new Set();
+  pg.ents.forEach((r, ei) => {
+    if (!r || r.L < 0 || !(r.t === "INSERT" || (r.cl && r.area > 0) || r.len > 0)) return;
+    const s = entSig(pg, ei, E); if (!s) return;
+    const k = r.t + "|" + r.L + "|" + (r.n || "") + "|" + s;
+    if (seen.has(k)) out.add(ei); else seen.add(k);
+  });
+  return out;
+}
+/* two readings of one drawing — an older revision (po) and this one (pn) — object by object, as AutoCAD's DWG Compare: matched by
+   handle (AutoCAD keeps an object's handle through every save of the drawing), then what has no partner by handle by its drawing.
+   Compared in the drawing's own units, each page's layout undone, to within tol (a thousandth of a point on the page). Lo / Ln: each
+   reading's layer names. -> {added: [pn index], removed: [po index], changed: [[po, pn]], same, byHandle} */
+export function cadDiff(po, pn, Lo, Ln, tol){
+  const Eo = cadEnts(po), En = cadEnts(pn), T = tol > 0 ? tol : 1e-3 / Math.min(po.k, pn.k);
+  const geo = (pg, E, ei) => { const k = pg.k, X = p => [(p[0] - pg.ox) / k + pg.x0, pg.y1 - (p[1] - pg.oy) / k], P = [], S = [], r = cadRec(pg, ei);
+    if (r.loops) r.loops.forEach(l => P.push(l.map(X)));
+    else for (let j = E.ps[ei]; j < E.ps[ei + 1]; j++) { const i = E.pl[j]; if (pg.pf[i] === 1) continue; primPaths(pg, i).forEach(Q => P.push(Q.map(X))); }
+    for (let j = E.ts[ei]; j < E.ts[ei + 1]; j++) { const t = E.tl[j], M = pg.tM; S.push([pg.tS[t]].concat(X([M[6 * t + 4], M[6 * t + 5]]))); }
+    return {P, S}; };
+  const near = (a, b) => Math.abs(a - b) <= T * (1 + 1e-9 * Math.abs(a));
+  const alike = (a, b) => a.P.length === b.P.length && a.S.length === b.S.length && a.P.every((Q, i) => Q.length === b.P[i].length && Q.every((p, j) => near(p[0], b.P[i][j][0]) && near(p[1], b.P[i][j][1])))
+    && a.S.every((s, i) => s[0] === b.S[i][0] && near(s[1], b.S[i][1]) && near(s[2], b.S[i][2]));
+  const head = (r, L) => r.t + "|" + (L[r.L] || "") + "|" + (r.n || "");
+  const ok = r => r && r.L >= 0, hid = r => { const h = r.hd != null ? r.hd : /TEXT|ATTRIB|ATTDEF|MULTILEADER/.test(r.t) ? "" : r.h; return h && h !== "0" ? h : ""; };   // (a scene from before CAD_VER 10 has no hd: a text's h is its height)
+  const HO = new Map(); po.ents.forEach((r, i) => { if (ok(r) && hid(r)) HO.set(hid(r), i); });
+  const added = [], removed = [], changed = [], usedO = new Set(); let same = 0, byHandle = 0;
+  const left = [];
+  pn.ents.forEach((r, i) => { if (!ok(r)) return; const j = hid(r) ? HO.get(hid(r)) : undefined;
+    if (j === undefined) { left.push(i); return; }
+    usedO.add(j); byHandle++; const q = po.ents[j];
+    if (head(q, Lo) === head(r, Ln) && alike(geo(po, Eo, j), geo(pn, En, i))) same++; else changed.push([j, i]); });
+  /* what has no partner by handle (a drawing saved through WBLOCK, pasted into a new file…): matched by its drawing, to 0.01 units */
+  const key = (pg, E, ei, L) => { const g = geo(pg, E, ei), f = v => Math.round(v * 100); let n = 0, sx = 0, sy = 0; g.P.forEach(Q => Q.forEach(p => { n++; sx += f(p[0]); sy += f(p[1]); }));
+    return head(cadRec(pg, ei), L) + "|" + g.P.length + "|" + n + "|" + sx + "|" + sy + "|" + g.S.map(s => s[0]).sort().join(";"); };
+  const KO = new Map(); po.ents.forEach((r, j) => { if (!ok(r) || usedO.has(j)) return; const k = key(po, Eo, j, Lo); (KO.get(k) || KO.set(k, []).get(k)).push(j); });
+  left.forEach(i => { const k = key(pn, En, i, Ln), L = KO.get(k); if (L && L.length) { usedO.add(L.shift()); same++; } else added.push(i); });
+  po.ents.forEach((r, j) => { if (ok(r) && !usedO.has(j)) removed.push(j); });
+  return {added, removed, changed, same, byHandle};
 }
