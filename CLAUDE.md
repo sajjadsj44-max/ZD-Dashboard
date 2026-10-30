@@ -51,10 +51,13 @@
   adds / removes them in Settings › Team logins, which saves users.json to main with a GitHub token asked
   when saving (kept only while the page is open) or downloads it. The team view hides backups, Recover,
   Settings › Backup & reset and the links to the other ZD pages. `tools/test_takeoff_team.js` checks it.
-- Feedback chat: friends' **Feedback** button ↔ the owner's **Inbox** (top bar). Messages live in the owner's Google
-  Sheet via the Apps Script web app `tools/feedback/Code.gs`, whose /exec URL is in `takeoff/chat.json` (empty → WhatsApp).
-  A friend is checked by `c` in users.json = SHA-256 of PBKDF2(password, salt + ":chat"); every new login needs `c`.
-  The Inbox password's SHA-256 is OWNER_HASH in Code.gs. `tools/test_takeoff_chat.js` runs Code.gs in Node.
+- Feedback chat: friends' **Feedback** button ↔ the owner's **Inbox** (top bar). No server of our own: messages are events on
+  the free relay ntfy.sh (topic in `takeoff/chat.json`; it keeps them 12 h), copied every half hour by
+  `.github/workflows/chat-archive.yml` (`tools/chat_archive.py`) to `takeoff-chat.jsonl` on the `chat-archive` branch, read back
+  from there. Text is sealed in the browser (AES-GCM per friend from their chat key; the chat key goes to the owner sealed for
+  the RSA key in chat.json, whose private half is locked with the Inbox password, `sa`). The Inbox trusts a friend only when
+  SHA-256(chat key) = `c` in users.json (PBKDF2(password, salt + ":chat")); every new login needs `c`. Empty relay → WhatsApp.
+  `tools/test_takeoff_chat.js` runs it against a stand-in relay.
 - One exception, asked for by the owner: a **trusted computer** (the owner's laptop) is never asked, on any
   page. Its browser keeps a random key in localStorage `zd-trusted-computer`; every page with a lock
   (zameen-developments, takeoff, dashboards, drawing-tracker) lists only the key's SHA-256 in `TRUSTED` —
