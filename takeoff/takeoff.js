@@ -8909,9 +8909,17 @@ async function panelDialog(side){
 
 /* Customize toolbar: which ribbon tabs and tools are shown (kept in this browser); nothing is deleted — Reset brings everything back */
 const TB_KEY = "zdTakeoffTb";
+/* My tools as every user first gets it (the owner's own set), and what "add the usual takeoff tools" puts back; a user who has
+   changed My tools keeps theirs */
+const MINE_START = ["takeoff/draw", "takeoff/rect", "takeoff/auto", "takeoff/count", "takeoff/vsearch", "takeoff/measure", "takeoff/cal", "takeoff/ded",
+  "modify/move", "modify/offset", "modify/trim", "modify/extend", "modify/fillet", "modify/break", "modify/join", "modify/explode",
+  "markup/dimension", "markup/arrow", "costing/openings", "export/bAdd",
+  "view/bHideMk", "view/bLbl", "view/bLegend", "view/bMini", "view/bDim", "view/bMono", "view/bBg_black", "takeoff/dedrect"];
 const tbKey = b => b.dataset.tool || b.dataset.mod || b.dataset.rv || b.dataset.px || b.dataset.fn || b.id || "";
 const tbName = b => ((b.querySelector(".tl") || {}).textContent || b.title || tbKey(b)).trim().split(" — ")[0].split("(")[0].trim();
-function tbPref(){ let o = null; try { o = JSON.parse(pref(TB_KEY) || "null"); } catch (e) { o = null; } return o && typeof o === "object" ? o : {}; }
+function tbPref(){ let o = null; try { o = JSON.parse(pref(TB_KEY) || "null"); } catch (e) { o = null; } o = o && typeof o === "object" ? o : {};
+  if (!Array.isArray(o.mine)) o.mine = MINE_START.slice();   // never set up here: the default set
+  return o; }
 const tbAll = () => [...document.querySelectorAll('#tools .rpanel[data-rp]:not([data-rp="mine"]) .tool, #topTools .tool')].map(b => ({k: (b.closest("[data-rp]") ? b.closest("[data-rp]").dataset.rp : "top") + "/" + tbKey(b), b}));
 function mineSet(list){ const o = tbPref(); o.mine = list; pref(TB_KEY, JSON.stringify(o)); tbApply(); }
 function mineAdd(k){ if (!k) return false; const o = tbPref(), L = o.mine || []; if (L.includes(k)) { toast("Already in My tools", 1800); return false; } L.push(k); mineSet(L); toast("Added to My tools", 1800); return true; }
@@ -9191,7 +9199,6 @@ async function nosSelDialog(){
   mutate(() => { its.forEach(o => { o.nos = v; }); }, "Nos " + v + " for " + its.length + " measurement" + (its.length === 1 ? "" : "s"));
   toast("Nos " + v + " on " + its.length + " measurement" + (its.length === 1 ? "" : "s"), 2400);
 }
-const MINE_START = ["takeoff/quick", "takeoff/draw", "takeoff/rect", "takeoff/auto", "takeoff/linepick", "takeoff/count", "takeoff/vsearch", "takeoff/dedrect", "takeoff/open", "takeoff/cal", "takeoff/rbAuto"];   // My tools filled in one click on first use
 /* ------------------------------------------------------------------ Settings (⚙ Settings in the top bar, Ctrl+,)
    Every option in one window, as Bluebeam's Preferences and PlanSwift's Options: a page per subject on the left, one search over all of
    them, a Reset on each page. A change applies at once (Close only closes). The options set elsewhere (View tab, Customize, Labels ⚙,
