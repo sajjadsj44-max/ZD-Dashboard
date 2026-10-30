@@ -50,7 +50,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
 
   await page.goto(URL, {waitUntil: "load"}); await wait(600);
   console.log("the look");
-  ok(await T(() => document.documentElement.getAttribute("data-look")) === "colour", "the page opens in the colourful look (data-look=\"colour\" on <html>)");
+  ok(await T(() => document.documentElement.getAttribute("data-look")) === "pro", "the page opens in the professional look (data-look=\"pro\" on <html>)");
   await page.click("#bNewProj"); await page.fill("#dlgName", "Fast takeoff test"); await page.click("#dlgOk"); await wait(400);
   await page.setInputFiles("#fileIn", {name: "test-plans.pdf", mimeType: "application/pdf", buffer: makePdf()});
   await page.waitForFunction(() => zdTakeoff.S.page && zdTakeoff.P.proj.scales[zdTakeoff.S.key] && zdTakeoff.S.geo[zdTakeoff.S.key], null, {timeout: 20000}); await wait(300);
@@ -212,12 +212,16 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
 
   console.log("the look");
   await T(() => zdTakeoff.setSave({look: "classic"})); await wait(80);
-  ok(await T(() => document.documentElement.getAttribute("data-look")) === "classic", "Settings → Colourful look off: the classic look");
+  ok(await T(() => document.documentElement.getAttribute("data-look")) === "classic", "Settings → Look: Classic");
   await page.reload({waitUntil: "load"}); await wait(800);
   ok(await T(() => document.documentElement.getAttribute("data-look")) === "classic", "…kept over a reload (set before the page is drawn)");
   await page.waitForFunction(() => window.zdTakeoff && zdTakeoff.P.proj, null, {timeout: 20000}).catch(() => {});
+  await T(() => zdTakeoff.setSave({look: "colourful"})); await wait(80);
+  ok(await T(() => document.documentElement.getAttribute("data-look")) === "colour", "Look: Colourful");
   await T(() => zdTakeoff.setSave({look: "colour"})); await wait(80);
-  ok(await T(() => document.documentElement.getAttribute("data-look")) === "colour", "and back to colour");
+  ok(await T(() => document.documentElement.getAttribute("data-look")) === "pro", "an older saved \"colour\" (the old default) opens Professional");
+  await T(() => zdTakeoff.setSave({look: "pro"})); await wait(80);
+  ok(await T(() => document.documentElement.getAttribute("data-look")) === "pro", "and back to Professional");
 
   console.log("one row at 1366 px");
   await page.setViewportSize({width: 1366, height: 768}); await wait(300); await page.click('[data-rtab="takeoff"]'); await wait(200);

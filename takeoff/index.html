@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en" data-zd-build="__ZD_BUILD__" data-look="colour">
+<html lang="en" data-zd-build="__ZD_BUILD__" data-look="pro">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sajjad QS PDF TAKEOFF Software</title>
 <script>/* the look (Settings → Ribbon & toolbar → Colourful look) is set before the page is drawn, so the other one never flashes */
-try { var zdSet = JSON.parse(localStorage.getItem("zdTakeoffSet") || "{}"); if (zdSet && zdSet.look === "classic") document.documentElement.setAttribute("data-look", "classic"); } catch (e) {}</script>
+try { var zdSet = JSON.parse(localStorage.getItem("zdTakeoffSet") || "{}"); if (zdSet && (zdSet.look === "classic" || zdSet.look === "colourful")) document.documentElement.setAttribute("data-look", zdSet.look === "classic" ? "classic" : "colour"); } catch (e) {}</script>
 <link rel="manifest" href="manifest.webmanifest">
 <script>/* the friends' link takeoff/?team: its own installable app (which opens on ?team again) and the team view from the first paint */
 if (new URLSearchParams(location.search).has("team")) { document.documentElement.classList.add("zd-team"); document.querySelector('link[rel="manifest"]').href = "manifest-team.webmanifest"; }</script>
@@ -930,6 +930,176 @@ html[data-look="colour"] :is(.hidebtn,.cond .ed,.crow .ed,.ctr .car,.cgrp2 .car)
 @media (forced-colors:active){html[data-look="colour"] :is(.rrow .tool.on,.rtabs .tool.on,.rtab.on){outline:2px solid Highlight;outline-offset:-2px}}
 @media (prefers-reduced-motion:reduce){html[data-look="colour"] *{transition:none!important}}
 </style>
+<style id="zdPro">
+/* the professional look (the default; Settings → Ribbon & toolbar → Look): a calm slate title bar, a white ribbon with
+   neutral icons and one blue accent, flat panels and clear section heads. Colours, borders, radii, shadows and a few
+   paddings only — every control stays where it is, so every key, menu and test finds it the same. */
+html[data-look="pro"]{--accent:#2563eb;--accent-h:#1d4ed8;--accent-s:#eff6ff;--accent-r:#bfdbfe;--body:#1f2937;--edge:#e5e7eb;--edge2:#d1d5db;
+  --ink:#111827;--sub:#4b5563;--muted:#6b7280;--purple:var(--accent);--blue:var(--accent);--navy:#111827;--bg:#f3f4f6;--line:#e5e7eb;--txt:#1f2937;accent-color:var(--accent)}
+html[data-look="pro"] body{font-feature-settings:"tnum" 0}
+html[data-look="pro"] :is(input[type=text],input[type=number],input[type=search],select,textarea){border-color:var(--edge2);border-radius:7px}
+html[data-look="pro"] :is(input,select,textarea):focus{outline:2px solid var(--accent-r);outline-offset:0;border-color:var(--accent)}
+html[data-look="pro"] .btn{border-color:var(--edge2);color:#374151;border-radius:7px;transition:background-color .12s,border-color .12s,color .12s}
+html[data-look="pro"] .btn:hover{border-color:#9ca3af;background:#f9fafb}
+html[data-look="pro"] .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+html[data-look="pro"] .btn.pri:hover{background:var(--accent-h);border-color:var(--accent-h)}
+html[data-look="pro"] .btn.dng{border-color:#fecaca;color:#b91c1c}
+html[data-look="pro"] .btn.dng:hover{background:#fef2f2;border-color:#f87171}
+html[data-look="pro"] :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+html[data-look="pro"] *{scrollbar-width:thin;scrollbar-color:#cbd5e1 transparent}
+
+/* title bar: one slate colour, quiet buttons, the project name as a field, one blue Export */
+html[data-look="pro"] header{background:#111827;border-bottom:1px solid #030712;color:#f9fafb;gap:6px;padding:6px 10px}
+html[data-look="pro"] header .homebtn{width:34px;height:34px;border-radius:8px;background:#1f2937;box-shadow:inset 0 0 0 1px #374151}
+html[data-look="pro"] header .homebtn:hover{background:#374151;filter:none;transform:none}
+html[data-look="pro"] header .homebtn svg{width:22px;height:22px}
+html[data-look="pro"] header .btn{background:transparent;border-color:transparent;color:#e5e7eb;font-weight:500;padding:4px 9px;border-radius:6px}
+html[data-look="pro"] header .btn:hover{background:#1f2937;border-color:#374151;color:#fff}
+html[data-look="pro"] header .btn:disabled{opacity:.35;background:transparent;border-color:transparent}
+html[data-look="pro"] :is(#bNewTop,#bAdd,#bAddM){background:#1f2937;border-color:#374151}
+html[data-look="pro"] #bAdd{border-radius:6px 0 0 6px;margin-right:-6px}html[data-look="pro"] #bAddM{border-radius:0 6px 6px 0;border-left-color:#4b5563}
+html[data-look="pro"] header .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+html[data-look="pro"] header .btn.pri:hover{background:var(--accent-h);border-color:var(--accent-h)}
+html[data-look="pro"] #bClaude{color:#c4b5fd}html[data-look="pro"] #bClaude:hover{color:#ddd6fe}
+html[data-look="pro"] #bClaude.on{background:#4c1d95;border-color:#6d28d9;color:#fff}
+html[data-look="pro"] .projpill{background:#1f2937;border:1px solid #374151;border-radius:8px}
+html[data-look="pro"] .projpill .btn{color:#d1d5db}
+html[data-look="pro"] .projpill #projName{background:transparent;color:#fff;border-color:transparent}
+html[data-look="pro"] .projpill #projName:hover{border-color:#4b5563}
+html[data-look="pro"] .projpill #projName:focus{background:#fff;color:var(--ink);border-color:var(--accent)}
+html[data-look="pro"] header #findIn{background:#1f2937;border:1px solid #374151;color:#f9fafb;border-radius:7px;flex:1 1 170px;min-width:140px}
+html[data-look="pro"] header #findIn::placeholder{color:#9ca3af}
+html[data-look="pro"] header #findIn:focus{background:#fff;color:var(--ink);border-color:var(--accent)}
+html[data-look="pro"] header .findw{flex:0 1 240px;min-width:150px;display:flex}
+html[data-look="pro"] header .findw #findIn{width:100%}
+html[data-look="pro"] header .edmode{display:inline-flex;background:#1f2937;border:1px solid #374151;border-radius:8px;padding:2px;gap:2px}
+html[data-look="pro"] header .edmode .btn{padding:3px 9px;border:0;border-radius:6px;color:#d1d5db}
+html[data-look="pro"] header .edmode .btn.tg2.on{background:#f9fafb;color:var(--ink);font-weight:600}
+html[data-look="pro"] header .btn.tg2.on{background:#f9fafb;border-color:#f9fafb;color:var(--ink)}
+html[data-look="pro"] header .savest{color:#86efac;font-size:11px}
+html[data-look="pro"] header .savest.bad{color:#fff}
+html[data-look="pro"] header a.back{color:#9ca3af;padding:4px 8px;border-radius:6px;font-weight:500}
+html[data-look="pro"] header a.back:hover{background:#1f2937;color:#fff}
+html[data-look="pro"] #bUndo{margin-left:4px}
+html[data-look="pro"] :is(#bUndo,#bRedo){font-size:13px;padding:2px 8px}
+html[data-look="pro"] #bCmd{border-left:1px solid #374151;border-radius:0 6px 6px 0;margin-left:2px}
+html[data-look="pro"] #bExport{margin-left:2px}
+
+/* ribbon: white, the tabs as a line of names with a blue bar under the open one */
+html[data-look="pro"] .tools{background:#fff;border-bottom:1px solid var(--edge);box-shadow:0 1px 2px rgba(17,24,39,.04)}
+html[data-look="pro"] .rtabs{background:#fff;border-bottom:1px solid var(--edge);padding:3px 8px 0;gap:0}
+html[data-look="pro"] .rtab{color:var(--sub);font-weight:600;font-size:12.5px;padding:6px 12px 7px;border:0;border-radius:0;margin-bottom:-1px;box-shadow:none;background:none}
+html[data-look="pro"] .rtab:hover{color:var(--ink);background:none;box-shadow:inset 0 -2px 0 var(--edge2)}
+html[data-look="pro"] .rtab.on{color:var(--accent);background:none;border:0;box-shadow:inset 0 -2px 0 var(--accent)}
+html[data-look="pro"] .rtab[data-rtab="mine"]{color:#b45309}html[data-look="pro"] .rtab[data-rtab="mine"].on{color:#b45309;box-shadow:inset 0 -2px 0 #d97706}
+html[data-look="pro"] .rtab.dropok{outline:2px dashed var(--accent);background:var(--accent-s);border-radius:6px 6px 0 0}
+html[data-look="pro"] .rtabs .tool{background:#fff;border-color:var(--edge);color:#374151;border-radius:7px}
+html[data-look="pro"] .rtabs .tool:hover:not(:disabled,.on){background:#f9fafb;border-color:var(--edge2)}
+html[data-look="pro"] :is(.rtabs .tool.on,.tool.tgl.on){background:var(--accent-s);border-color:var(--accent-r);color:var(--accent-h);box-shadow:none}
+html[data-look="pro"] .rtabs .rsel{border-left-color:var(--edge)}
+html[data-look="pro"] #bDel:not(:disabled):hover{color:#b91c1c;border-color:#fca5a5;background:#fef2f2}
+html[data-look="pro"] #snapLbl:has(#snapOn:checked){color:#047857}html[data-look="pro"] #snapLbl:has(#snapOn:checked) .ic{color:#059669}
+/* the little set-up buttons at the far right: icons, their names on pointing */
+html[data-look="pro"] :is(#bRibbon,#bCustTb,#bKeys) .tl{display:none}
+html[data-look="pro"] :is(#bRibbon,#bCustTb,#bKeys){padding:3px 6px;color:var(--muted)}
+html[data-look="pro"] .rcond{background:#fff;border:1px solid var(--edge2);border-radius:8px;box-shadow:0 1px 2px rgba(17,24,39,.05);margin-left:8px}
+html[data-look="pro"] .rcond:hover{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-s)}
+html[data-look="pro"] .rcond .rcq{color:var(--accent);font-weight:600}
+
+/* ribbon tools: neutral icons, a soft blue tile for the one in use, quiet group names */
+html[data-look="pro"] .rrow{background:#fff;padding:5px 8px 4px}
+html[data-look="pro"] .rg{border-right-color:var(--edge);padding:0 6px}
+html[data-look="pro"] .rg:first-child{padding-left:0}
+html[data-look="pro"] .rgl{color:#9ca3af;font-weight:600;font-size:9px;letter-spacing:.6px;padding-top:3px}
+html[data-look="pro"] .rrow .tool{color:#374151;border-radius:8px;min-width:52px;max-width:78px;padding:5px 4px 4px;transition:background-color .1s,color .1s}
+html[data-look="pro"] .rrow .tool .ic{color:#4b5563;stroke-width:1.6}
+html[data-look="pro"] .rrow .tool:hover:not(.on){background:#f3f4f6;color:var(--ink)}
+html[data-look="pro"] .rrow .tool:hover:not(.on) .ic{color:var(--accent)}
+html[data-look="pro"] .rrow .tool.on{background:var(--accent-s);border-color:var(--accent-r);color:var(--accent-h);box-shadow:none}
+html[data-look="pro"] .rrow .tool.on .ic{color:var(--accent)}
+html[data-look="pro"] .rrow .tool.on kbd{color:#60a5fa}
+html[data-look="pro"] .rrow .tool kbd{color:#9ca3af}
+html[data-look="pro"] .rrow .tool.tlg .ic{color:#fff;background:var(--accent);border-radius:7px;box-shadow:0 0 0 3px var(--accent)}
+html[data-look="pro"] .rrow .tool:disabled .ic{color:#9ca3af}
+html[data-look="pro"] #rbNos.on{background:#f5f3ff;border-color:#ddd6fe;color:#6d28d9}
+html[data-look="pro"] #mineHint b{color:#b45309}
+html[data-look="pro"] #mineBox.dropok,html[data-look="pro"] #mineHint.dropok{outline-color:var(--accent);background:var(--accent-s)}
+
+/* side panels: white, a light head, segmented tabs */
+html[data-look="pro"] .panel{background:#fff;border-color:var(--edge)}
+html[data-look="pro"] .panel .ph{background:#fff;border-bottom:1px solid var(--edge)}
+html[data-look="pro"] .panel .ph h3{color:var(--ink);font-size:14px;font-weight:700}
+html[data-look="pro"] .seg{background:#f3f4f6;border-radius:8px;padding:2px;display:inline-flex;gap:2px}
+html[data-look="pro"] .seg .btn{background:transparent;border-color:transparent;color:var(--sub);border-radius:6px}
+html[data-look="pro"] .seg .btn:hover{background:#fff;border-color:transparent;color:var(--ink)}
+html[data-look="pro"] .seg .btn.on{background:#fff;border-color:transparent;color:var(--accent-h);font-weight:600;box-shadow:0 1px 2px rgba(17,24,39,.12)}
+html[data-look="pro"] :is(#viewPop,#splitPop) .seg{background:none;padding:0}
+html[data-look="pro"] :is(#viewPop .btn.tg2.on,#splitPop .btn.tg2.on){background:var(--accent);border-color:var(--accent);color:#fff}
+html[data-look="pro"] .propsbox .pbh{background:#f9fafb;border-top:1px solid var(--edge);border-bottom:1px solid var(--edge);color:var(--ink)}
+html[data-look="pro"] .rz:hover{background:rgba(37,99,235,.18)}
+html[data-look="pro"] .rfoot{background:#f9fafb;border-top:1px solid var(--edge)}
+html[data-look="pro"] table.sh tr.grp td{background:#1f2937}
+html[data-look="pro"] .boq{color:#6d28d9;background:#f5f3ff}
+html[data-look="pro"] .pgt.on{box-shadow:0 0 0 2px var(--accent-r)}
+html[data-look="pro"] .panes.split .pane.act .pstrip{background:var(--accent-s);border-bottom-color:var(--accent)}
+
+/* drawing area, its bar, the status and agent bars */
+html[data-look="pro"] .panes{background:#d1d5db}
+html[data-look="pro"] .stg{background:#e5e7eb}
+html[data-look="pro"] .stg.dark{background:#000}
+html[data-look="pro"] .cbar{background:#fff;border-bottom:1px solid var(--edge)}
+html[data-look="pro"] .cbar .btn{background:#fff;border-color:var(--edge);color:#374151}
+html[data-look="pro"] .cbar .btn:hover{border-color:var(--accent);color:var(--accent)}
+html[data-look="pro"] :is(.cbar .btn.tg2.on,#bSplit.on){background:var(--accent-s);border-color:var(--accent-r);color:var(--accent-h)}
+html[data-look="pro"] .status{background:#f9fafb;border-top:1px solid var(--edge);color:#374151}
+html[data-look="pro"] .status .cmdwrap label{color:var(--ink)}
+html[data-look="pro"] .agentbar{background:#fff;border-top:1px solid var(--edge)}
+html[data-look="pro"] .agch .btn{background:#fff;border-color:var(--edge);color:#374151;border-radius:999px}
+html[data-look="pro"] .agch .btn:hover{border-color:var(--accent);color:var(--accent)}
+html[data-look="pro"] .warnbar{background:#fffbeb;border-bottom:1px solid #fde68a;color:#92400e}
+
+/* popovers, menus, dialogs, toast */
+html[data-look="pro"] :is(#viewPop,#splitPop,#snapPop,#ctx,#ctx .cm,#pop,#findRes,.cpop){border-color:var(--edge);border-radius:10px;box-shadow:0 12px 32px rgba(17,24,39,.18)}
+html[data-look="pro"] #ctx .ci:hover{background:var(--accent-s);color:var(--accent-h)}
+html[data-look="pro"] #pal .pi.on{background:var(--accent-s);box-shadow:inset 3px 0 0 var(--accent)}
+html[data-look="pro"] #dlgBack{background:rgba(17,24,39,.45)}
+html[data-look="pro"] .dlg{border-radius:12px;border:1px solid var(--edge);box-shadow:0 24px 60px rgba(17,24,39,.3)}
+html[data-look="pro"] .dlg .dh{background:#fff;border-bottom:1px solid var(--edge);border-radius:12px 12px 0 0;color:var(--ink);font-weight:700}
+html[data-look="pro"] .dlg .df{background:#f9fafb;border-top:1px solid var(--edge);border-radius:0 0 12px 12px}
+html[data-look="pro"] #toast{background:#111827;box-shadow:0 10px 30px rgba(17,24,39,.35);border-left:4px solid var(--accent);border-radius:8px}
+html[data-look="pro"] .qkch.on{background:var(--accent);border-color:var(--accent)}
+
+/* start screen: a title block, a proper search field, a clean project table */
+html[data-look="pro"] #start{background:#f3f4f6}
+html[data-look="pro"] #start .wrap{max-width:1040px;padding-top:34px}
+html[data-look="pro"] #start h2{font-size:24px;font-weight:700;color:var(--ink);letter-spacing:-.2px;margin-bottom:6px}
+html[data-look="pro"] #start h2 .btn{background:#fff}
+html[data-look="pro"] #start p.sub{color:var(--sub);font-size:13.5px;max-width:820px;margin-bottom:22px}
+html[data-look="pro"] #start .card{border:1px solid var(--edge);border-radius:12px;box-shadow:0 1px 3px rgba(17,24,39,.06);overflow:hidden}
+html[data-look="pro"] #start .card .hd{padding:14px 16px;gap:10px;border-bottom:1px solid var(--edge);background:#fff}
+html[data-look="pro"] #start .card .hd h3{font-size:15px;color:var(--ink)}
+html[data-look="pro"] #projectSearch{height:34px;padding:6px 10px 6px 32px;border:1px solid var(--edge2);border-radius:8px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 10px 50%/15px}
+html[data-look="pro"] #start .card .hd .btn{height:34px;padding:6px 14px}
+html[data-look="pro"] #projList table{border-collapse:collapse;width:100%}
+html[data-look="pro"] #projList th{background:#f9fafb;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;border-bottom:1px solid var(--edge)}
+html[data-look="pro"] #projList td{border-bottom:1px solid #f3f4f6}
+html[data-look="pro"] #projList tr:hover td{background:#f9fafb}
+html[data-look="pro"] #projList .plink{color:var(--accent-h)}
+html[data-look="pro"] #start .note{border:1px solid var(--edge);border-left:4px solid var(--accent);border-radius:10px;background:#fff;color:var(--sub)}
+/* one row each for the title bar, the tabs and My tools on a 1440 px screen: short names where an icon says it, the search takes what is left */
+html[data-look="pro"] header .hl{display:none}
+html[data-look="pro"] header{gap:4px}
+html[data-look="pro"] #projName{width:150px}
+html[data-look="pro"] header .findw{flex:1 1 120px;min-width:120px;max-width:320px}
+html[data-look="pro"] .rtab{padding:6px 9px 7px}
+html[data-look="pro"] .rcond{max-width:200px}
+html[data-look="pro"] #bDel .tl,html[data-look="pro"] .rtabs .tool kbd{display:none}
+@media (max-width:1500px){html[data-look="pro"] :is(#bOrtho,#bPolar,#bXh,[data-tool="lasso"],[data-tool="pan"]) .tl{display:none}}
+html[data-look="pro"] .rrow .tool{min-width:46px;max-width:68px;padding:5px 3px 4px;font-size:11px}
+html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
+@media (forced-colors:active){html[data-look="pro"] :is(.rrow .tool.on,.rtabs .tool.on,.rtab.on){outline:2px solid Highlight;outline-offset:-2px}}
+@media (prefers-reduced-motion:reduce){html[data-look="pro"] *{transition:none!important}}
+</style>
 </head>
 <body>
 <header>
@@ -947,13 +1117,13 @@ html[data-look="colour"] :is(.hidebtn,.cond .ed,.crow .ed,.ctr .car,.cgrp2 .car)
   <input type="file" id="dirIn" webkitdirectory multiple hidden>
   <input type="file" id="imgIn" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,.jpg,.jpeg,.png" multiple hidden>
   <div class="findw"><input type="search" id="findIn" placeholder="Search text on the drawings (Ctrl+F)" aria-label="Find text on the drawings"><div id="findRes"></div></div>
-  <div class="edmode" role="group" aria-label="Edit mode"><button class="btn sm tg2" id="bModePdf" title="PDF mode — dimmer 60 %, white background, monochrome, line weights on · Offset, Trim, Extend, Fillet, Break, Join and Explode edit the takeoff's markups">PDF Mode</button><button class="btn sm tg2" id="bModeCad" title="AutoCAD mode — no dimming, black background, the drawing's colours · Offset, Trim, Extend, Fillet, Break, Join and Explode edit the AutoCAD drawing's own lines, polylines, arcs and circles (DWG / DXF)">AutoCAD Mode</button></div>
+  <div class="edmode" role="group" aria-label="Edit mode"><button class="btn sm tg2" id="bModePdf" title="PDF mode — dimmer 60 %, white background, monochrome, line weights on · Offset, Trim, Extend, Fillet, Break, Join and Explode edit the takeoff's markups">PDF<span class="hl"> Mode</span></button><button class="btn sm tg2" id="bModeCad" title="AutoCAD mode — no dimming, black background, the drawing's colours · Offset, Trim, Extend, Fillet, Break, Join and Explode edit the AutoCAD drawing's own lines, polylines, arcs and circles (DWG / DXF)">AutoCAD<span class="hl"> Mode</span></button></div>
   <div class="sp"></div>
   <button class="btn sm" id="bUndo" title="Undo (Ctrl+Z)">&#8630;</button>
   <button class="btn sm" id="bRedo" title="Redo (Ctrl+Y)">&#8631;</button>
-  <button class="btn sm" id="bCmd" title="Every command by name — tools, exports, pages, AI agents (Ctrl+K)">&#8984; Commands</button>
+  <button class="btn sm" id="bCmd" title="Every command by name — tools, exports, pages, AI agents (Ctrl+K)">&#8984;<span class="hl"> Commands</span></button>
   <button class="btn sm" id="bToolChest" title="Tool Chest — reusable, favorited tool profiles; click a profile to activate its saved appearance">&#129520; Tool Chest</button>
-  <button class="btn sm" id="bSettings" title="Settings — every option in one window: start-up, ribbon, panels, drawing, snap, measurement and markup defaults, labels, your own shortcuts, export, AI, saving (Ctrl+,)">&#9881; Settings</button>
+  <button class="btn sm" id="bSettings" title="Settings — every option in one window: start-up, ribbon, panels, drawing, snap, measurement and markup defaults, labels, your own shortcuts, export, AI, saving (Ctrl+,)">&#9881;<span class="hl"> Settings</span></button>
   <button class="btn sm" id="bWs" title="Workspace: layouts (takeoff, drawing only, pages), icons-only toolbar, minimap, full screen, thumbnail size" aria-haspopup="true">&#9638; Workspace</button>
   <button class="btn sm tg2" id="bClaude" title="Ask Claude to read the drawing and measure the rooms">&#10022; Takeoff agent</button>
   <button class="btn sm pri" id="bExport" title="Export: Excel, CSV, marked-up pages as PDF / PNG / JPEG (choose pages, resolution, legend), report, project">&#8681; Export</button>
@@ -1407,7 +1577,7 @@ html[data-look="colour"] :is(.hidebtn,.cond .ed,.crow .ed,.ctr .car,.cgrp2 .car)
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-30c"></script>
+<script type="module" src="takeoff.js?v=2026-10-30p"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
