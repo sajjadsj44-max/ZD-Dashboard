@@ -9206,11 +9206,13 @@ async function nosSelDialog(){
    on, whether it follows the tool picked, snap and pick distances, your own shortcuts) are kept under SET_KEY. All of it stays in this
    browser — Settings → Backup & reset saves it to a file for another computer. */
 const SET_KEY = "zdTakeoffSet";
-const SET_DEF = {homeTab: "mine", ribFollow: "smart", openLast: true, snapStart: true, snapPx: 11, hitPx: 7, keys: [], look: "colour"};
+const SET_DEF = {homeTab: "mine", ribFollow: "smart", openLast: true, snapStart: true, snapPx: 11, hitPx: 7, keys: [], look: "pro"};
 let SETV = null;
 function setPref(){ if (!SETV) { let o = null; try { o = JSON.parse(pref(SET_KEY) || "null"); } catch (e) { o = null; } SETV = Object.assign({}, SET_DEF, o && typeof o === "object" ? o : {}); if (!Array.isArray(SETV.keys)) SETV.keys = []; } return SETV; }
 function setSave(ch){ SETV = Object.assign({}, setPref(), ch); pref(SET_KEY, JSON.stringify(SETV)); setApply(); return SETV; }
-function setApply(){ const o = setPref(); SNAP_PX = Math.max(4, Math.min(40, Math.round(+o.snapPx) || 11)); HIT_PX = Math.max(3, Math.min(30, Math.round(+o.hitPx) || 7)); document.documentElement.setAttribute("data-look", o.look === "classic" ? "classic" : "colour"); }
+function setApply(){ const o = setPref(); SNAP_PX = Math.max(4, Math.min(40, Math.round(+o.snapPx) || 11)); HIT_PX = Math.max(3, Math.min(30, Math.round(+o.hitPx) || 7)); document.documentElement.setAttribute("data-look", o.look === "classic" ? "classic" : o.look === "colourful" ? "colour" : "pro"); }
+/* the look: Professional (the default — an older saved "colour" was the old default, so it opens Professional too), Colourful, Classic */
+const lookNow = () => { const l = setPref().look; return l === "classic" || l === "colourful" ? l : "pro"; };
 function ribHome(){   // the tab the ribbon opens on: My tools unless Settings → General says otherwise (a tab hidden in Customize is skipped)
   const o = setPref(), h = o.homeTab === "last" ? pref("zdTakeoffRibLast") || "mine" : o.homeTab, b = [...document.querySelectorAll("#tools .rtab")].find(x => x.dataset.rtab === h);
   if (b && b.style.display !== "none") ribShow(h);
@@ -9304,7 +9306,7 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
       {t: "btn", n: "Command palette", d: "every tool, export and dialog by name (Ctrl+K)", b: "Open", fn: openPalette}],
      reset: () => { setSave({homeTab: SET_DEF.homeTab, ribFollow: SET_DEF.ribFollow, openLast: true}); pref("zd-auto-update", ""); }},
     {id: "ribbon", n: "Ribbon & toolbar", d: "the look, tabs, My tools, icons, compact ribbon", rows: [
-      {t: "tog", n: "Colourful look", d: "a colour for each tool family, colour icons, the navy title bar — off: the classic look", get: () => setPref().look !== "classic", set: v => { setSave({look: v ? "colour" : "classic"}); }},
+      {t: "sel", n: "Look", d: "Professional: a slate title bar, a white ribbon, one blue accent · Colourful: a colour for each tool family · Classic: the first look", o: [["pro", "Professional"], ["colourful", "Colourful"], ["classic", "Classic"]], get: lookNow, set: v => { setSave({look: v}); }},
       {t: "tog", n: "Compact ribbon", d: "the same tools, about half the height", get: () => !!pcPref().compact, set: v => pcSave({off: pcPref().off || [], compact: v})},
       {t: "tog", n: "Icons only", d: "no names under the tools (pointing at one still names it)", get: () => wsPref().tb === "icons", set: v => wsSet({tb: v ? "icons" : "full"})},
       {t: "tog", n: "Ribbon tabs row", d: "Takeoff, Modify, Markup … with Select, Ortho, Snap on the right", get: () => pcOn("ui-tabs"), set: v => pcSet("ui-tabs", v)},
