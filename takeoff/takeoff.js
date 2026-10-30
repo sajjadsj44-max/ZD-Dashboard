@@ -419,7 +419,7 @@ function migrate(p, rep){
   p.items.forEach(it => { const nn = Math.round(num(it.nos)); it.nos = nn >= 1 && isFinite(nn) ? nn : 1; if (it.label == null) it.label = ""; it.label = String(it.label);
     if (!["shape", "ded", "open"].includes(it.kind)) it.kind = "shape";
     if (it.arcs != null && !(arr(it.arcs) && it.arcs.every(a => arr(a) && a.length === 2 && Number.isInteger(a[0]) && Number.isInteger(a[1])))) delete it.arcs;
-    ["ow", "oh", "doorW"].forEach(k => { if (it[k] != null && it[k] !== "" && !isFinite(num(it[k]))) delete it[k]; });
+    ["ow", "oh", "doorW", "dep"].forEach(k => { if (it[k] != null && it[k] !== "" && !isFinite(num(it[k]))) delete it[k]; });
     if (it.ver != null && !(obj(it.ver) && VER_NAMES[it.ver.st])) delete it.ver; else if (it.ver) it.ver.note = String(it.ver.note == null ? "" : it.ver.note).slice(0, 2000); });
   bad = 0;
   p.marks = p.marks.filter(m => { const q = obj(m) && m.id != null && MARK_TOOLS[m.type] && pts(m.pts, MK_MINPTS[m.type] || 2); if (!q) { bad++; return false; } m.pts = q; m.id = String(m.id); m.text = String(m.text == null ? "" : m.text);
@@ -429,6 +429,13 @@ function migrate(p, rep){
     if (m.type === "legend") ["border", "fill", "headerFill", "titleFill", "textColor"].forEach(k2 => { if (m[k2] != null && !HEXCOL.test(String(m[k2]))) { note("The legend's colour “" + String(m[k2]).slice(0, 40) + "” is not a colour — reset"); delete m[k2]; } });   // (written into the drawing's SVG)
     if (m.color != null && !HEXCOL.test(String(m.color))) { note("A markup's colour “" + String(m.color).slice(0, 40) + "” is not a colour — replaced"); m.color = "#d03b3b"; } return true; });
   if (bad) note(bad + " markup" + (bad > 1 ? "s" : "") + " with missing or broken points left out");
+  if (p.levels != null) {   // spot levels (Cut / fill): a point and a level each, in the project's level unit (lvUnit: ft or m)
+    if (!arr(p.levels)) { note("Spot levels are not a list — cleared"); p.levels = []; }
+    const n0 = p.levels.length; p.levels = p.levels.filter(l => obj(l) && arr(l.p) && l.p.length === 2 && l.p.every(v => isFinite(num(v))) && isFinite(num(l.z)))
+      .map(l => ({id: String(l.id || uid("L")).slice(0, 40), file: String(l.file), page: Math.max(1, Math.round(num(l.page)) || 1), p: l.p.map(num), z: num(l.z)}));
+    if (p.levels.length < n0) note((n0 - p.levels.length) + " spot level" + (n0 - p.levels.length > 1 ? "s" : "") + " with no point or no level left out");
+  }
+  if (p.lvUnit != null && p.lvUnit !== "m" && p.lvUnit !== "ft") delete p.lvUnit;
   mkProjCommon(p);
   Object.keys(p.scales).forEach(k => { const sc = p.scales[k]; if (!obj(sc) || !(num(sc.ptPerFt) > 0) || !isFinite(num(sc.ptPerFt))) { note("Page scale " + k + " is not a number — removed (set it again)"); delete p.scales[k]; } else sc.ptPerFt = num(sc.ptPerFt); });
   Object.keys(p.viewports).forEach(k => { if (!arr(p.viewports[k])) { delete p.viewports[k]; return; }
@@ -3327,7 +3334,7 @@ function rowsOf(it, k){
   let rows = [];
   if (c.type === "count") rows = [R({nos: it.pts.length * nos, desc: "count"})];
   else if (it.shape === "circle") {   // Nos × π/4 × D² (area) or Nos × π × D (length) — the diameter on the sheet
-    const D = r3(2 * dist(it.pts[0], it.pts[1]) / k), H = c.unit === "cft" ? r3(+c.t || 0) : null, faces = +c.faces || 1;
+    const D = r3(2 * dist(it.pts[0], it.pts[1]) / k), H = c.unit === "cft" ? (+it.dep > 0 ? +it.dep : r3(+c.t || 0)) : null, faces = +c.faces || 1;
     if (c.type === "area") rows = [R({nos, A: r3(Math.PI / 4 * D * D), H, how: "circle", D})];
     else { const L = r3(Math.PI * D); rows = [c.unit === "ft" ? R({nos, L, how: "circle", D}) : c.unit === "Sft" ? R({nos: nos * faces, L, H: r3(+c.h || 0), how: "circle", D}) : R({nos, L, W: r3(+c.t || 0), H: r3(+c.h || 0), how: "circle", D})]; }
     if (it.kind === "ded" && c.type === "area") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0); if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }
@@ -3351,7 +3358,7 @@ function rowsOf(it, k){
   } else {
     // one measured shape = one row: a plain rectangle as L × W, any other outline as its plan area (by coordinates)
     const F = it.pts.map(ft), tol = 0.002 * Math.max(1, Math.sqrt(polyArea(F)));
-    const parts = rectilinear(F, tol), H = c.unit === "cft" ? r3(+c.t || 0) : null;
+    const parts = rectilinear(F, tol), H = c.unit === "cft" ? (+it.dep > 0 ? +it.dep : r3(+c.t || 0)) : null;   // dep: a cut / fill from spot levels, its own average depth (not rounded: the volume is the one worked out)
     rows = parts && parts.length === 1 ? [R({nos, L: r3(parts[0].L), W: r3(parts[0].W), H, how: "rect"})]
          : [R({nos, A: r3(polyArea(F)), H, how: "poly", sides: F.length})];
     if (it.kind === "ded") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0); if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }
@@ -4621,6 +4628,8 @@ function drawNow(){
   if (!keep) floorList(S.key).forEach(f => { if (!f.r) return; const a = toScr([f.r[0], f.r[1]]), b = toScr([f.r[2], f.r[3]]), w = f.name.length * 6.4 + 10;   // floor boundaries, each with its floor's name
     h.push(`<rect class="flbox" x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="none" stroke="#0f9d8f" stroke-width="1.5" stroke-dasharray="10 5" pointer-events="none"/>`);
     h.push(label([a[0] + w / 2 + 4, a[1] + 13], f.name, "#0b6e64")); });
+  if (!keep && !S.hideMk) lvHere().forEach(l => { const q = toScr(l.p).map(v => +v.toFixed(1));   // spot levels: a triangle on the point, its level beside it
+    h.push(`<g class="splv" pointer-events="none"><path d="M${q[0] - 5} ${q[1] - 9}h10l-5 9z" fill="#0f9d8f" stroke="#fff" stroke-width="1"/><text x="${q[0] + 7}" y="${q[1] - 3}" font-size="11" font-weight="700" fill="#0b6e64" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(lvFmt(l.z))}</text></g>`); });
   if (!keep && !S.hideMk) (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo && !mkHidden(m)).forEach(m => h.push(markSvg(m, toScr, 1)));
   if (!keep && S.cadSel) h.push(cadSelSvg(cadSelIds()));   // AutoCAD objects selected (Shift+V)
   if (cedHere()) dyn.push(cedSvg());
@@ -6218,8 +6227,9 @@ async function findSimilar(rect){
   const v = await ask("Find similar — " + esc(c.name), `<p>Every symbol that looks like the one you boxed is found and shown to you first — untick any wrong ones, and only the ticked ones are counted into <b>${esc(c.name)}</b>.</p>
     <div class="grid" style="margin-top:10px"><div class="fg"><label>Search</label><select id="vsWhere">${areaOf() ? '<option value="cur" selected>Inside the takeoff area (boxed)</option>' : ""}<option value="area"${areaOf() ? "" : " selected"}>An area of this page — box it next</option><option value="page">This whole page</option><option value="pdf">Every page of this PDF</option>${nPdf > 1 ? `<option value="all">Every PDF of the project (${nPdf})</option>` : ""}</select></div>
     <div class="fg"><label>Match</label><select id="vsThr"><option value="0.9">Strict (90%)</option><option value="0.82" selected>Normal (82%)</option><option value="0.72">Loose (72%)</option></select></div>
-    <div class="fg w2"><label><input type="checkbox" id="vsRot" style="width:auto" checked> Also find it turned 90°, 180°, 270°</label></div></div>`, "Find",
-    () => ({where: $("vsWhere").value, thr: +$("vsThr").value, rot: $("vsRot").checked}));
+    <div class="fg w2"><label><input type="checkbox" id="vsRot" style="width:auto" checked> Also find it turned 90°, 180°, 270°</label></div>
+    <div class="fg w2"><label title="Kept in this browser at its real size (from the page scale) as “${esc(c.name)}”: My symbols then counts it — with every other symbol kept — on any drawing in one go"><input type="checkbox" id="vsKeep" style="width:auto"> Keep it in <b>My symbols</b> as “${esc(c.name)}” — to count it on other drawings</label></div></div>`, "Find",
+    () => ({where: $("vsWhere").value, thr: +$("vsThr").value, rot: $("vsRot").checked, keep: $("vsKeep").checked}));
   if (!v) { setTool("count"); return; }
   let area = null;
   if (v.where === "cur") area = areaOf();
@@ -6238,6 +6248,7 @@ async function findSimilar(rect){
     bx0 = Math.max(0, bx0 - 1); by0 = Math.max(0, by0 - 1); bx1 = Math.min(here.W - 1, bx1 + 1); by1 = Math.min(here.H - 1, by1 + 1);
     const tw = bx1 - bx0 + 1, th = by1 - by0 + 1, T0 = new Uint8Array(tw * th);
     for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) T0[y * tw + x] = here.m[(by0 + y) * here.W + bx0 + x];
+    if (v.keep) { if (curScale()) { symKeep(c.name, T0, tw, th, sc, curScale()); toast("“" + c.name + "” kept in My symbols", 2200); } else toast("Not kept in My symbols: set this page's scale first (K) — a symbol is kept at its real size", 4500); }
     const vars = [{m: T0, w: tw, h: th}]; if (v.rot) for (let r = 0; r < 3; r++) vars.push(rot90(vars[r].m, vars[r].w, vars[r].h));
     const files = v.where === "all" ? P.proj.files : P.proj.files.filter(f => f.id === fid0);
     const pages = []; files.forEach(f => { if (v.where === "page") pages.push({f, pn: pn0}); else for (let i = 1; i <= f.pages; i++) pages.push({f, pn: i}); });
@@ -6294,16 +6305,106 @@ function reviewMatches(c, cands, thr, skipped){
   let n = 0;
   const body = `<p>${cands.length} possible match${cands.length > 1 ? "es" : ""} on ${groups.length} page${groups.length > 1 ? "s" : ""} for <b>${esc(c.name)}</b> — weakest first, the doubtful ones framed in amber. Untick the wrong ones; only the ticked ones are counted.</p>
     <div style="display:flex;gap:6px;margin:8px 0"><button class="btn sm" data-rv="all">Tick all</button><button class="btn sm" data-rv="none">Untick all</button><button class="btn sm" data-rv="weak">Untick the doubtful</button><span class="small" id="rvN" style="align-self:center"></span></div>
-    <div style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px">${groups.map(g => `<div style="margin-bottom:8px"><label style="font-weight:700;font-size:12px;display:flex;gap:6px;align-items:center"><input type="checkbox" checked data-rvg="${g.L[0].i}" style="width:auto"> ${esc(g.f.name.replace(/\.pdf$/i, ""))} — p.${g.pn} <span class="small" style="font-weight:400">(${g.L.length})</span></label>
+    <div class="rvl" style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px">${groups.map(g => `<div style="margin-bottom:8px"><label style="font-weight:700;font-size:12px;display:flex;gap:6px;align-items:center"><input type="checkbox" checked data-rvg="${g.L[0].i}" style="width:auto"> ${esc(g.f.name.replace(/\.pdf$/i, ""))} — p.${g.pn} <span class="small" style="font-weight:400">(${g.L.length})</span></label>
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">${g.L.map(m => (n++ < shown) ? `<label title="${Math.round(m.F * 100)}% match" style="display:flex;flex-direction:column;align-items:center;border:2px solid ${weak(m) ? "var(--amber)" : "var(--line)"};border-radius:5px;padding:2px;cursor:pointer;font-size:10px;background:#fff"><img src="${m.img}" width="44" height="44" style="image-rendering:pixelated;display:block"><span><input type="checkbox" checked data-rvm="${m.i}" data-g="${g.L[0].i}" style="width:auto;margin:0 2px 0 0">${Math.round(m.F * 100)}%</span></label>` : `<input type="checkbox" checked data-rvm="${m.i}" data-g="${g.L[0].i}" hidden>`).join("")}</div></div>`).join("")}
       ${n > shown ? `<p class="small">${n - shown} more not pictured (ticked) — tick / untick them with their page.</p>` : ""}</div>
     ${skipped.length ? `<p class="small" style="margin-top:6px;color:#8a5a00">Not searched: ${esc(skipped.slice(0, 5).join(" · "))}${skipped.length > 5 ? " · …" : ""}</p>` : ""}`;
   const p = ask("Check the matches — " + c.name, body, "Count ticked", () => cands.filter(m => { const b = $("dlgB").querySelector(`[data-rvm="${m.i}"]`); return b && b.checked; }));
   const B = $("dlgB"), boxes = () => [...B.querySelectorAll("[data-rvm]")];
-  const upd = () => { const k = boxes().filter(x => x.checked).length; $("rvN").textContent = k + " of " + cands.length + " ticked"; if ($("dlgOk")) $("dlgOk").textContent = "Count " + k; };
-  B.addEventListener("change", e => { const g = e.target.dataset.rvg; if (g != null) boxes().filter(x => x.dataset.g === g).forEach(x => { x.checked = e.target.checked; }); upd(); });
+  const upd = () => { const k = boxes().filter(x => x.checked).length, n2 = $("rvN"); if (!n2) return; n2.textContent = k + " of " + cands.length + " ticked"; if ($("dlgOk")) $("dlgOk").textContent = "Count " + k; };
+  B.querySelector(".rvl").addEventListener("change", e => { const g = e.target.dataset.rvg; if (g != null) boxes().filter(x => x.dataset.g === g).forEach(x => { x.checked = e.target.checked; }); upd(); });   // (on this list, not the dialog's body: a listener there outlived the dialog and broke the next ones)
   B.querySelectorAll("[data-rv]").forEach(b => b.onclick = () => { const w = b.dataset.rv; boxes().forEach(x => { if (w === "all") x.checked = true; else if (w === "none") x.checked = false; else if (weak(cands[+x.dataset.rvm])) x.checked = false; }); upd(); });
   upd(); return p;
+}
+/* My symbols (PlanSwift's Auto Count, carried from one drawing to the next): a symbol boxed for Find similar can be kept — its ink
+   and its real size in ft (from the page scale), in this browser — and My symbols then looks for every kept symbol at once, on
+   this page, this PDF or every PDF, each page read at its own scale so the symbol comes out its own size. The finds are checked
+   as Find similar's (one list per symbol) and counted into the count condition of the symbol's name, made when there is none. */
+const SYM_KEY = "zdTakeoffSyms";
+function symList(){ let L = []; try { L = JSON.parse(pref(SYM_KEY) || "[]"); } catch (e) { L = []; }
+  return Array.isArray(L) ? L.filter(s => s && typeof s.name === "string" && s.name.trim() && typeof s.m === "string" && s.w > 0 && s.h > 0 && s.w * s.h <= 40000 && s.fw > 0 && s.fh > 0) : []; }
+const symSaveAll = L => pref(SYM_KEY, JSON.stringify(L));
+function bitsTo(m){ let s = ""; for (let i = 0; i < m.length; i += 8) { let b = 0; for (let j = 0; j < 8; j++) if (m[i + j]) b |= 1 << j; s += String.fromCharCode(b); } return btoa(s); }
+function bitsFrom(s, n){ const b = atob(s), m = new Uint8Array(n); for (let i = 0; i < n; i++) m[i] = (b.charCodeAt(i >> 3) >> (i & 7)) & 1; return m; }
+function symKeep(name, m, w, h, sc, k){   // a boxed symbol's ink (w × h px at sc px per pt) kept as name (one per name: the newest); k: its page's pt per ft
+  const L = symList().filter(s => s.name.toLowerCase() !== String(name).toLowerCase());
+  L.push({id: uid("Y"), name: String(name).slice(0, 80), m: bitsTo(m), w, h, fw: w / sc / k, fh: h / sc / k, at: new Date().toISOString()}); symSaveAll(L); return L.length;
+}
+const symInk = s => ({m: bitsFrom(s.m, s.w * s.h), W: s.w, H: s.h});
+function symResize(T, w, h, f){   // a symbol's ink scaled by f (nearest pixel; a line is never lost: a scaled pixel takes any ink it covers)
+  const W2 = Math.max(3, Math.round(w * f)), H2 = Math.max(3, Math.round(h * f)), o = new Uint8Array(W2 * H2);
+  for (let y = 0; y < H2; y++) for (let x = 0; x < W2; x++) { const x0 = Math.floor(x * w / W2), x1 = Math.max(x0 + 1, Math.floor((x + 1) * w / W2)), y0 = Math.floor(y * h / H2), y1 = Math.max(y0 + 1, Math.floor((y + 1) * h / H2));
+    let on = 0; for (let yy = y0; yy < y1 && !on; yy++) for (let xx = x0; xx < x1 && !on; xx++) on = T[yy * w + xx]; o[y * W2 + x] = on; }
+  return {m: o, w: W2, h: H2};
+}
+async function symCountDialog(){
+  if (!P.proj) return; const L = symList();
+  if (!L.length) return ask("My symbols", `<p>No symbol is kept yet. Box a symbol with <b>Find similar</b> (WC, wash basin, light point, a column mark…) and tick <b>Keep it in My symbols</b>: it is kept in this browser at its real size, and from then on My symbols counts it — with every other symbol kept — on any drawing in one go.</p>`, "");
+  const nPdf = P.proj.files.length, thumb = s => { const I = symInk(s); return inkThumb(I, s.w / 2, s.h / 2, (Math.max(s.w, s.h) / 2 + 2) / 0.85); };
+  const body = `<p>Every ticked symbol is looked for at once, each page read at its own scale so the symbol is its own size there. What is found is shown for checking, symbol by symbol, and counted into the count condition of the symbol's name (made when this project has none).</p>
+    <div class="symg" style="display:flex;flex-direction:column;gap:4px;max-height:42vh;overflow:auto;margin-top:8px">${L.map((s, i) => `<div class="cand" style="align-items:center"><input type="checkbox" data-syck="${i}" checked title="Look for it"><img src="${thumb(s)}" width="40" height="40" alt="" style="image-rendering:pixelated;border:1px solid var(--line);border-radius:4px;background:#fff">
+      <span style="flex:1;min-width:0"><b>${esc(s.name)}</b><br><span class="small">${f2(s.fw)} × ${f2(s.fh)} ft · kept ${esc(dmy(String(s.at || "").slice(0, 10)))}${P.proj.conds.some(c => c.type === "count" && c.name.trim().toLowerCase() === s.name.trim().toLowerCase()) ? " · in this project" : ""}</span></span>
+      <button class="btn sm" data-syren="${i}" title="Rename it (the count condition it fills goes by this name)">Rename</button><button class="btn sm dng" data-sydel="${i}" title="Forget this symbol">Delete</button></div>`).join("")}</div>
+    <div class="grid" style="margin-top:10px"><div class="fg"><label>Search</label><select id="syWhere">${S.page ? '<option value="page">This page</option><option value="pdf" selected>Every page of this PDF</option>' : ""}${nPdf > 1 || !S.page ? `<option value="all">Every PDF of the project (${nPdf})</option>` : ""}</select></div>
+    <div class="fg"><label>Match</label><select id="syThr"><option value="0.9">Strict (90%)</option><option value="0.82" selected>Normal (82%)</option><option value="0.72">Loose (72%)</option></select></div>
+    <div class="fg w2"><label><input type="checkbox" id="syRot" style="width:auto" checked> Also find them turned 90°, 180°, 270°</label></div></div>
+    <p class="small">Pages with no scale are passed over (a symbol is kept at its real size, so the page scale is needed to find it). Kept in this browser — Settings › Backup &amp; reset carries them to another computer.</p>`;
+  const pr = ask("My symbols — count them all", body, "Count", () => { const pick = [...document.querySelectorAll("#dlgB [data-syck]:checked")].map(x => L[+x.dataset.syck]); return pick.length ? {pick, where: $("syWhere").value, thr: +$("syThr").value, rot: $("syRot").checked} : "Tick a symbol to look for"; });
+  $("dlgB").querySelectorAll("[data-syren],[data-sydel]").forEach(b => b.onclick = async () => {   // (this list closes; the question asked; the list again)
+    const s = L[+(b.dataset.syren || b.dataset.sydel)]; if (ask.cur) ask.cur(null);
+    if (b.dataset.sydel != null) { const ok = await ask("Forget “" + s.name + "”?", "<p>The symbol is removed from My symbols. What it counted stays.</p>", "Delete"); if (ok) symSaveAll(symList().filter(x => x.id !== s.id)); }
+    else { const v = await ask("Rename “" + s.name + "”", `<div class="fg w2"><label>Name</label><input type="text" id="syNm" value="${esc(s.name)}"></div>`, "Rename", () => { const n = $("syNm").value.trim(); return !n ? "Give it a name" : symList().some(x => x.id !== s.id && x.name.toLowerCase() === n.toLowerCase()) ? "Another symbol has that name" : {n}; }, "syNm");
+      if (v) symSaveAll(symList().map(x => x.id === s.id ? Object.assign(x, {name: v.n.slice(0, 80)}) : x)); }
+    symCountDialog();
+  });
+  const v = await pr; if (!v) return;
+  return symCount(v.pick, v);
+}
+async function symCount(pick, o){   // pick: kept symbols; o: {where: page | pdf | all, thr, rot} -> {counted: {name: n}, skipped}
+  const fid0 = S.fileId, pn0 = S.pageNo, files = o.where === "all" || !fid0 ? P.proj.files : P.proj.files.filter(f => f.id === fid0), pages = [];
+  files.forEach(f => { if (o.where === "page") { if (f.id === fid0) pages.push({f, pn: pn0}); } else for (let i = 1; i <= f.pages; i++) pages.push({f, pn: i}); });
+  const found = pick.map(() => []), skipped = [], noScale = [];
+  try {
+    for (const [n, {f, pn}] of pages.entries()) {
+      const key = keyOf(f.id, pn), k = P.proj.scales[key] && P.proj.scales[key].ptPerFt; if (!(k > 0)) { noScale.push(f.name.replace(/\.pdf$/i, "") + " p." + pn); continue; }
+      busy("My symbols — page " + (n + 1) + " of " + pages.length + " (" + f.name.replace(/\.pdf$/i, "") + " p." + pn + ")…"); await new Promise(r => setTimeout(r, 10));
+      let pg; try { pg = f.id === S.fileId && pn === S.pageNo ? S.page : await (await doc(f.id)).getPage(pn); await loadLayers(f.id); } catch (e) { skipped.push(f.name.replace(/\.pdf$/i, "") + " p." + pn + " (" + (e.message || e) + ")"); continue; }
+      const bv = pg.getViewport({scale: 1}), inks = new Map();   // one rendering per 6 % step of scale, shared by the symbols that need about the same
+      for (const [si, s] of pick.entries()) {
+        const want = s.w / (s.fw * k), b = Math.round(Math.log(want) / Math.log(1.06)), sc = Math.pow(1.06, b);
+        if (Math.max(bv.width, bv.height) * sc > 12000) { skipped.push(f.name.replace(/\.pdf$/i, "") + " p." + pn + " — " + s.name + " (sheet too large at this symbol size)"); continue; }
+        if (!inks.has(b)) inks.set(b, await renderInk(pg, sc, f.id));
+        const ink = inks.get(b), T = symResize(symInk(s).m, s.w, s.h, sc / want), vars = [T];
+        if (o.rot) for (let r = 0; r < 3; r++) vars.push(rot90(vars[r].m, vars[r].w, vars[r].h));
+        let hits = []; vars.forEach(t => { hits = hits.concat(matchInk(ink.m, ink.W, ink.H, t.m, t.w, t.h, o.thr).map(q => Object.assign(q, {r: Math.max(t.w, t.h)}))); });
+        hits.sort((a, c) => c.F - a.F); const keep = []; hits.forEach(q => { if (!keep.some(k2 => Math.hypot(k2.x - q.x, k2.y - q.y) < 0.6 * Math.max(k2.r, q.r))) keep.push(q); });
+        keep.forEach(q => found[si].push({f, pn, pt: [q.x / sc, q.y / sc], F: q.F, img: inkThumb(ink, q.x, q.y, q.r), near: Math.max(4, 0.5 * Math.max(s.fw, s.fh) * k)}));
+      }
+    }
+  } catch (e) { busy(""); toast("My symbols: " + (e.message || e), 5000); return null; }
+  busy("");
+  if (noScale.length) skipped.push(noScale.length + " page" + (noScale.length > 1 ? "s" : "") + " with no scale (" + noScale.slice(0, 3).join(", ") + (noScale.length > 3 ? ", …" : "") + ")");
+  const counted = {};
+  for (const [si, s] of pick.entries()) {
+    let c = P.proj.conds.find(x => x.type === "count" && x.name.trim().toLowerCase() === s.name.trim().toLowerCase());
+    const cands = found[si].filter(m => { const it = c && P.proj.items.find(i => i.cond === c.id && i.file === m.f.id && i.page === m.pn && i.kind === "shape"); return !(it && it.pts.some(p2 => dist(p2, m.pt) < m.near)); });   // already counted
+    if (!cands.length) { counted[s.name] = 0; continue; }
+    const ok = await reviewMatches(c || {name: s.name}, cands, o.thr, skipped);
+    if (!ok || !ok.length) { counted[s.name] = 0; continue; }
+    let total = 0;
+    mutate(() => {
+      if (!c) { c = qkMake({name: s.name, type: "count", unit: "Nos"}, {}, []); P.proj.conds.push(c); }
+      ok.forEach(m => { let it = P.proj.items.find(i => i.cond === c.id && i.file === m.f.id && i.page === m.pn && i.kind === "shape");
+        if (!it) { it = {id: uid("I"), cond: c.id, file: m.f.id, page: m.pn, kind: "shape", pts: [], nos: 1, label: ""}; P.proj.items.push(it); }
+        if (!it.pts.some(q => dist(q, m.pt) < m.near)) { it.pts.push(m.pt); total++; } });
+    }, "My symbols: " + s.name);
+    counted[s.name] = total;
+  }
+  if (S.fileId !== fid0 || S.pageNo !== pn0) await gotoPage(fid0, pn0);
+  refresh();
+  const got = Object.entries(counted).filter(([, n]) => n > 0);
+  toast(got.length ? "Counted " + got.map(([nm, n]) => n + " × " + nm).join(", ") + (skipped.length ? " · not searched: " + skipped.length : "") : "Nothing counted" + (pick.length ? " — no match for " + (pick.length > 1 ? "the symbols" : "“" + pick[0].name + "”") + (noScale.length === pages.length && pages.length ? " (no page has a scale)" : "") : ""), 6000);
+  return {counted, skipped};
 }
 
 /* ------------------------------------------------------------------ find text on the drawings */
@@ -7309,6 +7410,21 @@ const PRESETS = [
   {name: "Window sill", type: "linear", unit: "ft"}, {name: "Balcony sill", type: "linear", unit: "ft"}, {name: "Rubbing", type: "linear", unit: "ft"}, {name: "MS railing", type: "linear", unit: "ft"}, {name: "Wooden molding", type: "linear", unit: "ft"},
   {name: 'Block masonry 4"x8"x12"', type: "linear", unit: "cft", t: 0.33, dedMin: 1.0, needH: true, hHint: "11.375", hWhy: "your block working sheet (12 ft floor to floor − 7½\" slab)"}, {name: 'Block masonry 8"x8"x12" (internal)', type: "linear", unit: "cft", t: 0.67, dedMin: 1.0, needH: true, hHint: "11.375", hWhy: "your block working sheet (12 ft floor to floor − 7½\" slab)"},
   {name: 'Block masonry 8"x8"x16" (external)', type: "linear", unit: "cft", t: 0.67, dedMin: 1.0, needH: true, hHint: "11.375", hWhy: "your block working sheet (12 ft floor to floor − 7½\" slab)"},
+  // trade starter packs (as PlanSwift's): plumbing & sanitary and electrical points counted, pipe and wiring runs in ft, earthworks
+  // in cft — a trench as L × width T × depth H, a bulk dig or a filling as area × depth T (each asked, never assumed)
+  {name: "WC — commode", type: "count", unit: "Nos", cat: "plumb"}, {name: "WC — Asian (squatting pan)", type: "count", unit: "Nos", cat: "plumb"}, {name: "Wash basin", type: "count", unit: "Nos", cat: "plumb"},
+  {name: "Kitchen sink", type: "count", unit: "Nos", cat: "plumb"}, {name: "Shower", type: "count", unit: "Nos", cat: "plumb"}, {name: "Bath tub", type: "count", unit: "Nos", cat: "plumb"},
+  {name: "Urinal", type: "count", unit: "Nos", cat: "plumb"}, {name: "Floor trap", type: "count", unit: "Nos", cat: "plumb"}, {name: "Health faucet (muslim shower)", type: "count", unit: "Nos", cat: "plumb"},
+  {name: "Geyser / water heater", type: "count", unit: "Nos", cat: "plumb"}, {name: "Water supply pipe", type: "linear", unit: "ft", cat: "plumb"}, {name: "Soil / waste pipe", type: "linear", unit: "ft", cat: "plumb"},
+  {name: "Light point", type: "count", unit: "Nos", cat: "elec"}, {name: "Fan point", type: "count", unit: "Nos", cat: "elec"}, {name: "Power socket point", type: "count", unit: "Nos", cat: "elec"},
+  {name: "Switch board", type: "count", unit: "Nos", cat: "elec"}, {name: "Exhaust fan point", type: "count", unit: "Nos", cat: "elec"}, {name: "AC point", type: "count", unit: "Nos", cat: "elec"},
+  {name: "Distribution board (DB)", type: "count", unit: "Nos", cat: "elec"}, {name: "Wiring / conduit run", type: "linear", unit: "ft", cat: "elec"}, {name: "Lift (elevator)", type: "count", unit: "Nos", cat: "cnt"},
+  {name: "Excavation — foundation trench", type: "linear", unit: "cft", cat: "earth", needH: true, needT: true, hLabel: "Depth", tLabel: "Trench width", tMax: 20},
+  {name: "Excavation — bulk / basement", type: "area", unit: "cft", cat: "earth", needT: true, tLabel: "Depth", tMax: 60},
+  {name: "Earth filling under floors", type: "area", unit: "cft", cat: "earth", needT: true, tLabel: "Filling depth", tMax: 20},
+  {name: "Sand filling", type: "area", unit: "cft", cat: "earth", needT: true, tLabel: "Depth", tMax: 20},
+  {name: "Backfilling — foundation trench", type: "linear", unit: "cft", cat: "earth", needH: true, needT: true, hLabel: "Depth", tLabel: "Trench width", tMax: 20},
+  {name: "Anti-termite treatment", type: "area", unit: "Sft", cat: "earth"},
   {name: "Custom area", type: "area", unit: "Sft"}, {name: "Custom length", type: "linear", unit: "ft"}, {name: "Custom count", type: "count", unit: "Nos"}
 ];
 async function defaultsDialog(){
@@ -7377,7 +7493,7 @@ async function editCond(c){
     if (!name) return "Give the condition a name";
     if (isNaN(H) || isNaN(T)) return "Height and thickness are decimal feet (or ft-in like 10'-6\")";
     if (type === "linear" && unit !== "ft" && !(H > 0)) return "A wall measured in " + unit + " needs its height H";
-    if (unit === "cft" && !(T > 0)) return "A quantity in cft needs the thickness T";
+    if (unit === "cft" && !(T > 0) && !(c && c.cfCond && type === "area")) return "A quantity in cft needs the thickness T";   // (a cut / fill from spot levels: each measurement has its depth)
     const pitch = type === "count" ? 0 : parsePitch($("cPitch").value); if (isNaN(pitch)) return "Slope: rise:run like 4:12, a percent like 33% or degrees like 18.4° (blank = flat)";
     return {name, type, unit, h: H || "", t: T || "", pitch: pitch > 0 ? +pitch.toFixed(6) : "", faces: Math.max(1, Math.min(2, +$("cF").value || 1)), dedMin: Math.max(0, parseFloat($("cD").value) || 0), color: $("cC").value,
       sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value, group: $("cGrp").value.trim().slice(0, 60), boq: $("cBoq").value.trim(), ra: $("cRa").value.trim().toUpperCase(), ...apFromDialog(type),
@@ -8566,6 +8682,47 @@ function sheetLinkItems(q){   // the right-click menu's sheet links
   const A = uniq(all); if (A.length) L.push({t: "Sheets referenced on this page (" + A.length + ")", sub: A.slice(0, 40).map(x => ({t: name(x.k), fn: () => gotoKey(x.k)}))});
   return L.length ? L.concat([{sep: 1}]) : [];
 }
+/* the same sheet links made visible (PlanSwift's Auto Bookmark, Bluebeam's Batch Link): every sheet no. written on any page gets a
+   hyperlink markup to its sheet — a blue box round it, listed in Markups, a real link in the exported PDF. A run makes its own
+   links afresh (those it made before go first), in one step for Ctrl+Z. The sheet nos. come from Sheet info; with none yet, the
+   title blocks are read first */
+const SHEET_LINK = "Sheet link";
+function textPartBox(t, i0, n, tot){   // the box round characters i0 … i0 + n of a text piece, its turn followed -> [x0, y0, x1, y1] (page points)
+  const a = +t.r || 0, u = [Math.cos(a), Math.sin(a)], up = [Math.sin(a), -Math.cos(a)], h = t.h || 6, w = t.w || 0.55 * h * tot, f0 = tot ? i0 / tot : 0, f1 = tot ? (i0 + n) / tot : 1;
+  const P0 = [t.x + u[0] * w * f0, t.y + u[1] * w * f0], P1 = [t.x + u[0] * w * f1, t.y + u[1] * w * f1], Q = [P0, P1, [P1[0] + up[0] * h, P1[1] + up[1] * h], [P0[0] + up[0] * h, P0[1] + up[1] * h]], pad = 0.2 * h;
+  return [Math.min(...Q.map(q => q[0])) - pad, Math.min(...Q.map(q => q[1])) - pad, Math.max(...Q.map(q => q[0])) + pad, Math.max(...Q.map(q => q[1])) + pad];
+}
+async function sheetLinksMake(){
+  if (!P.proj || !P.proj.files.length) return toast("Add a PDF first", 2400);
+  if (!sheetIndex().size) {
+    const go = await ask("Sheet links", "<p>No sheet numbers are known in this project yet. They are read from each page's title block first (Sheet info); then every sheet no. written on the drawings — a detail callout's “3/A-301”, a “SEE A-501” note, a drawing list — becomes a link to its sheet.</p>", "Read the title blocks");
+    if (!go) return; await autoSheetDialog(); if (!sheetIndex().size) return toast("No sheet numbers saved — nothing to link to", 3500);
+  }
+  const idx = sheetIndex(), pages = allPages(), found = [], st = JSON.parse(JSON.stringify(mkStyle("link"))), at = new Date().toISOString(), who = qaUser();
+  try {
+    for (const [n, o] of pages.entries()) {
+      busy("Sheet links — reading page " + (n + 1) + " of " + pages.length + "…");
+      let T = []; try { T = await pageTexts(o.f.id, o.i); } catch (e) { T = []; }
+      const here = [];
+      T.forEach(t => { const s = String(t.s), rx = /[^\s\/(),;:]+/g; let m;
+        while ((m = rx.exec(s))) { const k = idx.get(sheetNorm(m[0])); if (!k || k === o.key) continue;   // (a sheet's own no. in its title block is no link)
+          const b = textPartBox(t, m.index, m[0].length, s.length); if (here.some(x => x.k === k && x.b[0] < b[2] && b[0] < x.b[2] && x.b[1] < b[3] && b[1] < x.b[3])) continue;
+          here.push({k, b, no: m[0].replace(/[.,;:]+$/, "")}); } });
+      here.forEach(x => found.push(Object.assign({o}, x)));
+    }
+  } finally { busy(""); }
+  const old = (P.proj.marks || []).filter(m => m.type === "link" && m.subject === SHEET_LINK).length;
+  if (!found.length && !old) return toast("No sheet no. of this project (" + idx.size + " known) is written on its pages — nothing to link", 4500);
+  const title = k => { const sh = (P.proj.sheets || {})[k] || {}; return (sh.no || keyName(k)) + (sh.title ? " — " + sh.title : ""); };
+  mutate(() => {
+    P.proj.marks = (P.proj.marks || []).filter(m => !(m.type === "link" && m.subject === SHEET_LINK));
+    found.forEach(x => P.proj.marks.push(Object.assign({id: uid("M"), type: "link", file: x.o.f.id, page: x.o.i, pts: [[x.b[0], x.b[1]], [x.b[2], x.b[3]]], text: "Open sheet " + title(x.k), subject: SHEET_LINK, author: who, status: "", at, link: {key: x.k}, show: false}, st)));
+  }, "Sheet links (" + found.length + ")");
+  const pg = new Set(found.map(x => x.o.key)).size, to = new Set(found.map(x => x.k)).size;
+  toast(found.length ? found.length + " sheet link" + (found.length > 1 ? "s" : "") + " on " + pg + " page" + (pg > 1 ? "s" : "") + " to " + to + " sheet" + (to > 1 ? "s" : "") + " — double-click one (Select tool) to open its sheet · listed in Markups · kept as links in the exported PDF" + (old ? " (the " + old + " made before replaced)" : "")
+    : "The " + old + " sheet link" + (old > 1 ? "s" : "") + " made before removed — no sheet no. is written on the pages now", 6000);
+  return {links: found.length, pages: pg, sheets: to};
+}
 
 /* cut-out (Forma Takeoff 2D "Cutout"): an area drawn over another area is taken out of it as a deduction in that area's
    condition — only the overlapping part, the area itself stays */
@@ -9069,10 +9226,11 @@ function condPopFill(){
   L.innerHTML = h;
 }
 /* Quick items: PRESETS grouped by trade */
-const QK_CATS = [["floor", "Floors & roofs"], ["ceil", "Ceilings"], ["wall", "Wall finishes"], ["mas", "Masonry"], ["conc", "Concrete & formwork"], ["run", "Skirting, sills & trims"], ["cnt", "Doors, windows & counts"], ["custom", "Custom"]];
+const QK_CATS = [["floor", "Floors & roofs"], ["ceil", "Ceilings"], ["wall", "Wall finishes"], ["mas", "Masonry"], ["conc", "Concrete & formwork"], ["run", "Skirting, sills & trims"], ["cnt", "Doors, windows & counts"],
+  ["plumb", "Plumbing & sanitary"], ["elec", "Electrical points"], ["earth", "Earthworks"], ["custom", "Custom"]];
 const QK_TOOLS = {area: [["draw", "Draw"], ["rect", "Rect"], ["auto", "Auto area"]], linear: [["draw", "Draw"], ["linepick", "Line pick"]], count: [["count", "Count"], ["vsearch", "Find similar"]]};
 function qkCat(p){ const n = p.name.toLowerCase();
-  return /^custom/.test(n) ? "custom" : p.type === "count" ? "cnt" : /masonry|partition/.test(n) ? "mas" : /rcc|pcc|formwork/.test(n) ? "conc" : /ceiling/.test(n) ? "ceil"
+  return p.cat ? p.cat : /^custom/.test(n) ? "custom" : p.type === "count" ? "cnt" : /masonry|partition/.test(n) ? "mas" : /rcc|pcc|formwork/.test(n) ? "conc" : /ceiling/.test(n) ? "ceil"
     : /skirting|sill|rubbing|railing|molding|moulding/.test(n) ? "run" : p.type === "area" ? "floor" : p.unit === "ft" ? "run" : "wall"; }
 function qkNeed(p){ return {h: !!p.needH || (p.type === "linear" && p.unit !== "ft"), t: !!p.needT || (p.unit === "cft" && !(+p.t > 0))}; }   // as the dialog's rules: a wall in Sft / cft needs H, a cft item T
 function qkFind(p){ return P.proj.conds.find(x => x.type === p.type && String(x.name).trim().toLowerCase() === p.name.toLowerCase()) || null; }
@@ -9095,8 +9253,8 @@ async function quickItemsDialog(){
       + `<span class="qktl">${QK_TOOLS[p.type].map(([t, nm]) => `<button type="button" class="qkb" data-qkt="${t}" title="${esc(nm)} — ${esc(p.name)}">${esc(nm)}</button>`).join("")}</span></div>`; };
   const body = `<div class="qkw"><div class="qkbar"><input type="search" id="qkQ" placeholder="Search — tile, plaster, 9&quot;, block, slab, door…" aria-label="Search the quick items" autocomplete="off" spellcheck="false">`
     + `<span class="qkchips">${[["", "All"]].concat(cats).map(([k, n]) => `<button type="button" class="qkch${k ? "" : " on"}" data-qcf="${k}">${esc(n)}</button>`).join("")}</span></div>`
-    + `<div class="qkgrid" id="qkG">${cats.map(([k, n]) => `<div class="qkgh" data-qgh="${k}">${esc(n)}</div>` + PRESETS.map((p, i) => qkCat(p) === k ? card(p, i) : "").join("")).join("")}</div>`
-    + `<p class="small">A click makes the item — or takes the one already in this project — and starts its tool; the buttons on a card pick another way to measure it. H and T are asked where the item needs them, never assumed. Tick several and <b>Add ticked</b> to set up a whole trade at once.</p></div>`;
+    + `<div class="qkgrid" id="qkG">${cats.map(([k, n]) => `<div class="qkgh" data-qgh="${k}">${esc(n)}${k !== "custom" ? ` <button type="button" class="qkall" data-qkall="${k}" title="Tick every item of ${esc(n)} — then Add ticked sets the whole trade up at once (a starter pack)">Tick all</button>` : ""}</div>` + PRESETS.map((p, i) => qkCat(p) === k ? card(p, i) : "").join("")).join("")}</div>`
+    + `<p class="small">A click makes the item — or takes the one already in this project — and starts its tool; the buttons on a card pick another way to measure it. H and T are asked where the item needs them, never assumed. <b>Tick all</b> on a trade (or tick several) and <b>Add ticked</b> to set up a whole trade at once — plumbing, electrical points and earthworks are starter packs of their own.</p></div>`;
   const pr = ask("Quick items — ready QS conditions", body, ""), done = ask.cur;
   $("dlgF").insertAdjacentHTML("beforeend", '<button class="btn pri" id="qkAdd" disabled>Add ticked</button>');
   const G = $("qkG"), ticked = () => [...G.querySelectorAll("[data-qkck]:checked")].map(x => +x.dataset.qkck);
@@ -9108,7 +9266,9 @@ async function quickItemsDialog(){
   $("qkQ").addEventListener("input", filt);
   $("dlgB").querySelector(".qkchips").addEventListener("click", e => { const b = e.target.closest("[data-qcf]"); if (!b) return; $("dlgB").querySelectorAll(".qkch").forEach(x => x.classList.toggle("on", x === b)); filt(); });
   G.addEventListener("change", upd);
-  G.addEventListener("click", e => { if (e.target.closest(".qkck")) return; const c = e.target.closest("[data-qk]"); if (!c) return; const t = e.target.closest("[data-qkt]"); done({pick: [+c.dataset.qk], tool: t ? t.dataset.qkt : ""}); });
+  G.addEventListener("click", e => { const ta = e.target.closest("[data-qkall]");
+    if (ta) { const B = [...G.querySelectorAll(`[data-qcat="${ta.dataset.qkall}"]:not([hidden]) [data-qkck]`)], on = !B.every(x => x.checked); B.forEach(x => { x.checked = on; }); ta.textContent = on ? "Untick all" : "Tick all"; upd(); return; }
+    if (e.target.closest(".qkck")) return; const c = e.target.closest("[data-qk]"); if (!c) return; const t = e.target.closest("[data-qkt]"); done({pick: [+c.dataset.qk], tool: t ? t.dataset.qkt : ""}); });
   G.addEventListener("keydown", e => { if (e.key !== " " || e.target.closest("button,input")) return; const c = e.target.closest("[data-qk]"); if (c) { e.preventDefault(); done({pick: [+c.dataset.qk], tool: ""}); } });
   $("qkAdd").onclick = () => done({pick: ticked(), tool: ""});
   $("qkQ").focus();
@@ -9122,14 +9282,14 @@ async function qkAskHT(L){   // H / T for the new items that need them — typed
   const inp = (attr, i, ph, ti, first) => `<input type="text" ${first ? 'id="qkF0" ' : ""}${attr}="${i}" placeholder="${esc(ph)}" title="${esc(ti)}" autocomplete="off">`;
   let first = true;
   const row = (p, i) => { const n = qkNeed(p); let h = `<div class="qkhr"><b>${esc(p.name)}</b>`;
-    if (n.h) { h += `<label>H ft ${inp("data-qkh", i, p.hHint ? "usually " + p.hHint : "e.g. 10'-6\"", p.hWhy ? "Usually " + p.hHint + " ft in " + p.hWhy + " — check it for this project" : "Floor to ceiling / slab soffit, from the section", first)}</label>`; first = false; }
-    if (n.t) { h += `<label>T ${inp("data-qkt2", i, "e.g. 0'-5\" for 5\"", "Thickness — ft-in (0'-5\" or 5\") or decimal ft (0.42)", first)}</label>`; first = false; }
+    if (n.h) { h += `<label>${esc(p.hLabel || "H")} ft ${inp("data-qkh", i, p.hHint ? "usually " + p.hHint : p.hLabel ? "e.g. 5'-0\"" : "e.g. 10'-6\"", p.hWhy ? "Usually " + p.hHint + " ft in " + p.hWhy + " — check it for this project" : p.hLabel ? p.hLabel + " in ft, from the drawing" : "Floor to ceiling / slab soffit, from the section", first)}</label>`; first = false; }
+    if (n.t) { h += `<label>${esc(p.tLabel || "T")} ${inp("data-qkt2", i, p.tLabel ? "e.g. 2'-6\"" : "e.g. 0'-5\" for 5\"", (p.tLabel || "Thickness") + " — ft-in (" + (p.tLabel ? "2'-6\"" : "0'-5\" or 5\"") + ") or decimal ft", first)}</label>`; first = false; }
     return h + "</div>"; };
   return ask(L.length === 1 ? L[0].name + " — the size it needs" : "Sizes for the " + L.length + " new items", `<p class="small">Typed for this project — never assumed. Decimal feet or ft-in (10'-6"); inches as 5"; mm and m work too.</p><div class="qkhs">${L.map(row).join("")}</div>`, L.length === 1 ? "Create" : "Create " + L.length, () => {
     const out = {};
     for (let i = 0; i < L.length; i++) { const p = L[i], n = qkNeed(p), o = {};
-      if (n.h) { const x = parseFt((document.querySelector(`#dlgB [data-qkh="${i}"]`) || {}).value || ""); if (!(x > 0)) return "Enter the height H of " + p.name + (p.hHint ? " — usually " + p.hHint + " ft; check it for this project" : " (floor to ceiling, from the section)"); o.h = r3(x); }
-      if (n.t) { const x = parseFt((document.querySelector(`#dlgB [data-qkt2="${i}"]`) || {}).value || ""); if (!(x > 0)) return "Enter the thickness T of " + p.name + " (e.g. 0'-5\" for 5 inches)"; if (x > 3) return "T " + f3(x) + " ft looks too thick for " + p.name + " — inches are typed as 5\" or 0'-5\""; o.t = r3(x); }
+      if (n.h) { const x = parseFt((document.querySelector(`#dlgB [data-qkh="${i}"]`) || {}).value || ""); if (!(x > 0)) return "Enter the " + (p.hLabel ? p.hLabel.toLowerCase() + " (ft)" : "height H") + " of " + p.name + (p.hHint ? " — usually " + p.hHint + " ft; check it for this project" : p.hLabel ? ", from the drawing" : " (floor to ceiling, from the section)"); o.h = r3(x); }
+      if (n.t) { const x = parseFt((document.querySelector(`#dlgB [data-qkt2="${i}"]`) || {}).value || ""); if (!(x > 0)) return "Enter the " + (p.tLabel ? p.tLabel.toLowerCase() + " (ft)" : "thickness T") + " of " + p.name + (p.tLabel ? ", from the drawing" : " (e.g. 0'-5\" for 5 inches)"); if (x > (p.tMax || 3)) return (p.tLabel || "T") + " " + f3(x) + " ft looks too " + (p.tLabel ? "big" : "thick") + " for " + p.name + " — inches are typed as 5\" or 0'-5\""; o.t = r3(x); }
       out[p.name] = o; }
     return out; }, "qkF0");
 }
@@ -9156,7 +9316,8 @@ function autoMenu(){
     {t: "Trace the whole floor — from the drawing's wall layers", fn: traceFloorUI, dis: !pg}, {t: "Apartment — one unit by its number…", fn: ag("agUnit"), dis: !pg}, {sep: 1},
     {t: "Walls — from their two face lines…", fn: ag("agWalls"), dis: !pg}, {t: "Block masonry — 4\" and 8\" with deductions and block count…", fn: ag("agBlock"), dis: !pg || !$("agBlock")},
     {t: "Doors / windows — tags and schedules…", fn: ag("agTags"), dis: !pg}, {t: "Finishes — plaster, paint, skirting, ceiling per room…", fn: ag("agFin"), dis: !pg},
-    {t: "Name rooms by contents (this page)", fn: nameRooms, dis: !pg}, {sep: 1},
+    {t: "Name rooms by contents (this page)", fn: nameRooms, dis: !pg}, {t: "Ceilings / floors by hatch pattern…", fn: () => hatchSplitDialog(), dis: !pg}, {t: "Count my symbols — WC, basin, light point… kept from Find similar", fn: () => symCountDialog()}, {sep: 1},
+    {t: "Earthworks: spot levels — click in, or read those written…", fn: levelsMenu, dis: !pg}, {t: "Earthworks: cut / fill from the spot levels…", fn: () => cutFillDialog(), dis: !pg}, {sep: 1},
     {t: "Check the takeoff — rooms missed, counted twice…", fn: ag("agCheck")}, {t: "Drawing details — rooms, sizes, tags, levels", fn: ag("aiDetails"), dis: !pg},
     {t: "Ask the takeoff agent (Claude)…", fn: () => { if (!$("aiPanel").classList.contains("on")) $("bClaude").click(); }}], r.left, r.bottom + 4);
 }
@@ -9240,7 +9401,7 @@ function settingsInit(){
 }
 /* settings in a file: every zdTakeoff… option of this browser but the AI key and what is only a record (last project, chat, history, KPIs) */
 const SET_SKIP = /^zdTakeoff(ApiKey|Last|Chat|CmdHist|Kpi|Bench|Pal|PalUse|RibLast|SetPg)$/;
-const SET_KEEP = /^zdTakeoff(ToolChest|Stamps|AgentRules|User|LocalUrl|LocalModel|LocalCtx|CcModel|AiEngine)$/;   // your own content and AI setup: a Reset all keeps them
+const SET_KEEP = /^zdTakeoff(ToolChest|Stamps|Syms|AgentRules|User|LocalUrl|LocalModel|LocalCtx|CcModel|AiEngine)$/;   // your own content and AI setup: a Reset all keeps them
 function setKeys(){ const out = []; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (/^zdTakeoff/.test(k) && !SET_SKIP.test(k)) out.push(k); } } catch (e) {} return out.sort(); }
 function setExport(){
   const o = {app: "ZD Takeoff settings", v: 1, at: new Date().toISOString(), keys: {}}; setKeys().forEach(k => { o.keys[k] = pref(k); });
@@ -9791,7 +9952,8 @@ function ribbonInit(){
     el.addEventListener("dragleave", e => { if (!el.contains(e.relatedTarget)) el.classList.remove("dropok"); });
     el.addEventListener("drop", dropHere); });
   /* ribbon tabs added for Costing / Export / View: each button runs an existing control or dialog */
-  const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog(), floors: () => floorsDialog(), quick: () => quickItemsDialog(), autowin: () => S.page ? autoWindowUI() : toast("Open a drawing first", 2000)};
+  const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog(), floors: () => floorsDialog(), quick: () => quickItemsDialog(), autowin: () => S.page ? autoWindowUI() : toast("Open a drawing first", 2000),
+    symbols: () => symCountDialog(), levels: () => levelsMenu(), cutfill: () => cutFillDialog(), sheetlinks: () => sheetLinksMake(), hatchsplit: () => hatchSplitDialog()};   // (PlanSwift's: My symbols, earthworks, Auto Bookmark, ceilings by pattern)
   const PX = {bDefaults: () => settingsDialog("measure")};   // Costing → Defaults: the top bar's Defaults is now in Settings (the tool keeps its name, so My tools keeps it)
   document.querySelectorAll("#tools [data-px]").forEach(b => b.addEventListener("click", () => { if (PX[b.dataset.px]) return PX[b.dataset.px](); const t = $(b.dataset.px); if (t && !t.disabled) t.click(); setTimeout(syncPx, 60); }));
   document.querySelectorAll("#tools [data-fn]").forEach(b => b.addEventListener("click", () => { if (P.proj && FN[b.dataset.fn]) FN[b.dataset.fn](); else toast("Open a project first", 2000); }));
@@ -10807,7 +10969,7 @@ function validate(){
   P.proj.conds.forEach(c => {
     const its = P.proj.items.filter(i => i.cond === c.id); if (!its.length) return;
     if (c.type === "linear" && c.unit !== "ft" && !(+c.h > 0)) E("ERROR", `${c.name}: height H missing (needed for ${c.unit})`);
-    if (c.unit === "cft" && !(+c.t > 0)) E("ERROR", `${c.name}: thickness T missing (needed for cft)`);
+    if (c.unit === "cft" && !(+c.t > 0) && !(c.cfCond && its.every(i => +i.dep > 0))) E("ERROR", `${c.name}: thickness T missing (needed for cft)`);
     if (!String(c.boq || "").trim()) E("WARNING", `${c.name}: no BOQ code`);
     const t = condTotals(c); if (t.net < 0) E("ERROR", `${c.name}: net quantity is negative (${fq(t.net, c.unit)} ${c.unit}) — deductions exceed the gross`);
     its.forEach(it => { const k = qScale(it); if (!k) return; const q = rowsOf(it, k).reduce((a, r) => a + Math.abs(r.qty), 0);
@@ -11671,6 +11833,8 @@ function paletteCmds(){
   add("Combine the selected areas into one (union) — merge them, small gaps between them filled", () => combineAreas(), "Modify");
   if (S.page) add("Trace the whole floor — every room, washroom, corridor, threshold and wall run from the drawing's wall layers (a CAD PDF, or the AutoCAD plan on screen)", traceFloorUI, "Tool");
   if (S.page) add("Auto area: every room in a window…", autoWindowUI, "Tool");
+  if (S.page) { add("Areas by hatch pattern — ceilings / floors grouped by the pattern drawn inside them", () => hatchSplitDialog(), "Tool"); add("Spot levels — click in, or read the levels written on the drawing (earthworks)", levelsPlace, "Tool");
+    add("Spot levels — read those written on this page", levelsRead, "Tool"); add("Spot levels on this page — edit, delete, unit", levelsList, "Tool"); add("Cut / fill from spot levels (earthworks)", () => cutFillDialog(), "Tool"); }
   add("Check before export (errors and warnings)", exportMenu, "Check");
   add("Excel measurement sheet", exportExcel, "Export"); add("CSV", exportCsv, "Export");
   if (S.page) add("DXF (AutoCAD) — this page's takeoff as drawing layers", exportDxf, "Export");
@@ -15555,6 +15719,182 @@ function finReport(r){
   d.querySelector("[data-cp]").onclick = async () => { try { await navigator.clipboard.writeText(tsv); toast("Copied — paste into Excel"); } catch (e) { toast("Could not copy"); } };
 }
 
+/* ▦ areas by hatch pattern (PlanSwift's Auto Takeoff tells a gypsum from a tile ceiling by its pattern): every area measured on
+   this page is read for the pattern drawn inside it — the runs of regular parallel lines hatchIds finds, by direction and spacing —
+   and the areas are grouped by pattern (a 2.00 × 2.00 ft grid, lines 0.50 ft apart at 45°, no pattern). Each group is copied into
+   the area condition picked for it (a new one by default), so a reflected ceiling plan or a floor finish plan is taken off by what
+   it shows. The areas themselves stay; a run replaces its own copies on this page. Vector PDFs and drawings only. */
+function hatchSig(pl, g, k, ids){   // the pattern inside an outline -> {key, name, dirs: [{a (°), sp (ft), n}]}
+  const D = [];
+  ids.forEach(i => { const s = g.segs[i], m = [(s[0] + s[2]) / 2, (s[1] + s[3]) / 2]; if (!pointInPoly(m, pl)) return;
+    let a = Math.atan2(s[3] - s[1], s[2] - s[0]) * 180 / Math.PI; a = ((a % 180) + 180) % 180;
+    const b = Math.round(a / 7.5) * 7.5 % 180, r = b * Math.PI / 180; let d = D.find(x => x.a === b); if (!d) D.push(d = {a: b, o: []});
+    d.o.push(-Math.sin(r) * m[0] + Math.cos(r) * m[1]); });
+  const dirs = D.map(d => { const o = d.o.sort((x, y) => x - y), gp = []; for (let i = 1; i < o.length; i++) if (o[i] - o[i - 1] > 0.05 * k) gp.push(o[i] - o[i - 1]);   // (a line drawn in pieces: one line)
+      gp.sort((x, y) => x - y); return {a: d.a, n: gp.length + 1, sp: gp.length >= 3 ? Math.round(gp[gp.length >> 1] / k * 20) / 20 : 0}; })
+    .filter(d => d.sp > 0).sort((x, y) => x.a - y.a);
+  if (!dirs.length) return {key: "none", name: "No pattern (plain)", dirs};
+  const sp = a => (dirs.find(d => d.a === a) || {}).sp, grid = dirs.length === 2 && dirs[1].a - dirs[0].a === 90;
+  const name = grid && dirs[0].a === 0 ? "Grid " + f2(sp(90)) + " × " + f2(sp(0)) + " ft" : grid ? "Diagonal grid " + f2(dirs[0].sp) + " × " + f2(dirs[1].sp) + " ft"
+    : dirs.length === 1 ? "Lines " + f2(dirs[0].sp) + " ft apart, " + (dirs[0].a === 0 ? "horizontal" : dirs[0].a === 90 ? "vertical" : "at " + dirs[0].a + "°")
+    : dirs.map(d => f2(d.sp) + " ft at " + d.a + "°").join(" + ");
+  return {key: dirs.map(d => d.a + "@" + d.sp.toFixed(2)).join("+"), name, dirs};
+}
+async function hatchSplitDialog(cid, mode){
+  if (!P.proj || !S.page) return toast("Open a drawing first", 2400);
+  const k = curScale(); if (!k) return toast("Set the page scale first (K)", 3000);
+  const g = S.geo[S.key]; if (!g || !g.segs || !g.segs.length) return toast("This page has no vector lines to read a pattern from (a scan?) — put the areas in their conditions by hand", 5000);
+  const areas = P.proj.items.filter(i => onPage(i) && i.kind === "shape" && !i.hatchAuto && !i.cf && (cond(i.cond) || {}).type === "area");
+  if (!areas.length) return toast("No area measured on this page yet — measure the rooms first (Auto takeoff › Rooms, or Rooms in box)", 5000);
+  const byC = {}; areas.forEach(i => { byC[i.cond] = (byC[i.cond] || 0) + 1; });
+  const cs = Object.keys(byC).sort((a, b) => byC[b] - byC[a]), rc = roomCondOf(); cid = cid && byC[cid] ? cid : rc && byC[rc] ? rc : cs[0]; mode = mode === "floor" ? "floor" : "ceil";
+  const ids = hatchIds(g, k), G = new Map();
+  areas.filter(i => i.cond === cid).forEach(it => { const sg = hatchSig(itemPoly(it), g, k, ids); let x = G.get(sg.key); if (!x) G.set(sg.key, x = {sg, L: []}); x.L.push(it); });
+  const groups = [...G.values()].sort((a, b) => (a.sg.key === "none") - (b.sg.key === "none") || b.L.length - a.L.length);
+  const sft = it => polyArea(itemPoly(it)) / k / k * (+it.nos || 1), lc = s => s.charAt(0).toLowerCase() + s.slice(1);
+  const dflt = (sg, m) => (m === "floor" ? "Floor finish — " : "Ceiling — ") + (sg.key === "none" ? "plain (no pattern)" : lc(sg.name));
+  const tgt = P.proj.conds.filter(c => c.type === "area" && c.id !== cid);
+  const body = `<p>Every area of <b>${esc((cond(cid) || {}).name || "")}</b> on this page, read for the pattern drawn inside it and grouped by pattern. Each ticked group is copied into the condition picked for it — a reflected ceiling plan's ceilings, or a floor plan's finishes, taken off by what the drawing shows. The areas themselves stay as they are; running it again replaces its own copies on this page.</p>
+    <div class="grid" style="margin-top:8px">${cs.length > 1 ? `<div class="fg"><label>Areas of</label><select id="hsSrc">${cs.map(c => `<option value="${esc(c)}"${c === cid ? " selected" : ""}>${esc((cond(c) || {}).name || c)} (${byC[c]})</option>`).join("")}</select></div>` : ""}
+      <div class="fg"><label>The patterns are</label><select id="hsMode"><option value="ceil"${mode === "ceil" ? " selected" : ""}>Ceilings (reflected ceiling plan)</option><option value="floor"${mode === "floor" ? " selected" : ""}>Floor finishes</option></select></div></div>
+    ${groups.length < 2 ? `<p class="small" style="margin-top:8px;color:#8a5a00">${groups[0] && groups[0].sg.key === "none" ? "No pattern found inside these areas — the drawing shows no hatch to tell them apart." : "Every area shows the same pattern."} They can still be copied into one condition.</p>` : ""}
+    <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;max-height:46vh;overflow:auto">${groups.map((x, i) => { const tot = x.L.reduce((a, it) => a + sft(it), 0), nm = [...new Set(x.L.map(it => String(it.label || "").trim()).filter(Boolean))];
+      return `<div class="cand" style="flex-wrap:wrap"><input type="checkbox" data-hsck="${i}" checked><span style="flex:1;min-width:180px"><b>${esc(x.sg.name)}</b><br><span class="small">${x.L.length} area${x.L.length > 1 ? "s" : ""} · ${fq(tot)} Sft${nm.length ? " — " + esc(nm.slice(0, 4).join(", ")) + (nm.length > 4 ? " +" + (nm.length - 4) : "") : ""}</span></span>
+        <select data-hsc="${i}" title="The condition the group is copied into"><option value="">+ New condition</option>${tgt.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select><input type="text" data-hsn="${i}" value="${esc(dflt(x.sg, mode))}" style="min-width:200px" aria-label="Name of the new condition"></div>`; }).join("")}</div>`;
+  const pr = ask("Areas by hatch pattern", body, "Copy the ticked", () => { const out = [];
+    for (const ck of document.querySelectorAll("#dlgB [data-hsck]:checked")) { const i = +ck.dataset.hsck, to = document.querySelector(`#dlgB [data-hsc="${i}"]`).value, nm = document.querySelector(`#dlgB [data-hsn="${i}"]`).value.trim();
+      if (!to && !nm) return "Name the new condition of “" + groups[i].sg.name + "”"; out.push({x: groups[i], to, nm}); }
+    return out.length ? out : "Tick a group to copy"; });
+  const B = $("dlgB"); if ($("hsSrc")) $("hsSrc").onchange = () => { const v = $("hsSrc").value, m = $("hsMode").value; if (ask.cur) ask.cur(null); hatchSplitDialog(v, m); };
+  $("hsMode").onchange = () => { const m = $("hsMode").value; groups.forEach((x, i) => { const inp = B.querySelector(`[data-hsn="${i}"]`); if (inp && inp.value === dflt(x.sg, m === "floor" ? "ceil" : "floor")) inp.value = dflt(x.sg, m); }); };
+  B.querySelectorAll("[data-hsc]").forEach(s => s.onchange = () => { B.querySelector(`[data-hsn="${s.dataset.hsc}"]`).style.display = s.value ? "none" : ""; });
+  const v = await pr; if (!v) return null;
+  const made = [], res = [];
+  mutate(() => {
+    P.proj.items = P.proj.items.filter(i => !(i.hatchAuto && onPage(i)));
+    v.forEach(({x, to, nm}) => {
+      let c = to ? cond(to) : P.proj.conds.find(q => q.type === "area" && q.name.trim().toLowerCase() === nm.toLowerCase());
+      if (!c) { c = qkMake({name: nm, type: "area", unit: "Sft", dedMin: 1.0}, {}, made.map(q => q.color.toLowerCase())); P.proj.conds.push(c); made.push(c); }
+      let n = 0; x.L.forEach(it => { if (it.cond === c.id) return; const y = JSON.parse(JSON.stringify(it)); ["qa", "ver", "finAuto"].forEach(f => delete y[f]);
+        P.proj.items.push(Object.assign(y, {id: uid("I"), cond: c.id, ai: true, hatchAuto: true})); n++; });
+      res.push({pattern: x.sg.name, cond: c.name, areas: n}); });
+  }, "Areas by hatch pattern");
+  toast("Copied by pattern: " + res.map(r => r.areas + " into " + r.cond).join(" · ") + " — the areas themselves are as they were", 6000);
+  return res;
+}
+
+/* ⛰ earthworks: spot levels and cut / fill (PlanSwift's EarthWorks). Spot levels are points with the ground level there (clicked
+   in, or read from the levels written on the drawing: NGL 101.50, +1'-6", EGL=99.80), kept with the project in its level unit
+   (ft or m). Cut / fill works an outline measured on the page against a formation level: the ground between the levels is the
+   TIN of them (measure.js cutFill), cut where it is above the formation, fill where below. Each becomes an area measurement in a
+   cft condition — the outline × its own average depth (dep), so the sheet reads Nos × area × depth = the volume worked out. */
+const lvUnit = () => P.proj && P.proj.lvUnit === "m" ? "m" : "ft";
+const lvFt = z => lvUnit() === "m" ? z / 0.3048 : z;
+const lvFmt = z => (z < 0 ? "−" : "+") + Math.abs(z).toFixed(3).replace(/0$/, "");
+const lvHere = () => ((P.proj && P.proj.levels) || []).filter(l => l.file === S.fileId && l.page === S.pageNo);
+const LV_PRE = /^(?:E\.?\s?G\.?\s?L|N\.?\s?G\.?\s?L|F\.?\s?G\.?\s?L|F\.?\s?F\.?\s?L|G\.?\s?L|R\.?\s?L|T\.?\s?O\.?\s?S|LVL|LEVEL|SPOT\s+LEVEL|EL(?:EV(?:ATION)?)?)\.?\s*[:=]?\s*/i;
+function lvParse(s, strict){   // a level as written -> its number in the level unit, or NaN; strict: it must look like a level (a level word, a sign, or 2–3 decimals), not any figure
+  let t = String(s == null ? "" : s).trim().replace(/[−–—]/g, "-").replace(/±/g, "+"); const pre = LV_PRE.test(t);
+  t = t.replace(LV_PRE, "").replace(/\s*(?:M|MTR|FT)\.?$/i, "").trim(); const sign = /^[+-]/.test(t);
+  if (/^[+-]?\s*\d{1,4}(?:\.\d{1,3})?$/.test(t)) return strict && !pre && !sign && !/\.\d{2,3}$/.test(t) ? NaN : +t.replace(/\s+/g, "");
+  if (/^[+-]?\s*\d{1,3}\s*'/.test(t)) { if (strict && !pre && !sign) return NaN; const v = parseFt(t.replace(/^[+-]\s*/, "")); return isFinite(v) ? (/^-/.test(t) ? -v : v) : NaN; }
+  return NaN;
+}
+function lvTexts(T){   // the levels written on a page: [{s, z, p, strong}] — whole lines first (NGL and its figure apart), then single pieces
+  const out = [], seen = q => out.some(o => dist(o.p, q) < 3);
+  textLines(T).concat(T).forEach(t => { const s = String(t.s || "").replace(/\s+/g, " ").trim(); if (!s || s.length > 24) return; const z = lvParse(s, true); if (!isFinite(z)) return;
+    const p = [t.x + Math.min(t.w || 0, 4), t.y - (t.h || 6) / 2]; if (seen(p)) return; out.push({s, z, p, strong: LV_PRE.test(s.replace(/[−–—]/g, "-")) || /^[+\-−–—±]/.test(s)}); });
+  return out;
+}
+function pickPoint(msg){   // one click on the drawing -> [x, y] in page points, or null (Esc); the wheel still zooms, right-drag pans
+  return new Promise(res => {
+    const ov = document.createElement("div"), tip = document.createElement("div"); ov.className = "tbpick"; tip.className = "tbtip"; tip.textContent = msg + " · Esc when done"; ov.append(tip); stage().appendChild(ov);
+    const done = v => { ov.remove(); document.removeEventListener("keydown", key, true); res(v); };
+    const key = e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(null); } };
+    document.addEventListener("keydown", key, true);
+    ov.addEventListener("pointerdown", e => { if (e.button !== 0 || S.space) return; e.preventDefault(); e.stopPropagation(); const a = evPos(e); done(toBase(a[0], a[1])); });
+  });
+}
+function levelsMenu(){
+  if (!P.proj || !S.page) return toast("Open a drawing first", 2000);
+  const r = ribAnchor("rbAuto").getBoundingClientRect(), n = lvHere().length;
+  ctxShow([{h: "Spot levels", s: n + " on this page · levels in " + lvUnit()}, {t: "Click to add spot levels…", fn: levelsPlace}, {t: "Read the levels written on this page…", fn: levelsRead},
+    {t: "Spot levels on this page — edit, delete, unit…", fn: levelsList}, {sep: 1}, {t: "Cut / fill from these levels…", fn: () => cutFillDialog(), dis: n < 3}], r.left, r.bottom + 4);
+}
+async function levelsPlace(){
+  if (!S.page) return; let n = 0;
+  for (;;) {
+    const p = await pickPoint("Spot level: click a point whose ground level you know (" + n + " added)"); if (!p) break;
+    const T = await pageTexts(S.fileId, S.pageNo), near = lvTexts(T).filter(o => dist(o.p, p) < 40 / S.view.s).sort((a, b) => dist(a.p, p) - dist(b.p, p))[0];
+    const v = await ask("Spot level", `<div class="fg"><label>Ground level here (${lvUnit()})</label><input type="text" id="lvZ" value="${near ? esc(String(near.z)) : ""}" placeholder="e.g. 101.50 or +1'-6&quot;"></div><p class="small" style="margin-top:6px">${near ? "Read from “" + esc(near.s) + "” beside the click — check it. " : ""}Levels are in ${lvUnit()} for this project (Spot levels on this page › unit). Esc stops adding.</p>`, "Add",
+      () => { const z = lvParse($("lvZ").value, false); return isFinite(z) ? {z} : "Type the level, e.g. 101.50 or +1'-6\""; }, "lvZ");
+    if (!v) break;
+    mutate(() => { (P.proj.levels = P.proj.levels || []).push({id: uid("L"), file: S.fileId, page: S.pageNo, p, z: v.z}); }, "Spot level " + lvFmt(v.z)); n++;
+  }
+  if (n) toast(n + " spot level" + (n > 1 ? "s" : "") + " added — " + lvHere().length + " on this page" + (lvHere().length >= 3 ? " · Cut / fill works them out" : " · 3 or more are needed for a cut / fill"), 4000);
+}
+async function levelsRead(){
+  if (!S.page) return; const ar = areaOf(), have = lvHere();
+  const C = lvTexts(await pageTexts(S.fileId, S.pageNo)).filter(o => (!ar || inArea(ar, o.p)) && !have.some(l => dist(l.p, o.p) < 3));
+  if (!C.length) return toast("No level written on this page" + (ar ? " inside the takeoff area" : "") + (have.length ? " that is not added already" : "") + " — click them in with Spot level › Click to add", 5000);
+  const v = await ask("Levels written on this page", `<p>${C.length} figure${C.length > 1 ? "s" : ""} that read as levels. Those with a level word (NGL, EGL, RL, FFL…) or a sign are ticked; plain decimals may be dimensions — tick them only if they are levels. Correct any figure before adding.</p>
+    <div class="grid" style="margin-top:6px"><div class="fg"><label>Levels are in</label><select id="lvU"><option value="ft"${lvUnit() === "ft" ? " selected" : ""}>ft</option><option value="m"${lvUnit() === "m" ? " selected" : ""}>m</option></select></div></div>
+    <div style="display:flex;flex-direction:column;gap:3px;max-height:44vh;overflow:auto;margin-top:6px">${C.map((o, i) => `<label class="cand" style="align-items:center"><input type="checkbox" data-lvck="${i}"${o.strong ? " checked" : ""}> <span style="flex:1">“${esc(o.s)}”</span> <input type="text" data-lvz="${i}" value="${esc(String(o.z))}" style="width:90px" aria-label="Level"></label>`).join("")}</div>`, "Add the ticked",
+    () => { const out = []; for (const ck of document.querySelectorAll("#dlgB [data-lvck]:checked")) { const i = +ck.dataset.lvck, z = lvParse(document.querySelector(`#dlgB [data-lvz="${i}"]`).value, false); if (!isFinite(z)) return "“" + C[i].s + "”: type its level as a figure"; out.push({p: C[i].p, z}); }
+      return out.length ? {out, u: $("lvU").value} : "Tick the levels to add"; });
+  if (!v) return null;
+  mutate(() => { P.proj.lvUnit = v.u; P.proj.levels = P.proj.levels || []; v.out.forEach(o => P.proj.levels.push({id: uid("L"), file: S.fileId, page: S.pageNo, p: o.p, z: o.z})); }, "Spot levels read (" + v.out.length + ")");
+  toast(v.out.length + " spot level" + (v.out.length > 1 ? "s" : "") + " added from the drawing (in " + v.u + ") — " + lvHere().length + " on this page", 3500);
+  return v.out.length;
+}
+async function levelsList(){
+  if (!S.page) return; const L = lvHere();
+  const v = await ask("Spot levels on this page", `<div class="grid"><div class="fg"><label>Levels of this project are in</label><select id="lvU"><option value="ft"${lvUnit() === "ft" ? " selected" : ""}>ft</option><option value="m"${lvUnit() === "m" ? " selected" : ""}>m</option></select></div></div>
+    ${L.length ? `<div style="display:flex;flex-direction:column;gap:3px;max-height:46vh;overflow:auto;margin-top:8px">${L.map((l, i) => `<div class="cand" style="align-items:center"><b style="width:28px">${i + 1}</b><input type="text" data-lvz="${i}" value="${esc(String(l.z))}" style="width:100px" aria-label="Level ${i + 1}"><label class="small"><input type="checkbox" data-lvdel="${i}"> delete</label><button class="btn sm" type="button" data-lvgo="${i}">Show</button></div>`).join("")}</div>` : '<p class="small" style="margin-top:8px">None on this page yet — Click to add, or Read the levels written on this page.</p>'}
+    <p class="small" style="margin-top:6px">Changing the unit does not convert the figures: it says what they are.</p>`, "Save",
+    () => { const out = []; for (let i = 0; i < L.length; i++) { if (document.querySelector(`#dlgB [data-lvdel="${i}"]`).checked) continue; const z = lvParse(document.querySelector(`#dlgB [data-lvz="${i}"]`).value, false); if (!isFinite(z)) return "Level " + (i + 1) + ": type a figure"; out.push({id: L[i].id, z}); } return {out, u: $("lvU").value}; });
+  $("dlgB").querySelectorAll("[data-lvgo]").forEach(b => b.onclick = () => { const l = L[+b.dataset.lvgo]; S.flash = {key: S.key, p: l.p, until: Date.now() + 2500}; draw(); setTimeout(draw, 2600); });
+  if (!v) return;
+  const keep = new Map(v.out.map(o => [o.id, o.z]));
+  mutate(() => { P.proj.lvUnit = v.u; P.proj.levels = (P.proj.levels || []).filter(l => !(l.file === S.fileId && l.page === S.pageNo) || keep.has(l.id)); P.proj.levels.forEach(l => { if (keep.has(l.id)) l.z = keep.get(l.id); }); }, "Spot levels");
+}
+async function cutFillDialog(){
+  if (!P.proj || !S.page) return toast("Open a drawing first", 2000);
+  const k = curScale(); if (!k) return toast("Set the page scale first (K)", 3000);
+  await measReady; if (!MEAS || !MEAS.cutFill) return toast("The measurement engine did not load — reload the page", 4000);
+  const outs = P.proj.items.filter(i => onPage(i) && i.kind === "shape" && !i.cf && !i.hatchAuto && (cond(i.cond) || {}).type === "area"), L = lvHere(), u = lvUnit();
+  if (!outs.length) return toast("Measure the site / plot outline first as an area on this page (Rect R, or click its corners in any area condition), then Cut / fill", 6000);
+  if (L.length < 3) return toast("Cut / fill needs 3 spot levels or more on this page (" + L.length + " now) — Spot level › Click to add, or Read the levels written on this page", 6000);
+  const sel = outs.find(i => selIds().has(i.id)) || outs.slice().sort((a, b) => polyArea(itemPoly(b)) - polyArea(itemPoly(a)))[0];
+  const ac = P.proj.conds.filter(c => c.type === "area" && c.unit === "cft"), CUT = "Excavation — cut (spot levels)", FILL = "Earth filling — fill (spot levels)";
+  const opt = nm => `<option value="">+ New: ${esc(nm)}</option>` + ac.map(c => `<option value="${esc(c.id)}"${c.name === nm ? " selected" : ""}>${esc(c.name)}</option>`).join("");
+  const nm = it => (String(it.label || "").trim() || (cond(it.cond) || {}).name || "Area") + " — " + fq(polyArea(itemPoly(it)) / k / k) + " Sft";
+  let last = null;
+  const calc = () => { const it = outs.find(i => i.id === $("cfO").value), F = lvParse($("cfF").value, false);
+    last = it ? MEAS.cutFill({outline: itemPoly(it), k, formation: isFinite(F) ? lvFt(F) : "", levels: L.map(l => ({p: l.p, z: lvFt(l.z)}))}) : null;
+    $("cfR").innerHTML = !last ? "" : last.value === null ? '<span style="color:#8a5a00">Needs: ' + esc(last.missing.join(", ")) + "</span>"
+      : `<b>Cut ${fq(last.cut)} cft</b> · <b>Fill ${fq(last.fill)} cft</b> · net ${last.value >= 0 ? "cut" : "fill"} ${fq(Math.abs(last.value))} cft<br><span class="small">over ${fq(last.area)} Sft · ground ${lvFmt(last.ground[0] * (u === "m" ? 0.3048 : 1))} to ${lvFmt(last.ground[1] * (u === "m" ? 0.3048 : 1))} ${u} · average depth: cut ${f3(last.depthCut)} ft, fill ${f3(last.depthFill)} ft${last.outside > 0.005 ? ` · <span style="color:#8a5a00">${Math.round(last.outside * 100)} % of the outline lies outside the spot levels — the ground there is taken from the nearest ones; add levels at its corners</span>` : ""}</span>`; };
+  const body = `<p>The ground between the ${L.length} spot levels on this page is the plane of each triangle between them (a TIN, as a level sheet is worked by hand). Inside the outline, where the ground is above the formation level it is cut, where below it is filled. Each goes into a cft condition as the outline × its average depth.</p>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Outline</label><select id="cfO">${outs.map(it => `<option value="${esc(it.id)}"${it === sel ? " selected" : ""}>${esc(nm(it))}</option>`).join("")}</select></div>
+      <div class="fg"><label>Formation level (${u})</label><input type="text" id="cfF" value="${P.proj.cfF != null ? esc(String(P.proj.cfF)) : ""}" placeholder="e.g. 100.00 — never assumed"></div><div class="fg"><label>Levels in</label><input type="text" value="${u} (Spot levels › unit)" disabled></div>
+      <div class="fg"><label>Cut into</label><select id="cfC">${opt(CUT)}</select></div><div class="fg"><label>Fill into</label><select id="cfL">${opt(FILL)}</select></div></div>
+    <div id="cfR" style="margin-top:10px;padding:8px;border:1px solid var(--line);border-radius:6px;background:#f8fafd;min-height:20px"></div>
+    <p class="small" style="margin-top:6px">Running it again on the same outline replaces its cut and fill. The formation level is the finished level of the dig or the fill (not assumed).</p>`;
+  const pr = ask("⛰ Cut / fill from spot levels", body, "Add to the takeoff", () => { calc(); if (!last || last.value === null) return "Needs: " + (last ? last.missing.join(", ") : "an outline"); return {it: outs.find(i => i.id === $("cfO").value), F: lvParse($("cfF").value, false), r: last, cutC: $("cfC").value, fillC: $("cfL").value}; }, "cfF");
+  ["cfO", "cfF"].forEach(id => $(id).addEventListener("input", calc)); $("cfO").addEventListener("change", calc); calc();
+  const v = await pr; if (!v) return null;
+  const r = v.r, lab = (w, d) => w + " — " + L.length + " spot levels, formation " + lvFmt(v.F) + " " + u + " (average depth " + f3(d) + " ft)";
+  mutate(() => {
+    P.proj.cfF = v.F; P.proj.items = P.proj.items.filter(i => !(i.cf && i.cf.from === v.it.id));
+    const pick = (id, name) => { let c = id ? cond(id) : P.proj.conds.find(q => q.type === "area" && q.unit === "cft" && q.name === name); if (!c) { c = qkMake({name, type: "area", unit: "cft"}, {}, []); P.proj.conds.push(c); } c.cfCond = true; return c; };
+    const add = (c, d, w) => { const y = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: v.it.pts.map(p => p.slice()), nos: 1, label: lab(w, d), dep: d, cf: {from: v.it.id, F: v.F, u, n: L.length}};
+      if (v.it.shape === "circle") y.shape = "circle"; if (v.it.arcs) y.arcs = JSON.parse(JSON.stringify(v.it.arcs)); P.proj.items.push(y); };
+    if (r.cut > 1e-6) add(pick(v.cutC, CUT), r.depthCut, "Cut"); if (r.fill > 1e-6) add(pick(v.fillC, FILL), r.depthFill, "Fill");
+  }, "Cut / fill");
+  toast("Cut " + fq(r.cut) + " cft · fill " + fq(r.fill) + " cft over " + fq(r.area) + " Sft from " + L.length + " spot levels" + (r.outside > 0.005 ? " — " + Math.round(r.outside * 100) + " % of the outline outside the levels" : ""), 6000);
+  return {cut: r.cut, fill: r.fill, area: r.area};
+}
+
 /* ✅ the checker: what a checking QS asks about a takeoff — rooms written on the drawing but not measured, the same room
    measured twice, a count marker on top of another, door / window tags not counted (or counted differently), measured
    against written sizes, counts against the schedule's quantities, the schedule's sizes against the opening schedule,
@@ -17169,7 +17509,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
     floorsDialog, floorAddMany, floorNext, floorTitleIn, floorZoom, floorMenu, floorBoxStart, floorNewAsk, floorLegends, floorLegendSplit, legendFloorSet, legendFit, legendTitle, floorTitleOf,
-    contactPop, CONTACT_NO, quickItemsDialog, quickItemsAdd, qkCat, qkNeed, qkFind, PRESETS, condPop, condUse, condBack, condMru, renderCondPick, nosSet, nosNow, nosNew, nosMenu, nosTyped, nosSelDialog, autoMenu, autoWindowUI, mineSet, tbGroups, tbPref, MINE_START, applyChestProfile,
+    contactPop, CONTACT_NO, quickItemsDialog, quickItemsAdd, qkCat, qkNeed, qkFind, PRESETS, QK_CATS, symList, symKeep, symCount, symCountDialog, sheetLinksMake, textPartBox, hatchSig, hatchIds, hatchSplitDialog, lvParse, lvTexts, lvHere, levelsRead, levelsPlace, levelsList, cutFillDialog, validate, followLink, itemPoly, condPop, condUse, condBack, condMru, renderCondPick, nosSet, nosNow, nosNew, nosMenu, nosTyped, nosSelDialog, autoMenu, autoWindowUI, mineSet, tbGroups, tbPref, MINE_START, applyChestProfile,
     get SNAP_PX(){ return SNAP_PX; }, get HIT_PX(){ return HIT_PX; }};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
