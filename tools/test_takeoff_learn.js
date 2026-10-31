@@ -152,13 +152,14 @@ function makePdf(){
     projects: {"Lother000002:aaaa11112222": {at: "2026-10-30T10:00:00Z", rooms: {KITCHEN: {n: 3, items: {"kitchen tile|area|Sft": {n: 3, how: "area", per: []}}}},
       conds: {"kitchen tile|area|Sft": {name: "Kitchen tile", type: "area", unit: "Sft", h: 0, t: 0, faces: 1, ded: 1}}},
       [me + ":" + proj.p]: Object.assign({sent: "x"}, unz(proj))}};
+  const b0 = await T(() => zdTakeoff.learnSkills().rooms.BATH.n);   // this browser's own baths (4, or 5 once the project is read again with BATH 5 of p.2)
   ok(await T(() => zdTakeoff.learnTeamLoad()), "the team's method read from the site");
   const k2 = await T(() => Object.keys(zdTakeoff.learnSkills().rooms));
   ok(k2.includes("KITCHEN") && k2.includes("BATH") && k2.includes("BED ROOM"), "…added to what this browser learned: " + k2.join(", "));
-  ok((await T(() => zdTakeoff.learnSkills().rooms.BATH.n)) === 4, "…what this browser sent itself is not counted twice (still 4 baths)");
+  ok(b0 >= 4 && (await T(() => zdTakeoff.learnSkills().rooms.BATH.n)) === b0, "…what this browser sent itself is not counted twice (still " + b0 + " baths)");
   await page.click("#bNewTop").catch(() => {}); await dlgWait().catch(() => {}); if (await T(() => !!document.getElementById("dlgName"))) { await page.fill("#dlgName", "Second project"); await page.click("#dlgOk"); } await wait(600);
   await T(() => zdTakeoff.learnProject());
-  ok((await T(() => (zdTakeoff.learnSkills().rooms.BATH || {}).n)) === 4, "a new, empty project: what it learned before stays");
+  ok((await T(() => (zdTakeoff.learnSkills().rooms.BATH || {}).n)) === b0, "a new, empty project: what it learned before stays");
   await T(() => { const Z = zdTakeoff, st = Z.learnStore(), id = Object.keys(st.projects)[0]; st.projects.X2 = JSON.parse(JSON.stringify(st.projects[id])); localStorage.setItem("zdTakeoffLearn", JSON.stringify(st)); });
   await T(() => { zdTakeoff.quickItemsDialog(); }); await dlgWait(); await page.fill("#qkQ", "wall tile"); await wait(120); await page.keyboard.press("Enter"); await dlgWait();
   const ph = await T(() => (document.querySelector('#dlgB [data-qkh="0"]') || {}).placeholder || "");
