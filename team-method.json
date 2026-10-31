@@ -1,6 +1,52 @@
 {
  "about": "PDF Takeoff: how this team takes off, learned by the takeoff agent in every browser of the team and merged by tools/learn_archive.py. Item names, heights, room kinds and counts only.",
- "projects": {},
- "senders": {},
+ "at": "2026-10-31T07:09:24.294Z",
+ "projects": {
+  "vw1q94deeqh7:df954b80d38e": {
+   "at": "2026-10-31T07:08:23.873Z",
+   "conds": {
+    "floor area|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "Floor area",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    }
+   },
+   "rooms": {
+    "BED ROOM": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 3,
+       "per": []
+      }
+     },
+     "n": 3
+    },
+    "LIFT": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    }
+   },
+   "sent": "2026-10-31T07:09:24.294Z"
+  }
+ },
+ "senders": {
+  "vw1q94deeqh7": {
+   "at": "2026-10-31T07:09:24.294Z",
+   "missed": {},
+   "rejects": {},
+   "words": {}
+  }
+ },
  "v": 2
 }
