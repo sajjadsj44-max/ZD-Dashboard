@@ -96,16 +96,21 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   ok(await T(() => { const Z = zdTakeoff, v = Z.condVars(Z.P.proj.conds.find(c => c.id === "cG")); return Math.abs(v.L - (20 * 1.118 + 10)) < 1e-6 && Math.abs(v.Q - 32.36) < 1e-9; }), "assembly variables: L along the slope with the rise (32.36 ft), Q the same");
 
   console.log("circles: R and D");
+  const lblFull = on => T(on => { const Z = zdTakeoff; Z.S.lbl = Object.assign({}, Z.S.lbl, on ? {style: "box", show: "full"} : {style: "ps", show: "nameqty"}); }, on);   // the full captions (R / Ø, slope, rise) are Full labels'; the default is PlanSwift's name + qty
+  await lblFull(true);
   { const r = await R("iC"), r2 = await R("iK"); ok(r[0].A === 78.54 && r2[0].L === 31.416, "circle of radius 5 ft: area 78.540 Sft, round 31.416 ft"); }
   ok(await T(() => { const Z = zdTakeoff, P = Z.P.proj, k = 9, c = id => P.conds.find(x => x.id === id), it = id => P.items.find(i => i.id === id);
     return Z.capLines(it("iC"), c("cC"), k).includes("R 5.000 ft · Ø 10.000 ft") && Z.capLines(it("iK"), c("cK"), k).includes("R 5.000 ft · Ø 10.000 ft"); }), "circle captions show R 5.000 ft · Ø 10.000 ft (area and length)");
+  await lblFull(false);
   await T(() => { zdTakeoff.setSel(["iC"]); zdTakeoff.refresh(); }); await wait(200);
   ok(await T(() => { const t = document.getElementById("props").textContent; return /Radius R\s*5\.000 ft/.test(t) && /Diameter D\s*10\.000 ft/.test(t) && /R 5\.000 · dia 10\.000 ft/.test(t); }), "Properties of a circle: Radius R 5.000 ft, Diameter D 10.000 ft");
 
   console.log("captions, sheet, Properties");
+  await lblFull(true);
   ok(await T(() => { const Z = zdTakeoff, P = Z.P.proj, c = id => P.conds.find(x => x.id === id), it = id => P.items.find(i => i.id === id), L = Z.capLines(it("iR"), c("cR"), 9), L2 = Z.capLines(it("iP"), c("cP"), 9), L3 = Z.capLines(it("iG"), c("cG"), 9);
     return L.includes("slope 6:12 × 1.1180") && L.some(t => /^134\.160/.test(t)) && L2.includes("L 20.000 ft") && L2.some(t => /^30\.000/.test(t)) && L2.includes("rise 10.000 ft") && L3.includes("slope 6:12 × 1.1180 · rise 10.000 ft"); }),
     "captions: the roof shows slope 6:12 × 1.1180 and 134.160; the pipe L 20.000 ft, 30.000 and rise 10.000 ft; the gutter both");
+  await lblFull(false);
   { const sh = await page.innerText("#sheet"); ok(/1 × 10\.000 × 12\.000 × slope 1\.1180/.test(sh) && /slope 6:12 \(26\.6°\)/.test(sh) && /run — rise/.test(sh) && /Drain — drop/.test(sh), "measurement sheet: × slope 1.1180 in the dimensions, the slope named, rise and drop rows"); }
   await T(() => { zdTakeoff.setSel(["iR"]); zdTakeoff.refresh(); }); await wait(200);
   ok(await page.isVisible('#props input[data-prop="pitch"]') && (await page.getAttribute('#props input[data-prop="pitch"]', "placeholder")) === "as condition 6:12" && !(await page.isVisible('#props input[data-prop="rise"]')), "Properties of an area: its own Slope box (placeholder ‘as condition 6:12’), no rise box");

@@ -8,7 +8,10 @@
 
    TK_URL, TK_LIBS (pdfjs-dist, exceljs) and TK_SHOTS as in tools/test_takeoff.js.
 
-   Checks: a label can be dragged (offset kept on the drawing, leader, undo, reset, locked), [ ] / ⚙ / dialog sizes; a label's text size follows the zoom at every zoom, as Bluebeam's (100 % = its set size); zoomed far out the labels are left
+   Checks: by default PlanSwift's labels — an area's yellow tag (#dfbf2a, black border, square corners, plain Arial) reading
+   "HALL / 1,200.00 SQ FT", fitted to its text and sized on the building (0.85 ft text at the drawing's scale), still drawn small
+   at 30 %; a run shows its length only when clicked (and on every run with that option off); the export draws the same; Classic
+   brings the white box back; labels set before are switched to PlanSwift's once. Then, in Classic: a label can be dragged (offset kept on the drawing, leader, undo, reset, locked), [ ] / ⚙ / dialog sizes; a label's text size follows the zoom at every zoom, as Bluebeam's (100 % = its set size); zoomed far out the labels are left
    out but the selected object's stays readable; small labels that would overlap keep only the bigger object's; View →
    Labels "grow and shrink with the zoom" off keeps one size, "leave out a label that would cover another" off shows them
    all; the hover tip still names a hidden label's object; no page errors. */
@@ -57,7 +60,52 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.05 : t);
     it("IB", big, "shape", "HALL"); it("D1", c1, "ded", ""); it("D2", c2, "ded", ""); it("D3", c3, "ded", "");
     Z.S.cond = "CF"; Z.save(); Z.refresh(); },
     [sq(100, 100, 360, 270), sq(150, 330, 27, 27), sq(185, 330, 27, 27), sq(220, 330, 27, 27)]);
-  await setLbl({on: true, small: false, zoom: true, declutter: true, name: true, qty: true});
+
+  console.log("PlanSwift's labels (the default)");
+  ok(await T(() => { const o = zdTakeoff.S.lbl; return o.style === "ps" && o.show === "nameqty" && o.lenSel === true; }), "by default labels are PlanSwift's: a name + quantity tag, a run's only when it is clicked");
+  /* a wall run 40 ft long (360 pt) under the hall */
+  await T(() => { const Z = zdTakeoff, P = Z.P.proj; P.conds.push({id: "CW", name: "Wall", type: "linear", unit: "ft", color: "#2222ff", h: "", t: "", faces: 1, dedMin: 0});
+    P.items.push({id: "IW", cond: "CW", file: Z.S.fileId, page: 1, kind: "shape", pts: [[100, 430], [460, 430]], nos: 1}); Z.refresh(); });
+  /* the tags drawn now: their lines, text size / weight / font, the box's fill, opacity, border, corners, and whether every line is inside the box */
+  const tags = () => T(() => [...document.querySelectorAll("#ov g.aplbl")].map(g => { const r = g.querySelector("rect"), t = [...g.querySelectorAll("text")], rb = r && r.getBBox(), tb = t.map(x => x.getBBox());
+    return {s: t.map(x => x.textContent), fs: +t[0].getAttribute("font-size"), fw: t[0].getAttribute("font-weight"), ff: t[0].getAttribute("font-family"), fill: r && r.getAttribute("fill"), op: r && r.getAttribute("fill-opacity"),
+      stroke: r && r.getAttribute("stroke"), rx: r && r.getAttribute("rx"), fits: !!rb && tb.every(b => b.x >= rb.x - 0.5 && b.x + b.width <= rb.x + rb.width + 0.5 && b.y >= rb.y - 0.5 && b.y + b.height <= rb.y + rb.height + 0.5)}; }));
+  const tagOf = async n => (await tags()).find(x => x.s[0] === n);
+  await zoomTo(1); let P0 = await tags(), hallT = P0.find(x => x.s[0] === "HALL");
+  ok(hallT && hallT.s.join(" / ") === "HALL / 1,200.00 SQ FT", "an area's tag: its name over its quantity, as PlanSwift writes it (" + (hallT && hallT.s.join(" / ")) + ")");
+  ok(hallT && hallT.fill === "#dfbf2a" && hallT.op === "1.00" && hallT.stroke === "#000000" && !hallT.rx && hallT.fw === "400" && /^Arial/.test(hallT.ff),
+    "…a solid yellow tag (#dfbf2a) with a black border and square corners, its text plain black Arial (" + JSON.stringify(hallT && [hallT.fill, hallT.op, hallT.stroke, hallT.rx, hallT.fw, hallT.ff]) + ")");
+  ok(hallT && hallT.fits, "…every line inside the tag (the tag is measured to its text)");
+  await setLbl({small: false}); const cutT = (await tags()).filter(x => x.s[0] !== "HALL" && x.s[0] !== "Wall"); await setLbl({small: true});
+  ok(cutT.length && cutT.every(x => x.s.length === 1 && x.s[0] === "-9.00 SQ FT"), "a cut-out's tag shows its quantity (3 × 3 ft, with “hide labels on small shapes” off): " + JSON.stringify(cutT.map(x => x.s)));
+  ok(!P0.some(x => x.s[0] === "Wall"), "a run (wall) shows no label until it is clicked (" + P0.map(x => x.s[0]).join(", ") + ")");
+  ok(hallT && near(hallT.fs, 0.85 * 9, 0.06), "sized on the building: its text 0.85 ft high at the drawing's 1/8\" = 1'-0\" (9 pt per ft), 7.65 px at 100 % (" + (hallT && hallT.fs) + ")");
+  await zoomTo(2); hallT = await tagOf("HALL");
+  ok(hallT && near(hallT.fs, 0.85 * 9 * 2, 0.06), "…twice that at 200 %, in step with the drawing (" + (hallT && hallT.fs) + " px)");
+  await zoomTo(0.3); hallT = await tagOf("HALL");
+  ok(hallT && near(hallT.fs, 0.85 * 9 * 0.3, 0.06), "zoomed out to 30 % the tag stays, small, as in PlanSwift's whole-sheet view (" + (hallT && hallT.fs) + " px)");
+  await zoomTo(0.2); ok(!(await tagOf("HALL")), "…and below a 2 px speck it is left out (20 %)");
+  await zoomTo(1); await page.keyboard.press("v");
+  const runAt = await T(() => { const Z = zdTakeoff, v = Z.S.view, r = document.getElementById("stage").getBoundingClientRect(); return [r.left + 300 * v.s + v.tx, r.top + 430 * v.s + v.ty]; });
+  await page.mouse.click(runAt[0], runAt[1]); await wait(250);
+  let wallT = await tagOf("Wall");
+  ok((await T(() => zdTakeoff.S.sel)) === "IW" && wallT && wallT.s.join(" / ") === "Wall / 40.00 FT", "a click on the run shows its length: " + (wallT && wallT.s.join(" / ")));
+  await page.mouse.click(runAt[0] + 140, runAt[1] - 35); await wait(250);   // (beside the tag: a click on a label selects its object)
+  ok(!(await T(() => zdTakeoff.S.sel)) && !(await tagOf("Wall")), "…a click elsewhere hides it again");
+  const ex = await T(() => { const Z = zdTakeoff, b = Z.S.base; return Z.pageOverlaySvg(Z.S.fileId, Z.S.pageNo, 2, b.width * 2, b.height * 2, {legend: "none"}); });
+  ok(/font-size="15\.3"[^>]*>HALL<\/text>/.test(ex) && />1,200\.00 SQ FT<\/text>/.test(ex) && /fill="#dfbf2a"/.test(ex) && !/>Wall<\/text>/.test(ex), "the marked-up export draws the same: the area's tag at the drawing's size, no run label");
+  await setLbl({lenSel: false}); wallT = await tagOf("Wall");
+  ok(wallT && wallT.s.join(" / ") === "Wall / 40.00 FT", "View → Labels “only on the run clicked” off: every run shows its length"); await setLbl({lenSel: true});
+  await page.click('[data-rtab="view"]'); await wait(150); await page.click("#rbLblMenu"); await wait(150);
+  const mi0 = await page.locator("#ctx .ci").allInnerTexts();
+  ok(mi0.some(t => /✓\s*Style: PlanSwift/.test(t)) && mi0.some(t => /Style: Classic/.test(t)) && mi0.some(t => /✓\s*Lengths only on the run clicked/.test(t)), "⚙ by Labels: Style PlanSwift (ticked) or Classic, Lengths only on the run clicked (ticked)");
+  await page.locator("#ctx .ci", {hasText: "Style: Classic"}).first().click(); await wait(200); hallT = await tagOf("HALL");
+  ok(hallT && hallT.fill === "#ffffff" && near(hallT.fs, 11.5, 0.06) && hallT.s[1] === "1,200.000 Sft", "Style: Classic brings the white box back: 11.5 px at 100 %, 1,200.000 Sft (" + JSON.stringify(hallT && [hallT.fill, hallT.fs, hallT.s]) + ")");
+  await page.click('[data-rtab="takeoff"]'); await wait(150);
+  await T(() => { const Z = zdTakeoff, P = Z.P.proj; P.items = P.items.filter(i => i.id !== "IW"); P.conds = P.conds.filter(c => c.id !== "CW"); Z.S.sel = null; Z.refresh(); });
+
+  console.log("Classic labels");
+  await setLbl({on: true, small: false, zoom: true, declutter: true, name: true, qty: true, style: "box", show: "full"});
 
   console.log("labels follow the zoom");
   await zoomTo(1); let L = await labels(); const hall1 = L.find(x => x.s === "HALL");
@@ -213,6 +261,11 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.05 : t);
   const kept2 = await T(() => JSON.parse(localStorage.getItem("zdTakeoffLbl") || "{}"));
   ok(kept2.scale === 1.5 && kept2.dedScale === 0.8, "the sizes are kept for the next visit");
   await setLbl({scale: 1, dedScale: 1});
+
+  console.log("labels set before PlanSwift's");
+  await T(() => localStorage.setItem("zdTakeoffLbl", JSON.stringify({on: true, show: "full", dedShow: "qty", zoom: true, declutter: true, v2: 1})));
+  await page.reload({waitUntil: "load"}); await wait(900);
+  ok(await T(() => { const o = zdTakeoff.S.lbl; return o.style === "ps" && o.show === "nameqty" && o.lenSel === true && o.v3 === 1 && o.dedShow === "qty"; }), "labels set before this are switched to PlanSwift's once (name + qty, a run's when clicked), the rest kept");
 
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
   await browser.close();

@@ -170,7 +170,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.01 : t);
   await T(() => zdTakeoff.floorLegendSplit(zdTakeoff.S.key)); await wait(300);
   LG = await lgOf();
   ok(LG.length === 1 && LG[0].floor === "*" && LG[0].rows.join("|") === "§Typical 1st to 8th floor|Room Area=100.00|Wall=15.00|Doors=1.00|§Ground floor|Room Area=180.00|Wall=30.00|Doors=2.00", "one legend split by floor: a section for each, in the floors' order");
-  ok(await T(id => { const Z = zdTakeoff, m = Z.P.proj.marks.find(x => x.id === id), h = Math.abs(m.pts[1][1] - m.pts[0][1]), svg = Z.legendSvg0(m, p => p, 1); return h >= 10 * 18 && /Typical 1st to 8th floor/.test(svg) && /Ground floor/.test(svg); }, LG[0].id), "its box is tall enough for the 8 rows, and draws both floor names");
+  ok(await T(id => { const Z = zdTakeoff, m = Z.P.proj.marks.find(x => x.id === id), h = Math.abs(m.pts[1][1] - m.pts[0][1]), svg = Z.legendSvg0(m, p => p, 1); return h >= (m.look === "ps" ? Z.legendRows(m).length * m.rowH : 10 * 18) && /Typical 1st to 8th floor/.test(svg) && /Ground floor/.test(svg); }, LG[0].id), "its box is tall enough for the 8 rows, and draws both floor names");
   await page.selectOption('#props select[data-lgfloor]', "Ground floor"); await wait(250);
   LG = await lgOf(); ok(LG[0].floor === "Ground floor" && LG[0].rows.length === 3, "Properties → Floors: only Ground floor");
   await T(() => zdTakeoff.floorRename(zdTakeoff.S.key, "Ground floor", "Ground")); await wait(200);
