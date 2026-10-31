@@ -35,6 +35,13 @@
   only reads it again from the DWG when `CAD_VER` changes, so without it drawings already added keep
   showing the old result (as the MTEXT box centring of #134 did).
 
+- The takeoff agent learns how the team takes off by itself (Auto takeoff › Learned skills, `learn*` in takeoff.js): from rooms
+  people measure and what they take off with them, the agent's rooms people delete, and rooms added by hand after it. Kept in
+  localStorage `zdTakeoffLearn`, never thrown away (per-project facts). Shared free and automatically: browsers of the published
+  site send to the relay topic `learn.topic` in `takeoff/chat.json`; `tools/learn_archive.py` (run by chat-archive.yml) merges them
+  into `team-method.json` on the chat-archive branch, read back on start. A copy served anywhere else never sends (tests set
+  localStorage `zdTakeoffLearnRelay` = `on`). `tools/test_takeoff_learn.js`; `python tools/learn_archive.py --selftest`.
+
 # Dashboard password
 
 - The dashboards' password is never saved in any browser and is asked every

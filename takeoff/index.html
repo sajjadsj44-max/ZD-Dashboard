@@ -783,6 +783,7 @@ table.sktbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}ta
 .qkch:hover{border-color:var(--blue)}.qkch.on{background:var(--navy);border-color:var(--navy);color:#fff}
 .qkgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:7px;align-items:stretch}
 .qkgh{grid-column:1/-1;font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin-top:6px}
+#rbAuto{position:relative}#rbAuto.learned::after{content:"🧠";position:absolute;top:1px;right:1px;font-size:10px;line-height:1}   /* the agent learned something new: Learned skills */
 .qkgh .qkall{margin-left:6px;border:1px solid var(--line);background:#fff;border-radius:10px;padding:0 8px;font:inherit;font-size:10px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--blue);cursor:pointer;vertical-align:1px}.qkgh .qkall:hover{border-color:var(--blue)}.qkgh[hidden]{display:none}
 .qkc{position:relative;display:grid;grid-template-columns:auto auto minmax(0,1fr);grid-template-rows:auto auto;align-items:center;gap:3px 9px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;cursor:pointer;min-width:0}
 .qkc:hover,.qkc:focus-visible{border-color:var(--blue);box-shadow:0 3px 12px rgba(15,41,66,.1);outline:none}
@@ -1607,7 +1608,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-31c"></script>
+<script type="module" src="takeoff.js?v=2026-10-31d"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with

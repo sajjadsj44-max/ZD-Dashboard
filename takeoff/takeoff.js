@@ -535,7 +535,8 @@ function mutate(fn, label){
   let tot = 0; S.undo.forEach(e => { tot += undoEntry(e).js.length; });   // 200 steps, fewer (20 at least) for a big project: about 80 MB of history at most
   while (S.undo.length > 200 || (S.undo.length > 20 && tot > 40e6)) tot -= undoEntry(S.undo.shift()).js.length;
   S.redo = []; S.draftRedo = [];
-  fn(); floorSplitSafe(); aiRunRecord(ids0, label); save(); refresh();
+  let lw = null; try { lw = learnBefore(); } catch (e) {}
+  fn(); floorSplitSafe(); aiRunRecord(ids0, label); try { learnAfter(lw, label); } catch (e) {} save(); refresh();
 }
 /* the shape being drawn keeps its own history in steps: a click is one step, an arc (many points) is one step, so
    Ctrl+Z / Backspace take back the last click or the whole arc and Ctrl+Y puts it back. With nothing being drawn,
@@ -631,6 +632,7 @@ async function openProject(id){
   S.ribHold = true; try { setTool(S.cond ? "draw" : "select"); } finally { S.ribHold = false; }   // opening a project leaves the ribbon on its tab (My tools after a refresh)
   refresh();
   backupNow("opened").catch(() => {});
+  learnSoon();   // the agent learns from this project as it is
 }
 async function showStart(){
   await flushSave();
@@ -9278,7 +9280,8 @@ async function quickItemsDialog(){
   if (!v || !v.pick || !v.pick.length) return null;
   return quickItemsAdd(v.pick, v.tool);
 }
-async function qkAskHT(L){   // H / T for the new items that need them — typed for this project, never assumed
+async function qkAskHT(L){   // H / T for the new items that need them — typed for this project, never assumed (the height the team uses offered)
+  L = L.map(learnHint);
   const inp = (attr, i, ph, ti, first) => `<input type="text" ${first ? 'id="qkF0" ' : ""}${attr}="${i}" placeholder="${esc(ph)}" title="${esc(ti)}" autocomplete="off">`;
   let first = true;
   const row = (p, i) => { const n = qkNeed(p); let h = `<div class="qkhr"><b>${esc(p.name)}</b>`;
@@ -9310,13 +9313,13 @@ async function quickItemsAdd(picks, tool){   // -> the condition now active, or 
 function ribAnchor(id){ const b = $(id); return [b].concat([...document.querySelectorAll('#mineBox [data-mine$="/' + id + '"]')]).filter(Boolean).find(x => x.offsetParent) || b; }   // the visible one: the ribbon button or its My tools copy
 function autoMenu(){
   const r = ribAnchor("rbAuto").getBoundingClientRect(), pg = !!S.page, ag = id => () => { const t = $(id); if (t) t.click(); };
-  ctxShow([{h: "Auto takeoff", s: "free — no API key · one Ctrl+Z takes each run back"},
+  ctxShow([{h: "Auto takeoff", s: "free — no API key · one Ctrl+Z takes each run back" + (S.learnNew ? " · 🧠 " + S.learnNew + " new thing" + (S.learnNew === 1 ? "" : "s") + " learned (Learned skills)" : "")},
     {t: "Full takeoff — rooms, walls, doors / windows, finishes…", fn: ag("agFull")},
     {t: "Rooms — every named room on this page", fn: ag("agRooms"), dis: !pg}, {t: "Rooms in a window — box part of the plan", fn: autoWindowUI, dis: !pg},
     {t: "Trace the whole floor — from the drawing's wall layers", fn: traceFloorUI, dis: !pg}, {t: "Apartment — one unit by its number…", fn: ag("agUnit"), dis: !pg}, {sep: 1},
     {t: "Walls — from their two face lines…", fn: ag("agWalls"), dis: !pg}, {t: "Block masonry — 4\" and 8\" with deductions and block count…", fn: ag("agBlock"), dis: !pg || !$("agBlock")},
     {t: "Doors / windows — tags and schedules…", fn: ag("agTags"), dis: !pg}, {t: "Finishes — plaster, paint, skirting, ceiling per room…", fn: ag("agFin"), dis: !pg},
-    {t: "Name rooms by contents (this page)", fn: nameRooms, dis: !pg}, {t: "Ceilings / floors by hatch pattern…", fn: () => hatchSplitDialog(), dis: !pg}, {t: "Count my symbols — WC, basin, light point… kept from Find similar", fn: () => symCountDialog()}, {sep: 1},
+    {t: "Name rooms by contents (this page)", fn: nameRooms, dis: !pg}, {t: "Ceilings / floors by hatch pattern…", fn: () => hatchSplitDialog(), dis: !pg}, {t: "🧠 Apply learned skills — what your team takes off with each room", fn: () => learnApply("page"), dis: !pg}, {t: "🧠 Learned skills — how your team takes off…", fn: () => learnDialog()}, {t: "Count my symbols — WC, basin, light point… kept from Find similar", fn: () => symCountDialog()}, {sep: 1},
     {t: "Earthworks: spot levels — click in, or read those written…", fn: levelsMenu, dis: !pg}, {t: "Earthworks: cut / fill from the spot levels…", fn: () => cutFillDialog(), dis: !pg}, {sep: 1},
     {t: "Check the takeoff — rooms missed, counted twice…", fn: ag("agCheck")}, {t: "Drawing details — rooms, sizes, tags, levels", fn: ag("aiDetails"), dis: !pg},
     {t: "Ask the takeoff agent (Claude)…", fn: () => { if (!$("aiPanel").classList.contains("on")) $("bClaude").click(); }}], r.left, r.bottom + 4);
@@ -9401,7 +9404,7 @@ function settingsInit(){
 }
 /* settings in a file: every zdTakeoff… option of this browser but the AI key and what is only a record (last project, chat, history, KPIs) */
 const SET_SKIP = /^zdTakeoff(ApiKey|Last|Chat|CmdHist|Kpi|Bench|Pal|PalUse|RibLast|SetPg)$/;
-const SET_KEEP = /^zdTakeoff(ToolChest|Stamps|Syms|AgentRules|User|LocalUrl|LocalModel|LocalCtx|CcModel|AiEngine)$/;   // your own content and AI setup: a Reset all keeps them
+const SET_KEEP = /^zdTakeoff(ToolChest|Stamps|Syms|Learn|AgentRules|User|LocalUrl|LocalModel|LocalCtx|CcModel|AiEngine)$/;   // your own content and AI setup: a Reset all keeps them
 function setKeys(){ const out = []; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (/^zdTakeoff/.test(k) && !SET_SKIP.test(k)) out.push(k); } } catch (e) {} return out.sort(); }
 function setExport(){
   const o = {app: "ZD Takeoff settings", v: 1, at: new Date().toISOString(), keys: {}}; setKeys().forEach(k => { o.keys[k] = pref(k); });
@@ -9574,6 +9577,7 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
       {t: "tog", n: "Takeoff-agent bar at the bottom", get: () => pcOn("ui-agent"), set: v => pcSet("ui-agent", v)},
       {t: "btn", n: "AI engine", d: "Claude, or a free local AI that runs offline — set up, test, benchmark", b: "Set up…", need: 1, fn: locSetup},
       {t: "btn", n: "Agent instructions", d: "the working rules the AI follows", b: "Edit…", need: 1, fn: rulesDialog},
+      {t: "btn", n: "Learned skills", d: "how your team takes off, learned by the agent from your own takeoffs — and shared with the team", b: "Open…", fn: () => learnDialog()},
       {t: "btn", n: "Project knowledge", d: "documents and offline search", b: "Open…", need: 1, fn: kbDialog},
       {t: "btn", n: "KPIs", d: "Auto area and agent performance from recorded results", b: "Open…", need: 1, fn: kpiDialog}],
      reset: () => pcSet("ui-agent", true)},
@@ -11260,7 +11264,7 @@ async function recoverDialog(){
     recoverDialog();
   });
 }
-setInterval(() => { if (P.proj && document.visibilityState !== "hidden") { savePr = P.proj; flushSave().then(ok => ok && backupNow("every 10 min")).catch(() => {}); } }, 600000);
+setInterval(() => { if (P.proj && document.visibilityState !== "hidden") { savePr = P.proj; flushSave().then(ok => ok && backupNow("every 10 min")).catch(() => {}); try { learnProject(); } catch (e) {} } }, 600000);   // (and the agent learns from what was done meanwhile)
 /* projects and backups live only in this browser, which may clear a site's storage when the disk is nearly full: a project made or
    imported asks it not to (Chrome / Edge decide by themselves, Firefox asks once). Settings › Saving & backups shows the answer */
 function keepStorage(){ const st = navigator.storage; if (st && st.persist && st.persisted) st.persisted().then(p => p || st.persist()).catch(() => {}); }
@@ -11833,6 +11837,7 @@ function paletteCmds(){
   add("Combine the selected areas into one (union) — merge them, small gaps between them filled", () => combineAreas(), "Modify");
   if (S.page) add("Trace the whole floor — every room, washroom, corridor, threshold and wall run from the drawing's wall layers (a CAD PDF, or the AutoCAD plan on screen)", traceFloorUI, "Tool");
   if (S.page) add("Auto area: every room in a window…", autoWindowUI, "Tool");
+  add("Learned skills — how your team takes off (the agent learns it from your takeoffs)", () => learnDialog(), "Tool"); if (S.page) add("Apply learned skills to the rooms on this page", () => learnApply("page"), "Tool");
   if (S.page) { add("Areas by hatch pattern — ceilings / floors grouped by the pattern drawn inside them", () => hatchSplitDialog(), "Tool"); add("Spot levels — click in, or read the levels written on the drawing (earthworks)", levelsPlace, "Tool");
     add("Spot levels — read those written on this page", levelsRead, "Tool"); add("Spot levels on this page — edit, delete, unit", levelsList, "Tool"); add("Cut / fill from spot levels (earthworks)", () => cutFillDialog(), "Tool"); }
   add("Check before export (errors and warnings)", exportMenu, "Check");
@@ -13108,8 +13113,8 @@ function rulesPut(scope, L){
 }
 function rulesActive(){ return ["project", "global", "session"].flatMap(sc => rulesOf(sc).filter(r => r && r.on !== false && String(r.text || "").trim()).map(r => Object.assign({scope: sc}, r))); }
 function rulesPrompt(){
-  const L = rulesActive(); if (!L.length) return "";
-  return "\n\nTHE USER'S WORKING RULES — follow them unless the user says otherwise in this message:\n" + L.map(r => "- " + r.text + " (" + RULE_SCOPES[r.scope] + ")").join("\n");
+  const L = rulesActive(); let lp = ""; try { lp = learnPrompt(); } catch (e) {}
+  return (L.length ? "\n\nTHE USER'S WORKING RULES — follow them unless the user says otherwise in this message:\n" + L.map(r => "- " + r.text + " (" + RULE_SCOPES[r.scope] + ")").join("\n") : "") + lp;
 }
 const RULE_NEG = /\b(never|don'?t|do not|no|exclude|without|avoid|stop)\b/i;
 function ruleCore(t){ return String(t).toLowerCase().replace(/\b(please|always|never|don'?t|do not|from now on|remember( that)?|for this project|make sure( to)?|you should|i want you to|by default)\b/g, " ").replace(/[^a-z0-9"' ]+/g, " ").replace(/\s+/g, " ").trim(); }
@@ -13624,6 +13629,7 @@ const AI_TOOLS3 = [
    takes the wet rooms only; a balcony item the balconies and terraces only. Other items: every room. */
 const WET_NAME = /\b(BATH|TOILET|W\.?C|WASH|POWDER|PWD|SHOWER|S\.\s*BATH)\b/i, BAL_NAME = /\b(BALCONY|TERRACE|VERANDAH?)\b/i;
 function houseRule(c){
+  const lt = learnTake(c); if (lt) return lt;   // learned from the team's own takeoffs: first
   const n = String((c && c.name) || "");
   if (/bath|wash|wet|toilet|w\.?r\b/i.test(n) && /tile|floor/i.test(n)) return {take: up => WET_NAME.test(up), why: "not a wet room — " + n + " takes baths / toilets only"};
   if (/balcony|terrace/i.test(n)) return {take: up => BAL_NAME.test(up), why: n + " takes balconies / terraces only"};
@@ -14295,12 +14301,12 @@ async function drawingFacts(fileId, pageNo){
     if ((m = /(?:^|\s)([+\-±]\s*\d+'\s*-\s*\d+(?:\s*\d\/\d)?"?)/.exec(l.s)) || /\b(F\.?F\.?L|LVL|LEVEL)\b/i.test(l.s)) levels.add((m ? m[1] : l.s).replace(/\s+/g, " ").trim().slice(0, 40));
     if ((m = /\b(TYPE\s*[-–]?\s*[A-Z0-9]{1,3}|\d\s*BED(ROOM)?S?\b(?!\s*ROOM\s*\d)|STUDIO|PENTHOUSE|\d{3,5}\s*S\.?\s*FT|\d{3,5}\s*SQ\.?\s*FT)/i.exec(l.s)) && !SIZE_RX.test(l.s)) types.add(l.s.slice(0, 50));
     if (/\b(STAIR|STAIRCASE|LIFT|RAMP|UP|DN|DOWN)\b/i.test(l.s) && /STAIR|LIFT|RAMP|\bUP\b|\bDN\b/i.test(l.s)) notes.add(l.s.slice(0, 60));
-    if (ROOM_RX.test(l.s) && !SIZE_RX.test(l.s) && l.s.length <= 32 && !/\bSCALE\b|PLAN\b|DETAIL|SECTION|ELEVATION|NOTE|TYPE\b|TYPE-|S\.?\s*FT|SQ\.?\s*FT|\bUP\b|\bDN\b|\bDOWN\b|^\d+\s*BED/i.test(l.s)) {
+    if ((ROOM_RX.test(l.s) || learnWord(l.s)) && !SIZE_RX.test(l.s) && l.s.length <= 32 && !/\bSCALE\b|PLAN\b|DETAIL|SECTION|ELEVATION|NOTE|TYPE\b|TYPE-|S\.?\s*FT|SQ\.?\s*FT|\bUP\b|\bDN\b|\bDOWN\b|^\d+\s*BED/i.test(l.s)) {
       const cx = l.x + l.w / 2;
       const near = sizes.filter(z => !used.has(z) && Math.abs(z.l.x + z.l.w / 2 - cx) < Math.max(3 * l.h, l.w) && z.l.y > l.y - 0.2 * l.h && z.l.y - l.y < 3.2 * l.h).sort((a, b) => a.l.y - b.l.y)[0];
       if (near) used.add(near);
       rooms.push({name: l.s, x: l.x, y: l.y, w: l.w, h: l.h, cx: l.cx, cy: l.cy, size: near ? near.txt : "", sft: near ? near.a : 0, sizeY: near ? near.l.y : null});
-    } else if (ROOM_RX.test(l.s) && SIZE_RX.test(l.s)) {   // name and size on one line
+    } else if ((ROOM_RX.test(l.s) || learnWord(l.s)) && SIZE_RX.test(l.s)) {   // name and size on one line
       const z = sizes.find(o => o.l === l); used.add(z);
       rooms.push({name: l.s.replace(SIZE_RX, "").trim(), x: l.x, y: l.y, w: l.w, h: l.h, cx: l.cx, cy: l.cy, size: z.txt, sft: z.a, sizeY: null});
     }
@@ -14820,6 +14826,8 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
   { const house = !words.length && !(opt && opt.house === false) ? houseRule(aiAreaCond()) : null;   // the QS house rule of the item being measured
     if (house) { const out = rooms.filter(r => !house.take(r.name.toUpperCase())); if (out.length && out.length < rooms.length) { rooms = rooms.filter(r => house.take(r.name.toUpperCase()));
       say("bot", `<span class="small">${out.length} space${out.length > 1 ? "s" : ""} ${esc(house.why)}: ${[...new Set(out.map(r => r.name))].slice(0, 8).map(esc).join(", ")}${out.length > 8 ? "…" : ""}. Name them to measure them anyway.</span>`); } } }
+  if (!words.length) { const sk = learnSkip(); if (sk.size) { const out = rooms.filter(r => sk.has(roomType(r.name))); if (out.length) { rooms = rooms.filter(r => !sk.has(roomType(r.name)));
+    say("bot", `<span class="small">🧠 ${out.length} space${out.length > 1 ? "s" : ""} left out as your team does — it deletes ${[...new Set(out.map(r => roomType(r.name)))].map(t => esc(t.toLowerCase())).join(", ")} every time (Learned skills): ${[...new Set(out.map(r => r.name))].slice(0, 8).map(esc).join(", ")}. Name them to measure them anyway.</span>`); } } }
   const vr = viewRect(), zoomed = (vr[2] - vr[0]) * (vr[3] - vr[1]) < 0.6 * S.base.width * S.base.height, all = rooms.length;
   const ar = !only && areaOf();
   if (only) rooms = only; else if (ar) rooms = rooms.filter(r => inArea(ar, nameCentre(r))); else if (zoomed && !(opt && opt.whole)) rooms = rooms.filter(r => { const [x, y] = nameCentre(r); return x >= vr[0] && x <= vr[2] && y >= vr[1] && y <= vr[3]; });
@@ -15463,7 +15471,7 @@ const STD_WALLS = [4, 4.5, 5, 6, 8, 9, 10, 12, 13.5, 18];   // inches: thickness
 const stdWall = t => STD_WALLS.find(s => Math.abs(t * 12 - s) <= 0.26);
 const inchOf = t => Math.round(t * 24) / 2 + "\"";
 const natSort = (a, b) => String(a).localeCompare(String(b), undefined, {numeric: true});
-const isRoomArea = i => i.kind === "shape" && !i.finAuto && (cond(i.cond) || {}).type === "area" && !!String(i.label || "").trim() && i.pts.length >= 2;
+const isRoomArea = i => i.kind === "shape" && !i.finAuto && !i.learnAuto && !i.hatchAuto && (cond(i.cond) || {}).type === "area" && !!String(i.label || "").trim() && i.pts.length >= 2;
 const wallCondFor = T => P.proj.conds.find(c => c.type === "linear" && Math.abs(+c.t - T) < 0.005 && !c.finAgent && (c.agentWall || /wall|masonry|partition|block/i.test(c.name)) && !/plaster|paint|finish|skirting/i.test(c.name));
 function lev(a, b){ if (Math.abs(a.length - b.length) > 2) return 9; let p = Array.from({length: b.length + 1}, (_, j) => j);
   for (let i = 1; i <= a.length; i++) { const c = [i]; for (let j = 1; j <= b.length; j++) c[j] = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); p = c; } return p[b.length]; }
@@ -15625,11 +15633,11 @@ function finCond(kind, H){   // the finishes agent's own conditions, made once a
   if (kind === "wall") c.h = H;
   return c;
 }
-function finishesRun(o){   // o: {H, DH, cond, ceiling} on this page -> {rooms: [{name, floor, per, skirt, wallGross, wallDed, wallNet, doors, wins, notes}], wall, skirt} or {error}
+function finishesRun(o){   // o: {H, DH, cond, ceiling} on this page -> {rooms: [{name, floor, per, skirt, wallGross, wallDed, wallNet, doors, wins, notes}], wall, skirt} or {error}; learned skills: wall / skirt (an item of its own, or null for none), rooms (these only), learn, label
   const k = curScale(); if (!k) return {error: "Set the page scale first (K)."};
   if (scaleDoubt()) return {error: "The page scale is doubtful — the drawing measures " + scaleDoubt().label + ", not the note. Settle it first (scale chip)."};
-  const H = +o.H; if (!(H > 0)) return {error: "Give the room height H (ft) — floor to ceiling, from the section."};
-  const DH = +o.DH > 0 ? +o.DH : 0, rooms = P.proj.items.filter(i => onPage(i) && isRoomArea(i) && (!o.cond || i.cond === o.cond));
+  const own = o.wall !== undefined || o.skirt !== undefined, H = +o.H; if (!(H > 0) && !(own && !o.wall)) return {error: "Give the room height H (ft) — floor to ceiling, from the section."};
+  const DH = +o.DH > 0 ? +o.DH : 0, rooms = o.rooms || P.proj.items.filter(i => onPage(i) && isRoomArea(i) && (!o.cond || i.cond === o.cond)), rids = new Set(rooms.map(i => i.id));
   if (!rooms.length) return {error: "No named room areas on this page — run 🏠 Rooms first (the finishes go round each measured room)."};
   const T = tagsOf(S.texts[S.key] || []), doors = doorLines(), tol = 1.25 * k, polys = rooms.map(itemPoly), wins = rooms.map(() => []), loose = [];
   const tagPts = fams => Object.entries(T.plan).filter(([m]) => fams.includes(tagKind(m))).flatMap(([m, pts]) => pts.map(p => ({m, p})));
@@ -15654,21 +15662,21 @@ function finishesRun(o){   // o: {H, DH, cond, ceiling} on this page -> {rooms: 
   const out = []; let wc, skc;
   mutate(() => {
     addSch.forEach(x => P.proj.openings.push(x)); if (DH) P.proj.finDH = DH;
-    wc = finCond("wall", H); skc = finCond("skirt");
-    P.proj.items = P.proj.items.filter(i => !(i.finAuto && onPage(i) && (i.cond === wc.id || i.cond === skc.id)));
+    wc = own ? o.wall || null : finCond("wall", H); skc = own ? o.skirt || null : finCond("skirt");
+    P.proj.items = P.proj.items.filter(i => !(i.finAuto && onPage(i) && ((wc && i.cond === wc.id) || (skc && i.cond === skc.id)) && (!o.rooms || rids.has(i.rid))));
     if (o.ceiling) [...new Set(rooms.map(i => i.cond))].map(cond).forEach(c => { if (c && !(c.asm || []).some(a => /ceiling/i.test(a.name || ""))) c.asm = (c.asm || []).concat({id: uid("A"), name: "Ceiling finish (plaster / paint)", unit: "Sft", f: "A"}); });
     rooms.forEach((it, n) => {
       const pl = polys[n], name = it.label.trim(), circ = it.shape === "circle", R = {name, nos: +it.nos || 1, it: it.id, doors: [], wins: [], notes: [], w: [], s: []};
-      const base = {file: S.fileId, page: S.pageNo, nos: R.nos, ai: true, finAuto: true, room: name};
+      const base = Object.assign({file: S.fileId, page: S.pageNo, nos: R.nos, ai: true, finAuto: true, room: name, rid: it.id}, o.learn ? {learnAuto: true} : {});
       const run = c2 => { const pts = pl.map(p => p.slice()).concat([pl[0].slice()]), x = Object.assign({id: uid("I"), cond: c2, kind: "shape", pts, label: name}, base); if (circ) x.arcs = [[0, pts.length - 1]]; P.proj.items.push(x); return x.id; };
-      R.w.push(run(wc.id)); R.s.push(run(skc.id));
+      if (wc) R.w.push(run(wc.id)); if (skc) R.s.push(run(skc.id));
       const mine = doors.filter(d => onRoom(pl, d));
       mine.forEach(d => {
-        const s = d.mk ? schM(d.mk) : null, w = s ? +s.w : dist(d.a, d.b) / k, h = s ? +s.h : DH;
+        const s = d.mk ? schM(d.mk) : null, w = s ? +s.w : dist(d.a, d.b) / k, h0 = s ? +s.h : DH, h = h0 > 0 && o.learn && wc && +wc.h > 0 ? Math.min(h0, +wc.h) : h0;   // (a learned dado or wall tile: the door only as high as the finish)
         const op = Object.assign({kind: "open", pts: [d.a.slice(), d.b.slice()], label: d.mk || "Door", ow: r3(w), oh: h ? r3(h) : 0}, s ? {sch: s.id} : {}, base);
-        const sk = Object.assign({id: uid("I"), cond: skc.id}, op); P.proj.items.push(sk); R.s.push(sk.id);   // the door's width off the skirting
-        if (h > 0) { const wo = Object.assign({id: uid("I"), cond: wc.id}, op); P.proj.items.push(wo); R.w.push(wo.id); }
-        else R.notes.push(`${d.mk || "a door"} ${f3(w)} ft wide: no height (not in the opening schedule, no door height given) — not deducted from the wall finish`);
+        if (skc) { const sk = Object.assign({id: uid("I"), cond: skc.id}, op); P.proj.items.push(sk); R.s.push(sk.id); }   // the door's width off the skirting
+        if (wc && h > 0) { const wo = Object.assign({id: uid("I"), cond: wc.id}, op); P.proj.items.push(wo); R.w.push(wo.id); }
+        else if (wc) R.notes.push(`${d.mk || "a door"} ${f3(w)} ft wide: no height (not in the opening schedule, no door height given) — not deducted from the wall finish`);
         R.doors.push(d.mk || "door"); });
       wins[n].forEach(wn => {
         if (wn.door && mine.some(d => !d.mk && distSeg(wn.p, d.a, d.b) < 5 * k)) return;   // a tag a little far from a swing with no tag of its own: that door, already taken
@@ -15676,15 +15684,16 @@ function finishesRun(o){   // o: {H, DH, cond, ceiling} on this page -> {rooms: 
         if (!s) { R.notes.push(`${wn.m}${wn.door ? " (a door tag with no swing drawn)" : ""}: no size in the opening schedule — not deducted`); lst.push(wn.m + "?"); return; }
         const p = pl[wn.ei], q = pl[(wn.ei + 1) % pl.length], L = dist(p, q), u = [(q[0] - p[0]) / L, (q[1] - p[1]) / L], hw = Math.min(L, +s.w * k) / 2;
         const t = Math.max(hw, Math.min(L - hw, (wn.p[0] - p[0]) * u[0] + (wn.p[1] - p[1]) * u[1]));
-        const wo = Object.assign({id: uid("I"), cond: wc.id, kind: "open", pts: [[p[0] + u[0] * (t - hw), p[1] + u[1] * (t - hw)], [p[0] + u[0] * (t + hw), p[1] + u[1] * (t + hw)]], label: wn.m, sch: s.id, ow: +s.w, oh: +s.h}, base);
-        P.proj.items.push(wo); R.w.push(wo.id); lst.push(wn.m);
-        if (wn.door) { const sk = Object.assign({}, wo, {id: uid("I"), cond: skc.id, pts: wo.pts.map(p => p.slice())}); P.proj.items.push(sk); R.s.push(sk.id); } });
+        const wo = Object.assign({id: uid("I"), kind: "open", pts: [[p[0] + u[0] * (t - hw), p[1] + u[1] * (t - hw)], [p[0] + u[0] * (t + hw), p[1] + u[1] * (t + hw)]], label: wn.m, sch: s.id, ow: +s.w, oh: o.learn && wc && +wc.h > 0 ? Math.min(+s.h, +wc.h) : +s.h}, base);
+        if (wc && !(o.learn && +wc.h > 0 && +wc.h <= 4 && !wn.door)) { wo.cond = wc.id; P.proj.items.push(wo); R.w.push(wo.id); }   // (a learned dado band of 4 ft or less: a window stands above it)
+        lst.push(wn.m);
+        if (wn.door && skc) { const sk = Object.assign({}, wo, {id: uid("I"), cond: skc.id, pts: wo.pts.map(p => p.slice())}); P.proj.items.push(sk); R.s.push(sk.id); } });
       out.push(R);
     });
-  }, "Finishes");
+  }, o.label || "Finishes");
   const q = id => { const it = P.proj.items.find(i => i.id === id), kk = it && qScale(it); return kk ? rowsOf(it, kk).reduce((a, r) => a + r.qty, 0) : 0; };
   out.forEach(R => { R.floor = q(R.it); R.ceil = R.floor; R.per = q(R.s[0]); R.skirt = R.s.reduce((a, id) => a + q(id), 0); R.wallGross = q(R.w[0]); R.wallNet = R.w.reduce((a, id) => a + q(id), 0); R.wallDed = R.wallGross - R.wallNet; });
-  return {rooms: out, wall: wc.name, skirt: skc.name, H, loose, schAdded: addSch.map(x => x.mark), ceiling: !!o.ceiling};
+  return {rooms: out, wall: wc ? wc.name : "", skirt: skc ? skc.name : "", H, loose, schAdded: addSch.map(x => x.mark), ceiling: !!o.ceiling};
 }
 async function finishesDialog(){
   if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
@@ -15894,6 +15903,277 @@ async function cutFillDialog(){
   }, "Cut / fill");
   toast("Cut " + fq(r.cut) + " cft · fill " + fq(r.fill) + " cft over " + fq(r.area) + " Sft from " + L.length + " spot levels" + (r.outside > 0.005 ? " — " + Math.round(r.outside * 100) + " % of the outline outside the levels" : ""), 6000);
   return {cut: r.cut, fill: r.fill, area: r.area};
+}
+
+/* ------------------------------------------------------------------ 🧠 the takeoff agent learns how your team works
+   By itself, every day, from what people do — never from what an agent did that nobody checked — and it never throws away what it
+   learned: each project's facts are kept (reading a project again refreshes its own), and the skills are worked out from all of
+   them, so a habit seen less often now shows as "sometimes", not forgotten.
+   What it reads from a project (when it is opened, and every 10 minutes while it is open):
+   - every room measured — a named area a person drew, or an agent's a person checked; areas drawn over one room in several items are
+     one room — its kind from its name (BATH, BED ROOM, KITCHEN …) and what was taken off with it: an area over it (floor tile,
+     ceiling), a run along its walls (plaster, paint, wall tile, skirting), the counts inside it (WC, basin);
+   - each item's settings as used (H, T, faces, the deduction threshold).
+   What it sees as it happens:
+   - the rooms an agent measured that a person deleted (an OTS, a planter — every time): it stops measuring them;
+   - the rooms a person measured by hand on a page an agent had done: what the agent missed — a name it did not know as a room is
+     learned as one, so the rooms agent finds it next time.
+   The skills: what each kind of room gets (an item in 60 % of them or more; 30–60 % "sometimes"), which rooms an item takes, the
+   heights the team uses, what is never measured as a room, the room names it learned. A new or changed skill is announced and kept
+   in a dated log; Auto takeoff › Learned skills shows each with its evidence, to switch off, applies them to the rooms measured on a
+   page, and shares the method with the team (a file on the site every browser adds to its own). The rooms agent, the item rules,
+   Quick items' heights and the Claude agent use them. Kept in this browser (Settings › Backup carries it). */
+const LEARN_KEY = "zdTakeoffLearn", LEARN_MIN = 2;
+const ROOM_KINDS = [[/\bBATH|TOILET|\bW\.?\s?C\b|WASH\s*ROOM|POWDER|SHOWER/, "BATH"], [/\bBED\s*(ROOM)?\b|\bB\.?\s?R\.?\s?\d/, "BED ROOM"], [/KITCHEN|\bKIT\b|PANTRY/, "KITCHEN"],
+  [/LOUNGE|LIVING|DRAWING|FAMILY|\bT\.?\s?V\b|SITTING/, "LOUNGE"], [/DINING/, "DINING"], [/BALCONY|TERRACE|VERANDAH?/, "BALCONY"], [/DRESS|\bWARD(ROBE)?\b|W\.?I\.?C\b|CLOSET/, "DRESS"],
+  [/STORE|LAUNDRY|UTILITY/, "STORE"], [/PASSAGE|CORRIDOR|LOBBY|FOYER|ENTRANCE|GALLERY/, "PASSAGE"], [/STAIR/, "STAIR"], [/SERVANT|MAID|DRIVER/, "SERVANT ROOM"]];
+function roomType(label){   // a room's kind from its name: BATH 2, TOILET, W.C → BATH; MASTER BED ROOM → BED ROOM; else its first words (PLANTER, AC LEDGE)
+  const u = String(label || "").toUpperCase(); if (!u.trim()) return "";
+  for (const [rx, t] of ROOM_KINDS) if (rx.test(u)) return t;
+  return u.replace(/[^A-Z\s]/g, " ").split(/\s+/).filter(w => w.length > 1 && !/^(NO|THE|OF|AND|AREA)$/.test(w)).slice(0, 2).join(" ");
+}
+const learnKey = c => String(c && c.name || "").trim().toLowerCase() + "|" + (c && c.type) + "|" + (c && c.unit);
+let LEARN_RX;
+function learnStore(){ let o = null; try { o = JSON.parse(pref(LEARN_KEY) || "null"); } catch (e) { o = null; } o = o && typeof o === "object" ? o : {};
+  ["projects", "rejects", "missed", "words", "team"].forEach(k => { if (!o[k] || typeof o[k] !== "object" || Array.isArray(o[k])) o[k] = {}; }); ["off", "log"].forEach(k => { if (!Array.isArray(o[k])) o[k] = []; }); o.v = 1; return o; }
+const learnSave = o => { LEARN_RX = undefined; pref(LEARN_KEY, JSON.stringify(o)); };
+const med = A => { const s = A.filter(v => v > 0).sort((a, b) => a - b); return s.length ? s[s.length >> 1] : 0; };
+/* the rooms measured on this page: the named areas, those over one room together (the room's own outline is its first item a person drew) */
+function learnRooms(human){
+  const k = curScale(); if (!k) return [];
+  const areas = P.proj.items.filter(i => onPage(i) && i.kind === "shape" && String(i.label || "").trim() && (cond(i.cond) || {}).type === "area" && (!human || human(i))), R = [];
+  areas.forEach(i => { const P0 = itemPoly(i), A = polyArea(P0); if (!(A > 0)) return; const c0 = polyCentroid(P0);
+    let r = R.find(x => Math.abs(A - x.A) <= 0.3 * Math.max(A, x.A) && pointInPoly(c0, x.P) && pointInPoly(x.c, P0));
+    if (!r) R.push(r = {P: P0, A, c: c0, items: [], labels: []}); r.items.push(i); r.labels.push(i.label); });
+  const runs = P.proj.items.filter(i => onPage(i) && i.kind === "shape" && (cond(i.cond) || {}).type === "linear" && i.pts.length >= 2 && (!human || human(i)));
+  const cnts = P.proj.items.filter(i => onPage(i) && (cond(i.cond) || {}).type === "count" && (!human || human(i)));
+  R.forEach(r => {
+    r.rep = r.items.find(i => !i.learnAuto && !i.hatchAuto && !i.cf && !i.finAuto) || r.items[0];
+    const tys = r.labels.map(roomType).filter(Boolean), cnt = {}; tys.forEach(t => { cnt[t] = (cnt[t] || 0) + 1; }); r.type = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || "";
+    r.has = new Map(r.items.map(i => [i.cond, "area"])); r.n = new Map();
+    const tol = 0.75 * k, E = r.P.map((p, j) => [p, r.P[(j + 1) % r.P.length]]), per = E.reduce((a, [p, q]) => a + dist(p, q), 0), ids = new Set(r.items.map(i => i.id));
+    runs.forEach(i => { if (i.rid && ids.has(i.rid)) { r.has.set(i.cond, "wall"); return; }
+      let on = 0, tot = 0; for (let j = 1; j < i.pts.length; j++) { const a = i.pts[j - 1], b = i.pts[j], L = dist(a, b); tot += L; if (E.some(([p, q]) => distSeg(a, p, q) <= tol && distSeg(b, p, q) <= tol)) on += L; }
+      if (tot > 0 && on >= 0.6 * tot && on >= 0.5 * per) r.has.set(i.cond, "wall"); });
+    cnts.forEach(i => { const n = i.pts.filter(p => pointInPoly(p, r.P)).length * (+i.nos || 1); if (n) { r.has.set(i.cond, "count"); r.n.set(i.cond, (r.n.get(i.cond) || 0) + n); } });
+  });
+  return R.filter(r => r.type);
+}
+/* a project's facts: {at, rooms: {KIND: {n, items: {key: {n, how, per: [counts]}}}}, conds: {key: {name, type, unit, h, t, faces, ded}}} */
+const learnHuman = i => !i.learnAuto && !i.hatchAuto && !i.cf && (!i.ai || i.qa === "checked");
+function learnFacts(){
+  const out = {at: new Date().toISOString(), rooms: {}, conds: {}}, key0 = S.key, used = new Set();
+  const pages = [...new Set(P.proj.items.filter(learnHuman).map(i => keyOf(i.file, i.page)))];
+  for (const key of pages) {
+    const [f, p] = [key.slice(0, key.lastIndexOf(":")), +key.slice(key.lastIndexOf(":") + 1)], sc = P.proj.scales[key]; if (!(sc && sc.ptPerFt > 0)) continue;
+    const save0 = [S.fileId, S.pageNo, S.key]; S.fileId = f; S.pageNo = p; S.key = key;   // (onPage / curScale read the page in hand: this one, for a moment)
+    try { learnRooms(learnHuman).forEach(r => { const T = out.rooms[r.type] = out.rooms[r.type] || {n: 0, items: {}}; T.n++;
+        r.has.forEach((how, cid) => { const c = cond(cid); if (!c) return; const k = learnKey(c), x = T.items[k] = T.items[k] || {n: 0, how, per: []}; x.n++; x.how = how; if (how === "count") x.per.push(r.n.get(cid) || 0); used.add(cid); }); }); }
+    finally { [S.fileId, S.pageNo, S.key] = save0; }
+  }
+  if (S.key !== key0) S.key = key0;
+  P.proj.conds.forEach(c => { if (!used.has(c.id)) return; out.conds[learnKey(c)] = {name: c.name, type: c.type, unit: c.unit, h: +c.h || 0, t: +c.t || 0, faces: +c.faces || 1, ded: +c.dedMin || 0}; });
+  return out;
+}
+/* the skills, from every project's facts (this browser's and the team's) */
+function learnSkills(st){
+  st = st || learnStore();
+  const all = Object.assign({}, st.team.projects || {}, st.projects), R = {}, C = {}, top = o => { const e = Object.entries(o).sort((a, b) => b[1] - a[1])[0]; return e ? +e[0] : 0; };
+  Object.values(all).forEach(f => { if (!f || !f.rooms) return;
+    Object.entries(f.rooms).forEach(([ty, T]) => { const r = R[ty] = R[ty] || {n: 0, np: 0, items: {}}; r.n += T.n; r.np++;
+      Object.entries(T.items || {}).forEach(([k, it]) => { const x = r.items[k] = r.items[k] || {n: 0, how: {}, per: []}; x.n += it.n; x.how[it.how] = (x.how[it.how] || 0) + it.n; (it.per || []).forEach(v => x.per.push(v)); }); });
+    Object.entries(f.conds || {}).forEach(([k, c]) => { const x = C[k] = C[k] || {name: c.name, type: c.type, unit: c.unit, h: {}, t: {}, faces: {}, ded: {}};
+      ["h", "t", "faces", "ded"].forEach(f2 => { if (+c[f2] > 0) x[f2][c[f2]] = (x[f2][c[f2]] || 0) + 1; }); }); });
+  const rooms = {};
+  Object.entries(R).forEach(([ty, r]) => { if (r.n < LEARN_MIN) return;
+    const items = Object.entries(r.items).filter(([, x]) => x.n >= LEARN_MIN && x.n / r.n >= 0.3).map(([k, x]) => { const c = C[k] || {}, how = Object.entries(x.how).sort((a, b) => b[1] - a[1])[0][0];
+      return {key: k, name: c.name || k.split("|")[0], type: c.type || k.split("|")[1], unit: c.unit || k.split("|")[2], how, n: x.n, share: x.n / r.n, some: x.n / r.n < 0.6,
+        h: top(c.h || {}), t: top(c.t || {}), faces: top(c.faces || {}) || 1, ded: top(c.ded || {}), per: med(x.per)}; }).sort((a, b) => a.some - b.some || b.share - a.share || a.name.localeCompare(b.name));
+    if (items.some(i => !i.some)) rooms[ty] = {n: r.n, np: r.np, items}; });
+  const take = {};   // which rooms an area item takes: seen in 4 rooms or more, never in a kind of room seen twice or more
+  Object.keys(C).forEach(k => { if (C[k].type !== "area") return; const yes = [], no = []; let seen = 0;
+    Object.entries(R).forEach(([ty, r]) => { const x = r.items[k]; if (x && x.n) { yes.push(ty); seen += x.n; } else if (r.n >= 2) no.push(ty); });
+    if (seen >= 4 && yes.length && no.length) take[k] = {name: C[k].name, yes, no, seen}; });
+  const rej = learnMerged(st, "rejects"), mis = learnMerged(st, "missed"), wd = learnMerged(st, "words");
+  const skip = Object.entries(rej).filter(([, x]) => (x.del || 0) >= 3 && x.del >= 0.75 * Math.max(x.made || 0, x.del)).map(([type, x]) => ({type, del: x.del, made: Math.max(x.made || 0, x.del)}));
+  const words = Object.entries(wd).filter(([w, n]) => (+n || 0) >= 2 && w.length >= 3 && !ROOM_RX.test(w) && !VOID_RX.test(w) && !skip.some(s => s.type === w)).map(([w, n]) => ({word: w, n: +n}));
+  const dflt = {}; Object.entries(C).forEach(([k, c]) => { const h = top(c.h); if (h > 0 && (c.h[h] || 0) >= 2) dflt[k] = {name: c.name, h, np: c.h[h]}; });
+  return {rooms, take, skip, words, dflt, missed: mis, np: Object.keys(all).length, nRooms: Object.values(R).reduce((a, r) => a + r.n, 0)};
+}
+function learnMax(a, b){ if (typeof a === "number" || typeof b === "number") return Math.max(+a || 0, +b || 0); const o = Object.assign({}, a || {}); Object.entries(b || {}).forEach(([k, v]) => { o[k] = Math.max(+o[k] || 0, +v || 0); }); return o; }
+const learnMerged = (st, k) => { const o = {}; [st.team && st.team[k], st[k]].forEach(src => Object.entries(src || {}).forEach(([t, v]) => { o[t] = t in o ? learnAdd(o[t], v) : v; })); return o; };   // the team's (the other browsers') and this browser's, added
+const learnOn = (st, id) => !(st.off || []).includes(id);
+function learnSig(K){ return JSON.stringify({r: Object.entries(K.rooms).map(([t, r]) => [t, r.items.filter(i => !i.some).map(i => i.key + "@" + i.h)]), s: K.skip.map(s => s.type), w: K.words.map(w => w.word), t: Object.keys(K.take)}); }
+function learnNews(a, b){   // what is new or changed between two sets of skills, as lines a person reads
+  const cap = s => s.charAt(0) + s.slice(1).toLowerCase(), out = [];
+  Object.entries(b.rooms).forEach(([ty, r]) => { const o = a.rooms[ty], L = r.items.filter(i => !i.some), sig = x => x ? x.items.filter(i => !i.some).map(i => i.key + "@" + i.h).sort().join(",") : "";
+    if (sig(o) !== sig(r)) out.push(cap(ty) + " → " + L.map(i => i.name + (i.how === "wall" && i.unit !== "ft" && i.h ? " H " + f3(i.h) : "")).join(", ") + " (" + r.n + " rooms)"); });
+  b.skip.forEach(s => { if (!a.skip.some(x => x.type === s.type)) out.push(cap(s.type) + " is not measured as a room (deleted " + s.del + " times)"); });
+  b.words.forEach(w => { if (!a.words.some(x => x.word === w.word)) out.push("“" + w.word + "” is a room name (you measured it " + w.n + " times after the agent)"); });
+  Object.entries(b.take).forEach(([k, t]) => { if (!a.take[k]) out.push(t.name + " is taken in " + t.yes.map(cap).join(", ") + " only"); });
+  return out;
+}
+function learnNote(st, before, quiet){   // a change of skills: into the dated log, and said
+  const after = learnSkills(st), news = learnNews(before, after); if (!news.length) return after;
+  const d = today(); news.forEach(t => st.log.push({d, t})); st.log = st.log.slice(-300); learnSave(st);
+  if (!quiet) { S.learnNew = (S.learnNew || 0) + news.length; const b = $("rbAuto"); if (b) { b.classList.add("learned"); b.dataset.learned = S.learnNew; } }   // a quiet 🧠 on Auto takeoff, never a pop-up over the work
+  learnSendSoon();
+  return after;
+}
+function learnProject(quiet){   // this project read again: its facts replace the ones it gave before -> the skills
+  if (!P.proj) return null;
+  const st = learnStore(), before = learnSkills(st), f = learnFacts();
+  if (Object.keys(f.rooms).length) st.projects[P.proj.id] = Object.assign(f, {name: P.proj.name}); else delete st.projects[P.proj.id];
+  learnSave(st); return learnNote(st, before, quiet);
+}
+let learnT = 0;
+const learnSoon = () => { clearTimeout(learnT); learnT = setTimeout(() => { try { learnProject(); } catch (e) {} }, 2500); };
+/* as it happens (every change): an agent's room a person deletes, an agent's room made, a room a person measures on a page the agent did */
+const learnArea = i => i.kind === "shape" && String(i.label || "").trim() && (cond(i.cond) || {}).type === "area";
+function learnBefore(){
+  if (!P.proj) return null; const ai = new Map(), all = new Set(), lab = new Map();
+  P.proj.items.forEach(i => { if (!learnArea(i)) return; all.add(i.id); lab.set(i.id, i); if (i.ai && i.qa !== "checked" && !i.learnAuto && !i.hatchAuto) ai.set(i.id, i.label); });
+  return {ai, all, lab};
+}
+function learnAfter(w, label){
+  if (!w || !P.proj) return; const now = new Map(P.proj.items.map(i => [i.id, i])); let st = null, before = null;
+  const bump = (k, ty, f) => { if (!ty) return; if (!st) { st = learnStore(); before = learnSkills(st); } const x = st[k][ty] = st[k][ty] !== undefined ? st[k][ty] : (f ? {} : 0); if (f) x[f] = (x[f] || 0) + 1; else st[k][ty] = x + 1; };
+  const person = !RUN_CTX && !/^(Learned|Find similar|My symbols|Areas by hatch|Sheet links|Cut \/ fill|AutoCAD takeoff|Full takeoff|Typical|Paste|Copy|Duplicate)/i.test(label || "");
+  if (person && /^(Delete|Reject)\b/i.test(label || "")) w.ai.forEach((lb, id) => { if (!now.has(id)) bump("rejects", roomType(lb), "del"); });
+  P.proj.items.forEach(i => { if (w.all.has(i.id) || !learnArea(i) || i.learnAuto || i.hatchAuto || i.cf || i.finAuto) return;
+    if (i.ai) { bump("rejects", roomType(i.label), "made"); return; }
+    if (!person) return;
+    const peers = [...w.lab.values()].filter(o => o.file === i.file && o.page === i.page);
+    if (!peers.some(o => o.ai)) return;   // the agent did not do rooms on this page
+    const c0 = polyCentroid(itemPoly(i)); if (peers.some(o => pointInPoly(c0, itemPoly(o)))) return;   // drawn over a room there already (a floor-tile copy): not a missed room
+    const ty = roomType(i.label); bump("missed", ty); if (!ROOM_RX.test(i.label) && !VOID_RX.test(i.label)) bump("words", ty); });
+  if (st) { learnSave(st); learnNote(st, before, false); }
+}
+/* the skills at work */
+function learnWord(s){
+  if (LEARN_RX === undefined) { const st = learnStore(), W = learnSkills(st).words.filter(w => learnOn(st, "word:" + w.word)).map(w => w.word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s*"));
+    LEARN_RX = W.length ? new RegExp("\\b(" + W.join("|") + ")\\b", "i") : null; }
+  return !!LEARN_RX && LEARN_RX.test(String(s || ""));
+}
+function learnSkip(){ const st = learnStore(); return new Set(learnSkills(st).skip.filter(s => learnOn(st, "skip:" + s.type)).map(s => s.type)); }
+function learnTake(c){
+  if (!c) return null; const st = learnStore(), k = learnKey(c); if (!learnOn(st, "take:" + k)) return null;
+  const t = learnSkills(st).take[k]; if (!t) return null; const no = new Set(t.no);
+  return {take: up => !no.has(roomType(up)), why: "left out of " + c.name + " as your team takes it off (learned from " + t.seen + " rooms: " + t.yes.map(x => x.toLowerCase()).join(", ") + " only)"};
+}
+function learnDefault(p){ const st = learnStore(), k = learnKey(p); return learnOn(st, "dflt:" + k) ? learnSkills(st).dflt[k] || null : null; }
+const learnHint = p => { if (p.hHint) return p; const d = learnDefault(p); return d ? Object.assign({}, p, {hHint: f3(d.h), hWhy: d.np + " of your team's projects (learned)"}) : p; };
+function learnPrompt(){
+  const st = learnStore(), K = learnSkills(st), L = [], how = i => i.how === "wall" ? "a run along its walls" + (i.unit !== "ft" && i.h ? ", H " + f3(i.h) + " ft" : "") : i.how === "count" ? "counted, usually " + i.per : "an area over it";
+  Object.entries(K.rooms).forEach(([ty, r]) => { if (learnOn(st, "room:" + ty)) L.push("- " + ty + " (" + r.n + " rooms seen): " + r.items.filter(i => !i.some).map(i => i.name + " — " + how(i)).join("; ")); });
+  K.skip.forEach(s => { if (learnOn(st, "skip:" + s.type)) L.push("- " + s.type + " is never measured as a room (the team deleted it " + s.del + " times)"); });
+  K.words.forEach(w => { if (learnOn(st, "word:" + w.word)) L.push("- “" + w.word + "” is a room name to measure (the team measured it by hand " + w.n + " times after the agent)"); });
+  return L.length ? "\n\nHOW THIS TEAM TAKES OFF (learned from their own takeoffs — follow it unless the user says otherwise):\n" + L.join("\n") : "";
+}
+function learnCond(it){   // the item a skill takes off: the project's own of that name, else made as the team has it
+  let c = P.proj.conds.find(x => learnKey(x) === it.key); if (c) return c;
+  c = qkMake({name: it.name, type: it.type, unit: it.unit, faces: it.faces, dedMin: it.ded, t: it.t}, {h: it.h, t: it.t}, []); P.proj.conds.push(c); return c;
+}
+/* the learned skills applied to the rooms measured on this page (or every page): each room's kind gets the items the team takes off with
+   it — an area over the room (copied from its outline), a run along its walls (the finishes agent's, its doors and windows deducted),
+   never twice (an item the room has already is left). Counts are only listed: where a WC stands is on the drawing, not in the habit. */
+async function learnApply(scope){
+  if (!P.proj || !S.page) return toast("Open a drawing first", 2000);
+  const st = learnStore(), K = learnSkills(st), on = Object.keys(K.rooms).filter(ty => learnOn(st, "room:" + ty));
+  if (!on.length) { toast("Nothing learned yet — the agent learns from the rooms your team measures and what is taken off with them (Learned skills)", 6000); return null; }
+  const pages = scope === "all" ? allPages() : allPages().filter(o => o.key === S.key), k0 = S.key, rep = {pages: 0, rooms: 0, added: 0, counts: new Map(), notes: []};
+  await agentRun("Learned skills", async () => {
+    for (const o of pages) {
+      if (S.key !== o.key && !await agentGoto(o.f.id, o.i)) { rep.notes.push(keyName(o.key) + ": could not be opened"); continue; }
+      if (!curScale()) { rep.notes.push(keyName(o.key) + ": no scale"); continue; }
+      const todo = learnRooms().filter(r => on.includes(r.type)); if (!todo.length) continue; rep.pages++; rep.rooms += todo.length;
+      const walls = new Map();
+      mutate(() => { todo.forEach(r => K.rooms[r.type].items.forEach(it => { if (it.some) return;
+        if (it.how === "count") { rep.counts.set(it.name, (rep.counts.get(it.name) || 0) + (it.per || 1)); return; }
+        const c = learnCond(it); if (r.has.has(c.id)) return;
+        if (it.how === "area") { const y = JSON.parse(JSON.stringify(r.rep)); ["qa", "ver", "finAuto", "hatchAuto", "cf", "dep", "learnAuto", "rid"].forEach(f => delete y[f]);
+          P.proj.items.push(Object.assign(y, {id: uid("I"), cond: c.id, ai: true, learnAuto: true, rid: r.rep.id})); rep.added++; }
+        else if (it.how === "wall") (walls.get(c.id) || walls.set(c.id, {c, rooms: []}).get(c.id)).rooms.push(r.rep); })); }, "Learned skills: areas");
+      for (const {c, rooms} of walls.values()) { const ft = c.unit === "ft";
+        if (!ft && !(+c.h > 0)) { rep.notes.push(c.name + ": no height H — give the item its H, then apply again"); continue; }
+        const r2 = finishesRun({H: +c.h, DH: +P.proj.finDH || 0, wall: ft ? null : c, skirt: ft ? c : null, rooms, learn: true, label: "Learned skills: " + c.name});
+        if (r2 && r2.error) rep.notes.push(c.name + ": " + r2.error); else rep.added += rooms.length; }
+    }
+  });
+  if (S.key !== k0) await gotoKey(k0);
+  refresh();
+  const cn = [...rep.counts].map(([n, v]) => v + " × " + n).join(", ");
+  toast(rep.added ? "🧠 Learned skills: " + rep.added + " item" + (rep.added === 1 ? "" : "s") + " on " + rep.rooms + " room" + (rep.rooms === 1 ? "" : "s") + " — marked AI, check them" + (cn ? " · count by the drawing: " + cn : "") + (rep.notes.length ? " · " + rep.notes[0] : "")
+    : rep.rooms ? "Every room here has what your team takes off with it already" + (rep.notes.length ? " · " + rep.notes[0] : "") : "No measured room of a kind the agent has learned — measure the rooms first (Auto takeoff › Rooms)", 8000);
+  return rep;
+}
+/* the team's method, shared by itself and free: each browser of the published site sends what it learned — each project's facts and its
+   counts, anonymous (a random id for the browser, a hash for the project; item names, heights and room kinds only) — to the team's
+   relay (takeoff/chat.json: learn.topic, the free relay the Feedback chat uses), a minute after it learned something and only what
+   changed. Every half hour .github/workflows/chat-archive.yml (tools/learn_archive.py) merges what every browser sent into
+   team-method.json on the chat-archive branch, and every browser adds that file to its own when the takeoff opens — leaving out what
+   it sent itself, which it has already. A copy run anywhere but the published site (a test) never sends nor reads, unless told to. */
+const learnLive = () => /(^|\.)github\.io$/.test(location.hostname) || pref("zdTakeoffLearnRelay") === "on";
+function learnId(){ let id = pref("zdTakeoffLearnId"); if (!id) { id = uid("L").slice(-12); pref("zdTakeoffLearnId", id); } return id; }
+async function learnCfg(){ try { const r = await fetch("chat.json?check=" + Date.now(), {cache: "no-store"}), j = r.ok ? await r.json() : null; return j && j.relay && j.learn && j.learn.topic ? {relay: String(j.relay).replace(/\/$/, ""), topic: j.learn.topic, file: j.learn.file || ""} : null; } catch (e) { return null; } }
+async function zip64(o){   // an object as base64 of its deflated JSON (a relay message stays small), or itself where the browser cannot deflate
+  const s = JSON.stringify(o); if (typeof CompressionStream !== "function") return {j: o};
+  const b = new Uint8Array(await new Response(new Blob([s]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer()); let t = ""; for (let i = 0; i < b.length; i += 8192) t += String.fromCharCode.apply(null, b.subarray(i, i + 8192)); return {z: btoa(t)};
+}
+async function unzip64(m){ if (m.j) return m.j; const b = Uint8Array.from(atob(m.z), c => c.charCodeAt(0)); return JSON.parse(await new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text()); }
+const learnHash = async s => { try { const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("zd-learn:" + s)); return [...new Uint8Array(b)].slice(0, 6).map(x => (x | 256).toString(16).slice(1)).join(""); } catch (e) { return String(s).slice(-8); } };
+const learnAdd = (a, b) => typeof a === "number" || typeof b === "number" ? (+a || 0) + (+b || 0) : Object.assign({}, a || {}, ...Object.entries(b || {}).map(([k, v]) => ({[k]: (+((a || {})[k]) || 0) + (+v || 0)})));
+let learnSendT = 0;
+const learnSendSoon = () => { if (!learnLive()) return; clearTimeout(learnSendT); learnSendT = setTimeout(() => { learnSend().catch(() => {}); }, 60000); };
+async function learnSend(force){   // -> how many messages the relay took
+  if (!learnLive()) return 0; const cfg = await learnCfg(); if (!cfg) return 0;
+  const st = learnStore(), id = learnId(), sent = Object.assign({}, st.sent || {}), at = new Date().toISOString(), msgs = [];
+  for (const [pid, f] of Object.entries(st.projects)) { const body = {at: f.at, rooms: f.rooms, conds: f.conds}, sig = JSON.stringify(body);
+    if (!force && sent[pid] === sig.length + ":" + f.at) continue; msgs.push([pid, sig.length + ":" + f.at, Object.assign({k: "zdlearn", v: 1, s: id, at, p: await learnHash(pid)}, await zip64(body))]); }
+  const c = {rejects: st.rejects, missed: st.missed, words: st.words}, cs = JSON.stringify(c);
+  if (force || sent._c !== cs) msgs.push(["_c", cs, Object.assign({k: "zdlearn", v: 1, s: id, at, c: 1}, await zip64(c))]);
+  let n = 0;
+  for (const [key, sig, m] of msgs) { try { const r = await fetch(cfg.relay + "/" + cfg.topic, {method: "POST", body: JSON.stringify(m)}); if (r.ok) { sent[key] = sig; n++; } } catch (e) {} }
+  if (n) { const s2 = learnStore(); s2.sent = sent; learnSave(s2); }
+  return n;
+}
+async function learnTeamLoad(){   // the team's merged method (from the relay, by the archive) added to this browser's -> true when read
+  if (!learnLive()) return false; const cfg = await learnCfg(); if (!cfg || !cfg.file) return false;
+  try { const r = await fetch(cfg.file + "?t=" + Date.now(), {cache: "no-store"}); if (!r.ok) return false; const j = await r.json(); if (!j || typeof j !== "object") return false;
+    const me = learnId(), P2 = {}, cnt = {rejects: {}, missed: {}, words: {}};
+    Object.entries(j.projects || {}).forEach(([k, f]) => { if (String(k).split(":")[0] !== me && f && typeof f.rooms === "object") P2[k] = {at: f.at, rooms: f.rooms, conds: f.conds || {}}; });
+    Object.entries(j.senders || {}).forEach(([s, x]) => { if (s === me || !x) return; ["rejects", "missed", "words"].forEach(t => Object.entries(x[t] || {}).forEach(([ty, v]) => { cnt[t][ty] = learnAdd(cnt[t][ty], v); })); });
+    const st = learnStore(), before = learnSkills(st); st.team = Object.assign({projects: P2, at: j.at || "", n: Object.keys(j.senders || {}).filter(s => s !== me).length}, cnt); learnSave(st); learnNote(st, before, false); return true; }
+  catch (e) { return false; }
+}
+async function learnDialog(){
+  S.learnNew = 0; { const b = $("rbAuto"); if (b) b.classList.remove("learned"); }
+  const st = learnStore(), K = learnSkills(st), cap = s => s.charAt(0) + s.slice(1).toLowerCase(), ck = id => `<input type="checkbox" data-lk="${esc(id)}"${learnOn(st, id) ? " checked" : ""} title="Use it">`;
+  const how = i => i.how === "wall" ? "along its walls" + (i.unit !== "ft" && i.h ? ", H " + f3(i.h) : "") : i.how === "count" ? "count, usually " + i.per + " (counted by the drawing)" : "area";
+  const room = ([ty, r]) => `<div class="cand" style="align-items:flex-start">${ck("room:" + ty)}<span style="flex:1"><b>${esc(cap(ty))}</b> <span class="small">— ${r.n} rooms in ${r.np} project${r.np === 1 ? "" : "s"}</span><br>
+    <span class="small">${r.items.map(i => `${i.some ? "<i>" : ""}${esc(i.name)} — ${esc(how(i))} <span style="color:var(--muted)">(${Math.round(i.share * 100)} %${i.some ? ", sometimes" : ""})</span>${i.some ? "</i>" : ""}`).join("<br>")}</span></span></div>`;
+  const R = Object.entries(K.rooms).sort((a, b) => b[1].n - a[1].n), mis = Object.entries(K.missed).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const body = `<p>What the takeoff agent learned from how your team takes off — from the rooms people measure and what they take off with them, the agent's rooms they delete, and the rooms they add by hand after it. It keeps learning as you work and never forgets an earlier project; untick a skill to stop it being used.</p>
+    <p class="small" style="margin-top:6px">From <b>${K.np}</b> project${K.np === 1 ? "" : "s"}, <b>${K.nRooms}</b> rooms${st.team.at ? " — with what " + (st.team.n || "the") + " other browser" + (st.team.n === 1 ? "" : "s") + " of the team learned (merged " + esc(dmy(String(st.team.at).slice(0, 10))) + ")" : ""}. It is shared with the team by itself, free, every time it learns something (nothing to set up).</p>
+    <h4 style="margin:10px 0 4px">What each kind of room gets</h4>${R.length ? R.map(room).join("") : '<p class="small">Nothing yet — measure the rooms of a floor (with their names) and what you take off with them: it learns from two rooms of a kind.</p>'}
+    ${K.skip.length ? `<h4 style="margin:10px 0 4px">Not measured as a room</h4>${K.skip.map(s => `<div class="cand">${ck("skip:" + s.type)}<span><b>${esc(cap(s.type))}</b> <span class="small">— the agent's ${s.type.toLowerCase()} deleted ${s.del} of ${s.made} times</span></span></div>`).join("")}` : ""}
+    ${K.words.length ? `<h4 style="margin:10px 0 4px">Room names it learned</h4>${K.words.map(w => `<div class="cand">${ck("word:" + w.word)}<span><b>${esc(w.word)}</b> <span class="small">— measured by hand ${w.n} times on pages the agent had done</span></span></div>`).join("")}` : ""}
+    ${Object.keys(K.take).length ? `<h4 style="margin:10px 0 4px">Which rooms an item takes</h4>${Object.entries(K.take).map(([k, t]) => `<div class="cand">${ck("take:" + k)}<span><b>${esc(t.name)}</b> <span class="small">— ${t.yes.map(cap).map(esc).join(", ")}; not ${t.no.map(cap).map(esc).join(", ")}</span></span></div>`).join("")}` : ""}
+    ${Object.keys(K.dflt).length ? `<h4 style="margin:10px 0 4px">Heights your team uses</h4>${Object.entries(K.dflt).map(([k, d]) => `<div class="cand">${ck("dflt:" + k)}<span><b>${esc(d.name)}</b> <span class="small">— H ${f3(d.h)} ft in ${d.np} projects (Quick items asks with it)</span></span></div>`).join("")}` : ""}
+    ${mis.length ? `<p class="small" style="margin-top:8px">What the agent missed most (added by hand after it): ${mis.map(([t, n]) => esc(cap(t)) + " " + n).join(" · ")}</p>` : ""}
+    ${st.log.length ? `<details style="margin-top:8px"><summary class="small">What it learned, day by day (${st.log.length})</summary><div class="small" style="max-height:24vh;overflow:auto">${st.log.slice().reverse().map(l => `<div>${esc(dmy(l.d))} — ${esc(l.t)}</div>`).join("")}</div></details>` : ""}
+    <div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap"><button class="btn sm pri" type="button" data-la="page"${R.length && S.page ? "" : " disabled"}>Apply to the rooms on this page</button><button class="btn sm" type="button" data-la="all"${R.length && P.proj ? "" : " disabled"}>Apply to every page</button>
+      <button class="btn sm" type="button" data-la="learn"${P.proj ? "" : " disabled"}>Learn from this project now</button><button class="btn sm" type="button" data-la="share">Share with the team now</button><button class="btn sm dng" type="button" data-la="forget">Forget everything</button></div>`;
+  const pr = ask("🧠 Learned skills — how your team takes off", body, "Save", () => ({off: [...document.querySelectorAll("#dlgB [data-lk]")].filter(x => !x.checked).map(x => x.dataset.lk)}));
+  $("dlgB").querySelectorAll("[data-la]").forEach(b => b.onclick = async () => { const a = b.dataset.la;
+    const off = [...document.querySelectorAll("#dlgB [data-lk]")].filter(x => !x.checked).map(x => x.dataset.lk), s2 = learnStore(); s2.off = off; learnSave(s2);   // (what was unticked holds)
+    if (ask.cur) ask.cur(null);
+    if (a === "page" || a === "all") await learnApply(a);
+    else if (a === "learn") { learnProject(); learnDialog(); }
+    else if (a === "share") { const n = await learnSend(true); toast(n ? "Sent to the team — every browser has it within the hour" : learnLive() ? "Could not reach the team's relay (offline?) — it is sent again by itself later" : "Shared from the published site only", 4500); learnDialog(); }
+    else if (a === "forget") { if (await ask("Forget everything it learned?", "<p>Every skill, the dated log and the facts of every project are taken out of this browser (the team's shared method stays on the site). It starts learning again from your next takeoff.</p>", "Forget")) { pref(LEARN_KEY, ""); LEARN_RX = undefined; toast("Forgotten — it learns again from your next takeoff", 3000); } } });
+  const v = await pr; if (!v) return;
+  const s3 = learnStore(); s3.off = v.off; learnSave(s3); toast("Learned skills saved", 1800);
 }
 
 /* ✅ the checker: what a checking QS asks about a takeoff — rooms written on the drawing but not measured, the same room
@@ -17580,6 +17860,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   S.bg = pref("zdTakeoffBg") || "auto"; S.mono = pref("zdTakeoffMono") === "1"; bgMark(); S.edMode = pref("zdTakeoffEdMode") === "cad" ? "cad" : "pdf"; edModeMark();
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
+  if (location.protocol !== "file:") learnTeamLoad();   // the team's learned method, added to this browser's
   window.zdTakeoff = {agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
@@ -17588,7 +17869,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
     floorsDialog, floorAddMany, floorNext, floorTitleIn, floorZoom, floorMenu, floorBoxStart, floorNewAsk, floorLegends, floorLegendSplit, legendFloorSet, legendFit, legendTitle, floorTitleOf,
-    contactPop, CONTACT_NO, quickItemsDialog, quickItemsAdd, qkCat, qkNeed, qkFind, PRESETS, QK_CATS, symList, symKeep, symCount, symCountDialog, sheetLinksMake, textPartBox, hatchSig, hatchIds, hatchSplitDialog, lvParse, lvTexts, lvHere, levelsRead, levelsPlace, levelsList, cutFillDialog, validate, followLink, itemPoly, cadCompareDialog, cadCompare, cadCompareClouds, cadCompareReport, cadQtyDialog, cadTakeoff, condPop, condUse, condBack, condMru, renderCondPick, nosSet, nosNow, nosNew, nosMenu, nosTyped, nosSelDialog, autoMenu, autoWindowUI, mineSet, tbGroups, tbPref, MINE_START, applyChestProfile,
+    contactPop, CONTACT_NO, quickItemsDialog, quickItemsAdd, qkCat, qkNeed, qkFind, PRESETS, QK_CATS, symList, symKeep, symCount, symCountDialog, sheetLinksMake, textPartBox, hatchSig, hatchIds, hatchSplitDialog, lvParse, lvTexts, lvHere, levelsRead, levelsPlace, levelsList, cutFillDialog, validate, followLink, itemPoly, cadCompareDialog, cadCompare, cadCompareClouds, cadCompareReport, cadQtyDialog, cadTakeoff, learnStore, learnFacts, learnSkills, learnProject, learnApply, learnDialog, learnTeamLoad, learnSend, learnSkip, learnWord, learnTake, learnPrompt, roomType, rulesPrompt, isRoomArea, condPop, condUse, condBack, condMru, renderCondPick, nosSet, nosNow, nosNew, nosMenu, nosTyped, nosSelDialog, autoMenu, autoWindowUI, mineSet, tbGroups, tbPref, MINE_START, applyChestProfile,
     get SNAP_PX(){ return SNAP_PX; }, get HIT_PX(){ return HIT_PX; }};   // for tests and the console
   const last = localStorage.getItem("zdTakeoffLast");
   const all = await dbAll("projects");
