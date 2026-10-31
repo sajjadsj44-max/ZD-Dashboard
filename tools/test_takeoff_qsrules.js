@@ -89,7 +89,10 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   if (await page.isVisible("#agBlock")) await page.click("#agBlock"); else await T(() => { zdTakeoff.blockMasonryDialog(); });   // (not awaited: it waits for the dialog)
   await page.waitForSelector('[data-bmw="D2"]', {timeout: 8000}).catch(() => {});
   ok(await page.$('[data-bmw="D2"]') !== null && await page.inputValue('[data-bmw="D2"]') === "3.5", "the Block masonry dialog lists D2 with 3.5 ft prefilled (to check)");
-  await page.keyboard.press("Escape"); await wait(200);
+  ok(await page.$eval("#dlgOk", b => b.textContent === "Take off" && b.getBoundingClientRect().right <= innerWidth).catch(() => false), "its button reads Take off and is on the screen");
+  await page.fill("#bmF", "11"); await page.click("#dlgOk"); await wait(600);   // what is typed is used: wall height = 11 ft − 7.5" slab
+  const hTyped = await T(() => { const c = zdTakeoff.P.proj.conds.find(c => c.blockKey === "4"); return c && +c.h; });
+  ok(Math.abs(hTyped - (11 - 7.5 / 12)) < 1e-6, "…and the floor to floor typed in it is used (wall height " + hTyped + " ft)");
   ok(errors.length === 0, "no console or page errors" + (errors.length ? " — " + errors.slice(0, 5).join(" | ") : ""));
   await browser.close();
   console.log("\n" + passes + " passed, " + fails + " failed"); process.exit(fails ? 1 : 0);
