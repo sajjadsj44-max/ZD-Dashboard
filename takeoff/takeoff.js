@@ -3514,17 +3514,31 @@ function condTotals(c){
    cement bag 50 kg ÷ 1440 kg/m³ (IS 875-1) = 1.226 cft; mortar joint 3/8". Brick 9 × 4½ × 3 in: N = V / (l+j)(w+j)(h+j),
    wet mortar = V − N·lwh. Block l × w × h: leaves k = floor(t / w), N = V / ((l+j)(h+j)·t / k), wet mortar = V − N·lwh
    (hollow: joint mortar on the two face shells only, s = 1¼"). Plaster / screed: dry = A × t × 1.27. Wastage 0 % unless set.
+   Tiles and paint take the Rate Analysis library's own consumption (FN-500 / FN-505 / FN-530 / FN-535 / FN-540 and the notes
+   of TILEADH, GROUT, PUTTY, PRIMER, EMUL, WSHIELD): tiles A × 1.05, adhesive 0.6 kg / Sft floor (0.55 wall), grout 0.08 kg / Sft,
+   putty 0.08 kg / Sft for two coats, primer 100 Sft / litre, emulsion 110 and weather shield 90 Sft / litre a coat.
+   The mortar joint and the wall thickness of brick and block, and the tile and paint choices, default to the project's
+   Material defaults (Material tab) and can be set on each condition.
    A condition keeps its choice in c.mat; with none set it is read from the name (8" Block, Wall Plaster, RCC slab...). */
 const MAT_BAG_CFT = 50 / 1440 / 0.028316846592, MAT_J = 0.375 / 12, MAT_SRC = "Material Calculator convention factors, 25-Sep-2026";
-const MAT_KINDS = [["none", "None"], ["brick", "Brick masonry"], ["block", "Block masonry"], ["plaster", "Plaster"], ["screed", "Screed / mortar bed"], ["concrete", "Concrete (PCC / RCC)"]];
-const MAT_MIXES = {brick: ["1:3", "1:4", "1:5", "1:6"], block: ["1:3", "1:4", "1:5", "1:6"], plaster: ["1:2", "1:3", "1:4", "1:5", "1:6"], screed: ["1:2", "1:3", "1:4", "1:5", "1:6"], concrete: ["1:1.5:3", "1:2:4", "1:3:6", "1:4:8"]};
+const MAT_KINDS = [["none", "None"], ["brick", "Brick masonry"], ["block", "Block masonry"], ["plaster", "Plaster"], ["screed", "Screed / mortar bed"], ["concrete", "Concrete (PCC / RCC)"], ["tile", "Tiles (floor / wall)"], ["paint", "Paint (putty, primer, emulsion)"]];
+const MAT_MIXES = {brick: ["1:3", "1:4", "1:5", "1:6"], block: ["1:3", "1:4", "1:5", "1:6"], plaster: ["1:2", "1:3", "1:4", "1:5", "1:6"], screed: ["1:2", "1:3", "1:4", "1:5", "1:6"], concrete: ["1:1.5:3", "1:2:4", "1:3:6", "1:4:8"], tile: ["1:3", "1:4", "1:5", "1:6"]};
+/* the project's material defaults (Material tab › Defaults), inches / % / coats; a condition's own value wins */
+const MAT_DEF = {jBrick: 0.375, jBlock: 0.375, tBrick: 9, tBlock: 6, tileJ: 0.0625, tileW: 5, tileBed: "adh", bedIn: 1, coats: 3};
+const matDef = () => Object.assign({}, MAT_DEF, (P.proj && P.proj.matDef) || {});
+const matIn = v => { const s = Math.round(v * 16); return v > 0 && v < 1 && Math.abs(v * 16 - s) < 1e-6 ? (s % 2 ? s + "/16" : s % 4 ? s / 2 + "/8" : s % 8 ? s / 4 + "/4" : "1/2") + '"' : r3(v) + '"'; };   // inches: 3/8", 1/16" (else decimal)
+const MAT_TILES = [["TILE-POR", "Porcelain floor tile"], ["TILE-CER", "Ceramic wall tile"]], MAT_ADH = {"TILE-POR": 0.6, "TILE-CER": 0.55}, MAT_GROUT = 0.08;
+const MAT_TSIZES = [["24x24", '24" × 24"'], ["12x12", '12" × 12"'], ["16x16", '16" × 16"'], ["24x48", '24" × 48"'], ["12x24", '12" × 24"'], ["32x32", '32" × 32"'], ["8x12", '8" × 12"'], ["10x16", '10" × 16"'], ["12x18", '12" × 18"']];
+const MAT_BEDS = [["adh", "Tile adhesive"], ["mortar", "Cement sand bed"]];
+const MAT_PAINTS = [["int", "Internal: putty 2 coats, primer, emulsion"], ["int-np", "Internal: primer, emulsion (no putty)"], ["ext", "External: primer, weather shield"]];
+const MAT_PUTTY = 0.08, MAT_PRIMER = 100, MAT_COVER = {EMUL: 110, WSHIELD: 90};
 const MAT_BLOCKS = [["auto", "Auto (from wall T)"], ["12x4x8s", '4" × 8" × 12" solid'], ["16x4x8h", '4" × 8" × 16" hollow'], ["12x6x8s", '6" × 8" × 12" solid'], ["16x6x8h", '6" × 8" × 16" hollow'],
   ["12x8x8s", '8" × 8" × 12" solid'], ["16x8x8h", '8" × 8" × 16" hollow'], ["16x4x8s", '4" × 8" × 16" solid'], ["12x4x8h", '4" × 8" × 12" hollow'], ["16x8x8s", '8" × 8" × 16" solid'], ["12x8x8h", '8" × 8" × 12" hollow']];
 /* the Cost Control (SAJ QSCOST Rate Analysis) resource codes each material is priced from — the rate, unit, source and date are
    read from that library in this browser, never typed here. Blocks: the library's solid blocks are 12" long, its hollow ones 16". */
 const MAT_SANDS = [["SAND-CH", "Chenab sand"], ["SAND-RV", "Ravi sand"], ["SAND-LP", "Lawrencepur sand"]], MAT_CRUSH = [["CRSH-SG", "Sargodha crush"], ["CRSH-MG", "Margalla crush"]], MAT_BRICKS = [["BRK-1", "1st class brick"], ["BRK-2", "2nd class brick"]];
 const MAT_BLK_CODE = {"12x4x8s": "BLK-S4", "12x6x8s": "BLK-S6", "12x8x8s": "BLK-S8", "16x4x8h": "BLK-H4", "16x6x8h": "BLK-H6", "16x8x8h": "BLK-H8"};
-const MAT_UNIT = {bags: "bag", cft: "cft", Nos: "nos"};
+const MAT_UNIT = {bags: "bag", cft: "cft", Nos: "nos", Sft: "sft", kg: "kg"};
 /* rate of one material row from the library: {rate, src, date, vs} or {na} — a unit that does not match, or no rate, is not used */
 function matRate(code, unit){
   const L = raLib(); if (!L.o) return {na: "rates: open SAJ QSCOST → Rate Analysis in this browser once"};
@@ -3540,6 +3554,8 @@ function matGuess(c){
   const n = String(c.name || "").toLowerCase();
   if (c.type === "count" || /door|window|frame|shutter|wardrobe|cabin|railing|fixture/.test(n)) return {kind: "none"};
   if (/plaster|render/.test(n)) return {kind: "plaster", mix: "1:4", tin: 0.5};
+  if (/tile|porcelain|ceramic|\bdado\b/.test(n)) return {kind: "tile", tt: /wall|dado/.test(n) ? "TILE-CER" : "TILE-POR"};
+  if (/paint|emulsion|distemper|weather ?shield|putty/.test(n)) return {kind: "paint", ps: /ext|weather|outside|facade/.test(n) ? "ext" : "int"};
   if (/block|hollow/.test(n)) return {kind: "block", mix: "1:6", bs: "auto"};
   if (/brick|masonry|\beent\b/.test(n)) return {kind: "brick", mix: "1:4"};
   if (/screed|mortar bed|floor bed/.test(n)) return {kind: "screed", mix: "1:4", tin: 1.5};
@@ -3548,50 +3564,87 @@ function matGuess(c){
   return {kind: "none"};
 }
 function matOf(c){
-  const g = matGuess(c), m = c.mat && c.mat.kind ? c.mat : null;
-  if (!m) return Object.assign({wst: 0, guessed: true}, g);
-  const d = {brick: {mix: "1:4"}, block: {mix: "1:6", bs: "auto"}, plaster: {mix: "1:4", tin: 0.5}, screed: {mix: "1:4", tin: 1.5}, concrete: {mix: "1:2:4"}}[m.kind] || {};
-  return Object.assign({wst: 0}, d, m);
+  const g = matGuess(c), m = c.mat && c.mat.kind ? c.mat : null, D = matDef();
+  const d = {brick: {mix: "1:4"}, block: {mix: "1:6", bs: "auto"}, plaster: {mix: "1:4", tin: 0.5}, screed: {mix: "1:4", tin: 1.5}, concrete: {mix: "1:2:4"},
+    tile: {tt: "TILE-POR", ts: "24x24", bed: D.tileBed, mix: "1:4", tin: D.bedIn, wst: D.tileW}, paint: {ps: "int", coats: D.coats}}[(m || g).kind] || {};
+  return m ? Object.assign({wst: 0}, d, m) : Object.assign({wst: 0}, d, g, {guessed: true});
+}
+/* the mortar joint (inches) and wall thickness T (ft) of brick / block: the condition's own, else the name's, else the defaults */
+function matJoint(c, m){ const D = matDef(); return +m.jin > 0 ? +m.jin : m.kind === "brick" ? D.jBrick : D.jBlock; }
+function matWallT(c, m){
+  if (+c.t > 0) return {T: +c.t, how: ""};
+  const tIn = matNameIn(c); if (tIn) return {T: tIn / 12, how: ' (T ' + tIn + '" from the name)'};
+  const D = matDef(), bw = m.kind === "block" && m.bs && m.bs !== "auto" ? parseFloat(m.bs.split("x")[1]) : 0, d = m.kind === "brick" ? D.tBrick : bw || D.tBlock;
+  return {T: d / 12, how: ' (T ' + r3(d) + '" ' + (bw ? "the block's width" : "default") + ")"};
 }
 /* materials for a net quantity Q of condition c (Q in the condition's unit) → {basis, rows: [[name, value, unit, note]], err} */
 function matCalc(c, Q){
   const m = matOf(c); if (m.kind === "none") return null;
-  const out = {m, rows: [], basis: "", err: ""}, H = +c.h || 0, wst = 1 + (+m.wst || 0) / 100, u = c.unit;
-  const parts = String(m.mix || "").split(":").map(Number); if (parts.some(x => !(x > 0))) { out.err = "Mix " + m.mix + " is not valid"; return out; }
-  const sum = parts.reduce((a, x) => a + x, 0), mixRows = dry => { const cem = dry * parts[0] / sum, bags = cem / MAT_BAG_CFT;
-    out.rows.push(["Cement", bags, "bags", f3(cem) + " cft · " + fq(bags * 50, "kg") + " kg (50 kg bag = " + f3(MAT_BAG_CFT) + " cft)", "CEM"], ["Sand", dry * parts[1] / sum, "cft", "dry × " + parts[1] + " / " + sum, m.sand || "SAND-CH"]);
-    if (parts[2]) out.rows.push(["Crush (coarse aggregate)", dry * parts[2] / sum, "cft", "dry × " + parts[2] + " / " + sum, m.crush || "CRSH-SG"]); };
+  const out = {m, rows: [], mats: [], basis: "", err: ""}, H = +c.h || 0, wst = 1 + (+m.wst || 0) / 100, u = c.unit, faces = +c.faces || 1;
+  const mat = (k, n, q, un) => out.mats.push({k, n, q, u: un}), nm = (L, v) => (L.find(x => x[0] === v) || [v, v])[1];
+  const mixed = m.kind !== "paint" && !(m.kind === "tile" && m.bed !== "mortar");   // mortar or concrete: cement, sand (crush) from the mix
+  const parts = String(m.mix || "").split(":").map(Number); if (mixed && parts.some(x => !(x > 0))) { out.err = "Mix " + m.mix + " is not valid"; return out; }
+  const sum = parts.reduce((a, x) => a + x, 0), mixRows = dry => { const cem = dry * parts[0] / sum, bags = cem / MAT_BAG_CFT, sd = m.sand || "SAND-CH", cr = m.crush || "CRSH-SG";
+    out.rows.push(["Cement", bags, "bags", f3(cem) + " cft · " + fq(bags * 50, "kg") + " kg (50 kg bag = " + f3(MAT_BAG_CFT) + " cft)", "CEM"], ["Sand", dry * parts[1] / sum, "cft", "dry × " + parts[1] + " / " + sum, sd]);
+    mat("cem", "Cement", bags, "bags"); mat("sand:" + sd, nm(MAT_SANDS, sd), dry * parts[1] / sum, "cft");
+    if (parts[2]) { out.rows.push(["Crush (coarse aggregate)", dry * parts[2] / sum, "cft", "dry × " + parts[2] + " / " + sum, cr]); mat("crush:" + cr, nm(MAT_CRUSH, cr), dry * parts[2] / sum, "cft"); } };
   if (Q <= 0) { out.err = "No net quantity measured yet"; return out; }
-  if (m.kind === "plaster" || m.kind === "screed") {   // area × thickness
-    const t = (+m.tin || 0) / 12, faces = +c.faces || 1; if (!(t > 0)) { out.err = "Set the " + m.kind + " thickness"; return out; }
-    let A = u === "Sft" ? Q : u === "ft" ? (H > 0 ? Q * H * faces : NaN) : NaN;
-    if (isNaN(A)) { out.err = u === "ft" ? "Type Height H in the box above — plaster area = L × H" : "Plaster is taken from an area (Sft) or a length (ft) with H, not " + u; return out; }
+  if (m.kind === "plaster" || m.kind === "screed" || m.kind === "tile" || m.kind === "paint") {   // a finish: its area (× thickness)
+    const A = u === "Sft" ? Q : u === "ft" ? (H > 0 ? Q * H * faces : NaN) : NaN, what = {plaster: "Plaster", screed: "Screed", tile: "Tiling", paint: "Paint"}[m.kind];
+    if (isNaN(A)) { out.err = u === "ft" ? "Type Height H in the box above — " + what.toLowerCase() + " area = L × H" : what + " is taken from an area (Sft) or a length (ft) with H, not " + u; return out; }
+    const aTxt = (u === "ft" ? uLenT(Q) + " × H " + f3(H) + (faces > 1 ? " × " + faces + " faces" : "") + " = " : "") + f3(A) + " Sft";
+    if (m.kind === "tile") {
+      const tt = m.tt === "TILE-CER" ? "TILE-CER" : "TILE-POR", ts = m.ts || "24x24", [tl, tw] = ts.split("x").map(x => parseFloat(x) / 12), tj = (m.tj != null && m.tj !== "" && +m.tj >= 0 ? +m.tj : matDef().tileJ) / 12;
+      if (!(tl > 0 && tw > 0)) { out.err = "Tile size " + ts + " is not valid"; return out; }
+      const N = Math.ceil(A * wst / ((tl + tj) * (tw + tj)) - 1e-9), adh = MAT_ADH[tt], tn = nm(MAT_TILES, tt) + " " + nm(MAT_TSIZES, ts);
+      out.basis = aTxt + " · " + nm(MAT_TSIZES, ts) + " tiles, " + matIn(tj * 12) + " joints" + (wst > 1 ? ", " + f2((wst - 1) * 100) + " % waste" : "");
+      out.rows.push(["Area", A, "Sft", ""], ["Tiles", A * wst, "Sft", "A × " + f3(wst) + " · " + fq(N, "Nos") + " pieces", tt], ["Tiles (pieces)", N, "Nos", "A × " + f3(wst) + " ÷ ((L + j)(W + j))"]);
+      mat("tile:" + tt + ":" + ts, tn, A * wst, "Sft"); mat("tilen:" + tt + ":" + ts, tn + " (pieces)", N, "Nos");
+      if (m.bed === "mortar") { const t = (+m.tin || 0) / 12; if (!(t > 0)) { out.err = "Set the bed thickness"; return out; }
+        const wet = A * t, dry = wet * 1.27; out.basis += " · bed " + f3(+m.tin) + '" ' + m.mix; out.rows.push(["Wet mortar bed", wet, "cft", "A × t"], ["Dry mortar", dry, "cft", "wet × 1.27"]); mixRows(dry); }
+      else { out.rows.push(["Tile adhesive", A * adh, "kg", adh + " kg / Sft (Rate Analysis " + (tt === "TILE-CER" ? "FN-505" : "FN-500") + ")", "TILEADH"]); mat("adh", "Tile adhesive", A * adh, "kg"); }
+      out.rows.push(["Tile grout", A * MAT_GROUT, "kg", MAT_GROUT + " kg / Sft (Rate Analysis FN-500 / FN-505)", "GROUT"]); mat("grout", "Tile grout", A * MAT_GROUT, "kg");
+      return out;
+    }
+    if (m.kind === "paint") {
+      const ext = m.ps === "ext", coats = Math.max(1, Math.round(+m.coats || matDef().coats)), pc = ext ? "WSHIELD" : "EMUL", cov = MAT_COVER[pc], pn = ext ? "Weather shield" : "Emulsion";
+      const L = A * coats / cov * wst, n3 = coats !== 3 ? " — the library rate is for 3 coats" : "";
+      out.basis = aTxt + " · " + nm(MAT_PAINTS, m.ps || "int") + ", " + coats + " coat" + (coats > 1 ? "s" : "") + (wst > 1 ? ", " + f2((wst - 1) * 100) + " % waste" : "");
+      out.rows.push(["Area", A, "Sft", ""]);
+      if (m.ps !== "ext" && m.ps !== "int-np") { out.rows.push(["Wall putty, 2 coats", A, "Sft", fq(A * MAT_PUTTY * wst, "kg") + " kg (" + MAT_PUTTY + " kg / Sft)", "PUTTY"]); mat("putty", "Wall putty", A * MAT_PUTTY * wst, "kg"); }
+      out.rows.push(["Primer, 1 coat", A, "Sft", fq(A / MAT_PRIMER * wst, "") + " litres (" + MAT_PRIMER + " Sft / litre)", "PRIMER"], [pn + ", " + coats + " coats", A, "Sft", fq(L, "") + " litres (" + cov + " Sft / litre a coat)" + n3, pc]);
+      mat("primer", "Primer", A / MAT_PRIMER * wst, "litre"); mat(ext ? "wsh" : "emul", pn + " paint", L, "litre");
+      return out;
+    }
+    const t = (+m.tin || 0) / 12; if (!(t > 0)) { out.err = "Set the " + m.kind + " thickness"; return out; }
     const wet = A * t, dry = wet * 1.27 * wst;
-    out.basis = (u === "ft" ? uLenT(Q) + " × H " + f3(H) + (faces > 1 ? " × " + faces + " faces" : "") + " = " : "") + f3(A) + " Sft × " + f3(+m.tin) + '" (' + uLenT(t) + ")";
+    out.basis = aTxt + " × " + f3(+m.tin) + '" (' + uLenT(t) + ")";
     out.rows.push(["Area", A, "Sft", ""], ["Wet mortar", wet, "cft", "A × t"], ["Dry mortar", dry, "cft", "wet × 1.27" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out;
   }
-  // masonry and concrete: a volume
-  const tIn = m.kind === "concrete" ? 0 : matNameIn(c), T = +c.t || tIn / 12;
+  // masonry and concrete: a volume. Brick and block take a default wall thickness and joint when none is given; concrete asks for T
+  const wt = m.kind === "concrete" ? {T: +c.t || 0, how: ""} : matWallT(c, m), T = wt.T;
   let V = NaN;
   if (u === "cft") V = Q;
   else if (u === "Sft") V = T > 0 ? Q * T : NaN;
   else if (u === "ft") V = T > 0 && H > 0 ? Q * H * T : NaN;
   if (isNaN(V)) { out.err = u === "ft" ? "Type Height H" + (T > 0 ? "" : " and thickness T") + " in the boxes above — volume = L × H × T" : "Type the thickness T (inches) in the box above — volume = area × T"; return out; }
   out.basis = u === "cft" ? f3(V) + " cft" : u === "Sft" ? f3(Q) + " Sft × T " + f3(T) + " = " + f3(V) + " cft" : uLenT(Q) + " × H " + f3(H) + " × T " + f3(T) + " = " + f3(V) + " cft";
-  if (!c.t && tIn) out.basis += ' (T ' + tIn + '" from the name)';
+  if (u !== "cft" || m.kind === "block") out.basis += wt.how;
   if (m.kind === "concrete") { const dry = V * 1.54 * wst; out.rows.push(["Concrete", V, "cft", ""], ["Dry volume", dry, "cft", "V × 1.54" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out; }
-  let N, wet, unit, code;
-  if (m.kind === "brick") { code = m.brk || "BRK-1"; const l = 9 / 12, w = 4.5 / 12, h = 3 / 12; N = V / ((l + MAT_J) * (w + MAT_J) * (h + MAT_J)); wet = V - N * l * w * h; unit = "Bricks"; }
+  const jIn = matJoint(c, m), j = jIn / 12;
+  let N, wet, unit, code, mk, mn;
+  if (m.kind === "brick") { code = m.brk || "BRK-1"; const l = 9 / 12, w = 4.5 / 12, h = 3 / 12; N = V / ((l + j) * (w + j) * (h + j)); wet = V - N * l * w * h; unit = "Bricks"; mk = "brick:" + code; mn = "Bricks — " + nm(MAT_BRICKS, code); out.basis += " · " + matIn(jIn) + " joints"; }
   else {
     const ti = T * 12, sz = m.bs && m.bs !== "auto" ? m.bs : ((h => (h ? "16x" : "12x") + (ti >= 7.5 ? 8 : ti >= 5.5 ? 6 : 4) + "x8" + (h ? "h" : "s"))(/hollow/i.test(c.name || ""))); code = MAT_BLK_CODE[sz] || "";
-    const [bl, bw, bh] = sz.split("x").map(x => parseFloat(x) / 12), hol = /h$/.test(sz), j = MAT_J;
+    const [bl, bw, bh] = sz.split("x").map(x => parseFloat(x) / 12), hol = /h$/.test(sz);
     const k = Math.max(1, Math.floor(T / bw + 0.05)); N = V / ((bl + j) * (bh + j) * T / k); wet = V - N * bl * bw * bh;
     if (hol) { const jm = N * ((bl + j) * (bh + j) - bl * bh) * bw, fs = 1.25 / 12; wet = Math.max(0, jm * 2 * fs / bw + (wet - jm)); }
-    unit = "Blocks"; out.basis += " · block " + r3(bw * 12) + '" × ' + r3(bh * 12) + '" × ' + r3(bl * 12) + '" ' + (hol ? "hollow" : "solid") + (k > 1 ? ", " + k + " leaves" : "");
+    unit = "Blocks"; mk = "block:" + sz; mn = "Blocks " + r3(bw * 12) + '" × ' + r3(bh * 12) + '" × ' + r3(bl * 12) + '" ' + (hol ? "hollow" : "solid");
+    out.basis += " · block " + r3(bw * 12) + '" × ' + r3(bh * 12) + '" × ' + r3(bl * 12) + '" ' + (hol ? "hollow" : "solid") + (k > 1 ? ", " + k + " leaves" : "") + ", " + matIn(jIn) + " joints";
   }
   if (wet < 0) { out.err = unit + " fill more than the wall volume — check thickness T"; return out; }
-  const dry = wet * 1.27 * wst;
-  out.rows.push([unit, Math.ceil(N * wst - 1e-9), "Nos", fq(N * wst / V, "") + " per cft", code], ["Wet mortar", wet, "cft", "V − N × unit volume"], ["Dry mortar", dry, "cft", "wet × 1.27" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry);
+  const dry = wet * 1.27 * wst, Nn = Math.ceil(N * wst - 1e-9);
+  out.rows.push([unit, Nn, "Nos", fq(N * wst / V, "") + " per cft", code], ["Wet mortar", wet, "cft", "V − N × unit volume"], ["Dry mortar", dry, "cft", "wet × 1.27" + (wst > 1 ? " × " + f3(wst) : "")]); mat(mk, mn, Nn, "Nos"); mixRows(dry);
   return out;
 }
 /* the Materials section of the Properties box: the condition's (or one measurement's) materials, and its settings */
@@ -3605,19 +3658,26 @@ const matQ = (q, u) => u === "Nos" ? fq(q, "Nos") : u === "bags" ? f2(q) : f3(q)
 function matHtml(c, Q, own){
   const m = matOf(c), r = matCalc(c, Q), mixes = MAT_MIXES[m.kind] || [];
   const sel = (k, opts, v) => `<select data-matk="${k}" style="min-width:0">${opts.map(o => { const [a, b] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(a)}"${String(v) === String(a) ? " selected" : ""}>${esc(b)}</option>`; }).join("")}</select>`;
-  const mortar = m.kind !== "none", vol = m.kind === "brick" || m.kind === "block" || m.kind === "concrete", tName = vol && m.kind !== "concrete" ? matNameIn(c) : 0;
-  const needT = vol && c.unit !== "cft", needH = (vol && c.unit === "ft") || ((m.kind === "plaster" || m.kind === "screed") && c.unit === "ft");   // the T / H the materials need, typed here
+  const mason = m.kind === "brick" || m.kind === "block", vol = mason || m.kind === "concrete", fin = m.kind === "plaster" || m.kind === "screed" || m.kind === "tile" || m.kind === "paint";
+  const bedM = m.kind === "tile" && m.bed === "mortar", mortar = m.kind !== "none" && m.kind !== "paint" && (m.kind !== "tile" || bedM), tName = mason ? matNameIn(c) : 0;
+  const needT = mason || (m.kind === "concrete" && c.unit !== "cft"), needH = (vol || fin) && c.unit === "ft";   // the T / H the materials need, typed here
+  const tDef = mason && !tName ? matWallT(Object.assign({}, c, {t: ""}), m) : null;   // brick and block: the default wall T, shown in the box
+  const num = (k, v, ph, o) => `<input type="number" min="0" max="${o.max}" step="${o.step}" data-matk="${k}" value="${v === "" || v == null ? "" : +v}" placeholder="${esc(ph)}"${o.t ? ` title="${esc(o.t)}"` : ""}>`;
   const set = own ? "" : `<div class="row matset"><div class="fg"><label>Material</label>${sel("kind", MAT_KINDS, m.kind)}</div>
-    ${mixes.length ? `<div class="fg"><label>Mix</label>${sel("mix", mixes.includes(m.mix) ? mixes : mixes.concat([m.mix]), m.mix)}</div>` : ""}
-    ${m.kind === "plaster" || m.kind === "screed" ? `<div class="fg"><label>Thickness in</label><input type="number" min="0" step="0.125" data-matk="tin" value="${+m.tin || 0}"></div>` : ""}
+    ${m.kind === "tile" ? `<div class="fg"><label>Tile</label>${sel("tt", MAT_TILES, m.tt || "TILE-POR")}</div><div class="fg"><label>Size</label>${sel("ts", MAT_TSIZES.some(x => x[0] === m.ts) ? MAT_TSIZES : MAT_TSIZES.concat([[m.ts, m.ts]]), m.ts || "24x24")}</div>
+      <div class="fg"><label>Joint in</label>${num("tj", m.tj, matDef().tileJ + " (default)", {max: 1, step: 0.0625, t: "Gap between tiles, inches — blank = the project default"})}</div><div class="fg"><label>Laid on</label>${sel("bed", MAT_BEDS, m.bed || "adh")}</div>` : ""}
+    ${m.kind === "paint" ? `<div class="fg"><label>System</label>${sel("ps", MAT_PAINTS, m.ps || "int")}</div><div class="fg"><label>Coats</label>${num("coats", m.coats, matDef().coats + " (default)", {max: 6, step: 1, t: "Finish coats of emulsion / weather shield (the library rate is for 3)"})}</div>` : ""}
+    ${mixes.length && (m.kind !== "tile" || bedM) ? `<div class="fg"><label>Mix</label>${sel("mix", mixes.includes(m.mix) ? mixes : mixes.concat([m.mix]), m.mix)}</div>` : ""}
+    ${m.kind === "plaster" || m.kind === "screed" || bedM ? `<div class="fg"><label>${bedM ? "Bed in" : "Thickness in"}</label><input type="number" min="0" step="0.125" data-matk="tin" value="${+m.tin || 0}"></div>` : ""}
     ${m.kind === "block" ? `<div class="fg"><label>Block</label>${sel("bs", MAT_BLOCKS, m.bs || "auto")}</div>` : ""}
     ${m.kind === "brick" ? `<div class="fg"><label>Brick</label>${sel("brk", MAT_BRICKS, m.brk || "BRK-1")}</div>` : ""}
     ${mortar ? `<div class="fg"><label>Sand</label>${sel("sand", MAT_SANDS, m.sand || "SAND-CH")}</div>` : ""}
     ${m.kind === "concrete" ? `<div class="fg"><label>Crush</label>${sel("crush", MAT_CRUSH, m.crush || "CRSH-SG")}</div>` : ""}
-    ${needT ? `<div class="fg"><label>${m.kind === "concrete" ? "Thickness T in" : "Wall T in"}</label><input type="text" data-matk="T" value="${+c.t ? r3(c.t * 12) : ""}" placeholder="${tName ? tName + ' (name)' : m.kind === "concrete" ? "e.g. 5" : "e.g. 9"}" title="Inches (or ft-in, e.g. 0'-6&quot;) — saved as T on the condition in decimal ft"></div>` : ""}
+    ${needT ? `<div class="fg"><label>${m.kind === "concrete" ? "Thickness T in" : "Wall T in"}</label><input type="text" data-matk="T" value="${+c.t ? r3(c.t * 12) : ""}" placeholder="${tName ? tName + ' (name)' : tDef ? r3(tDef.T * 12) + " (default)" : "e.g. 5"}" title="Inches (or ft-in, e.g. 0'-6&quot;) — saved as T on the condition in decimal ft${mason ? "; blank = from the name, else the default (Material tab › Defaults)" : ""}"></div>` : ""}
+    ${mason ? `<div class="fg"><label>Joint in</label>${num("jin", m.jin, matJoint(c, Object.assign({}, m, {jin: ""})) + " (default)", {max: 2, step: 0.0625, t: "Mortar joint thickness, inches — blank = the project default (3/8\" unless changed in Material tab › Defaults)"})}</div>` : ""}
     ${needH ? `<div class="fg"><label>Height H ${uL("ft")}</label><input type="text" data-matk="H" value="${+c.h ? uLenIn(c.h) : ""}" placeholder="e.g. 10" title="Decimal ft or ft-in — saved as H on the condition"></div>` : ""}
-    ${mortar ? `<div class="fg"><label>Waste %</label><input type="number" min="0" max="50" step="0.5" data-matk="wst" value="${+m.wst || 0}"></div>` : ""}</div>`;
-  if (!r) return own ? "" : `<div class="psec">Materials</div>${set}<div class="small">Pick a material (brick, block, plaster, concrete...) to see cement, sand and crush.</div>`;
+    ${m.kind !== "none" ? `<div class="fg"><label>Waste %</label><input type="number" min="0" max="50" step="0.5" data-matk="wst" value="${+m.wst || 0}"></div>` : ""}</div>`;
+  if (!r) return own ? "" : `<div class="psec">Materials</div>${set}<div class="small">Pick a material (brick, block, plaster, concrete, tiles, paint...) to see cement, sand, crush, bricks, blocks, tiles and paint.</div>`;
   let body;
   if (r.err) body = `<div class="small warn" style="color:var(--red,#c0392b)">${esc(r.err)}</div>`;
   else { const pr = matPriced(r), info = r.rows.filter(x => x[4] === undefined);
@@ -3625,8 +3685,8 @@ function matHtml(c, Q, own){
       ${pr.rows.map(x => `<tr title="${esc(x.note + (x.R.rate ? "\n" + x.R.code + " — " + x.R.name + ": " + x.R.src : ""))}"><td>${esc(x.n)}<div class="mr">${x.R.rate ? "@ " + f2(x.R.rate) + " / " + esc(x.R.unit) + " · " + esc(x.R.code) + ", " + esc(dmy(x.R.date)) + (x.R.vs === "A" ? ' · <b class="warn">ASSUMPTION</b>' : "") : '<span class="warn">' + esc(x.R.na) + "</span>"}</div></td>
         <td class="n">${matQ(x.q, x.u)} <small>${esc(x.u)}</small></td><td class="n amt">${x.R.rate ? f2(x.q * x.R.rate) : "—"}</td></tr>`).join("")}
       ${pr.rows.length ? `<tr class="tot"><td colspan="2">Material cost PKR${pr.miss ? ` <span class="warn">(${pr.miss} not priced)</span>` : ""}${Q > 0 && pr.tot ? `<div class="mr">${f2(uR(pr.tot / Q, c.unit))} per ${esc(uL(c.unit))}</div>` : ""}</td><td class="n amt">${pr.tot ? f2(pr.tot) : "—"}</td></tr>` : ""}</table>`; }
-  return `<div class="psec">Materials${own ? " — this measurement" : ""}</div><div class="small" style="margin:-2px 0 4px">${esc(MAT_KINDS.find(x => x[0] === m.kind)[1])} ${esc(m.mix || "")}${m.guessed && !own ? " · picked from the condition name — change it below" : ""}</div>${set}${body}
-    ${own ? "" : `<div class="small" style="margin-top:3px">${esc(MAT_SRC)} — dry factor 1.27 mortar / 1.54 concrete, 3/8" joints. Rates: Cost Control rate library (SAJ QSCOST → Rate Analysis) in this browser, with each rate's source and date; material only — no labour.</div>`}`;
+  return `<div class="psec">Materials${own ? " — this measurement" : ""}</div><div class="small" style="margin:-2px 0 4px">${esc(MAT_KINDS.find(x => x[0] === m.kind)[1])} ${esc(mortar && m.kind !== "tile" || bedM ? m.mix || "" : "")}${m.guessed && !own ? " · picked from the condition name — change it below" : ""}</div>${set}${body}
+    ${own ? "" : `<div class="small" style="margin-top:3px">${esc(MAT_SRC)} — dry factor 1.27 mortar / 1.54 concrete${mason ? ", " + matIn(matJoint(c, m)) + " joints" : ""}; tiles and paint from the Rate Analysis items' own consumption. Rates: Cost Control rate library (SAJ QSCOST → Rate Analysis) in this browser, with each rate's source and date; material only — no labour.</div>`}`;
 }
 /* ------------------------------------------------------------------ assemblies and the bill
    A condition's measured quantity drives derived items by formula (PlanSwift-style assemblies), each with a rate.
@@ -3836,10 +3896,213 @@ function matDialog(){
     <table class="sh"><thead><tr><th>Material</th><th class="n">Qty</th><th>Unit</th><th class="n">Rate PKR</th><th class="n">Amount PKR</th><th>Source</th></tr></thead><tbody>
     ${M.tot.map(x => `<tr><td>${esc(x.n)}</td><td class="n">${matQ(x.q, x.u)}</td><td>${esc(x.u)}</td><td class="n">${x.R.rate ? f2(x.R.rate) : "—"}</td><td class="n">${x.R.rate ? f2(x.q * x.R.rate) : "—"}</td><td class="small">${x.R.rate ? esc(x.R.code + " · " + x.R.src) : '<span style="color:var(--red)">' + esc(x.R.na) + "</span>"}</td></tr>`).join("")}
     <tr class="tot"><td colspan="4">Total material${miss ? ` (${miss} not priced)` : ""}</td><td class="n">${f2(T)}</td><td></td></tr></tbody></table>
-    <h4 style="margin:12px 0 4px">By condition</h4><table class="sh"><thead><tr><th>Condition</th><th class="n">Qty</th><th>Material</th><th class="n">Cement bags</th><th class="n">Sand cft</th><th class="n">Crush cft</th><th class="n">Bricks / blocks</th><th class="n">Material PKR</th></tr></thead><tbody>
+    <h4 style="margin:12px 0 4px">By condition</h4><table class="sh"><thead><tr><th>Condition</th><th class="n">Qty</th><th>Material</th><th class="n">Cement bags</th><th class="n">Sand cft</th><th class="n">Crush cft</th><th class="n">Bricks / blocks / tiles</th><th class="n">Material PKR</th></tr></thead><tbody>
     ${M.per.map(o => { const g = n => { const x = o.pr.rows.find(y => y.n.startsWith(n)); return x ? matQ(x.q, x.u) : ""; };
-      return `<tr><td>${esc(o.c.name)}</td><td class="n">${fq(condTotals(o.c).net, o.c.unit)} ${esc(uL(o.c.unit))}</td><td>${o.r.err ? '<span style="color:var(--red)">' + esc(o.r.err) + "</span>" : esc(MAT_KINDS.find(k => k[0] === o.r.m.kind)[1] + " " + (o.r.m.mix || ""))}</td><td class="n">${g("Cement")}</td><td class="n">${g("Sand")}</td><td class="n">${g("Crush")}</td><td class="n">${g("Bricks") || g("Blocks")}</td><td class="n">${o.pr.tot ? f2(o.pr.tot) : "—"}</td></tr>`; }).join("")}</tbody></table>`;
+      return `<tr><td>${esc(o.c.name)}</td><td class="n">${fq(condTotals(o.c).net, o.c.unit)} ${esc(uL(o.c.unit))}</td><td>${o.r.err ? '<span style="color:var(--red)">' + esc(o.r.err) + "</span>" : esc(MAT_KINDS.find(k => k[0] === o.r.m.kind)[1] + " " + (o.r.m.mix || ""))}</td><td class="n">${g("Cement")}</td><td class="n">${g("Sand")}</td><td class="n">${g("Crush")}</td><td class="n">${g("Bricks") || g("Blocks") || g("Tiles")}</td><td class="n">${o.pr.tot ? f2(o.pr.tot) : "—"}</td></tr>`; }).join("")}</tbody></table>`;
   return ask("Materials — whole takeoff", body, "Close");
+}
+/* ------------------------------------------------------------------ the Material tab
+   Every measurement's materials (matCalc) by floor, by drawing page, by measurement or by condition — the Material view beside Sheet
+   and Bill — every condition's material set in one table (Material setup), the project's Material defaults, and the materials
+   workbook (Summary, By floor, By page, By measurement, By condition, Basis). A group's quantity is the net of its measurements
+   (deductions taken off), worked out once per group: bricks, blocks and tile pieces are rounded up in each group. */
+const MAT_ORDER = ["cem", "sand", "crush", "brick", "block", "tile", "tilen", "adh", "grout", "putty", "primer", "emul", "wsh"];
+const matOrd = k => { const i = MAT_ORDER.indexOf(String(k).split(":")[0]); return i < 0 ? 99 : i; };
+const matAdd = (tot, mats) => { mats.forEach(x => { const o = tot.get(x.k) || {k: x.k, n: x.n, u: x.u, q: 0}; o.q += x.q; tot.set(x.k, o); }); return tot; };
+const matList = tot => [...tot.values()].sort((a, b) => matOrd(a.k) - matOrd(b.k) || a.n.localeCompare(b.n));
+const matTot = L => matList(L.reduce((t, o) => o.r.err ? t : matAdd(t, o.r.mats), new Map()));
+const matMeas = c => !!c && c.type !== "count" && matOf(c).kind !== "none";
+const matKind = r => (MAT_KINDS.find(k => k[0] === r.m.kind) || ["", ""])[1] + (r.m.mix && r.m.kind !== "paint" && (r.m.kind !== "tile" || r.m.bed === "mortar") ? " " + r.m.mix : "");
+const matLine = mats => mats.map(x => esc(x.n) + " <b>" + matQ(x.q, x.u) + "</b> " + esc(x.u)).join(" · ");
+/* the materials of some measurements: per condition (in the list's order) their net quantity and its materials */
+function matFor(its){
+  const by = new Map(); its.forEach(it => { const c = cond(it.cond); if (!matMeas(c)) return; const q = qtyOf(it); if (q != null) by.set(c.id, (by.get(c.id) || 0) + q); });
+  return P.proj.conds.filter(c => by.has(c.id)).map(c => ({c, Q: by.get(c.id), r: matCalc(c, by.get(c.id))})).filter(o => o.r);
+}
+/* one measurement's own materials — a deduction or an opening takes its share off (negative) */
+function matItem(it){
+  const c = cond(it.cond); if (!matMeas(c)) return null; const q = qtyOf(it); if (q == null || !q) return null;
+  const r = matCalc(c, Math.abs(q)); if (!r) return null; const s = q < 0 ? -1 : 1;
+  return {c, it, Q: q, r, mats: r.err ? [] : r.mats.map(x => Object.assign({}, x, {q: x.q * s}))};
+}
+/* the measurements with materials in groups: by "kind" (type of work: brick, block, plaster... in that order), "floor" (building · floor,
+   in order), "page" (the drawings' pages in order) or "cond" (one group) */
+function matGroups(by, pageOnly){
+  let its = P.proj.items.filter(it => matMeas(cond(it.cond)));
+  if (pageOnly) its = its.filter(it => it.file === S.fileId && it.page === S.pageNo);
+  if (by === "kind") { const K = new Map(); its.forEach(it => { const k = matOf(cond(it.cond)).kind; if (!K.has(k)) K.set(k, []); K.get(k).push(it); });
+    return MAT_KINDS.filter(([k]) => K.has(k)).map(([k, n]) => ({name: n, key: k, its: K.get(k)})); }
+  if (by === "floor") return floorGroups().map(g => ({name: g.name, its: its.filter(g.only)})).filter(g => g.its.length);
+  if (by === "page") { const fo = new Map(P.proj.files.map((f, i) => [f.id, i])), pg = new Map();
+    its.forEach(it => { const k = keyOf(it.file, it.page); if (!pg.has(k)) pg.set(k, {name: pageName(it), key: k, f: fo.has(it.file) ? fo.get(it.file) : 1e9, p: it.page, its: []}); pg.get(k).its.push(it); });
+    return [...pg.values()].sort((a, b) => a.f - b.f || a.p - b.p); }
+  return its.length ? [{name: pageOnly ? keyName(keyOf(S.fileId, S.pageNo)) : "Whole takeoff", its}] : [];
+}
+/* the right panel's Sheet, Bill or Material view */
+function rView(v){
+  S.billView = v === "bill"; S.matView = v === "mat";
+  $("sheet").style.display = v === "sheet" ? "" : "none"; $("bill").style.display = S.billView ? "" : "none"; $("matv").style.display = S.matView ? "" : "none";
+  $("vSheet").classList.toggle("on", v === "sheet"); $("vBill").classList.toggle("on", S.billView); $("vMat").classList.toggle("on", S.matView);
+  $("matv").closest("aside").classList.toggle("rmat", S.matView); if (S.billView) renderBill(); if (S.matView) renderMatView();
+}
+function matShow(by){ if (by) { S.matBy = by; pref("tkMatBy", by); } if (S.rHide) { S.rHide = false; setPanels(); } rView("mat"); }
+function renderMatView(){
+  const el = $("matv"); if (!el) return; if (!P.proj) { el.innerHTML = ""; return; }
+  const by = S.matBy || pref("tkMatBy") || "floor", pg = !!S.matPg, shut = S.mvShut || (S.mvShut = new Set());
+  const BY = [["kind", "By type (block, plaster, tile…)"], ["floor", "By floor"], ["page", "By page"], ["item", "By measurement"], ["cond", "By condition"]];
+  const bar = `<div class="mvbar"><select id="mvBy" aria-label="Show the materials" title="Group the materials by type of work, by floor, by drawing page, by each measurement or by condition">${BY.map(([a, b]) => `<option value="${a}"${a === by ? " selected" : ""}>${b}</option>`).join("")}</select>
+    <label class="small" title="Only the measurements on the page open now"><input type="checkbox" id="mvPg"${pg ? " checked" : ""}> This page</label><span class="sp"></span>
+    <button class="btn sm" data-mva="set" title="Material setup — every condition's material, mix, thickness, mortar joint, size and waste in one table">Setup</button><button class="btn sm" data-mva="def" title="Material defaults — mortar joint and wall thickness of brick and block, tiles, paint">Defaults</button><button class="btn sm pri" data-mva="xls" title="Excel workbook: Summary, By type, By floor, By page, By measurement, By condition and the Basis of every figure">Excel</button></div>`;
+  const G = matGroups(by === "item" || by === "cond" ? "cond" : by, pg);
+  if (!G.length) { el.innerHTML = bar + `<div class="mvempty">No materials yet${pg ? " on this page" : ""}. Conditions named like <b>8" Block</b>, <b>9" Brick wall</b>, <b>Wall plaster</b>, <b>RCC slab</b>, <b>Floor tile</b> or <b>Emulsion paint</b> get their material by themselves; for the others pick one in <a href="#" data-mva="set">Material setup</a> or in Properties › Materials.</div>`; return; }
+  const all = new Map(), sw = c => `<i class="lsw" style="background:${esc(c.color)}"></i>`;
+  const tbl = mats => `<table class="mattbl mvt">${mats.map(x => `<tr><td>${esc(x.n)}</td><td class="n">${matQ(x.q, x.u)}</td><td class="u">${esc(x.u)}</td></tr>`).join("")}</table>`;
+  const box = (key, sum, body) => `<details class="mvg" data-mvg="${esc(key)}"${shut.has(key) ? "" : " open"}><summary>${sum}</summary>${body}</details>`;
+  let sec = "";
+  if (by === "item") matFor(G[0].its).forEach(o => {
+    const its = G[0].its.filter(it => it.cond === o.c.id).map(matItem).filter(Boolean); if (!o.r.err) matAdd(all, o.r.mats);
+    sec += box("c:" + o.c.id, `${sw(o.c)}<b>${esc(o.c.name)}</b><span class="mvs">${its.length} measurement${its.length === 1 ? "" : "s"} · ${fq(o.Q, o.c.unit)} ${esc(uL(o.c.unit))}</span>`,
+      its.map(x => `<div class="mvi" data-mvit="${esc(x.it.id)}" title="Go to it on the drawing"><div class="mvh"><span>${esc(x.it.label || kindName(x.it, x.c))}</span><span class="small">${esc(pageName(x.it))}</span><b>${x.Q < 0 ? "−" : ""}${fq(Math.abs(x.Q), x.c.unit)} ${esc(uL(x.c.unit))}</b></div><div class="mvm">${x.r.err ? '<span class="warn">' + esc(x.r.err) + "</span>" : matLine(x.mats)}</div></div>`).join("")
+      + `<div class="mvsum"><div class="small">${esc(o.c.name)} — net ${fq(o.Q, o.c.unit)} ${esc(uL(o.c.unit))}${o.r.basis ? " · " + esc(o.r.basis) : ""}</div>${o.r.err ? '<div class="warn small">' + esc(o.r.err) + "</div>" : tbl(o.r.mats)}</div>`); });
+  else G.forEach(g => {
+    const L = matFor(g.its), tot = matTot(L); matAdd(all, tot);
+    sec += box(by + ":" + (g.key || g.name), `<b>${esc(g.name)}</b><span class="mvs">${g.its.length} measurement${g.its.length === 1 ? "" : "s"}</span>`,
+      L.map(o => `<div class="mvc">${sw(o.c)}<b>${esc(o.c.name)}</b><span class="mvq">${fq(o.Q, o.c.unit)} ${esc(uL(o.c.unit))}</span></div><div class="mvk small">${esc(matKind(o.r))}${o.r.basis ? " · " + esc(o.r.basis) : ""}</div>`
+        + (o.r.err ? `<div class="warn small mverr">${esc(o.r.err)}</div>` : tbl(o.r.mats))).join("")
+      + (G.length > 1 && L.length > 1 ? `<div class="mvsum"><div class="small">Total — ${esc(g.name)}</div>${tbl(tot)}</div>` : "")); });
+  el.innerHTML = bar + `<div class="mvtot"><div class="mvth">Total materials${pg ? " — this page" : ""}</div>${tbl(matList(all))}<div class="small">${esc(MAT_SRC)}; tiles and paint from the Rate Analysis items' own consumption. Deductions taken off; bricks, blocks and tile pieces rounded up in each ${by === "floor" ? "floor" : by === "page" ? "page" : by === "kind" ? "type" : "condition"}.</div></div>` + sec;
+}
+/* Material setup: every length / area condition's material in one table — material, mix, thickness, mortar joint, size / type, waste */
+async function matSetupDialog(){
+  const C = P.proj.conds.filter(c => c.type !== "count");
+  if (!C.length) return ask("Material setup", "<p>No length or area conditions yet — make them with Quick items or New condition, then give each its material here.</p>", "OK");
+  const st = new Map(C.map(c => { const m = Object.assign({}, matOf(c)), g = !!m.guessed; delete m.guessed; return [c.id, {m, t: +c.t ? r3(c.t * 12) : "", g, d: false, dt: false}]; }));
+  const opt = (L, v) => L.map(([a, b]) => `<option value="${esc(a)}"${String(v) === String(a) ? " selected" : ""}>${esc(b)}</option>`).join("");
+  const S2 = (k, L, v, t) => `<select data-sk="${k}"${t ? ` title="${esc(t)}"` : ""}>${opt(L.some(x => x[0] === v) ? L : L.concat([[v, v]]), v)}</select>`;
+  const N2 = (k, v, ph, w, t) => `<input type="number" data-sk="${k}" value="${v === "" || v == null ? "" : +v}" placeholder="${esc(ph)}" min="0" step="any" style="width:${w}px"${t ? ` title="${esc(t)}"` : ""}>`;
+  const cells = c => { const o = st.get(c.id), m = o.m, k = m.kind, mason = k === "brick" || k === "block", D = matDef(), mx = MAT_MIXES[k] || [], bedM = k === "tile" && m.bed === "mortar";
+    const tPh = mason ? (matNameIn(c) ? matNameIn(c) + " name" : r3(matWallT(Object.assign({}, c, {t: ""}), m).T * 12) + " def.") : "T";
+    const thick = mason || k === "concrete" ? N2("T", o.t, tPh, 78, "Wall / slab thickness T, inches — saved as T on the condition" + (mason ? "; blank = from the name, else the default" : ""))
+      : k === "plaster" || k === "screed" || bedM ? N2("tin", m.tin, "", 78, (bedM ? "Bed" : "Plaster / screed") + " thickness, inches") : "";
+    const joint = mason ? N2("jin", m.jin, String(k === "brick" ? D.jBrick : D.jBlock) + " def.", 84, "Mortar joint, inches — blank = the project default") : k === "tile" ? N2("tj", m.tj, D.tileJ + " def.", 84, "Tile joint, inches — blank = the project default") : "";
+    const size = k === "block" ? S2("bs", MAT_BLOCKS, m.bs || "auto") : k === "brick" ? S2("brk", MAT_BRICKS, m.brk || "BRK-1") : k === "concrete" ? S2("crush", MAT_CRUSH, m.crush || "CRSH-SG")
+      : k === "tile" ? S2("tt", MAT_TILES, m.tt || "TILE-POR") + S2("ts", MAT_TSIZES, m.ts || "24x24") + S2("bed", MAT_BEDS, m.bed || "adh")
+      : k === "paint" ? S2("ps", MAT_PAINTS, m.ps || "int") + N2("coats", m.coats, D.coats + " coats", 70, "Finish coats") : "";
+    return `<td>${S2("kind", MAT_KINDS, k)}${o.g && k !== "none" ? '<div class="small">from the name</div>' : ""}</td><td>${mx.length && (k !== "tile" || bedM) ? S2("mix", mx, m.mix) : ""}</td><td>${thick}</td><td>${joint}</td><td class="mss">${size}</td><td>${k !== "none" ? N2("wst", m.wst, "0", 52) : ""}</td>`; };
+  const row = c => `<td><i class="lsw" style="background:${esc(c.color)}"></i> ${esc(c.name)}<div class="small">${fq(condTotals(c).net, c.unit)} ${esc(uL(c.unit))}</div></td>${cells(c)}`;
+  const body = `<p class="small">Each length or area condition's material. Blank thickness and joint boxes take the name (8" Block) or the project's <b>Material defaults</b> (shown greyed). Thick. in: the wall T of brick and block, the slab T of concrete, the plaster / screed / tile bed thickness.</p>
+    <div class="mstw"><table class="sh mst"><thead><tr><th>Condition</th><th>Material</th><th>Mix</th><th>Thick. in</th><th>Joint in</th><th>Size / type</th><th>Waste %</th></tr></thead><tbody>${C.map(c => `<tr data-sc="${esc(c.id)}">${row(c)}</tr>`).join("")}</tbody></table></div>`;
+  const p = ask("Material setup — every condition", body, "Apply", () => {
+    for (const c of C) { const o = st.get(c.id); if (o.dt && o.t !== "" && !(+o.t > 0)) return c.name + ": type the thickness in inches, or leave it blank"; } return {ok: true}; });
+  const tb = document.querySelector("#dlgB .mst");
+  tb.addEventListener("change", e => { const el = e.target.closest("[data-sk]"), tr = el && el.closest("tr[data-sc]"); if (!tr) return;
+    const c = cond(tr.dataset.sc), o = st.get(c.id), k = el.dataset.sk, v = el.value; o.d = true; o.g = false;
+    if (k === "kind") { const m = Object.assign({}, matOf(Object.assign({}, c, {mat: {kind: v}}))); delete m.guessed; o.m = m; }
+    else if (k === "T") { o.t = v.trim(); o.dt = true; }
+    else if (["jin", "tj", "coats", "tin", "wst"].includes(k)) { if (v.trim() === "") delete o.m[k]; else o.m[k] = Math.max(0, Math.min(k === "wst" ? 50 : k === "coats" ? 6 : k === "tin" ? 24 : 2, +v || 0)); }
+    else o.m[k] = v;
+    if (k === "kind" || k === "bed" || k === "bs") tr.innerHTML = row(c); });
+  if (!(await p)) return;
+  const ch = C.filter(c => st.get(c.id).d); if (!ch.length) return;
+  mutate(() => ch.forEach(c => { const o = st.get(c.id); c.mat = o.m; if (o.dt) c.t = o.t === "" ? "" : r3(+o.t / 12); }), "Material setup");
+  toast("Material set for " + ch.length + " condition" + (ch.length > 1 ? "s" : ""), 2200);
+}
+/* the project's material defaults: mortar joint and wall thickness of brick and block, tiles, paint (kept in P.proj.matDef) */
+async function matDefDialog(){
+  const D = matDef(), f = (k, n, step, note) => `<div class="mdf"><label for="md_${k}">${n}</label><input type="number" id="md_${k}" value="${D[k]}" min="0" step="${step}">${note ? `<div class="small">${note}</div>` : ""}</div>`;
+  const body = `<p class="small">Used by every condition that has no value of its own (Properties › Materials, or Material setup). Kept with this project.</p>
+    <h4 class="mdh">Brick and block masonry</h4><div class="mdg">${f("jBrick", "Brick mortar joint in", 0.0625, '3/8" = 0.375')}${f("jBlock", "Block mortar joint in", 0.0625)}${f("tBrick", "Brick wall T in", 0.5, "when the name has none")}${f("tBlock", "Block wall T in", 0.5, "block size Auto, no T in the name")}</div>
+    <h4 class="mdh">Tiles</h4><div class="mdg">${f("tileJ", "Tile joint in", 0.0625, '1/16" = 0.0625')}${f("tileW", "Tile waste %", 0.5, "5 % = the Rate Analysis 1.05")}<div class="mdf"><label for="md_tileBed">Laid on</label><select id="md_tileBed">${MAT_BEDS.map(([a, b]) => `<option value="${a}"${a === D.tileBed ? " selected" : ""}>${b}</option>`).join("")}</select></div>${f("bedIn", "Bed thickness in", 0.125, "on a cement sand bed")}</div>
+    <h4 class="mdh">Paint</h4><div class="mdg">${f("coats", "Finish coats", 1, "the library rate is for 3")}</div>
+    <p class="small">Fixed by the method: 50 kg cement bag = ${f3(MAT_BAG_CFT)} cft; dry factor 1.27 mortar, 1.54 concrete; brick 9 × 4½ × 3 in; tile adhesive 0.6 kg / Sft floor, 0.55 wall; grout ${MAT_GROUT} kg / Sft; putty ${MAT_PUTTY} kg / Sft (2 coats); primer ${MAT_PRIMER} Sft / litre; emulsion ${MAT_COVER.EMUL}, weather shield ${MAT_COVER.WSHIELD} Sft / litre a coat (Rate Analysis library).</p>`;
+  const v = await ask("Material defaults", body, "Save", () => {
+    const o = {}; for (const k of Object.keys(MAT_DEF)) { if (k === "tileBed") { o[k] = $("md_tileBed").value; continue; } const s = $("md_" + k).value.trim(), x = +s; if (s === "" || !(x >= 0)) return "Type a number in every box"; o[k] = x; }
+    if (!(o.tBrick > 0 && o.tBlock > 0)) return "The wall thickness must be more than 0"; if (o.jBrick > 2 || o.jBlock > 2 || o.tileJ > 1) return "A joint that wide is not right — inches, e.g. 0.375"; if (!(o.coats >= 1 && o.coats <= 6)) return "Finish coats: 1 to 6";
+    o.coats = Math.round(o.coats); if (o.tileW > 50) return "Tile waste: up to 50 %"; return {o}; }, "md_jBrick");
+  if (v) mutate(() => { P.proj.matDef = v.o; }, "Material defaults");
+}
+/* the materials workbook: Summary (quantities, and the cost from the rate library), By type, By floor, By page, By measurement, By condition, Basis */
+async function matWorkbook(){
+  const X = await loadExcel(), wb = new X.Workbook(); wb.creator = "Sajjad QS PDF TAKEOFF Software"; wb.created = new Date();
+  const fill = a => ({type: "pattern", pattern: "solid", fgColor: {argb: a}}), HEAD = fill("FF12263F"), GREY = fill("FFE6E9EE"), SUB = fill("FFDDEBFF"), YEL = fill("FFFFF2C2");
+  const all = P.proj.items.filter(it => matMeas(cond(it.cond))), fo = new Map(P.proj.files.map((f, i) => [f.id, i])), co = new Map(P.proj.conds.map((c, i) => [c.id, i]));
+  const GK = matGroups("kind").map(g => ({g, L: matFor(g.its)})), GF = matGroups("floor").map(g => ({g, L: matFor(g.its)})), GP = matGroups("page").map(g => ({g, L: matFor(g.its)})), LC = matFor(all);
+  const IT = all.map(matItem).filter(Boolean).sort((a, b) => (fo.get(a.it.file) || 0) - (fo.get(b.it.file) || 0) || a.it.page - b.it.page || co.get(a.c.id) - co.get(b.c.id));
+  const keys = new Map(); [LC, ...GK.map(x => x.L), ...GF.map(x => x.L), ...GP.map(x => x.L)].forEach(L => L.forEach(o => { if (!o.r.err) o.r.mats.forEach(x => keys.set(x.k, x)); })); IT.forEach(x => x.mats.forEach(m => keys.set(m.k, m)));
+  const cols = [...keys.values()].sort((a, b) => matOrd(a.k) - matOrd(b.k) || a.n.localeCompare(b.n)), mHdr = cols.map(x => x.n + " (" + x.u + ")"), mW = cols.map(() => 13);
+  const colL = n => { let s = ""; for (n++; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + (n - 1) % 26) + s; return s; };   // 0 → A
+  const vq = (q, u) => +(+q).toFixed(u === "Nos" ? 0 : 3), nf = u => u === "Nos" ? "#,##0" : "#,##0.000";
+  const D = matDef(), note = P.proj.name + " · " + dmy(today()) + " · " + MAT_SRC + "; tiles and paint from the Rate Analysis items' own consumption · deductions taken off · bricks, blocks and tile pieces rounded up in each group · material only";
+  const head = (ws, title, hdr, widths) => { ws.columns = widths.map(w => ({width: w})); ws.getCell(1, 1).value = title; ws.getCell(1, 1).font = {bold: true, size: 13};
+    ws.getCell(2, 1).value = note; ws.getCell(2, 1).font = {size: 9, color: {argb: "FF52514E"}};
+    const r = ws.getRow(3); r.values = hdr; r.height = 30; r.eachCell(c => { c.fill = HEAD; c.font = {bold: true, color: {argb: "FFFFFFFF"}}; c.alignment = {wrapText: true, vertical: "middle"}; }); };
+  // a row's material cells from column `at` on; `S` adds what was written (for the cached results of the total formulas)
+  const mCells = (r, at, mats, S) => cols.forEach((x, i) => { const m = mats.find(y => y.k === x.k), c = r.getCell(at + i); c.numFmt = nf(x.u); if (m) { c.value = vq(m.q, x.u); if (S) S[i] += c.value; } });
+  const totRow = (ws, at, label, r0, r1, S, F) => { const t = ws.addRow([label]); t.font = {bold: true};
+    cols.forEach((x, i) => { const L1 = colL(at - 1 + i), c = t.getCell(at + i); c.value = {formula: `SUBTOTAL(9,${L1}${r0}:${L1}${r1})`, result: vq(S[i], x.u)}; c.numFmt = nf(x.u); });
+    for (let n = 1; n < at + cols.length; n++) t.getCell(n).fill = F; return t; };
+  const filt = (ws, n) => { ws.autoFilter = {from: {row: 3, column: 1}, to: {row: 3, column: n}}; };
+
+  // Summary: the quantities of the whole takeoff, then their cost from the Cost Control rate library
+  const sm = wb.addWorksheet("Summary");
+  head(sm, "MATERIALS — " + P.proj.name, ["Material", "Qty", "Unit"], [46, 15, 9, 13, 16, 14, 70]);
+  matTot(LC).forEach(x => { const r = sm.addRow([x.n, vq(x.q, x.u), x.u]); r.getCell(2).numFmt = nf(x.u); });
+  const MS = matSummary();
+  if (MS.tot.length) { sm.addRow([]);
+    const h = sm.addRow(["Cost — Cost Control rate library", "Qty", "Unit", "Rate PKR", "Amount PKR", "Library code", "Rate source / date"]); h.eachCell(c => { c.fill = HEAD; c.font = {bold: true, color: {argb: "FFFFFFFF"}}; }); const h0 = h.number + 1;
+    MS.tot.forEach(x => { const n = sm.rowCount + 1, q = vq(x.q, x.u === "Nos" ? "Nos" : ""), r = sm.addRow([x.n, q, x.u, x.R.rate || 0, {formula: `B${n}*D${n}`, result: q * (x.R.rate || 0)}, x.R.code || "", x.R.rate ? x.R.src + (x.R.date ? " (" + dmy(x.R.date) + ")" : "") : x.R.na]);
+      r.getCell(2).numFmt = "#,##0.000"; r.getCell(4).numFmt = "#,##0.00"; r.getCell(5).numFmt = "#,##0.00"; if (!x.R.rate || x.R.vs === "A") r.getCell(7).fill = YEL; });
+    const t = sm.addRow(["Total material cost", "", "", "", {formula: `SUM(E${h0}:E${sm.rowCount})`, result: MS.tot.reduce((a, x) => a + vq(x.q, x.u === "Nos" ? "Nos" : "") * (x.R.rate || 0), 0)}]); t.font = {bold: true}; t.getCell(5).numFmt = "#,##0.00"; t.eachCell(c => { c.fill = GREY; }); }
+
+  // By type, By floor and By page: a row per condition in each group, the group's SUBTOTAL, and the grand total (SUBTOTAL skips the subtotals)
+  [["By type", "Type of work", GK], ["By floor", "Building / floor", GF], ["By page", "Drawing page", GP]].forEach(([name, lead, G]) => {
+    const ws = wb.addWorksheet(name, {views: [{state: "frozen", ySplit: 3, xSplit: 2}]}), at = 6, GT = cols.map(() => 0);
+    head(ws, "MATERIALS " + name.toUpperCase() + " — " + P.proj.name, [lead, "Condition", "Material", "Qty", "Unit"].concat(mHdr), [30, 34, 26, 13, 7].concat(mW));
+    G.forEach(({g, L}) => { const r0 = ws.rowCount + 1, S = cols.map(() => 0);
+      L.forEach(o => { const r = ws.addRow([g.name, o.c.name, o.r.err || matKind(o.r), vq(o.Q, ""), uL(o.c.unit)]); r.getCell(4).numFmt = qFmt(o.c.unit); if (o.r.err) r.getCell(3).fill = YEL; else mCells(r, at, o.r.mats, S); });
+      totRow(ws, at, "Total — " + g.name, r0, ws.rowCount, S, GREY); S.forEach((v, i) => { GT[i] += v; }); });
+    totRow(ws, at, "Grand total", 4, ws.rowCount, GT, SUB); filt(ws, at - 1 + cols.length); });
+
+  // By measurement: every measurement with its own materials (deductions negative); the total follows the filter
+  { const ws = wb.addWorksheet("By measurement", {views: [{state: "frozen", ySplit: 3}]}), at = 8, S = cols.map(() => 0);
+    head(ws, "MATERIALS BY MEASUREMENT — " + P.proj.name, ["S.No", "Drawing page", "Location", "Condition", "Measurement", "Qty", "Unit"].concat(mHdr), [6, 26, 24, 32, 24, 13, 7].concat(mW));
+    IT.forEach((x, i) => { const r = ws.addRow([i + 1, pageName(x.it), locText(locOf(x.it)), x.c.name, (x.Q < 0 ? "Ded. " : "") + (x.it.label || kindName(x.it, x.c)) + (x.r.err ? " — " + x.r.err : ""), vq(x.Q, ""), uL(x.c.unit)]);
+      r.getCell(6).numFmt = qFmt(x.c.unit); if (x.r.err) r.getCell(5).fill = YEL; mCells(r, at, x.mats, S); });
+    totRow(ws, at, "Total (of the rows shown)", 4, ws.rowCount, S, SUB); filt(ws, at - 1 + cols.length); }
+
+  // By condition: each condition's net quantity, its material settings and basis, and its materials
+  { const ws = wb.addWorksheet("By condition", {views: [{state: "frozen", ySplit: 3, xSplit: 1}]}), at = 7, S = cols.map(() => 0);
+    head(ws, "MATERIALS BY CONDITION — " + P.proj.name, ["Condition", "BOQ code", "Qty", "Unit", "Material", "Basis"].concat(mHdr), [32, 13, 13, 7, 26, 64].concat(mW));
+    LC.forEach(o => { const r = ws.addRow([o.c.name, o.c.boq || "", vq(o.Q, ""), uL(o.c.unit), o.r.err || matKind(o.r), o.r.basis || ""]); r.getCell(3).numFmt = qFmt(o.c.unit); if (o.r.err) r.getCell(5).fill = YEL; else mCells(r, at, o.r.mats, S); });
+    totRow(ws, at, "Total", 4, ws.rowCount, S, SUB); filt(ws, at - 1 + cols.length); }
+
+  // Basis: the formulas and factors, this project's defaults, and each condition's settings
+  { const ws = wb.addWorksheet("Basis"); ws.columns = [{width: 32}, {width: 26}, {width: 10}, {width: 14}, {width: 12}, {width: 30}, {width: 10}, {width: 70}];
+    ws.getCell(1, 1).value = "BASIS OF THE MATERIAL QUANTITIES — " + P.proj.name; ws.getCell(1, 1).font = {bold: true, size: 13};
+    [["Source", MAT_SRC + " (SAJJAD QSCALCULATOR formulas); tiles and paint: Rate Analysis library items FN-500, FN-505, FN-530, FN-535, FN-540"],
+     ["Cement bag", "50 kg = " + f3(MAT_BAG_CFT) + " cft (1,440 kg / m³)"], ["Dry volume", "mortar and plaster: wet × 1.27; concrete: V × 1.54; split by the mix (1:4 → cement 1/5, sand 4/5)"],
+     ["Brick masonry", "brick 9 × 4½ × 3 in; N = V ÷ ((l + j)(w + j)(h + j)); wet mortar = V − N × l × w × h"],
+     ["Block masonry", "N = V ÷ ((l + j)(h + j) × T ÷ leaves); wet mortar = V − N × l × w × h; hollow blocks: joint mortar on the two face shells (1¼ in) only"],
+     ["Plaster / screed", "dry = A × t × 1.27"], ["Tiles", "tiles = A × (1 + waste) Sft; pieces = A × (1 + waste) ÷ ((L + j)(W + j)); adhesive " + MAT_ADH["TILE-POR"] + " kg / Sft floor (FN-500), " + MAT_ADH["TILE-CER"] + " wall (FN-505); grout " + MAT_GROUT + " kg / Sft; or a cement sand bed: A × t × 1.27"],
+     ["Paint", "putty " + MAT_PUTTY + " kg / Sft (2 coats); primer " + MAT_PRIMER + " Sft / litre (1 coat); emulsion " + MAT_COVER.EMUL + ", weather shield " + MAT_COVER.WSHIELD + " Sft / litre a coat"],
+     ["This project's defaults", `mortar joint: brick ${matIn(D.jBrick)}, block ${matIn(D.jBlock)} · wall T when none is given: brick ${D.tBrick}", block ${D.tBlock}" · tile joint ${matIn(D.tileJ)}, waste ${D.tileW} %, laid on ${D.tileBed === "mortar" ? "a cement sand bed " + D.bedIn + '"' : "tile adhesive"} · paint ${D.coats} finish coats`],
+     ["Groups", "each floor / page / condition worked out from the net quantity of its measurements; bricks, blocks and tile pieces rounded up in each"],
+     ["Material only", "no labour, plant or overheads — they are in each item's Rate Analysis rate"]].forEach(x => { const r = ws.addRow(x); r.getCell(1).font = {bold: true}; ws.mergeCells(r.number, 2, r.number, 8); r.getCell(2).alignment = {wrapText: true}; });
+    ws.addRow([]); const h = ws.addRow(["Condition", "Material", "Mix", "Thickness / T", "Joint", "Size / type", "Waste %", "Basis"]); h.eachCell(c => { c.fill = HEAD; c.font = {bold: true, color: {argb: "FFFFFFFF"}}; });
+    LC.forEach(o => { const m = o.r.m, k = m.kind, mason = k === "brick" || k === "block";
+      const th = mason ? r3(matWallT(o.c, m).T * 12) + '"' : k === "concrete" ? (+o.c.t ? r3(o.c.t * 12) + '"' : "") : (k === "plaster" || k === "screed" || (k === "tile" && m.bed === "mortar")) ? r3(+m.tin) + '"' : "";
+      const sz = k === "block" ? (MAT_BLOCKS.find(x => x[0] === (m.bs || "auto")) || ["", m.bs])[1] : k === "brick" ? (MAT_BRICKS.find(x => x[0] === (m.brk || "BRK-1")) || ["", ""])[1] : k === "tile" ? (MAT_TILES.find(x => x[0] === m.tt) || ["", ""])[1] + " " + (MAT_TSIZES.find(x => x[0] === m.ts) || ["", m.ts])[1] + ", " + (m.bed === "mortar" ? "bed" : "adhesive") : k === "paint" ? (MAT_PAINTS.find(x => x[0] === m.ps) || ["", ""])[1] + ", " + Math.round(+m.coats || D.coats) + " coats" : k === "concrete" ? (MAT_CRUSH.find(x => x[0] === (m.crush || "CRSH-SG")) || ["", ""])[1] : "";
+      ws.addRow([o.c.name, (MAT_KINDS.find(x => x[0] === k) || ["", ""])[1], m.mix && k !== "paint" ? m.mix : "", th, mason ? matIn(matJoint(o.c, m)) : k === "tile" ? matIn(m.tj != null && m.tj !== "" ? +m.tj : D.tileJ) : "", sz, +m.wst || 0, o.r.err || o.r.basis]); }); }
+  return wb;
+}
+async function exportMatExcel(){
+  if (!P.proj) return toast("Open a project first", 2000);
+  if (!P.proj.items.some(it => matMeas(cond(it.cond)))) return toast("No materials to export yet — give the conditions a material (Material tab › Material setup)", 4000);
+  busy("Building the materials workbook…");
+  try { const wb = await matWorkbook(), buf = await wb.xlsx.writeBuffer();
+    saveBlob(new Blob([buf], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), fileBase() + "_Materials.xlsx"); toast("Materials workbook saved — Summary, By type, By floor, By page, By measurement, By condition, Basis", 3500); }
+  catch (e) { toast(e.message || String(e), 5000); }
+  busy("");
 }
 function floorGroups(){   // one group per building / floor found, plus the measurements with no floor — floors in their order (floorSort)
   const keyL = it => { const L = locOf(it); return [L.bldg, L.floor].filter(Boolean).join(" · "); }, names = floorSort(P.proj.items.map(it => { const L = locOf(it); return {n: [L.bldg, L.floor].filter(Boolean).join(" · "), b: L.bldg, f: L.floor}; }));
@@ -5592,7 +5855,7 @@ function renderPageStrip(){
     return `<div class="pgt${o.key === S.key ? " on" : ""}" data-pg="${esc(o.f.id)}|${o.i}" title="${esc(o.f.name)} p.${o.i}${sh.title ? " — " + esc(sh.title) : ""}"><img data-th="${esc(o.key)}" alt=""${th && th !== "x" ? ` src="${th}"` : ""}><div class="pgl">p.${o.i}</div></div>`; }).join("") + "</div>";
   const on = el.querySelector(".pgt.on"); if (on && on.scrollIntoView) on.scrollIntoView({block: "nearest", inline: "center"});
 }
-function refresh(){ mlSoon(); renderPageStrip(); lblSync(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); renderScaleChip(); renderProps(); renderLiveLegend(); if (SPLIT.on) paneStrips(); if (S.unmOn) unmSoon(); draw(); draftBtns(); renderCondPick(); }
+function refresh(){ mlSoon(); renderPageStrip(); lblSync(); S.doorIx = null; S.ver = (S.ver || 0) + 1; if (S.leftTab === "pages") renderPages(); renderConds(); renderSheet(); renderQaBar(); if (S.billView) renderBill(); if (S.matView) renderMatView(); renderScaleChip(); renderProps(); renderLiveLegend(); if (SPLIT.on) paneStrips(); if (S.unmOn) unmSoon(); draw(); draftBtns(); renderCondPick(); }
 let sheetT = null;
 function refreshSheetSoon(){ clearTimeout(sheetT); sheetT = setTimeout(() => { renderSheet(); renderConds(); }, 120); }
 function renderScaleChip(){
@@ -5848,7 +6111,15 @@ function qaBadges(it){
   return b.length ? " " + b.join("") : "";
 }
 function pageName(it){ const f = P.proj.files.find(x => x.id === it.file); return (f ? f.name.replace(/\.pdf$/i, "") : "?") + " p." + it.page; }
-function kindName(it, c){ return it.kind === "open" ? "Opening" : c.type === "count" ? c.name : c.type === "area" ? (it.kind === "ded" ? "void" : "area") : (it.kind === "ded" ? "length" : "run"); }
+async function sheetGo(it){   // a measurement picked in a list (the sheet, the Material view): its page, selected, brought into view
+  if (it.file !== S.fileId || it.page !== S.pageNo) await gotoPage(it.file, it.page);
+  S.sel = it.id; S.cond = it.cond; setTool("select"); S.sel = it.id;
+  const xs = it.pts.map(p => toScr(p)), x0 = Math.min(...xs.map(p => p[0])), x1 = Math.max(...xs.map(p => p[0])), y0 = Math.min(...xs.map(p => p[1])), y1 = Math.max(...xs.map(p => p[1]));
+  const w = stage().clientWidth, h = stage().clientHeight;
+  if (x1 < 0 || x0 > w || y1 < 0 || y0 > h) { S.view.tx += w / 2 - (x0 + x1) / 2; S.view.ty += h / 2 - (y0 + y1) / 2; applyView(); renderHi(); }
+  refresh();
+}
+function kindName(it, c){return it.kind === "open" ? "Opening" : c.type === "count" ? c.name : c.type === "area" ? (it.kind === "ded" ? "void" : "area") : (it.kind === "ded" ? "length" : "run"); }
 /* details shown at the top of the Properties box (left panel): the selected measurement's quantity, dimension string, geometry,
    condition settings, rate and check status — read-only facts; the fields below them edit it */
 const dl = rows => '<dl>' + rows.filter(r => r && r[1] !== "" && r[1] != null).map(r => `<dt>${esc(r[0])}</dt><dd${r[2] ? ' class="' + r[2] + '"' : ""} title="${esc(String(r[1]).replace(/<[^>]+>/g, ""))}">${r[3] ? r[1] : esc(r[1])}</dd>`).join("") + '</dl>';
@@ -7975,7 +8246,7 @@ async function exportExcel(){
       ms.addRow([]); const h2 = ms.addRow(["By condition", "Qty", "Unit", "Material", "Basis"]); h2.font = {bold: true};
       MS.per.forEach(o => { const t = condTotals(o.c); ms.addRow([o.c.name, +t.net.toFixed(3), o.c.unit, o.r.err ? o.r.err : MAT_KINDS.find(k => k[0] === o.r.m.kind)[1] + " " + (o.r.m.mix || ""), o.r.basis || ""]);
         o.pr.rows.forEach(x => { const r = ms.addRow(["   " + x.n, +x.q.toFixed(3), x.u, x.R.rate || "", x.R.rate ? x.q * x.R.rate : ""]); r.getCell(2).numFmt = "#,##0.000"; r.getCell(5).numFmt = "#,##0.00"; }); });
-      ms.addRow([]); ms.addRow([MAT_SRC + " — dry factor 1.27 mortar / 1.54 concrete, 50 kg bag = " + f3(MAT_BAG_CFT) + " cft, 3/8\" joints. Material only."]);
+      ms.addRow([]); ms.addRow([MAT_SRC + " — dry factor 1.27 mortar / 1.54 concrete, 50 kg bag = " + f3(MAT_BAG_CFT) + " cft, mortar joints as set (default 3/8\"); tiles and paint from the Rate Analysis items. Material only — by floor, page and measurement: Material tab › Excel."]);
     }
     const lc = wb.addWorksheet("By location");
     lc.columns = [{header: "Building / floor", width: 26}, {header: "BOQ code", width: 13}, {header: "Item", width: 46}, {header: "Qty", width: 13}, {header: "Unit", width: 8}, {header: "Rate PKR", width: 13}, {header: "Amount PKR", width: 15}];
@@ -9242,7 +9513,7 @@ function snapPopToggle(on){
 const PC_KEY = "zdTakeoffPc";
 const PC_ITEMS = {
   l: [["l-tab-pages", "Pages tab"], ["l-tab-lay", "Layers tab"], ["l-filter", "Search and Length / Area / Count tabs"], ["l-strip", "Page thumbnail strip"], ["l-props", "Properties box"], ["l-pdet", "— details card in Properties"], ["l-pedit", "— edit fields in Properties"], ["l-keys", "Keyboard shortcuts list"]],
-  r: [["r-tab-bill", "Bill tab"], ["r-search", "Search and sort bar"], ["r-chips", "Summary chips (measured / checked / pending …)"], ["r-info", "Measurement count"], ["r-foot", "Prev / Next / Check this page footer"]],
+  r: [["r-tab-bill", "Bill tab"], ["r-tab-mat", "Material tab"],["r-search", "Search and sort bar"], ["r-chips", "Summary chips (measured / checked / pending …)"], ["r-info", "Measurement count"], ["r-foot", "Prev / Next / Check this page footer"]],
   u: [["ui-tabs", "Ribbon tabs row"], ["ui-ribbon", "Ribbon tools (collapsed = more drawing room)"], ["ui-cbar", "Drawing bar (page, zoom, View, Split, scale)"], ["ui-agent", "Takeoff-agent bar at the bottom"], ["ui-status", "Status bar"]]
 };
 const PC_PRESETS = {
@@ -9258,7 +9529,7 @@ function pcApply(){
   B.classList.toggle("pc-compact", !!o.compact);
   const hid = id => !!$(id) && getComputedStyle($(id)).display === "none";
   if ((S.leftTab === "pages" && hid("tPages")) || (S.leftTab === "lay" && hid("tLay"))) $("tCond").click();
-  if (S.billView && hid("vBill")) $("vSheet").click();
+  if ((S.billView && hid("vBill")) || (S.matView && hid("vMat"))) $("vSheet").click();
 }
 function pcSave(o){ pref(PC_KEY, JSON.stringify(o)); pcApply(); if (S.page) setTimeout(() => { applyView(); renderHi(); }, 60); }
 async function panelDialog(side){
@@ -10233,7 +10504,9 @@ function ribbonInit(){
     el.addEventListener("drop", dropHere); });
   /* ribbon tabs added for Costing / Export / View: each button runs an existing control or dialog */
   const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog(), floors: () => floorsDialog(), quick: () => quickItemsDialog(), autowin: () => S.page ? autoWindowUI() : toast("Open a drawing first", 2000),
-    symbols: () => symCountDialog(), levels: () => levelsMenu(), cutfill: () => cutFillDialog(), sheetlinks: () => sheetLinksMake(), hatchsplit: () => hatchSplitDialog(), cadcmp: () => cadCompareDialog()};   // (PlanSwift's: My symbols, earthworks, Auto Bookmark, ceilings by pattern)
+    symbols: () => symCountDialog(), levels: () => levelsMenu(), cutfill: () => cutFillDialog(), sheetlinks: () => sheetLinksMake(), hatchsplit: () => hatchSplitDialog(), cadcmp: () => cadCompareDialog(),   // (PlanSwift's: My symbols, earthworks, Auto Bookmark, ceilings by pattern)
+    matview: () => matShow(), matkind: () => matShow("kind"), matfloor: () => matShow("floor"), matpage: () => matShow("page"), matitem: () => matShow("item"), matcond: () => matShow("cond"),   // the Material tab
+    mattot: () => matDialog(), matset: () => matSetupDialog(), matdef: () => matDefDialog(), matxls: () => exportMatExcel()};
   const PX = {bDefaults: () => settingsDialog("measure")};   // Costing → Defaults: the top bar's Defaults is now in Settings (the tool keeps its name, so My tools keeps it)
   document.querySelectorAll("#tools [data-px]").forEach(b => b.addEventListener("click", () => { if (PX[b.dataset.px]) return PX[b.dataset.px](); const t = $(b.dataset.px); if (t && !t.disabled) t.click(); setTimeout(syncPx, 60); }));
   document.querySelectorAll("#tools [data-fn]").forEach(b => b.addEventListener("click", () => { if (P.proj && FN[b.dataset.fn]) FN[b.dataset.fn](); else toast("Open a project first", 2000); }));
@@ -12819,8 +13092,7 @@ function wire(){
     const b = e.target.closest("[data-lall]"); if (!b) return; const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; setLayer(Object.keys(cfg.getGroups()), b.dataset.lall === "1"); renderLayers(); });
   $("layerList").addEventListener("input", e => { if (e.target.id !== "lyrQ") return; const q = e.target.value.toLowerCase(); document.querySelectorAll("#layerList .lyr").forEach(l => { l.style.display = l.dataset.name.includes(q) ? "" : "none"; }); });
   $("bCompare").onclick = () => P.proj && compareDialog();
-  const view = b => { S.billView = b; $("sheet").style.display = b ? "none" : ""; $("bill").style.display = b ? "" : "none"; $("vSheet").classList.toggle("on", !b); $("vBill").classList.toggle("on", b); if (b) renderBill(); };
-  $("vSheet").onclick = () => view(false); $("vBill").onclick = () => view(true);
+  $("vSheet").onclick = () => rView("sheet"); $("vBill").onclick = () => rView("bill"); $("vMat").onclick = () => rView("mat");
   $("bill").addEventListener("click", e => { const a = e.target.closest("[data-asm]"); if (a) return asmDialog(cond(a.dataset.asm));
     const b = e.target.closest("[data-bact]"); if (b) return b.dataset.bact === "open" ? openingsDialog() : b.dataset.bact === "mat" ? matDialog() : revCompareDialog(); });
   $("bill").addEventListener("change", e => { if (e.target.id === "billGrp") { S.billGrp = e.target.value; renderBill(); } if (e.target.id === "billSplit") { S.billSplit = e.target.checked; pref("tkBillSplit", S.billSplit ? "1" : "0"); renderBill(); } });
@@ -12940,14 +13212,12 @@ function wire(){
     const rn = e.target.closest("[data-rename]");
     if (rn) return renameItem(P.proj.items.find(i => i.id === rn.dataset.rename));
     const tr = e.target.closest("[data-item]"); if (!tr) return;
-    const it = P.proj.items.find(i => i.id === tr.dataset.item); if (!it) return;
-    if (it.file !== S.fileId || it.page !== S.pageNo) await gotoPage(it.file, it.page);
-    S.sel = it.id; S.cond = it.cond; setTool("select"); S.sel = it.id;
-    const xs = it.pts.map(p => toScr(p)), x0 = Math.min(...xs.map(p => p[0])), x1 = Math.max(...xs.map(p => p[0])), y0 = Math.min(...xs.map(p => p[1])), y1 = Math.max(...xs.map(p => p[1]));
-    const w = stage().clientWidth, h = stage().clientHeight;
-    if (x1 < 0 || x0 > w || y1 < 0 || y0 > h) { S.view.tx += w / 2 - (x0 + x1) / 2; S.view.ty += h / 2 - (y0 + y1) / 2; applyView(); renderHi(); }
-    refresh();
+    const it = P.proj.items.find(i => i.id === tr.dataset.item); if (it) await sheetGo(it);
   });
+  $("matv").addEventListener("change", e => { if (e.target.id === "mvBy") { S.matBy = e.target.value; pref("tkMatBy", S.matBy); renderMatView(); } if (e.target.id === "mvPg") { S.matPg = e.target.checked; renderMatView(); } });
+  $("matv").addEventListener("click", e => { const a = e.target.closest("[data-mva]"); if (a) { e.preventDefault(); return a.dataset.mva === "set" ? matSetupDialog() : a.dataset.mva === "def" ? matDefDialog() : exportMatExcel(); }
+    const i = e.target.closest("[data-mvit]"), it = i && P.proj.items.find(x => x.id === i.dataset.mvit); if (it) sheetGo(it); });
+  $("matv").addEventListener("toggle", e => { const d = e.target, s = S.mvShut || (S.mvShut = new Set()); if (d.dataset && d.dataset.mvg) { if (d.open) s.delete(d.dataset.mvg); else s.add(d.dataset.mvg); } }, true);   // (toggle does not bubble)
   apWire();   // the appearance bar (Bluebeam-style properties)
   $("props").addEventListener("change", e => {
     if (e.target.dataset.lgfloor) { const lg = (P.proj.marks || []).find(m => m.id === S.selMark && m.type === "legend"); if (lg) legendFloorSet(lg, e.target.value); return; }   // a legend's Floors
@@ -12958,6 +13228,7 @@ function wire(){
       if (mt === "kind") { mc.mat = {kind: v}; return; }
       if (mt === "T") { const t = parseFt(String(v).trim() + (/["'a-z]/i.test(v) ? "" : '"')); if (!isNaN(t) && t >= 0) mc.t = t > 0 ? r3(t) : ""; return; }   // thickness typed in inches (or ft-in) → T on the condition, decimal ft
       if (mt === "H") { const h = uParse(String(v).trim()); if (!isNaN(h) && h >= 0) mc.h = h > 0 ? r3(h) : ""; return; }
+      if (mt === "jin" || mt === "tj" || mt === "coats") { if (String(v).trim() === "") delete m[mt]; else m[mt] = Math.max(0, Math.min(mt === "coats" ? 6 : 2, +v || 0)); mc.mat = m; return; }   // blank: the project default
       m[mt] = mt === "tin" || mt === "wst" ? Math.max(0, Math.min(mt === "wst" ? 50 : 24, +v || 0)) : v; mc.mat = m; }); return; }
     const it = P.proj.items.find(i => i.id === S.sel), f = e.target.dataset.prop; if (!it || !f) return;
     if (f === "qa") return setQa([it], e.target.value);
@@ -18159,7 +18430,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
   if (location.protocol !== "file:") learnTeamLoad();   // the team's learned method, added to this browser's
-  window.zdTakeoff = {setUnits, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),

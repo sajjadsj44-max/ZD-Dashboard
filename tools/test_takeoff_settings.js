@@ -124,10 +124,10 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   ok(await T(() => document.querySelector('[data-rtab="costing"]').style.display === "none"), "Ribbon: unticking the Costing tab hides it");
   await setVal("Costing tab", true);
   ok(await T(() => document.querySelector('[data-rtab="costing"]').style.display !== "none"), "ticking it shows it again");
-  await T(() => { const o = JSON.parse(localStorage.getItem("zdTakeoffTb") || "{}"); o.tabs = ["takeoff", "modify", "markup", "review", "costing", "export", "view"]; localStorage.setItem("zdTakeoffTb", JSON.stringify(o)); });
+  await T(() => { const o = JSON.parse(localStorage.getItem("zdTakeoffTb") || "{}"); o.tabs = ["takeoff", "modify", "markup", "review", "costing", "material", "export", "view"]; localStorage.setItem("zdTakeoffTb", JSON.stringify(o)); });
   await page.click('#stgNav [data-spg="general"]'); await page.click('#stgNav [data-spg="ribbon"]'); await wait(100);
   await setVal("★ My tools tab", false);
-  ok(await T(() => !(JSON.parse(localStorage.getItem("zdTakeoffTb")).tabs || []).includes("mine") || JSON.parse(localStorage.getItem("zdTakeoffTb")).tabs.length < 8), "the last tab shown cannot be hidden");
+  ok(await T(() => !(JSON.parse(localStorage.getItem("zdTakeoffTb")).tabs || []).includes("mine") || JSON.parse(localStorage.getItem("zdTakeoffTb")).tabs.length < 9), "the last tab shown cannot be hidden");
   await T(() => { const o = JSON.parse(localStorage.getItem("zdTakeoffTb") || "{}"); o.tabs = []; localStorage.setItem("zdTakeoffTb", JSON.stringify(o)); });
   await page.click('#stgNav [data-spg="snap"]'); await wait(100); await page.click("#stgReset"); await wait(200);
   ok(await T(() => zdTakeoff.SNAP_PX) === 11, "Snap & drafting → Reset this page: snap distance back to 11 px");

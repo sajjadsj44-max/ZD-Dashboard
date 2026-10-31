@@ -630,7 +630,7 @@ table.sh tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
 /* ===== panel / layout settings (body classes set from the Panel settings dialog) ===== */
 body.pc-l-filter-off #condFilter,body.pc-l-strip-off #pageStrip,body.pc-l-props-off #propsBox,body.pc-l-keys-off .keys,body.pc-l-tab-pages-off #tPages,body.pc-l-tab-lay-off #tLay,
 body.pc-l-pdet-off .props .pdet,body.pc-l-pedit-off .props .pedit,
-body.pc-r-search-off #shBar,body.pc-r-chips-off #qaBar,body.pc-r-foot-off #rFoot,body.pc-r-tab-bill-off #vBill,body.pc-r-info-off #shInfo,
+body.pc-r-search-off #shBar,body.pc-r-chips-off #qaBar,body.pc-r-foot-off #rFoot,body.pc-r-tab-bill-off #vBill,body.pc-r-tab-mat-off #vMat,body.pc-r-info-off #shInfo,
 body.pc-ui-agent-off #agentBar,body.pc-ui-cbar-off #cbar,body.pc-ui-status-off #status,body.pc-ui-ribbon-off .rrow,body.pc-ui-tabs-off .rtabs{display:none!important}
 body.pc-ui-agent-off .agentbar{display:none!important}
 /* compact ribbon: the same tools, about half the height */
@@ -724,6 +724,26 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 .cic.count::before{content:"";position:absolute;left:4px;top:3px;width:6px;height:6px;border-radius:50%;background:#d22}
 table.mattbl{width:100%;border-collapse:collapse;font-size:12px}table.mattbl td{padding:2px 4px;border-bottom:1px solid #eef1f5}table.mattbl td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--navy)}table.mattbl td:last-child{width:34px;color:var(--muted);font-size:11px}
 table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl .warn{color:#b45309}table.mattbl td:first-child{white-space:normal}table.mattbl td.n{white-space:nowrap}table.mattbl td.n small{font-weight:400;color:var(--muted);font-size:10px}table.mattbl td.amt{width:auto;color:var(--navy);font-size:12px;font-weight:600}table.mattbl tr.tot td{border-top:1.5px solid #cfd8e3;font-weight:600}
+/* the Material view (right panel, beside Sheet and Bill) and Material setup */
+.mvbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:1}
+.mvbar select{font-size:12px;padding:3px 6px}.mvbar .sp{flex:1}.mvbar label{display:inline-flex;align-items:center;gap:3px}
+.mvempty{padding:14px 10px;color:var(--muted);line-height:1.5;font-size:12.5px}
+.mvtot{margin:8px;padding:8px;border:1px solid #c9d6e4;border-radius:8px;background:#f6f9fd}.mvth{font-weight:700;color:var(--navy);margin-bottom:4px;font-size:12.5px}
+.mvg{margin:6px 8px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.mvg>summary{display:flex;align-items:center;gap:6px;padding:6px 8px;cursor:pointer;color:var(--navy);font-size:12.5px}.mvg>summary .mvs{margin-left:auto;color:var(--muted);font-size:11px;font-weight:400;white-space:nowrap}
+.mvg .lsw,.mst .lsw{width:12px;height:12px;border-radius:3px;display:inline-block;flex:none;vertical-align:-1px}
+.mvc{display:flex;align-items:center;gap:6px;padding:6px 8px 0;font-size:12px;border-top:1px solid #eef1f5}.mvc .mvq{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
+.mvk{padding:1px 8px 2px 26px;color:var(--muted);line-height:1.35}
+table.mvt{width:calc(100% - 16px);margin:0 8px 6px}.mvt td.u{color:var(--muted);width:1%;white-space:nowrap}
+.mvi{padding:5px 8px;border-top:1px solid #eef1f5;cursor:pointer}.mvi:hover{background:#f4f8ff}
+.mvh{display:flex;gap:6px;align-items:baseline;font-size:12px}.mvh span:first-child{font-weight:600}.mvh b{margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mvm{font-size:11px;color:#3c4c60;line-height:1.45}
+.mvsum{margin:4px 8px 8px;padding:6px 0 0;border-radius:6px;background:#f3f5f8}.mvsum>.small{padding:0 8px 2px}
+.mverr{padding:2px 8px 6px 26px;color:var(--red,#c0392b)}
+.rmat #shBar,.rmat #qaBar,.rmat #rFoot{display:none!important}
+.mdh{margin:10px 0 4px;font-size:12px;color:var(--navy)}.mdg{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px 14px}
+.mdf label{display:block;font-size:11px;font-weight:600;color:#3c4c60;margin-bottom:2px}.mdf input,.mdf select{width:100%}.mdf .small{margin-top:1px}
+.dlg:has(.mstw){width:min(1080px,100%)}.mstw{max-height:62vh;overflow:auto}.mst td{vertical-align:top}.mst select,.mst input{font-size:12px;max-width:170px}.mst .mss select,.mst .mss input{display:block;margin-bottom:2px}
 .matset{flex-wrap:wrap;gap:4px;margin-bottom:4px}
 .boql{max-height:190px;overflow:auto;border:1px solid var(--line);border-radius:6px;margin-top:4px;background:#fff}.boqr{display:flex;gap:8px;align-items:baseline;padding:4px 8px;border-bottom:1px solid #eef1f5;cursor:pointer;font-size:12px}.boqr:hover{background:#f4f7fc}.boqr.on{background:#dbe7fb}.boqr b{flex:none;color:var(--navy);font-size:11.5px}.boqr .bd{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.boqr .bu{flex:none;color:var(--muted);font-size:11px;width:34px}.boqr .bu.x{color:#b45309}.boqr .br{flex:none;font-variant-numeric:tabular-nums;font-weight:600;min-width:70px;text-align:right}.boqr .br i{font-weight:400;color:var(--muted)}
 @media (hover:none){.crow input[type=checkbox]{display:block}.crow .ed.pen{opacity:1}.pgt .pgck{opacity:1}.crow{height:30px}.ctr{padding:6px 4px}}
@@ -839,7 +859,7 @@ html[data-look="colour"]{--muted:#56657a;--purple:var(--accent);accent-color:var
 .rtab[data-rtab="modify"],.rpanel[data-rp="modify"],#mineBox [data-mine^="modify/"]{--cat:var(--c-modify);--tile:var(--t-modify);--soft:var(--s-modify)}
 .rtab[data-rtab="markup"],.rpanel[data-rp="markup"],#mineBox [data-mine^="markup/"]{--cat:var(--c-markup);--tile:var(--t-markup);--soft:var(--s-markup)}
 .rtab[data-rtab="review"],.rpanel[data-rp="review"],#mineBox [data-mine^="review/"]{--cat:var(--c-review);--tile:var(--t-review);--soft:var(--s-review)}
-.rtab[data-rtab="costing"],.rpanel[data-rp="costing"],#mineBox [data-mine^="costing/"]{--cat:var(--c-costing);--tile:var(--t-costing);--soft:var(--s-costing)}
+.rtab[data-rtab="costing"],.rpanel[data-rp="costing"],#mineBox [data-mine^="costing/"],.rtab[data-rtab="material"],.rpanel[data-rp="material"],#mineBox [data-mine^="material/"]{--cat:var(--c-costing);--tile:var(--t-costing);--soft:var(--s-costing)}
 .rtab[data-rtab="export"],.rpanel[data-rp="export"],#mineBox [data-mine^="export/"]{--cat:var(--c-export);--tile:var(--t-export);--soft:var(--s-export)}
 .rtab[data-rtab="mine"],.rpanel[data-rp="mine"]{--cat:var(--c-mine);--tile:var(--t-mine);--soft:var(--s-mine)}
 .rtab[data-rtab="view"],.rpanel[data-rp="view"],#mineBox :is([data-mine^="view/"],[data-mine^="top/"]){--cat:var(--c-view);--tile:var(--t-view);--soft:var(--s-view)}
@@ -1180,6 +1200,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
         <button class="rtab" role="tab" data-rtab="markup" title="Notes, clouds, arrows, dimensions, highlights, stamps and the Markups list">Markup</button>
         <button class="rtab" role="tab" data-rtab="review" title="Check the takeoff: next / previous unchecked, mark checked, check before export, Compare, Typical">Review</button>
         <button class="rtab" role="tab" data-rtab="costing" title="Costing: measurement sheet, bill with rates, opening schedule, revision cost variance, check before export">Costing</button>
+        <button class="rtab" role="tab" data-rtab="material" title="Materials: cement, sand, crush, bricks, blocks, tiles, adhesive, grout, putty, primer, paint — by floor, page, measurement and condition; each condition's material, mortar joint and wall thickness; Excel">Material</button>
         <button class="rtab" role="tab" data-rtab="export" title="Export Excel / CSV / marked-up PDF, save the project, import pages">Export</button>
         <button class="rtab on" role="tab" data-rtab="mine" title="My tools — the tools you picked in Customize toolbar">&#9733; My tools</button>
         <button class="rtab" role="tab" data-rtab="view" title="View: fit, zoom, split window, dimmer, background, layers, labels, legend, minimap, full screen">View</button>
@@ -1320,6 +1341,26 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
           <button class="tool" data-px="bNewCond" title="New condition — then set its BOQ code, Rate Analysis code and assemblies in Edit"><svg class="ic"><use href="#i-plusc"/></svg><span class="tl">New condition</span></button>
           <button class="tool" data-px="bDefaults" title="Defaults for new measurements and markups — colour, line weight, dimensions (Settings → Measurements)"><svg class="ic"><use href="#i-sliders"/></svg><span class="tl">Defaults</span></button>
         </div><div class="rgl">Conditions</div></div>
+      </div>
+      <div class="rpanel" data-rp="material" hidden>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-fn="matview" title="Material sheet — the right panel's Material view: every material of the takeoff (cement, sand, crush, bricks, blocks, tiles, adhesive, grout, putty, primer, paint) with its quantity"><svg class="ic"><use href="#i-bricks"/></svg><span class="tl">Material sheet</span></button>
+          <button class="tool" data-fn="mattot" title="Totals and cost — the whole takeoff's materials priced from the Cost Control rate library, each rate with its source and date"><svg class="ic"><use href="#i-bill"/></svg><span class="tl">Totals &amp; cost</span></button>
+        </div><div class="rgl">Materials</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-fn="matkind" title="Materials by type of work — brick masonry, block masonry, plaster, screed, concrete, tiles, paint — each with its conditions and its total"><svg class="ic"><use href="#i-layers"/></svg><span class="tl">By type</span></button>
+          <button class="tool" data-fn="matfloor" title="Materials by floor — each building / floor with its conditions and their materials, and its total"><svg class="ic"><use href="#i-floors"/></svg><span class="tl">By floor</span></button>
+          <button class="tool" data-fn="matpage" title="Materials by drawing page — each page uploaded, in order"><svg class="ic"><use href="#i-sheet"/></svg><span class="tl">By page</span></button>
+          <button class="tool" data-fn="matitem" title="Materials of each measurement (markup) on its own — click one to go to it on the drawing"><svg class="ic"><use href="#i-listcheck"/></svg><span class="tl">By measurement</span></button>
+          <button class="tool" data-fn="matcond" title="Materials by condition — each condition's net quantity, its basis and materials"><svg class="ic"><use href="#i-list"/></svg><span class="tl">By condition</span></button>
+        </div><div class="rgl">Show by</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-fn="matset" title="Material setup — every condition's material, mix, wall / bed thickness, mortar joint, block / brick / tile size and waste in one table"><svg class="ic"><use href="#i-sliders"/></svg><span class="tl">Material setup</span></button>
+          <button class="tool" data-fn="matdef" title="Material defaults of this project — mortar joint (3/8&quot;) and wall thickness of brick and block, tile joint, waste and bed, paint coats"><svg class="ic"><use href="#i-cog"/></svg><span class="tl">Defaults</span></button>
+        </div><div class="rgl">Set up</div></div>
+        <div class="rg"><div class="rgb">
+          <button class="tool" data-fn="matxls" title="Materials workbook (Excel): Summary with cost, By type, By floor, By page, By measurement, By condition, and the Basis of every figure"><svg class="ic"><use href="#i-export"/></svg><span class="tl">Excel</span></button>
+        </div><div class="rgl">Export</div></div>
       </div>
       <div class="rpanel" data-rp="export" hidden>
         <div class="rg"><div class="rgb">
@@ -1589,11 +1630,12 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
   <aside class="panel right">
     <div class="rz" id="rzR" title="Drag to resize"></div>
     <div class="warnbar" id="warnbar"></div>
-    <div class="ph"><h3>Measurement sheet</h3><span class="seg"><button class="btn sm on" id="vSheet">Sheet</button><button class="btn sm" id="vBill">Bill</button></span><span class="ds" id="shInfo" style="font-size:10.5px;color:var(--muted)"></span><button class="hidebtn" id="bPanR" title="Right panel settings: tabs, sections, width, layouts">&#9881;</button><button class="hidebtn" id="hideR" title="Hide this panel">&#10217;</button></div>
+    <div class="ph"><h3>Measurement sheet</h3><span class="seg"><button class="btn sm on" id="vSheet">Sheet</button><button class="btn sm" id="vBill">Bill</button><button class="btn sm" id="vMat" title="Materials of the takeoff by floor, page, measurement or condition">Material</button></span><span class="ds" id="shInfo" style="font-size:10.5px;color:var(--muted)"></span><button class="hidebtn" id="bPanR" title="Right panel settings: tabs, sections, width, layouts">&#9881;</button><button class="hidebtn" id="hideR" title="Hide this panel">&#10217;</button></div>
     <div id="shBar"><input type="search" id="shQ" placeholder="Search the sheet — room, item, BOQ, page…" aria-label="Search the measurement sheet"><select id="shSort" aria-label="Sort the measurements" title="Order of the measurements inside each condition (the totals do not change)"><option value="order">Drawing order</option><option value="page">By page</option><option value="qty">Largest first</option><option value="name">Name A–Z</option></select></div>
     <div id="qaBar"></div>
     <div class="pb" id="sheet"></div>
     <div class="pb" id="bill" style="display:none"></div>
+    <div class="pb" id="matv" style="display:none"></div>
     <div class="rfoot" id="rFoot"><button class="btn" data-rvf="prev">&larr; Prev</button><button class="btn" data-rvf="next">Next unchecked &rarr;</button><span class="sp"></span><button class="btn pri" data-rvf="checkpage">&#10003; Check this page</button></div>
   </aside>
 </div>
@@ -1630,7 +1672,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-31v"></script>
+<script type="module" src="takeoff.js?v=2026-11-01a"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
