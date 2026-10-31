@@ -4812,7 +4812,7 @@ function drawNow(){
       const a = toScr(it.pts[0]), b = toScr(it.pts[1]);
       h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${sel ? 6 : Math.max(1, +c.sw || 4)}" stroke-linecap="round" opacity=".85"/>`);
       if (k) { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], r = rowsOf(it, k)[0]; h.push(label(m, (it.label ? it.label + " " : "") + uLen(r.L) + " × " + uLen(+it.oh || 0), "#9b2222")); }
-    } else h.push(measSvg(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, {T: toScr, z: 1, lz, lblOut: LB, lo: LD && LD.id === it.id ? LD.lo : undefined, sp: S.view.s, sel, k, lbl: S.lbl.on, seg: S.lbl.on && S.lbl.seg, small: S.lbl.small, screen: true}));   // as its appearance says (the exports draw it the same way)
+    } else h.push(measSvg(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, {T: toScr, z: 1, lz, lps: lblPS() && S.lbl.zoom !== false, lblOut: LB, lo: LD && LD.id === it.id ? LD.lo : undefined, sp: S.view.s, sel, k, lbl: S.lbl.on, seg: S.lbl.on && S.lbl.seg, small: S.lbl.small, screen: true}));   // as its appearance says (the exports draw it the same way)
     if (sel && !S.multi.size) {
       (it._pts || it.pts).forEach((p, i) => { const q = toScr(p); h.push(`<rect x="${(q[0] - 4).toFixed(1)}" y="${(q[1] - 4).toFixed(1)}" width="8" height="8" fill="${it.locked ? "#e8ecf1" : i === S.selPt ? "#0b0b0b" : "#fff"}" stroke="${it.locked ? "#8a97a6" : i === S.selPt ? "#0b0b0b" : col}" stroke-width="2"/>`); });
       if (!it.locked && editPts(it) && S.tool === "select") { const n = closedOf(it) ? it.pts.length : it.pts.length - 1;   // a "+" at the middle of each side: drag it to add a point
@@ -4918,10 +4918,10 @@ const AP_BLEND = {normal: "Normal", multiply: "Multiply — lines show through"}
 const apBlendG = (a, svg) => a.blend === "multiply" && svg ? `<g data-blend="multiply" style="mix-blend-mode:multiply">${svg}</g>` : svg;
 const AP_FRAC = {0: "1\"", 2: "1/2\"", 4: "1/4\"", 8: "1/8\"", 16: "1/16\""};
 function apBase(c){   // what a condition looks like with nothing set: the look the app has always had
-  const area = c && c.type === "area", cnt = c && c.type === "count";
+  const area = c && c.type === "area", cnt = c && c.type === "count", ps = lblPS();   // ps: PlanSwift's label (View → Labels), a yellow tag with a black border
   return {col: "", lineOp: area || cnt ? 100 : 85, dash: "solid", sw: swN(c && c.sw, area ? 1.6 : cnt ? 2.5 : 3), swU: "px", h0: "none", h1: "none", hs: 1,
-    fill: "", fillOp: cnt ? 30 : 22, hatch: "none", hcol: "", hsp: 8, units: "ft", dec: 3, frac: 8, font: "Segoe UI", fsz: 11.5, fcol: "#0b0b0b", fb: false, fi: false, fu: false,
-    lpos: "center", lbg: true, lbgCol: "#ffffff", lbgOp: 88, lbd: false, seg: "auto", vtx: false, csz: ({s: 7, m: 10, l: 14})[c && c.sz] || 10, blend: "normal"};
+    fill: "", fillOp: cnt ? 30 : 22, hatch: "none", hcol: "", hsp: 8, units: "ft", dec: 3, frac: 8, font: ps ? "Arial" : "Segoe UI", fsz: 11.5, fcol: ps ? "#000000" : "#0b0b0b", fb: false, fi: false, fu: false,
+    lpos: "center", lbg: true, lbgCol: ps ? "#dfbf2a" : "#ffffff", lbgOp: ps ? 100 : 88, lbd: ps, seg: "auto", vtx: false, csz: ({s: 7, m: 10, l: 14})[c && c.sz] || 10, blend: "normal"};
 }
 function apOf(c, it){   // the appearance a measurement is drawn with: its condition's, then its own
   const a = Object.assign(apBase(c), c && c.ap || {}, it && it.ap || {});
@@ -5000,16 +5000,23 @@ function apHatchDefs(id, kind, col, z, sp){   // an SVG pattern for a hatch, in 
 }
 /* the label box, in the appearance's font */
 function apLabelDims(lines, a, z){   // a label's text size, line height, box width and height
-  z = z || 1; const fs = (+a.fsz || 11.5) * z, lh = fs * 1.22, cw = fs * (a.fb ? 0.6 : 0.56); return {fs, lh, w: Math.max(...lines.map(t => t.length)) * cw + 10 * z, hh: lines.length * lh + 4 * z};
+  z = z || 1; const fs = (+a.fsz || 11.5) * z;
+  if (lblPS()) { const lh = fs * 1.25, fam = '"' + (a.font || "Arial") + '",Arial,sans-serif';   // PlanSwift's tag: its text as set, 0.38 em each side, 0.33 em over the first line
+    return {fs, lh, w: Math.max(...lines.map(t => lblTextW(t, fam, a.fb ? 700 : 400, fs))) + 0.76 * fs, hh: lines.length * lh + 0.61 * fs, ps: 1}; }
+  const lh = fs * 1.22, cw = fs * (a.fb ? 0.6 : 0.56); return {fs, lh, w: Math.max(...lines.map(t => t.length)) * cw + 10 * z, hh: lines.length * lh + 4 * z};
 }
 function apLabel(p, lines, a, col, z){
-  z = z || 1; const {fs, lh, w, hh} = apLabelDims(lines, a, z), y0 = p[1] - hh / 2;
+  z = z || 1; const {fs, lh, w, hh, ps} = apLabelDims(lines, a, z), y0 = p[1] - hh / 2;
   const fam = esc(a.font || "Segoe UI") + ",Arial,sans-serif", deco = a.fu ? ' text-decoration="underline"' : "", it = a.fi ? ' font-style="italic"' : "";
+  if (ps) {   // PlanSwift's: square corners, a hairline border in the text's colour, plain (not bold) text
+    const bw = Math.max(0.6, fs / 16), box = a.lbg !== false ? `<rect x="${(p[0] - w / 2).toFixed(1)}" y="${y0.toFixed(1)}" width="${w.toFixed(1)}" height="${hh.toFixed(1)}" fill="${esc(a.lbgCol || "#dfbf2a")}" fill-opacity="${((+a.lbgOp || 0) / 100).toFixed(2)}"${a.lbd ? ` stroke="${esc(col)}" stroke-width="${bw.toFixed(2)}"` : ""}/>` : "";
+    const halo = a.lbg === false ? ` stroke="#fff" stroke-width="${(fs / 4).toFixed(1)}" paint-order="stroke"` : "";
+    return `<g class="aplbl">${box}` + lines.map((t, i) => `<text x="${p[0].toFixed(1)}" y="${(y0 + 0.33 * fs + lh * (i + 0.8)).toFixed(1)}" text-anchor="middle" font-family="${esc(a.font || "Arial")},Arial,sans-serif" font-size="${fs.toFixed(1)}" font-weight="${a.fb ? 700 : 400}"${it}${deco} fill="${esc(col)}"${halo}>${esc(t)}</text>`).join("") + "</g>"; }
   const box = a.lbg !== false ? `<rect x="${(p[0] - w / 2).toFixed(1)}" y="${y0.toFixed(1)}" width="${w.toFixed(1)}" height="${hh.toFixed(1)}" rx="${4 * z}" fill="${esc(a.lbgCol || "#ffffff")}" fill-opacity="${((+a.lbgOp || 0) / 100).toFixed(2)}"${a.lbd ? ` stroke="${esc(col)}" stroke-width="${z}"` : ""}/>` : "";
   const halo = a.lbg === false ? ` stroke="#fff" stroke-width="${3 * z}" paint-order="stroke"` : "";
   return `<g class="aplbl">${box}` + lines.map((t, i) => `<text x="${p[0].toFixed(1)}" y="${(y0 + 2 * z + lh * (i + 0.78)).toFixed(1)}" text-anchor="middle" font-family="${fam}" font-size="${fs.toFixed(1)}" font-weight="${a.fb || (i === 0 && lines.length > 1) ? 700 : 600}"${it}${deco} fill="${esc(col)}"${halo}>${esc(t)}</text>`).join("") + "</g>";
 }
-function apLabelPt(scr, area, a, z){   // where the label goes: in the shape / beside the run, or above / below / left / right of it
+function apLabelPt(scr, area, a, z, d){   // where the label goes: in the shape / beside the run, or above / below / left / right of it (d: its size)
   z = z || 1; const xs = scr.map(p => p[0]), ys = scr.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), g = 14 * z + (+a.fsz || 11.5) * z;
   switch (a.lpos) {
     case "above": return [(x0 + x1) / 2, y0 - g];
@@ -5018,7 +5025,7 @@ function apLabelPt(scr, area, a, z){   // where the label goes: in the shape / b
     case "right": return [x1 + g * 2.6, (y0 + y1) / 2];
   }
   if (area) return labelPt(scr);
-  return lineLabelPt(scr, z);
+  return lineLabelPt(scr, z, lblPS() && d);
 }
 /* a measurement (area or run) as SVG: o {T page -> screen, z sizes, sp page pt -> screen px, sel, k, lbl (labels on), seg (segment lengths on), small} */
 function measSvg(it, c, o){
@@ -5037,11 +5044,11 @@ function measSvg(it, c, o){
   if (a.vtx) (it.shape === "circle" ? [] : it.pts.map(T)).forEach(q => out.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(Math.max(2.2, w0 * 0.9)).toFixed(1)}" fill="#fff" stroke="${esc(col)}" stroke-width="${(1.2 * z).toFixed(2)}"/>`));
   if (a.blend === "multiply" && out.length) out.splice(0, out.length, apBlendG(a, out.join("")));
   const ks = (+S.lbl.scale || 1) * (ded ? +S.lbl.dedScale || 1 : 1), lo = o.lo !== undefined ? o.lo : it.lo;   // ks: View → Labels size (cut-outs have their own); lo: the label moved by hand (Bluebeam), its offset in page units
-  const k = o.k, lz = o.lz || z, lzs = o.sel ? Math.max(lz * ks, LBL_SEL_Z) : lz * ks;   // lz: the labels' size (on screen it follows the zoom), z: the lines'; the selected object's label stays readable
-  if (k && o.lbl && a.lpos !== "none" && (!o.screen || (+a.fsz || 11.5) * lzs >= LBL_MIN_PX)) {   // on screen smaller than that it could not be read: left out (hover still tells)
+  const k = o.k, lz = o.lps && k > 0 ? lblPsZ(sp, k) : o.lz || z, lzs = o.sel ? Math.max(lz * ks, LBL_SEL_Z) : lz * ks;   // lz: the labels' size (on screen it follows the zoom; lps: PlanSwift's, sized on the building), z: the lines'; the selected object's label stays readable
+  if (k && o.lbl && a.lpos !== "none" && !lenLblOff(c, o.sel) && (!o.screen || (+a.fsz || 11.5) * lzs >= (o.lps ? LBL_PS_MIN_PX : LBL_MIN_PX))) {   // on screen smaller than that it could not be read: left out (hover still tells) — a PlanSwift tag stays down to a speck, as there
     const big = area ? polyArea(scr) > 2500 * lz * lz : polyLen(scr) > 60 * lz;
     if (big || o.sel || !o.small || lo) { const L = capLines(it, c, k, a);
-      if (L.length) { const p0 = apLabelPt(scr, area, a, lzs), p = lo ? [p0[0] + lo[0] * sp, p0[1] + lo[1] * sp] : p0, d = apLabelDims(L, a, lzs), lc = ded ? "#9b2222" : a.fcol;
+      if (L.length) { const d = apLabelDims(L, a, lzs), p0 = apLabelPt(scr, area, a, lzs, d), p = lo ? [p0[0] + lo[0] * sp, p0[1] + lo[1] * sp] : p0, lc = ded ? "#9b2222" : a.fcol;
         const lead = lo && Math.hypot(p[0] - p0[0], p[1] - p0[1]) > d.hh * 0.9 + 6 * lzs ?   // moved well away: a leader back to its object
           `<g class="aplead"><line x1="${p0[0].toFixed(1)}" y1="${p0[1].toFixed(1)}" x2="${p[0].toFixed(1)}" y2="${p[1].toFixed(1)}" stroke="${esc(lc)}" stroke-width="${Math.max(0.8, lzs).toFixed(2)}" stroke-dasharray="${(4 * lzs).toFixed(1)} ${(3 * lzs).toFixed(1)}" opacity=".75"/><circle cx="${p0[0].toFixed(1)}" cy="${p0[1].toFixed(1)}" r="${(2.5 * lzs).toFixed(1)}" fill="${esc(lc)}"/></g>` : "";
         const svg = lead + apLabel(p, L, a, lc, lzs);
@@ -5213,7 +5220,28 @@ function tmpMeasSvg(m, k){   // a temporary angle (arms dashed, an arc at the co
 }
 /* measurement captions, as Bluebeam's "show caption": which values a label shows is set once (🏷 ▾) and used on screen
    and in the marked-up exports. Areas: name, quantity, area, perimeter, L × W; lengths: name, length, quantity, H / T. */
-const LBL_DEF = {on: true, name: true, qty: true, area: true, perim: true, len: true, dims: false, cond: false, seg: false, units: true, small: true, autoName: true, zoom: true, declutter: true, show: "full", dedShow: "qty", scale: 1, dedScale: 1, v2: 1};
+const LBL_DEF = {on: true, name: true, qty: true, area: true, perim: true, len: true, dims: false, cond: false, seg: false, units: true, small: true, autoName: true, zoom: true, declutter: true, show: "nameqty", dedShow: "qty", scale: 1, dedScale: 1, style: "ps", lenSel: true, v2: 1, v3: 1};
+/* the labels' look (View → Labels): PlanSwift's — a yellow tag with a thin black border, its name over its quantity in plain black Arial,
+   sized on the building (its text 0.85 ft high at the drawing's scale, so as big as the drawing's own room names on any paper and small
+   when zoomed out, as in PlanSwift) — or the classic white box of a set size. A run's label (a wall's length) shows only on the run
+   clicked, as PlanSwift's: lenSel. */
+const LBL_STYLE = {ps: "PlanSwift — yellow tag, sized with the drawing", box: "Classic — white box, one set size"};
+const LBL_PS_FT = 0.85, LBL_PS_MIN_PX = 2, lblPS = () => !S.lbl || S.lbl.style !== "box";
+const lblPsZ = (sp, k) => sp * LBL_PS_FT * k / 11.5;   // a label's size, × its set size (11.5), at sp px per page pt on a sheet of k pt per ft
+const lenLblOff = (c, sel) => c.type === "linear" && !sel && !!S.lbl && S.lbl.lenSel !== false;   // a run's label waits for a click
+/* a quantity as PlanSwift's labels read it: 2 decimals, SQ FT / FT / CU FT / EA (the sheet and the bill keep Sft, ft, cft, Nos); a project
+   in metres keeps m, m², m³ and their 3 decimals (to the mm), as everywhere else */
+const PS_UNITS = {ft: "FT", rft: "FT", sft: "SQ FT", cft: "CU FT", nos: "EA", no: "EA"};
+const psU = unit => { const u = uL(unit); return isM() ? u : PS_UNITS[String(u || "").toLowerCase()] || u; };
+const psQty = (v, unit) => (isM() ? fq(v, unit) : f2(uV(+v || 0, unit))) + (S.lbl && S.lbl.units === false ? "" : " " + psU(unit));
+/* a label line's width as the browser sets it (a PlanSwift tag fits its text) — measured once per text at 100 px */
+const LBL_TW = new Map(); let LBL_TC = null;
+function lblTextW(t, fam, wt, fs){
+  const key = wt + "|" + fam + "|" + t; let w = LBL_TW.get(key);
+  if (w == null) { try { LBL_TC = LBL_TC || document.createElement("canvas").getContext("2d"); LBL_TC.font = wt + " 100px " + fam; w = LBL_TC.measureText(t).width; } catch (e) { w = t.length * 56; }
+    if (LBL_TW.size > 4000) LBL_TW.clear(); LBL_TW.set(key, w); }
+  return w * fs / 100;
+}
 /* label sizes (View → Labels ⚙, [ ] keys; Shift for cut-outs): a step up or down this list, × the condition's own size */
 const LBL_SIZES = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75, 2, 2.5, 3];
 function lblStep(v, d){ v = +v || 1; const L = LBL_SIZES; if (d > 0) return L.find(x => x > v + 1e-9) || L[L.length - 1]; return [...L].reverse().find(x => x < v - 1e-9) || L[0]; }
@@ -5243,14 +5271,17 @@ function resetLabelPos(ids){   // labels moved by hand go back into their object
   mutate(() => L.forEach(i => { delete i.lo; }), "Reset label position" + (L.length > 1 ? "s (" + L.length + ")" : ""));
 }
 function loadLbl(){ let o = null; try { o = JSON.parse(pref("zdTakeoffLbl") || "null"); } catch (e) { o = null; } S.lbl = Object.assign({}, LBL_DEF, o || {});
-  if (o && !o.v2) Object.assign(S.lbl, {area: true, perim: true, v2: 1}); }   // an area's label shows its area and perimeter: switched on once for labels set before (switched off again, it stays off)
+  if (o && !o.v2) Object.assign(S.lbl, {area: true, perim: true, v2: 1});   // an area's label shows its area and perimeter: switched on once for labels set before (switched off again, it stays off)
+  if (o && !o.v3) Object.assign(S.lbl, {style: "ps", show: "nameqty", lenSel: true, v3: 1}); }   // PlanSwift's labels: switched to once for labels set before (Classic in View → Labels brings the old look back)
 function capLines(it, c, k, ap){
   const o = S.lbl, out = [], u = t => o.units ? " " + t : "", rows = rowsOf(it, k), q = rows.reduce((a, r) => a + r.qty, 0), poly = itemPoly(it);
-  const A0 = ap || null, fL = v => A0 ? apLen(v, A0) : uLen(v) + u(uL("ft")), fA = v => A0 ? apArea(v, A0) : fq(v, "Sft") + u(uL("Sft")), fQ = v => A0 ? apQty(v, c.unit, A0) : fq(v, c.unit) + u(uL(c.unit));
+  const own = x => x && x.ap && (x.ap.units != null || x.ap.dec != null), ps = lblPS() && !own(c) && !own(it);   // PlanSwift's figures, unless units or decimals are set on the condition / measurement
+  const A0 = ap || null, fL = v => ps ? psQty(v, "ft") : A0 ? apLen(v, A0) : uLen(v) + u(uL("ft")), fA = v => ps ? psQty(v, "Sft") : A0 ? apArea(v, A0) : fq(v, "Sft") + u(uL("Sft")), fQ = v => ps ? psQty(v, c.unit) : A0 ? apQty(v, c.unit, A0) : fq(v, c.unit) + u(uL(c.unit));
   const ded = it.kind === "ded", mode = ded ? (LBL_DED[o.dedShow] ? o.dedShow : "qty") : (LBL_SHOW[o.show] ? o.show : "full");
   if (mode === "off") return [];
   if (mode !== "full") { const nm = it.label || (ded ? (c.type === "area" ? "Cut-out" : "Deduction") : c.name);
-    return (mode === "name" ? [nm] : mode === "qty" ? [fQ(q)] : [nm, fQ(q)]).filter(Boolean); }
+    const L = lblPS() && c.type === "linear" && c.unit !== "ft" && mode !== "name" ? [fL((it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k * (ded ? -1 : 1))] : [];   // a wall in Sft (plaster): its length too
+    return (mode === "name" ? [nm] : mode === "qty" ? [...L, fQ(q)] : [nm, ...L, fQ(q)]).filter(Boolean); }
   if (o.name && it.label) out.push(it.label);
   if (o.cond) out.push(c.name);
   if (c.type === "area") {
@@ -5288,10 +5319,10 @@ function labelPt(P){   // a point inside the outline for its caption: the centro
   for (let i = 0; i + 1 < xs.length; i += 2) if (!best || xs[i + 1] - xs[i] > best[1] - best[0]) best = [xs[i], xs[i + 1]];
   return best ? [(best[0] + best[1]) / 2, c[1]] : c;
 }
-function lineLabelPt(P, z){   // beside the middle of the longest run, clear of its segment length
+function lineLabelPt(P, z, d){   // beside the middle of the longest run, clear of its segment length — and of the run itself (d: a PlanSwift tag's size, kept off the line so the run can still be grabbed)
   z = z || 1; let bi = 1, bl = -1; for (let i = 1; i < P.length; i++) { const l = dist(P[i - 1], P[i]); if (l > bl) { bl = l; bi = i; } }
-  const a = P[bi - 1], b = P[bi] || a, L = dist(a, b) || 1, n = [(b[1] - a[1]) / L, -(b[0] - a[0]) / L], off = (S.lbl.seg ? 34 : 18) * z, m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-  return Math.abs(n[0]) > Math.abs(n[1]) ? [m[0] + (n[0] < 0 ? -1 : 1) * (off + 30 * z), m[1]] : [m[0], m[1] - off];
+  const a = P[bi - 1], b = P[bi] || a, L = dist(a, b) || 1, n = [(b[1] - a[1]) / L, -(b[0] - a[0]) / L], off = Math.max((S.lbl.seg ? 34 : 18) * z, d ? d.hh / 2 + 6 * z : 0), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  return Math.abs(n[0]) > Math.abs(n[1]) ? [m[0] + (n[0] < 0 ? -1 : 1) * Math.max(off + 30 * z, d ? d.w / 2 + 6 * z : 0), m[1]] : [m[0], m[1] - off];
 }
 function segLabels(scr, pts, k, closed, z, ap){   // the length of every side, at its middle (Bluebeam "show segment values")
   const out = [], n = closed ? pts.length : pts.length - 1, fam = ap ? esc(ap.font || "Segoe UI") + ",Arial" : "Segoe UI,Arial", fs = ap ? Math.max(6, (+ap.fsz || 11.5) * 0.87) : 10, fc = ap ? esc(ap.fcol || "#33475b") : "#33475b";
@@ -5303,12 +5334,12 @@ function segLabels(scr, pts, k, closed, z, ap){   // the length of every side, a
 async function labelDialog(){
   const o = S.lbl, cb = (k2, t) => `<label class="pk"><input type="checkbox" data-lb="${k2}"${o[k2] ? " checked" : ""}> ${t}</label>`;
   const sl = (k2, O, v0) => `<select data-lbs="${k2}">${Object.entries(O).map(([x, t]) => `<option value="${x}"${x === v0 ? " selected" : ""}>${t}</option>`).join("")}</select>`;
-  const v = await ask("Labels on the drawing", `<div class="grid"><div class="fg"><label>Every label shows</label>${sl("show", LBL_SHOW, LBL_SHOW[o.show] ? o.show : "full")}</div>
+  const v = await ask("Labels on the drawing", `<div class="grid"><div class="fg w2"><label>Label style</label>${sl("style", LBL_STYLE, lblPS() ? "ps" : "box")}</div><div class="fg"><label>Every label shows</label>${sl("show", LBL_SHOW, LBL_SHOW[o.show] ? o.show : "full")}</div>
     <div class="fg"><label>Cut-out / deduction labels show</label>${sl("dedShow", LBL_DED, LBL_DED[o.dedShow] ? o.dedShow : "qty")}</div>
     <div class="fg"><label>Label size % ( [ ] )</label><input type="number" data-lbn="scale" min="50" max="300" step="5" value="${Math.round((+o.scale || 1) * 100)}"></div>
     <div class="fg"><label>Cut-out label size % ( Shift + [ ] )</label><input type="number" data-lbn="dedScale" min="50" max="300" step="5" value="${Math.round((+o.dedScale || 1) * 100)}"></div><div class="fg"><label>Show on every label</label>${cb("name", "Name (room / label)")}${cb("cond", "Condition name")}${cb("qty", "Quantity in the condition's unit")}${cb("units", "Units (Sft, ft, cft, Nos)")}</div>
     <div class="fg"><label>Areas</label>${cb("area", "Area Sft (when the unit is not Sft — in Sft the quantity is the area)")}${cb("perim", "Perimeter ft — shown as P (the outline's length)")}${cb("dims", "L × W of rectangles · Ø of circles · H / T of walls")}
-      <label style="margin-top:6px">Lengths</label>${cb("len", "Length ft")}</div>
+      <label style="margin-top:6px">Lengths</label>${cb("len", "Length ft")}${cb("lenSel", "Only on the run clicked — walls show no label until selected, as PlanSwift")}</div>
     <div class="fg w2"><label>Display</label>${cb("seg", "Length of every side / segment (always shown on the selected one)")}${cb("small", "Hide labels on shapes too small to read at this zoom")}${cb("zoom", "Labels grow and shrink with the zoom, as the drawing's own text (off: always one size on screen)")}${cb("declutter", "Leave out a label that would cover another (the bigger object's label stays)")}${cb("autoName", "Name new areas from the room name written inside them (manual, rectangle, auto area, Claude)")}</div></div>
     <p class="small" style="margin-top:8px">The same labels go on the marked-up PNG / PDF exports. <b>L</b> shows or hides all labels.</p>`, "Save", () => { const n = {on: o.on}; document.querySelectorAll("[data-lb]").forEach(x => { n[x.dataset.lb] = x.checked; }); document.querySelectorAll("[data-lbs]").forEach(x => { n[x.dataset.lbs] = x.value; }); document.querySelectorAll("[data-lbn]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) n[x.dataset.lbn] = Math.max(0.5, Math.min(3, v / 100)); }); return n; });
   if (!v) return;
@@ -5371,6 +5402,7 @@ function legendSvg(m,T){   // the legend is in drawing units: its text scales wi
  return legendSvg0(m,T,k*Math.min(1,w/k/(+m.refW||340)));
 }
 function legendSvg0(m,T,z){
+ if(legPS(m))return legendPsSvg(m,T,z);
  const pp=m.pts||[[80,80],[420,260]],a=T(pp[0]),b=T(pp[1]),x0=Math.min(a[0],b[0]),y0=Math.min(a[1],b[1]),x1=Math.max(a[0],b[0]),y1=Math.max(a[1],b[1]),W=Math.max(80*z,x1-x0),H=Math.max(60*z,y1-y0),cols=legendCols(m),rows=legendRows(m),fs=Math.max(5,Math.min(32,+m.fontSize||9))*z,rh=Math.max(fs*1.55,Math.min(80,+m.rowH||18)*z),hh=m.showHeaders===false?0:Math.max(fs*1.8,Math.min(80,+m.headerH||22)*z),th=m.showTitle===false?0:Math.max(fs*1.9,Math.min(80,+m.titleH||24)*z),pad=Math.max(2,Math.min(20,+m.pad||5))*z,bw=Math.max(0,Math.min(8,+m.lineWidth||1))*z,hx=(v,d)=>HEXCOL.test(String(v||''))?v:d,fill=hx(m.fill,'#ffffff'),head=hx(m.headerFill,'#eef2f7'),border=hx(m.border,'#40556b'),textCol=hx(m.textColor,'#172b3f');
  const defs='<defs><clipPath id="lg'+esc(m.id)+'"><rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+H.toFixed(1)+'"/></clipPath></defs>';let out='<g clip-path="url(#lg'+esc(m.id)+')">'+defs+'<rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+H.toFixed(1)+'" rx="3" fill="'+fill+'" fill-opacity="'+(m.fillOpacity==null?.96:Math.max(.05,Math.min(1,+m.fillOpacity)))+'" stroke="'+border+'" stroke-width="'+bw.toFixed(1)+'"/>';let yy=y0+pad;
  if(th){out+='<rect x="'+x0.toFixed(1)+'" y="'+y0.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+th.toFixed(1)+'" fill="'+hx(m.titleFill,head)+'"/><text x="'+(x0+pad).toFixed(1)+'" y="'+(y0+th*.68).toFixed(1)+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(legendTitle(m))+'</text>';yy+=th}
@@ -5382,12 +5414,55 @@ function legendSvg0(m,T,z){
  if(cols.length>1)for(let i=1;i<cols.length;i++){out+='<line x1="'+xs[i].toFixed(1)+'" y1="'+(y0+pad).toFixed(1)+'" x2="'+xs[i].toFixed(1)+'" y2="'+Math.min(y1,y0+pad+th+hh+rows.length*rh).toFixed(1)+'" stroke="'+border+'" stroke-opacity=".22" stroke-width=".6"/>'}
  out+='</g>';return out;
 }
-function defaultLegend(file=S.fileId,page=S.pageNo){const st=legendStyle()||{},base=S.base||{width:1000,height:1000},w=Math.max(80,Math.min(st.w||400,base.width-40)),h=Math.max(60,Math.min(st.h||190,base.height-60)),x0=Math.max(20,Math.min(Math.max(20,base.width-w-20),base.width-80)),y0=30;delete st.w;delete st.h;return Object.assign({id:uid('M'),type:'legend',file,page,pts:[[x0,y0],[x0+w,y0+h]],title:'Takeoff Legend',showTitle:true,showHeaders:true,columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id),precision:3,refW:400,moneyPrecision:2,fontSize:9,rowH:18,headerH:22,titleH:24,pad:5,lineWidth:1,border:'#40556b',fill:'#ffffff',fillOpacity:.96,headerFill:'#eef2f7',textColor:'#172b3f',sort:'drawing',colWidths:LEGEND_COLS.filter(x=>x.on).map(x=>LEG_W0[x.id]||.15),subject:'Takeoff Legend'},st,{author:qaUser(),status:'',at:new Date().toISOString()});}
+/* PlanSwift's legend (m.look "ps" — new legends take it while labels are PlanSwift's): no column headers, a row per condition: its kind's
+   icon (a run's bracket, a count's dots, an area's patch), its name, its quantity in bold blue as PlanSwift writes it (368.0 FT,
+   360.8 SQ FT, 11.0 EA) and a swatch of its colour; a title only when asked (a floor's legend keeps its floor's name). Sized on the
+   sheet, as PlanSwift's (a legend belongs to the sheet, not to the building): readable with the whole sheet in view */
+const legPS = m => m.look === "ps";
+function legPsDims(m, z){ const fs = Math.max(5, Math.min(32, +m.fontSize || 10)) * z; return {fs, rh: Math.max(fs * 1.2, Math.min(80, +m.rowH || 14) * z), th: m.showTitle === false ? 0 : fs * 1.7, pad: fs * 0.38}; }
+function legPsIcon(c, x, y, s){
+  const P = (u, v) => (x + u * s).toFixed(1) + " " + (y + v * s).toFixed(1);
+  if (c.type === "count") return [[.22, .3], [.22, .78], [.64, .54]].map(([u, v]) => `<circle cx="${(x + u * s).toFixed(1)}" cy="${(y + v * s).toFixed(1)}" r="${(.14 * s).toFixed(1)}" fill="#e3241b"/>`).join("");
+  if (c.type === "area") return `<path d="M${P(.08, .38)}L${P(.42, .12)}L${P(.92, .3)}L${P(.86, .86)}L${P(.3, .92)}L${P(.1, .72)}Z" fill="#8be04e" stroke="#2f7d1e" stroke-width="${(.06 * s).toFixed(2)}"/>`;
+  const V = [[.14, .92], [.14, .16], [.52, .16], [.52, .64], [.9, .64]], q = .16 * s;
+  return `<path d="M${V.map(([u, v]) => P(u, v)).join("L")}" fill="none" stroke="#1f5ea8" stroke-width="${(.09 * s).toFixed(2)}"/>` + V.map(([u, v]) => `<rect x="${(x + u * s - q / 2).toFixed(1)}" y="${(y + v * s - q / 2).toFixed(1)}" width="${q.toFixed(1)}" height="${q.toFixed(1)}" fill="#fff" stroke="#1f5ea8" stroke-width="${(.05 * s).toFixed(2)}"/>`).join("");
+}
+function legPsSwatch(c, a, x, y, s){   // the condition's own colour, solid: a count's as its marker (a disc)
+  if (c.type === "count") return `<circle cx="${(x + s / 2).toFixed(1)}" cy="${(y + s / 2).toFixed(1)}" r="${(s * .45).toFixed(1)}" fill="${esc(a.col)}"/>`;
+  return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${s.toFixed(1)}" height="${s.toFixed(1)}" fill="${esc(c.type === "area" ? a.fill : a.col)}"/>`;
+}
+const legPsQty = (r, m) => r.has ? legendQty({has: true, q: uV(+r.q || 0, r.c.unit)}, m) + " " + psU(r.c.unit) : "—";
+function legPsFitText(t, room, wt, fs){ if (lblTextW(t, "Arial", wt, fs) <= room) return t; let k = t.length; while (k > 2 && lblTextW(t.slice(0, k) + "…", "Arial", wt, fs) > room) k--; return t.slice(0, k) + "…"; }
+function legendPsSvg(m, T, z){
+  const pp = m.pts || [[80, 80], [420, 260]], a = T(pp[0]), b = T(pp[1]), x0 = Math.min(a[0], b[0]), y0 = Math.min(a[1], b[1]), W = Math.max(60 * z, Math.abs(b[0] - a[0])), H = Math.max(30 * z, Math.abs(b[1] - a[1]));
+  const {fs, rh, th, pad} = legPsDims(m, z), rows = legendRows(m), hx = (v, d) => HEXCOL.test(String(v || "")) ? v : d, tc = hx(m.textColor, "#000000"), bw = Math.max(0, Math.min(8, m.lineWidth == null ? .75 : +m.lineWidth)) * z, f = v => v.toFixed(1);
+  const tx = (x, y, s, wt, col, anc) => `<text x="${f(x)}" y="${f(y)}"${anc ? ` text-anchor="${anc}"` : ""} font-size="${f(fs)}" font-family="Arial,sans-serif" font-weight="${wt}" fill="${col}">${esc(s)}</text>`;
+  let out = `<g clip-path="url(#lg${esc(m.id)})"><defs><clipPath id="lg${esc(m.id)}"><rect x="${f(x0)}" y="${f(y0)}" width="${f(W)}" height="${f(H)}"/></clipPath></defs><rect x="${f(x0)}" y="${f(y0)}" width="${f(W)}" height="${f(H)}" fill="${hx(m.fill, "#ffffff")}" fill-opacity="${m.fillOpacity == null ? 1 : Math.max(.05, Math.min(1, +m.fillOpacity))}" stroke="${hx(m.border, "#000000")}" stroke-width="${bw.toFixed(2)}"/>`;
+  let yy = y0 + pad * .6;
+  if (th) { out += tx(x0 + pad, yy + th * .7, legendTitle(m), 700, tc); yy += th; }
+  const ic = fs * 1.15, sw = fs * 1.05, xq = x0 + W - pad - sw - fs * .4, xn = x0 + pad + ic + fs * .3;
+  rows.forEach((r, i) => { const y = yy + i * rh, by = y + rh * .5 + fs * .36;
+    if (r.sec != null) { out += tx(x0 + pad, by, r.sec, 700, tc); return; }
+    const c = r.c, q = legPsQty(r, m), nm = String(r.nm || c.name || "—"), t = legPsFitText(nm, xq - lblTextW(q, "Arial", 700, fs) - fs * .6 - xn, 400, fs);
+    out += legPsIcon(c, x0 + pad, y + (rh - ic) / 2, ic) + (t !== nm ? `<g><title>${esc(nm)}</title>` : "") + tx(xn, by, t, 400, tc) + (t !== nm ? "</g>" : "") + tx(xq, by, q, 700, "#0000ff", "end") + legPsSwatch(c, r.ap || apOf(c), x0 + W - pad - sw, y + (rh - sw) / 2, sw); });
+  return out + "</g>";
+}
+/* a new legend in PlanSwift's look: its text 1.2 % of the sheet's long side (8 – 32 pt: 14 pt on A3, 29 pt on A1), as wide as its rows (a name past ~40
+   letters is shortened with …, whole on hover) */
+function legendPsInit(m){
+  const base = S.base || {width: 1000, height: 1000}, fs = Math.max(8, Math.min(32, Math.round(Math.max(base.width, base.height) * 0.12) / 10)), rows = legendRows(Object.assign({}, m, {look: "ps"})).filter(r => r.sec == null);
+  const nw = Math.min(fs * 22, Math.max(fs * 4, ...rows.map(r => lblTextW(String(r.nm || r.c.name || ""), "Arial", 400, fs)))), qw = Math.max(fs * 3, ...rows.map(r => lblTextW(legPsQty(r, {precision: isM() ? 3 : 1}), "Arial", 700, fs)));
+  const w = Math.max(120, Math.min(base.width - 40, Math.ceil(fs * 0.38 * 2 + fs * 1.15 + fs * .3 + nw + fs * .9 + qw + fs * .4 + fs * 1.05 + 2)));
+  const x0 = Math.max(20, base.width - w - 20), y0 = Math.min(m.pts[0][1], m.pts[1][1]);
+  Object.assign(m, {look: "ps", showTitle: false, showHeaders: false, precision: isM() ? 3 : 1, fontSize: fs, rowH: Math.round(fs * 14) / 10, refW: w, lineWidth: .75, border: "#000000", fill: "#ffffff", fillOpacity: 1, textColor: "#000000", pts: [[x0, y0], [x0 + w, y0 + 10]]});
+  legendFit(m); return m;
+}
+function defaultLegend(file=S.fileId,page=S.pageNo){const st=legendStyle()||{},base=S.base||{width:1000,height:1000},w=Math.max(80,Math.min(st.w||400,base.width-40)),h=Math.max(60,Math.min(st.h||190,base.height-60)),x0=Math.max(20,Math.min(Math.max(20,base.width-w-20),base.width-80)),y0=30;const look=st.look||(Object.keys(st).length?'table':lblPS()?'ps':'table');delete st.w;delete st.h;delete st.look;const m0=Object.assign({id:uid('M'),type:'legend',file,page,pts:[[x0,y0],[x0+w,y0+h]],title:'Takeoff Legend',showTitle:true,showHeaders:true,columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id),precision:3,refW:400,moneyPrecision:2,fontSize:9,rowH:18,headerH:22,titleH:24,pad:5,lineWidth:1,border:'#40556b',fill:'#ffffff',fillOpacity:.96,headerFill:'#eef2f7',textColor:'#172b3f',sort:'drawing',colWidths:LEGEND_COLS.filter(x=>x.on).map(x=>LEG_W0[x.id]||.15),subject:'Takeoff Legend'},{author:qaUser(),status:'',at:new Date().toISOString()});if(look==='ps'){if(Object.keys(st).length){Object.assign(m0,st,{look:'ps'});legendFit(m0)}else legendPsInit(m0)}else Object.assign(m0,st);return m0;}
 const LEG_W0 = {symbol: .11, boq: .14, description: .31, unit: .11, qty: .16, perim: .15, rate: .12, amount: .15};
 /* the legend's look set as default (right-click → Set as default, or Properties): a legend placed after it starts with that
    title, columns, order, sizes and colours, at that size — kept in this browser like the other tools' defaults */
 const LEGEND_STYLE_KEY = "zdTakeoffLegendStyle";
-const LEGEND_STYLE_KEYS = ["title", "subject", "showTitle", "showHeaders", "columns", "colWidths", "precision", "moneyPrecision", "sort", "fontSize", "rowH", "headerH", "titleH", "pad", "lineWidth", "refW", "border", "fill", "fillOpacity", "headerFill", "titleFill", "textColor"];
+const LEGEND_STYLE_KEYS = ["look", "title", "subject", "showTitle", "showHeaders", "columns", "colWidths", "precision", "moneyPrecision", "sort", "fontSize", "rowH", "headerH", "titleH", "pad", "lineWidth", "refW", "border", "fill", "fillOpacity", "headerFill", "titleFill", "textColor"];
 const LEGEND_SORTS = ["drawing", "list", "condition", "boq", "qty"];
 function saveLegendStyle(m){
   const o = {}, pp = m.pts || [[0, 0], [400, 190]];
@@ -5405,6 +5480,7 @@ function legendStyle(){   // the saved look, checked before it is drawn into the
     else if (k === "colWidths") { if (Array.isArray(v)) s.colWidths = v.map(Number); }
     else if (k === "title" || k === "subject") s[k] = String(v).slice(0, 200);
     else if (k === "sort") { if (LEGEND_SORTS.includes(v)) s.sort = v; }
+    else if (k === "look") { if (v === "ps" || v === "table") s.look = v; }
     else if (k === "showTitle" || k === "showHeaders") s[k] = !!v;
     else if (isFinite(+v) && +v >= 0) s[k] = +v; });
   if (!s.columns) delete s.colWidths;
@@ -5416,7 +5492,7 @@ function legendDescShare(m){ const cols = legendCols(m), w = cols.map((c, i) => 
 function legendWidths(ids, share){   // column weights with the description at the share given, the others in their usual proportions
   const others = ids.filter(id => id !== "description"), t = others.reduce((a, id) => a + (LEG_W0[id] || .15), 0) || 1, rest = ids.includes("description") ? 1 - share : 1;
   return ids.map(id => id === "description" ? +share.toFixed(3) : +((LEG_W0[id] || .15) / t * rest).toFixed(3)); }
-async function editLegend(m){const cols=legendCols(m),body='<div class="grid"><div class="fg w2"><label>Title</label><input type="text" id="lgTitle" value="'+esc(m.title||'Takeoff Legend')+'"></div><div class="fg"><label>Font size (pt)</label><input type="number" id="lgFs" min="5" max="32" step=".5" value="'+(+m.fontSize||9)+'"></div><div class="fg"><label>Row height (pt)</label><input type="number" id="lgRh" min="8" max="60" step="1" value="'+(+m.rowH||18)+'"></div><div class="fg"><label>Precision</label><select id="lgPrec">'+[0,1,2,3].map(n=>'<option value="'+n+'" '+((+m.precision||3)===n?'selected':'')+'>'+n+' decimals</option>').join('')+'</select></div><div class="fg"><label>Order</label><select id="lgSort">'+[['drawing','Drawing order'],['list','Condition list order'],['condition','Name A → Z'],['boq','BOQ code'],['qty','Quantity, largest first']].map(([v,t])=>'<option value="'+v+'"'+((m.sort||'drawing')===v?' selected':'')+'>'+t+'</option>').join('')+'</select></div><div class="fg"><label>Description width %</label><input type="number" id="lgDw" min="15" max="70" step="1" value="'+Math.round(100*legendDescShare(m))+'" title="Share of the legend width given to the description; the other columns share the rest"></div>'+(m.scope==='all'?'':'<div class="fg"><label>Floors</label><select id="lgFloor" title="The whole sheet, a section for each floor, or one floor only (a legend for each floor)">'+legendFloorOpts(m)+'</select></div>')+'<div class="fg"><label>Border colour</label><input type="color" id="lgBorder" value="'+(HEXCOL.test(m.border||'')?m.border:'#40556b')+'"></div><div class="fg"><label>Header fill</label><input type="color" id="lgHead" value="'+(HEXCOL.test(m.headerFill||'')?m.headerFill:'#eef2f7')+'"></div><div class="fg"><label>Fill</label><input type="color" id="lgFill" value="'+(HEXCOL.test(m.fill||'')?m.fill:'#ffffff')+'"></div><div class="fg w2"><label><input type="checkbox" id="lgTitleOn" style="width:auto" '+(m.showTitle===false?'':'checked')+'> Show title</label><label><input type="checkbox" id="lgHeadOn" style="width:auto" '+(m.showHeaders===false?'':'checked')+'> Show column headers</label></div><div class="fg w2"><label>Columns</label><div class="grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">'+LEGEND_COLS.map(c=>'<label class="pk"><input type="checkbox" data-lgcol="'+c.id+'" style="width:auto" '+(cols.some(x=>x.id===c.id)?'checked':'')+'> '+esc(c.label)+'</label>').join('')+'</div></div></div><p class="small">Unit and Quantity are live from the takeoff condition. Rate and Amount use the condition rate when one exists; no rate is invented.</p>';const v=await ask('Edit Legend',body,'Save',()=>{const columns=[...document.querySelectorAll('[data-lgcol]:checked')].map(x=>x.dataset.lgcol);if(!columns.length)return'Choose at least one column';return{title:$('lgTitle').value.trim()||'Takeoff Legend',fontSize:Math.max(5,Math.min(32,+$('lgFs').value||9)),rowH:Math.max(8,Math.min(60,+$('lgRh').value||18)),precision:+$('lgPrec').value||0,sort:$('lgSort').value,border:$('lgBorder').value,headerFill:$('lgHead').value,fill:$('lgFill').value,showTitle:$('lgTitleOn').checked,showHeaders:$('lgHeadOn').checked,columns,colWidths:legendWidths(columns,Math.max(15,Math.min(70,+$('lgDw').value||31))/100),floor:$('lgFloor')?$('lgFloor').value:(m.floor||'')}});if(v)mutate(()=>{Object.assign(m,v);if(!m.floor)delete m.floor;legendFit(m)},'Edit Legend');}
+async function editLegend(m){const cols=legendCols(m),body='<div class="grid"><div class="fg w2"><label>Look</label><select id="lgLook"><option value="ps"'+(legPS(m)?' selected':'')+'>PlanSwift — icon, name, quantity and colour of each condition</option><option value="table"'+(legPS(m)?'':' selected')+'>Table — columns and headers</option></select></div><div class="fg w2"><label>Title</label><input type="text" id="lgTitle" value="'+esc(m.title||'Takeoff Legend')+'"></div><div class="fg"><label>Font size (pt)</label><input type="number" id="lgFs" min="5" max="32" step=".5" value="'+(+m.fontSize||9)+'"></div><div class="fg"><label>Row height (pt)</label><input type="number" id="lgRh" min="8" max="60" step="1" value="'+(+m.rowH||18)+'"></div><div class="fg"><label>Precision</label><select id="lgPrec">'+[0,1,2,3].map(n=>'<option value="'+n+'" '+((+m.precision||3)===n?'selected':'')+'>'+n+' decimals</option>').join('')+'</select></div><div class="fg"><label>Order</label><select id="lgSort">'+[['drawing','Drawing order'],['list','Condition list order'],['condition','Name A → Z'],['boq','BOQ code'],['qty','Quantity, largest first']].map(([v,t])=>'<option value="'+v+'"'+((m.sort||'drawing')===v?' selected':'')+'>'+t+'</option>').join('')+'</select></div><div class="fg"><label>Description width %</label><input type="number" id="lgDw" min="15" max="70" step="1" value="'+Math.round(100*legendDescShare(m))+'" title="Share of the legend width given to the description; the other columns share the rest"></div>'+(m.scope==='all'?'':'<div class="fg"><label>Floors</label><select id="lgFloor" title="The whole sheet, a section for each floor, or one floor only (a legend for each floor)">'+legendFloorOpts(m)+'</select></div>')+'<div class="fg"><label>Border colour</label><input type="color" id="lgBorder" value="'+(HEXCOL.test(m.border||'')?m.border:'#40556b')+'"></div><div class="fg"><label>Header fill</label><input type="color" id="lgHead" value="'+(HEXCOL.test(m.headerFill||'')?m.headerFill:'#eef2f7')+'"></div><div class="fg"><label>Fill</label><input type="color" id="lgFill" value="'+(HEXCOL.test(m.fill||'')?m.fill:'#ffffff')+'"></div><div class="fg w2"><label><input type="checkbox" id="lgTitleOn" style="width:auto" '+(m.showTitle===false?'':'checked')+'> Show title</label><label><input type="checkbox" id="lgHeadOn" style="width:auto" '+(m.showHeaders===false?'':'checked')+'> Show column headers</label></div><div class="fg w2"><label>Columns</label><div class="grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">'+LEGEND_COLS.map(c=>'<label class="pk"><input type="checkbox" data-lgcol="'+c.id+'" style="width:auto" '+(cols.some(x=>x.id===c.id)?'checked':'')+'> '+esc(c.label)+'</label>').join('')+'</div></div></div><p class="small">Unit and Quantity are live from the takeoff condition. Rate and Amount use the condition rate when one exists; no rate is invented.</p>';const v=await ask('Edit Legend',body,'Save',()=>{const columns=[...document.querySelectorAll('[data-lgcol]:checked')].map(x=>x.dataset.lgcol);if(!columns.length)return'Choose at least one column';const look=$('lgLook').value,sw=look!==(legPS(m)?'ps':'table');return{look,title:$('lgTitle').value.trim()||'Takeoff Legend',fontSize:Math.max(5,Math.min(32,+$('lgFs').value||9)),rowH:Math.max(8,Math.min(60,+$('lgRh').value||18)),precision:+$('lgPrec').value||0,sort:$('lgSort').value,border:$('lgBorder').value,headerFill:$('lgHead').value,fill:$('lgFill').value,showTitle:sw&&look==='table'?true:$('lgTitleOn').checked,showHeaders:sw?look==='table':$('lgHeadOn').checked,columns,colWidths:legendWidths(columns,Math.max(15,Math.min(70,+$('lgDw').value||31))/100),floor:$('lgFloor')?$('lgFloor').value:(m.floor||'')}});if(v)mutate(()=>{Object.assign(m,v);if(!m.floor)delete m.floor;legendFit(m)},'Edit Legend');}
 /* the choices of a legend's Floors: the whole sheet, split by floor, or each floor of its sheet */
 function legendFloorOpts(m){ const cur = String(m.floor || ""), fls = floorsOf(keyOf(m.file, m.page)).map(f => f.name);
   if (cur && cur !== "*" && !fls.some(n => flLow(n) === flLow(cur))) fls.push(cur);
@@ -5426,7 +5502,7 @@ function legendFit(m){
   const pp = m.pts; if (!Array.isArray(pp) || pp.length < 2) return;
   const y0 = Math.min(pp[0][1], pp[1][1]), y1 = Math.max(pp[0][1], pp[1][1]), w = Math.abs(pp[1][0] - pp[0][0]), s = Math.min(1, w / (+m.refW || 340)), fs = Math.max(5, Math.min(32, +m.fontSize || 9)) * s;
   const rh = Math.max(fs * 1.55, Math.min(80, +m.rowH || 18) * s), hh = m.showHeaders === false ? 0 : Math.max(fs * 1.8, Math.min(80, +m.headerH || 22) * s), th = m.showTitle === false ? 0 : Math.max(fs * 1.9, Math.min(80, +m.titleH || 24) * s), pad = Math.max(2, Math.min(20, +m.pad || 5)) * s;
-  const need = pad * 2 + th + hh + Math.max(1, legendRows(m).length) * rh;
+  const d = legPS(m) && legPsDims(m, s), need = d ? d.pad * 1.2 + d.th + Math.max(1, legendRows(m).length) * d.rh : pad * 2 + th + hh + Math.max(1, legendRows(m).length) * rh;
   if (y1 - y0 < need) { const i = pp[0][1] > pp[1][1] ? 0 : 1; pp[i] = [pp[i][0], y0 + need]; }
 }
 function legendFloorSet(m, v){ mutate(() => { if (v) m.floor = v; else delete m.floor; legendFit(m); }, v === "*" ? "Legend split by floor" : v ? "Legend of " + v : "Legend of the whole sheet"); }
@@ -5438,7 +5514,7 @@ function floorLegends(pk, only){
   const have = new Set((P.proj.marks || []).filter(m => m.type === "legend" && m.file === file && m.page === page && m.floor && m.floor !== "*").map(m => flLow(m.floor)));
   const made = []; let free = 0;
   floorsOf(pk).filter(f => (!only || flLow(f.name) === flLow(only)) && !have.has(flLow(f.name))).forEach(f => {
-    const m = defaultLegend(file, page), w0 = Math.abs(m.pts[1][0] - m.pts[0][0]); m.floor = f.name; if (!legendRows(m).length) return;
+    const m = defaultLegend(file, page), w0 = Math.abs(m.pts[1][0] - m.pts[0][0]); m.floor = f.name; if (legPS(m)) m.showTitle = true; if (!legendRows(m).length) return;
     m.pts = [[0, 0], [w0, 10]]; legendFit(m); const h = m.pts[1][1], gap = 12;
     let w = w0, x0, y0;
     if (f.r) { w = Math.max(160, Math.min(w0, f.r[2] - f.r[0])); m.pts = [[0, 0], [w, 10]]; legendFit(m); const hh = m.pts[1][1];
@@ -5469,6 +5545,8 @@ function lblMenu(anchor){
   ctxShow([{h: "Labels", s: "what they show and how they are sized"},
     ...Object.entries(LBL_SHOW).map(([v, t]) => ({t: "Labels: " + lo(t), fn: () => lblSet({show: v}), on: sh === v})), {sep: 1},
     ...Object.entries(LBL_DED).map(([v, t]) => ({t: "Cut-outs: " + lo(t), fn: () => v === "off" ? (dd !== "off" && dedLblToggle()) : lblSet({dedShow: v}), on: dd === v})), {sep: 1},
+    ...Object.entries(LBL_STYLE).map(([v, t]) => ({t: "Style: " + t, fn: () => lblSet({style: v}), on: (lblPS() ? "ps" : "box") === v})),
+    {t: "Lengths only on the run clicked", fn: () => lblSet({lenSel: o.lenSel === false}), on: o.lenSel !== false}, {sep: 1},
     {t: "Follow the zoom (sized as the drawing's text)", fn: () => lblSet({zoom: o.zoom === false}), on: o.zoom !== false},
     {t: "No overlap (leave out a covered label)", fn: () => lblSet({declutter: o.declutter === false}), on: o.declutter !== false},
     {t: "Hide labels on small shapes", fn: () => lblSet({small: !o.small}), on: !!o.small}, {sep: 1},
@@ -8021,7 +8099,7 @@ function pageOverlaySvg0(file, page, sc, W, H, legend){
     if (c.type === "area" && it.kind === "shape" && k) per[c.id] = (per[c.id] || 0) + (+it.nos || 1) * polyLen(itemPoly(it), true) / k;   // (as P in the bill)
     if (c.type === "count") { h.push(countSvg(c, it.pts, T, z, -1)); return; }
     if (it.kind === "open") { const a = T(it.pts[0]), b = T(it.pts[1]); h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${4 * z * wz}" stroke-linecap="round"/>`); return; }
-    h.push(measSvg(it, c, {T, z, lz: o.z > 0 ? z : z * lblPageK(file, page), wz, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false}));   // (a plot gives its labels' size on paper)
+    h.push(measSvg(it, c, {T, z, lz: o.z > 0 ? z : z * lblPageK(file, page), lps: lblPS() && !(o.z > 0), wz, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false}));   // (a plot gives its labels' size on paper)
   });
   (P.proj.marks || []).filter(m => m.file === file && m.page === page && (m.type === "redact" || (o.mk !== false && m.type !== "fence" && !mkHidden(m)))).forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
   const sh = (P.proj.sheets || {})[keyOf(file, page)] || {}, lz = z * ({s: 0.8, m: 1, l: 1.3}[o.lsz] || 1), pos = o.legend || "none";
@@ -18079,7 +18157,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
   if (location.protocol !== "file:") learnTeamLoad();   // the team's learned method, added to this browser's
-  window.zdTakeoff = {setUnits, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {setUnits, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),

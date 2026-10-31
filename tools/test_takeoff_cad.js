@@ -125,8 +125,12 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
      (a model space of many plans: 1:960) as on one plotted at 1/8" = 1'-0", not taller than the rooms */
   const lblFs = async (s, ppf) => { await T(([s, ppf]) => { const Z = zdTakeoff; Z.cadMeta(Z.S.fileId).ptPerFt = ppf; Z.S.sel = null; Z.S.multi.clear(); Z.S.view.s = s; Z.applyView(); Z.refresh(); }, [s, ppf]); await wait(250);
     return T(() => { const t = document.querySelector("#ov g.aplbl text"); return t ? +t.getAttribute("font-size") : 0; }); };
+  const psK = await T(() => { const Z = zdTakeoff, it = Z.P.proj.items[Z.P.proj.items.length - 1]; return Z.P.proj.scales[it.file + ":" + it.page].ptPerFt; }), fsP = await lblFs(2, 54);
+  ok(near(fsP, Math.max(0, 0.85 * psK * 2), 0.11) && fsP >= 2, "PlanSwift's labels (the default) are sized on the building: 0.85 ft text at the sheet's scale (" + fsP + " px at 200 %, " + psK.toFixed(2) + " pt per ft)");
+  await T(() => { zdTakeoff.S.lbl.style = "box"; });   // Classic: sized on the sheet as Bluebeam's
   const fs1 = await lblFs(1, 54), fs2 = await lblFs(2, 54), fsS = await lblFs(1, 5.4), fsS2 = await lblFs(2, 5.4); await lblFs(1, 54);
-  ok(fs1 > 6 && near(fs2, 2 * fs1, 0.11), "a label grows with the zoom, in step with the drawing (" + fs1 + " px at 100 %, " + fs2 + " px at 200 %)");
+  await T(() => { zdTakeoff.S.lbl.style = "ps"; zdTakeoff.refresh(); });
+  ok(fs1 > 6 && near(fs2, 2 * fs1, 0.11), "Classic: a label grows with the zoom, in step with the drawing (" + fs1 + " px at 100 %, " + fs2 + " px at 200 %)");
   ok(near(fsS, fs1 * 0.6, 0.11) && near(fsS2, fs1 * 1.2, 0.11), "on a sheet at 1:160 (5.4 pt per ft) it is 0.6 × — as at 1/8\" = 1'-0\" (" + fsS + " / " + fsS2 + " px at 100 / 200 %)");
 
   console.log("CAD quantities");

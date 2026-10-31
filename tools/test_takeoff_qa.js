@@ -677,7 +677,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     const vq = await T(() => Object.assign({}, zdTakeoff.S.view)); await T(() => { zdTakeoff.S.view.s = 1; zdTakeoff.applyView(); }); await wait(300);
     const lbl = await T(() => [...document.querySelectorAll("#ov text")].map(t => t.textContent).join("|"));
     await T(v => { Object.assign(zdTakeoff.S.view, v); zdTakeoff.applyView(); }, vq); await wait(200);
-    ok(/144\.000 Sft/.test(lbl) && /257\.250 Sft/.test(lbl), "drawing labels show the same figures (144.000, 257.250 Sft)");
+    ok(/144\.00 SQ FT/.test(lbl) && /257\.25 SQ FT/.test(lbl), "drawing labels show the same figures, as PlanSwift's labels write them (144.00, 257.25 SQ FT)");
     await T(() => { document.getElementById("findIn").value = ""; document.getElementById("findRes").classList.remove("on"); zdTakeoff.setTool("select"); });
   });
 

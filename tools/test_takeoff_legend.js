@@ -48,6 +48,8 @@ const LONG = "Ceiling plaster — a condition named far too long to fit its colu
       {id: "i5", cond: "N1", file: f, page: pg, kind: "shape", pts: [[X(25), X(2)], [X(26), X(2)], [X(27), X(2)]], nos: 1, label: ""});
     Z.refresh(); }, LONG);
 
+  /* A – E: the table legend, placed while labels are Classic (with PlanSwift's labels, the default, a new legend is PlanSwift's: F) */
+  await T(() => { localStorage.setItem("zdTakeoffLbl", JSON.stringify({style: "box", show: "full", v2: 1, v3: 1})); zdTakeoff.loadLbl(); });
   console.log("A. the legend's symbols");
   const L = await T(() => { const Z = zdTakeoff; Z.createLegend(); const P = Z.P.proj, m = P.marks[P.marks.length - 1];
     const rows = Z.legendRows(m), svg = Z.legendSvg0(m, p => p, 1), sym = {};
@@ -123,6 +125,27 @@ const LONG = "Ceiling plaster — a condition named far too long to fit its colu
     return {a, border: m.border, columns: m.columns, colWidths: m.colWidths, fontSize: m.fontSize, sort: m.sort, w: Math.abs(m.pts[1][0] - m.pts[0][0]), title: m.title}; });
   ok(E2.a === "Typical floor legend", "Set as default in the legend's Properties does the same (" + E2.a + ")");
   ok(E2.border === "#40556b" && E2.columns.length === 6 && E2.colWidths.length === 6 && E2.fontSize === 9 && E2.sort === "drawing" && E2.w === 400 && E2.title === "Mine", "a saved default that is not right is not used: colours, columns, sizes and order fall back (" + JSON.stringify(E2) + ")");
+
+  console.log("F. PlanSwift's legend — a new legend's look while labels are PlanSwift's (the default)");
+  const PL = await T(() => { const Z = zdTakeoff, P = Z.P.proj; localStorage.removeItem("zdTakeoffLbl"); localStorage.removeItem("zdTakeoffLegendStyle"); Z.loadLbl();
+    Z.createLegend(); const m = P.marks[P.marks.length - 1];
+    return {look: m.look, title: m.showTitle, heads: m.showHeaders, fs: m.fontSize, rowH: m.rowH, svg: Z.legendSvg0(m, p => p, 1), h: Math.abs(m.pts[1][1] - m.pts[0][1]), rows: Z.legendRows(m).length, lbl: Z.S.lbl.style, q: Object.fromEntries(Z.legendRows(m).map(r => [r.c.id, r.q])), side: Math.max(Z.S.base.width, Z.S.base.height)}; });
+  const qT = (id, u) => 'font-weight="700" fill="#0000ff">' + PL.q[id].toLocaleString("en-US", {minimumFractionDigits: 1, maximumFractionDigits: 1}) + " " + u + "</text>", qS = (id, u) => qT(id, u).split(">")[1].split("<")[0];
+  ok(PL.lbl === "ps" && PL.look === "ps" && PL.title === false && PL.heads === false, "a new legend is PlanSwift's: no title, no column headers (" + JSON.stringify([PL.look, PL.title, PL.heads]) + ")");
+  const fs0 = Math.max(8, Math.min(32, Math.round(PL.side * 0.12) / 10));
+  ok(PL.fs === fs0 && PL.rowH === Math.round(fs0 * 14) / 10, "sized on the sheet: its text 1.2 % of the sheet's long side (" + PL.side.toFixed(0) + " pt → " + PL.fs + " pt), rows 1.4 × (" + PL.rowH + " pt)");
+  ok(PL.h >= PL.rows * PL.rowH, "…its box tall enough for its " + PL.rows + " rows (" + PL.h.toFixed(1) + " pt)");
+  ok(/>Floor finish<\/text>/.test(PL.svg) && PL.svg.includes(qT("A1", "SQ FT")) && PL.svg.includes(qT("L1", "FT")) && PL.svg.includes(qT("N1", "EA")) && PL.q.L1 === 10 && PL.q.N1 === 3,
+    "each row: its name, its quantity in bold blue as PlanSwift writes it — " + [qS("A1", "SQ FT"), qS("L1", "FT"), qS("N1", "EA")].join(", "));
+  ok(/fill="#8be04e"/.test(PL.svg) && /stroke="#1f5ea8"/.test(PL.svg) && /fill="#e3241b"/.test(PL.svg), "…the icon of its kind: an area's patch, a run's bracket, a count's dots");
+  ok(/<rect[^>]*fill="#a3e635"\/>/.test(PL.svg) && /<rect[^>]*fill="#0891b2"\/>/.test(PL.svg) && /<circle[^>]*fill="#f59e0b"\/>/.test(PL.svg), "…and a swatch of its colour: an area's fill (#a3e635, not its line), a run's line, a count's disc");
+  ok(/<title>Ceiling plaster — a condition named far too long[^<]*<\/title><text[^>]*>[^<]*…</.test(PL.svg) && !/>Perimeter</.test(PL.svg), "a long name is shortened with … (whole on hover); no column headers");
+  await T(() => { const Z = zdTakeoff, P = Z.P.proj; Z.editLegend(P.marks[P.marks.length - 1]); }); await wait(300);
+  ok((await page.inputValue("#lgLook")) === "ps", "Edit Legend shows its Look: PlanSwift");
+  await page.selectOption("#lgLook", "table"); await page.click("#dlgOk"); await wait(300);
+  const TB = await T(() => { const Z = zdTakeoff, P = Z.P.proj, m = P.marks[P.marks.length - 1]; return {look: m.look, heads: m.showHeaders, title: m.showTitle, svg: Z.legendSvg0(m, p => p, 1)}; });
+  ok(TB.look === "table" && TB.heads && TB.title && />Description</.test(TB.svg) && />Perimeter</.test(TB.svg), "Look: Table turns it into the table, with its title and column headers");
+
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
   await b.close(); console.log(fails ? fails + " failed" : "all passed"); process.exit(fails ? 1 : 0);
 })();
