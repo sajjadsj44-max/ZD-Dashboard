@@ -1288,17 +1288,25 @@ async function lowKept(pn){
     if (bm.width !== Math.ceil(vp.width) || bm.height !== Math.ceil(vp.height)) { bm.close(); return null; }
     const cv = document.createElement("canvas"); cv.width = bm.width; cv.height = bm.height; cv.getContext("2d").drawImage(bm, 0, 0); bm.close(); return cv; } catch (e) { return null; }
 }
+/* the picture made a PNG in a worker: on the page itself a big sheet's picture froze it a third of a second */
+let pngW = null, pngN = 0;
+function pngBlob(cv){   // -> Promise of the PNG (null if it could not be made)
+  const here = () => new Promise(r => { try { cv.toBlob(r, "image/png"); } catch (e) { r(null); } });
+  if (!window.OffscreenCanvas || !window.createImageBitmap || !window.Worker) return here();
+  try { pngW = pngW || new Worker(URL.createObjectURL(new Blob(["onmessage = async e => { let b = null; try { const m = e.data.m, c = new OffscreenCanvas(m.width, m.height); c.getContext('2d').drawImage(m, 0, 0); m.close(); b = await c.convertToBlob({type: 'image/png'}); } catch (er) {} postMessage({id: e.data.id, b}); };"], {type: "text/javascript"}))); } catch (e) { return here(); }
+  return createImageBitmap(cv).then(m => new Promise(r => { const id = ++pngN, on = e => { if (e.data.id !== id) return; pngW.removeEventListener("message", on); r(e.data.b); }; pngW.addEventListener("message", on); pngW.postMessage({id, m}, [m]); }), here);
+}
 function lowKeep(pn, cv, u){ if (!u || !window.caches || (S.docs[pn.fileId] || {}).zdLocked) return;
-  try { cv.toBlob(b => { if (b) caches.open(LOW_CACHE).then(c => c.put(u, new Response(b, {headers: {"Content-Type": "image/png"}}))).then(() => { if (Math.random() < 0.1) cacheTrim(LOW_CACHE, LOW_KEEP); }).catch(() => {}); }, "image/png"); } catch (e) {} }
-function lowShow(pn, cv, s){ const c = pn.el.low; c.width = cv.width; c.height = cv.height; c.getContext("2d").drawImage(cv, 0, 0); pn.low = {s}; applyView(pn); }
+  pngBlob(cv).then(b => { if (b) return caches.open(LOW_CACHE).then(c => c.put(u, new Response(b, {headers: {"Content-Type": "image/png"}}))).then(() => { if (Math.random() < 0.1) cacheTrim(LOW_CACHE, LOW_KEEP); }); }).catch(() => {}); }
+function lowShow(pn, cv, s, sig){ const c = pn.el.low; c.width = cv.width; c.height = cv.height; c.getContext("2d").drawImage(cv, 0, 0); pn.low = {s, sig, page: pn.page}; applyView(pn); }
 async function renderLow(pn = ACT){   // drawn off screen, then shown only if the page is still the one on screen
   if (cadOn(pn)) return cadLow(pn);   // an AutoCAD drawing: from its scene
-  { const e = rcGet(pn, "low", () => true); if (e) return lowShow(pn, e.cv, e.v.s); }   // drawn a moment ago: at once
+  { const e = rcGet(pn, "low", () => true); if (e) return lowShow(pn, e.cv, e.v.s, e.sig); }   // drawn a moment ago: at once
   pn.lowBusy = true;
   try { const page = pn.page, sig = rcSig(pn), kept = await lowKept(pn);
-    if (kept && pn.page === page && rcSig(pn) === sig) { const s = lowSc(pn); rcPut(pn, "low", kept, {s}, sig); return lowShow(pn, kept, s); }   // drawn in an earlier session
+    if (kept && pn.page === page && rcSig(pn) === sig) { const s = lowSc(pn); rcPut(pn, "low", kept, {s}, sig); return lowShow(pn, kept, s, sig); }   // drawn in an earlier session
     if (pn.page !== page) return;
-    return await renderLow0(pn); } finally { pn.lowBusy = false; }
+    return await renderLow0(pn); } finally { pn.lowBusy = false; if (pn.hiAfterLow) { pn.hiAfterLow = false; renderHi(true, pn); } }   // (a view waiting for this picture)
 }
 async function renderLow0(pn){
   thumbHalt();
@@ -1306,14 +1314,84 @@ async function renderLow0(pn){
   const vp = vpOf(page, pn.sess.proj, {scale: sc}), off = document.createElement("canvas");
   off.width = Math.ceil(vp.width); off.height = Math.ceil(vp.height);
   const ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
-  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, off.width, off.height); try { await sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vp})).promise; } catch (e) {}
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, off.width, off.height); const t0 = performance.now(); try { await sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vp})).promise; } catch (e) {}
   if (pn.page !== page) return;
+  pn.full = {page, ms: performance.now() - t0};   // how long this page takes to draw whole
   if (!darkNow(fileId, pn.sess.proj)) boostInk(off.getContext("2d"), off.width, off.height, sc * (pn.view ? Math.min(1, pn.view.s / sc) : 1));
   await overlayCmp(ctx, off.width, off.height, sc, 0, 0, pn);
   if (pn.page !== page) return;
   const c = pn.el.low; c.width = off.width; c.height = off.height; c.getContext("2d").drawImage(off, 0, 0);
-  pn.low = {s: sc}; if (!cmp0 && !pn.cmp && rcSig(pn) === sig) { rcPut(pn, "low", off, {s: sc}, sig); lowKeep(pn, off, u0); }
+  pn.low = {s: sc, sig, page}; if (!cmp0 && !pn.cmp && rcSig(pn) === sig) { rcPut(pn, "low", off, {s: sc}, sig); lowKeep(pn, off, u0); }
   applyView(pn);
+}
+/* a big CAD sheet zoomed in: pdf.js goes through every operation of a page on every draw, wherever the view is, so a sheet of
+   600,000 lines took 2.5 s a zoom or pan step even zoomed right in, the view blurred all that time. pdf.js keeps a page's
+   operation list once it has been drawn; each path's box on the page is worked out from it once, and the draw of a view gets
+   a copy of the list without the paths wholly outside the view (and their paint). Everything else stays: clips, text, images,
+   shadings, transparency groups and the PDF's own markups. Only how the picture is drawn — never the PDF or a line read from it. */
+const OPBOX = new WeakMap();
+function opBoxes(list, base){   // per operation [x0, y0, x1, y1] on the page (scale 1) of a painted path; NaN = always drawn
+  const key = base.transform.join(","), had = OPBOX.get(list), fa = list.fnArray, aa = list.argsArray, n = fa.length;
+  if (had && had.key === key && had.n === n) return had.box;
+  const O = pdfjs.OPS, box = new Float32Array(4 * n).fill(NaN), stack = [];
+  const PAINT = new Set([O.stroke, O.closeStroke, O.fill, O.eoFill, O.fillStroke, O.eoFillStroke, O.closeFillStroke, O.closeEOFillStroke, O.endPath]);
+  let m = base.transform.slice(), lw = 1, grp = 0, x0, y0, x1, y1;
+  const pt = (x, y) => { const X = m[0] * x + m[2] * y + m[4], Y = m[1] * x + m[3] * y + m[5]; if (X < x0) x0 = X; if (X > x1) x1 = X; if (Y < y0) y0 = Y; if (Y > y1) y1 = Y; };
+  for (let i = 0; i < n; i++) {
+    const fn = fa[i], ar = aa[i];
+    if (fn === O.save) stack.push([m, lw]);
+    else if (fn === O.restore || fn === O.paintFormXObjectEnd || fn === O.endGroup) { if (fn === O.endGroup) grp--; const g = stack.pop(); if (g) [m, lw] = g; }
+    else if (fn === O.transform) m = mul(m, ar);
+    else if (fn === O.paintFormXObjectBegin) { stack.push([m, lw]); if (ar && ar[0]) m = mul(m, ar[0]); }
+    else if (fn === O.beginGroup) { grp++; stack.push([m, lw]); }   // (a transparency group is drawn whole)
+    else if (fn === O.beginAnnotation) break;   // the PDF's own markups: drawn as they are
+    else if (fn === O.setLineWidth) lw = +ar[0] || 0;
+    else if (fn === O.setGState) (ar[0] || []).forEach(([k, v]) => { if (k === "LW") lw = +v || 0; });
+    else if (fn === O.constructPath && !grp && PAINT.has(fa[i + 1])) {
+      const po = ar[0], c = ar[1]; if (po[0] !== O.moveTo && po[0] !== O.rectangle) continue;
+      let k = 0; x0 = y0 = Infinity; x1 = y1 = -Infinity;
+      for (const op of po) {
+        if (op === O.moveTo || op === O.lineTo) { pt(c[k], c[k + 1]); k += 2; }
+        else if (op === O.curveTo) { pt(c[k], c[k + 1]); pt(c[k + 2], c[k + 3]); pt(c[k + 4], c[k + 5]); k += 6; }
+        else if (op === O.curveTo2 || op === O.curveTo3) { pt(c[k], c[k + 1]); pt(c[k + 2], c[k + 3]); k += 4; }
+        else if (op === O.rectangle) { const x = c[k], y = c[k + 1], w = c[k + 2], h = c[k + 3]; pt(x, y); pt(x + w, y); pt(x, y + h); pt(x + w, y + h); k += 4; }
+      }
+      if (!(x0 <= x1)) continue;
+      const e = 2 * lw * Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2]));   // the stroke's half width, twice over (joins, caps)
+      box[4 * i] = x0 - e; box[4 * i + 1] = y0 - e; box[4 * i + 2] = x1 + e; box[4 * i + 3] = y1 + e;
+    }
+  }
+  OPBOX.set(list, {key, n, box}); return box;
+}
+function viewOps(page, o, base, r){   // -> [pdf.js's state for this kind of draw, the operation list of view r] or null (drawn as usual)
+  try {
+    const st = page._intentStates && page._intentStates.get(page._transport.getRenderingIntent(o.intent || "display", o.annotationMode == null ? pdfjs.AnnotationMode.ENABLE : o.annotationMode).cacheKey);
+    const list = st && st.displayReadyCapability && st.operatorList; if (!list || !list.lastChunk || list.fnArray.length < 3000) return null;
+    if ((r[2] - r[0]) * (r[3] - r[1]) > 0.6 * base.width * base.height) return null;   // most of the page in view: nothing to gain
+    const box = opBoxes(list, base), fa = list.fnArray, aa = list.argsArray, F = [], A = [];
+    for (let i = 0; i < fa.length; i++) { const b = 4 * i; if (box[b] > r[2] || box[b + 2] < r[0] || box[b + 1] > r[3] || box[b + 3] < r[1]) { i++; continue; } F.push(fa[i]); A.push(aa[i]); }   // (a path outside: it and its paint left out)
+    return [st, {fnArray: F, argsArray: A, lastChunk: true, separateAnnots: list.separateAnnots}];
+  } catch (e) { return null; }
+}
+function pageDraw(page, o, base, r){   // page.render — of only the paths in view r (page units) when that is worth it (task.cut)
+  const c = r && viewOps(page, o, base, r); if (!c) return page.render(o);
+  const [st, list] = c, keep = st.operatorList; st.operatorList = list;   // (pdf.js takes the list as the draw is set up: put back at once)
+  try { const t = page.render(o); t.cut = true; return t; } finally { st.operatorList = keep; }
+}
+/* a heavy page seen whole or zoomed out: its whole-page picture already holds more detail than the screen can show, so the sharp
+   view is made from it in a moment instead of pdf.js drawing the page again for seconds. Faint lines get their ink back as on a
+   pdf.js draw. A light page (drawn whole in under 0.2 s) is still drawn by pdf.js. */
+const heavyPg = pn => !!(pn.full && pn.full.page === pn.page && pn.full.ms > 200);
+const lowEnough = (pn, px) => !pn.cmp && heavyPg(pn) && lowSc(pn) >= 1.25 * px;   // (px: screen pixels per point of the view)
+function hiFromLow(pn, v, w, h, dpr, sig){
+  const L = pn.low, lc = pn.el.low; if (!L || L.page !== pn.page || L.sig !== sig || lc.width < 2 || L.s < 1.25 * v.s * dpr) return null;
+  const off = document.createElement("canvas"); off.width = w; off.height = h;
+  const dark = darkNow(pn.fileId, pn.sess.proj), x = inkCtx(off.getContext("2d"), dark, !!S.mono);
+  x.fillStyle = "#ffffff"; x.fillRect(0, 0, w, h);   // the paper, as pdf.js lays it (dark in dark mode)
+  x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high";
+  const k = v.s * dpr / L.s; x.drawImage(lc, v.tx * dpr, v.ty * dpr, lc.width * k, lc.height * k);
+  if (!dark) boostInk(x, w, h, v.s * dpr);
+  return off;
 }
 function renderHi(now, pn = ACT){
   clearTimeout(pn.hiT);
@@ -1326,12 +1404,20 @@ function renderHi(now, pn = ACT){
     const page = pn.page; if (!page) return;
     if (pn.renderTask) { try { pn.renderTask.cancel(); } catch (e) {} }
     const {st, dpr, w, h} = hiSize(pn), c = pn.el.hi, v = Object.assign({}, pn.view), fileId = pn.fileId, cmp0 = pn.cmp, sig = rcSig(pn);
+    pn.hiAfterLow = false;
+    if (lowEnough(pn, v.s * dpr)) {   // a heavy page seen whole or zoomed out: made from its whole-page picture
+      const fl = hiFromLow(pn, v, w, h, dpr, sig);
+      if (fl) { pn.renderTask = null; pn.hiWait = false; hiShow(pn, fl, v, dpr); return; }
+      if (pn.lowBusy) { pn.renderTask = null; pn.hiAfterLow = true; return; }   // that picture is being drawn: the view waits for it
+    }
     const off = document.createElement("canvas"); off.width = w; off.height = h;
     const ptPx = v.s * dpr, ctx = inkCtx(boldLines(thinLines(off.getContext("2d")), S.boost && ptPx < 1.6 && !darkNow(fileId, pn.sess.proj)), !pn.cmp && darkNow(fileId, pn.sess.proj), !pn.cmp && !!S.mono);
-    const task = sliced(page.render({...lay(fileId), canvasContext: ctx, viewport: vpOf(page, pn.sess.proj, {scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}));
+    const mg = 8 / v.s, r = [-v.tx / v.s - mg, -v.ty / v.s - mg, (st.clientWidth - v.tx) / v.s + mg, (st.clientHeight - v.ty) / v.s + mg];   // the view on the page, 8 px round
+    const t0 = performance.now(), task = sliced(pageDraw(page, {...lay(fileId), canvasContext: ctx, viewport: vpOf(page, pn.sess.proj, {scale: v.s * dpr}), transform: [1, 0, 0, 1, v.tx * dpr, v.ty * dpr]}, pn.base, r));
     pn.renderTask = task;
     try { await task.promise; } catch (e) { if (pn.renderTask === task) { pn.renderTask = null; pn.hiWait = false; } return; }   // (failed, not given up for a newer view: the pane is not left "drawing" — thumbnails would wait on it)
     if (pn.renderTask !== task) return;
+    pn.hiMs = performance.now() - t0; if (!task.cut) pn.full = {page, ms: pn.hiMs};
     if (!darkNow(fileId, pn.sess.proj)) boostInk(off.getContext("2d"), w, h, v.s * dpr);
     await overlayCmp(ctx, w, h, v.s * dpr, v.tx * dpr, v.ty * dpr, pn);
     if (pn.renderTask !== task) return;
@@ -1340,7 +1426,7 @@ function renderHi(now, pn = ACT){
     c.getContext("2d").drawImage(off, 0, 0);
     pn.rendered = Object.assign({dpr}, v); if (!cmp0 && rcSig(pn) === sig) rcPut(pn, "hi", off, pn.rendered, sig);
     applyView(pn);
-  }, now ? 0 : 140);
+  }, now ? 0 : pn.view && lowEnough(pn, pn.view.s * Math.min(window.devicePixelRatio || 1, 2)) ? 16 : Math.max(30, Math.min(140, pn.hiMs || 140)));   // (a page drawn in a moment is drawn again at once; a heavy one waits for the wheel to stop)
 }
 function applyView(pn = ACT){
   const v = pn.view, E = pn.el;
@@ -1393,6 +1479,7 @@ async function indexPage(){
       const gs = () => ({ctm, lw, dash, sCol, fCol});
       const setGs = g => { if (g) ({ctm, lw, dash, sCol, fCol} = g); };
       for (let i = 0; i < ops.fnArray.length; i++) {
+        if ((i & 8191) === 8191) await breathe();   // (a big CAD sheet: the page stays live while its lines are read)
         const fn = ops.fnArray[i], ar = ops.argsArray[i];
         if (fn === O.beginMarkedContentProps) { let li = -1; const pr = ar && ar[1]; const id = ar && ar[0] === "OC" && pr ? (typeof pr === "string" ? pr : pr.id || (pr.ids && pr.ids[0])) : null;
           if (id) { li = layerIx.get(id); if (li == null) { li = layerIds.length; layerIds.push(id); layerIx.set(id, li); } } mc.push(li); lay0 = curLayer(); }
@@ -1435,11 +1522,12 @@ async function indexPage(){
         }
       }
       const cell = 24, grid = new Map();
-      segs.forEach((s, i) => {
-        const x0 = Math.floor(Math.min(s[0], s[2]) / cell), x1 = Math.floor(Math.max(s[0], s[2]) / cell), y0 = Math.floor(Math.min(s[1], s[3]) / cell), y1 = Math.floor(Math.max(s[1], s[3]) / cell);
-        if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4000) return;   // page borders / hatch fills are not useful snap targets at this cost
+      for (let i = 0; i < segs.length; i++) {
+        if ((i & 8191) === 8191) await breathe();
+        const s = segs[i], x0 = Math.floor(Math.min(s[0], s[2]) / cell), x1 = Math.floor(Math.max(s[0], s[2]) / cell), y0 = Math.floor(Math.min(s[1], s[3]) / cell), y1 = Math.floor(Math.max(s[1], s[3]) / cell);
+        if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4000) continue;   // page borders / hatch fills are not useful snap targets at this cost
         for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) { const k = x + "," + y; let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(i); }
-      });
+      }
       if (base.rotation !== pgRot(page)) { busy(""); return; }   // the page was turned while it was read: it is read again at its turn (rotDrop)
       S.geo[key] = {segs, grid, cell, images, styles, layerIds, file};
     } catch (e) { S.geo[key] = {segs: [], grid: new Map(), cell: 24, images: 0, styles: [], err: String(e)}; }
@@ -14375,12 +14463,23 @@ async function doorWinDialog(){
     + (v.sch && newSch.length ? `<br><span class="small">${newSch.length} size${newSch.length > 1 ? "s" : ""} added to the opening schedule (Bill → Opening schedule).</span>` : ""));
   toast("Counted " + v.pick.reduce((a, k2) => a + (lines[k2] ? lines[k2].n : 0), 0) + " tags" + (v.sw ? " + " + sw.length + " door swings" : ""), 3000);
 }
+/* a page's lines are worked out once for its text: as a big DWG opened, the sheet's name, the drawing's facts and its tags each
+   read them again (0.4 s each, one 1.6 s freeze). Each reader gets its own copies, as before. */
+const TLC = new WeakMap();
 function textLines(T){   // pdf text pieces -> lines {s, x, y, w, h, parts}
+  let e = TLC.get(T); if (!e || e.n !== T.length) TLC.set(T, e = {n: T.length, out: textLines0(T)});
+  return e.out.map(l => Object.assign({}, l, {parts: l.parts.slice()}));
+}
+function textLines0(T){
   const t = T.slice().sort((a, b) => a.y - b.y || a.x - b.x), out = [];
   /* lines are made in the order of their y, and a piece joins a line less than 0.45 × the taller height above it: a line lower than
      0.45 × the tallest text of the page can take no later piece, so the search starts past those (a DWG page of 27,000 pieces took
      3 s, looking through every line for every piece — and it is read several times as a project opens) */
   let hMax = 0, lo = 0; for (const p of t) if (p.h > hMax) hMax = p.h;
+  /* a piece joins only a line turned its own way (to 0.02 rad), so the lines are kept by their turn as well, in bands of 0.02 rad:
+     a piece looks through the lines of its own band and the two either side, in the order they were made — the same line is found
+     as before, without going through the lines written other ways (a hotel DWG's text at 0°, -90°, 75° and -15°: 0.4 s a read) */
+  const BW = 0.02, NB = Math.ceil(2 * Math.PI / BW), band = r => Math.min(NB - 1, Math.floor((((r % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) / BW)), bands = new Map();
   t.forEach(p => {
     const tag = TAG_RX.test(p.s.trim().replace(/\s+/g, ""));
     while (lo < out.length && p.y - out[lo].y >= 0.45 * hMax) lo++;
@@ -14388,13 +14487,21 @@ function textLines(T){   // pdf text pieces -> lines {s, x, y, w, h, parts}
     // a piece joins a line written the same way, next along it (a word written up the page never joins one written across:
     // a balcony's name up its strip was read with the bed room's size beside it)
     const pr = p.r || 0;
-    if (!tag) for (let i = lo; i < out.length; i++) { const l = out[i]; if (l.tag) continue; const lr = l.r || 0;
-      if (lr !== pr && Math.abs(((pr - lr) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI) > 0.02) continue;
+    const fits = l => { if (l.tag) return false; const lr = l.r || 0;
+      if (lr !== pr && Math.abs(((pr - lr) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI) > 0.02) return false;
       let along = p.x - l.x, across = p.y - l.y;   // (written across the page: no turning — the common case, kept as fast as it was)
       if (lr) { const c = Math.cos(lr), sn = Math.sin(lr), dx = along, dy = across; along = dx * c + dy * sn; across = -dx * sn + dy * c; }
-      if (Math.abs(across) < 0.45 * Math.max(l.h, p.h) && along - l.w < 1.6 * l.h && along - l.w > -0.3 * l.h) { L = l; gap = along - l.w; break; } }
+      if (Math.abs(across) < 0.45 * Math.max(l.h, p.h) && along - l.w < 1.6 * l.h && along - l.w > -0.3 * l.h) { L = l; gap = along - l.w; return true; }
+      return false; };
+    if (!tag) {
+      const b0 = band(pr), ls = [], at = [];
+      for (let d = -2; d <= 2; d++) { const q = bands.get((b0 + d + NB) % NB); if (!q || ls.includes(q)) continue;
+        let a = 0, b = q.length; while (a < b) { const m = (a + b) >> 1; if (q[m] < lo) a = m + 1; else b = m; } if (a < q.length) { ls.push(q); at.push(a); } }   // (from the first line not yet passed by)
+      for (;;) { let k = -1; for (let j = 0; j < ls.length; j++) if (at[j] < ls[j].length && (k < 0 || ls[j][at[j]] < ls[k][at[k]])) k = j;   // the earliest made of the bands' next lines
+        if (k < 0 || fits(out[ls[k][at[k]++]])) break; } }
     if (L) { L.s += (gap > 0.25 * L.h && !/\s$/.test(L.s) ? " " : "") + p.s; L.w = Math.max(L.w, gap + L.w + (p.w || 0)); L.parts.push(p); }
-    else out.push({s: p.s, x: p.x, y: p.y, w: p.w || p.s.length * p.h * 0.55, h: p.h, r: p.r || 0, parts: [p], tag});   // a door / window tag stays on its own
+    else { out.push({s: p.s, x: p.x, y: p.y, w: p.w || p.s.length * p.h * 0.55, h: p.h, r: p.r || 0, parts: [p], tag});   // a door / window tag stays on its own
+      if (!tag) { const k = band(pr); let q = bands.get(k); if (!q) bands.set(k, q = []); q.push(out.length - 1); } }
   });
   out.forEach(l => { const c = Math.cos(l.r || 0), sn = Math.sin(l.r || 0); l.cx = l.x + c * l.w / 2 + sn * l.h / 2; l.cy = l.y + sn * l.w / 2 - c * l.h / 2;   // the text's centre — along its own direction (a label written up the page too)
     l.s = l.s.replace(/½/g, " 1/2").replace(/¼/g, " 1/4").replace(/¾/g, " 3/4").replace(/⅛/g, " 1/8").replace(/\s+/g, " ").trim(); });   // 13'-5½" is 13'-5 1/2"
@@ -17972,7 +18079,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
   if (location.protocol !== "file:") learnTeamLoad();   // the team's learned method, added to this browser's
-  window.zdTakeoff = {setUnits, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {setUnits, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
