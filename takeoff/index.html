@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sajjad QS PDF TAKEOFF Software</title>
 <script>/* the look (Settings → Ribbon & toolbar → Colourful look) is set before the page is drawn, so the other one never flashes */
-try { var zdSet = JSON.parse(localStorage.getItem("zdTakeoffSet") || "{}"); if (zdSet && (zdSet.look === "classic" || zdSet.look === "colourful")) document.documentElement.setAttribute("data-look", zdSet.look === "classic" ? "classic" : "colour"); } catch (e) {}</script>
+try { var zdSet = JSON.parse(localStorage.getItem("zdTakeoffSet") || "{}"); if (zdSet && (zdSet.look === "classic" || zdSet.look === "colourful")) document.documentElement.setAttribute("data-look", zdSet.look === "classic" ? "classic" : "colour"); if (zdSet && zdSet.condBtn === true) document.documentElement.setAttribute("data-condbtn", ""); } catch (e) {}</script>
 <link rel="manifest" href="manifest.webmanifest">
 <script>/* the friends' link takeoff/?team: its own installable app (which opens on ?team again) and the team view from the first paint */
 if (new URLSearchParams(location.search).has("team")) { document.documentElement.classList.add("zd-team"); document.querySelector('link[rel="manifest"]').href = "manifest-team.webmanifest"; }</script>
@@ -774,6 +774,7 @@ table.sktbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}ta
 .rcond .rcq{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:11.5px}
 .rcond.none .rcnm{color:var(--muted);font-weight:500}.rcond .ic.ch{flex:none}
 @container stg (max-width:1000px){.rcond .rcq{display:none}.rcond{max-width:190px}}
+html:not([data-condbtn]) #rbCond{display:none}   /* off by default — Settings › Ribbon & toolbar › Condition button beside the tabs; J opens the list either way */
 .cpop{position:fixed;z-index:31;width:min(390px,calc(100vw - 12px));max-height:min(72vh,580px);display:none;flex-direction:column;background:#fff;border:1px solid #c9d6e4;border-radius:10px;box-shadow:0 14px 40px rgba(15,41,66,.28);overflow:hidden;font-size:12.5px;color:var(--txt)}
 .cpop.on{display:flex}
 .cpop .cph{padding:8px;border-bottom:1px solid var(--line)}.cpop .cph input{width:100%;border-radius:7px}
@@ -1629,7 +1630,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-31u"></script>
+<script type="module" src="takeoff.js?v=2026-10-31v"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
