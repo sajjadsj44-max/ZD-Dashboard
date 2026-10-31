@@ -102,6 +102,8 @@ function makePdf(){
   ok(/11\.150 m²/.test(await T(() => zdTakeoff.capLines(zdTakeoff.P.proj.items.find(i => i.label === "LOUNGE"), zdTakeoff.P.proj.conds[0], 9, null).join(" "))), "a label with no appearance of its own is in metres too");
   const lg = await T(() => { const Z = zdTakeoff; Z.createLegend(); const m = Z.P.proj.marks.find(x => x.type === "legend"), t = Z.legendSvg0(m, p => p, 1).replace(/<[^>]+>/g, " "); Z.undoAny(); return t; }); await wait(200);
   ok(/11\.150/.test(lg) && /m²/.test(lg) && /m³/.test(lg) && !/\bSft\b/.test(lg), "the legend placed on the drawing: 11.150 m², m³ — no Sft");
+  const dimTxt = () => T(() => { const Z = zdTakeoff, m = {id: "Mdim", type: "dimension", file: Z.P.proj.files[0].id, page: 1, pts: [[100, 445], [280, 445]], color: "#2b7de9", width: 1, size: 13, arrow: 10, offset: 24}; return Z.markSvg(m, p => p, 1).replace(/<[^>]+>/g, " "); });
+  ok(/6096 mm/.test(await dimTxt()), "a dimension line on the 20'-0\" wall reads 6096 mm (as metric drawings are dimensioned)");
   const cr = await T(() => document.getElementById("scaleChip").textContent + " | " + document.getElementById("scaleChip").title);
   ok(/1:96/.test(cr) && /1" = 8'/.test(cr), "the scale read both ways on the chip: ≈ 1:96 · 1\" = 8'");
 
@@ -163,6 +165,7 @@ function makePdf(){
   await T(() => zdTakeoff.setUnits("ft")); await wait(300);
   cl = await conds();
   ok(!(await T(() => zdTakeoff.isM())) && /120\.000/.test(cl) && /Sft/.test(cl) && !/m²/.test(cl), "back in feet: 120.000 Sft again");
+  ok(/20\.000/.test(await dimTxt()) && !/mm/.test(await dimTxt()), "…and 20.000 again in feet");
   ok(/1 × 12\.000 × 10\.000/.test(await txt("#sheet")) && (await wallC()).h === 10, "the sheet in feet again; H still exactly 10 ft");
   await T(() => zdTakeoff.setUnits("m")); await wait(200);
   await T(() => zdTakeoff.undoAny()); await wait(300);
