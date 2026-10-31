@@ -2,7 +2,8 @@ name: Takeoff chat archive
 
 # PDF Takeoff's Feedback chat goes through a free relay (takeoff/chat.json) that keeps messages 12 hours.
 # This copies them every half hour to takeoff-chat.jsonl on the chat-archive branch (sealed, no readable text),
-# where the takeoff reads them back. It never touches main, so it does not publish the site.
+# where the takeoff reads them back. It also merges what the takeoff agent learned in every browser of the team
+# (tools/learn_archive.py: learn.topic -> team-method.json). It never touches main, so it does not publish the site.
 
 on:
   schedule:
@@ -33,8 +34,9 @@ jobs:
             (cd arch && git checkout -q --orphan chat-archive-new && git rm -rfq .)
           fi
           python3 tools/chat_archive.py takeoff/chat.json arch/takeoff-chat.jsonl
+          python3 tools/learn_archive.py takeoff/chat.json arch/team-method.json || echo "the learned method was not merged this time"
           cd arch
-          git add takeoff-chat.jsonl 2>/dev/null || exit 0
+          for f in takeoff-chat.jsonl team-method.json; do if [ -f "$f" ]; then git add "$f"; fi; done
           git diff --cached --quiet && exit 0
-          git commit -qm "Takeoff chat archive"
+          git commit -qm "Takeoff chat archive and the team's learned method"
           git push -q origin HEAD:refs/heads/chat-archive

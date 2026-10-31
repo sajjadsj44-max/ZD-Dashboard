@@ -1,5 +1,5 @@
 {
- "about": "PDF Takeoff's Feedback chat (friends) and Inbox (owner). Messages go through the free relay below, sealed in the browser: a friend's thread key comes from their password, and only the owner's key (its private half locked with the Inbox password) can open a friend's key. .github/workflows/chat-archive.yml copies the relay's messages to the chat-archive branch every half hour (the relay keeps them 12 hours). Empty relay → Feedback offers WhatsApp.",
+ "about": "PDF Takeoff's Feedback chat (friends) and Inbox (owner). Messages go through the free relay below, sealed in the browser: a friend's thread key comes from their password, and only the owner's key (its private half locked with the Inbox password) can open a friend's key. .github/workflows/chat-archive.yml copies the relay's messages to the chat-archive branch every half hour (the relay keeps them 12 hours). Empty relay → Feedback offers WhatsApp. learn: what the takeoff agent learns of how the team takes off (item names, heights, room kinds — no drawings, no project names), sent to learn.topic by every browser and merged by tools/learn_archive.py into learn.file.",
  "relay": "https://ntfy.sh",
  "topic": "zd-takeoff-a6e8a0ed1db5ff7123c7",
  "archive": "https://raw.githubusercontent.com/sajjadsj44-max/ZD-Dashboard/chat-archive/takeoff-chat.jsonl",
@@ -9,5 +9,9 @@
   "iv": "Qg0gOgT3JOMrEtn2",
   "iter": 200000,
   "key": "1v3KGfwBJY2ArH4KaGMHJB2WRYXrOZ+FeZxI+bcGHhrvnh0H63L0Kf1f2BWHk0ecOyYtTAqYEqTnp7nz0E6u63n2WeR4M70fySFJoEjP6jOXojGizk6dU2S7HBJNsQ/PYqnDQ2fBZozzrkHaucuIWe4p5lD7L0CFwKqch5ohWBn1bfZYKHjdJq40Q72SDWGlET7HnV1MZ7SXD17138bZZHOG4eQXFj8ZyPtpUcdIZhQvj6uFnY9JFzRJGhy3niFZvXStPxhi5hSVKKgsvsOXcONKIqdr/bzLJelAOH4JMi3he/Z30QLgghcnZW4+fmcjVg+KDzHvExnZML+C40R0FWQoIORxhgPrMx2LZirtUUcDfRfZ9hxz3eFy/aHkDMQiG3iti2hNW4u/74g+7RyD1Lj4E+e18Mmempd6l1iu+C/Cf5hOeCT83oQtI+nTZbcncoFiyzpFuRjBmppnejNPK1MNDfIAX3TFr2X2BXIkTLQXCK5VBfHifwJscAOFdRk9h5bhsQwUmDId/cp93SqS5j+OanwqbH2CfpqEySjJfFh4WrtbEmRXELtCR+Q+7pJ9memr9DG9TKani1PTVdHRsCGWpQNPkAPKiMn6kFAjizIrwWL8odOuUM7yR/GAAhGabu6odXlDTB6K9Nt/RTTz7ihU4e2gowO5LTcEY4IIrqyrhiILvo7sIez8dACDeMvnBmgx1smNMFOMYwx6lKH4DYYYP7Y6d8mohau7u0gGN693A4snNuoHTbSTm0udPherrDji4whHf8iQLsjQRkkDTtTRFo3H5p0jN0Z9mfQIBL9XFFUTMDzqKlCciclgwzP0XzsTtJ8RV+NFgyek68yFiajMArgPOy3FyLIWfyMR8w+FtAzysoVvrwLJA7P2nAzvGac+++ph/XnzBoBe80KdlQIhxP5oU2ppZ7gGVtzqmWEmojYK3eHL3vl/ZFXLwy5eu92n6fwfdSHA4I06oV0rzoxoeBQIMmuZwRzEufYaav8CYZ5QLoxty0aBpzNRNWMogAJwvqBukkmUTtuPZu4zyvSVSff2QLaHJu7JeezhU5+f+k1+y7JoAf1M2E7REiNykr21wVkDC88wTCd8XEb5QAIpiEumWxUej34E+H5pRsPs/wHwUi3Tesj5e8n5zu6rC2Erh7Fym6LfKgV++X3fKEYgDdYwzUYQlpVpbl3RqProZW88wXlnzSvoTEkVOfEv9jt0NGkxwT73hyh+nKZddilPYLBl5CpTUEYN7tjZH2onb6crzFtCiOxVctNgBm/AZ2L7y8v8VKCtAS8VVdmPR6h9TmhyN0K+ragh/1tR7vMg5pziNvmndujMhhEmRBFIZMeBPuCLoipGq8rM+TiYpQyghu0IRE2FHiUU5SJ5nW56J4KKbfZyFdaITEl7s9bXU83gR3XO7fr6C5eN2eBTf08Y6Ca5FjsPZGpuNVLsE++moBqEmYjATViBPD3O0Zpx3iS8D2girFG69wgeJSVhIDIF7md5RtQQb0J1s4Jg9pXgc6ZfRQQZQB0zKel9Nv+4jzzSaHOXwB4v9IBR9IefukD2u7lQ1/+pNzXA6Ful7kxcJ11wEO3/DgDsVMFx5AoPXel7AZutp1mVt5KFseq+ELVeIvrXol85Bd+ms0a1z6SZ"
+ },
+ "learn": {
+  "topic": "zd-takeoff-learn-b40d576cf06ec06bee83",
+  "file": "https://raw.githubusercontent.com/sajjadsj44-max/ZD-Dashboard/chat-archive/team-method.json"
  }
 }
