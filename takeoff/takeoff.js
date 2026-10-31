@@ -9420,7 +9420,8 @@ function condPop(show){
   }
   $("cpQ").value = ""; condPopFill();
   pop.classList.add("on"); btn.setAttribute("aria-expanded", "true");
-  const r = btn.getBoundingClientRect(); pop.style.left = Math.max(6, Math.min(r.left, innerWidth - pop.offsetWidth - 6)) + "px"; pop.style.top = (r.bottom + 6) + "px";
+  const vis = btn.offsetParent !== null, r = (vis ? btn : $("stage")).getBoundingClientRect();   // the button is off by default: then the list opens at the drawing's top-left
+  pop.style.left = Math.max(6, Math.min(r.left + (vis ? 0 : 8), innerWidth - pop.offsetWidth - 6)) + "px"; pop.style.top = (vis ? r.bottom + 6 : r.top + 8) + "px";
   $("cpQ").focus();
 }
 function condPopFill(){
@@ -9581,11 +9582,11 @@ async function nosSelDialog(){
    on, whether it follows the tool picked, snap and pick distances, your own shortcuts) are kept under SET_KEY. All of it stays in this
    browser — Settings → Backup & reset saves it to a file for another computer. */
 const SET_KEY = "zdTakeoffSet";
-const SET_DEF = {homeTab: "mine", ribFollow: "smart", openLast: true, snapStart: true, snapPx: 11, hitPx: 7, keys: [], look: "pro"};
+const SET_DEF = {homeTab: "mine", ribFollow: "smart", openLast: true, snapStart: true, snapPx: 11, hitPx: 7, keys: [], look: "pro", condBtn: false};
 let SETV = null;
 function setPref(){ if (!SETV) { let o = null; try { o = JSON.parse(pref(SET_KEY) || "null"); } catch (e) { o = null; } SETV = Object.assign({}, SET_DEF, o && typeof o === "object" ? o : {}); if (!Array.isArray(SETV.keys)) SETV.keys = []; } return SETV; }
 function setSave(ch){ SETV = Object.assign({}, setPref(), ch); pref(SET_KEY, JSON.stringify(SETV)); setApply(); return SETV; }
-function setApply(){ const o = setPref(); SNAP_PX = Math.max(4, Math.min(40, Math.round(+o.snapPx) || 11)); HIT_PX = Math.max(3, Math.min(30, Math.round(+o.hitPx) || 7)); document.documentElement.setAttribute("data-look", o.look === "classic" ? "classic" : o.look === "colourful" ? "colour" : "pro"); }
+function setApply(){ const o = setPref(); SNAP_PX = Math.max(4, Math.min(40, Math.round(+o.snapPx) || 11)); HIT_PX = Math.max(3, Math.min(30, Math.round(+o.hitPx) || 7)); document.documentElement.setAttribute("data-look", o.look === "classic" ? "classic" : o.look === "colourful" ? "colour" : "pro"); document.documentElement.toggleAttribute("data-condbtn", o.condBtn === true); }
 /* the look: Professional (the default — an older saved "colour" was the old default, so it opens Professional too), Colourful, Classic */
 const lookNow = () => { const l = setPref().look; return l === "classic" || l === "colourful" ? l : "pro"; };
 function ribHome(){   // the tab the ribbon opens on: My tools unless Settings → General says otherwise (a tab hidden in Customize is skipped)
@@ -9687,12 +9688,13 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
       {t: "tog", n: "Icons only", d: "no names under the tools (pointing at one still names it)", get: () => wsPref().tb === "icons", set: v => wsSet({tb: v ? "icons" : "full"})},
       {t: "tog", n: "Ribbon tabs row", d: "Takeoff, Modify, Markup … with Select, Ortho, Snap on the right", get: () => pcOn("ui-tabs"), set: v => pcSet("ui-tabs", v)},
       {t: "tog", n: "Ribbon tools", d: "off: collapsed for more drawing room (double-click a tab does the same)", get: () => pcOn("ui-ribbon"), set: v => pcSet("ui-ribbon", v)},
+      {t: "tog", n: "Condition button beside the tabs", d: "the condition in use with its colour and total, a click lists them all; off: J still opens the list", get: () => setPref().condBtn === true, set: v => { setSave({condBtn: v}); }},
       {h: "Tabs shown"},
       ...tabs.map(([id, n]) => ({t: "tog", n: n + " tab", d: id === "mine" ? (tbPref().mine || []).length + " tool(s) in it — drag a tool onto the tab to add it" : "", get: () => !(tbPref().tabs || []).includes(id),
         set: v => { const o = tbPref(), s = new Set(o.tabs || []); if (v) s.delete(id); else s.add(id); if (s.size >= tabs.length) return "Keep at least one tab"; o.tabs = [...s]; pref(TB_KEY, JSON.stringify(o)); tbApply(); }})),
       {h: "Tools"},
       {t: "btn", n: "Customize toolbar", d: "the tools on each tab and their order, the top-bar buttons, the tools in My tools", b: "Customize…", fn: tbDialog, back: true}, chest],
-     reset: () => { const o = tbPref(); o.tabs = []; pref(TB_KEY, JSON.stringify(o)); tbApply(); wsSet({tb: "full"}); pcSave({off: (pcPref().off || []).filter(k => k !== "ui-tabs" && k !== "ui-ribbon"), compact: true}); setSave({look: SET_DEF.look}); }},
+     reset: () => { const o = tbPref(); o.tabs = []; pref(TB_KEY, JSON.stringify(o)); tbApply(); wsSet({tb: "full"}); pcSave({off: (pcPref().off || []).filter(k => k !== "ui-tabs" && k !== "ui-ribbon"), compact: true}); setSave({look: SET_DEF.look, condBtn: SET_DEF.condBtn}); }},
     {id: "panels", n: "Panels & layout", d: "left and right panels, bars, ready-made layouts", rows: [
       {t: "html", n: "Ready-made layouts", html: () => `<div class="presets">${Object.entries(PC_PRESETS).map(([k, p]) => `<button class="btn" data-setp="${k}"><b>${esc(p.n)}</b><small>${esc(p.d)}</small></button>`).join("")}</div>`,
         wire: paint => document.querySelectorAll("#dlgB [data-setp]").forEach(b => b.addEventListener("click", () => { const p = PC_PRESETS[b.dataset.setp]; S.lw = p.lw; S.rw = p.rw; S.lHide = p.lHide; S.rHide = p.rHide; pcSave({off: p.off.slice(), compact: p.compact}); setPanels(); toast("Layout: " + p.n, 1600); paint(); }))},
