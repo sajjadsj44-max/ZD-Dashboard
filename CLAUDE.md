@@ -42,6 +42,13 @@
   into `team-method.json` on the chat-archive branch, read back on start. A copy served anywhere else never sends (tests set
   localStorage `zdTakeoffLearnRelay` = `on`). `tools/test_takeoff_learn.js`; `python tools/learn_archive.py --selftest`.
 
+- Units: a project is in feet (ft, Sft, cft — the default) or metres (`P.proj.units` = `"m"`: m, m², m³), switched any time
+  from the units chip beside the scale chip, Settings › General or the palette. Everything is measured and stored in feet either
+  way; only what is shown, typed, printed and exported changes (each dimension rounded to the mm in metres). So new code that
+  prints a figure with its unit goes through the helpers by `fq` — `fq(v, unit)` + `uL(unit)`, `uLenT(ft)`, `uArea(sft)`,
+  `uVol(cft)`, `uLen(ft)` for a bare length — and reads a typed length with `uParse` (a bare number is in the project's units).
+  Text for the AI stays in feet. `tools/test_takeoff_units.js`.
+
 # Dashboard password
 
 - The dashboards' password is never saved in any browser and is asked every

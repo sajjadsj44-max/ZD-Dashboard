@@ -527,6 +527,7 @@ header .btn.sm{border-radius:8px}
 .cbar .btn{border-radius:8px}
 .cbar .btn.tg2.on{background:#eaf0ff;color:var(--blue);border-color:#b9c9e6}
 .cbar #scaleChip{border:1px solid var(--line)}
+.cbar #unitChip{border:1px solid var(--line);background:var(--panel,#fff);color:var(--navy,#12263f)}.cbar #unitChip.on{background:#e8f3ff;border-color:#2a78d6}
 
 /* left panel: tabs stay as they were (Conditions | Pages | Layers), filter, richer rows, properties below */
 .cfil{display:flex;flex-direction:column;gap:7px;padding:9px 12px 7px;border-bottom:1px solid var(--line);flex:none}
@@ -1558,6 +1559,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
       <button class="btn sm" id="bCompare" title="Overlay another revision in colour to see what changed">&#9681; Compare</button>
       <button class="btn sm" id="bTypical" title="Copy this page's takeoff to other pages (typical floors)">&#10697; Typical</button>
       <span class="chip bad" id="scaleChip" title="Page scale — click to set or check"><i></i><span>Scale not set</span></span>
+      <span class="chip" id="unitChip" title="Units of every figure — click to change: feet (ft, Sft, cft) ↔ metres (m, m², m³). Kept in feet underneath, so nothing changes but how it reads" style="display:none"><span>ft · Sft · cft</span></span>
     </div>
     <div id="panes" class="panes v"><div class="pane" id="pane0">
     <div id="stage" class="stg">
@@ -1621,7 +1623,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-31p"></script>
+<script type="module" src="takeoff.js?v=2026-10-31q"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
