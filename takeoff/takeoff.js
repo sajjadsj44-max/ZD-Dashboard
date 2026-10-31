@@ -20,9 +20,50 @@ const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&": "&am
 const r3 = v => Math.round(v * 1000) / 1000;                       // lengths: decimal feet, 3 dp
 const f3 = v => r3(v).toFixed(3);
 const f2 = v => (Math.round(v * 100) / 100).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});   // money (PKR), thresholds
-/* a quantity as shown: ft, Sft and cft to 3 dp (as the dimensions); Nos as a whole number (3 dp only if a formula gives a part) */
-const fq = (v, unit) => { v = +v || 0; const d = /^\s*nos?\.?\s*$/i.test(String(unit || "")) && Math.abs(v - Math.round(v)) < 1e-9 ? 0 : 3, x = Math.round(v * 10 ** d) / 10 ** d;
+/* a quantity as shown: ft, Sft and cft to 3 dp (as the dimensions); Nos as a whole number (3 dp only if a formula gives a part). With
+   its unit given, in the project's units (m, m², m³ in a project in metres) */
+const fq = (v, unit) => { v = uV(+v || 0, unit); const d = /^\s*nos?\.?\s*$/i.test(String(unit || "")) && Math.abs(v - Math.round(v)) < 1e-9 ? 0 : 3, x = Math.round(v * 10 ** d) / 10 ** d;
   return (x === 0 ? 0 : x).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d}); };
+/* the project's units (P.proj.units): feet — the house standard, ft, Sft, cft — or "m", metres — m, m², m³. Everything is measured
+   and kept in feet whichever is chosen; only what is shown, typed, printed and exported is read in metres, so the units can be
+   changed at any time and every figure follows: the labels on the drawing, the conditions, Properties, the sheet, the bill, the
+   reports and the exports. A rate follows its unit (PKR per m²), so every amount stays the same. */
+const U_M = {ft: ["m", 0.3048], Rft: ["m", 0.3048], rft: ["m", 0.3048], Sft: ["m²", 0.09290304], sft: ["m²", 0.09290304], cft: ["m³", 0.028316846592], Cft: ["m³", 0.028316846592]};
+const isM = () => !!(P.proj && P.proj.units === "m");
+const uV = (v, u) => isM() && U_M[u] ? v * U_M[u][1] : v;         // a figure in unit u, as shown
+const uL = u => isM() && U_M[u] ? U_M[u][0] : u;                    // unit u, as shown
+const uR = (rate, u) => isM() && U_M[u] ? rate / U_M[u][1] : rate;  // a rate per unit u, as shown (per m², per m³)
+const uX = (v, u, rate) => v == null ? null : !isM() || !U_M[u] ? v : rate ? +(v / U_M[u][1]).toFixed(6) : +(v * U_M[u][1]).toFixed(9);   // a figure for an Excel cell, exact
+const uQx = (cell, u) => isM() && U_M[u] ? "(" + cell + "/" + U_M[u][1] + ")" : cell;   // a quantity cell as its formulas read it (custom columns work in feet)
+const rD = v => isM() ? r3(v * 0.3048) / 0.3048 : r3(v), rA = v => isM() ? r3(v * 0.09290304) / 0.09290304 : r3(v);   // a dimension (an area) as printed: 3 dp of feet, or of metres
+const uLen = ft => f3(uV(ft, "ft")), uLenT = ft => uLen(ft) + " " + uL("ft"), uQL = ft => fq(ft, "ft") + " " + uL("ft");
+const uArea = sft => fq(sft, "Sft") + " " + uL("Sft"), uVol = cft => fq(cft, "cft") + " " + uL("cft");
+const uLen2 = ft => f2(uV(ft, "ft")) + " " + uL("ft"), uArea2 = sft => f2(uV(sft, "Sft")) + " " + uL("Sft"), uVol2 = cft => f2(uV(cft, "cft")) + " " + uL("cft");
+const dedU = c => c && c.unit === "cft" && c.type === "area" ? "cft" : "Sft";   // a condition's deduction threshold: cft for a slab in cft, else Sft (openings, voids)
+const uDedIn = (v, u) => String(+uV(+v || 0, u).toFixed(4));
+/* a length typed in a box -> feet: ft-in, or with its unit (230 mm, 3.05 m, 12'-6"); a bare number is in the project's units */
+const uParse = s => isM() && /^\s*(\d+(?:\.\d+)?|\.\d+)\s*$/.test(String(s == null ? "" : s)) ? +String(s).trim() / 0.3048 : parseFt(s);
+const uLenIn = ft => isM() ? String(+(+ft * 0.3048).toFixed(4)) : f3(+ft);   // a length in feet as written back in a box
+const uKeep = (s, ft) => { s = String(s || "").trim(); if (!s) return 0; return isM() && +ft && s === uLenIn(+ft) ? +ft : uParse(s); };   // a box left as shown keeps its figure (no rounding through metres)
+/* the scale both ways: 1:96 and 1" = 8' (on the page as it is printed) */
+const scaleBoth = k => { if (!(k > 0)) return ""; const N = 864 / k, ft = 72 / k; return "≈ 1:" + (Math.abs(N - Math.round(N)) < 0.05 ? Math.round(N) : N.toFixed(1)) + " · 1\" = " + (Math.abs(ft - Math.round(ft)) < 0.005 ? Math.round(ft) + "'" : ft.toFixed(3) + "'"); };
+const ptPerTxt = (k, d) => isM() ? "1 m = " + (k / 0.3048).toFixed(d) + " pt" : "1 ft = " + k.toFixed(d) + " pt";
+/* a known length typed with its unit (calibrate, verify): ft (or ft-in), m, mm, cm or in — ft in a project in feet, mm in one in metres */
+const LEN_U = [["ft", "ft (or ft-in 12'-6\")"], ["m", "m"], ["mm", "mm"], ["cm", "cm"], ["in", "in"]], LEN_F = {ft: 1, m: 1 / 0.3048, mm: 1 / 304.8, cm: 1 / 30.48, in: 1 / 12};
+const lenBox = label => { const u0 = isM() ? "mm" : "ft"; return `<div class="fg w2"><label>${esc(label)}</label><div style="display:flex;gap:6px"><input type="text" id="dlgLen" autocomplete="off" style="flex:1"><select id="dlgLenU" style="width:auto">${LEN_U.map(([v, t]) => `<option value="${v}"${v === u0 ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></div></div>`; };
+function lenRead(){   // -> {ft, t: as typed, with its unit} or {err}
+  const s = String($("dlgLen").value || "").trim(), u = $("dlgLenU") ? $("dlgLenU").value : "ft", bare = /^(\d+(?:\.\d+)?|\.\d+)$/.test(s);
+  const ft = !s ? NaN : bare ? +s * LEN_F[u] : parseFt(s);
+  if (!(ft > 0)) return {err: "Enter a length, e.g. " + (u === "mm" ? "3000" : u === "m" ? "3.05" : "12.5 or 12'-6\"") + " — or with its unit: 3000 mm, 3.05 m, 12'-6\""};
+  return {ft, t: bare ? s + " " + u : s};
+}
+/* the units changed: one step of the history (Ctrl+Z), every figure redrawn; the choice is also the next new project's */
+function setUnits(u){
+  u = u === "m" ? "m" : "ft"; pref("zdTakeoffUnits", u);
+  if (!P.proj) return;
+  if ((isM() ? "m" : "ft") !== u) mutate(() => { if (u === "m") P.proj.units = "m"; else delete P.proj.units; }, u === "m" ? "Units: metres" : "Units: feet");
+  toast(u === "m" ? "Units: metres — m, m², m³ everywhere (kept in feet underneath; switch back any time)" : "Units: feet — ft, Sft, cft everywhere", 3500);
+}
 const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const today = () => { const d = new Date(); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); };
@@ -368,7 +409,7 @@ const hiddenItem = it => { const c = cond(it.cond); return !!(c && c.hidden); };
 const SCHEMA = 2;
 function newProject(name){
   return {id: uid("P"), name: name || "Untitled takeoff", created: new Date().toISOString(), updated: new Date().toISOString(), v: SCHEMA,
-          files: [], scales: {}, conds: [], items: [], last: {}, viewports: {}, floors: {}, marks: [], sheets: {}, openings: [], cols: [], rot: {}, pageOrder: [], pageHide: []};
+          files: [], scales: {}, conds: [], items: [], last: {}, viewports: {}, floors: {}, marks: [], sheets: {}, openings: [], cols: [], rot: {}, pageOrder: [], pageHide: [], ...(pref("zdTakeoffUnits") === "m" ? {units: "m"} : {})};
 }
 /* rep (optional): an array that gets one line per repair. A project file comes from anywhere (a colleague, an old
    version, a damaged disk): values the app draws or multiplies are checked here — a colour that is not a colour (it is
@@ -524,7 +565,7 @@ if (TABCH) TABCH.onmessage = e => { const m = e.data || {}; if (!P.proj || m.tab
   if (m.t === "open") tabSay({t: "here", id: P.proj.id});
   S.otherTab = m.t === "saved" ? "changed in another tab or window at " + dmyHm(m.at).slice(-5) : "also open in another tab or window";
   renderSheet(); };
-const UNDO_KEYS = ["conds", "items", "scales", "viewports", "floors", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd", "bbImp", "cols", "rot", "pageOrder", "pageHide", "flShare"];
+const UNDO_KEYS = ["units", "conds", "items", "scales", "viewports", "floors", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd", "bbImp", "cols", "rot", "pageOrder", "pageHide", "flShare"];
 function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 /* every change goes through mutate(): the project before it is kept for Ctrl+Z (200 steps), with a name for the
    undo / redo buttons ("Undo: Move 3 measurements") */
@@ -581,7 +622,7 @@ function draftBtns(){
 }
 function undo(){ if (!S.undo.length) return; const e = undoEntry(S.undo.pop()); S.redo.push({js: snapshot(), label: e.label}); restore(e.js); toast("Undone" + (e.label ? ": " + e.label : ""), 1600); }
 function redo(){ if (!S.redo.length) return; const e = undoEntry(S.redo.pop()); S.undo.push({js: snapshot(), label: e.label}); restore(e.js); toast("Redone" + (e.label ? ": " + e.label : ""), 1600); }
-function restore(js){ const o = JSON.parse(js), bb0 = P.proj.bbImp || {}, rt0 = Object.assign({}, P.proj.rot); UNDO_KEYS.forEach(k => { if (o[k] !== undefined) P.proj[k] = o[k]; }); migrate(P.proj);
+function restore(js){ const o = JSON.parse(js), bb0 = P.proj.bbImp || {}, rt0 = Object.assign({}, P.proj.rot); UNDO_KEYS.forEach(k => { if (o[k] !== undefined) P.proj[k] = o[k]; }); if (o.units === undefined) delete P.proj.units; migrate(P.proj);
   const rt1 = P.proj.rot || {}, rtK = Object.keys(Object.assign({}, rt0, rt1)).filter(k => (rt0[k] || 0) !== (rt1[k] || 0)); if (rtK.length) rotDrop(rtK);   // a page's turn taken back: read again at its turn
   bbRedraw(Object.keys(Object.assign({}, bb0, P.proj.bbImp)).filter(id => !!(bb0[id] || {}).off !== !!(P.proj.bbImp[id] || {}).off));   // a Bluebeam import taken back (or redone): the PDF's own markups shown again
   if (S.sel && !P.proj.items.some(i => i.id === S.sel)) { S.sel = null; S.selPt = -1; }
@@ -1195,10 +1236,10 @@ async function revisionDiff(){
     const qtyOf = it => { const k = qScale(it); return k ? rowsOf(it, k).reduce((t, r) => t + r.qty, 0) : 0; };
     const body = `<p>This page against <b>${esc(cmp.name)}</b>: <b style="color:#2a52d6">${nAdd}</b> cells only on this page, <b style="color:#d03b3b">${nRem}</b> only on the other (${pct} % of the drawn cells changed).</p>
       ${flagged.length ? `<p style="margin-top:8px"><b>${flagged.length}</b> of ${items.length} measurements sit on changed drawing — check them against the new revision:</p>
-        <div style="max-height:260px;overflow:auto;margin-top:4px">${flagged.map((f, i) => `<label class="pk" style="display:block"><input type="checkbox" data-df="${i}" checked> ${name(f.it)} <span class="small">· ${fq(qtyOf(f.it), cond(f.it.cond).unit)} ${esc(cond(f.it.cond).unit)} · ${Math.round(100 * f.frac)} % of the drawing under it changed</span></label>`).join("")}</div>`
+        <div style="max-height:260px;overflow:auto;margin-top:4px">${flagged.map((f, i) => `<label class="pk" style="display:block"><input type="checkbox" data-df="${i}" checked> ${name(f.it)} <span class="small">· ${fq(qtyOf(f.it), cond(f.it.cond).unit)} ${esc(uL(cond(f.it.cond).unit))} · ${Math.round(100 * f.frac)} % of the drawing under it changed</span></label>`).join("")}</div>`
         : `<p style="margin-top:8px;color:var(--green)"><b>No measurement sits on changed drawing.</b> Their quantities should stand.</p>`}
       ${clusters.length ? `<p style="margin-top:8px"><b>${clusters.length}</b> changed place${clusters.length > 1 ? "s" : ""} with no measurement near ${clusters.length > 1 ? "them" : "it"} (new or removed work not yet measured?)${k0 ? ":" : "."}</p>
-        <div class="small" style="max-height:110px;overflow:auto">${clusters.slice(0, 10).map(c => { const k = hereScale([c.box[0], c.box[1]]); return "• " + (k ? "near x " + f3((c.box[0] + c.box[2]) / 2 / k) + ", y " + f3((c.box[1] + c.box[3]) / 2 / k) + " ft, " + f3((c.box[2] - c.box[0]) / k) + " × " + f3((c.box[3] - c.box[1]) / k) + " ft" : "at (" + Math.round(c.box[0]) + ", " + Math.round(c.box[1]) + ") pt") + " · " + c.n + " cells"; }).join("<br>")}</div>` : ""}
+        <div class="small" style="max-height:110px;overflow:auto">${clusters.slice(0, 10).map(c => { const k = hereScale([c.box[0], c.box[1]]); return "• " + (k ? "near x " + f3((c.box[0] + c.box[2]) / 2 / k) + ", y " + uLenT((c.box[1] + c.box[3]) / 2 / k) + ", " + uLen((c.box[2] - c.box[0]) / k) + " × " + uLenT((c.box[3] - c.box[1]) / k) : "at (" + Math.round(c.box[0]) + ", " + Math.round(c.box[1]) + ") pt") + " · " + c.n + " cells"; }).join("<br>")}</div>` : ""}
       <p class="small" style="margin-top:8px">A flagged measurement is put back in the review queue (✓ Check when it is right for the new revision). Nothing is re-measured.</p>`;
     const v = await ask("Revision diff", body, flagged.length ? "Flag for review" : "", () => ({sel: [...document.querySelectorAll("#dlgB [data-df]:checked")].map(x => +x.dataset.df)}));
     if (!v || !flagged.length) return;
@@ -1858,7 +1899,7 @@ function bbReport(f, rep, made, skip, scaleSay, o){
     if (Math.abs(Math.abs(r.mine) - Math.abs(b.v)) > tol) g.bad.push((r.a.label ? r.a.label + ": " : "") + fq(r.mine, r.c.unit) + " here, " + r.a.contents.split(/[\r\n]+/).pop().trim() + " in Bluebeam" + (r.k && r.ks && Math.abs(r.k - r.ks) / r.k > 0.002 ? " (measured there at " + r.k.toFixed(3) + " pt/ft, here " + r.ks.toFixed(3) + ")" : "")); });
   const G = [...by.values()], bad = G.reduce((s, g) => s + g.bad.length, 0), checked = G.reduce((s, g) => s + g.bbN, 0);
   const sk = Object.entries(skip).map(([k, v]) => v + " " + k.toLowerCase() + (v > 1 ? "s" : "")).join(", ");
-  const row = g => `<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${esc(g.c.color)};margin-right:6px"></span>${esc(g.c.name)}</td><td>${esc(g.c.type)}</td><td class="n">${g.n}</td><td class="n">${fq(g.mine, g.c.unit)} ${esc(g.c.unit)}</td><td class="n">${g.c.type === "count" ? g.bb : g.bbN ? fq(g.bb, g.c.unit) : "—"}</td><td style="font-weight:700;color:${g.bad.length ? "var(--red)" : "var(--green)"}">${g.bad.length ? g.bad.length + " differ" : g.bbN ? "PASS" : "—"}</td></tr>${g.bad.length ? `<tr><td colspan="6" class="ds">${g.bad.slice(0, 8).map(esc).join("<br>")}${g.bad.length > 8 ? "<br>…" : ""}</td></tr>` : ""}`;
+  const row = g => `<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${esc(g.c.color)};margin-right:6px"></span>${esc(g.c.name)}</td><td>${esc(g.c.type)}</td><td class="n">${g.n}</td><td class="n">${fq(g.mine, g.c.unit)} ${esc(uL(g.c.unit))}</td><td class="n">${g.c.type === "count" ? g.bb : g.bbN ? fq(g.bb, g.c.unit) : "—"}</td><td style="font-weight:700;color:${g.bad.length ? "var(--red)" : "var(--green)"}">${g.bad.length ? g.bad.length + " differ" : g.bbN ? "PASS" : "—"}</td></tr>${g.bad.length ? `<tr><td colspan="6" class="ds">${g.bad.slice(0, 8).map(esc).join("<br>")}${g.bad.length > 8 ? "<br>…" : ""}</td></tr>` : ""}`;
   const head = (made.items ? made.items + " measurement" + (made.items > 1 ? "s" : "") : "") + (made.items && made.marks ? " and " : "") + (made.marks ? made.marks + " markup" + (made.marks > 1 ? "s" : "") : "");
   toast("Bluebeam: " + (head || "nothing") + " imported from " + f.name + (made.conds ? " — " + made.conds + " new condition" + (made.conds > 1 ? "s" : "") : ""), 5000);
   if (!G.length && !sk && o.auto) return {n: made.items + made.marks};
@@ -1889,8 +1930,8 @@ function cornerDeg(a, b, c){   // the angle at b between a and c, 0–180°
 function measText(m, k){
   if (m.t === "angle") return m.length >= 3 ? "∠ " + cornerDeg(m[0], m[1], m[2]).toFixed(1) + "°" : "";
   if (m.t === "radius") { if (m.length < 2) return ""; const r = dist(m[0], m[1]);
-    return k ? "R " + f3(r / k) + " ft · Ø " + f3(2 * r / k) + " ft · circumference " + f3(2 * Math.PI * r / k) + " ft · area " + fq(Math.PI * r * r / k / k) + " Sft" : "R " + r.toFixed(2) + " pt — set the scale (K)"; }
-  return k ? f3(polyLen(m) / k) + " ft" : "";
+    return k ? "R " + uLenT(r / k) + " · Ø " + uLenT(2 * r / k) + " · circumference " + uLenT(2 * Math.PI * r / k) + " · area " + uArea(Math.PI * r * r / k / k) : "R " + r.toFixed(2) + " pt — set the scale (K)"; }
+  return k ? uLenT(polyLen(m) / k) : "";
 }
 function snapAt(q, ex){   // ex(item, i): points of the drawing's own takeoff to leave out (what is being dragged)
   const g = S.geo[S.key], r = SNAP_PX / S.view.s;
@@ -2052,7 +2093,7 @@ async function typeDialog(){
   const body = `<p>This page looks like a <b>${esc(h.d)}</b> sheet${h.kind ? " — <b>" + esc(h.kind) + "</b>" : ""} (${Math.round(h.conf * 100)} % sure).</p>
     <p class="small">Seen from: ${h.why.map(esc).join("; ")}.</p>
     <p style="margin-top:8px"><b>Add these items to measure</b> <span class="small">(heights and thicknesses are left for you to enter)</span></p>
-    ${specs.map((c, i) => `<label class="pk" style="display:block"><input type="checkbox" data-tc="${i}"${have.has(c.name.toLowerCase()) ? " disabled" : " checked"}> ${esc(c.name)} <span class="small">· ${esc(c.type)} · ${esc(c.unit)}${have.has(c.name.toLowerCase()) ? " · already there" : ""}</span></label>`).join("")}
+    ${specs.map((c, i) => `<label class="pk" style="display:block"><input type="checkbox" data-tc="${i}"${have.has(c.name.toLowerCase()) ? " disabled" : " checked"}> ${esc(c.name)} <span class="small">· ${esc(c.type)} · ${esc(uL(c.unit))}${have.has(c.name.toLowerCase()) ? " · already there" : ""}</span></label>`).join("")}
     ${sh.disc ? "" : `<label class="pk" style="display:block;margin-top:8px"><input type="checkbox" id="tcDisc" checked> Save “${esc(h.d)}” as this sheet's discipline</label>`}`;
   const v = await ask("Set up for this sheet type", body, "Add", () => ({sel: [...document.querySelectorAll("#dlgB [data-tc]:checked")].map(x => +x.dataset.tc), disc: !!($("tcDisc") && $("tcDisc").checked)}));
   P.proj.dtype = P.proj.dtype || {}; P.proj.dtype[h.key] = {d: h.d, done: true};
@@ -2809,7 +2850,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
       }
     } else {   // narrower than the gap all over (a passage): the thin-line fill alone, if it stays closed
       const A = sa >= 0 ? fill(thin, sa, true) : null;
-      if (!A) return {err: "This space is narrower than the door gap (" + f3(o.gap) + " ft) and is not closed — lower ‘Close gaps’ in the auto-area settings (⚙), or draw it.", passage};
+      if (!A) return {err: "This space is narrower than the door gap (" + uLenT(o.gap) + ") and is not closed — lower ‘Close gaps’ in the auto-area settings (⚙), or draw it.", passage};
       m = A.m;
     }
     await breathe();
@@ -2858,7 +2899,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
     if (!warn && g.segs.length && ids.length) { const sup = lineSupport(Q, g, k); if (sup < 0.75) warn = "only " + Math.round(sup * 100) + " % of the outline follows the drawing's lines — something (text, a watermark, a gap) may have broken a wall; check it"; }
     return {pts: Q, rect: !!sq, passage, partial, holes, warn, wet: wetN};
   }
-  return {err: "The space leaks — an opening wider than the door gap (" + f3(autoOpt().gap) + " ft) joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it."};
+  return {err: "The space leaks — an opening wider than the door gap (" + uLenT(autoOpt().gap) + ") joins it to the outside. Raise ‘Close gaps’ (⚙ next to Auto area) or draw it."};
 }
 /* a scan has no vector lines to snap to: the trace stops at the inside edge of the ink. Each side is moved out to the middle of
    the line it lies against (half the line's width, measured across it), as a vector outline lies on the line itself. Solid
@@ -2948,11 +2989,11 @@ async function autoAt(p, nc){   // nc: a new area condition, added with the outl
       const ans = await autoPreview(res, p); if (!ans) return draw();
       if (ans === "ok") break;
       const g0 = res.gap || autoOpt().gap, g2 = ans === "tight" ? Math.max(0.5, g0 * 0.75) : Math.min(29, g0 * 1.5);
-      busy("Tracing again — openings closed up to " + f3(g2) + " ft…"); S.autoBusy = true; await new Promise(r => setTimeout(r, 20));
+      busy("Tracing again — openings closed up to " + uLenT(g2) + "…"); S.autoBusy = true; await new Promise(r => setTimeout(r, 20));
       let r2; try { r2 = squareTrace(await autoRoom(p, {gap: g2}), p); } catch (e) { r2 = {err: e.message || String(e)}; }   // (squared like the first outline)
       busy(""); S.autoBusy = false;
       if (S.key !== key) return toast("The page changed — nothing added", 3000);
-      if (r2.err) toast("With openings up to " + f3(g2) + " ft: " + r2.err + " — the last outline is kept", 5000); else { r2.gap = g2; r2.note = "openings closed up to " + f3(g2) + " ft"; res = r2; }
+      if (r2.err) toast("With openings up to " + uLenT(g2) + ": " + r2.err + " — the last outline is kept", 5000); else { r2.gap = g2; r2.note = "openings closed up to " + uLenT(g2); res = r2; }
     }
   }
   const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "", kk = hereScale(p);
@@ -2965,21 +3006,21 @@ async function autoAt(p, nc){   // nc: a new area condition, added with the outl
     (res.holes || []).forEach(h => P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: h.pts, nos: nn, label: h.name + " (void in " + (nm || "room") + ")", det: {how: "auto-void", of: id, src: det.src, gap: det.gap, pts0: h.pts.map(q => q.slice()), a0: kk ? +(polyArea(h.pts) / kk / kk).toFixed(4) : null, at: det.at, flag: ""}})); }, "Auto area");
   if (nc) { S.cond = nc.id; renderConds(); }
   S.sel = id; draw(); renderSheet(); renderProps();   // (Properties shows the room just traced, which its edits go to)
-  const k = hereScale(p), per = " · perimeter " + f3(polyLen(res.pts, true) / k) + " ft";   // the area and its perimeter
-  if (res.short && !res.leak) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + per + " — " + res.short + ".", 9000);
+  const k = hereScale(p), per = " · perimeter " + uLenT(polyLen(res.pts, true) / k);   // the area and its perimeter
+  if (res.short && !res.leak) return toast("⚠ " + (nm || "Room") + " " + uArea(polyArea(res.pts) / k / k) + per + " — " + res.short + ".", 9000);
   if (res.leak) { if (!autoOpt().show) { P.proj.auto = Object.assign({}, P.proj.auto || {}, {show: true}); save(); }
-    return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + per + " — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
-  if (res.warn) return toast("⚠ " + (nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + per + " — " + res.warn + ".", 9000);
-  toast((nm || "Room") + " " + fq(polyArea(res.pts) / k / k) + " Sft" + per + ((res.holes || []).length ? " less " + res.holes.map(h => h.name + " " + fq(polyArea(h.pts) / k / k)).join(", ") + " Sft (deducted)" : "") + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
+    return toast("⚠ " + (nm || "Room") + " " + uArea(polyArea(res.pts) / k / k) + per + " — it still leaks (" + res.leak + "). The pink lines show the walls found: draw a Fence (orange) across the gap where it escapes, Ctrl+Z, and click again.", 9000); }
+  if (res.warn) return toast("⚠ " + (nm || "Room") + " " + uArea(polyArea(res.pts) / k / k) + per + " — " + res.warn + ".", 9000);
+  toast((nm || "Room") + " " + uArea(polyArea(res.pts) / k / k) + per + ((res.holes || []).length ? " less " + res.holes.map(h => h.name + " " + fq(polyArea(h.pts) / k / k, "Sft")).join(", ") + " " + uL("Sft") + " (deducted)" : "") + (res.note ? " · " + res.note : "") + (res.rect ? "" : " (not square — check the outline)") + " — Select (V) and drag points to adjust", 4200);
 }
 /* Preview before adding (Auto area settings ⚙ "Show the outline before adding it", or the agent rule "show me the boundary
    before accepting"): the outline is drawn dashed orange with its area; Accept (Enter), Tighter / Wider door gap, Cancel (Esc) */
 function autoPreview(res, p){
   return new Promise(done => {
-    const k = hereScale(p), a = k ? fq(polyArea(res.pts) / k / k) + " Sft" : "", nm = roomNameAt(res.pts) || "Room";
+    const k = hereScale(p), a = k ? uArea(polyArea(res.pts) / k / k) : "", nm = roomNameAt(res.pts) || "Room";
     S.autoPrev = {pts: res.pts, holes: res.holes || [], key: S.key}; draw();
     let bar = $("autoPrevBar"); if (!bar) { bar = document.createElement("div"); bar.id = "autoPrevBar"; document.body.appendChild(bar); }
-    bar.innerHTML = `<b>${esc(nm)} — ${esc(a)}</b><span class="small">${esc([res.note, (res.holes || []).length ? res.holes.length + " void" + (res.holes.length > 1 ? "s" : "") + " deducted (" + res.holes.map(h => h.name).join(", ") + ")" : "", res.leak ? "⚠ leaks: " + res.leak : res.short ? "⚠ " + res.short : res.warn ? "⚠ " + res.warn : res.rect ? "" : "not square"].filter(Boolean).join(" · ") || "door gap " + f3(res.gap || autoOpt().gap) + " ft")}</span>
+    bar.innerHTML = `<b>${esc(nm)} — ${esc(a)}</b><span class="small">${esc([res.note, (res.holes || []).length ? res.holes.length + " void" + (res.holes.length > 1 ? "s" : "") + " deducted (" + res.holes.map(h => h.name).join(", ") + ")" : "", res.leak ? "⚠ leaks: " + res.leak : res.short ? "⚠ " + res.short : res.warn ? "⚠ " + res.warn : res.rect ? "" : "not square"].filter(Boolean).join(" · ") || "door gap " + uLenT(res.gap || autoOpt().gap))}</span>
       <button class="btn pri sm" data-ap="ok">Accept <kbd>Enter</kbd></button><button class="btn sm" data-ap="tight" title="Trace again closing only narrower openings — when the outline ran out through a gap that is not a door">Tighter gap</button><button class="btn sm" data-ap="wide" title="Trace again closing wider openings — when the outline leaked into the next room">Wider gap</button><button class="btn sm" data-ap="">Cancel <kbd>Esc</kbd></button>`;
     bar.classList.add("on");
     const end = v => { bar.classList.remove("on"); S.autoPrev = null; document.removeEventListener("keydown", key, true); bar.onclick = null; draw(); done(v); };
@@ -2993,8 +3034,8 @@ const detEdited = it => !!(it.det && it.det.pts0 && (it.det.pts0.length !== it.p
 function detHtml(it, k){   // the properties panel line for an outline found by Auto area: how, the original outline, review flag
   const d = it.det; if (!d) return "";
   const a0 = k && d.pts0 ? polyArea(d.pts0) / k / k : d.a0, a1 = k ? polyArea(it.pts) / k / k : null, ed = detEdited(it);
-  return `<div class="row detrow" style="margin-top:6px;gap:6px;align-items:center"><span class="small" style="flex:1;min-width:200px"><b>${d.how === "trace" ? "Vector trace" : "Auto area"}</b> · from the ${esc(d.src)}, ${d.how === "trace" ? "openings closed up to" : "door gap"} ${f3(d.gap)} ft · ${esc(dmy(d.at))}${d.note ? " · " + esc(d.note) : ""}
-    · detected <b>${a0 != null ? fq(a0) : "?"} Sft</b>${ed ? ` → now <b>${a1 != null ? fq(a1) : "?"} Sft</b> (edited${a0 && a1 != null ? ", " + (a1 >= a0 ? "+" : "") + fq(a1 - a0) + " Sft" : ""})` : " (as detected)"}${d.flag ? ` · <span style="color:#b45309">⚠ ${esc(d.flag)}</span>` : ""}</span>
+  return `<div class="row detrow" style="margin-top:6px;gap:6px;align-items:center"><span class="small" style="flex:1;min-width:200px"><b>${d.how === "trace" ? "Vector trace" : "Auto area"}</b> · from the ${esc(d.src)}, ${d.how === "trace" ? "openings closed up to" : "door gap"} ${uLenT(d.gap)} · ${esc(dmy(d.at))}${d.note ? " · " + esc(d.note) : ""}
+    · detected <b>${a0 != null ? fq(a0) : "?"} Sft</b>${ed ? ` → now <b>${a1 != null ? fq(a1) : "?"} Sft</b> (edited${a0 && a1 != null ? ", " + (a1 >= a0 ? "+" : "") + uArea(a1 - a0) : ""})` : " (as detected)"}${d.flag ? ` · <span style="color:#b45309">⚠ ${esc(d.flag)}</span>` : ""}</span>
     <button class="btn sm${S.detShow ? " on" : ""}" data-act="detShow" title="Show the outline as Auto area found it (grey dashes) next to the current one">${S.detShow ? "Hide" : "Show"} detected</button>${ed && !it.locked ? '<button class="btn sm" data-act="detRestore" title="Put the outline back as Auto area found it (Ctrl+Z undoes)">Restore detected</button>' : ""}</div>`;
 }
 /* Leak guard: a room's outline must not swallow another room's name, nor grow far past its own written size.
@@ -3004,16 +3045,16 @@ async function autoRoomRetried(p){   // the trace retried with wider gaps / dash
   // a passage about as narrow as the door gap (a 4 ft corridor, gap 4 ft): traced again closing openings just under its width
   // (doorways on it close, it does not), when the first trace failed or took in only a piece of it
   if (first.passage && (first.err || first.partial)) {
-    for (const f of [0.9, 0.8, 0.7, 0.6]) { const g2 = Math.max(1.2, f * autoOpt().gap); busy("A passage as narrow as the door gap — closing openings up to " + f3(g2) + " ft…");
-      const r2 = await autoRoom(p, {gap: g2}); if (!r2.err && !r2.partial) { r2.note = "passage narrower than the door gap: openings closed up to " + f3(g2) + " ft"; first = r2; break; } }
+    for (const f of [0.9, 0.8, 0.7, 0.6]) { const g2 = Math.max(1.2, f * autoOpt().gap); busy("A passage as narrow as the door gap — closing openings up to " + uLenT(g2) + "…");
+      const r2 = await autoRoom(p, {gap: g2}); if (!r2.err && !r2.partial) { r2.note = "passage narrower than the door gap: openings closed up to " + uLenT(g2); first = r2; break; } }
     if (!first.err && first.partial) first.short = "only part of a passage narrower than the door gap was found — Ctrl+Z, set ‘Close gaps’ (⚙) below the passage's width and click again";
   }
   if (first.err && !first.passage) {   // no closed room found (a door a little wider than the setting): try again closing just a little wider — never a big hole, which is a real opening
     const o0 = autoOpt();
     for (const f of [1.25, 1.5]) {
-      const g2 = Math.min(29, o0.gap * f); busy("No closed room — closing openings up to " + f3(g2) + " ft…"); await new Promise(r => setTimeout(r, 10));
+      const g2 = Math.min(29, o0.gap * f); busy("No closed room — closing openings up to " + uLenT(g2) + "…"); await new Promise(r => setTimeout(r, 10));
       const r2 = await autoRoom(p, {gap: g2});
-      if (!r2.err) { r2.note = "a door wider than the setting: openings up to " + f3(g2) + " ft closed — check the outline"; first = r2; break; }
+      if (!r2.err) { r2.note = "a door wider than the setting: openings up to " + uLenT(g2) + " closed — check the outline"; first = r2; break; }
     }
   }
   if (first.err) return first;
@@ -3024,14 +3065,14 @@ async function autoRoomRetried(p){   // the trace retried with wider gaps / dash
     const own = inn.length === 1 ? inn[0] : null, big = own && own.sft && a > own.sft * 1.25, small = own && own.sft && a < own.sft * 0.9;
     return {n: inn.length, bad: inn.length > 1 || big, small, own, names: inn.map(m => m.name), a}; };
   let j = judge(first);
-  if (!j.bad && j.small && !first.short) first.short = "smaller than the size written in it (" + j.own.size + " = " + fq(j.own.sft) + " Sft, traced " + fq(j.a) + " Sft) — furniture or fittings in the wall pen may cut it: Pick a wall (⚙) or adjust the outline";
+  if (!j.bad && j.small && !first.short) first.short = "smaller than the size written in it (" + j.own.size + " = " + uArea(j.own.sft) + ", traced " + uArea(j.a) + ") — furniture or fittings in the wall pen may cut it: Pick a wall (⚙) or adjust the outline";
   if (!j.bad) return first;
   let best = {res: first, j};
   for (const over of [{dashBound: true}, {dashBound: true, gap: o.gap * 1.5}, {dashBound: true, gap: o.gap * 2, pocket: Math.max(o.pocket || 0, 1.5)}, {dashBound: true, gap: o.gap * 3, pocket: Math.max(o.pocket || 0, 2)}]) {
     busy("Room leaked into " + j.names.filter(Boolean).slice(0, 3).join(", ") + " — closing wider gaps…"); await new Promise(r => setTimeout(r, 10));
     const r2 = await autoRoom(p, over); if (r2.err) continue;
     const j2 = judge(r2);
-    if (!j2.bad && j2.n >= 1) { r2.note = "leak closed (gap " + f3(over.gap || o.gap) + " ft" + (over.dashBound ? ", dashed lines as walls" : "") + ")"; return r2; }
+    if (!j2.bad && j2.n >= 1) { r2.note = "leak closed (gap " + uLenT(over.gap || o.gap) + (over.dashBound ? ", dashed lines as walls" : "") + ")"; return r2; }
     if (j2.n >= 1 && (j2.n < best.j.n || (j2.n === best.j.n && j2.a < best.j.a))) best = {res: r2, j: j2};
   }
   best.res.leak = best.j.n > 1 ? "takes in " + best.j.names.join(" + ") : "much bigger than its written size";
@@ -3223,7 +3264,7 @@ async function traceFloorTakeoff(o){
     s.holes.forEach(H0 => put(code, cw(H0), s.sid + " column / shaft inside " + s.names[0], {kind: "ded", room: nm, zone: zoneOf(s), st: s.status})); });
   T.thresholds.forEach((t, i) => { if (!here(t)) return; const a = T.spaces[t.between[0]], b = T.spaces[t.between[1]], w = Math.max(t.bw, t.bh);
     t.outer.forEach(R0 => put("L-04T", cw(R0), "TH-" + String(i + 1).padStart(3, "0") + " THRESHOLD " + apFtIn(w, 2) + " (" + (a ? a.names[0] : "?") + " | " + (b ? b.names[0] : "?") + ")", {room: "Threshold", zone: a && a.unit ? "Unit " + a.unit : "Core / common", st: t.status, note: (t.notes || []).join("; ") || "opening between two rooms, closed on both wall faces"})); });
-  T.ducts.filter(here).forEach((d, i) => put("L-08", cw(d.outer[0]), "DU-" + String(i + 1).padStart(2, "0") + " DUCT / SHAFT " + f2(d.sft) + " Sft", {room: "Duct", zone: "Ducts", st: "walls", note: "duct box as drawn (in or against walls)"}));
+  T.ducts.filter(here).forEach((d, i) => put("L-08", cw(d.outer[0]), "DU-" + String(i + 1).padStart(2, "0") + " DUCT / SHAFT " + uArea2(d.sft), {room: "Duct", zone: "Ducts", st: "walls", note: "duct box as drawn (in or against walls)"}));
   let wr = 0, wo = 0, cr = 0, co = 0;
   sp.filter(s => s.edges && s.edges.length).forEach(s => {
     const bath = s.kind === "bath", code = bath ? "L-05" : "L-06", dcode = bath ? "L-05D" : "L-06D";
@@ -3234,10 +3275,10 @@ async function traceFloorTakeoff(o){
     if (chains.length > 1 && dist(chains[chains.length - 1][chains[chains.length - 1].length - 1].q, chains[0][0].p) < 0.05) chains[0] = chains.pop().concat(chains[0]);
     const st = s.status === "manual" ? "walls" : s.status, nm = nameOf(s);
     chains.forEach(ch => { const closed = chains.length === 1 && dist(ch[ch.length - 1].q, ch[0].p) < 0.05, g = ch.reduce((x, e) => x + e.L, 0), op = ch.reduce((x, e) => x + e.open.reduce((y, [u, v]) => y + v - u, 0), 0);
-      put(code, ch.map(e => e.p).concat(closed ? [] : [ch[ch.length - 1].q]), s.sid + " " + nm + " — wall face, " + ch.length + " segments", {room: nm, zone: zoneOf(s), st, closed, note: (bath ? "internal finished face of the walls round the room" : "face of the walls along the corridor (zone divisions left out)") + ", gross " + f3(g) + " ft; openings on it " + f3(op) + " ft (" + dcode + ")"});
+      put(code, ch.map(e => e.p).concat(closed ? [] : [ch[ch.length - 1].q]), s.sid + " " + nm + " — wall face, " + ch.length + " segments", {room: nm, zone: zoneOf(s), st, closed, note: (bath ? "internal finished face of the walls round the room" : "face of the walls along the corridor (zone divisions left out)") + ", gross " + uLenT(g) + "; openings on it " + uLenT(op) + " (" + dcode + ")"});
       if (bath) { wr += g; wo += op; } else { cr += g; co += op; } });
     E.forEach((e, j) => e.open.forEach(([u, v], m) => { const L0 = e.L * k, ux = (e.q[0] - e.p[0]) / L0, uy = (e.q[1] - e.p[1]) / L0;
-      put(dcode, [[e.p[0] + ux * u * k, e.p[1] + uy * u * k], [e.p[0] + ux * v * k, e.p[1] + uy * v * k]], s.sid + "-W" + String(j + 1).padStart(2, "0") + " opening " + (m + 1) + " (" + f2(v - u) + " ft)", {room: nm, zone: zoneOf(s), st: "walls", note: "opening along this wall face (a door or an open side)"}); }));
+      put(dcode, [[e.p[0] + ux * u * k, e.p[1] + uy * u * k], [e.p[0] + ux * v * k, e.p[1] + uy * v * k]], s.sid + "-W" + String(j + 1).padStart(2, "0") + " opening " + (m + 1) + " (" + uLen2(v - u) + ")", {room: nm, zone: zoneOf(s), st: "walls", note: "opening along this wall face (a door or an open side)"}); }));
     if (bath && s.centre && s.centre.length > 2) put("L-07", s.centre, s.sid + " " + nm + " — wall centreline", {room: nm, zone: zoneOf(s), st: "walls", closed: true, note: "each wall face moved out by half its measured thickness; reference only, not billable"}); });
   (T.splits || []).forEach(x => put("L-09", x.line, "Split line (no wall on the drawing): " + x.what, {zone: "Corrections", st: "manual", note: "a room open to the one it is named with, split on the written size where the walls fit it"}));
   (T.repairs || []).forEach(x => put("L-09", [[x[0], x[1]], [x[2], x[3]]], "Wall face carried across a duct box (" + f2(Math.hypot(x[2] - x[0], x[3] - x[1]) / k * 12) + "\")", {zone: "Corrections", st: "manual", note: "the drawing leaves the wall face out where a duct box meets the wall; the face was carried straight across so the room stays closed"}));
@@ -3260,12 +3301,12 @@ async function agentTraceFloor(){   // the agent's "trace the whole floor": the 
   aiLog("bot", "Reading the whole floor from the drawing's wall layers…");
   const r = await traceFloorTakeoff({}); if (r.err) { aiLog("err", esc(r.err)); return {error: r.err}; }
   const x = r.ok;
-  aiLog("bot", `Traced <b>${x.spaces}</b> spaces and <b>${x.thresholds}</b> door thresholds in ${f2(x.ms / 1000)} s${x.replaced ? ` (replacing ${x.replaced} from the last trace)` : ""}:<br>floor <b>${fq(x.overall_sft)} Sft</b> · rooms <b>${fq(x.rooms_sft)}</b> · kitchen + lounge <b>${fq(x.kitchen_lounge_sft)}</b> · passages / entrances ${fq(x.passages_sft)} · corridors <b>${fq(x.corridor_sft)}</b> · baths <b>${fq(x.washroom_sft)}</b> · balconies <b>${fq(x.balcony_sft)}</b> · thresholds ${fq(x.thresholds_sft)} Sft<br>floor tile (rooms, kitchen + lounge, passages, corridors) <b>${fq(x.floor_tile_sft)} Sft</b><br>washroom walls ${f2(x.washroom_walls_ft)} ft (openings ${f2(x.washroom_openings_ft)} ft) · corridor walls ${f2(x.corridor_walls_ft)} ft<br>${x.verified_dims} match their written size, ${x.verified_walls} follow the drawn walls, ${x.manual} split on a written size${x.review ? `, <b>${x.review} to review</b>: ${x.to_review.slice(0, 8).map(esc).join("; ")}` : ""}.`);
+  aiLog("bot", `Traced <b>${x.spaces}</b> spaces and <b>${x.thresholds}</b> door thresholds in ${f2(x.ms / 1000)} s${x.replaced ? ` (replacing ${x.replaced} from the last trace)` : ""}:<br>floor <b>${uArea(x.overall_sft)}</b> · rooms <b>${fq(x.rooms_sft)}</b> · kitchen + lounge <b>${fq(x.kitchen_lounge_sft)}</b> · passages / entrances ${fq(x.passages_sft)} · corridors <b>${fq(x.corridor_sft)}</b> · baths <b>${fq(x.washroom_sft)}</b> · balconies <b>${fq(x.balcony_sft)}</b> · thresholds ${uArea(x.thresholds_sft)}<br>floor tile (rooms, kitchen + lounge, passages, corridors) <b>${uArea(x.floor_tile_sft)}</b><br>washroom walls ${uLen2(x.washroom_walls_ft)} (openings ${uLen2(x.washroom_openings_ft)}) · corridor walls ${uLen2(x.corridor_walls_ft)}<br>${x.verified_dims} match their written size, ${x.verified_walls} follow the drawn walls, ${x.manual} split on a written size${x.review ? `, <b>${x.review} to review</b>: ${x.to_review.slice(0, 8).map(esc).join("; ")}` : ""}.`);
   return x;
 }
 async function traceFloorUI(){
   const r = await traceFloorTakeoff(); if (r.err) { if (r.err !== "cancelled") toast(r.err, 7000); return r; }
-  const x = r.ok; toast(`Whole floor traced: ${x.spaces} spaces, ${x.thresholds} thresholds — rooms ${fq(x.rooms_sft)}, kitchen + lounge ${fq(x.kitchen_lounge_sft)}, passages ${fq(x.passages_sft)}, corridors ${fq(x.corridor_sft)}, baths ${fq(x.washroom_sft)}, balconies ${fq(x.balcony_sft)} Sft (floor tile ${fq(x.floor_tile_sft)} Sft). ${x.verified_dims} match their written size${x.review ? `, <b>${x.review} to review</b> (Review list)` : ""}.`, 12000);
+  const x = r.ok; toast(`Whole floor traced: ${x.spaces} spaces, ${x.thresholds} thresholds — rooms ${fq(x.rooms_sft)}, kitchen + lounge ${fq(x.kitchen_lounge_sft)}, passages ${fq(x.passages_sft)}, corridors ${fq(x.corridor_sft)}, baths ${fq(x.washroom_sft)}, balconies ${uArea(x.balcony_sft)} (floor tile ${uArea(x.floor_tile_sft)}). ${x.verified_dims} match their written size${x.review ? `, <b>${x.review} to review</b> (Review list)` : ""}.`, 12000);
   return r;
 }
 async function autoSettings(){
@@ -3324,8 +3365,8 @@ const pitchOf = (it, c) => it && it.pitch != null && it.pitch !== "" ? Math.max(
 const slopeF = p => Math.round(Math.sqrt(1 + p * p) * 10000) / 10000;   // √(1 + p²), 4 dp as printed
 const pitchIn = p => +p > 0 ? +(+p * 12).toFixed(3) + ":12" : "";   // as typed back in a box
 const pitchText = p => +p > 0 ? pitchIn(p) + " (" + (Math.atan(+p) * 180 / Math.PI).toFixed(1) + "°)" : "flat";
-/* rows of one measurement on the sheet. Every quantity = product of the dimensions as printed (rounded), so the
-   sheet re-measures from its own figures. A slope is one more printed factor F (× slope 1.1180); a run's rise / drop
+/* rows of one measurement on the sheet. Every quantity = product of the dimensions as printed (rounded: 3 dp of feet, or of metres
+   — to the mm — in a project in metres; rD / rA), so the sheet re-measures from its own figures in either. A slope is one more printed factor F (× slope 1.1180); a run's rise / drop
    (it.rise, ft, − for a drop) is its own row, its vertical length added once. */
 function rowsOf(it, k){
   const c = cond(it.cond); if (!c || (!k && c.type !== "count")) return [];
@@ -3336,33 +3377,33 @@ function rowsOf(it, k){
   let rows = [];
   if (c.type === "count") rows = [R({nos: it.pts.length * nos, desc: "count"})];
   else if (it.shape === "circle") {   // Nos × π/4 × D² (area) or Nos × π × D (length) — the diameter on the sheet
-    const D = r3(2 * dist(it.pts[0], it.pts[1]) / k), H = c.unit === "cft" ? (+it.dep > 0 ? +it.dep : r3(+c.t || 0)) : null, faces = +c.faces || 1;
-    if (c.type === "area") rows = [R({nos, A: r3(Math.PI / 4 * D * D), H, how: "circle", D})];
-    else { const L = r3(Math.PI * D); rows = [c.unit === "ft" ? R({nos, L, how: "circle", D}) : c.unit === "Sft" ? R({nos: nos * faces, L, H: r3(+c.h || 0), how: "circle", D}) : R({nos, L, W: r3(+c.t || 0), H: r3(+c.h || 0), how: "circle", D})]; }
+    const D = rD(2 * dist(it.pts[0], it.pts[1]) / k), H = c.unit === "cft" ? (+it.dep > 0 ? +it.dep : rD(+c.t || 0)) : null, faces = +c.faces || 1;
+    if (c.type === "area") rows = [R({nos, A: rA(Math.PI / 4 * D * D), H, how: "circle", D})];
+    else { const L = rD(Math.PI * D); rows = [c.unit === "ft" ? R({nos, L, how: "circle", D}) : c.unit === "Sft" ? R({nos: nos * faces, L, H: rD(+c.h || 0), how: "circle", D}) : R({nos, L, W: rD(+c.t || 0), H: rD(+c.h || 0), how: "circle", D})]; }
     if (it.kind === "ded" && c.type === "area") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0); if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }
   }
   else if (c.type === "linear") {
     if (it.kind === "open") {
-      const sch = schOf(it.sch), w = sch ? +sch.w : it.ow ? +it.ow : r3(dist(it.pts[0], it.pts[1]) / k), h = sch ? +sch.h : +it.oh || 0, faces = c.unit === "Sft" ? (+c.faces || 1) : 1;
-      const r = c.unit === "ft" ? R({nos, L: r3(w), desc: "opening"}) : c.unit === "Sft" ? R({nos: nos * faces, L: r3(w), H: r3(h), desc: "opening"}) : R({nos, L: r3(w), W: r3(+c.t || 0), H: r3(h), desc: "opening"});
+      const sch = schOf(it.sch), w = sch ? +sch.w : it.ow ? +it.ow : rD(dist(it.pts[0], it.pts[1]) / k), h = sch ? +sch.h : +it.oh || 0, faces = c.unit === "Sft" ? (+c.faces || 1) : 1;
+      const r = c.unit === "ft" ? R({nos, L: rD(w), desc: "opening"}) : c.unit === "Sft" ? R({nos: nos * faces, L: rD(w), H: rD(h), desc: "opening"}) : R({nos, L: rD(w), W: rD(+c.t || 0), H: rD(h), desc: "opening"});
       if (c.unit !== "ft" && r3(w) * r3(h) <= (+c.dedMin || 0)) r.below = true;
       rows = [r];
     } else {
       const runs = [], arcs = Array.isArray(it.arcs) ? it.arcs : [];   // an arc drawn with A is one leg (its short pieces summed)
       for (let i = 1; i < it.pts.length;) { const a = arcs.find(q => q[0] === i - 1 && q[1] > q[0] && q[1] < it.pts.length);
-        if (a) { let L = 0; for (let j = a[0] + 1; j <= a[1]; j++) L += dist(it.pts[j - 1], it.pts[j]); runs.push(r3(L / k)); i = a[1] + 1; } else { runs.push(r3(dist(it.pts[i - 1], it.pts[i]) / k)); i++; } }
-      const L = r3(runs.reduce((a, v) => a + v, 0)), faces = +c.faces || 1;
-      const r = c.unit === "ft" ? R({nos, L}) : c.unit === "Sft" ? R({nos: nos * faces, L, H: r3(+c.h || 0)}) : R({nos, L, W: r3(+c.t || 0), H: r3(+c.h || 0)});
+        if (a) { let L = 0; for (let j = a[0] + 1; j <= a[1]; j++) L += dist(it.pts[j - 1], it.pts[j]); runs.push(rD(L / k)); i = a[1] + 1; } else { runs.push(rD(dist(it.pts[i - 1], it.pts[i]) / k)); i++; } }
+      const L = rD(runs.reduce((a, v) => a + v, 0)), faces = +c.faces || 1;
+      const r = c.unit === "ft" ? R({nos, L}) : c.unit === "Sft" ? R({nos: nos * faces, L, H: rD(+c.h || 0)}) : R({nos, L, W: rD(+c.t || 0), H: rD(+c.h || 0)});
       r.runs = runs; rows = [r];
-      const rz = r3(+it.rise || 0);   // Bluebeam polylength rise / drop: the riser as its own row, L = |rise|, no slope
-      if (rz) { const L2 = Math.abs(rz); rows.push(c.unit === "ft" ? R({nos, L: L2, F: null, rise: rz}) : c.unit === "Sft" ? R({nos: nos * faces, L: L2, H: r3(+c.h || 0), F: null, rise: rz}) : R({nos, L: L2, W: r3(+c.t || 0), H: r3(+c.h || 0), F: null, rise: rz})); }
+      const rz = rD(+it.rise || 0);   // Bluebeam polylength rise / drop: the riser as its own row, L = |rise|, no slope
+      if (rz) { const L2 = Math.abs(rz); rows.push(c.unit === "ft" ? R({nos, L: L2, F: null, rise: rz}) : c.unit === "Sft" ? R({nos: nos * faces, L: L2, H: rD(+c.h || 0), F: null, rise: rz}) : R({nos, L: L2, W: rD(+c.t || 0), H: rD(+c.h || 0), F: null, rise: rz})); }
     }
   } else {
     // one measured shape = one row: a plain rectangle as L × W, any other outline as its plan area (by coordinates)
     const F = it.pts.map(ft), tol = 0.002 * Math.max(1, Math.sqrt(polyArea(F)));
-    const parts = rectilinear(F, tol), H = c.unit === "cft" ? (+it.dep > 0 ? +it.dep : r3(+c.t || 0)) : null;   // dep: a cut / fill from spot levels, its own average depth (not rounded: the volume is the one worked out)
-    rows = parts && parts.length === 1 ? [R({nos, L: r3(parts[0].L), W: r3(parts[0].W), H, how: "rect"})]
-         : [R({nos, A: r3(polyArea(F)), H, how: "poly", sides: F.length})];
+    const parts = rectilinear(F, tol), H = c.unit === "cft" ? (+it.dep > 0 ? +it.dep : rD(+c.t || 0)) : null;   // dep: a cut / fill from spot levels, its own average depth (not rounded: the volume is the one worked out)
+    rows = parts && parts.length === 1 ? [R({nos, L: rD(parts[0].L), W: rD(parts[0].W), H, how: "rect"})]
+         : [R({nos, A: rA(polyArea(F)), H, how: "poly", sides: F.length})];
     if (it.kind === "ded") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0); if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }
   }
   rows.forEach(r => { r.qty = r.below ? 0 : qty(r); });
@@ -3437,7 +3478,7 @@ function matCalc(c, Q){
     let A = u === "Sft" ? Q : u === "ft" ? (H > 0 ? Q * H * faces : NaN) : NaN;
     if (isNaN(A)) { out.err = u === "ft" ? "Type Height H in the box above — plaster area = L × H" : "Plaster is taken from an area (Sft) or a length (ft) with H, not " + u; return out; }
     const wet = A * t, dry = wet * 1.27 * wst;
-    out.basis = (u === "ft" ? f3(Q) + " ft × H " + f3(H) + (faces > 1 ? " × " + faces + " faces" : "") + " = " : "") + f3(A) + " Sft × " + f3(+m.tin) + '" (' + f3(t) + " ft)";
+    out.basis = (u === "ft" ? uLenT(Q) + " × H " + f3(H) + (faces > 1 ? " × " + faces + " faces" : "") + " = " : "") + f3(A) + " Sft × " + f3(+m.tin) + '" (' + uLenT(t) + ")";
     out.rows.push(["Area", A, "Sft", ""], ["Wet mortar", wet, "cft", "A × t"], ["Dry mortar", dry, "cft", "wet × 1.27" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out;
   }
   // masonry and concrete: a volume
@@ -3447,7 +3488,7 @@ function matCalc(c, Q){
   else if (u === "Sft") V = T > 0 ? Q * T : NaN;
   else if (u === "ft") V = T > 0 && H > 0 ? Q * H * T : NaN;
   if (isNaN(V)) { out.err = u === "ft" ? "Type Height H" + (T > 0 ? "" : " and thickness T") + " in the boxes above — volume = L × H × T" : "Type the thickness T (inches) in the box above — volume = area × T"; return out; }
-  out.basis = u === "cft" ? f3(V) + " cft" : u === "Sft" ? f3(Q) + " Sft × T " + f3(T) + " = " + f3(V) + " cft" : f3(Q) + " ft × H " + f3(H) + " × T " + f3(T) + " = " + f3(V) + " cft";
+  out.basis = u === "cft" ? f3(V) + " cft" : u === "Sft" ? f3(Q) + " Sft × T " + f3(T) + " = " + f3(V) + " cft" : uLenT(Q) + " × H " + f3(H) + " × T " + f3(T) + " = " + f3(V) + " cft";
   if (!c.t && tIn) out.basis += ' (T ' + tIn + '" from the name)';
   if (m.kind === "concrete") { const dry = V * 1.54 * wst; out.rows.push(["Concrete", V, "cft", ""], ["Dry volume", dry, "cft", "V × 1.54" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out; }
   let N, wet, unit, code;
@@ -3485,7 +3526,7 @@ function matHtml(c, Q, own){
     ${mortar ? `<div class="fg"><label>Sand</label>${sel("sand", MAT_SANDS, m.sand || "SAND-CH")}</div>` : ""}
     ${m.kind === "concrete" ? `<div class="fg"><label>Crush</label>${sel("crush", MAT_CRUSH, m.crush || "CRSH-SG")}</div>` : ""}
     ${needT ? `<div class="fg"><label>${m.kind === "concrete" ? "Thickness T in" : "Wall T in"}</label><input type="text" data-matk="T" value="${+c.t ? r3(c.t * 12) : ""}" placeholder="${tName ? tName + ' (name)' : m.kind === "concrete" ? "e.g. 5" : "e.g. 9"}" title="Inches (or ft-in, e.g. 0'-6&quot;) — saved as T on the condition in decimal ft"></div>` : ""}
-    ${needH ? `<div class="fg"><label>Height H ft</label><input type="text" data-matk="H" value="${+c.h ? f3(c.h) : ""}" placeholder="e.g. 10" title="Decimal ft or ft-in — saved as H on the condition"></div>` : ""}
+    ${needH ? `<div class="fg"><label>Height H ${uL("ft")}</label><input type="text" data-matk="H" value="${+c.h ? uLenIn(c.h) : ""}" placeholder="e.g. 10" title="Decimal ft or ft-in — saved as H on the condition"></div>` : ""}
     ${mortar ? `<div class="fg"><label>Waste %</label><input type="number" min="0" max="50" step="0.5" data-matk="wst" value="${+m.wst || 0}"></div>` : ""}</div>`;
   if (!r) return own ? "" : `<div class="psec">Materials</div>${set}<div class="small">Pick a material (brick, block, plaster, concrete...) to see cement, sand and crush.</div>`;
   let body;
@@ -3494,7 +3535,7 @@ function matHtml(c, Q, own){
     body = `<div class="dimstr" style="margin:2px 0 4px">${esc(r.basis)}</div><table class="mattbl">${info.map(x => `<tr title="${esc(x[3])}"><td>${esc(x[0])}</td><td class="n">${matQ(x[1], x[2])} <small>${esc(x[2])}</small></td><td></td></tr>`).join("")}
       ${pr.rows.map(x => `<tr title="${esc(x.note + (x.R.rate ? "\n" + x.R.code + " — " + x.R.name + ": " + x.R.src : ""))}"><td>${esc(x.n)}<div class="mr">${x.R.rate ? "@ " + f2(x.R.rate) + " / " + esc(x.R.unit) + " · " + esc(x.R.code) + ", " + esc(dmy(x.R.date)) + (x.R.vs === "A" ? ' · <b class="warn">ASSUMPTION</b>' : "") : '<span class="warn">' + esc(x.R.na) + "</span>"}</div></td>
         <td class="n">${matQ(x.q, x.u)} <small>${esc(x.u)}</small></td><td class="n amt">${x.R.rate ? f2(x.q * x.R.rate) : "—"}</td></tr>`).join("")}
-      ${pr.rows.length ? `<tr class="tot"><td colspan="2">Material cost PKR${pr.miss ? ` <span class="warn">(${pr.miss} not priced)</span>` : ""}${Q > 0 && pr.tot ? `<div class="mr">${f2(pr.tot / Q)} per ${esc(c.unit)}</div>` : ""}</td><td class="n amt">${pr.tot ? f2(pr.tot) : "—"}</td></tr>` : ""}</table>`; }
+      ${pr.rows.length ? `<tr class="tot"><td colspan="2">Material cost PKR${pr.miss ? ` <span class="warn">(${pr.miss} not priced)</span>` : ""}${Q > 0 && pr.tot ? `<div class="mr">${f2(uR(pr.tot / Q, c.unit))} per ${esc(uL(c.unit))}</div>` : ""}</td><td class="n amt">${pr.tot ? f2(pr.tot) : "—"}</td></tr>` : ""}</table>`; }
   return `<div class="psec">Materials${own ? " — this measurement" : ""}</div><div class="small" style="margin:-2px 0 4px">${esc(MAT_KINDS.find(x => x[0] === m.kind)[1])} ${esc(m.mix || "")}${m.guessed && !own ? " · picked from the condition name — change it below" : ""}</div>${set}${body}
     ${own ? "" : `<div class="small" style="margin-top:3px">${esc(MAT_SRC)} — dry factor 1.27 mortar / 1.54 concrete, 3/8" joints. Rates: Cost Control rate library (SAJ QSCOST → Rate Analysis) in this browser, with each rate's source and date; material only — no labour.</div>`}`;
 }
@@ -3575,12 +3616,12 @@ function colVals(c, only, L, all){   // -> [{col, v, err}] for the columns c sho
     run.delete(col.id); done.set(col.id, r); return r; };
   return (all ? L : colsOf(c, L)).map(val);
 }
-const colTxt = x => x.col.name + " = " + (x.err ? "#ERR — " + x.err : fq(x.v, x.col.unit) + (x.col.unit ? " " + x.col.unit : ""));
+const colTxt = x => x.col.name + " = " + (x.err ? "#ERR — " + x.err : fq(x.v, x.col.unit) + (x.col.unit ? " " + uL(x.col.unit) : ""));
 let COL_TIP = null;   // one renderConds: each condition's tooltip worked out once (the By page tree lists a condition on every page it is on)
 const colTip = c => { const m = COL_TIP; if (m && m.has(c.id)) return m.get(c.id); const t = colVals(c).map(colTxt).join("\n"); if (m) m.set(c.id, t); return t; };
 const colChips = c => { const m = colChips.m && colChips.m.v === S.ver && colChips.m.p === P.proj ? colChips.m : (colChips.m = {v: S.ver, p: P.proj, h: new Map()});   // worked out once per change of the project (the list and the sheet both show them)
   if (!m.h.has(c.id)) m.h.set(c.id, colChips0(c)); return m.h.get(c.id); };
-const colChips0 = c => colVals(c).map(x => x.err ? `<span class="ccol err" title="${esc(x.col.name + " = " + x.col.formula + "\n" + x.err)}">${esc(x.col.name)} #ERR</span>` : `<span class="ccol" title="${esc(x.col.name + " = " + x.col.formula)}">${esc(x.col.name)} <b>${fq(x.v, x.col.unit)}</b>${x.col.unit ? " " + esc(x.col.unit) : ""}</span>`).join("");
+const colChips0 = c => colVals(c).map(x => x.err ? `<span class="ccol err" title="${esc(x.col.name + " = " + x.col.formula + "\n" + x.err)}">${esc(x.col.name)} #ERR</span>` : `<span class="ccol" title="${esc(x.col.name + " = " + x.col.formula)}">${esc(x.col.name)} <b>${fq(x.v, x.col.unit)}</b>${x.col.unit ? " " + esc(uL(x.col.unit)) : ""}</span>`).join("");
 /* a column's formula as an Excel one, fully bracketed (the grammar of evalFormula): map(NAME) -> a cell, a number, or null (no
    live formula: the value is written instead). ceil / floor as -INT(-x) / INT(x), which Excel has for any sign. */
 function colXl(src, map){
@@ -3681,7 +3722,7 @@ function renderBill(){
       const amt = l.qty * l.rate, cp = compOf(l), ca = cp ? [cp.mat, cp.lab, cp.eqp, cp.oth].map(v => v * l.qty) : null; tot += amt; if (ca) ca.forEach((v, i) => { GC[i] += v; });
       h += `<tr class="${l.kind === "cond" ? "ch2" : "it"}"><td>${l.kind === "asm" ? "↳ " : `${++n}. <span class="sw" style="background:${l.c.color}"></span>`}${l.boq ? `<span class="boq">${esc(l.boq)}</span> ` : ""}${esc(l.name)}${l.kind === "cond" ? ` <button class="rn" data-asm="${esc(l.c.id)}" title="Items this condition drives, and rates">&#9881; Assembly</button>` : ""}
         <div class="ds">${l.kind === "asm" ? (l.err ? '<span style="color:var(--red)">' + esc(l.err) + "</span>" : "= " + esc(asmLabel(l))) : "measured"} · ${rateNote(l)}${sp && l.rate > 0 && !cp ? " · typed rate — no split" : ""}</div>${sp && ca ? splitLn(ca) : ""}</td>
-        <td class="n">${fq(l.qty, l.unit)}<div class="ds">${esc(l.unit)}</div></td><td class="n">${l.rate ? f2(l.rate) : "—"}</td><td class="n">${l.rate ? f2(amt) : "—"}</td></tr>`;
+        <td class="n">${fq(l.qty, l.unit)}<div class="ds">${esc(uL(l.unit))}</div></td><td class="n">${l.rate ? f2(uR(l.rate, l.unit)) : "—"}</td><td class="n">${l.rate ? f2(amt) : "—"}</td></tr>`;
     });
     all += tot; GC.forEach((v, i) => { AC[i] += v; });
     h += `<tr class="tot"><td>Total${g.name ? " " + esc(g.name) : ""}${sp ? splitLn(GC) : ""}</td><td></td><td></td><td class="n">${f2(tot)}</td></tr>`;
@@ -3708,7 +3749,7 @@ function matDialog(){
     <tr class="tot"><td colspan="4">Total material${miss ? ` (${miss} not priced)` : ""}</td><td class="n">${f2(T)}</td><td></td></tr></tbody></table>
     <h4 style="margin:12px 0 4px">By condition</h4><table class="sh"><thead><tr><th>Condition</th><th class="n">Qty</th><th>Material</th><th class="n">Cement bags</th><th class="n">Sand cft</th><th class="n">Crush cft</th><th class="n">Bricks / blocks</th><th class="n">Material PKR</th></tr></thead><tbody>
     ${M.per.map(o => { const g = n => { const x = o.pr.rows.find(y => y.n.startsWith(n)); return x ? matQ(x.q, x.u) : ""; };
-      return `<tr><td>${esc(o.c.name)}</td><td class="n">${fq(condTotals(o.c).net, o.c.unit)} ${esc(o.c.unit)}</td><td>${o.r.err ? '<span style="color:var(--red)">' + esc(o.r.err) + "</span>" : esc(MAT_KINDS.find(k => k[0] === o.r.m.kind)[1] + " " + (o.r.m.mix || ""))}</td><td class="n">${g("Cement")}</td><td class="n">${g("Sand")}</td><td class="n">${g("Crush")}</td><td class="n">${g("Bricks") || g("Blocks")}</td><td class="n">${o.pr.tot ? f2(o.pr.tot) : "—"}</td></tr>`; }).join("")}</tbody></table>`;
+      return `<tr><td>${esc(o.c.name)}</td><td class="n">${fq(condTotals(o.c).net, o.c.unit)} ${esc(uL(o.c.unit))}</td><td>${o.r.err ? '<span style="color:var(--red)">' + esc(o.r.err) + "</span>" : esc(MAT_KINDS.find(k => k[0] === o.r.m.kind)[1] + " " + (o.r.m.mix || ""))}</td><td class="n">${g("Cement")}</td><td class="n">${g("Sand")}</td><td class="n">${g("Crush")}</td><td class="n">${g("Bricks") || g("Blocks")}</td><td class="n">${o.pr.tot ? f2(o.pr.tot) : "—"}</td></tr>`; }).join("")}</tbody></table>`;
   return ask("Materials — whole takeoff", body, "Close");
 }
 function floorGroups(){   // one group per building / floor found, plus the measurements with no floor — floors in their order (floorSort)
@@ -3727,7 +3768,7 @@ async function asmDialog(c){
     <td><input type="text" data-k="f" value="${esc(a.f || "")}" placeholder="A*1.05"></td><td><input type="number" data-k="w" value="${esc(a.w || "")}" min="0" max="100" step="any" style="width:56px" placeholder="0"></td><td><input type="text" data-k="boq" value="${esc(a.boq || "")}" style="width:78px" placeholder="BOQ code"></td><td><input type="text" data-k="ra" value="${esc(a.ra || "")}" style="width:92px" placeholder="RA code" list="dlRa2"></td><td><input type="number" data-k="rate" value="${esc(a.rate || "")}" style="width:80px" placeholder="0"></td>
     <td><input type="text" data-k="src" value="${esc(a.src || "")}" placeholder="source"></td><td><input type="date" data-k="date" value="${esc(a.date || "")}"></td><td><button class="btn sm dng" data-del="${n}" type="button">&times;</button></td></tr>`;
   const cr = rateOf(c, c.unit);
-  const body = () => `<p class="small">Now: Q = ${fq(vars.Q, c.unit)} ${esc(c.unit)}${c.type === "area" ? ` · A = ${fq(vars.A)} Sft · P = ${f3(vars.P)} ft · PD = ${f3(vars.PD)} ft (P less ${f3(vars.D)} ft of doors)` : ""}${c.type === "linear" ? ` · L = ${f3(vars.L)} ft` : ""} · N = ${vars.N}${vars.H ? " · H = " + f3(vars.H) : ""}${vars.T ? " · T = " + f3(vars.T) : ""}.
+  const body = () => `<p class="small">Now: Q = ${fq(vars.Q, c.unit)} ${esc(uL(c.unit))}${c.type === "area" ? ` · A = ${uArea(vars.A)} · P = ${uLenT(vars.P)} · PD = ${uLenT(vars.PD)} (P less ${uLenT(vars.D)} of doors)` : ""}${c.type === "linear" ? ` · L = ${uLenT(vars.L)}` : ""} · N = ${vars.N}${vars.H ? " · H = " + f3(vars.H) : ""}${vars.T ? " · T = " + f3(vars.T) : ""}.
     Formulas use Q A P PD D L N H T and ceil floor round min max abs sqrt, e.g. <code>A*1.05</code>, <code>PD</code> (skirting), <code>ceil(A/4)</code>. <b>Waste %</b> is added on top of the formula. Another condition's figure: <code>[Floor area].A</code> (its name, then .Q .A .P .PD .D .L .N).</p>
     ${c.ra ? `<p class="small" style="margin-top:6px">${esc(c.name)} is linked to Rate Analysis <b>${esc(c.ra)}</b> (condition editor): ${cr.na ? `<span style="color:var(--red)">${esc(cr.na)}</span>` : "PKR " + f2(cr.rate) + " / " + esc(c.unit) + " — the typed rate below is not used"}.</p>` : ""}
     <div class="grid" style="margin:8px 0"><div class="fg"><label>Rate for ${esc(c.name)} (PKR / ${esc(c.unit)})</label><input type="number" id="crRate" value="${c.rate || ""}" placeholder="0"></div>
@@ -3765,7 +3806,7 @@ async function asmDialog(c){
 }
 
 function dimText(r){
-  const parts = [r.nos, r.A, r.L, r.W, r.H].map((v, i) => v == null ? null : i === 0 ? String(v) : i === 1 ? f3(v) + " Sft" : f3(v)).filter(v => v != null);
+  const parts = [r.nos, r.A, r.L, r.W, r.H].map((v, i) => v == null ? null : i === 0 ? String(v) : i === 1 ? f3(uV(v, "Sft")) + " " + uL("Sft") : uLen(v)).filter(v => v != null);
   return parts.join(" × ") + (r.F != null ? " × slope " + r.F.toFixed(4) : "");
 }
 
@@ -3841,7 +3882,7 @@ function hint(){
     dedrect: !c ? "" : "Rectangular cut-out from " + c.name + ": click two opposite corners of the void — or one corner, then type L x W (e.g. 4 x 3) and Enter. D: polyline cut-out.",
     ded: !c ? "" : c.type === "area" ? "Polyline cut-out from " + c.name + ": click the corners of the void; click the first point, right-click or press Enter to close. Shift+D: rectangle cut-out." + drawing
       : "Deduction from " + c.name + ": click along the length to take off; Enter, double-click or right-click to finish." + drawing, circle: "Click the centre, then a point on the edge.", polygon: "Regular polygon: click the centre, then a corner (" + polySides() + " sides — type pol 8 in the command line for 8).", vp: "Click two opposite corners of the detail drawn at another scale.", floorbox: S.flRedraw ? "Floor boundary of “" + S.flRedraw + "”: click two opposite corners round its plan." : "Floor box: click two opposite corners round one floor plan (with its title), then name the floor — the measurements inside it are in that floor · Esc when done.", count: "Click each item to count it — numbered as you go. Select (V) a marker and press Delete to remove it.", auto: S.pickWall ? "Click a wall line — only lines of its colour and weight will bound rooms." : "Click inside a room — its area is traced from the walls, across door openings. ⚙ for settings.",
-    open: schOf(S.openMark) ? "Placing " + schOf(S.openMark).mark + " (" + f3(schOf(S.openMark).w) + " × " + f3(schOf(S.openMark).h) + ") — click both sides of each opening. Esc stops." : "Click both sides of the opening, then enter its height or pick its schedule mark.",
+    open: schOf(S.openMark) ? "Placing " + schOf(S.openMark).mark + " (" + uLen(schOf(S.openMark).w) + " × " + uLen(schOf(S.openMark).h) + ") — click both sides of each opening. Esc stops." : "Click both sides of the opening, then enter its height or pick its schedule mark.",
     typref: S.typ ? (S.key === S.typ.src ? "Typical copy: click reference point " + (S.typ.a.length + 1) + " of 2 on this (source) sheet." : "Typical copy: click the same reference point " + (S.typ.b.length + 1) + " of 2 on this sheet.") : "", measure: "Click points; double-click, right-click or Enter ends a measurement (it stays on screen). Esc clears. Nothing is saved." + drawing,
     angle: S.draft.length === 1 ? "Angle: now click the corner." : S.draft.length === 2 ? "Angle: click a point on the second arm." : "Angle: click a point on the first arm, then the corner, then a point on the second arm — the angle stays on screen. Esc clears. Nothing is saved.",
     radius: S.draft.length ? "Radius: click a point on the edge." : "Radius: click the centre, then a point on the edge — radius, diameter and circumference stay on screen. Esc clears. Nothing is saved.",
@@ -3849,8 +3890,8 @@ function hint(){
     break: "Break: click a length run where it should be cut in two · Shift+click a segment to delete just that segment · Esc when done.",
     trim: "Trim: click the part of a run to cut away — it is cut back to the nearest line, run or outline that crosses it (also the drawing's own lines) · Shift+click: Extend · Esc when done.",
     extend: "Extend: click a run near its end — it grows to the first line, run or outline in its way · Shift+click: Trim · Esc when done.",
-    fillet: S.fc.first ? "Fillet: click the second run (or the next leg of the same run) · Esc: pick the first again." : "Fillet (radius " + f3(S.fc.r) + " ft): click the first run near its corner, then the second · Enter: change the radius · Esc when done.",
-    chamfer: S.fc.first ? "Chamfer: click the second run (or the next leg of the same run) · Esc: pick the first again." : "Chamfer (" + f3(S.fc.d1) + " × " + f3(S.fc.d2) + " ft): click the first run near its corner, then the second · Enter: change the distances · Esc when done.",
+    fillet: S.fc.first ? "Fillet: click the second run (or the next leg of the same run) · Esc: pick the first again." : "Fillet (radius " + uLenT(S.fc.r) + "): click the first run near its corner, then the second · Enter: change the radius · Esc when done.",
+    chamfer: S.fc.first ? "Chamfer: click the second run (or the next leg of the same run) · Esc: pick the first again." : "Chamfer (" + uLen(S.fc.d1) + " × " + uLenT(S.fc.d2) + "): click the first run near its corner, then the second · Enter: change the distances · Esc when done.",
     stretch: !S.str || !S.str.stage ? "Stretch: click one corner of a crossing window round the points to move (runs and outlines stretch; whole objects move)." : S.str.stage === 1 ? "Stretch: click the opposite corner of the window." : S.str.stage === 2 ? "Stretch: click a base point (Ortho / Polar / snap work)." : "Stretch: click where the base point goes · Esc starts again.",
     gap: "Cut a gap: click the other end of the gap on the same run (e.g. the far side of a door) · Esc cancels.",
     stamp: S.stampBase ? "Place copies: click the second point — a copy lands there, displaced from the base point · click again for more copies · Shift / F8: straight · Esc: new base point, Esc again: done."
@@ -4026,7 +4067,7 @@ function onMove(e){
   const k = hereScale(p), vp = viewportAt(S.fileId, S.pageNo, p);
   $("stPos").innerHTML = k ? `x <b>${f3(p[0] / k)}</b> ft · y <b>${f3(p[1] / k)}</b> ft${vp ? " · <b>" + esc(vp.name) + "</b>" : ""}` : "Scale not set";
   $("stSnap").textContent = s ? "Snap: " + s.type : "";
-  if (S.tool === "stamp" && S.stampBase) { const dx = p[0] - S.stampBase[0], dy = p[1] - S.stampBase[1]; $("stMeas").innerHTML = k ? "<b>Copy " + f3(dx / k) + " ft, " + f3(dy / k) + " ft (" + f3(Math.hypot(dx, dy) / k) + " ft)</b>" : ""; }
+  if (S.tool === "stamp" && S.stampBase) { const dx = p[0] - S.stampBase[0], dy = p[1] - S.stampBase[1]; $("stMeas").innerHTML = k ? "<b>Copy " + uLenT(dx / k) + ", " + uLenT(dy / k) + " (" + uLenT(Math.hypot(dx, dy) / k) + ")</b>" : ""; }
   draw();
 }
 function cancelDrag0(){   // a long press became the menu: drop what the press had started, without a toast
@@ -4084,7 +4125,7 @@ function squareUpSel(it0){   // right-click → Square up to walls: the area out
   const pts = squareToWalls(it.pts, k, g); if (pts === it.pts) return toast("Could not square this outline to the walls — no wall faces near it, it follows a curved wall, or its area would change more than 8 %", 4000);
   if (pts.length === it.pts.length && pts.every((q, i) => dist(q, it.pts[i]) < 0.01)) return toast("Already square to the walls");   // (no empty undo step)
   mutate(() => { it.pts = pts; delete it.arcs; qaMoved(it); }, "Square up to walls");   // arcs index the old points: gone, as Offset does
-  toast("Squared up to the walls: " + fq(polyArea(pts) / k / k) + " Sft, " + pts.length + " corners");
+  toast("Squared up to the walls: " + uArea(polyArea(pts) / k / k) + ", " + pts.length + " corners");
 }
 function selOne(){ if (S.multi.size || !S.sel) return null; const it = P.proj.items.find(i => i.id === S.sel); return it && onPage(it) && !hiddenItem(it) ? it : null; }
 function setSel(ids, pt){
@@ -4268,7 +4309,7 @@ function moveDrag(sp, e){
   D.d = [dx, dy]; D.moved = D.moved || Math.hypot(dx, dy) * S.view.s > 0.5;
   S.cursorScr = sp; S.cursor = t;
   const k = hereScale(t);
-  $("stMeas").innerHTML = "<b>" + (D.copy ? "Copy" : "Move") + (k ? " " + f3(dx / k) + " ft, " + f3(dy / k) + " ft (" + f3(Math.hypot(dx, dy) / k) + " ft)" : "") + "</b>";
+  $("stMeas").innerHTML = "<b>" + (D.copy ? "Copy" : "Move") + (k ? " " + uLenT(dx / k) + ", " + uLenT(dy / k) + " (" + uLenT(Math.hypot(dx, dy) / k) + ")" : "") + "</b>";
   draw();
 }
 function endMove(){
@@ -4287,7 +4328,7 @@ function endMove(){
     else fin.forEach((pts, id) => { const o = objById(id); if (o) { o.pts = pts; if (o.cond) qaMoved(o); } });
   }, (D.copy ? "Copy " : "Move ") + n + " object" + (n > 1 ? "s" : ""));
   if (D.added.length) setSel(keep); refresh();
-  if (k) toast((D.copy ? "Copied " : "Moved ") + n + " by " + f3(Math.hypot(D.d[0], D.d[1]) / k) + " ft" + (D.copy ? "" : " — Ctrl+Z puts " + (n > 1 ? "them" : "it") + " back"), 2200);
+  if (k) toast((D.copy ? "Copied " : "Moved ") + n + " by " + uLenT(Math.hypot(D.d[0], D.d[1]) / k) + (D.copy ? "" : " — Ctrl+Z puts " + (n > 1 ? "them" : "it") + " back"), 2200);
 }
 /* box (window / crossing) and lasso: what is selected */
 function objPolyScr(o){ if (!o.cond) return mkPolyScr(o); const c = o.cond ? cond(o.cond) : null; const poly = o.cond ? itemPoly(o) : o.pts; return {P: poly.map(toScr), closed: o.cond ? closedOf(o) : o.type === "hilite" || o.type === "cloud", count: !!(c && c.type === "count")}; }
@@ -4432,20 +4473,20 @@ async function finish(pts){
     // a short span magnifies the click error: one screen pixel off over under an inch of paper is over 1 % of the scale
     const shortW = d < 72 ? `<p class="small" style="color:#b42318">⚠ The two points are under 1 inch apart on the paper — a click a little off changes the scale by over 1 %. Calibrate on the longest dimension you can find.</p>` : "";
     if (vp) {
-      const v = await ask("Viewport scale — " + vp.name, `<p>The two points are <b>${d.toFixed(2)} pt</b> apart${inVp ? `, inside the viewport <b>${esc(vp.name)}</b> — its own scale is set, the page's is not changed` : ""}. Enter the real length they measure.</p>${shortW}<div class="grid" style="margin-top:10px"><div class="fg w2"><label>Real length (ft, or ft-in like 12'-6")</label><input type="text" id="dlgLen" autocomplete="off"></div></div>`, "Set scale",
-        () => { const ft = parseFt($("dlgLen").value); return ft > 0 ? ft : "Enter a length, e.g. 12.5 or 12'-6\""; }, "dlgLen");
+      const v = await ask("Viewport scale — " + vp.name, `<p>The two points are <b>${d.toFixed(2)} pt</b> apart${inVp ? `, inside the viewport <b>${esc(vp.name)}</b> — its own scale is set, the page's is not changed` : ""}. Enter the real length they measure.</p>${shortW}<div class="grid" style="margin-top:10px">${lenBox("Real length")}</div>`, "Set scale",
+        () => { const r = lenRead(); return r.ft > 0 ? r : r.err; }, "dlgLen");
       S.calVp = null;
-      if (v) mutate(() => { vp.ptPerFt = d / v; vp.text = "calibrated: " + f3(v) + " ft over " + d.toFixed(2) + " pt"; vp.cal = {a: pts[0], b: pts[1], ft: v, span: +d.toFixed(2), at: new Date().toISOString()}; });
+      if (v) mutate(() => { vp.ptPerFt = d / v.ft; vp.text = "calibrated: " + v.t + " over " + d.toFixed(2) + " pt"; vp.cal = {a: pts[0], b: pts[1], ft: v.ft, span: +d.toFixed(2), at: new Date().toISOString()}; });
       setTool("select"); return;
     }
     const v = await ask("Set the scale", `<p>The two points are <b>${d.toFixed(2)} pt</b> apart on the sheet. Enter the real length they measure.</p>${shortW}
-      <div class="grid" style="margin-top:10px"><div class="fg w2"><label>Real length (ft, or ft-in like 12'-6")</label><input type="text" id="dlgLen" autocomplete="off"></div>
+      <div class="grid" style="margin-top:10px">${lenBox("Real length")}
       <div class="fg w2"><label><input type="checkbox" id="dlgAll" style="width:auto"> Then choose other pages to copy it to (Copy scale to…)</label></div></div>`, "Set scale",
-      () => { const ft = parseFt($("dlgLen").value); if (!(ft > 0)) return "Enter a length, e.g. 12.5 or 12'-6\""; return {ft, all: $("dlgAll").checked}; }, "dlgLen");
+      () => { const r = lenRead(); if (!(r.ft > 0)) return r.err; return {ft: r.ft, t: r.t, all: $("dlgAll").checked}; }, "dlgLen");
     if (v) mutate(() => {
       const k = d / v.ft;
-      P.proj.scales[S.key] = {ptPerFt: k, how: "calibrated", text: f3(v.ft) + " ft over " + d.toFixed(2) + " pt", cal: {a: pts[0], b: pts[1], ft: v.ft, page: S.key}, verified: true, at: new Date().toISOString()};
-      toast("Scale set: 1 ft = " + k.toFixed(4) + " pt");
+      P.proj.scales[S.key] = {ptPerFt: k, how: "calibrated", text: v.t + " over " + d.toFixed(2) + " pt", cal: {a: pts[0], b: pts[1], ft: v.ft, page: S.key}, verified: true, at: new Date().toISOString()};
+      toast("Scale set: " + ptPerTxt(k, 4) + " — " + scaleBoth(k));
     });
     setTool("select");
     if (v && v.all) copyScaleDialog();
@@ -4456,19 +4497,19 @@ async function finish(pts){
     const ko = hereScale(pts[0]), w = ko ? dist(pts[0], pts[1]) / ko : 0, sticky = schOf(S.openMark);
     if (sticky) { mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "open", pts, nos: 1, label: sticky.mark, sch: sticky.id, oh: sticky.h, ow: sticky.w}); }); draw(); return; }
     const OP = P.proj.openings || [];
-    const pr = ask("Opening", `<div class="grid"><div class="fg w2"><label>Schedule mark</label><select id="dlgSch"><option value="">— new / not in the schedule —</option>${OP.map(o => `<option value="${esc(o.id)}">${esc(o.mark)} — ${f3(o.w)} × ${f3(o.h)} ft · ${esc(o.type)}</option>`).join("")}</select></div>
-      <div class="fg"><label>Width (ft)</label><input type="text" id="dlgW" value="${w ? f3(w) : ""}"></div>
-      <div class="fg"><label>Height (ft)</label><input type="text" id="dlgH" value="${P.proj.last.oh ? f3(P.proj.last.oh) : ""}" autocomplete="off"></div>
+    const pr = ask("Opening", `<div class="grid"><div class="fg w2"><label>Schedule mark</label><select id="dlgSch"><option value="">— new / not in the schedule —</option>${OP.map(o => `<option value="${esc(o.id)}">${esc(o.mark)} — ${uLen(o.w)} × ${uLenT(o.h)} · ${esc(o.type)}</option>`).join("")}</select></div>
+      <div class="fg"><label>Width (${uL("ft")})</label><input type="text" id="dlgW" value="${w ? uLenIn(w) : ""}"></div>
+      <div class="fg"><label>Height (${uL("ft")})</label><input type="text" id="dlgH" value="${P.proj.last.oh ? uLenIn(P.proj.last.oh) : ""}" autocomplete="off"></div>
       <div class="fg"><label>Label / mark</label><input type="text" id="dlgLbl" placeholder="e.g. D1 / W2"></div>
       <div class="fg"><label>Type</label><select id="dlgTyp"><option>door</option><option>window</option><option>other</option></select></div>
       <div class="fg w2"><label><input type="checkbox" id="dlgSave" style="width:auto"> Add this mark to the opening schedule</label><label><input type="checkbox" id="dlgKeep" style="width:auto"> Keep placing this mark without asking (Esc or another tool stops)</label></div></div>
-      <p class="small" style="margin-top:8px">Deducted from <b>${esc(c.name)}</b> as its own row. Openings of ${f2(+c.dedMin || 0)} Sft or less are listed but not deducted (house rule). A schedule mark's size wins over the clicked width.</p>`, "Add opening",
-      () => { const sch = schOf($("dlgSch").value), W = parseFt($("dlgW").value), H = parseFt($("dlgH").value), lbl = $("dlgLbl").value.trim();
+      <p class="small" style="margin-top:8px">Deducted from <b>${esc(c.name)}</b> as its own row. Openings of ${uArea2(+c.dedMin || 0)} or less are listed but not deducted (house rule). A schedule mark's size wins over the clicked width.</p>`, "Add opening",
+      () => { const sch = schOf($("dlgSch").value), W = uParse($("dlgW").value), H = uParse($("dlgH").value), lbl = $("dlgLbl").value.trim();
         if (sch) return {sch, W: sch.w, H: sch.h, lbl: sch.mark, keep: $("dlgKeep").checked};
         if (!(W > 0)) return "Enter the width"; if (c.unit !== "ft" && !(H > 0)) return "Enter the height";
         if ($("dlgSave").checked) { if (!lbl) return "Give the mark (e.g. D1) to add it to the schedule"; if (!(H > 0)) return "Enter the height for the schedule"; if (OP.some(o => o.mark.toUpperCase() === lbl.toUpperCase())) return lbl + " is already in the schedule — pick it above"; }
         return {W, H, lbl, add: $("dlgSave").checked, type: $("dlgTyp").value, keep: $("dlgKeep").checked}; }, "dlgH");
-    const syncSch = () => { const s = schOf($("dlgSch").value); ["dlgW", "dlgH", "dlgLbl", "dlgTyp", "dlgSave"].forEach(id => { $(id).disabled = !!s; }); if (s) { $("dlgW").value = f3(s.w); $("dlgH").value = f3(s.h); $("dlgLbl").value = s.mark; $("dlgTyp").value = s.type; } };
+    const syncSch = () => { const s = schOf($("dlgSch").value); ["dlgW", "dlgH", "dlgLbl", "dlgTyp", "dlgSave"].forEach(id => { $(id).disabled = !!s; }); if (s) { $("dlgW").value = uLenIn(s.w); $("dlgH").value = uLenIn(s.h); $("dlgLbl").value = s.mark; $("dlgTyp").value = s.type; } };
     $("dlgSch").onchange = syncSch;
     $("dlgLbl").oninput = () => { const l = $("dlgLbl").value.trim(); $("dlgSave").checked = !!l && !OP.some(o => o.mark.toUpperCase() === l.toUpperCase()); if (/^d/i.test(l)) $("dlgTyp").value = "door"; else if (/^[wv]/i.test(l)) $("dlgTyp").value = "window"; };
     const v = await pr;
@@ -4504,8 +4545,8 @@ async function finish(pts){
   if (arcs.length) ni.arcs = arcs;
   mutate(() => { P.proj.items.push(ni); }, (t === "dedrect" ? "Rectangular cut-out" : ded ? "Deduction" : area ? "Area" : "Run") + " in " + c.name);
   if (area && crossed(ni)) toast(crossMsg, 7000);
-  else if (area && ded && itemScale(ni)) { const k = itemScale(ni), Q = itemPoly(ni); toast("Cut-out − " + fq(polyArea(Q) / k / k) + " Sft deducted from " + c.name, 2600); }
-  else if (area && !ded && itemScale(ni)) { const k = itemScale(ni), Q = itemPoly(ni); toast((nm ? nm + " (named from the drawing) — " : "Area — ") + fq(polyArea(Q) / k / k) + " Sft · perimeter " + f3(polyLen(Q, true) / k) + " ft", 3500); }   // what was just taken: its area and perimeter
+  else if (area && ded && itemScale(ni)) { const k = itemScale(ni), Q = itemPoly(ni); toast("Cut-out − " + uArea(polyArea(Q) / k / k) + " deducted from " + c.name, 2600); }
+  else if (area && !ded && itemScale(ni)) { const k = itemScale(ni), Q = itemPoly(ni); toast((nm ? nm + " (named from the drawing) — " : "Area — ") + uArea(polyArea(Q) / k / k) + " · perimeter " + uLenT(polyLen(Q, true) / k), 3500); }   // what was just taken: its area and perimeter
   else if (nm) toast("Named " + nm + " from the drawing", 1800);
 }
 /* ------------------------------------------------------------------ line pick (Shift+A): one click takes a whole run of the drawing's lines
@@ -4559,7 +4600,7 @@ function lpChain(g, i0, thru){   // the run through line i0 -> {pts, closed, sto
 function lpText(r, c){   // what a picked run measures, as said before and after the click
   const k = hereScale(r.pts[0]), legs = r.pts.length - (r.closed ? 0 : 1), L = polyLen(r.pts, r.closed);
   if (!k) return legs + " leg" + (legs === 1 ? "" : "s") + " · " + L.toFixed(1) + " pt (no scale)";
-  return (c && c.type === "area" && r.closed ? fq(polyArea(r.pts) / k / k) + " Sft · perimeter " : "") + f3(L / k) + " ft · " + legs + " leg" + (legs === 1 ? "" : "s") + (r.closed ? " · closed" : r.stop === "junction" ? " · stops at a junction (Shift: on through it)" : "");
+  return (c && c.type === "area" && r.closed ? uArea(polyArea(r.pts) / k / k) + " · perimeter " : "") + uLenT(L / k) + " · " + legs + " leg" + (legs === 1 ? "" : "s") + (r.closed ? " · closed" : r.stop === "junction" ? " · stops at a junction (Shift: on through it)" : "");
 }
 function lpHover(sp, e){
   const i = lpAt(sp), thru = !!(e && e.shiftKey);
@@ -4623,7 +4664,7 @@ function drawNow(){
   const A = S.autoShow; if (!keep && A && A.key === S.key) { const q = toScr([A.x0, A.y0]); h.push(`<image href="${A.url}" x="${q[0].toFixed(1)}" y="${q[1].toFixed(1)}" width="${(A.W * A.px * S.view.s).toFixed(1)}" height="${(A.H * A.px * S.view.s).toFixed(1)}" preserveAspectRatio="none" style="image-rendering:pixelated"/>`); }
   if (S.unmOn && (!S.unm || S.unm.key !== S.key)) unmSoon();   // what is not measured yet: red over each space no area covers, its Sft on it
   const U = S.unm; if (!keep && U && U.url && U.key === S.key) { const q = toScr([U.x0, U.y0]); h.push(`<image class="unm" href="${U.url}" x="${q[0].toFixed(1)}" y="${q[1].toFixed(1)}" width="${(U.W * U.px * S.view.s).toFixed(1)}" height="${(U.H * U.px * S.view.s).toFixed(1)}" preserveAspectRatio="none" style="image-rendering:pixelated;pointer-events:none"/>`);
-    U.pieces.forEach(pc => { const c = toScr([pc.cx, pc.cy]); h.push(`<text x="${c[0].toFixed(1)}" y="${(c[1] + 4).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="#b42318" stroke="#fff" stroke-width="3" paint-order="stroke" style="pointer-events:none">${fq(pc.sft)} Sft</text>`); }); }
+    U.pieces.forEach(pc => { const c = toScr([pc.cx, pc.cy]); h.push(`<text x="${c[0].toFixed(1)}" y="${(c[1] + 4).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="#b42318" stroke="#fff" stroke-width="3" paint-order="stroke" style="pointer-events:none">${uArea(pc.sft)}</text>`); }); }
   if (!keep) ((P.proj.viewports || {})[S.key] || []).forEach(v => { const a = toScr([v.r[0], v.r[1]]), b = toScr([v.r[2], v.r[3]]);
     h.push(`<rect x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="none" stroke="#7b5ce0" stroke-width="1.5" stroke-dasharray="8 4"/>`);
     h.push(label([a[0] + 6 + (v.name.length + 14) * 3.2, a[1] + 12], v.name + " · " + (v.ptPerFt ? v.text || "own scale" : "scale not set"), "#4b3b8f")); });
@@ -4681,7 +4722,7 @@ function drawNow(){
     if (it.kind === "open") {
       const a = toScr(it.pts[0]), b = toScr(it.pts[1]);
       h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${sel ? 6 : Math.max(1, +c.sw || 4)}" stroke-linecap="round" opacity=".85"/>`);
-      if (k) { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], r = rowsOf(it, k)[0]; h.push(label(m, (it.label ? it.label + " " : "") + f3(r.L) + " × " + f3(+it.oh || 0), "#9b2222")); }
+      if (k) { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], r = rowsOf(it, k)[0]; h.push(label(m, (it.label ? it.label + " " : "") + uLen(r.L) + " × " + uLen(+it.oh || 0), "#9b2222")); }
     } else h.push(measSvg(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, {T: toScr, z: 1, lz, lblOut: LB, lo: LD && LD.id === it.id ? LD.lo : undefined, sp: S.view.s, sel, k, lbl: S.lbl.on, seg: S.lbl.on && S.lbl.seg, small: S.lbl.small, screen: true}));   // as its appearance says (the exports draw it the same way)
     if (sel && !S.multi.size) {
       (it._pts || it.pts).forEach((p, i) => { const q = toScr(p); h.push(`<rect x="${(q[0] - 4).toFixed(1)}" y="${(q[1] - 4).toFixed(1)}" width="8" height="8" fill="${it.locked ? "#e8ecf1" : i === S.selPt ? "#0b0b0b" : "#fff"}" stroke="${it.locked ? "#8a97a6" : i === S.selPt ? "#0b0b0b" : col}" stroke-width="2"/>`); });
@@ -4713,18 +4754,18 @@ function drawNow(){
   } else if (S.draft.length && cur && S.tool === "polygon") {
     const n = polySides(), Q = polyPts(S.draft[0], cur, n), col = c ? c.color : "#0b0b0b";
     dyn.push(`<polygon points="${Q.map(toScr).map(q => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>`);
-    if (k) live = n + " sides · side " + f3(dist(Q[0], Q[1]) / k) + " ft · " + fq(polyArea(Q) / k / k) + " Sft · perimeter " + f3(n * dist(Q[0], Q[1]) / k) + " ft";
+    if (k) live = n + " sides · side " + uLenT(dist(Q[0], Q[1]) / k) + " · " + uArea(polyArea(Q) / k / k) + " · perimeter " + uLenT(n * dist(Q[0], Q[1]) / k);
   } else if (S.draft.length && cur && S.tool === "circle") {
     const a = S.draft[0], r = dist(a, cur), q = toScr(a), col = c ? c.color : "#0b0b0b";
     dyn.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(r * S.view.s).toFixed(1)}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>`);
-    if (k) live = "dia " + f3(2 * r / k) + " ft · " + fq(Math.PI * r * r / k / k) + " Sft · round " + f3(2 * Math.PI * r / k) + " ft";
+    if (k) live = "dia " + uLenT(2 * r / k) + " · " + uArea(Math.PI * r * r / k / k) + " · round " + uLenT(2 * Math.PI * r / k);
   } else if (S.draft.length && cur && !mkIsTool(S.tool)) {
     const D = S.arcMid && S.draft.length ? S.draft.concat(arcPts(S.draft[S.draft.length - 1], S.arcMid, cur)) : S.draft.concat([S.tool === "rect" || S.tool === "dedrect" ? null : cur]).filter(Boolean);
     if (S.arcMode && !S.arcMid && S.draft.length) { const q = toScr(cur); dyn.push(`<text x="${(q[0] + 12).toFixed(1)}" y="${(q[1] - 12).toFixed(1)}" font-size="11" font-weight="700" fill="#4b3b8f" stroke="#fff" stroke-width="3" paint-order="stroke">arc: point on it</text>`); }
     if (S.arcMid) { const q = toScr(S.arcMid); dyn.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="3.5" fill="#4b3b8f"/>`); }
     if (S.tool === "rect" || S.tool === "dedrect") { const a = S.draft[0], R = [a, [cur[0], a[1]], cur, [a[0], cur[1]]], cut = S.tool === "dedrect", rc = cut ? "#d03b3b" : c.color;
       dyn.push(`<polygon points="${ptsS(R)}" fill="${rc}" fill-opacity=".15" stroke="${rc}" stroke-width="2"${cut ? ' stroke-dasharray="6 3"' : ""}/>`);
-      if (k) live = (cut ? "Cut-out " : "") + f3(Math.abs(cur[0] - a[0]) / k) + " × " + f3(Math.abs(cur[1] - a[1]) / k) + " ft = " + (cut ? "− " : "") + fq(Math.abs(cur[0] - a[0]) * Math.abs(cur[1] - a[1]) / k / k) + " Sft"; }
+      if (k) live = (cut ? "Cut-out " : "") + uLen(Math.abs(cur[0] - a[0]) / k) + " × " + uLenT(Math.abs(cur[1] - a[1]) / k) + " = " + (cut ? "− " : "") + uArea(Math.abs(cur[0] - a[0]) * Math.abs(cur[1] - a[1]) / k / k); }
     else {
       const col = S.tool === "fence" ? "#ff7a00" : S.tool === "ded" || S.tool === "open" ? "#d03b3b" : S.tool === "measure" || S.tool === "cal" ? "#0b0b0b" : c ? c.color : "#0b0b0b";
       if (isAreaDraft() && D.length >= 3) dyn.push(`<polygon points="${ptsS(D)}" fill="${col}" fill-opacity=".12" stroke="none"/>`);
@@ -4732,7 +4773,7 @@ function drawNow(){
       S.draft.forEach(p => { const q = toScr(p); dyn.push(`<circle cx="${q[0]}" cy="${q[1]}" r="3.5" fill="#fff" stroke="${col}" stroke-width="2"/>`); });
       if (k) { const L = polyLen(D) / k, seg = dist(D[D.length - 2], D[D.length - 1]) / k;
         const a1 = D[D.length - 2], a2 = D[D.length - 1], ang = (Math.atan2(a1[1] - a2[1], a2[0] - a1[0]) * 180 / Math.PI + 360) % 360;
-        live = (isAreaDraft() && D.length >= 3 ? fq(polyArea(D) / k / k) + " Sft · perimeter " + f3(polyLen(D, true) / k) + " ft" : (D.length > 2 ? "run " + f3(seg) + " · total " : "") + f3(L) + " ft") + " · ∠ " + ang.toFixed(1) + "°" + (D.length > 2 && !isAreaDraft() ? " · corner " + cornerDeg(D[D.length - 3], a1, a2).toFixed(1) + "°" : ""); }
+        live = (isAreaDraft() && D.length >= 3 ? uArea(polyArea(D) / k / k) + " · perimeter " + uLenT(polyLen(D, true) / k) : (D.length > 2 ? "run " + f3(seg) + " · total " : "") + uLenT(L)) + " · ∠ " + ang.toFixed(1) + "°" + (D.length > 2 && !isAreaDraft() ? " · corner " + cornerDeg(D[D.length - 3], a1, a2).toFixed(1) + "°" : ""); }
       else if (S.tool === "cal") live = (dist(D[0], D[D.length - 1])).toFixed(2) + " pt";
     }
   }
@@ -4740,7 +4781,7 @@ function drawNow(){
     if (m.t) { dyn.push(tmpMeasSvg(m, k)); return; }   // an angle / a radius
     dyn.push(`<polyline points="${ptsS(m)}" fill="none" stroke="#0b0b0b" stroke-width="2" stroke-dasharray="6 3"/>`);
     m.forEach(p => { const q = toScr(p); dyn.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="2.5" fill="#0b0b0b"/>`); });
-    if (k) { const q = toScr(m[m.length - 1]); dyn.push(label([q[0] + 8, q[1] - 10], f3(polyLen(m) / k) + " ft", "#0b0b0b")); }
+    if (k) { const q = toScr(m[m.length - 1]); dyn.push(label([q[0] + 8, q[1] - 10], uLenT(polyLen(m) / k), "#0b0b0b")); }
   });
   if (S.snap && cur && ((S.tool !== "select" && S.tool !== "pan") || S.drag)) {
     const q = toScr(S.snap.p), t = S.snap.type;
@@ -4768,7 +4809,7 @@ function hoverText(id){
   if (!o.cond) return MK_TYPES.has(o.type) ? mkHover(o) : (MARK_TOOLS[o.type] || (o.type === "legend" ? "Takeoff legend" : o.type)) + (o.text ? " — " + o.text : "") + (o.locked ? " · locked" : "");
   const c = cond(o.cond), k = itemScale(o); if (!c) return "";
   const q = k ? rowsOf(o, k).reduce((a, r) => a + r.qty, 0) : null;
-  return (o.label ? o.label + " · " : "") + c.name + (q == null ? " · scale not set" : " · " + fq(q, c.unit) + " " + c.unit) + (o.locked ? " · locked" : "");
+  return (o.label ? o.label + " · " : "") + c.name + (q == null ? " · scale not set" : " · " + fq(q, c.unit) + " " + uL(c.unit)) + (o.locked ? " · locked" : "");
 }
 /* ------------------------------------------------------------------ appearance (as Bluebeam's Properties toolbar, and more)
    Every condition has an appearance (c.ap) — line colour, opacity, style, width (screen px or paper pt), start / end heads,
@@ -4806,9 +4847,10 @@ function apFtIn(ft, den){
   let f = Math.floor(whole / 12), i = whole - f * 12; let g = den, n = fr; while (n && g && n % 2 === 0 && g % 2 === 0) { n /= 2; g /= 2; }
   return s + f + "'-" + i + (n ? " " + n + "/" + g : "") + "\"";
 }
+const apU = a => isM() && /^(ft|ftin|in)$/.test(a.units) ? "m" : a.units;   // the units a label is read in: a project in metres reads every one in metres (cm or mm set on a condition stay)
 function apLen(ft, a){
   const d = a.dec == null ? 3 : +a.dec;
-  switch (a.units) {
+  switch (apU(a)) {
     case "ftin": return apFtIn(ft, a.frac);
     case "in": return (ft * 12).toFixed(d) + "\"";
     case "m": return (ft * 0.3048).toFixed(d) + " m";
@@ -4818,18 +4860,18 @@ function apLen(ft, a){
 }
 function apArea(sft, a){
   const d = a.dec == null ? 3 : +a.dec;
-  switch (a.units) {
+  switch (apU(a)) {
     case "in": return (sft * 144).toFixed(Math.max(0, d - 1)) + " sq in";
     case "m": return (sft * 0.09290304).toFixed(d) + " m²";
     case "cm": return (sft * 929.0304).toFixed(Math.max(0, d - 2)) + " cm²";
     case "mm": return (sft * 92903.04).toFixed(0) + " mm²";
     default: return sft.toFixed(d) + (S.lbl && S.lbl.units === false ? "" : " Sft"); }
 }
-function apVol(cft, a){ const d = a.dec == null ? 3 : +a.dec; return a.units === "m" || a.units === "cm" || a.units === "mm" ? (cft * 0.028316846592).toFixed(d) + " m³" : cft.toFixed(d) + " cft"; }
+function apVol(cft, a){ const d = a.dec == null ? 3 : +a.dec; return /^(m|cm|mm)$/.test(apU(a)) ? (cft * 0.028316846592).toFixed(d) + " m³" : cft.toFixed(d) + " cft"; }
 function apQty(q, unit, a){   // a quantity in the condition's unit, read in the appearance's units where it has one
-  if (a.units === "ft" && (+a.dec === 3 || a.dec == null)) return fq(q, unit) + (S.lbl && S.lbl.units === false ? "" : " " + unit);
+  if (apU(a) === "ft" && (+a.dec === 3 || a.dec == null)) return fq(q, unit) + (S.lbl && S.lbl.units === false ? "" : " " + uL(unit));
   if (unit === "ft") return apLen(q, a); if (unit === "Sft") return apArea(q, a); if (unit === "cft") return apVol(q, a);
-  return fq(q, unit) + " " + unit;
+  return fq(q, unit) + " " + uL(unit);
 }
 /* dashes, heads and hatches */
 function apDash(d, w){
@@ -4979,7 +5021,7 @@ function condTotalsList(c, its){
   if (c.type === "linear") { out.push(["Length", apLen(T0.len - T0.ded, a)]); if (T0.rise) out.push(["Rise / drop (added)", apLen(T0.rise, a)]); if (T0.ded) out.push(["Gross length", apLen(T0.len, a)], ["Deducted", apLen(T0.ded, a)]); if (+c.h) out.push(["Wall area (× H)", apArea((T0.len - T0.ded) * +c.h * (+c.faces || 1), a)]); if (+c.h && +c.t) out.push(["Volume (× H × T)", apVol((T0.len - T0.ded) * +c.h * +c.t, a)]); out.push(["Segments", String(T0.segs)]); }
   else if (c.type === "area") { out.push(["Area", apArea(T0.area - T0.darea, a)]); if (T0.darea) out.push(["Gross area", apArea(T0.area, a)], ["Deducted", apArea(T0.darea, a)]); out.push(["Perimeter", apLen(T0.per, a)]); if (+c.t) out.push(["Volume (× T)", apVol((T0.area - T0.darea) * +c.t, a)]); }
   else out.push(["Count", String(T0.pts) + " Nos"]);
-  out.push(["Quantity", fq(q.net, c.unit) + " " + c.unit + (c.unit !== "ft" && c.unit !== "Sft" && c.unit !== "cft" ? "" : a.units !== "ft" ? " (" + apQty(q.net, c.unit, a) + ")" : "")], ["Measurements", String(T0.n)]);
+  out.push(["Quantity", fq(q.net, c.unit) + " " + uL(c.unit) + (c.unit !== "ft" && c.unit !== "Sft" && c.unit !== "cft" ? "" : a.units !== "ft" ? " (" + apQty(q.net, c.unit, a) + ")" : "")], ["Measurements", String(T0.n)]);
   if (T0.sloped) out.push(["Sloped", T0.sloped + " × √(1 + p²) in the quantity (the figures above are on plan)"]);
   if (T0.noScale) out.push(["No scale", T0.noScale + " measurement" + (T0.noScale > 1 ? "s" : "")]);
   return out;
@@ -4994,7 +5036,7 @@ function itemTotalsList(it, c, k){   // one measurement's own totals, in its app
   else out.push(["Count", it.pts.length * nos + " Nos"]);
   if (it.shape === "circle") out.push(["Radius / dia", apLen(dist(it.pts[0], it.pts[1]) / k, a) + " / " + apLen(2 * dist(it.pts[0], it.pts[1]) / k, a)]);
   if (rows[0] && rows[0].F != null) out.push(["Slope", pitchText(pitchOf(it, c)) + " × " + rows[0].F.toFixed(4)]);
-  out.push(["Quantity", fq(q, c.unit) + " " + c.unit]);
+  out.push(["Quantity", fq(q, c.unit) + " " + uL(c.unit)]);
   return out;
 }
 /* the condition dialog: its appearance editor, kept in step with the colour swatches, with a live preview */
@@ -5115,7 +5157,7 @@ function loadLbl(){ let o = null; try { o = JSON.parse(pref("zdTakeoffLbl") || "
   if (o && !o.v2) Object.assign(S.lbl, {area: true, perim: true, v2: 1}); }   // an area's label shows its area and perimeter: switched on once for labels set before (switched off again, it stays off)
 function capLines(it, c, k, ap){
   const o = S.lbl, out = [], u = t => o.units ? " " + t : "", rows = rowsOf(it, k), q = rows.reduce((a, r) => a + r.qty, 0), poly = itemPoly(it);
-  const A0 = ap || null, fL = v => A0 ? apLen(v, A0) : f3(v) + u("ft"), fA = v => A0 ? apArea(v, A0) : fq(v) + u("Sft"), fQ = v => A0 ? apQty(v, c.unit, A0) : fq(v, c.unit) + u(c.unit);
+  const A0 = ap || null, fL = v => A0 ? apLen(v, A0) : uLen(v) + u(uL("ft")), fA = v => A0 ? apArea(v, A0) : fq(v, "Sft") + u(uL("Sft")), fQ = v => A0 ? apQty(v, c.unit, A0) : fq(v, c.unit) + u(uL(c.unit));
   const ded = it.kind === "ded", mode = ded ? (LBL_DED[o.dedShow] ? o.dedShow : "qty") : (LBL_SHOW[o.show] ? o.show : "full");
   if (mode === "off") return [];
   if (mode !== "full") { const nm = it.label || (ded ? (c.type === "area" ? "Cut-out" : "Deduction") : c.name);
@@ -5127,7 +5169,7 @@ function capLines(it, c, k, ap){
     if (o.qty) out.push(fQ(q));
     if (o.area && !(o.qty && c.unit === "Sft")) out.push("A " + fA(A));
     if (o.perim) out.push("P " + fL(P) + ((+it.nos || 1) > 1 ? " × " + (+it.nos) : ""));   // P = perimeter, short so the label stays no wider than its area (one outline's; the quantity counts every one)
-    if (o.dims && r && r.how === "rect") out.push(A0 && A0.units !== "ft" ? apLen(r.L, A0) + " × " + apLen(r.W, A0) : f3(r.L) + " × " + f3(r.W) + u("ft"));
+    if (o.dims && r && r.how === "rect") out.push(A0 && apU(A0) !== "ft" ? apLen(r.L, A0) + " × " + apLen(r.W, A0) : uLen(r.L) + " × " + uLen(r.W) + u(uL("ft")));
     if (r && r.how === "circle" && (o.dims || o.qty)) out.push("R " + fL(r.D / 2) + " · Ø " + fL(r.D));
     if (r && r.F != null && (o.dims || o.qty)) out.push("slope " + pitchIn(pitchOf(it, c)) + " × " + r.F.toFixed(4));
   } else if (c.type === "linear") {
@@ -5165,7 +5207,7 @@ function lineLabelPt(P, z){   // beside the middle of the longest run, clear of 
 function segLabels(scr, pts, k, closed, z, ap){   // the length of every side, at its middle (Bluebeam "show segment values")
   const out = [], n = closed ? pts.length : pts.length - 1, fam = ap ? esc(ap.font || "Segoe UI") + ",Arial" : "Segoe UI,Arial", fs = ap ? Math.max(6, (+ap.fsz || 11.5) * 0.87) : 10, fc = ap ? esc(ap.fcol || "#33475b") : "#33475b";
   for (let i = 0; i < n; i++) { const a = scr[i], b = scr[(i + 1) % scr.length]; if (dist(a, b) < 46 * z) continue;
-    const d = dist(pts[i], pts[(i + 1) % pts.length]) / k, t = ap && ap.units !== "ft" ? apLen(d, ap) : f3(d), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const d = dist(pts[i], pts[(i + 1) % pts.length]) / k, t = ap && apU(ap) !== "ft" ? apLen(d, ap) : f3(d), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     out.push(`<text x="${m[0].toFixed(1)}" y="${(m[1] - 4 * z).toFixed(1)}" text-anchor="middle" font-family="${fam}" font-size="${(fs * z).toFixed(1)}" font-weight="600" fill="${fc}" stroke="#fff" stroke-width="${3 * z}" paint-order="stroke">${esc(t)}</text>`); }
   return out.join("");
 }
@@ -5234,7 +5276,7 @@ function legSym(c, a, x, y, w, h, z){   // in a box at x, y: h high, up to w wid
   return o + `<rect ${r} fill="none" stroke="${col}" stroke-width="${Math.min(h * .2, lw).toFixed(2)}" stroke-opacity="${op}"${da}/>`;
 }
 function legendQty(x,m){const d=Math.max(0,Math.min(3,Math.round(+m.precision||3)));return x.has?(+x.q||0).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';}
-function legendRate(c,m){const r=Number(c&&c.rate);if(!isFinite(r)||r===0)return'—';const d=Math.max(0,Math.min(2,Math.round(+m.moneyPrecision||2)));return r.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function legendRate(c,m){const r=uR(Number(c&&c.rate),c&&c.unit);if(!isFinite(r)||r===0)return'—';const d=Math.max(0,Math.min(2,Math.round(+m.moneyPrecision||2)));return r.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
 function legendSvg(m,T){   // the legend is in drawing units: its text scales with the zoom like its box, and shrinks (never grows) when the box is dragged narrower than refW
  const k=Math.abs(T([1,0])[0]-T([0,0])[0])||1,pp=m.pts||[[80,80],[420,260]],w=Math.abs(T(pp[0])[0]-T(pp[1])[0]);
  return legendSvg0(m,T,k*Math.min(1,w/k/(+m.refW||340)));
@@ -5247,7 +5289,7 @@ function legendSvg0(m,T,z){
  if(hh){out+='<rect x="'+x0.toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+hh.toFixed(1)+'" fill="'+head+'"/>';cols.forEach((c,i)=>{out+='<text x="'+(xs[i]+pad).toFixed(1)+'" y="'+(yy+hh*.67).toFixed(1)+'" font-size="'+Math.max(5,fs*.9).toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(c.label)+'</text>'});yy+=hh}
  const cell=function(x,y,w,s,al,bold){al=al||'start';const tx=al==='end'?x+w-pad:al==='middle'?x+w/2:x+pad;return '<text x="'+tx.toFixed(1)+'" y="'+y.toFixed(1)+'" text-anchor="'+(al==='end'?'end':al==='middle'?'middle':'start')+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="'+(bold?700:400)+'" fill="'+textCol+'">'+esc(s==null?'—':s)+'</text>';};
  rows.forEach(function(r,ri){const y=yy+ri*rh,c=r.c;if(r.sec!=null){out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="'+head+'"/><text x="'+(x0+pad).toFixed(1)+'" y="'+(y+rh*.67).toFixed(1)+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(r.sec)+'</text>';return}if(ri%2)out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="#f7f9fb"/>';cols.forEach(function(col,i){const cw=W*weights[i],x=xs[i];if(col.id==='symbol'){const hs=Math.min(cw-pad*2,rh*.46);out+=legSym(c,r.ap||apOf(c),x+pad,y+(rh-hs)/2,cw-pad*2,hs,z)}else if(col.id==='boq')out+=cell(x,y+rh*.67,cw,c.boq||'—');else if(col.id==='description'){const nm=String(r.nm||c.name||'—'),n=Math.max(4,Math.floor((cw-pad*2)/(fs*.55))),t=nm.length>n?nm.slice(0,n-1)+'…':nm;out+=(t!==nm?'<g><title>'+esc(nm)+'</title>':'')+cell(x,y+rh*.67,cw,t)+(t!==nm?'</g>':'')}
-   else if(col.id==='perim')out+=cell(x,y+rh*.67,cw,c.type==='area'&&r.has?legendQty({has:true,q:r.per},m)+' ft':'—','end');else if(col.id==='unit')out+=cell(x,y+rh*.67,cw,c.unit||'—','middle');else if(col.id==='qty')out+=cell(x,y+rh*.67,cw,legendQty(r,m),'end');else if(col.id==='rate')out+=cell(x,y+rh*.67,cw,legendRate(c,m),'end');else{const rate=Number(c.rate),amt=isFinite(rate)&&rate?(+r.q||0)*rate:null;out+=cell(x,y+rh*.67,cw,amt==null?'—':f2(amt),'end')}})});
+   else if(col.id==='perim')out+=cell(x,y+rh*.67,cw,c.type==='area'&&r.has?legendQty({has:true,q:uV(r.per,'ft')},m)+' '+uL('ft'):'—','end');else if(col.id==='unit')out+=cell(x,y+rh*.67,cw,uL(c.unit)||'—','middle');else if(col.id==='qty')out+=cell(x,y+rh*.67,cw,legendQty({has:r.has,q:uV(+r.q||0,c.unit)},m),'end');else if(col.id==='rate')out+=cell(x,y+rh*.67,cw,legendRate(c,m),'end');else{const rate=Number(c.rate),amt=isFinite(rate)&&rate?(+r.q||0)*rate:null;out+=cell(x,y+rh*.67,cw,amt==null?'—':f2(amt),'end')}})});
  if(cols.length>1)for(let i=1;i<cols.length;i++){out+='<line x1="'+xs[i].toFixed(1)+'" y1="'+(y0+pad).toFixed(1)+'" x2="'+xs[i].toFixed(1)+'" y2="'+Math.min(y1,y0+pad+th+hh+rows.length*rh).toFixed(1)+'" stroke="'+border+'" stroke-opacity=".22" stroke-width=".6"/>'}
  out+='</g>';return out;
 }
@@ -5387,10 +5429,11 @@ function refresh(){ mlSoon(); renderPageStrip(); lblSync(); S.doorIx = null; S.v
 let sheetT = null;
 function refreshSheetSoon(){ clearTimeout(sheetT); sheetT = setTimeout(() => { renderSheet(); renderConds(); }, 120); }
 function renderScaleChip(){
+  const uc = $("unitChip"); if (uc) { uc.style.display = P.proj ? "" : "none"; uc.lastElementChild.textContent = isM() ? "m · m² · m³" : "ft · Sft · cft"; uc.classList.toggle("on", isM()); }
   const ch = $("scaleChip"), sc = P.proj && P.proj.scales[S.key];
   if (!S.page) { ch.className = "chip bad"; ch.lastElementChild.textContent = "No page"; return; }
   if (!sc) { ch.className = "chip bad"; ch.lastElementChild.textContent = "Scale not set — press K"; }
-  else { ch.className = "chip " + scaleState(sc).k; ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "pdf" ? sc.text + " · saved in the PDF" : sc.how === "cad" ? sc.text + " · from the drawing" : sc.how === "dims" ? sc.text + " · from dimension strings" : sc.how === "manual" ? sc.text + " · chosen" : sc.how === "inherited" ? "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · inherited from " + keyName(sc.from) : "1 ft = " + sc.ptPerFt.toFixed(3) + " pt · calibrated") + (sc.verified ? " · verified" : sc.doubt ? " · doubtful" : " · not verified"); ch.title = "Page scale: " + scaleState(sc).t + " — click to set or check"; }
+  else { ch.className = "chip " + scaleState(sc).k; ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "pdf" ? sc.text + " · saved in the PDF" : sc.how === "cad" ? sc.text + " · from the drawing" : sc.how === "dims" ? sc.text + " · from dimension strings" : sc.how === "manual" ? sc.text + " · chosen" : sc.how === "inherited" ? ptPerTxt(sc.ptPerFt, 3) + " · inherited from " + keyName(sc.from) : ptPerTxt(sc.ptPerFt, 3) + " · calibrated") + (sc.verified ? " · verified" : sc.doubt ? " · doubtful" : " · not verified"); ch.title = "Page scale: " + scaleState(sc).t + " · " + scaleBoth(sc.ptPerFt) + " — click to set or check"; }
   markPageSel();
 }
 /* a page's scale status: Verified / Calibrated (both checked against a known length), Inherited (copied from another page,
@@ -5529,8 +5572,8 @@ function renderConds(){
   const gHead = o => { const t = o.m.reduce((a, c) => a + P.proj.items.filter(x => x.cond === c.id).length, 0), ck = o.m.reduce((a, c) => a + P.proj.items.filter(x => x.cond === c.id && x.qa === "checked").length, 0);
     return `<div class="cgrp2" data-cgrp="${esc(o.g)}" title="Click to fold / unfold this group"><span class="car">${grpOff.has(o.g) ? "&#9656;" : "&#9662;"}</span><b>${o.g ? esc(o.g) : "Ungrouped"}</b><span class="small">${o.m.length} condition${o.m.length === 1 ? "" : "s"} · ${ck}/${t} checked</span></div>`; };
   const cardOf = c => { const i = P.proj.conds.indexOf(c), t = condTotals(c), its = P.proj.items.filter(x => x.cond === c.id), ck = its.filter(x => x.qa === "checked").length;
-    return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}${its.length ? (ck ? ` · ${ck}/${its.length} checked<i class="pbar" title="${ck} of ${its.length} checked"><i style="width:${Math.round(100 * ck / its.length)}%"></i></i>` : "") : " · no measurements yet"}</span>${(P.proj.cols || []).length ? `<span class="ccols">${colChips(c)}</span>` : ""}</div>
-      <div class="q">${fq(t.net, c.unit)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(c.unit)}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; };
+    return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + uLen(+c.h) : ""}${c.t ? " · T " + uLen(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}${its.length ? (ck ? ` · ${ck}/${its.length} checked<i class="pbar" title="${ck} of ${its.length} checked"><i style="width:${Math.round(100 * ck / its.length)}%"></i></i>` : "") : " · no measurements yet"}</span>${(P.proj.cols || []).length ? `<span class="ccols">${colChips(c)}</span>` : ""}</div>
+      <div class="q">${fq(t.net, c.unit)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(uL(c.unit))}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; };
   const vw = condView(), vbar = `<div class="cview" title="How the conditions are listed">${[["tree", "By page", "PlanSwift-style tree: every page with the conditions measured on it and that page's quantity"], ["list", "Compact", "One thin row per condition"], ["cards", "Cards", "Cards with check progress"]].map(([k, n, t]) => `<button data-cview="${k}" class="${vw === k ? "on" : ""}" title="${t}">${n}</button>`).join("")}</div>`;
   const body = !shown.length ? '<div class="empty">No condition matches this filter.</div>' : vw === "tree" ? condTreeHtml(shown)
     : order.map(o => (hasG ? gHead(o) : "") + (hasG && grpOff.has(o.g) ? "" : o.m.map(c => vw === "list" ? condRowHtml(c, condTotals(c).net, 0) : cardOf(c)).join(""))).join("");
@@ -5542,9 +5585,9 @@ function condView(){ const v = S.condView || pref("tkCondView") || "tree"; retur
 function condRowHtml(c, q, lvl, pg){
   const nm = pg && c.flpk === pg ? condShort(c) : c.name;   // (a floor's own condition, under its floor: "Kitchen")
   const its = P.proj.items.filter(x => x.cond === c.id), ck = its.filter(x => x.qa === "checked").length, ty = c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count";
-  return `<div class="crow${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"${pg ? ` data-cpg="${esc(pg)}"` : ""} style="padding-left:${4 + 10 * lvl}px" title="${esc(c.name)} — ${ty}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""} · ${its.length} measurement${its.length === 1 ? "" : "s"}${its.length ? ", " + ck + " checked" : ""}${(P.proj.cols || []).length ? "\n" + esc(colTip(c)) : ""}${pg ? "\nClick: this condition on this page" : ""}">
+  return `<div class="crow${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"${pg ? ` data-cpg="${esc(pg)}"` : ""} style="padding-left:${4 + 10 * lvl}px" title="${esc(c.name)} — ${ty}${c.h ? " · H " + uLen(+c.h) : ""}${c.t ? " · T " + uLen(+c.t) : ""} · ${its.length} measurement${its.length === 1 ? "" : "s"}${its.length ? ", " + ck + " checked" : ""}${(P.proj.cols || []).length ? "\n" + esc(colTip(c)) : ""}${pg ? "\nClick: this condition on this page" : ""}">
     <input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several"><i class="cic ${c.type}" style="--cc:${esc(c.color)}"></i><span class="cn">${esc(nm)}</span>
-    <span class="cq">${fq(q, c.unit)}</span><span class="cu">${esc(c.unit)}</span><button class="sw" style="background:${esc(c.color)}" title="Change colour" data-color="${esc(c.id)}"></button>
+    <span class="cq">${fq(q, c.unit)}</span><span class="cu">${esc(uL(c.unit))}</span><button class="sw" style="background:${esc(c.color)}" title="Change colour" data-color="${esc(c.id)}"></button>
     <button class="ed eye bulb${c.hidden ? " out" : ""}" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">&#128161;</button><button class="ed pen" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`;
 }
 function condTreeHtml(shown){
@@ -5602,26 +5645,26 @@ function renderSheet(){
   if (inh) msgs.push(inh + " page scale" + (inh > 1 ? "s were" : " was") + " copied from another page (inherited) and not yet checked on that page — open it, click the scale chip → <b>Verify</b>.");
   if (S.otherTab) msgs.unshift(`<b>⚠ This project is ${esc(S.otherTab)}.</b> Two open copies overwrite each other's work when they save — keep one open. <button class="btn sm" data-reload="1">Reload this one</button>`);
   wb.innerHTML = msgs.join("<br>"); wb.classList.toggle("on", msgs.length > 0);
-  if (!P.proj.items.length) { el.innerHTML = '<div class="empty">Measurements appear here as you draw, in the house format: <b>Nos × L × W × H</b> in decimal feet, deductions as their own rows.</div>'; $("shInfo").textContent = ""; return; }
+  if (!P.proj.items.length) { el.innerHTML = '<div class="empty">Measurements appear here as you draw, in the house format: <b>Nos × L × W × H</b> in ' + (isM() ? "metres (m, m², m³)" : "decimal feet") + ', deductions as their own rows.</div>'; $("shInfo").textContent = ""; return; }
   let h = '<table class="sh"><thead><tr><th>#</th><th>Description</th><th class="n">Nos × L × W × H</th><th class="n">Qty</th></tr></thead><tbody>', n = 0;
   P.proj.conds.forEach(c => {
     const its = shSorted(P.proj.items.filter(i => i.cond === c.id && qaFilterOk(i) && shMatch(i, c)), c); if (!its.length) return;
     const t = condTotals(c);
-    h += `<tr class="ch"><td colspan="4"><span class="sw" style="background:${c.color}"></span>${c.boq ? `<span class="boq">${esc(c.boq)}</span> ` : ""}${esc(c.name)} <span style="font-weight:400;color:var(--muted)">(${esc(c.unit)})</span>${(P.proj.cols || []).length ? `<span class="ccols">${colChips(c)}</span>` : ""}</td></tr>`;
+    h += `<tr class="ch"><td colspan="4"><span class="sw" style="background:${c.color}"></span>${c.boq ? `<span class="boq">${esc(c.boq)}</span> ` : ""}${esc(c.name)} <span style="font-weight:400;color:var(--muted)">(${esc(uL(c.unit))})</span>${(P.proj.cols || []).length ? `<span class="ccols">${colChips(c)}</span>` : ""}</td></tr>`;
     its.forEach(it => {
       const k = itemScale(it), vp = viewportAt(it.file, it.page, it.pts[0]), lt = locText(locOf(it)), pg = pageName(it) + (vp ? " · " + vp.name : "") + (lt ? " · " + lt : "");
       if (!k) { h += `<tr class="it${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${++n}</td><td>${esc(it.label || kindName(it, c))}<div class="ds">${esc(pg)} · scale not set</div></td><td class="n">—</td><td class="n">—</td></tr>`; return; }
       rowsOf(it, k).forEach((r, i) => {
         const desc = (r.sign < 0 ? "Ded. " : "") + (it.label || kindName(it, c)) + (r.part ? " — part " + String.fromCharCode(96 + r.part) : "") + (r.rise ? " — " + (r.rise > 0 ? "rise" : "drop") : "");
-        const sub = [pg, r.runs && r.runs.length > 1 ? "runs " + r.runs.map(f3).join(" + ") : "", r.F != null ? "slope " + pitchText(pitchOf(it, c)) + " — plan × √(1 + p²) = × " + r.F.toFixed(4) : "", r.rise ? "vertical " + f3(r.rise) + " ft, added once" : "", r.how === "poly" ? "plan area of the " + r.sides + "-sided outline" : "", r.how === "circle" ? "circle, dia " + f3(r.D) + " ft" + (c.type === "area" ? " — area = π/4 × D²" : " — length = π × D") : "",
+        const sub = [pg, r.runs && r.runs.length > 1 ? "runs " + r.runs.map(uLen).join(" + ") : "", r.F != null ? "slope " + pitchText(pitchOf(it, c)) + " — plan × √(1 + p²) = × " + r.F.toFixed(4) : "", r.rise ? "vertical " + uLenT(r.rise) + ", added once" : "", r.how === "poly" ? "plan area of the " + r.sides + "-sided outline" : "", r.how === "circle" ? "circle, dia " + uLenT(r.D) + (c.type === "area" ? " — area = π/4 × D²" : " — length = π × D") : "",
                      c.type === "linear" && c.unit === "Sft" && (+c.faces || 1) > 1 && it.kind !== "ded" ? "Nos includes " + c.faces + " faces" : "",
-                     r.below ? "≤ " + f2(+c.dedMin || 0) + " " + (c.unit === "cft" && c.type === "area" ? "cft" : "Sft") + " — not deducted (house rule)" : "",
+                     r.below ? "≤ " + f2(uV(+c.dedMin || 0, dedU(c))) + " " + uL(dedU(c)) + " — not deducted (house rule)" : "",
                      i === 0 && crossed(it) ? "⚠ OUTLINE CROSSES ITSELF — area not right, fix the points" : ""].filter(Boolean).join(" · ");
         h += `<tr class="it${r.sign < 0 ? " ded" : ""}${r.below ? " below" : ""}${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${i === 0 ? ++n : ""}</td><td>${esc(desc)}${i === 0 ? qaBadges(it) + `<button class="rn" title="Rename (e.g. Bedroom 1)" data-rename="${esc(it.id)}">&#9998;</button>` : ""}<div class="ds">${esc(sub)}</div></td>
           <td class="n">${dimText(r)}</td><td class="n">${fq(r.below ? 0 : r.qty, c.unit)}</td></tr>`;
       });
     });
-    h += `<tr class="tot"><td></td><td>Total ${esc(c.name)}${t.ded ? `<div class="ds">gross ${fq(t.gross, c.unit)} − deductions ${fq(t.ded, c.unit)}</div>` : ""}</td><td></td><td class="n">${fq(t.net, c.unit)} ${esc(c.unit)}</td></tr>`;
+    h += `<tr class="tot"><td></td><td>Total ${esc(c.name)}${t.ded ? `<div class="ds">gross ${fq(t.gross, c.unit)} − deductions ${fq(t.ded, c.unit)}</div>` : ""}</td><td></td><td class="n">${fq(t.net, c.unit)} ${esc(uL(c.unit))}</td></tr>`;
   });
   const shown = P.proj.items.filter(i => { const c = cond(i.cond); return c && qaFilterOk(i) && shMatch(i, c); }).length;
   el.innerHTML = shown ? h + "</tbody></table>" : '<div class="empty">Nothing on the sheet matches' + ((S.shQ || "").trim() ? " “" + esc(S.shQ.trim()) + "”" : "") + (S.qaFilter ? " with this check filter" : "") + '.</div>';
@@ -5642,22 +5685,22 @@ function kindName(it, c){ return it.kind === "open" ? "Opening" : c.type === "co
 /* details shown at the top of the Properties box (left panel): the selected measurement's quantity, dimension string, geometry,
    condition settings, rate and check status — read-only facts; the fields below them edit it */
 const dl = rows => '<dl>' + rows.filter(r => r && r[1] !== "" && r[1] != null).map(r => `<dt>${esc(r[0])}</dt><dd${r[2] ? ' class="' + r[2] + '"' : ""} title="${esc(String(r[1]).replace(/<[^>]+>/g, ""))}">${r[3] ? r[1] : esc(r[1])}</dd>`).join("") + '</dl>';
-function rateLine(c){ const r = rateOf(c, c.unit); return r.na ? ["Rate", "not available", "warn"] : +r.rate > 0 ? ["Rate", "PKR " + f2(+r.rate) + " / " + c.unit] : ["Rate", "not set", "warn"]; }
+function rateLine(c){ const r = rateOf(c, c.unit); return r.na ? ["Rate", "not available", "warn"] : +r.rate > 0 ? ["Rate", "PKR " + f2(uR(+r.rate, c.unit)) + " / " + uL(c.unit)] : ["Rate", "not set", "warn"]; }
 function condDetailHtml(c){
   const t = condTotals(c), its = P.proj.items.filter(i => i.cond === c.id), ck = its.filter(i => i.qa === "checked").length, pages = new Set(its.map(i => keyOf(i.file, i.page))), r = rateOf(c, c.unit);
   const tp = c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count";
   return `<div class="pcard"><div style="display:flex;gap:8px;align-items:center"><span class="lsw" style="background:${esc(c.color)};width:14px;height:14px"></span><b style="color:var(--navy);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}</b><button class="btn sm" data-act="editCond" title="Edit this condition: name, unit, H, T, faces, BOQ and Rate Analysis codes, colour">&#9998; Edit</button></div>
-    <div class="big" style="margin-top:6px">${fq(t.net, c.unit)}<small>${esc(c.unit)}</small></div>
+    <div class="big" style="margin-top:6px">${fq(t.net, c.unit)}<small>${esc(uL(c.unit))}</small></div>
     <div class="dimstr">${t.ded ? "gross " + fq(t.gross, c.unit) + " − deductions " + fq(t.ded, c.unit) : its.length + " measurement" + (its.length === 1 ? "" : "s")}</div></div>
     <div class="psec">Totals</div>
     ${dl(condTotalsList(c, its))}
     <div class="psec">Appearance <span class="small" style="font-weight:400;text-transform:none;letter-spacing:0">— every measurement of this condition</span></div>
     ${apEditorHtml(c, apOf(c), {scope: "cond", totals: condTotalsList(c, its).slice(0, 4)})}
     <div class="psec">Condition</div>
-    ${dl([["Measured as", tp], ["Unit", c.unit], c.h ? ["Height H", f3(+c.h) + " ft"] : null, c.t ? ["Thickness T", f3(+c.t) + " ft"] : null, c.faces > 1 ? ["Faces", String(c.faces)] : null, +c.pitch > 0 && c.type !== "count" ? ["Slope", pitchText(+c.pitch) + " × " + slopeF(+c.pitch).toFixed(4)] : null,
-      +c.dedMin ? ["Deduct over", f2(+c.dedMin)] : null, ["BOQ code", c.boq || "not set", c.boq ? "" : "warn"], c.ra ? ["Rate Analysis", c.ra] : null, rateLine(c), r.src ? ["Rate source", r.src + (r.date ? ", " + r.date : "")] : null,
+    ${dl([["Measured as", tp], ["Unit", uL(c.unit)], c.h ? ["Height H", uLenT(+c.h)] : null, c.t ? ["Thickness T", uLenT(+c.t)] : null, c.faces > 1 ? ["Faces", String(c.faces)] : null, +c.pitch > 0 && c.type !== "count" ? ["Slope", pitchText(+c.pitch) + " × " + slopeF(+c.pitch).toFixed(4)] : null,
+      +c.dedMin ? ["Deduct over", f2(uV(+c.dedMin, dedU(c))) + (isM() ? " " + uL(dedU(c)) : "")] : null, ["BOQ code", c.boq || "not set", c.boq ? "" : "warn"], c.ra ? ["Rate Analysis", c.ra] : null, rateLine(c), r.src ? ["Rate source", r.src + (r.date ? ", " + r.date : "")] : null,
       c.asm && c.asm.length ? ["Assembly lines", String(c.asm.length)] : null])}
-    ${(P.proj.cols || []).length ? `<div class="psec">Custom columns <button class="rn" data-act="cols" title="Add, change or switch off custom columns">&#9998;</button></div>` + (colVals(c).length ? dl(colVals(c).map(x => x.err ? [x.col.name, `<span title="${esc(x.err)}">#ERR</span>`, "warn", 1] : [x.col.name, fq(x.v, x.col.unit) + (x.col.unit ? " " + x.col.unit : "")])) : '<div class="small">All switched off for this condition.</div>') : ""}
+    ${(P.proj.cols || []).length ? `<div class="psec">Custom columns <button class="rn" data-act="cols" title="Add, change or switch off custom columns">&#9998;</button></div>` + (colVals(c).length ? dl(colVals(c).map(x => x.err ? [x.col.name, `<span title="${esc(x.err)}">#ERR</span>`, "warn", 1] : [x.col.name, fq(x.v, x.col.unit) + (x.col.unit ? " " + uL(x.col.unit) : "")])) : '<div class="small">All switched off for this condition.</div>') : ""}
     ${matHtml(c, t.net)}
     <div class="psec">Takeoff</div>
     ${dl([["Measurements", String(its.length)], ["Pages used", String(pages.size)], ["Checked", ck + " of " + its.length, its.length && ck === its.length ? "ok" : ""], t.noScale ? ["No scale", t.noScale + " measurement" + (t.noScale > 1 ? "s" : ""), "warn"] : null])}
@@ -5666,17 +5709,17 @@ function condDetailHtml(c){
 function itemDetailHtml(it, c, k){
   const poly = itemPoly(it), rows = k ? rowsOf(it, k) : [], net = rows.reduce((a, r) => a + (r.below ? 0 : r.qty), 0), r0 = rows[0], pg = pageName(it), loc = locText(locOf(it)), pc = it.pts.length;
   const pz = c.type !== "count" && it.kind !== "open" ? pitchOf(it, c) : 0;
-  const geom = !k ? [] : it.shape === "circle" ? [["Radius R", f3(dist(it.pts[0], it.pts[1]) / k) + " ft"], ["Diameter D", f3(2 * dist(it.pts[0], it.pts[1]) / k) + " ft"], ["Circumference", f3(polyLen(poly, true) / k) + " ft"], ["Area", f2(polyArea(poly) / k / k) + " Sft"]]
-    : c.type === "area" ? [["Area", f3(polyArea(it.pts) / k / k) + " Sft"], ["Perimeter", f3(polyLen(it.pts, true) / k) + " ft"], ["Points", String(pc)]]
-    : c.type === "linear" ? [["Length", f3(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k) + " ft"], it.kind === "open" ? null : ["Segments", String(Math.max(1, pc - 1))], it.kind === "open" ? null : ["Points", String(pc)]] : [["Count points", String(pc)]];
+  const geom = !k ? [] : it.shape === "circle" ? [["Radius R", uLenT(dist(it.pts[0], it.pts[1]) / k)], ["Diameter D", uLenT(2 * dist(it.pts[0], it.pts[1]) / k)], ["Circumference", uLenT(polyLen(poly, true) / k)], ["Area", uArea2(polyArea(poly) / k / k)]]
+    : c.type === "area" ? [["Area", f3(uV(polyArea(it.pts) / k / k, "Sft")) + " " + uL("Sft")], ["Perimeter", uLenT(polyLen(it.pts, true) / k)], ["Points", String(pc)]]
+    : c.type === "linear" ? [["Length", uLenT(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k)], it.kind === "open" ? null : ["Segments", String(Math.max(1, pc - 1))], it.kind === "open" ? null : ["Points", String(pc)]] : [["Count points", String(pc)]];
   const sc = (P.proj.scales || {})[keyOf(it.file, it.page)], st = it.qa === "checked" ? ["Checked", "ok"] : it.qa === "recheck" ? ["Recheck", "bad"] : ["Pending", ""];
   return `<div class="pcard"><div style="display:flex;gap:8px;align-items:center"><span class="lsw" style="background:${esc(c.color)};width:14px;height:14px"></span><b style="color:var(--navy);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.label || kindName(it, c))}</b><span class="pstat ${st[1]}">${st[0]}</span></div>
-    <div class="big" style="margin-top:6px">${k ? (it.kind === "ded" || it.kind === "open" ? "−" : "") + fq(Math.abs(net), c.unit) : "—"}<small>${esc(c.unit)}</small></div>
+    <div class="big" style="margin-top:6px">${k ? (it.kind === "ded" || it.kind === "open" ? "−" : "") + fq(Math.abs(net), c.unit) : "—"}<small>${esc(uL(c.unit))}</small></div>
     <div class="dimstr">${r0 ? esc(dimText(r0)) : "scale not set on this page"}${rows.length > 1 ? " · +" + (rows.length - 1) + " more row" + (rows.length > 2 ? "s" : "") : ""}</div></div>
     <div class="psec">Details</div>
     ${dl([["Condition", c.name], ["Type", it.kind === "open" ? "Opening" : it.kind === "ded" ? "Deduction" : c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"], ["Page", pg], loc ? ["Location", loc] : null, ...geom,
-      pz > 0 ? ["Slope", pitchText(pz) + " × " + slopeF(pz).toFixed(4) + (it.pitch != null ? " (this one)" : "")] : null, +it.rise && c.type === "linear" ? [+it.rise > 0 ? "Rise" : "Drop", f3(Math.abs(+it.rise)) + " ft"] : null,
-      c.h ? ["Height H", f3(+c.h) + " ft"] : null, c.t ? ["Thickness T", f3(+c.t) + " ft"] : null, ["BOQ code", c.boq || "not set", c.boq ? "" : "warn"], rateLine(c),
+      pz > 0 ? ["Slope", pitchText(pz) + " × " + slopeF(pz).toFixed(4) + (it.pitch != null ? " (this one)" : "")] : null, +it.rise && c.type === "linear" ? [+it.rise > 0 ? "Rise" : "Drop", uLenT(Math.abs(+it.rise))] : null,
+      c.h ? ["Height H", uLenT(+c.h)] : null, c.t ? ["Thickness T", uLenT(+c.t)] : null, ["BOQ code", c.boq || "not set", c.boq ? "" : "warn"], rateLine(c),
       ["Scale", sc ? (sc.verified ? "verified" : sc.how === "inherited" ? "inherited — not checked" : "not verified") : "not set", sc && sc.verified ? "ok" : "warn"],
       verOf(it) ? ["Verification", VER_NAMES[verOf(it)], verOk(it) ? "ok" : "warn"] : null,
       it.locked ? ["Locked", "yes"] : null, it.ai ? ["Made by", "AI assistant"] : null, it.copied ? ["Copied from", keyName(it.copied.from)] : null, it.qa === "checked" ? ["Checked", (it.qaBy || "") + (it.qaAt ? ", " + dmy(it.qaAt) : "")] : null])}
@@ -5699,24 +5742,24 @@ function renderProps(){
   if (!it) { const c0 = P.proj && S.cond ? cond(S.cond) : null; if (c0) { el.innerHTML = condDetailHtml(c0); el.classList.add("on"); $("propsTag").textContent = "condition"; } else { el.classList.remove("on"); el.innerHTML = ""; } return; }
   $("propsTag").textContent = "measurement";
   const c = cond(it.cond), k = itemScale(it), poly = itemPoly(it);
-  const meas = !k ? "scale not set" : it.shape === "circle" ? "R " + f3(dist(it.pts[0], it.pts[1]) / k) + " · dia " + f3(2 * dist(it.pts[0], it.pts[1]) / k) + " ft · " + (c.type === "area" ? fq(polyArea(poly) / k / k) + " Sft" : f3(polyLen(poly, true) / k) + " ft round")
-    : c.type === "area" ? fq(polyArea(it.pts) / k / k) + " Sft measured · perimeter " + f3(polyLen(it.pts, true) / k) + " ft" : c.type === "linear" ? f3(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k) + " ft measured" : it.pts.length + " points";
+  const meas = !k ? "scale not set" : it.shape === "circle" ? "R " + f3(dist(it.pts[0], it.pts[1]) / k) + " · dia " + uLenT(2 * dist(it.pts[0], it.pts[1]) / k) + " · " + (c.type === "area" ? uArea(polyArea(poly) / k / k) : uLenT(polyLen(poly, true) / k) + " round")
+    : c.type === "area" ? uArea(polyArea(it.pts) / k / k) + " measured · perimeter " + uLenT(polyLen(it.pts, true) / k) : c.type === "linear" ? uLenT(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k) + " measured" : it.pts.length + " points";
   el.innerHTML = '<div class="pdet">' + itemDetailHtml(it, c, k) + '</div><div class="pedit">' + `<h4>${esc(c.name)} — ${esc(kindName(it, c))} <span style="font-weight:400;color:var(--muted);font-size:11px">${esc(meas)}</span></h4>
     <div class="row"><div class="fg" style="flex:2"><label>Label</label><input type="text" data-prop="label" value="${esc(it.label)}" placeholder="e.g. Bed room 1"></div>
     <div class="fg"><label>Nos (×)</label><input type="number" min="1" step="1" data-prop="nos" value="${+it.nos || 1}"></div>
-    ${it.kind === "open" ? `<div class="fg"><label>Width ft</label><input type="text" data-prop="ow" value="${it.ow ? f3(it.ow) : ""}" placeholder="${k ? f3(dist(it.pts[0], it.pts[1]) / k) : ""}"></div><div class="fg"><label>Height ft</label><input type="text" data-prop="oh" value="${f3(+it.oh || 0)}"></div>` : ""}
+    ${it.kind === "open" ? `<div class="fg"><label>Width ${uL("ft")}</label><input type="text" data-prop="ow" value="${it.ow ? uLenIn(it.ow) : ""}" placeholder="${k ? uLen(dist(it.pts[0], it.pts[1]) / k) : ""}"></div><div class="fg"><label>Height ${uL("ft")}</label><input type="text" data-prop="oh" value="${uLenIn(+it.oh || 0)}"></div>` : ""}
     ${c.type !== "count" && it.kind !== "open" ? `<div class="fg"><label>Measured as</label><select data-prop="kind"><option value="shape"${it.kind === "shape" ? " selected" : ""}>Add</option><option value="ded"${it.kind === "ded" ? " selected" : ""}>Deduct</option></select></div>` : ""}
     <div class="fg"><label>Condition</label><select data-prop="cond">${P.proj.conds.filter(x => x.type === c.type).map(x => `<option value="${esc(x.id)}"${x.id === it.cond ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div><div class="fg"><label>Condition colour</label><input type="color" data-prop="color" value="${/^#[0-9a-f]{6}$/i.test(c.color) ? c.color : "#2a78d6"}" style="height:30px;padding:0"></div><div class="fg"><label>Line weight</label><input type="number" min="0.25" max="24" step="0.25" data-prop="sw" value="${+c.sw || 2}"></div>
     <button class="btn dng" data-act="delItem"${it.locked ? " disabled" : ""}>Delete</button></div>
     <div class="row" style="margin-top:6px;gap:4px">${it.locked ? '<span class="tag a">&#128274; locked</span>' : ""}<button class="btn sm" data-act="lock" title="Ctrl+Shift+L">${it.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn sm" data-act="dup" title="Ctrl+D">Duplicate</button>
       ${isRun(it) ? '<button class="btn sm" data-act="brk" title="Break tool (B): click where to cut the run">&#9986; Break…</button>' : ""}${S.selPt >= 0 && (c.type === "count" || editPts(it)) ? '<button class="btn sm dng" data-act="delPoint">Remove point ' + (S.selPt + 1) + "</button>" : ""}
       <span class="small" style="flex:1;min-width:160px">${editPts(it) && !it.locked ? "Double-click a side to add a point, a point to remove it · drag the + to add one" : ""} · right-click for more</span></div>
-    ${it.kind === "open" ? `<div class="row" style="margin-top:6px"><div class="fg"><label>Schedule mark</label><select data-prop="sch"><option value="">— none (own size) —</option>${(P.proj.openings || []).map(o => `<option value="${esc(o.id)}"${o.id === it.sch ? " selected" : ""}>${esc(o.mark)} — ${f3(o.w)} × ${f3(o.h)} ${esc(o.type)}</option>`).join("")}</select></div></div>` : ""}
-    ${c.type === "area" && it.kind === "shape" && k ? (() => { const dr = doorsOn(it), per = polyLen(poly, true) / k; return `<div class="row" style="margin-top:6px"><div class="fg"><label>Doors on outline (ft)</label><input type="text" data-prop="doorW" value="${dr.manual ? f3(dr.ft) : ""}" placeholder="auto ${f3(dr.ft)}"></div>
-      <div class="fg" style="flex:2"><span class="small">P ${f3(per)} − doors ${f3(Math.min(per, dr.ft))} = <b>PD ${f3(per - Math.min(per, dr.ft))} ft</b> ${dr.manual ? "(typed)" : "(auto: " + dr.n + " door opening" + (dr.n === 1 ? "" : "s") + " on this outline)"}</span></div></div>`; })() : ""}
+    ${it.kind === "open" ? `<div class="row" style="margin-top:6px"><div class="fg"><label>Schedule mark</label><select data-prop="sch"><option value="">— none (own size) —</option>${(P.proj.openings || []).map(o => `<option value="${esc(o.id)}"${o.id === it.sch ? " selected" : ""}>${esc(o.mark)} — ${uLen(o.w)} × ${uLen(o.h)} ${esc(o.type)}</option>`).join("")}</select></div></div>` : ""}
+    ${c.type === "area" && it.kind === "shape" && k ? (() => { const dr = doorsOn(it), per = polyLen(poly, true) / k; return `<div class="row" style="margin-top:6px"><div class="fg"><label>Doors on outline (${uL("ft")})</label><input type="text" data-prop="doorW" value="${dr.manual ? uLenIn(dr.ft) : ""}" placeholder="auto ${uLen(dr.ft)}"></div>
+      <div class="fg" style="flex:2"><span class="small">P ${uLen(per)} − doors ${uLen(Math.min(per, dr.ft))} = <b>PD ${uLenT(per - Math.min(per, dr.ft))}</b> ${dr.manual ? "(typed)" : "(auto: " + dr.n + " door opening" + (dr.n === 1 ? "" : "s") + " on this outline)"}</span></div></div>`; })() : ""}
     ${c.type !== "count" && it.kind !== "open" ? (() => { const pz = pitchOf(it, c), rz = c.type === "linear" && it.shape !== "circle"; return `<div class="row" style="margin-top:6px"><div class="fg"><label>Slope (this one)</label><input type="text" data-prop="pitch" value="${it.pitch != null ? (+it.pitch > 0 ? pitchIn(+it.pitch) : "flat") : ""}" placeholder="${+c.pitch > 0 ? "as condition " + pitchIn(+c.pitch) : "flat"}" title="Measured on plan: rise:run (4:12), percent (33%) or degrees (18.4°), flat for none · blank = the condition's"></div>
-      ${rz ? `<div class="fg"><label>Rise / drop (ft)</label><input type="text" data-prop="rise" value="${+it.rise ? f3(+it.rise) : ""}" placeholder="0 · −10 = drop" title="Vertical length added once to the run (a riser, a drop) — Bluebeam polylength rise / drop"></div>` : ""}
-      <div class="fg" style="flex:2"><span class="small">${pz > 0 ? "plan × √(1 + p²) = <b>× " + slopeF(pz).toFixed(4) + "</b> (" + esc(pitchText(pz)) + ")" : "flat — on plan"}${rz && +it.rise ? " · " + (+it.rise > 0 ? "rise" : "drop") + " <b>" + f3(Math.abs(+it.rise)) + " ft</b> its own row" : ""}</span></div></div>`; })() : ""}
+      ${rz ? `<div class="fg"><label>Rise / drop (${uL("ft")})</label><input type="text" data-prop="rise" value="${+it.rise ? uLenIn(+it.rise) : ""}" placeholder="0 · −10 = drop" title="Vertical length added once to the run (a riser, a drop) — Bluebeam polylength rise / drop"></div>` : ""}
+      <div class="fg" style="flex:2"><span class="small">${pz > 0 ? "plan × √(1 + p²) = <b>× " + slopeF(pz).toFixed(4) + "</b> (" + esc(pitchText(pz)) + ")" : "flat — on plan"}${rz && +it.rise ? " · " + (+it.rise > 0 ? "rise" : "drop") + " <b>" + uLenT(Math.abs(+it.rise)) + "</b> its own row" : ""}</span></div></div>`; })() : ""}
     <div class="row" style="margin-top:6px">${LOC_KEYS.map(lk => { const sh = (P.proj.sheets || {})[keyOf(it.file, it.page)] || {}; return `<div class="fg"><label>${LOC_NAMES[lk]}</label><input type="text" data-prop="${lk}" list="dlp_${lk}" value="${esc(it[lk] || "")}" placeholder="${esc(sh[lk] || (lk === "room" ? it.label || "" : ""))}"><datalist id="dlp_${lk}">${locValues(lk).map(x => `<option value="${esc(x)}">`).join("")}</datalist></div>`; }).join("")}</div>
     <div class="row" style="margin-top:6px"><div class="fg"><label>QA status</label><select data-prop="qa">${Object.entries(QA_NAMES).map(([q, n]) => `<option value="${q}"${(it.qa || "") === q ? " selected" : ""}>${n}</option>`).join("")}</select></div>
       <div class="fg" style="flex:2"><label>QA note</label><input type="text" data-prop="qaNote" value="${esc(it.qaNote || "")}" placeholder="e.g. confirm against section B-B"></div></div>
@@ -5796,7 +5839,7 @@ function breakRun(it, i, p){
   const nb = cloneItem(it, B);
   mutate(() => { it.pts = A; delete it.arcs; qaMoved(it); qaMoved(nb); P.proj.items.splice(P.proj.items.indexOf(it) + 1, 0, nb); }, "Break run");
   setSel([it.id, nb.id]); refresh();
-  const k = itemScale(it); toast("Broken in two" + (k ? ": " + f3(polyLen(A) / k) + " + " + f3(polyLen(B) / k) + " ft" : "") + " — both halves selected", 2600);
+  const k = itemScale(it); toast("Broken in two" + (k ? ": " + f3(polyLen(A) / k) + " + " + uLenT(polyLen(B) / k) : "") + " — both halves selected", 2600);
 }
 function delSegment(it, i){
   if (it.locked) return lockedMsg();
@@ -5808,7 +5851,7 @@ function delSegment(it, i){
     if (keep[1]) P.proj.items.splice(P.proj.items.indexOf(it) + 1, 0, cloneItem(it, keep[1]));
   }, "Delete segment");
   if (!keep.length) setSel([]); refresh();
-  toast("Segment deleted" + (k ? " (" + f3(gone / k) + " ft)" : "") + (keep.length === 2 ? " — the run is now two" : ""), 2400);
+  toast("Segment deleted" + (k ? " (" + uLenT(gone / k) + ")" : "") + (keep.length === 2 ? " — the run is now two" : ""), 2400);
 }
 function breakClick(sp, e){
   const r = runAt(sp);
@@ -5837,7 +5880,7 @@ function cutGap(it, i1, p1, i2, p2, label){
     if (keep[1]) P.proj.items.splice(P.proj.items.indexOf(it) + 1, 0, cloneItem(it, keep[1]));
   }, label || "Cut gap");
   refresh(); const after = keep.reduce((a, x) => a + polyLen(x), 0);
-  toast((label === "Trim" ? "Trimmed" : "Gap cut out") + (k ? ": " + f3((before - after) / k) + " ft removed" : ""), 2400);
+  toast((label === "Trim" ? "Trimmed" : "Gap cut out") + (k ? ": " + uLenT((before - after) / k) + " removed" : ""), 2400);
 }
 function joinRuns(ids){
   const runs = P.proj.items.filter(i => ids.has(i.id) && isRun(i));
@@ -5854,7 +5897,7 @@ function joinRuns(ids){
   const k = itemScale(runs[0]), drop = new Set(runs.slice(1).map(r => r.id)), mixed = new Set(runs.map(r => r.cond)).size > 1;
   mutate(() => { runs[0].pts = chain; delete runs[0].arcs; qaMoved(runs[0]); P.proj.items = P.proj.items.filter(i => !drop.has(i.id)); }, "Join " + runs.length + " runs");
   setSel([runs[0].id]); refresh();
-  toast("Joined into one run" + (k && gap / k > 0.01 ? " — " + f3(gap / k) + " ft of line added across the gaps" : "") + (mixed ? " · kept in " + cond(runs[0].cond).name : ""), 3600);
+  toast("Joined into one run" + (k && gap / k > 0.01 ? " — " + uLenT(gap / k) + " of line added across the gaps" : "") + (mixed ? " · kept in " + cond(runs[0].cond).name : ""), 3600);
 }
 function resumeRun(it, q){   // carry on drawing a run from its nearer end (Bluebeam "Resume")
   if (it.locked) return lockedMsg();
@@ -5871,7 +5914,7 @@ function toRun(it, condId){   // an area's outline (or a circle's rim) as a run 
   LOC_KEYS.forEach(lk => { if (it[lk]) nb[lk] = it[lk]; });
   mutate(() => { P.proj.items.push(nb); }, "Perimeter run in " + c.name);
   S.cond = condId; setSel([nb.id]); refresh();
-  const k = itemScale(nb); toast("Perimeter run added to " + c.name + (k ? ": " + f3(it.shape === "circle" ? polyLen(itemPoly(nb), true) / k : polyLen(nb.pts) / k) + " ft" : "") + " — openings are deducted with O", 3200);
+  const k = itemScale(nb); toast("Perimeter run added to " + c.name + (k ? ": " + uLenT(it.shape === "circle" ? polyLen(itemPoly(nb), true) / k : polyLen(nb.pts) / k) : "") + " — openings are deducted with O", 3200);
 }
 function toArea(it, condId){
   const c = cond(condId); if (!c) return;
@@ -5881,7 +5924,7 @@ function toArea(it, condId){
   LOC_KEYS.forEach(lk => { if (it[lk]) nb[lk] = it[lk]; });
   mutate(() => { P.proj.items.push(nb); }, "Area in " + c.name);
   S.cond = condId; setSel([nb.id]); refresh();
-  const k = itemScale(nb); toast("Area added to " + c.name + (k ? ": " + fq(polyArea(pts) / k / k) + " Sft" : ""), 2600);
+  const k = itemScale(nb); toast("Area added to " + c.name + (k ? ": " + uArea(polyArea(pts) / k / k) : ""), 2600);
 }
 function explodeRun(it){   // PlanSwift "segment" takeoff: every leg its own run (an arc stays one piece)
   if (it.locked) return lockedMsg();
@@ -5899,7 +5942,7 @@ function closeRun(it){
   if (it.pts.length < 3) return toast("A run needs 3 or more points to close into a loop", 2400);
   if (dist(it.pts[0], it.pts[it.pts.length - 1]) < 1e-6) return toast("This run already closes on its start", 2000);
   mutate(() => { it.pts.push(it.pts[0].slice()); qaMoved(it); }, "Close run");
-  const k = itemScale(it); if (k) toast("Closed: " + f3(polyLen(it.pts) / k) + " ft", 1800);
+  const k = itemScale(it); if (k) toast("Closed: " + uLenT(polyLen(it.pts) / k), 1800);
 }
 function offsetRun(Q, d){   // a run moved sideways by d (+ to the left of its direction on screen, − to the right), corners mitred
   const L = []; for (let i = 0; i + 1 < Q.length; i++) { const a = Q[i], b = Q[i + 1], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; L.push({p: [a[0] + dy / l * d, a[1] - dx / l * d], u: [dx / l, dy / l], n: [dy / l, -dx / l]}); }
@@ -5925,7 +5968,7 @@ async function offsetDialog(it){
     <div class="grid" style="margin-top:8px"><div class="fg"><label>Distance (ft, or ft-in)</label><input type="text" id="ofD" value="${t ? f3(t / 2) : ""}" placeholder="e.g. 0.375 or 4 1/2&quot;"></div>
     <div class="fg"><label>Direction</label><select id="ofS">${area ? '<option value="1">Outward (bigger)</option><option value="-1">Inward (smaller)</option>' : '<option value="1">Left of its direction (as drawn)</option><option value="-1">Right of its direction</option>'}</select></div>
     <div class="fg w2"><label class="pk"><input type="checkbox" id="ofK" checked> Keep the original — add the offset as a new measurement</label></div></div>
-    ${t ? `<p class="small" style="margin-top:6px">Filled with half of ${esc(c.name)}'s thickness (T ${f3(t)} ft).</p>` : ""}`, "Offset",
+    ${t ? `<p class="small" style="margin-top:6px">Filled with half of ${esc(c.name)}'s thickness (T ${uLenT(t)}).</p>` : ""}`, "Offset",
     () => { const raw = $("ofD").value.trim(); let d = parseFt(raw); if (isNaN(d) && /^\d+(\.\d+)?\s*"$/.test(raw)) d = parseFloat(raw) / 12; if (!(d > 0)) return "Enter a distance, e.g. 0.375 or 4 1/2\""; return {d: d * +$("ofS").value, keep: $("ofK").checked}; }, "ofD");
   if (v) offsetItem(it, v.d, v.keep);
 }
@@ -6053,7 +6096,7 @@ async function arrayDialog(dir){   // PlanSwift Ctrl + arrow / Advanced Copy: co
   const cl = clipOf(ids); if (!cl) return;
   const k = hereScale(cl.anchor); if (!k) return toast("Set the page scale first (K) — the distances are in feet", 3000);
   const bw = r3(cl.w / k), bh = r3(cl.h / k), D = {right: [1, 0], left: [1, 0], down: [0, 1], up: [0, 1]}[dir] || [1, 0], sg = dir === "left" || dir === "up" ? -1 : 1;
-  const v = await ask("Copy at a distance / array", `<p>Copies of the ${cl.n} selected object${cl.n > 1 ? "s" : ""} (${f3(bw)} × ${f3(bh)} ft) — across (+ right, − left) and down (+ down, − up).</p>
+  const v = await ask("Copy at a distance / array", `<p>Copies of the ${cl.n} selected object${cl.n > 1 ? "s" : ""} (${uLen(bw)} × ${uLenT(bh)}) — across (+ right, − left) and down (+ down, − up).</p>
     <div class="grid" style="margin-top:8px"><div class="fg"><label>Copies across</label><input type="number" id="arNx" min="0" step="1" value="${D[0]}"></div><div class="fg"><label>Distance across (ft, centre to centre)</label><input type="text" id="arDx" value="${f3(sg * bw)}"></div>
     <div class="fg"><label>Copies down</label><input type="number" id="arNy" min="0" step="1" value="${D[1]}"></div><div class="fg"><label>Distance down (ft)</label><input type="text" id="arDy" value="${f3(sg * bh)}"></div></div>
     <p class="small" style="margin-top:8px">Distances take decimal feet or ft-in (12'-6"). Every copy is its own measurement.</p>`, "Copy",
@@ -6345,7 +6388,7 @@ async function symCountDialog(){
   const nPdf = P.proj.files.length, thumb = s => { const I = symInk(s); return inkThumb(I, s.w / 2, s.h / 2, (Math.max(s.w, s.h) / 2 + 2) / 0.85); };
   const body = `<p>Every ticked symbol is looked for at once, each page read at its own scale so the symbol is its own size there. What is found is shown for checking, symbol by symbol, and counted into the count condition of the symbol's name (made when this project has none).</p>
     <div class="symg" style="display:flex;flex-direction:column;gap:4px;max-height:42vh;overflow:auto;margin-top:8px">${L.map((s, i) => `<div class="cand" style="align-items:center"><input type="checkbox" data-syck="${i}" checked title="Look for it"><img src="${thumb(s)}" width="40" height="40" alt="" style="image-rendering:pixelated;border:1px solid var(--line);border-radius:4px;background:#fff">
-      <span style="flex:1;min-width:0"><b>${esc(s.name)}</b><br><span class="small">${f2(s.fw)} × ${f2(s.fh)} ft · kept ${esc(dmy(String(s.at || "").slice(0, 10)))}${P.proj.conds.some(c => c.type === "count" && c.name.trim().toLowerCase() === s.name.trim().toLowerCase()) ? " · in this project" : ""}</span></span>
+      <span style="flex:1;min-width:0"><b>${esc(s.name)}</b><br><span class="small">${f2(s.fw)} × ${uLen2(s.fh)} · kept ${esc(dmy(String(s.at || "").slice(0, 10)))}${P.proj.conds.some(c => c.type === "count" && c.name.trim().toLowerCase() === s.name.trim().toLowerCase()) ? " · in this project" : ""}</span></span>
       <button class="btn sm" data-syren="${i}" title="Rename it (the count condition it fills goes by this name)">Rename</button><button class="btn sm dng" data-sydel="${i}" title="Forget this symbol">Delete</button></div>`).join("")}</div>
     <div class="grid" style="margin-top:10px"><div class="fg"><label>Search</label><select id="syWhere">${S.page ? '<option value="page">This page</option><option value="pdf" selected>Every page of this PDF</option>' : ""}${nPdf > 1 || !S.page ? `<option value="all">Every PDF of the project (${nPdf})</option>` : ""}</select></div>
     <div class="fg"><label>Match</label><select id="syThr"><option value="0.9">Strict (90%)</option><option value="0.82" selected>Normal (82%)</option><option value="0.72">Loose (72%)</option></select></div>
@@ -7465,15 +7508,15 @@ async function editCond(c){
   const isNew = !c, used = c && P.proj.items.some(i => i.cond === c.id);
   const dflt = toolDefaults();
   const d = c ? Object.assign({}, c) : {name: "", type: "area", unit: "Sft", color: dflt.condColor, sw: dflt.condWidth, h: "", t: "", faces: 1, dedMin: 0, ap: (dflt.apBy || {}).area || undefined};
-  const unitOpts = t => UNITS[t].map(u => `<option${u === d.unit ? " selected" : ""}>${u}</option>`).join("");
+  const unitOpts = t => UNITS[t].map(u => `<option value="${u}"${u === d.unit ? " selected" : ""}>${uL(u)}</option>`).join("");
   const body = (isNew ? `<div class="fg w2" style="margin-bottom:10px"><label>Start from</label><select id="cPre"><option value="">— choose a common item —</option>${PRESETS.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join("")}</select></div>` : "") +
     `<div class="grid"><div class="fg w2"><label>Name (as it should read on the sheet)</label><input type="text" id="cName" value="${esc(d.name)}"></div>
      <div class="fg"><label>Measured as</label><select id="cType"${used ? " disabled" : ""}><option value="area"${d.type === "area" ? " selected" : ""}>Area</option><option value="linear"${d.type === "linear" ? " selected" : ""}>Length</option><option value="count"${d.type === "count" ? " selected" : ""}>Count</option></select></div>
      <div class="fg"><label>Quantity unit</label><select id="cUnit">${unitOpts(d.type)}</select></div>
-     <div class="fg"><label>Height H (ft)</label><input type="text" id="cH" value="${d.h ? f3(+d.h) : ""}" placeholder="walls: floor to ceiling"></div>
-     <div class="fg"><label>Thickness T (ft)</label><input type="text" id="cT" value="${d.t ? f3(+d.t) : ""}" placeholder="9&quot; = 0.75"></div>
+     <div class="fg"><label>Height H (${uL("ft")})</label><input type="text" id="cH" value="${d.h ? uLenIn(+d.h) : ""}" placeholder="walls: floor to ceiling"></div>
+     <div class="fg"><label>Thickness T (${uL("ft")})</label><input type="text" id="cT" value="${d.t ? uLenIn(+d.t) : ""}" placeholder="${isM() ? "230 mm = 0.23" : "9&quot; = 0.75"}"></div>
      <div class="fg"><label>Faces</label><input type="number" id="cF" min="1" max="2" step="1" value="${+d.faces || 1}"></div>
-     <div class="fg"><label>Deduct openings / voids over</label><input type="text" id="cD" value="${f2(+d.dedMin || 0)}"></div>
+     <div class="fg"><label>Deduct openings / voids over${isM() ? " (" + uL(dedU(d)) + ")" : ""}</label><input type="text" id="cD" value="${isM() ? uDedIn(+d.dedMin || 0, dedU(d)) : f2(+d.dedMin || 0)}"></div>
      <div class="fg nocnt"><label>Slope (measured on plan)</label><input type="text" id="cPitch" value="${+d.pitch > 0 ? pitchIn(+d.pitch) : ""}" placeholder="flat · 4:12 · 33% · 18.4°" title="Roof, ramp or sloped run measured on plan: rise:run (4:12), percent (33%) or degrees (18.4°). Plan area / length × √(1 + p²)"><span class="small" id="cPitchF">${+d.pitch > 0 ? "× " + slopeF(+d.pitch).toFixed(4) + " (" + (Math.atan(+d.pitch) * 180 / Math.PI).toFixed(1) + "°)" : "plan × √(1 + p²)"}</span></div>
      <div class="fg w2"><label>Group (folder in the conditions list, e.g. Exterior working)</label><input type="text" id="cGrp" list="dlGrp" value="${esc(d.group || "")}" placeholder="none" autocomplete="off"><datalist id="dlGrp">${[...new Set(P.proj.conds.map(x => x.group).filter(Boolean))].map(g => `<option value="${esc(g)}">`).join("")}</datalist></div>
      ${(P.proj.cols || []).length ? `<div class="fg w2"><label>Custom columns shown for it <button class="rn" type="button" id="cColsEd" title="Add or change the columns">&#9998;</button></label><div style="display:flex;flex-wrap:wrap;gap:2px 14px">${P.proj.cols.map(x => `<label class="pk" title="${esc(x.name + " = " + x.formula)}"><input type="checkbox" data-ccol="${esc(x.id)}"${!Array.isArray(d.cols) || d.cols.includes(x.id) ? " checked" : ""}> ${esc(x.name)}</label>`).join("")}</div></div>` : ""}
@@ -7491,13 +7534,13 @@ async function editCond(c){
      <p class="small" style="margin-top:10px">Area → Sft, or cft with T (slab, screed). Length → ft; Sft with H (plaster, 4.5" partition — 2 faces for internal plaster); cft with H and T (9" and thicker walls).
      House thresholds: masonry and plaster openings 1.00 Sft, formwork 5.00 Sft, concrete voids 0.50 cft.</p>`;
   const pr = ask(isNew ? "New condition" : "Edit condition", body, isNew ? "Create" : "Save", () => {
-    const name = $("cName").value.trim(), type = $("cType").value, unit = $("cUnit").value, H = $("cH").value.trim() ? parseFt($("cH").value) : 0, T = $("cT").value.trim() ? parseFt($("cT").value) : 0;
+    const name = $("cName").value.trim(), type = $("cType").value, unit = $("cUnit").value, H = uKeep($("cH").value, d.h), T = uKeep($("cT").value, d.t);
     if (!name) return "Give the condition a name";
-    if (isNaN(H) || isNaN(T)) return "Height and thickness are decimal feet (or ft-in like 10'-6\")";
+    if (isNaN(H) || isNaN(T)) return isM() ? "Height and thickness are in metres (or with their unit: 230 mm, 10'-6\")" : "Height and thickness are decimal feet (or ft-in like 10'-6\")";
     if (type === "linear" && unit !== "ft" && !(H > 0)) return "A wall measured in " + unit + " needs its height H";
     if (unit === "cft" && !(T > 0) && !(c && c.cfCond && type === "area")) return "A quantity in cft needs the thickness T";   // (a cut / fill from spot levels: each measurement has its depth)
     const pitch = type === "count" ? 0 : parsePitch($("cPitch").value); if (isNaN(pitch)) return "Slope: rise:run like 4:12, a percent like 33% or degrees like 18.4° (blank = flat)";
-    return {name, type, unit, h: H || "", t: T || "", pitch: pitch > 0 ? +pitch.toFixed(6) : "", faces: Math.max(1, Math.min(2, +$("cF").value || 1)), dedMin: Math.max(0, parseFloat($("cD").value) || 0), color: $("cC").value,
+    return {name, type, unit, h: H || "", t: T || "", pitch: pitch > 0 ? +pitch.toFixed(6) : "", faces: Math.max(1, Math.min(2, +$("cF").value || 1)), dedMin: isM() && $("cD").value.trim() === uDedIn(+d.dedMin || 0, dedU(d)) ? +d.dedMin || 0 : Math.max(0, (parseFloat($("cD").value) || 0) / (isM() ? U_M[dedU({unit, type})][1] : 1)), color: $("cC").value,
       sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value, group: $("cGrp").value.trim().slice(0, 60), boq: $("cBoq").value.trim(), ra: $("cRa").value.trim().toUpperCase(), ...apFromDialog(type),
       ...((P.proj.cols || []).length ? {cols: (k => k.length === P.proj.cols.length ? undefined : k)([...document.querySelectorAll("[data-ccol]")].filter(b => b.checked).map(b => b.dataset.ccol))} : {})};   // every column ticked: none listed, so new columns show too
   }, "cName");
@@ -7517,8 +7560,8 @@ async function editCond(c){
     const bq = $("cBoq").value.trim(); if (!bq || pk.boqAuto || (!auto && L.items.has(bq.toUpperCase()))) { $("cBoq").value = it.code || it.id; pk.boqAuto = true; }
     if (!$("cName").value.trim()) { $("cName").value = String(it.desc || "").slice(0, 80); pk.nameAuto = true; }
     const tu = pkUnit(it); if (tu && !used) { if ($("cType").value !== tu[0]) { $("cType").value = tu[0]; $("cType").dispatchEvent(new Event("change", {bubbles: true})); }
-      $("cUnit").innerHTML = UNITS[tu[0]].map(u => `<option${u === tu[1] ? " selected" : ""}>${u}</option>`).join("");
-      if (tu[1] === "cft" && !$("cT").value.trim()) { const ti = matNameIn({name: $("cName").value}) || matNameIn({name: it.desc}); if (ti) $("cT").value = f3(ti / 12); } }   // 8" in the name → T 0.667
+      $("cUnit").innerHTML = UNITS[tu[0]].map(u => `<option value="${u}"${u === tu[1] ? " selected" : ""}>${uL(u)}</option>`).join("");
+      if (tu[1] === "cft" && !$("cT").value.trim()) { const ti = matNameIn({name: $("cName").value}) || matNameIn({name: it.desc}); if (ti) $("cT").value = uLenIn(ti / 12); } }   // 8" in the name → T 0.667
     raInfo(); pkDraw(); };
   const pkDraw = () => { const L = raLib(), el = $("cBoqL"); if (!el) return;
     if (!L.o) { el.innerHTML = '<div class="small" style="padding:6px">Rate library not in this browser — open SAJ QSCOST → Rate Analysis on this site once; then BOQ items and their rates are listed here.</div>'; $("cBoqHint").textContent = ""; return; }
@@ -7566,22 +7609,22 @@ document.addEventListener("change", e => {   // dialog: preset and type change
   if (e.target.id === "cCx") { $("cC").value = e.target.value; $("cSw").querySelectorAll(".swb").forEach(x => x.classList.remove("on")); }
   if (e.target.id === "cPre" && e.target.value !== "") {
     const p = PRESETS[+e.target.value];
-    $("cName").value = p.name; $("cType").value = p.type; $("cUnit").innerHTML = UNITS[p.type].map(u => `<option${u === p.unit ? " selected" : ""}>${u}</option>`).join("");
-    $("cT").value = p.t ? f3(p.t) : ""; $("cF").value = p.faces || 1; $("cD").value = f2(p.dedMin || 0);   // H is the project's, never the preset's: left as typed
-    $("cH").placeholder = p.hHint ? "usually " + p.hHint : "walls: floor to ceiling";
+    $("cName").value = p.name; $("cType").value = p.type; $("cUnit").innerHTML = UNITS[p.type].map(u => `<option value="${u}"${u === p.unit ? " selected" : ""}>${uL(u)}</option>`).join("");
+    $("cT").value = p.t ? uLenIn(p.t) : ""; $("cF").value = p.faces || 1; $("cD").value = isM() ? uDedIn(p.dedMin || 0, dedU(p)) : f2(p.dedMin || 0);   // H is the project's, never the preset's: left as typed
+    $("cH").placeholder = p.hHint ? "usually " + p.hHint + (isM() ? " ft" : "") : "walls: floor to ceiling";
     $("dlgErr").textContent = p.needH && !$("cH").value.trim() ? (p.hHint ? "Enter the height H — usually " + p.hHint + " ft in " + p.hWhy + "; check it for this project (it is not assumed)." : "Enter the height H (floor to ceiling / slab soffit) — it is not assumed.") : p.needT ? "Enter the thickness T — it is not assumed." : "";
   }
-  if (e.target.id === "cType") $("cUnit").innerHTML = UNITS[e.target.value].map(u => `<option>${u}</option>`).join("");
+  if (e.target.id === "cType") $("cUnit").innerHTML = UNITS[e.target.value].map(u => `<option value="${u}">${uL(u)}</option>`).join("");
 });
 async function scaleDialog(){
   if (!S.page) return;
   const key0 = S.key; let pv = []; try { pv = await pdfScalesOn(S.fileId, S.pageNo, S.base); } catch (e) {}
   if (key0 !== S.key) return;
   const sc = P.proj.scales[S.key], cands = scaleCandidates(S.key);
-  const body = `<p>Current: <b>${sc ? (sc.how === "note" ? esc(scaleLabel(sc)) + " (from the drawing note)" : sc.how === "pdf" ? esc(sc.text) + " (saved in the PDF)" : sc.how === "manual" ? esc(sc.text) + " (chosen by hand)" : sc.how === "dims" ? esc(sc.text) + " (read from the dimension strings)" : sc.how === "inherited" ? "inherited — " + esc(sc.text) : "calibrated — " + esc(sc.text)) : "not set"}</b>${sc ? (sc.verified ? " · <span style='color:var(--green)'>verified</span>" : " · <span style='color:var(--amber)'>not verified</span>") : ""} · status <b>${esc(scaleState(sc).ic + " " + scaleState(sc).t)}</b></p>
+  const body = `<p>Current: <b>${sc ? (sc.how === "note" ? esc(scaleLabel(sc)) + " (from the drawing note)" : sc.how === "pdf" ? esc(sc.text) + " (saved in the PDF)" : sc.how === "manual" ? esc(sc.text) + " (chosen by hand)" : sc.how === "dims" ? esc(sc.text) + " (read from the dimension strings)" : sc.how === "inherited" ? "inherited — " + esc(sc.text) : "calibrated — " + esc(sc.text)) : "not set"}</b>${sc ? (sc.verified ? " · <span style='color:var(--green)'>verified</span>" : " · <span style='color:var(--amber)'>not verified</span>") : ""} · status <b>${esc(scaleState(sc).ic + " " + scaleState(sc).t)}</b></p>${sc ? `<p class="small">${esc(scaleBoth(sc.ptPerFt))} · ${esc(ptPerTxt(sc.ptPerFt, 4))}</p>` : ""}
     ${sc && sc.note ? `<p class="small">${esc(sc.note)}</p>` : ""}
     ${cands.length ? `<p style="margin-top:10px"><b>Scale notes found on this page</b></p>` + cands.map((c, i) => `<div class="cand" data-cand="${i}"><b>${esc(c.label)}</b><span class="small">“${esc(c.text.slice(0, 70))}”${c.note ? " · " + esc(c.note) : ""}</span></div>`).join("") : '<p class="small" style="margin-top:10px">No scale note was found in the text of this page (scanned drawings have no text).</p>'}
-    ${pv.length ? `<p style="margin-top:10px"><b>Scale saved in this PDF</b> <span class="small">— by Bluebeam, Acrobat or the CAD plot; exact for the page as printed</span></p>` + pv.map((v, i) => `<div class="cand" data-pv="${i}"><b>${esc(v.label)}</b><span class="small">${v.name ? esc(v.name) + " · " : ""}${v.share >= 0.999 ? "whole page" : Math.round(v.share * 100) + "% of the sheet"} · 1 ft = ${v.ptPerFt.toFixed(4)} pt</span></div>`).join("") : ""}
+    ${pv.length ? `<p style="margin-top:10px"><b>Scale saved in this PDF</b> <span class="small">— by Bluebeam, Acrobat or the CAD plot; exact for the page as printed</span></p>` + pv.map((v, i) => `<div class="cand" data-pv="${i}"><b>${esc(v.label)}</b><span class="small">${v.name ? esc(v.name) + " · " : ""}${v.share >= 0.999 ? "whole page" : Math.round(v.share * 100) + "% of the sheet"} · ${esc(ptPerTxt(v.ptPerFt, 4))}</span></div>`).join("") : ""}
     <p class="small" style="margin-top:10px">A scale note is only right if the PDF is printed at the drawing's paper size. <b>Verify</b> by measuring a dimension you know; <b>Calibrate</b> sets the scale from it.</p>
     <p style="margin-top:12px"><b>Or choose the scale</b> <span class="small">— architectural, engineering or metric, for a page with no note or a wrong one</span></p>
     <div class="grid" style="margin-top:6px"><div class="fg"><label>Scale</label><select id="msSel"><option value="">— pick —</option>${MAN_SCALES.map(g => `<optgroup label="${esc(g[0])}">${g[1].map(t => `<option>${esc(t)}</option>`).join("")}</optgroup>`).join("")}</select></div>
@@ -7610,7 +7653,7 @@ async function scaleDialog(){
     if (!t) return {err: ""}; if (!(sc2.v > 0) || sc2.v > 12 * 10) return {err: "Write it like 1/4\" = 1'-0\", 1\" = 20' or 1:100"};
     const f = paper ? Math.max(S.base.width, S.base.height) / PAPER[paper] : 1;
     return {ptPerFt: 72 * sc2.v * f, label: sc2.label + (paper ? " @ " + paper : ""), f, paper}; };
-  const manShow = () => { const r = manRead(); $("msInfo").innerHTML = r.err != null ? (r.err ? `<span style="color:var(--red)">${esc(r.err)}</span>` : "") : `1 ft = <b>${r.ptPerFt.toFixed(4)} pt</b> on this page${r.paper ? " (× " + r.f.toFixed(3) + " for " + esc(r.paper) + " printed on this page)" : ""} — marked not verified until a known dimension is measured`; };
+  const manShow = () => { const r = manRead(); $("msInfo").innerHTML = r.err != null ? (r.err ? `<span style="color:var(--red)">${esc(r.err)}</span>` : "") : `${esc(ptPerTxt(r.ptPerFt, 4))} on this page (${esc(scaleBoth(r.ptPerFt))})${r.paper ? " (× " + r.f.toFixed(3) + " for " + esc(r.paper) + " printed on this page)" : ""} — marked not verified until a known dimension is measured`; };
   ["msSel", "msPaper"].forEach(id => $(id).addEventListener("change", () => { if (id === "msSel") $("msTxt").value = ""; manShow(); })); $("msTxt").addEventListener("input", manShow);
   $("msSet").onclick = () => { const r = manRead(); if (r.err != null) { $("msInfo").innerHTML = `<span style="color:var(--red)">${esc(r.err || "Pick or type a scale first")}</span>`; return; }
     close(); mutate(() => { P.proj.scales[S.key] = {ptPerFt: r.ptPerFt, how: "manual", text: r.label, note: r.paper ? "drawn for " + r.paper + ", this PDF page is × " + r.f.toFixed(3) : "", factor: r.f, verified: false, at: new Date().toISOString()}; }, "Scale " + r.label);
@@ -7627,24 +7670,24 @@ async function verifyMeasure(){
   if (!k) { S.verify = false; S.measure = null; setTool("select"); return toast(vp ? "The viewport " + vp.name + " has no scale yet — calibrate it first (Scale → its Calibrate)" : "Set the page scale first (K)", 5000); }
   const meas = polyLen(m) / k;
   if (vp) {
-    const v = await ask("Verify the viewport scale — " + vp.name, `<p>Measured in the viewport <b>${esc(vp.name)}</b>: <b>${f3(meas)} ft</b>.</p><div class="grid" style="margin-top:8px"><div class="fg w2"><label>The dimension printed on the drawing (ft or ft-in)</label><input type="text" id="dlgLen"></div></div>`,
-      "Check", () => { const ft = parseFt($("dlgLen").value); return ft > 0 ? ft : "Enter the printed dimension"; }, "dlgLen");
+    const v = await ask("Verify the viewport scale — " + vp.name, `<p>Measured in the viewport <b>${esc(vp.name)}</b>: <b>${uLenT(meas)}</b>.</p><div class="grid" style="margin-top:8px">${lenBox("The dimension printed on the drawing")}</div>`,
+      "Check", () => { const r = lenRead(); return r.ft > 0 ? r.ft : "Enter the printed dimension"; }, "dlgLen");
     S.verify = false; S.measure = null; setTool("select"); if (!v) return;
     const err = (meas - v) / v * 100;
-    if (Math.abs(err) <= 1) { mutate(() => { vp.verified = true; vp.check = {measured: r3(meas), printed: r3(v), at: new Date().toISOString()}; }); toast("Viewport scale verified: " + f3(meas) + " ft measured vs " + f3(v) + " ft printed (" + err.toFixed(2) + "%)", 4000); }
-    else if (await ask("Viewport scale does not agree", `<p>Measured <b>${f3(meas)} ft</b> against <b>${f3(v)} ft</b> printed — off by <b>${err.toFixed(1)}%</b>.</p><p class="small">Recalibrate the viewport <b>${esc(vp.name)}</b> from this measurement? The page's scale is not changed.</p>`, "Recalibrate"))
-      mutate(() => { vp.ptPerFt = polyLen(m) / v; vp.verified = true; vp.text = "calibrated: " + f3(v) + " ft over " + polyLen(m).toFixed(2) + " pt"; });
+    if (Math.abs(err) <= 1) { mutate(() => { vp.verified = true; vp.check = {measured: r3(meas), printed: r3(v), at: new Date().toISOString()}; }); toast("Viewport scale verified: " + uLenT(meas) + " measured vs " + uLenT(v) + " printed (" + err.toFixed(2) + "%)", 4000); }
+    else if (await ask("Viewport scale does not agree", `<p>Measured <b>${uLenT(meas)}</b> against <b>${uLenT(v)}</b> printed — off by <b>${err.toFixed(1)}%</b>.</p><p class="small">Recalibrate the viewport <b>${esc(vp.name)}</b> from this measurement? The page's scale is not changed.</p>`, "Recalibrate"))
+      mutate(() => { vp.ptPerFt = polyLen(m) / v; vp.verified = true; vp.text = "calibrated: " + uLenT(v) + " over " + polyLen(m).toFixed(2) + " pt"; });
     return;
   }
-  const v = await ask("Verify the scale", `<p>Measured on the drawing: <b>${f3(meas)} ft</b>.</p><div class="grid" style="margin-top:8px"><div class="fg w2"><label>The dimension printed on the drawing (ft or ft-in)</label><input type="text" id="dlgLen"></div></div>`,
-    "Check", () => { const ft = parseFt($("dlgLen").value); return ft > 0 ? ft : "Enter the printed dimension"; }, "dlgLen");
+  const v = await ask("Verify the scale", `<p>Measured on the drawing: <b>${uLenT(meas)}</b>.</p><div class="grid" style="margin-top:8px">${lenBox("The dimension printed on the drawing")}</div>`,
+    "Check", () => { const r = lenRead(); return r.ft > 0 ? r.ft : "Enter the printed dimension"; }, "dlgLen");
   S.verify = false;
   if (!v) return;
   const err = (meas - v) / v * 100;
-  if (Math.abs(err) <= 1) { mutate(() => { P.proj.scales[S.key].verified = true; P.proj.scales[S.key].check = {measured: r3(meas), printed: r3(v), at: new Date().toISOString()}; }); toast("Scale verified: " + f3(meas) + " ft measured vs " + f3(v) + " ft printed (" + err.toFixed(2) + "%)", 4000); }
+  if (Math.abs(err) <= 1) { mutate(() => { P.proj.scales[S.key].verified = true; P.proj.scales[S.key].check = {measured: r3(meas), printed: r3(v), at: new Date().toISOString()}; }); toast("Scale verified: " + uLenT(meas) + " measured vs " + uLenT(v) + " printed (" + err.toFixed(2) + "%)", 4000); }
   else {
-    const fix = await ask("Scale does not agree", `<p>Measured <b>${f3(meas)} ft</b> against <b>${f3(v)} ft</b> printed — off by <b>${err.toFixed(1)}%</b>. The PDF is probably not at the drawing's paper size.</p><p class="small">Recalibrate this page from this measurement?</p>`, "Recalibrate");
-    if (fix) mutate(() => { const kk = polyLen(m) / v; P.proj.scales[S.key] = {ptPerFt: kk, how: "calibrated", text: f3(v) + " ft over " + polyLen(m).toFixed(2) + " pt", cal: {pts: m, ft: v, page: S.key}, verified: true, at: new Date().toISOString()}; });
+    const fix = await ask("Scale does not agree", `<p>Measured <b>${uLenT(meas)}</b> against <b>${uLenT(v)}</b> printed — off by <b>${err.toFixed(1)}%</b>. The PDF is probably not at the drawing's paper size.</p><p class="small">Recalibrate this page from this measurement?</p>`, "Recalibrate");
+    if (fix) mutate(() => { const kk = polyLen(m) / v; P.proj.scales[S.key] = {ptPerFt: kk, how: "calibrated", text: uLenT(v) + " over " + polyLen(m).toFixed(2) + " pt", cal: {pts: m, ft: v, page: S.key}, verified: true, at: new Date().toISOString()}; });
   }
   S.measure = null; setTool("select");
 }
@@ -7681,17 +7724,18 @@ function segRows(){
   }));
   return out;
 }
-const SEG_HEAD = ["Segment", "S.No", "Condition", "Measurement", "Leg", "of", "From X ft", "From Y ft", "To X ft", "To Y ft", "Length ft", "Kind", "Drawing / page", "Verification"];
-const segLine = r => [r.id, r.sn, r.c.name, r.name, r.leg, r.legs, r.x0, r.y0, r.x1, r.y1, r.L, r.kind + (r.arc ? " (arc)" : ""), pageName(r.it), r.ver];
+const SEG_HEAD0 = ["Segment", "S.No", "Condition", "Measurement", "Leg", "of", "From X ft", "From Y ft", "To X ft", "To Y ft", "Length ft", "Kind", "Drawing / page", "Verification"];
+const segHead = () => SEG_HEAD0.map(h => h.replace(/ ft$/, " " + uL("ft")));
+const segLine = r => [r.id, r.sn, r.c.name, r.name, r.leg, r.legs, ...[r.x0, r.y0, r.x1, r.y1, r.L].map(v => +uV(v, "ft").toFixed(isM() ? 4 : 3)), r.kind + (r.arc ? " (arc)" : ""), pageName(r.it), r.ver];
 function exportSegmentsCsv(){
-  const rows = [SEG_HEAD].concat(segRows().map(segLine));
+  const rows = [segHead()].concat(segRows().map(segLine));
   const t = rows.map(r => r.map(v => { v = String(v == null ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
   saveBlob(new Blob(["\ufeff" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Segments.csv");
 }
 function loadExcel(){ return window.ExcelJS ? Promise.resolve(window.ExcelJS) : new Promise((ok, bad) => { const s = document.createElement("script"); s.src = EXCELJS; s.onload = () => ok(window.ExcelJS); s.onerror = () => bad(new Error("Excel library could not be loaded (offline?) — use CSV")); document.head.appendChild(s); }); }
 function saveBlob(blob, name){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); }
 const fileBase = () => (P.proj.name || "takeoff").replace(/[^A-Za-z0-9]+/g, "_") + "_" + today();
-function rowDesc(x){ const {r, it, i} = x, c = cond(it.cond); return (r.sign < 0 ? "Ded. " : "") + (it.label || kindName(it, c)) + (r.part ? " — part " + String.fromCharCode(96 + r.part) : "") + (r.rise ? " — " + (r.rise > 0 ? "rise" : "drop") + " " + f3(Math.abs(r.rise)) + " ft" : "") + (r.F != null ? " × slope " + pitchIn(pitchOf(it, c)) + " (√(1 + p²) = " + r.F.toFixed(4) + ")" : "") + (r.below ? " (≤ " + f2(+c.dedMin || 0) + " — not deducted)" : "") + (r.how === "poly" ? " (plan area, " + r.sides + "-sided outline — area in the L column)" : r.how === "circle" ? " (circle dia " + f3(r.D) + " ft" + (r.A != null ? ", π/4 × D² — area in the L column)" : ", π × D)") : ""); }
+function rowDesc(x){ const {r, it, i} = x, c = cond(it.cond); return (r.sign < 0 ? "Ded. " : "") + (it.label || kindName(it, c)) + (r.part ? " — part " + String.fromCharCode(96 + r.part) : "") + (r.rise ? " — " + (r.rise > 0 ? "rise" : "drop") + " " + uLenT(Math.abs(r.rise)) : "") + (r.F != null ? " × slope " + pitchIn(pitchOf(it, c)) + " (√(1 + p²) = " + r.F.toFixed(4) + ")" : "") + (r.below ? " (≤ " + f2(+c.dedMin || 0) + " — not deducted)" : "") + (r.how === "poly" ? " (plan area, " + r.sides + "-sided outline — area in the L column)" : r.how === "circle" ? " (circle dia " + uLenT(r.D) + (r.A != null ? ", π/4 × D² — area in the L column)" : ", π × D)") : ""); }
 async function exportExcel(){
   busy("Building Excel…");
   try {
@@ -7701,16 +7745,16 @@ async function exportExcel(){
     const ws = wb.addWorksheet("Measurement", {views: [{state: "frozen", ySplit: 4}], pageSetup: {paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0}});
     ws.columns = [{width: 6}, {width: 48}, {width: 16}, {width: 8}, {width: 11}, {width: 11}, {width: 11}, {width: 13}, {width: 7}, {width: 26}, {width: 22}];
     ws.mergeCells("A1:I1"); ws.getCell("A1").value = "MEASUREMENT SHEET — " + P.proj.name; ws.getCell("A1").font = {bold: true, size: 13};
-    ws.mergeCells("A2:I2"); ws.getCell("A2").value = "PDF takeoff · " + dmy(today()) + " · decimal feet · Qty = Nos × L × W × H (blank = not used) · deductions as negative rows";
+    ws.mergeCells("A2:I2"); ws.getCell("A2").value = "PDF takeoff · " + dmy(today()) + (isM() ? " · metres (m, m², m³)" : " · decimal feet") + " · Qty = Nos × L × W × H (blank = not used) · deductions as negative rows";
     ws.getCell("A2").font = {size: 9, color: {argb: "FF52514E"}};
     ws.mergeCells("A3:I3"); ws.getCell("A3").value = "Blue = measured / input · green = formula · grey = totals · yellow = check (see Assumptions)"; ws.getCell("A3").font = {size: 9, color: {argb: "FF52514E"}};
     const SR = sheetRows(), anyF = SR.some(g => g.rows.some(x => x.r.F != null));   // a slope: its factor in column L, inside the row's PRODUCT
     if (anyF) { ws.getColumn(12).width = 10; ws.getCell("A2").value += " · sloped rows × slope √(1 + p²) in column L"; }
-    const hr = ws.getRow(4); hr.values = ["S.No", "Description", "Drawing / page", "Nos", "L (ft) / Area", "W (ft)", "H (ft)", "Qty", "Unit", "Location", "QA"].concat(anyF ? ["Slope ×"] : []);
+    const hr = ws.getRow(4); hr.values = ["S.No", "Description", "Drawing / page", "Nos", "L (" + uL("ft") + ") / Area", "W (" + uL("ft") + ")", "H (" + uL("ft") + ")", "Qty", "Unit", "Location", "QA"].concat(anyF ? ["Slope ×"] : []);
     hr.font = {bold: true, color: {argb: "FFFFFFFF"}}; hr.eachCell(c => { c.fill = HEAD; });
     let row = 5, sn = 0; const totals = [];
     for (const g of SR) {
-      const head = ws.getRow(row); head.values = ["", (g.c.boq ? g.c.boq + " — " : "") + g.c.name + " (" + g.c.unit + ")" + (g.c.type === "linear" && g.c.unit !== "ft" ? " — H " + f3(+g.c.h) + " ft" + (g.c.t ? ", T " + f3(+g.c.t) + " ft" : "") + ((+g.c.faces || 1) > 1 ? ", " + g.c.faces + " faces" : "") : g.c.unit === "cft" ? " — T " + f3(+g.c.t) + " ft" : "")];
+      const head = ws.getRow(row); head.values = ["", (g.c.boq ? g.c.boq + " — " : "") + g.c.name + " (" + uL(g.c.unit) + ")" + (g.c.type === "linear" && g.c.unit !== "ft" ? " — H " + uLenT(+g.c.h) + (g.c.t ? ", T " + uLenT(+g.c.t) : "") + ((+g.c.faces || 1) > 1 ? ", " + g.c.faces + " faces" : "") : g.c.unit === "cft" ? " — T " + uLenT(+g.c.t) : "")];
       head.font = {bold: true}; for (let n = 1; n <= 9; n++) head.getCell(n).fill = GREY;
       const first = ++row;
       g.rows.forEach(x => {
@@ -7718,24 +7762,24 @@ async function exportExcel(){
         rr.getCell(1).value = i === 0 ? ++sn : null;
         rr.getCell(2).value = rowDesc(x);
         rr.getCell(3).value = pageName(it);
-        [r.nos, r.A != null ? r.A : r.L, r.W, r.H].forEach((v, j) => {
+        [r.nos, r.A != null ? uX(r.A, "Sft") : uX(r.L, "ft"), uX(r.W, "ft"), uX(r.H, "ft")].forEach((v, j) => {
           const cell = rr.getCell(4 + j);
-          if (j === 1 && r.runs && r.runs.length > 1) cell.value = {formula: r.runs.map(f3).join("+"), result: r.L};
+          if (j === 1 && r.runs && r.runs.length > 1) cell.value = {formula: r.runs.map(x => isM() ? String(uX(x, "ft")) : f3(x)).join("+"), result: uX(r.L, "ft")};
           else cell.value = v == null ? null : v;
           if (v != null) { cell.fill = BLUE; cell.numFmt = j === 0 ? "0.###" : "0.000"; cell.protection = {locked: false}; }
         });
         if (r.F != null) { const fc = rr.getCell(12); fc.value = r.F; fc.fill = BLUE; fc.numFmt = "0.0000"; fc.protection = {locked: false}; }   // √(1 + p²) as an input cell, live in the PRODUCT
         const q = rr.getCell(8);
-        q.value = r.below ? {formula: "0", result: 0} : {formula: (r.sign < 0 ? "-" : "") + (r.F != null ? `PRODUCT(D${row}:G${row},L${row})` : `PRODUCT(D${row}:G${row})`), result: r.qty};
+        q.value = r.below ? {formula: "0", result: 0} : {formula: (r.sign < 0 ? "-" : "") + (r.F != null ? `PRODUCT(D${row}:G${row},L${row})` : `PRODUCT(D${row}:G${row})`), result: uV(r.qty, r.unit)};
         q.fill = r.below ? YELLOW : GREEN; q.numFmt = qFmt(r.unit);
-        rr.getCell(9).value = r.unit;
+        rr.getCell(9).value = uL(r.unit);
         if (i === 0) { rr.getCell(10).value = locText(locOf(it)); rr.getCell(11).value = QA_NAMES[it.qa || ""] + (it.qa === "checked" ? " — " + it.qaBy + ", " + dmy(it.qaAt) : "") + (it.ai && it.qa !== "checked" ? " · AI-generated" : "") + (it.copied && it.qa !== "checked" ? " · copied, not checked" : "") + (verOf(it) ? " · " + VER_NAMES[verOf(it)] : "");
           if (it.qa !== "checked") rr.getCell(11).fill = YELLOW; }
         if (r.sign < 0) rr.font = {color: {argb: "FFB32D2D"}};
         row++;
       });
-      const tr = ws.getRow(row); tr.getCell(2).value = "Total " + g.c.name; tr.getCell(9).value = g.c.unit;
-      tr.getCell(8).value = {formula: `SUM(H${first}:H${row - 1})`, result: g.t.net}; tr.getCell(8).numFmt = qFmt(g.c.unit);
+      const tr = ws.getRow(row); tr.getCell(2).value = "Total " + g.c.name; tr.getCell(9).value = uL(g.c.unit);
+      tr.getCell(8).value = {formula: `SUM(H${first}:H${row - 1})`, result: uV(g.t.net, g.c.unit)}; tr.getCell(8).numFmt = qFmt(g.c.unit);
       tr.font = {bold: true}; for (let n = 1; n <= 9; n++) tr.getCell(n).fill = GREY;
       totals.push({c: g.c, cell: "H" + row, t: g.t}); row++;
     }
@@ -7745,11 +7789,11 @@ async function exportExcel(){
     bl.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; bl.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
     let bn = 0, br = 2; const BL = billLines(), XC0 = P.proj.cols || [];
     XC0.forEach((col, j) => { const h = bl.getRow(1).getCell(15 + j); h.value = col.name + (col.unit ? " (" + col.unit + ")" : ""); h.font = {bold: true, color: {argb: "FFFFFFFF"}}; h.fill = HEAD; bl.getColumn(15 + j).width = Math.max(12, h.value.length + 2); });
-    BL.forEach(l => { const r = bl.addRow([l.kind === "cond" ? ++bn : "", l.boq || "", (l.kind === "asm" ? "   " : "") + l.name, l.kind === "asm" ? asmLabel(l) : "measured", +l.qty.toFixed(9), l.unit, l.rate || 0, {formula: `E${br}*G${br}`, result: l.qty * (l.rate || 0)}, l.ra || "",
+    BL.forEach(l => { const r = bl.addRow([l.kind === "cond" ? ++bn : "", l.boq || "", (l.kind === "asm" ? "   " : "") + l.name, l.kind === "asm" ? asmLabel(l) : "measured", +uV(l.qty, l.unit).toFixed(9), uL(l.unit), uX(l.rate, l.unit, 1) || 0, {formula: `E${br}*G${br}`, result: l.qty * (l.rate || 0)}, l.ra || "",
         l.na ? l.na : l.rate ? (rateOk(l) ? l.src + (l.ra ? "" : ", " + dmy(l.date)) : "ASSUMPTION — no dated source") : "rate not set"]);
       r.getCell(5).numFmt = qFmt(l.unit); r.getCell(7).numFmt = "#,##0.00"; r.getCell(8).numFmt = "#,##0.00"; r.getCell(5).fill = GREEN; r.getCell(7).fill = BLUE; r.getCell(8).fill = GREEN;
-      const cp = compOf(l); if (cp) [cp.mat, cp.lab, cp.eqp, cp.oth].forEach((v, k) => { const cl = r.getCell(11 + k); cl.value = {formula: `E${br}*${+v.toFixed(4)}`, result: l.qty * v}; cl.numFmt = "#,##0.00"; });   // split of the Rate Analysis rate
-      if (l.kind === "cond" && XC0.length) xlCols(r, l.c, "E" + br, 15, xlLetter);   // custom columns on the condition's line, on its quantity (written whole, shown to 3 dp: a column works from the figure the sheet has, not a rounded one)
+      const cp = compOf(l); if (cp) [cp.mat, cp.lab, cp.eqp, cp.oth].forEach((v, k) => { const cl = r.getCell(11 + k); cl.value = {formula: `E${br}*${+uX(v, l.unit, 1).toFixed(isM() ? 6 : 4)}`, result: l.qty * v}; cl.numFmt = "#,##0.00"; });   // split of the Rate Analysis rate
+      if (l.kind === "cond" && XC0.length) xlCols(r, l.c, uQx("E" + br, l.unit), 15, xlLetter);   // custom columns on the condition's line, on its quantity (written whole, shown to 3 dp: a column works from the figure the sheet has, not a rounded one)
       if (l.kind === "cond") r.font = {bold: true}; if (!rateOk(l) || !(l.rate > 0)) r.getCell(10).fill = YELLOW; br++; });
     const bt = bl.addRow(["", "", "Total", "", "", "", "", {formula: `SUM(H2:H${br - 1})`, result: BL.reduce((a, l) => a + l.qty * (l.rate || 0), 0)}]); bt.font = {bold: true}; bt.getCell(8).numFmt = "#,##0.00";
     ["K", "L", "M", "N"].forEach((L1, k) => { const cl = bt.getCell(11 + k); cl.value = {formula: `SUM(${L1}2:${L1}${br - 1})`, result: BL.reduce((a, l) => { const cp = compOf(l); return a + (cp ? l.qty * [cp.mat, cp.lab, cp.eqp, cp.oth][k] : 0); }, 0)}; cl.numFmt = "#,##0.00"; }); bt.eachCell(c2 => { c2.fill = GREY; });
@@ -7769,13 +7813,13 @@ async function exportExcel(){
     const lc = wb.addWorksheet("By location");
     lc.columns = [{header: "Building / floor", width: 26}, {header: "BOQ code", width: 13}, {header: "Item", width: 46}, {header: "Qty", width: 13}, {header: "Unit", width: 8}, {header: "Rate PKR", width: 13}, {header: "Amount PKR", width: 15}];
     lc.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; lc.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
-    floorGroups().forEach(g => billLines(g.only).forEach(l => { const r = lc.addRow([g.name, l.boq || "", (l.kind === "asm" ? "   " : "") + l.name, +l.qty.toFixed(3), l.unit, l.rate || 0, {formula: `D${lc.rowCount + 1}*F${lc.rowCount + 1}`, result: l.qty * (l.rate || 0)}]);
+    floorGroups().forEach(g => billLines(g.only).forEach(l => { const r = lc.addRow([g.name, l.boq || "", (l.kind === "asm" ? "   " : "") + l.name, +uV(l.qty, l.unit).toFixed(isM() ? 6 : 3), uL(l.unit), uX(l.rate, l.unit, 1) || 0, {formula: `D${lc.rowCount + 1}*F${lc.rowCount + 1}`, result: l.qty * (l.rate || 0)}]);
       r.getCell(4).numFmt = "#,##0.000"; r.getCell(6).numFmt = "#,##0.00"; r.getCell(7).numFmt = "#,##0.00"; }));
     if ((P.proj.openings || []).length) {
       const os = wb.addWorksheet("Openings");
-      os.columns = [{header: "Mark", width: 10}, {header: "Type", width: 10}, {header: "Width ft", width: 11}, {header: "Height ft", width: 11}, {header: "Area Sft", width: 11}, {header: "Placed", width: 9}];
+      os.columns = [{header: "Mark", width: 10}, {header: "Type", width: 10}, {header: "Width " + uL("ft"), width: 11}, {header: "Height " + uL("ft"), width: 11}, {header: "Area " + uL("Sft"), width: 11}, {header: "Placed", width: 9}];
       os.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; os.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
-      P.proj.openings.forEach(o => { const r = os.addRow([o.mark, o.type, +o.w, +o.h, {formula: `C${os.rowCount + 1}*D${os.rowCount + 1}`, result: o.w * o.h}, P.proj.items.filter(i => i.sch === o.id).length]); r.getCell(3).numFmt = "0.000"; r.getCell(4).numFmt = "0.000"; r.getCell(5).numFmt = "#,##0.000"; });
+      P.proj.openings.forEach(o => { const r = os.addRow([o.mark, o.type, uX(+o.w, "ft"), uX(+o.h, "ft"), {formula: `C${os.rowCount + 1}*D${os.rowCount + 1}`, result: uV(o.w * o.h, "Sft")}, P.proj.items.filter(i => i.sch === o.id).length]); r.getCell(3).numFmt = "0.000"; r.getCell(4).numFmt = "0.000"; r.getCell(5).numFmt = "#,##0.000"; });
     }
     const V = validation(), vs = wb.addWorksheet("Validation");
     vs.columns = [{header: "Status", width: 12}, {header: "Check — " + V.lvl, width: 110}];
@@ -7788,34 +7832,34 @@ async function exportExcel(){
     sm.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; sm.getRow(1).eachCell(c => { c.fill = HEAD; });
     const XC = P.proj.cols || [];   // custom columns: live formulas on the quantity cell (B), which is the Measurement sheet's total
     XC.forEach((col, j) => { const h = sm.getRow(1).getCell(5 + j); h.value = col.name + (col.unit ? " (" + col.unit + ")" : ""); h.fill = HEAD; sm.getColumn(5 + j).width = Math.max(12, h.value.length + 2); });
-    totals.forEach(t => { const r = sm.addRow([t.c.name, {formula: "Measurement!" + t.cell, result: t.t.net}, t.c.unit, P.proj.items.filter(i => i.cond === t.c.id).length]); r.getCell(2).numFmt = qFmt(t.c.unit); r.getCell(2).fill = GREEN;
-      if (XC.length) xlCols(r, t.c, "B" + r.number, 5, xlLetter);
-      if (anyVer) { const [a, b] = verSplit(t.c), vc = 5 + XC.length; r.getCell(vc).value = +a.toFixed(3); r.getCell(vc + 1).value = +b.toFixed(3); r.getCell(vc).numFmt = qFmt(t.c.unit); r.getCell(vc + 1).numFmt = qFmt(t.c.unit); if (Math.abs(b) > 1e-9) r.getCell(vc + 1).fill = YELLOW; } });
+    totals.forEach(t => { const r = sm.addRow([t.c.name, {formula: "Measurement!" + t.cell, result: uV(t.t.net, t.c.unit)}, uL(t.c.unit), P.proj.items.filter(i => i.cond === t.c.id).length]); r.getCell(2).numFmt = qFmt(t.c.unit); r.getCell(2).fill = GREEN;
+      if (XC.length) xlCols(r, t.c, uQx("B" + r.number, t.c.unit), 5, xlLetter);
+      if (anyVer) { const [a, b] = verSplit(t.c), vc = 5 + XC.length; r.getCell(vc).value = +uV(a, t.c.unit).toFixed(3); r.getCell(vc + 1).value = +uV(b, t.c.unit).toFixed(3); r.getCell(vc).numFmt = qFmt(t.c.unit); r.getCell(vc + 1).numFmt = qFmt(t.c.unit); if (Math.abs(b) > 1e-9) r.getCell(vc + 1).fill = YELLOW; } });
     if (anyVer) [["Verified qty", 16], ["Needs review qty", 16]].forEach(([h, w], j) => { const c2 = sm.getRow(1).getCell(5 + XC.length + j); c2.value = h; c2.fill = HEAD; c2.font = {bold: true, color: {argb: "FFFFFFFF"}}; sm.getColumn(5 + XC.length + j).width = w; });
     const SG = segRows();
     if (SG.length) {   // every wall / run leg and every side of every area, with its ends: the segment-by-segment audit trail
       const sg = wb.addWorksheet("Segments", {views: [{state: "frozen", ySplit: 1}]});
-      sg.columns = [{width: 9}, {width: 6}, {width: 34}, {width: 40}, {width: 5}, {width: 5}, {width: 10}, {width: 10}, {width: 10}, {width: 10}, {width: 11}, {width: 16}, {width: 22}, {width: 34}].map((c, n) => Object.assign(c, {header: SEG_HEAD[n]}));
+      sg.columns = [{width: 9}, {width: 6}, {width: 34}, {width: 40}, {width: 5}, {width: 5}, {width: 10}, {width: 10}, {width: 10}, {width: 10}, {width: 11}, {width: 16}, {width: 22}, {width: 34}].map((c, n) => Object.assign(c, {header: segHead()[n]}));
       sg.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; sg.getRow(1).eachCell(c2 => { c2.fill = HEAD; });
       let last = null, first = 2;
-      const sub = () => { if (!last) return; const n = sg.rowCount; const r = sg.addRow(["", last.sn, last.c.name, "Total " + last.name, "", "", "", "", "", "", {formula: `SUM(K${first}:K${n})`, result: SG.filter(x => x.it === last.it).reduce((a, x) => a + x.L, 0)}]); r.font = {bold: true}; r.getCell(11).numFmt = "0.000"; r.eachCell(c2 => { c2.fill = GREY; }); };
+      const sub = () => { if (!last) return; const n = sg.rowCount; const r = sg.addRow(["", last.sn, last.c.name, "Total " + last.name, "", "", "", "", "", "", {formula: `SUM(K${first}:K${n})`, result: uV(SG.filter(x => x.it === last.it).reduce((a, x) => a + x.L, 0), "ft")}]); r.font = {bold: true}; r.getCell(11).numFmt = "0.000"; r.eachCell(c2 => { c2.fill = GREY; }); };
       SG.forEach(x => { if (last && last.it !== x.it) { sub(); first = sg.rowCount + 1; } const r = sg.addRow(segLine(x)); [7, 8, 9, 10, 11].forEach(n => { r.getCell(n).numFmt = "0.000"; }); if (!x.ver || /review|Unresolved/.test(x.ver)) r.getCell(14).fill = YELLOW; last = x; });
       sub();
-      sg.addRow([]); sg.addRow(["", "", "Ends are in feet on the page, from the sheet's top-left corner (y down), at the page's scale. A closed run lists its closing leg too; an area lists every side once."]);
+      sg.addRow([]); sg.addRow(["", "", "Ends are in " + (isM() ? "metres" : "feet") + " on the page, from the sheet's top-left corner (y down), at the page's scale. A closed run lists its closing leg too; an area lists every side once."]);
     }
     const au = wb.addWorksheet("Scale & audit");
     au.columns = [{header: "Drawing", width: 34}, {header: "Page", width: 7}, {header: "Scale", width: 26}, {header: "1 ft on the sheet (pt)", width: 18}, {header: "How", width: 12}, {header: "Verified", width: 10}, {header: "Check", width: 40}, {header: "Status", width: 26}];
     au.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; au.getRow(1).eachCell(c => { c.fill = HEAD; });
     Object.entries(P.proj.scales).forEach(([kk, sc]) => { const [fid, pg] = kk.split(":"), f = P.proj.files.find(x => x.id === fid); if (!f) return;
-      const r = au.addRow([f.name, +pg, sc.how === "calibrated" ? "calibrated: " + sc.text : sc.text, +sc.ptPerFt.toFixed(5), sc.how === "note" ? "scale note" : sc.how === "pdf" ? "PDF scale data" : sc.how === "dims" ? "dimension strings" : sc.how === "inherited" ? "inherited" : sc.how === "manual" ? "chosen" : "calibrated", sc.verified ? "yes" : "NO", sc.check ? `measured ${f3(sc.check.measured)} ft vs printed ${f3(sc.check.printed)} ft` : sc.note || "", scaleState(sc).t]);
+      const r = au.addRow([f.name, +pg, sc.how === "calibrated" ? "calibrated: " + sc.text : sc.text, +sc.ptPerFt.toFixed(5), sc.how === "note" ? "scale note" : sc.how === "pdf" ? "PDF scale data" : sc.how === "dims" ? "dimension strings" : sc.how === "inherited" ? "inherited" : sc.how === "manual" ? "chosen" : "calibrated", sc.verified ? "yes" : "NO", sc.check ? `measured ${uLenT(sc.check.measured)} vs printed ${uLenT(sc.check.printed)}` : sc.note || "", scaleState(sc).t]);
       if (!sc.verified) r.eachCell(c => { c.fill = YELLOW; }); });
     const as = wb.addWorksheet("Assumptions");
     as.columns = [{header: "#", width: 5}, {header: "Item to confirm", width: 90}];
     as.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; as.getRow(1).eachCell(c => { c.fill = HEAD; });
     let an = 0;
     Object.entries(P.proj.scales).forEach(([kk, sc]) => { if (!sc.verified) { const [fid, pg] = kk.split(":"), f = P.proj.files.find(x => x.id === fid); as.addRow([++an, `Scale of ${f ? f.name : fid} p.${pg} ${sc.how === "manual" ? "chosen by hand" : sc.how === "inherited" ? "copied from another page" : sc.how === "pdf" ? "read from the scale saved in the PDF" : sc.how === "dims" ? "read from its dimension strings" : "read from its note"} (${sc.text}) and not checked against a printed dimension`]).getCell(2).fill = YELLOW; } });
-    P.proj.conds.filter(c => c.h || c.t).forEach(c => as.addRow([++an, `${c.name}: ${c.h ? "height H " + f3(+c.h) + " ft" : ""}${c.h && c.t ? ", " : ""}${c.t ? "thickness T " + f3(+c.t) + " ft" : ""} entered for the condition — confirm against the sections`]));
-    P.proj.items.filter(i => i.kind === "open").forEach(i => as.addRow([++an, `Opening ${i.label || ""} on ${pageName(i)}: height ${f3(+i.oh || 0)} ft entered — confirm against the door / window schedule`]));
+    P.proj.conds.filter(c => c.h || c.t).forEach(c => as.addRow([++an, `${c.name}: ${c.h ? "height H " + uLenT(+c.h) : ""}${c.h && c.t ? ", " : ""}${c.t ? "thickness T " + uLenT(+c.t) : ""} entered for the condition — confirm against the sections`]));
+    P.proj.items.filter(i => i.kind === "open").forEach(i => as.addRow([++an, `Opening ${i.label || ""} on ${pageName(i)}: height ${uLenT(+i.oh || 0)} entered — confirm against the door / window schedule`]));
     if (!an) as.addRow([1, "None"]);
     const buf = await wb.xlsx.writeBuffer();
     saveBlob(new Blob([buf], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), fileBase() + "_Measurement.xlsx");
@@ -7826,11 +7870,11 @@ const isNos = u => /^\s*nos?\.?\s*$/i.test(String(u || ""));
 const qFmt = u => isNos(u) ? "#,##0" : "#,##0.000";   // Excel: quantities 3 dp, Nos whole
 const qCsv = (v, u) => { v = +v || 0; const x = isNos(u) && Math.abs(v - Math.round(v)) < 1e-9 ? Math.round(v) : Math.round(v * 1000) / 1000; return (x === 0 ? 0 : x).toFixed(isNos(u) && Number.isInteger(x) ? 0 : 3); };
 function exportCsv(){
-  const rows = [["S.No", "Condition", "Description", "Drawing / page", "Nos", "L (ft) / Area (Sft)", "W (ft)", "H (ft)", "Qty", "Unit", "BOQ code", "Location", "QA"]];
+  const rows = [["S.No", "Condition", "Description", "Drawing / page", "Nos", "L (" + uL("ft") + ") / Area (" + uL("Sft") + ")", "W (" + uL("ft") + ")", "H (" + uL("ft") + ")", "Qty", "Unit", "BOQ code", "Location", "QA"]];
   let sn = 0; const SR = sheetRows(), anyF = SR.some(g => g.rows.some(x => x.r.F != null)); if (anyF) rows[0].push("Slope ×");   // a slope's factor: its own last column
   const anyV = P.proj.items.some(i => verOf(i)); if (anyV) rows[0].push("Verification");   // how far each outline is proved (a traced / imported takeoff)
-  SR.forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.A != null ? f3(r.A) : r.L == null ? "" : f3(r.L), r.W == null ? "" : f3(r.W), r.H == null ? "" : f3(r.H), qCsv(r.qty, r.unit), r.unit, g.c.boq || "", x.i === 0 ? locText(locOf(x.it)) : "", x.i === 0 ? QA_NAMES[x.it.qa || ""] + (x.it.ai && x.it.qa !== "checked" ? " · AI" : "") + (x.it.copied && x.it.qa !== "checked" ? " · copied" : "") : ""].concat(anyF ? [r.F != null ? r.F.toFixed(4) : ""] : []).concat(anyV ? [x.i === 0 && verOf(x.it) ? VER_NAMES[verOf(x.it)] : ""] : [])); });
-    rows.push(["", g.c.name, "Total " + g.c.name, "", "", "", "", "", qCsv(g.t.net, g.c.unit), g.c.unit, g.c.boq || "", "", ""]); });
+  SR.forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.A != null ? f3(uV(r.A, "Sft")) : r.L == null ? "" : uLen(r.L), r.W == null ? "" : uLen(r.W), r.H == null ? "" : uLen(r.H), qCsv(uV(r.qty, r.unit), r.unit), uL(r.unit), g.c.boq || "", x.i === 0 ? locText(locOf(x.it)) : "", x.i === 0 ? QA_NAMES[x.it.qa || ""] + (x.it.ai && x.it.qa !== "checked" ? " · AI" : "") + (x.it.copied && x.it.qa !== "checked" ? " · copied" : "") : ""].concat(anyF ? [r.F != null ? r.F.toFixed(4) : ""] : []).concat(anyV ? [x.i === 0 && verOf(x.it) ? VER_NAMES[verOf(x.it)] : ""] : [])); });
+    rows.push(["", g.c.name, "Total " + g.c.name, "", "", "", "", "", qCsv(uV(g.t.net, g.c.unit), g.c.unit), uL(g.c.unit), g.c.boq || "", "", ""]); });
   const t = rows.map(r => r.map(v => { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
   saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Measurement.csv");
 }
@@ -7852,7 +7896,7 @@ function expLegendSvg(o, pos, tot, file, page, sh, W, H, z, lz, ox, ext){   // e
   else if (ord === "qty") cs = cs.slice().sort((a, b) => (tot[b.id] || 0) - (tot[a.id] || 0));
   const head = pos === "margin" ? [[P.proj.name, 700], [[sh.no, sh.title].filter(Boolean).join(" · ") || pageName({file, page}), 600], [pageName({file, page}), 400]].filter((l, i) => i < 2 || sh.no || sh.title) : [[P.proj.name + " — " + pageName({file, page}), 700]];
   ext = ext || {}; const PER = ext.per || {}, ITS = ext.its || {};
-  const rows = cs.map(c => ({c, boq: c.boq || "", qty: fq(tot[c.id], c.unit), unit: c.unit, per: c.type === "area" && PER[c.id] != null ? f3(PER[c.id]) + " ft" : "—", amt: (v => v == null ? "—" : f2(v))(amtOf(c))}));
+  const rows = cs.map(c => ({c, boq: c.boq || "", qty: fq(tot[c.id], c.unit), unit: uL(c.unit), per: c.type === "area" && PER[c.id] != null ? uLenT(PER[c.id]) : "—", amt: (v => v == null ? "—" : f2(v))(amtOf(c))}));
   const wOf = k => cols.has(k) ? (Math.max(k === "amt" ? 6 : k === "boq" ? 4 : k === "per" ? 9 : 3, ...rows.map(r => String(r[k]).length)) + 1) * cw : 0;
   const wb = wOf("boq"), wq = wOf("qty"), wu = wOf("unit"), wp = wOf("per"), wa = wOf("amt"), fixed = pad * 2 + sw + wb + wq + wu + wp + wa;
   const lwSet = pos === "margin" ? ox - 16 * lz : +o.lw > 0 ? +o.lw * z : 0;
@@ -8866,7 +8910,7 @@ function overlapDialog(scope){   // the pairs, each with Show and Fix, and Fix a
   const L = overlapCheck(scope), nm = it => esc(it.label || kindName(it, cond(it.cond))), tot = L.reduce((a, p) => a + p.sft, 0), where = scope === "page" ? "on this page" : "in the project";
   const what = p => { const q = ovPlan(p.a, p.b); return q.act === "dup" ? "delete " + nm(q.t) + " (drawn twice)" : q.act === "cut" ? "cut it out of " + nm(q.t) : "nothing — the same outline " + (p.a.cond !== p.b.cond ? "in two conditions" : "with other Nos") + ": check it"; };
   $("dlgT").textContent = "Areas counted twice";
-  $("dlgB").innerHTML = `<div class="wide"></div><p>${L.length ? `<b>${L.length}</b> pair${L.length > 1 ? "s" : ""} of areas overlap ${where} — <b>${fq(tot)} Sft</b> counted twice. <b>Fix</b> cuts the overlap out of one outline (two conditions: always the larger — nothing is deleted), or deletes one drawn twice (the same outline, the same Nos).` : `No two areas of one condition (or two floor finishes) overlap ${where}.`}</p>
+  $("dlgB").innerHTML = `<div class="wide"></div><p>${L.length ? `<b>${L.length}</b> pair${L.length > 1 ? "s" : ""} of areas overlap ${where} — <b>${uArea(tot)}</b> counted twice. <b>Fix</b> cuts the overlap out of one outline (two conditions: always the larger — nothing is deleted), or deletes one drawn twice (the same outline, the same Nos).` : `No two areas of one condition (or two floor finishes) overlap ${where}.`}</p>
     ${L.length ? `<div style="max-height:320px;overflow:auto;margin:6px 0;border:1px solid var(--line);border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:12px"><tr><th align="left">Condition</th><th align="left">Overlapping</th><th align="right">Sft</th><th align="left">Fix will</th><th></th></tr>
     ${L.map((p, n) => { const ca = cond(p.a.cond), cb = cond(p.b.cond), lk = p.a.locked || p.b.locked;
       return `<tr data-ov="${n}" style="border-top:1px solid var(--line)"><td>${esc(ca.name)}${cb !== ca ? " / " + esc(cb.name) : ""}</td><td>${nm(p.a)} and ${nm(p.b)}${scope === "project" ? `<br><span class="small">${esc(pageName(p.a))}</span>` : ""}</td><td align="right">${fq(p.sft)}</td><td class="small">${lk ? "nothing — locked" : what(p)}</td>
@@ -8937,13 +8981,13 @@ function combineAreas(ids, opt){
     if (!fill) {
       if (k && !opt.gap && isFinite(B.near)) {   // a wider gap than is filled at once: ask
         const idl = [...(ids || selIds())];
-        ask("Merge areas", `<p>Those areas are <b>${f3(B.near / k)} ft</b> apart at the closest — more than the ${MERGE_GAP} ft filled without asking. Fill the gap between them and make them one area?</p>
+        ask("Merge areas", `<p>Those areas are <b>${uLenT(B.near / k)}</b> apart at the closest — more than the ${uLenT(MERGE_GAP)} filled without asking. Fill the gap between them and make them one area?</p>
           <div class="grid" style="margin-top:8px"><div class="fg"><label>Fill gaps up to (ft)</label><input type="text" id="mgG" value="${f3(Math.ceil(B.near / k * 100 - 1e-6) / 100)}"></div></div>
           <p class="small" style="margin-top:6px">Only where the areas face each other across the gap — the strip between them is added to the area.</p>`, "Fill and merge",
           () => { const d = parseFt($("mgG").value.trim()); return d > 0 ? d : "Enter a distance in ft, e.g. 2.5"; }, "mgG").then(d => { if (d) combineAreas(new Set(idl), Object.assign({}, opt, {gap: d})); });
         return null; }
       return no("Not combined: those areas would stay " + n0 + " separate outlines — " + (!isFinite(B.near) ? "they must overlap, share a side or face each other across a gap (touching at a corner is not enough)"
-        : k ? "the gap between them is " + f3(B.near / k) + " ft" + (opt.gap ? ", more than the " + f3(opt.gap) + " ft to fill" : "") : "set the page scale first (K) to fill the gap between them"));
+        : k ? "the gap between them is " + uLenT(B.near / k) + (opt.gap ? ", more than the " + uLenT(opt.gap) + " to fill" : "") : "set the page scale first (K) to fill the gap between them"));
     }
   }
   const it = ar[0], c = cond(it.cond), drop = new Set(ar.slice(1).map(i => i.id)), nos = +it.nos || 1;
@@ -8951,7 +8995,7 @@ function combineAreas(ids, opt){
   mutate(() => { it.pts = outs[0]; delete it.arcs; delete it.shape; qaMoved(it); P.proj.items = P.proj.items.filter(i => !drop.has(i.id)); P.proj.items.splice(P.proj.items.indexOf(it) + 1, 0, ...voids); }, "Combine " + ar.length + " areas");
   setSel([it.id]); refresh();
   const left = sel.length - ar.length;
-  toast("Combined " + ar.length + " areas into one" + (k ? " — " + fq(polyArea(outs[0]) / k / k) + " Sft" : "") + (fill ? k ? " · gap " + (fill.hi - fill.lo > 0.01 * k ? f3(fill.lo / k) + "–" : "") + f3(fill.hi / k) + " ft filled (+" + fq(fill.a / k / k) + " Sft)" : " · the gap between them filled" : "") + (voids.length ? " · " + voids.length + " space" + (voids.length > 1 ? "s" : "") + " closed round taken off as void" + (voids.length > 1 ? "s" : "") : "")
+  toast("Combined " + ar.length + " areas into one" + (k ? " — " + uArea(polyArea(outs[0]) / k / k) : "") + (fill ? k ? " · gap " + (fill.hi - fill.lo > 0.01 * k ? f3(fill.lo / k) + "–" : "") + uLenT(fill.hi / k) + " filled (+" + uArea(fill.a / k / k) + ")" : " · the gap between them filled" : "") + (voids.length ? " · " + voids.length + " space" + (voids.length > 1 ? "s" : "") + " closed round taken off as void" + (voids.length > 1 ? "s" : "") : "")
     + (nos > 1 ? " · Nos " + nos : "") + (left ? " · " + left + " other item" + (left > 1 ? "s" : "") + " left as " + (left > 1 ? "they were" : "it was") : ""), 5000);
   return it;
 }
@@ -9176,7 +9220,7 @@ function renderCondPick(){
   b.classList.toggle("none", !c); b.disabled = !P.proj;
   $("rbCondSw").style.background = c ? c.color : "";
   $("rbCondNm").textContent = c ? c.name : !P.proj ? "No project open" : P.proj.conds.length ? "Pick a condition" : "Quick items or a new condition";
-  $("rbCondQ").textContent = c ? fq(condTotals(c).net, c.unit) + " " + c.unit : "";
+  $("rbCondQ").textContent = c ? fq(condTotals(c).net, c.unit) + " " + uL(c.unit) : "";
   const p = $("condPop"); if (p && p.classList.contains("on")) condPopFill();
 }
 function condUse(id){   // as the keys 1–9: the condition becomes the active one, and from Select or Pan its drawing tool starts
@@ -9216,7 +9260,7 @@ function condPopFill(){
   const L = $("cpL"); if (!L || !P.proj) return;
   const q = ($("cpQ").value || "").trim().toLowerCase(), all = P.proj.conds, hit = c => !q || q.split(/\s+/).every(w => [c.name, c.boq, c.ra, c.unit, c.group].join(" ").toLowerCase().includes(w));
   const row = c => { const i = all.indexOf(c), ty = c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count";
-    return `<button type="button" class="cpi${c.id === S.cond ? " on" : ""}" role="option" aria-selected="${c.id === S.cond}" data-cpk="${esc(c.id)}" title="${esc(c.name)} — ${ty}${c.h ? " · H " + f3(+c.h) : ""}${c.t ? " · T " + f3(+c.t) : ""}${c.group ? " · " + esc(c.group) : ""}"><i class="cpsw" style="background:${esc(c.color)}"></i><span class="cpn">${esc(c.name)}</span><span class="cpq">${fq(condTotals(c).net, c.unit)} ${esc(c.unit)}</span>${i < 9 ? "<kbd>" + (i + 1) + "</kbd>" : '<kbd class="cpnk"></kbd>'}</button>`; };
+    return `<button type="button" class="cpi${c.id === S.cond ? " on" : ""}" role="option" aria-selected="${c.id === S.cond}" data-cpk="${esc(c.id)}" title="${esc(c.name)} — ${ty}${c.h ? " · H " + uLen(+c.h) : ""}${c.t ? " · T " + uLen(+c.t) : ""}${c.group ? " · " + esc(c.group) : ""}"><i class="cpsw" style="background:${esc(c.color)}"></i><span class="cpn">${esc(c.name)}</span><span class="cpq">${fq(condTotals(c).net, c.unit)} ${esc(uL(c.unit))}</span>${i < 9 ? "<kbd>" + (i + 1) + "</kbd>" : '<kbd class="cpnk"></kbd>'}</button>`; };
   let h = "";
   if (!all.length) h = '<div class="cpe">No conditions yet — <b>Quick items</b> makes a ready QS item in one click, or <b>+ New condition</b>.</div>';
   else {
@@ -9248,7 +9292,7 @@ async function quickItemsDialog(){
   const cats = QK_CATS.filter(([k]) => PRESETS.some(p => qkCat(p) === k)), ic = {area: "i-rect", linear: "i-draw", count: "i-count"};
   const card = (p, i) => { const have = qkFind(p), n = qkNeed(p), ty = p.type === "area" ? "Area" : p.type === "linear" ? "Length" : "Count";
     const needs = [n.h ? "asks H" + (p.hHint ? " (usually " + p.hHint + ")" : "") : "", n.t ? "asks T" : ""].filter(Boolean).join(" · ");
-    return `<div class="qkc${have ? " have" : ""}" data-qk="${i}" data-qcat="${qkCat(p)}" tabindex="0" role="button" title="${esc(p.name)} — ${ty} in ${esc(p.unit)}${+p.t > 0 ? " · T " + f3(+p.t) + " ft" : ""}${p.faces > 1 ? " · " + p.faces + " faces" : ""}${p.dedMin ? " · openings over " + f2(p.dedMin) + " deducted" : ""}${have ? " · already in this project: a click takes it" : ""}">`
+    return `<div class="qkc${have ? " have" : ""}" data-qk="${i}" data-qcat="${qkCat(p)}" tabindex="0" role="button" title="${esc(p.name)} — ${ty} in ${esc(uL(p.unit))}${+p.t > 0 ? " · T " + uLenT(+p.t) : ""}${p.faces > 1 ? " · " + p.faces + " faces" : ""}${p.dedMin ? " · openings over " + f2(p.dedMin) + " deducted" : ""}${have ? " · already in this project: a click takes it" : ""}">`
       + `<label class="qkck" title="Tick to add several at once"><input type="checkbox" data-qkck="${i}" aria-label="Tick ${esc(p.name)}"></label>`
       + `<i class="qkic ${p.type}" style="--qc:${have ? esc(have.color) : "var(--qk-" + p.type + ")"}"><svg class="ic"><use href="#${ic[p.type]}"/></svg></i>`
       + `<span class="qkt"><b>${esc(p.name)}</b><small>${ty} · ${esc(p.unit)}${needs ? " · " + esc(needs) : ""}${have ? " · in project" : ""}</small></span>`
@@ -9285,14 +9329,14 @@ async function qkAskHT(L){   // H / T for the new items that need them — typed
   const inp = (attr, i, ph, ti, first) => `<input type="text" ${first ? 'id="qkF0" ' : ""}${attr}="${i}" placeholder="${esc(ph)}" title="${esc(ti)}" autocomplete="off">`;
   let first = true;
   const row = (p, i) => { const n = qkNeed(p); let h = `<div class="qkhr"><b>${esc(p.name)}</b>`;
-    if (n.h) { h += `<label>${esc(p.hLabel || "H")} ft ${inp("data-qkh", i, p.hHint ? "usually " + p.hHint : p.hLabel ? "e.g. 5'-0\"" : "e.g. 10'-6\"", p.hWhy ? "Usually " + p.hHint + " ft in " + p.hWhy + " — check it for this project" : p.hLabel ? p.hLabel + " in ft, from the drawing" : "Floor to ceiling / slab soffit, from the section", first)}</label>`; first = false; }
+    if (n.h) { h += `<label>${esc(p.hLabel || "H")} ${uL("ft")} ${inp("data-qkh", i, p.hHint ? "usually " + p.hHint + (isM() ? " ft" : "") : p.hLabel ? "e.g. 5'-0\"" : "e.g. 10'-6\"", p.hWhy ? "Usually " + p.hHint + " ft in " + p.hWhy + " — check it for this project" : p.hLabel ? p.hLabel + " in ft, from the drawing" : "Floor to ceiling / slab soffit, from the section", first)}</label>`; first = false; }
     if (n.t) { h += `<label>${esc(p.tLabel || "T")} ${inp("data-qkt2", i, p.tLabel ? "e.g. 2'-6\"" : "e.g. 0'-5\" for 5\"", (p.tLabel || "Thickness") + " — ft-in (" + (p.tLabel ? "2'-6\"" : "0'-5\" or 5\"") + ") or decimal ft", first)}</label>`; first = false; }
     return h + "</div>"; };
   return ask(L.length === 1 ? L[0].name + " — the size it needs" : "Sizes for the " + L.length + " new items", `<p class="small">Typed for this project — never assumed. Decimal feet or ft-in (10'-6"); inches as 5"; mm and m work too.</p><div class="qkhs">${L.map(row).join("")}</div>`, L.length === 1 ? "Create" : "Create " + L.length, () => {
     const out = {};
     for (let i = 0; i < L.length; i++) { const p = L[i], n = qkNeed(p), o = {};
-      if (n.h) { const x = parseFt((document.querySelector(`#dlgB [data-qkh="${i}"]`) || {}).value || ""); if (!(x > 0)) return "Enter the " + (p.hLabel ? p.hLabel.toLowerCase() + " (ft)" : "height H") + " of " + p.name + (p.hHint ? " — usually " + p.hHint + " ft; check it for this project" : p.hLabel ? ", from the drawing" : " (floor to ceiling, from the section)"); o.h = r3(x); }
-      if (n.t) { const x = parseFt((document.querySelector(`#dlgB [data-qkt2="${i}"]`) || {}).value || ""); if (!(x > 0)) return "Enter the " + (p.tLabel ? p.tLabel.toLowerCase() + " (ft)" : "thickness T") + " of " + p.name + (p.tLabel ? ", from the drawing" : " (e.g. 0'-5\" for 5 inches)"); if (x > (p.tMax || 3)) return (p.tLabel || "T") + " " + f3(x) + " ft looks too " + (p.tLabel ? "big" : "thick") + " for " + p.name + " — inches are typed as 5\" or 0'-5\""; o.t = r3(x); }
+      if (n.h) { const x = uParse((document.querySelector(`#dlgB [data-qkh="${i}"]`) || {}).value || ""); if (!(x > 0)) return "Enter the " + (p.hLabel ? p.hLabel.toLowerCase() + " (ft)" : "height H") + " of " + p.name + (p.hHint ? " — usually " + p.hHint + " ft; check it for this project" : p.hLabel ? ", from the drawing" : " (floor to ceiling, from the section)"); o.h = r3(x); }
+      if (n.t) { const x = uParse((document.querySelector(`#dlgB [data-qkt2="${i}"]`) || {}).value || ""); if (!(x > 0)) return "Enter the " + (p.tLabel ? p.tLabel.toLowerCase() + " (ft)" : "thickness T") + " of " + p.name + (p.tLabel ? ", from the drawing" : " (e.g. 0'-5\" for 5 inches)"); if (x > (p.tMax || 3)) return (p.tLabel || "T") + " " + uLenT(x) + " looks too " + (p.tLabel ? "big" : "thick") + " for " + p.name + " — inches are typed as 5\" or 0'-5\""; o.t = r3(x); }
       out[p.name] = o; }
     return out; }, "qkF0");
 }
@@ -9328,8 +9372,8 @@ async function autoWindowUI(){
   const w = await pickWindow("Auto area: click one corner of the area to scan, then the opposite corner"); if (!w) return;
     busy("Auto area: finding the rooms…"); try { const r = await autoAreaWindow(w); if (r.err) { toast(r.err, 6000); return; } const sk = r.skipped;
       const more = [sk.failed ? sk.failed + " could not be traced" : "", r.flagged ? r.flagged + " to check (flagged)" : "", sk.existing ? sk.existing + " already measured" : "", sk.overlap ? sk.overlap + " ran into a neighbour (left out)" : "", sk.large ? sk.large + " over 3,000 Sft (click those)" : "", sk.small + sk.thin ? (sk.small + sk.thin) + " under 12 Sft or narrower than 3 ft" : ""].filter(Boolean);
-      toast("Auto area: " + r.added + " room" + (r.added === 1 ? "" : "s") + ", " + fq(r.sft) + " Sft added to " + (r.cond || "—") + (more.length ? " — " + more.join(", ") : "") + (!r.added && !sk.failed ? " — no closed room found in the window" : "")
-        + (r.narrow ? " · " + r.narrow + " of them narrower than the door gap (" + f3(r.gap) + " ft), traced again with a " + f3(r.gap2) + " ft gap" + (r.open ? ", " + r.open + " open-ended — check" : "") : "")
+      toast("Auto area: " + r.added + " room" + (r.added === 1 ? "" : "s") + ", " + uArea(r.sft) + " added to " + (r.cond || "—") + (more.length ? " — " + more.join(", ") : "") + (!r.added && !sk.failed ? " — no closed room found in the window" : "")
+        + (r.narrow ? " · " + r.narrow + " of them narrower than the door gap (" + uLenT(r.gap) + "), traced again with a " + uLenT(r.gap2) + " gap" + (r.open ? ", " + r.open + " open-ended — check" : "") : "")
         + (() => { const s2 = r.skip2 || {}, L = [s2.failed ? s2.failed + " could not be traced" : "", s2.overlap ? s2.overlap + " ran into a neighbour" : "", s2.small ? s2.small + " under 12 Sft" : ""].filter(Boolean); return L.length ? " · narrower spaces left out: " + L.join(", ") : ""; })(), 10000); }
     catch (e) { toast("Auto area: " + (e.message || e), 6000); } finally { busy(""); }
 }
@@ -9465,6 +9509,7 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
       {t: "sel", n: "Ribbon tab when the app opens", d: "shown on opening or refreshing the page", o: tabs.concat([["last", "The tab used last"]]), get: () => setPref().homeTab, set: v => { setSave({homeTab: v}); }},
       {t: "sel", n: "When a tool is picked by its key or a menu", d: "which ribbon tab shows", o: [["smart", "Its tab — but stay on My tools when the tool is there"], ["always", "Always its tab"], ["never", "Keep the tab I am on"]], get: () => setPref().ribFollow, set: v => { setSave({ribFollow: v}); }},
       {t: "tog", n: "Open the last project when the app starts", d: "off: start on the list of projects", get: () => setPref().openLast !== false, set: v => { setSave({openLast: v}); }},
+      {t: "sel", n: "Units", d: "of every figure — labels on the drawing, the conditions, the sheet, the exports; kept with the project, a new one takes the last chosen. Change it any time (the chip by the scale too): every measurement follows", o: [["ft", "Feet — ft, Sft, cft"], ["m", "Metres — m, m², m³"]], get: () => P.proj ? (isM() ? "m" : "ft") : pref("zdTakeoffUnits") === "m" ? "m" : "ft", set: v => setUnits(v)},
       {t: "tog", n: "Load a new version by itself", d: "when the app is opened or you come back to its tab, after saving — no Ctrl + F5; off: a bar offers Reload. The same for every ZD page", get: autoUpd, set: v => pref("zd-auto-update", v ? "" : "0")},
       {t: "txt", n: "Your name", d: "on markups, checks, comments and legends", get: qaUser, set: v => pref("zdTakeoffUser", String(v).trim().slice(0, 60))},
       {t: "btn", n: "Command palette", d: "every tool, export and dialog by name (Ctrl+K)", b: "Open", fn: openPalette}],
@@ -10030,7 +10075,7 @@ function ribbonInit(){
   $("pageStrip").addEventListener("click", e => { const t = e.target.closest("[data-pg]"); if (!t) return; const [f, p2] = t.dataset.pg.split("|"); gotoPage(f, +p2); });
   $("condList").addEventListener("contextmenu", e => { const r = e.target.closest("[data-cond]"), c = r && P.proj && cond(r.dataset.cond); if (!c) return; e.preventDefault();   // right-click a condition: its menu
     const mine = P.proj.items.filter(i => i.cond === c.id && onPage(i));
-    ctxShow([{h: c.name, s: fq(condTotals(c).net, c.unit) + " " + c.unit + ((P.proj.cols || []).length ? " · " + colTip(c).replace(/\n/g, " · ") : "")}, {t: "Edit condition…", fn: () => editCond(c)},
+    ctxShow([{h: c.name, s: fq(condTotals(c).net, c.unit) + " " + uL(c.unit) + ((P.proj.cols || []).length ? " · " + colTip(c).replace(/\n/g, " · ") : "")}, {t: "Edit condition…", fn: () => editCond(c)},
       {t: "Apply to pages / typical floors…" + (mine.length ? " (" + mine.length + " on this page)" : " — nothing on this page"), fn: () => copyToPagesDialog(c.id), dis: !mine.length || !S.page},
       {t: "Select all on this page", fn: () => { setTool("select"); S.cond = c.id; setSel(mine.map(i => i.id)); refresh(); }, dis: !mine.length}, {sep: 1}, {t: "Custom columns…", fn: colsDialog}], e.clientX, e.clientY); });
   $("condList").addEventListener("contextmenu", e => { const r = e.target.closest(".ctr.fl[data-flpk]"); if (!r || !P.proj) return; e.preventDefault(); e.stopPropagation(); floorMenu(e.clientX, e.clientY, r.dataset.flpk, r.dataset.fl); }, true);   // right-click a floor: its menu
@@ -10133,10 +10178,10 @@ function reportPrint(){
   if (!P.proj) return;
   const V = validation(), q = qaCounts(), BL = billLines(), tot = BL.reduce((a, l) => a + l.qty * (l.rate || 0), 0), w = window.open("", "_blank");
   if (!w) return toast("The browser blocked the new tab — allow pop-ups for this page, then try again", 5000);
-  const row = c => { const t = condTotals(c), n = P.proj.items.filter(i => i.cond === c.id).length; return n ? `<tr><td><span class="sw" style="background:${c.color}"></span>${c.boq ? esc(c.boq) + " · " : ""}${esc(c.name)}</td><td class="n">${n}</td><td class="n">${fq(t.gross, c.unit)}</td><td class="n">${t.ded ? "−" + fq(t.ded, c.unit) : ""}</td><td class="n"><b>${fq(t.net, c.unit)}</b></td><td>${esc(c.unit)}</td></tr>` : ""; };
+  const row = c => { const t = condTotals(c), n = P.proj.items.filter(i => i.cond === c.id).length; return n ? `<tr><td><span class="sw" style="background:${c.color}"></span>${c.boq ? esc(c.boq) + " · " : ""}${esc(c.name)}</td><td class="n">${n}</td><td class="n">${fq(t.gross, c.unit)}</td><td class="n">${t.ded ? "−" + fq(t.ded, c.unit) : ""}</td><td class="n"><b>${fq(t.net, c.unit)}</b></td><td>${esc(uL(c.unit))}</td></tr>` : ""; };
   const pages = allPages().filter(o => P.proj.items.some(i => i.file === o.f.id && i.page === o.i)).map(o => { const sh = (P.proj.sheets || {})[o.key] || {}, n = P.proj.items.filter(i => i.file === o.f.id && i.page === o.i), st = scaleState(P.proj.scales[o.key]);
     return `<tr><td>${esc(sh.no || "")}</td><td>${esc(sh.title || "")}</td><td>${esc(o.f.name.replace(/\.pdf$/i, ""))} p.${o.i}</td><td>${esc([sh.bldg, sh.floor].filter(Boolean).join(" · "))}</td><td class="n">${n.length}</td><td class="n">${n.filter(i => i.qa === "checked").length}</td><td>${esc(st.t)}</td></tr>`; }).join("");
-  const fl = floorGroups(), byFloor = fl.length > 1 ? fl.map(g => `<tr class="g"><td colspan="3">${esc(g.name)}</td></tr>` + billLines(g.only).filter(l => l.kind === "cond").map(l => `<tr><td>${esc(l.name)}</td><td class="n">${fq(l.qty, l.unit)}</td><td>${esc(l.unit)}</td></tr>`).join("")).join("") : "";
+  const fl = floorGroups(), byFloor = fl.length > 1 ? fl.map(g => `<tr class="g"><td colspan="3">${esc(g.name)}</td></tr>` + billLines(g.only).filter(l => l.kind === "cond").map(l => `<tr><td>${esc(l.name)}</td><td class="n">${fq(l.qty, l.unit)}</td><td>${esc(uL(l.unit))}</td></tr>`).join("")).join("") : "";
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(P.proj.name)} — takeoff report</title><style>
     body{font:12px "Segoe UI",Arial,sans-serif;color:#1e2b3a;margin:24px}h1{font-size:20px;color:#0f2942;margin:0 0 4px}h2{font-size:14px;color:#0f2942;margin:22px 0 6px;border-bottom:2px solid #0f2942;padding-bottom:3px}
     table{width:100%;border-collapse:collapse}th{background:#12263f;color:#fff;font-size:10.5px;text-align:left;padding:5px 6px}td{padding:4px 6px;border-bottom:1px solid #e3e8ef;vertical-align:top}td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -10147,7 +10192,7 @@ function reportPrint(){
     <div><span class="muted">AI / copied to check</span><b>${q.review}</b></div><div><span class="muted">Takeoff check</span><b class="st">${esc(V.lvl)}</b></div><div><span class="muted">Bill amount</span><b>${tot ? "PKR " + f2(tot) : "—"}</b></div></div>
     <h2>Quantities by condition</h2><table><thead><tr><th>Condition</th><th class="n">Measurements</th><th class="n">Gross</th><th class="n">Deductions</th><th class="n">Net</th><th>Unit</th></tr></thead><tbody>${P.proj.conds.map(row).join("")}</tbody></table>
     ${byFloor ? `<h2>By building / floor</h2><table><thead><tr><th>Item</th><th class="n">Qty</th><th>Unit</th></tr></thead><tbody>${byFloor}</tbody></table>` : ""}
-    ${BL.length ? `<h2>Bill</h2><table><thead><tr><th>Item</th><th class="n">Qty</th><th>Unit</th><th class="n">Rate PKR</th><th class="n">Amount PKR</th></tr></thead><tbody>${BL.map(l => `<tr${l.kind === "cond" ? ' class="g"' : ""}><td>${l.kind === "asm" ? "↳ " : ""}${l.boq ? esc(l.boq) + " · " : ""}${esc(l.name)}</td><td class="n">${fq(l.qty, l.unit)}</td><td>${esc(l.unit)}</td><td class="n">${l.rate ? f2(l.rate) : "—"}</td><td class="n">${l.rate ? f2(l.qty * l.rate) : "—"}</td></tr>`).join("")}<tr class="g"><td>Total</td><td></td><td></td><td></td><td class="n">${f2(tot)}</td></tr></tbody></table>` : ""}
+    ${BL.length ? `<h2>Bill</h2><table><thead><tr><th>Item</th><th class="n">Qty</th><th>Unit</th><th class="n">Rate PKR</th><th class="n">Amount PKR</th></tr></thead><tbody>${BL.map(l => `<tr${l.kind === "cond" ? ' class="g"' : ""}><td>${l.kind === "asm" ? "↳ " : ""}${l.boq ? esc(l.boq) + " · " : ""}${esc(l.name)}</td><td class="n">${fq(l.qty, l.unit)}</td><td>${esc(uL(l.unit))}</td><td class="n">${l.rate ? f2(uR(l.rate, l.unit)) : "—"}</td><td class="n">${l.rate ? f2(l.qty * l.rate) : "—"}</td></tr>`).join("")}<tr class="g"><td>Total</td><td></td><td></td><td></td><td class="n">${f2(tot)}</td></tr></tbody></table>` : ""}
     <h2>Drawings measured</h2><table><thead><tr><th>Sheet no.</th><th>Title</th><th>Drawing</th><th>Building / floor</th><th class="n">Measurements</th><th class="n">Checked</th><th>Scale</th></tr></thead><tbody>${pages || '<tr><td colspan="7" class="muted">Nothing measured yet</td></tr>'}</tbody></table>
     <h2>Takeoff check</h2>${V.L.length ? `<table><tbody>${V.L.map(x => `<tr><td style="width:80px;font-weight:700;color:${lvlCol(x.lvl)}">${esc(x.lvl)}</td><td>${esc(x.msg)}</td></tr>`).join("")}</tbody></table>` : '<p>No errors or warnings.</p>'}
     <script>setTimeout(function(){ window.print(); }, 400);<\/script></body></html>`);
@@ -10172,13 +10217,14 @@ function reportBuild(o){   // -> {o, cols, groups: [{name, rows | sub: [{name, r
   P.proj.items.forEach(it => { const c = cond(it.cond), k = c && qScale(it); if (!k) return;   // no page scale: left out, as on the measurement sheet (counts need none)
     const R = rowsOf(it, k), key = keyOf(it.file, it.page), L = locOf(it), r = rateOf(c, c.unit);
     recs.push({it, c, key, qty: R.reduce((a, x) => a + x.qty, 0), nos: c.type === "count" ? R.reduce((a, x) => a + (+x.nos || 0), 0) : +it.nos || 1, lbl: it.label || kindName(it, c) + (it.kind === "ded" ? " (deduction)" : ""),
-      floor: [L.bldg, L.floor].filter(Boolean).join(" · ") || repPage(key), fb: L.bldg, ff: L.floor, rate: !r.na && r.rate > 0 ? r.rate : 0}); });
+      floor: [L.bldg, L.floor].filter(Boolean).join(" · ") || repPage(key), fb: L.bldg, ff: L.floor, rate: !r.na && r.rate > 0 ? r.rate : 0});
+    const x = recs[recs.length - 1]; x.qty = uV(x.qty, c.unit); x.rate = uR(x.rate, c.unit); });   // in the project's units (the amount is the same)
   let flOrd = null; const flO = x => { if (!flOrd) flOrd = new Map(floorSort(recs.map(y => ({n: y.floor, b: y.fb, f: y.ff}))).map((n, i) => [n, i])); return flOrd.get(x.floor); };   // floors in their order (floorSort), pages after
   const byOrd = (a, b) => typeof a.ord === "number" && typeof b.ord === "number" ? a.ord - b.ord : String(a.ord).localeCompare(String(b.ord), undefined, {numeric: true});
   const split = (L, f) => { const m = new Map(); L.forEach(x => { const [id, name, ord] = f(x); if (!m.has(id)) m.set(id, {id, name, ord, recs: []}); m.get(id).recs.push(x); }); return [...m.values()].sort(byOrd); };
-  const GK = {cond: x => ["c" + x.c.id, (x.c.boq ? x.c.boq + " · " : "") + x.c.name + " (" + x.c.unit + ")", cOrd.get(x.c.id)], page: x => ["p" + x.key, repPage(x.key), pgOrd.get(x.key)], floor: x => ["f" + x.floor, x.floor, flO(x)]};
+  const GK = {cond: x => ["c" + x.c.id, (x.c.boq ? x.c.boq + " · " : "") + x.c.name + " (" + uL(x.c.unit) + ")", cOrd.get(x.c.id)], page: x => ["p" + x.key, repPage(x.key), pgOrd.get(x.key)], floor: x => ["f" + x.floor, x.floor, flO(x)]};
   const lv = o.grp === "condpage" ? [GK.cond, GK.page] : [GK[o.grp] || GK.cond];
-  const line = (c, x) => Object.assign({c, boq: c.boq || "", unit: c.unit, note: ""}, x, {amt: x.rate ? x.qty * x.rate : null});
+  const line = (c, x) => Object.assign({c, boq: c.boq || "", unit: uL(c.unit), note: ""}, x, {amt: x.rate ? x.qty * x.rate : null});
   const rowsOfG = L => o.rows === "sum"
     ? split(L, x => [x.c.id, "", cOrd.get(x.c.id)]).map(g => { const ks = [...new Set(g.recs.map(x => x.key))];
         return line(g.recs[0].c, {page: ks.length === 1 ? repPage(ks[0]) : ks.length + " pages", lbl: "", nos: g.recs.reduce((a, x) => a + x.nos, 0), qty: g.recs.reduce((a, x) => a + x.qty, 0), rate: g.recs[0].rate, n: g.recs.length}); })
@@ -10186,7 +10232,7 @@ function reportBuild(o){   // -> {o, cols, groups: [{name, rows | sub: [{name, r
   const sum = (rows, g) => { const us = [...new Set(rows.map(r => r.unit))]; return Object.assign(g, {unit: us.length === 1 ? us[0] : null, qty: us.length === 1 ? rows.reduce((a, r) => a + r.qty, 0) : null, amt: rows.reduce((a, r) => a + (r.amt || 0), 0), n: rows.reduce((a, r) => a + r.n, 0)}); };
   const groups = split(recs, lv[0]).map(g => { if (!lv[1]) { const rows = rowsOfG(g.recs); return sum(rows, {name: g.name, rows}); }
     const sub = split(g.recs, lv[1]).map(s => { const rows = rowsOfG(s.recs); return sum(rows, {name: s.name, rows}); }); return sum(sub.flatMap(s => s.rows), {name: g.name, sub}); });
-  const byCond = P.proj.conds.map(c => { const L = recs.filter(x => x.c === c); return L.length ? {c, qty: L.reduce((a, x) => a + x.qty, 0), amt: L.reduce((a, x) => a + (x.rate ? x.qty * x.rate : 0), 0), n: L.length, rate: L[0].rate} : null; }).filter(Boolean);
+  const byCond = P.proj.conds.map(c => { const L = recs.filter(x => x.c === c); return L.length ? {c, unit: uL(c.unit), qty: L.reduce((a, x) => a + x.qty, 0), amt: L.reduce((a, x) => a + (x.rate ? x.qty * x.rate : 0), 0), n: L.length, rate: L[0].rate} : null; }).filter(Boolean);
   const us = [...new Set(groups.map(g => g.unit))], gunit = us.length === 1 ? us[0] : null;   // the grand total's quantity: only when every group is in one unit ("mixed units" otherwise)
   return {o, cols, groups, byCond, amt: byCond.reduce((a, x) => a + x.amt, 0), n: recs.length, gunit, gqty: gunit ? groups.reduce((a, g) => a + g.qty, 0) : null};
 }
@@ -10203,7 +10249,7 @@ function reportHtml(R, max){   // the report as a table (the dialog's preview); 
     if (g.sub) g.sub.forEach(s => { h += `<tr class="ch2"><td colspan="${nc}">${esc(s.name)}</td></tr>` + lines(s.rows) + tot(s, "Total " + s.name); }); else h += lines(g.rows);
     h += tot(g, "Total " + g.name); });
   h += tot({qty: R.gqty, unit: R.gunit, amt: R.amt, n: R.n}, "Grand total", "tot gt");
-  const bc = `<table class="sh rbt"><thead><tr><th>Grand total by condition</th><th class="n">Quantity</th><th>Unit</th><th class="n">Measurements</th><th class="n">Amount PKR</th></tr></thead><tbody>${R.byCond.map(x => `<tr data-rbq="${esc(x.c.id)}"><td>${esc((x.c.boq ? x.c.boq + " · " : "") + x.c.name)}</td><td class="n">${fq(x.qty, x.c.unit)}</td><td>${esc(x.c.unit)}</td><td class="n">${x.n}</td><td class="n">${x.amt ? f2(x.amt) : ""}</td></tr>`).join("")}</tbody></table>`;
+  const bc = `<table class="sh rbt"><thead><tr><th>Grand total by condition</th><th class="n">Quantity</th><th>Unit</th><th class="n">Measurements</th><th class="n">Amount PKR</th></tr></thead><tbody>${R.byCond.map(x => `<tr data-rbq="${esc(x.c.id)}"><td>${esc((x.c.boq ? x.c.boq + " · " : "") + x.c.name)}</td><td class="n">${fq(x.qty, x.unit)}</td><td>${esc(uL(x.unit))}</td><td class="n">${x.n}</td><td class="n">${x.amt ? f2(x.amt) : ""}</td></tr>`).join("")}</tbody></table>`;
   return R.n ? `<table class="sh rbt"><thead><tr>${cols.map(k => `<th${REP_NUM.has(k) ? ' class="n"' : ""}>${esc(head(k))}</th>`).join("")}</tr></thead><tbody>${h}</tbody></table>${cut ? `<p class="small">… and ${cut} more line${cut === 1 ? "" : "s"} (all of them in the Excel / CSV)</p>` : ""}${bc}`
     : '<div class="empty">Nothing measured on a page with a scale yet.</div>';
 }
@@ -10235,7 +10281,7 @@ async function reportExcel(o){
     ws.columns = cols.map(k => ({width: WD[k]})).concat([{width: 12, hidden: true}, {width: 4, hidden: true}]);   // two hidden helpers: the condition's id and "m" on a measurement line (for SUMIFS)
     const Q = xlCol(ci("qty")), RT = ci("rate") >= 0 ? xlCol(ci("rate")) : "", HC = xlCol(nc), HT = xlCol(nc + 1), nameAt = cols.findIndex(k => !REP_NUM.has(k)) + 1;
     ws.mergeCells(1, 1, 1, Math.max(2, nc)); ws.getCell(1, 1).value = "TAKEOFF REPORT — " + P.proj.name; ws.getCell(1, 1).font = {bold: true, size: 13};
-    ws.mergeCells(2, 1, 2, Math.max(2, nc)); ws.getCell(2, 1).value = "Grouped by " + (REP_GRP.find(g => g[0] === R.o.grp) || REP_GRP[0])[1].toLowerCase() + " · " + (R.o.rows === "sum" ? "one line per condition" : "each measurement") + " · " + dmy(today()) + " · decimal feet, deductions as negative quantities"; ws.getCell(2, 1).font = {size: 9, color: {argb: "FF52514E"}};
+    ws.mergeCells(2, 1, 2, Math.max(2, nc)); ws.getCell(2, 1).value = "Grouped by " + (REP_GRP.find(g => g[0] === R.o.grp) || REP_GRP[0])[1].toLowerCase() + " · " + (R.o.rows === "sum" ? "one line per condition" : "each measurement") + " · " + dmy(today()) + (isM() ? " · metres (m, m², m³)" : " · decimal feet") + ", deductions as negative quantities"; ws.getCell(2, 1).font = {size: 9, color: {argb: "FF52514E"}};
     const hr = ws.getRow(4); cols.forEach((k, j) => { hr.getCell(j + 1).value = k === "note" ? R.o.note || "Note" : REP_COLS.find(x => x[0] === k)[1]; }); hr.font = {bold: true, color: {argb: "FFFFFFFF"}}; for (let j = 1; j <= nc; j++) hr.getCell(j).fill = HEAD;
     let row = 5; const fmt = (cell, k, unit) => { if (k === "qty") cell.numFmt = qFmt(unit); else if (k === "rate" || k === "amt") cell.numFmt = "#,##0.00"; else if (k === "nos") cell.numFmt = "#,##0.###"; };
     const put = r => { const x = ws.getRow(row);
@@ -10262,7 +10308,7 @@ async function reportExcel(o){
     bc.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; for (let j = 1; j <= 6; j++) bc.getRow(1).getCell(j).fill = HEAD;
     const rg = c => `Report!$${c}$5:$${c}$${last}`, A = ci("amt") >= 0 ? xlCol(ci("amt")) : "";
     R.byCond.forEach((x, i) => { const n = i + 2, cnd = `${rg(HC)},$G${n},${rg(HT)},"m"`;
-      const r = bc.addRow([x.c.boq || "", x.c.name, {formula: `SUMIFS(${rg(Q)},${cnd})`, result: x.qty}, x.c.unit, {formula: `COUNTIFS(${cnd})`, result: x.n}, A ? {formula: `SUMIFS(${rg(A)},${cnd})`, result: x.amt} : x.amt || null, x.c.id]);
+      const r = bc.addRow([x.c.boq || "", x.c.name, {formula: `SUMIFS(${rg(Q)},${cnd})`, result: x.qty}, x.unit, {formula: `COUNTIFS(${cnd})`, result: x.n}, A ? {formula: `SUMIFS(${rg(A)},${cnd})`, result: x.amt} : x.amt || null, x.c.id]);
       r.getCell(3).numFmt = qFmt(x.c.unit); r.getCell(6).numFmt = "#,##0.00"; });
     const bt = bc.addRow(["", "Total", null, null, {formula: `SUM(E2:E${R.byCond.length + 1})`, result: R.n}, {formula: `SUM(F2:F${R.byCond.length + 1})`, result: R.amt}]); bt.font = {bold: true}; bt.getCell(6).numFmt = "#,##0.00"; for (let j = 1; j <= 6; j++) bt.getCell(j).fill = GREY;
     const buf = await wb.xlsx.writeBuffer();
@@ -10277,7 +10323,7 @@ function reportCsv(o){
   const tot = (g, name) => rows.push(cols.map((k, j) => k === "qty" ? (g.qty == null ? "mixed units" : qCsv(g.qty, g.unit)) : k === "unit" ? g.unit || "" : k === "amt" ? n2(g.amt) : k === "n" ? String(g.n) : j === nameAt ? name : ""));
   R.groups.forEach(g => { rows.push([g.name]); if (g.sub) g.sub.forEach(s => { rows.push([s.name]); s.rows.forEach(r => rows.push(cols.map(k => val(r, k)))); tot(s, "Total " + s.name); }); else g.rows.forEach(r => rows.push(cols.map(k => val(r, k)))); tot(g, "Total " + g.name); });
   tot({qty: R.gqty, unit: R.gunit, amt: R.amt, n: R.n}, "Grand total"); rows.push([]); rows.push(["Grand total by condition", "BOQ code", "Quantity", "Unit", "Measurements", "Amount PKR"]);
-  R.byCond.forEach(x => rows.push([x.c.name, x.c.boq || "", qCsv(x.qty, x.c.unit), x.c.unit, String(x.n), x.amt ? n2(x.amt) : ""]));
+  R.byCond.forEach(x => rows.push([x.c.name, x.c.boq || "", qCsv(x.qty, x.c.unit), x.unit, String(x.n), x.amt ? n2(x.amt) : ""]));
   const t = rows.map(r => r.map(v => { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
   saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Report.csv");
 }
@@ -10808,7 +10854,7 @@ async function floorsDialog(pk, found){
   if (found === undefined) { found = null; if (!floorList(pk).length) { busy("Finding the floor plans on this sheet…"); try { found = await floorDetect(pk); } finally { busy(""); } if (S.key !== pk) return; } }
   const F = (found || []).filter(f => f && f.name && flBox(f.r)), L = floorsOf(pk), k = curScale() || 0;
   const ids = [...selIds()].filter(id => P.proj.items.some(i => i.id === id && flPk(i) === pk));
-  const size = r => k > 0 ? Math.round((r[2] - r[0]) / k) + " × " + Math.round((r[3] - r[1]) / k) + " ft" : "";
+  const size = r => k > 0 ? Math.round(uV((r[2] - r[0]) / k, "ft")) + " × " + Math.round(uV((r[3] - r[1]) / k, "ft")) + " " + uL("ft") : "";
   const nT = F.filter(f => f.titled !== false).length, un = nT ? F.filter(f => f.titled === false).length : 0;   // plans with no floor title (sections, details, a site plan) unticked, folded — unless no plan has one
   const one = (f, i) => `<div class="cand"><input type="checkbox" data-flck="${i}"${!nT || f.titled !== false ? " checked" : ""} title="Add this floor"><input type="text" data-flnew="${i}" value="${esc(f.name)}" style="flex:1;min-width:120px" aria-label="Floor name"><span class="small">${size(f.r)}${floorNamed(pk, f.name) ? " · its boundary replaces the one there" : ""}</span><button class="btn sm" data-flpz="${i}" title="Show this plan on the drawing (the dialog stays open)">Show</button></div>`;
   const prop = F.map((f, i) => !un || f.titled !== false ? one(f, i) : "").join("") + (un ? `<details style="margin-top:4px"><summary class="small">${un} other plan${un > 1 ? "s" : ""} with no floor title (sections, details, a site plan…) — tick one to add it as a floor</summary>${F.map((f, i) => f.titled === false ? one(f, i) : "").join("")}</details>` : "");
@@ -11023,7 +11069,7 @@ function sizeMismatch(it, k){
     return best; };
   const o = [[sp.w, sp.h], [sp.h, sp.w]].map(([a, b]) => Math.max(span(V, a, false), span(H, b, true))).sort((x, y) => x - y)[0];
   if (o <= 1 / 12 + 1e-6) return "";
-  return isFinite(o) ? `written size ${f3(sp.w)} × ${f3(sp.h)} ft is not between its sides (nearest ${(o * 12).toFixed(1)}" off)` : `written size ${f3(sp.w)} × ${f3(sp.h)} ft — no two pairs of facing square sides`;
+  return isFinite(o) ? `written size ${uLen(sp.w)} × ${uLenT(sp.h)} is not between its sides (nearest ${(o * 12).toFixed(1)}" off)` : `written size ${uLen(sp.w)} × ${uLenT(sp.h)} — no two pairs of facing square sides`;
 }
 function validate(){
   const out = [], E = (lvl, msg) => out.push({lvl, msg});
@@ -11037,7 +11083,7 @@ function validate(){
     if (c.type === "linear" && c.unit !== "ft" && !(+c.h > 0)) E("ERROR", `${c.name}: height H missing (needed for ${c.unit})`);
     if (c.unit === "cft" && !(+c.t > 0) && !(c.cfCond && its.every(i => +i.dep > 0))) E("ERROR", `${c.name}: thickness T missing (needed for cft)`);
     if (!String(c.boq || "").trim()) E("WARNING", `${c.name}: no BOQ code`);
-    const t = condTotals(c); if (t.net < 0) E("ERROR", `${c.name}: net quantity is negative (${fq(t.net, c.unit)} ${c.unit}) — deductions exceed the gross`);
+    const t = condTotals(c); if (t.net < 0) E("ERROR", `${c.name}: net quantity is negative (${fq(t.net, c.unit)} ${uL(c.unit)}) — deductions exceed the gross`);
     its.forEach(it => { const k = qScale(it); if (!k) return; const q = rowsOf(it, k).reduce((a, r) => a + Math.abs(r.qty), 0);
       if (!(q > 0) && !rowsOf(it, k).some(r => r.below)) E("ERROR", `${c.name} — ${it.label || kindName(it, c)} on ${pageName(it)}: zero quantity`);
       if (it.kind === "open" && c.unit !== "ft" && !(openH(it) > 0)) E("ERROR", `${c.name} — opening ${it.label || ""} on ${pageName(it)}: height missing`);
@@ -11059,7 +11105,7 @@ function validate(){
     : `${d.c.name} — ${d.a.label || kindName(d.a, d.c)} on ${pageName(d.a)} is drawn twice (same outline${d.b.label && d.b.label !== d.a.label ? " as " + d.b.label : ""}) — counted twice`));
   const dk = new Set(DUP.filter(d => d.b).flatMap(d => [d.a.id + "|" + d.b.id, d.b.id + "|" + d.a.id])), nmOf = it => it.label || kindName(it, cond(it.cond));   // areas overlapping (not the same outline twice: above)
   overlapCheck("project").forEach(p => { if (dk.has(p.a.id + "|" + p.b.id)) return; const ca = cond(p.a.cond), cb = cond(p.b.cond);
-    out.push({lvl: "WARNING", msg: `${fq(p.sft)} Sft counted twice where ${nmOf(p.a)} and ${nmOf(p.b)} overlap — ${ca === cb ? ca.name : ca.name + " / " + cb.name} on ${pageName(p.a)} (Review → Overlaps to fix)`, ov: ca === cb ? 1 : 2}); });
+    out.push({lvl: "WARNING", msg: `${uArea(p.sft)} counted twice where ${nmOf(p.a)} and ${nmOf(p.b)} overlap — ${ca === cb ? ca.name : ca.name + " / " + cb.name} on ${pageName(p.a)} (Review → Overlaps to fix)`, ov: ca === cb ? 1 : 2}); });
   floorGaps().forEach(g => E("WARNING", `${g.c.name}: measured on ${g.have} floor${g.have > 1 ? "s" : ""}${g.bldg ? " of " + g.bldg : ""} but not on ${g.miss.join(", ")} — check nothing was missed there`));
   const rc = P.proj.items.filter(i => i.qa === "recheck").length, ai = P.proj.items.filter(i => i.ai && i.qa !== "checked").length, cp = P.proj.items.filter(i => i.copied && i.qa !== "checked").length;
   if (rc) E("ERROR", `${rc} measurement${rc > 1 ? "s" : ""} marked Recheck required`);
@@ -11149,7 +11195,7 @@ async function revCompareDialog(){
   $("dlgT").textContent = "Revision quantity compare";
   $("dlgB").innerHTML = `<p class="small">Old: <b>${esc(rl(v.o))}</b> → New: <b>${esc(rl(v.n))}</b></p>
     <div style="overflow:auto;margin-top:6px"><table class="sh"><thead><tr><th>Item</th><th class="n">Old</th><th class="n">New</th><th class="n">Variance</th><th class="n">%</th><th class="n">Cost impact PKR</th></tr></thead><tbody>
-    ${rows.map(r => `<tr class="${r.kind === "asm" ? "" : "ch2"}"><td>${r.kind === "asm" ? "↳ " : ""}${esc(r.name)} <span class="small">${esc(r.unit)}</span>${r.boq ? `<div class="ds">${esc(r.boq)}</div>` : ""}</td><td class="n">${fq(r.old, r.unit)}</td><td class="n">${fq(r.neu, r.unit)}</td>
+    ${rows.map(r => `<tr class="${r.kind === "asm" ? "" : "ch2"}"><td>${r.kind === "asm" ? "↳ " : ""}${esc(r.name)} <span class="small">${esc(uL(r.unit))}</span>${r.boq ? `<div class="ds">${esc(r.boq)}</div>` : ""}</td><td class="n">${fq(r.old, r.unit)}</td><td class="n">${fq(r.neu, r.unit)}</td>
       <td class="n" style="color:${r.var > 0 ? "var(--red)" : r.var < 0 ? "var(--green)" : "inherit"}">${r.var > 0 ? "+" : ""}${fq(r.var, r.unit)}</td><td class="n">${r.pct == null ? "new" : (r.pct > 0 ? "+" : "") + r.pct.toFixed(2) + "%"}</td><td class="n">${r.cost == null ? `<span class="small" title="${esc(r.na || "rate not set")}">no rate</span>` : f2(r.cost)}</td></tr>`).join("")}
     <tr class="tot"><td>Total cost impact (lines with a rate)</td><td></td><td></td><td></td><td></td><td class="n">${f2(tot)}</td></tr></tbody></table></div>
     <p class="small" style="margin-top:8px">Variance = new − old. Cost impact = variance × the line's rate; lines without a usable rate show “no rate” — never assumed.</p>`;
@@ -11567,7 +11613,7 @@ function extendRun(r){
   });
   if (!best) return toast("Nothing in line with that end of the run to extend to", 3000);
   mutate(() => { Q[atStart ? 0 : n - 1] = best.p; delete it.arcs; qaMoved(it); }, "Extend");
-  toast("Extended by " + f3(best.s / k) + " ft", 2200);
+  toast("Extended by " + uLenT(best.s / k), 2200);
 }
 
 /* FILLET / CHAMFER: pick two runs (or two legs of one run, at their corner) — they are cut or extended to meet, the corner rounded / bevelled */
@@ -11634,7 +11680,7 @@ function fcClick(sp){
   const out = L1.slice(0, -1).concat(c.pts, L2.slice(0, -1).reverse()), i1 = L1.length - 1;
   mutate(() => { const it = A.it; it.pts = out; delete it.arcs; if (c.arc) it.arcs = [[i1, i1 + c.pts.length - 1]]; qaMoved(it); P.proj.items = P.proj.items.filter(x => x !== B.it); }, kind === "fillet" ? "Fillet" : "Chamfer");
   setSel([A.it.id]); refresh();
-  toast((kind === "fillet" ? "Filleted" : "Chamfered") + " — the two runs are now one: " + f3(polyLen(out) / k) + " ft in " + (cond(A.it.cond) || {name: "its condition"}).name, 3200);
+  toast((kind === "fillet" ? "Filleted" : "Chamfered") + " — the two runs are now one: " + uLenT(polyLen(out) / k) + " in " + (cond(A.it.cond) || {name: "its condition"}).name, 3200);
   done(null);
 }
 
@@ -11756,7 +11802,7 @@ function dxfBuild(opts){
   P.proj.items.filter(it => it.file === S.fileId && it.page === S.pageNo).forEach(it => {
     const c = cond(it.cond), k = itemScale(it); if (!c || !it.pts || !it.pts.length || it.kind === "open") return;
     if (!k) { skipped++; return; }
-    const L = lname(c), q = rowsOf(it, k).reduce((a, r) => a + r.qty, 0), lab = (it.label ? it.label + " " : "") + c.name + " " + fq(q, c.unit) + " " + c.unit;
+    const L = lname(c), q = rowsOf(it, k).reduce((a, r) => a + r.qty, 0), lab = (it.label ? it.label + " " : "") + c.name + " " + fq(q, c.unit) + " " + uL(c.unit);
     count++;
     if (c.type === "count") {
       it.pts.forEach(p => { const a = xy(p, k); put([0, "POINT"], [8, L], [10, n4(a[0])], [20, n4(a[1])], [30, 0]); put([0, "CIRCLE"], [8, L], [10, n4(a[0])], [20, n4(a[1])], [30, 0], [40, n4(0.5 * ftU)]); });
@@ -11888,6 +11934,7 @@ function paletteCmds(){
     return L;
   }
   document.querySelectorAll("#tools [data-tool]").forEach(b => btn(b, "Tool"));
+  add("Units: feet — ft, Sft, cft", () => setUnits("ft"), "View"); add("Units: metres — m, m², m³ (metric)", () => setUnits("m"), "View");
   document.querySelectorAll("#tools [data-mod]").forEach(b => btn(b, "Modify")); document.querySelectorAll("#tools [data-rv]").forEach(b => btn(b, "Check")); document.querySelectorAll("#tools [data-fn]").forEach(b => btn(b, "Tool"));
   add("Ortho on / off", () => setOrtho(!S.ortho), "Tool", "F8"); add("Polar tracking on / off", () => setPolar(!S.polar), "Tool", "F10"); add("Object snaps…", () => snapPopToggle(true), "Tool");
   add("Search the measurement sheet", () => { const q = $("shQ"); if (q) { q.focus(); q.select(); } }, "View");
@@ -12101,13 +12148,13 @@ const ctxArrange = () => ({t: "Arrange / rotate", sub: [{t: "Bring to front", fn
 function selTotals(ids){   // "Floor area 312.00 Sft · Doors 4 Nos" for the selection
   const T = new Map();
   [...ids].map(id => P.proj.items.find(i => i.id === id)).filter(Boolean).forEach(it => { const c = cond(it.cond), k = qScale(it); if (!c || !k) return; const q = rowsOf(it, k).reduce((a, r) => a + r.qty, 0); const t = T.get(c.id) || {c, q: 0, n: 0}; t.q += q; t.n++; T.set(c.id, t); });
-  return [...T.values()].map(t => t.c.name + " " + fq(t.q, t.c.unit) + " " + t.c.unit).join(" · ");
+  return [...T.values()].map(t => t.c.name + " " + fq(t.q, t.c.unit) + " " + uL(t.c.unit)).join(" · ");
 }
 function ctxItem(hi, sp, q, e){
   const it = hi.it, c = cond(it.cond), ids = selIds(), many = ids.size > 1, k = itemScale(it), sel = [...ids].map(id => P.proj.items.find(i => i.id === id)).filter(Boolean);
   const runs = sel.filter(isRun), vi = !many && editPts(it) ? vertexAt(it, sp) : -1, sg = !many && (editPts(it) || it.shape === "circle") ? segAt(it, sp) : null;
   const cut = sg || (vi > 0 && vi < it.pts.length - 1 ? {i: vi - 1, p: it.pts[vi]} : null), lk = sel.some(o => o.locked), allLk = sel.length && sel.every(o => o.locked);
-  const qty = k ? fq(rowsOf(it, k).reduce((a, r) => a + r.qty, 0), c.unit) + " " + c.unit : "scale not set";
+  const qty = k ? fq(rowsOf(it, k).reduce((a, r) => a + r.qty, 0), c.unit) + " " + uL(c.unit) : "scale not set";
   const L = [{h: many ? ids.size + " selected" : (it.label || kindName(it, c)), s: many ? selTotals(ids) : c.name + " · " + qty + (it.locked ? " · locked" : "")}];
   if (!many) L.push({t: "Properties…", k: "Dbl-click", fn: focusProps}, {t: "Set as default", fn: () => setDefaultsFromSelection(it)}, {t: "Add to Tool Chest…", fn: () => toolChestDialog({object: it, name: (c.name || kindName(it, c)) + " profile"})}, {t: "Rename…", k: "F2", fn: () => renameItem(it)});
   L.push({sep: 1});
@@ -12655,6 +12702,7 @@ function wire(){
   $("bExport").onclick = exportMenu;
   $("bContact").onclick = () => contactPop();
   $("scaleChip").onclick = scaleDialog;
+  if ($("unitChip")) $("unitChip").onclick = () => setUnits(isM() ? "ft" : "m");
   $("bNewCond").onclick = () => P.proj && editCond(null); $("bCols").onclick = () => P.proj && colsDialog();
   $("bProjects").onclick = showStart;
   $("projName").onchange = e => { if (P.proj) { P.proj.name = e.target.value.trim() || "Untitled takeoff"; save(); } };
@@ -12740,20 +12788,20 @@ function wire(){
     if (mc) { mutate(() => { const m = Object.assign({}, matOf(mc)); delete m.guessed; const v = e.target.value;
       if (mt === "kind") { mc.mat = {kind: v}; return; }
       if (mt === "T") { const t = parseFt(String(v).trim() + (/["'a-z]/i.test(v) ? "" : '"')); if (!isNaN(t) && t >= 0) mc.t = t > 0 ? r3(t) : ""; return; }   // thickness typed in inches (or ft-in) → T on the condition, decimal ft
-      if (mt === "H") { const h = parseFt(String(v).trim()); if (!isNaN(h) && h >= 0) mc.h = h > 0 ? r3(h) : ""; return; }
+      if (mt === "H") { const h = uParse(String(v).trim()); if (!isNaN(h) && h >= 0) mc.h = h > 0 ? r3(h) : ""; return; }
       m[mt] = mt === "tin" || mt === "wst" ? Math.max(0, Math.min(mt === "wst" ? 50 : 24, +v || 0)) : v; mc.mat = m; }); return; }
     const it = P.proj.items.find(i => i.id === S.sel), f = e.target.dataset.prop; if (!it || !f) return;
     if (f === "qa") return setQa([it], e.target.value);
     if (f === "ver") { const v = e.target.value; return mutate(() => { if (!v) delete it.ver; else it.ver = {st: v, note: (it.ver && it.ver.note) || "", by: "", at: new Date().toISOString()}; }, v ? "Verification: " + VER_NAMES[v] : "Verification cleared"); }
     if (f === "pitch" && isNaN(parsePitch(e.target.value))) { toast("Slope: rise:run like 4:12, a percent like 33% or degrees like 18.4° — flat for none, blank for the condition's", 4000); renderProps(); return; }
-    if (f === "rise") { const s = e.target.value.trim().replace(/^[−–]/, "-"), v = !s ? 0 : s[0] === "-" ? -parseFt(s.slice(1)) : s[0] === "+" ? parseFt(s.slice(1)) : parseFt(s);
+    if (f === "rise") { const s = e.target.value.trim().replace(/^[−–]/, "-"), v = !s ? 0 : s[0] === "-" ? -uParse(s.slice(1)) : s[0] === "+" ? uParse(s.slice(1)) : uParse(s);
       if (isNaN(v)) { toast("Rise / drop: feet (10, 10'-6\") — a minus for a drop (−4)", 3500); renderProps(); return; }
-      return mutate(() => { if (v) it.rise = r3(v); else delete it.rise; }, v ? (v > 0 ? "Rise " : "Drop ") + f3(Math.abs(v)) + " ft" : "Rise / drop cleared"); }
+      return mutate(() => { if (v) it.rise = r3(v); else delete it.rise; }, v ? (v > 0 ? "Rise " : "Drop ") + uLenT(Math.abs(v)) : "Rise / drop cleared"); }
     if (f === "pitch") { const s = e.target.value.trim(), p = parsePitch(s); return mutate(() => { if (!s) delete it.pitch; else it.pitch = p > 0 ? +p.toFixed(6) : 0; }, s ? "Slope " + (p > 0 ? pitchIn(p) : "flat") : "Slope as condition"); }
     mutate(() => {
       if (f === "nos") { const v = Math.round(+e.target.value || 1); it.nos = Math.max(1, Math.min(100000, v)); if (v > 100000) toast("Nos is limited to 100,000 — check the number typed", 3500); }
-      else if (f === "ow" || f === "oh") { const v = e.target.value.trim() ? parseFt(e.target.value) : 0; if (!isNaN(v)) it[f] = v; }
-      else if (f === "doorW") { const s = e.target.value.trim(); if (!s) delete it.doorW; else { const v = s.split("+").reduce((a, x) => a + parseFt(x), 0); if (!isNaN(v) && v >= 0) it.doorW = r3(v); } }
+      else if (f === "ow" || f === "oh") { const v = e.target.value.trim() ? uParse(e.target.value) : 0; if (!isNaN(v)) it[f] = v; }
+      else if (f === "doorW") { const s = e.target.value.trim(); if (!s) delete it.doorW; else { const v = s.split("+").reduce((a, x) => a + uParse(x), 0); if (!isNaN(v) && v >= 0) it.doorW = r3(v); } }
       else if (f === "color") { const c = cond(it.cond); if (c && HEXCOL.test(e.target.value)) c.color = e.target.value; }
       else if (f === "sw") { const c = cond(it.cond); if (c) c.sw = swN(e.target.value, c.sw); }
       else if (f === "sch") { const s = schOf(e.target.value); if (s) { it.sch = s.id; it.label = s.mark; } else delete it.sch; }
@@ -13089,11 +13137,11 @@ const SPECIALISTS = ["measure_rooms", "detect_walls", "count_tags", "measure_uni
 function aiToolMsg(name, inp, out){   // one line in the panel for a tool step
   const o = out.ok, nm = n => `<span class="small">(${esc(n.replace(/_/g, " "))})</span>`;
   if (!o) return `${esc(inp.name || name.replace(/_/g, " "))}: ${esc(out.err)}`;
-  if (SPECIALISTS.includes(name)) return `Specialist ${nm(name)} done${o.total_length_ft != null ? ": <b>" + f3(o.total_length_ft) + " ft</b> in " + o.runs + " runs" : ""}`;
+  if (SPECIALISTS.includes(name)) return `Specialist ${nm(name)} done${o.total_length_ft != null ? ": <b>" + uLenT(o.total_length_ft) + "</b> in " + o.runs + " runs" : ""}`;
   if (o.deleted) return "Deleted an area";
-  if (o.length_ft != null) return `${esc(inp.condition)} ${esc(inp.name || "")}: <b>${f3(o.length_ft)} ft</b> ${nm(name)}`;
+  if (o.length_ft != null) return `${esc(inp.condition)} ${esc(inp.name || "")}: <b>${uLenT(o.length_ft)}</b> ${nm(name)}`;
   if (o.count_on_page != null && name === "add_counts") return `${esc(o.name)}: <b>${o.count_on_page} Nos</b> on this page ${nm(name)}`;
-  if (o.area_sft != null) return `${esc(o.name || inp.name || "")}: <b>${fq(o.area_sft)} Sft</b> ${nm(name)}${o.corners_snapped ? ' <span class="small">corners snapped ' + esc(o.corners_snapped) + "</span>" : ""}`;
+  if (o.area_sft != null) return `${esc(o.name || inp.name || "")}: <b>${uArea(o.area_sft)}</b> ${nm(name)}${o.corners_snapped ? ' <span class="small">corners snapped ' + esc(o.corners_snapped) + "</span>" : ""}`;
   return `${esc(name.replace(/_/g, " "))} ✓`;
 }
 function aiLog(kind, html){ const d = document.createElement("div"); d.className = "aimsg " + kind; d.innerHTML = html; $("aiLog").appendChild(d); $("aiLog").scrollTop = 1e9; return d; }
@@ -13176,7 +13224,7 @@ function rulesPut(scope, L){
 function rulesActive(){ return ["project", "global", "session"].flatMap(sc => rulesOf(sc).filter(r => r && r.on !== false && String(r.text || "").trim()).map(r => Object.assign({scope: sc}, r))); }
 function rulesPrompt(){
   const L = rulesActive(); let lp = ""; try { lp = learnPrompt(); } catch (e) {}
-  return (L.length ? "\n\nTHE USER'S WORKING RULES — follow them unless the user says otherwise in this message:\n" + L.map(r => "- " + r.text + " (" + RULE_SCOPES[r.scope] + ")").join("\n") : "") + lp;
+  return (L.length ? "\n\nTHE USER'S WORKING RULES — follow them unless the user says otherwise in this message:\n" + L.map(r => "- " + r.text + " (" + RULE_SCOPES[r.scope] + ")").join("\n") : "") + lp + (isM() ? "\n\nUNITS: this project is read in metres. Tool inputs and results stay in feet (height_ft, area_sft, Sft, cft) — when you write a quantity to the user, give it in metres too: 1 ft = 0.3048 m, 1 Sft = 0.09290304 m², 1 cft = 0.028316846592 m³." : "");
 }
 const RULE_NEG = /\b(never|don'?t|do not|no|exclude|without|avoid|stop)\b/i;
 function ruleCore(t){ return String(t).toLowerCase().replace(/\b(please|always|never|don'?t|do not|from now on|remember( that)?|for this project|make sure( to)?|you should|i want you to|by default)\b/g, " ").replace(/[^a-z0-9"' ]+/g, " ").replace(/\s+/g, " ").trim(); }
@@ -13721,7 +13769,7 @@ async function autoAreaPage(inp){
     const issues = [];
     if (res.pts.length < 3) issues.push("not closed"); if (selfCross(res.pts)) issues.push("crosses itself");
     if (existing.concat(cand.map(x => ({pts: x.pts}))).some(i => overlapSft(i.pts, res.pts, k) > 1)) issues.push("overlaps an area already measured");
-    if (r.sft && Math.abs(net - r.sft) / r.sft > 0.05) issues.push("differs from its written size " + r.size + " (" + fq(r.sft) + " Sft) by " + (100 * (net - r.sft) / r.sft).toFixed(1) + " %");
+    if (r.sft && Math.abs(net - r.sft) / r.sft > 0.05) issues.push("differs from its written size " + r.size + " (" + uArea(r.sft) + ") by " + (100 * (net - r.sft) / r.sft).toFixed(1) + " %");
     const flag = [res.leak ? "leaks — " + res.leak : "", res.short || "", res.warn || ""].concat(issues).filter(Boolean).join("; ");
     cand.push({name: nm, pts: res.pts, holes: res.holes || [], flag, gap: inp.gap_ft || autoOpt().gap, note: res.note || "", ver: res.ver});
     out.push({name: nm, status: flag ? "flagged" : "ok", net_sft: +net.toFixed(2), written_sft: r.sft || null, voids_deducted: (res.holes || []).map(h => h.name), flag: flag || null});
@@ -13888,7 +13936,7 @@ function unmToggle(on){   // the "What's not measured yet" shading on / off -> t
   if (!S.unmOn) { draw(); return {off: true}; }
   const r = unmeasured(); if (r.err) { S.unmOn = false; document.querySelectorAll('[data-rv="unmeasured"]').forEach(b => b.classList.remove("on")); toast(r.err, 6000); draw(); return r; }
   S.unm = r; draw();
-  toast(r.pieces.length ? "Not measured yet: " + r.pieces.length + " space" + (r.pieces.length === 1 ? "" : "s") + ", " + fq(r.sft) + " Sft (shaded red) — click one to Auto area it" + (r.other ? " · " + r.other + " more in drawings on the sheet with nothing measured (left out)" : "")
+  toast(r.pieces.length ? "Not measured yet: " + r.pieces.length + " space" + (r.pieces.length === 1 ? "" : "s") + ", " + uArea(r.sft) + " (shaded red) — click one to Auto area it" + (r.other ? " · " + r.other + " more in drawings on the sheet with nothing measured (left out)" : "")
     : "Everything inside the walls on this page is measured" + (r.other ? " (" + r.other + " spaces in drawings with nothing measured left out)" : ""), 8000);
   return r;
 }
@@ -13946,9 +13994,9 @@ async function autoAreaWindow0(win, o){   // the barrier raster's pockets are th
     if (existing.some(it => overlapSft(it.pts, res.pts, kk) > 1) || cand.some(x => overlapSft(x.pts, res.pts, kk) > 1)) { sk.overlap++; tried.push(seed); return true; }   // ran into a neighbour already measured (a leak through an opening): not counted twice
     const a = (polyArea(res.pts) - (res.holes || []).reduce((s2, h) => s2 + polyArea(h.pts), 0)) / kk / kk;
     if (over && a < 12) { sk.small++; tried.push(seed); return true; }   // (a pocket is smaller than its room by the lines' width: judged on the outline)
-    const big = r.sft > 20 && a > 1.6 * r.sft ? "much bigger than its enclosed space (" + fq(r.sft) + " Sft) — leaked through an opening?" : "";   // (no room names on a DWG: the leak judge cannot run, the pocket size can)
+    const big = r.sft > 20 && a > 1.6 * r.sft ? "much bigger than its enclosed space (" + uArea(r.sft) + ") — leaked through an opening?" : "";   // (no room names on a DWG: the leak judge cannot run, the pocket size can)
     cand.push({name: nm(roomKind({file: S.fileId, page: S.pageNo, pts: res.pts})), pts: res.pts, holes: res.holes || [], flag: [open ? "open-ended — check (closed at the scan window's edge)" : "", res.leak ? "leaks — " + res.leak : "", big, res.short || "", res.warn || ""].filter(Boolean).join("; "),
-      gap: over ? over.gap : o.gap, note: res.note || (over ? "narrower than the door gap: openings closed up to " + f3(over.gap) + " ft" : ""), sft: a, pass2: !!over, open: !!open});
+      gap: over ? over.gap : o.gap, note: res.note || (over ? "narrower than the door gap: openings closed up to " + uLenT(over.gap) : ""), sft: a, pass2: !!over, open: !!open});
     return true; };
   for (let n = 0; n < todo.length; n++) if (!await trace(todo[n], "Auto area: " + (n + 1) + " of " + todo.length + " rooms…", skipped)) return LEFT;
   // pass 2, as the reference pipeline's "retrace uncovered gaps with gap 2": the free space no outline covers yet — a passage, a store or a WC narrower than the door gap, a corridor
@@ -14099,11 +14147,11 @@ async function freeImport(){
     if (!pts) { aiLog("err", esc(r.name || "room") + ": no usable seed or corners"); continue; }
     const c = aiAreaCond(), id = uid("I"), a2 = ar(pts);
     mutate(() => { P.proj.items.push({id, cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(r.name || "").slice(0, 60)}); });
-    aiLog("tool", `${esc(r.name || "")}: <b>${fq(a2)} Sft</b> <span class="small">${esc(how)}${want ? " · written " + fq(want) + " Sft" + (Math.abs(a2 - want) / want > 0.05 ? " — check" : " ✓") : ""}</span>`);
+    aiLog("tool", `${esc(r.name || "")}: <b>${uArea(a2)}</b> <span class="small">${esc(how)}${want ? " · written " + uArea(want) + (Math.abs(a2 - want) / want > 0.05 ? " — check" : " ✓") : ""}</span>`);
   }
   for (const l of (J.lengths || [])) { const pts = (l.points || []).filter(inImg).map(q => aiToBase(V, q[0], q[1])); if (pts.length < 2) continue;
     const c = condByName(l.condition, "linear"); mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, label: String(l.name || "").slice(0, 60)}); });
-    aiLog("tool", `${esc(c.name)} ${esc(l.name || "")}: <b>${f3(polyLen(pts) / k)} ft</b>`); }
+    aiLog("tool", `${esc(c.name)} ${esc(l.name || "")}: <b>${uLenT(polyLen(pts) / k)}</b>`); }
   for (const g of (J.counts || [])) { const pts = (g.points || []).filter(inImg).map(q => aiToBase(V, q[0], q[1])); if (!pts.length) continue;
     const c = condByName(g.condition, "count"); let it;
     mutate(() => { const A = aiCountItem(c, S.fileId, S.pageNo); it = A.it; pts.forEach(p => { if (!A.has(p)) it.pts.push(p); }); A.done(); });
@@ -14281,7 +14329,7 @@ async function agentCount(filter, scope, group){   // group: "mark" (one conditi
   const base = k2 => k2.replace(/[A-Z]?'*$/, ""), named = fl.map(x => tagParse(x)).filter(Boolean).map(g => base(g.k));
   const sib = [...all].filter(k2 => !pick.includes(k2) && named.includes(base(k2))).sort((a, b) => a.localeCompare(b, undefined, {numeric: true})), nOf = k2 => res.reduce((a, r) => a + (r.T.plan[k2] || []).length, 0);
   aiLog("tool", pick.map(t2 => { const L = lines[t2] || {n: 0, added: 0, pages: []}, sc = sched[t2];
-    return `${esc(t2)} <span class="small">${esc(tagKind(t2).replace(/s$/, ""))}</span>: <b>${L.n} Nos</b>${L.added < L.n ? ` <span class="small">(${L.n - L.added} already marked)</span>` : ""}${scope !== "page" && L.pages.length > 1 ? ` <span class="small">— ${esc(L.pages.join(", "))}</span>` : ""}${sc ? ` <span class="small">· schedule ${f3(sc.w)} × ${f3(sc.h)} ft${sc.qty ? ", qty " + sc.qty + (sc.qty !== L.n ? " <b style='color:#b3261e'>≠ " + L.n + " counted</b>" : " ✓") : ""}</span>` : ""}`; }).join("<br>")
+    return `${esc(t2)} <span class="small">${esc(tagKind(t2).replace(/s$/, ""))}</span>: <b>${L.n} Nos</b>${L.added < L.n ? ` <span class="small">(${L.n - L.added} already marked)</span>` : ""}${scope !== "page" && L.pages.length > 1 ? ` <span class="small">— ${esc(L.pages.join(", "))}</span>` : ""}${sc ? ` <span class="small">· schedule ${uLen(sc.w)} × ${uLenT(sc.h)}${sc.qty ? ", qty " + sc.qty + (sc.qty !== L.n ? " <b style='color:#b3261e'>≠ " + L.n + " counted</b>" : " ✓") : ""}</span>` : ""}`; }).join("<br>")
     + (sib.length ? `<br><span class="small">Not in this count: ${sib.map(k2 => `<b>${esc(k2)}</b> ${nOf(k2)} Nos`).join(" · ")} — other marks, each with its own size in the schedule. Type <i>count ${esc(sib[0])}</i>, or <i>count ${esc(pick.concat(sib).join(", "))}</i> for all of them.</span>` : "")
     + `<br><span class="small">One count condition per tag — markers sit on the tags. ${res.reduce((a, r) => a + r.T.inSched, 0) ? res.reduce((a, r) => a + r.T.inSched, 0) + " tags in schedule tables were left out. " : ""}A tag written once for several doors needs its Nos edited.</span>`);
   return Object.assign({counts: Object.fromEntries(pick.map(t2 => [t2, (lines[t2] || {n: 0}).n]))}, sib.length ? {others: Object.fromEntries(sib.map(k2 => [k2, nOf(k2)]))} : {});
@@ -14304,7 +14352,7 @@ async function doorWinDialog(){
   if (!keys.length && !(sw && sw.length)) { aiLog("err", "No door / window tags found" + (o.scope === "page" ? " on this page" : "") + (o.sw ? (sw ? " and no door swings" : " — door swings need the page scale set (K) and a vector PDF") : "") + ". Scanned drawings have no text: use 🔍 Find similar on one tag instead."); return; }
   const newSch = keys.filter(k2 => sched[k2] && !(P.proj.openings || []).some(x => x.mark.toUpperCase() === k2));
   const rowsH = keys.map((k2, n) => { const sc = sched[k2], diff = sc && sc.qty && sc.qty !== tot[k2];
-    return `<tr><td><input type="checkbox" data-dw="${n}" checked></td><td><b>${esc(k2)}</b></td><td>${esc(tagKind(k2).replace(/s$/, ""))}</td><td class="n">${tot[k2]}</td><td>${sc ? f3(sc.w) + " × " + f3(sc.h) + (sc.how !== "ft-in" ? ` <span class="small">(${esc(sc.how)})</span>` : "") : "—"}</td><td class="n">${sc && sc.qty ? sc.qty + (diff ? ' <b style="color:var(--red)">≠</b>' : " ✓") : "—"}</td><td class="small">${esc(pg[k2].join(" · "))}</td></tr>`; }).join("");
+    return `<tr><td><input type="checkbox" data-dw="${n}" checked></td><td><b>${esc(k2)}</b></td><td>${esc(tagKind(k2).replace(/s$/, ""))}</td><td class="n">${tot[k2]}</td><td>${sc ? uLen(sc.w) + " × " + uLen(sc.h) + (sc.how !== "ft-in" ? ` <span class="small">(${esc(sc.how)})</span>` : "") : "—"}</td><td class="n">${sc && sc.qty ? sc.qty + (diff ? ' <b style="color:var(--red)">≠</b>' : " ✓") : "—"}</td><td class="small">${esc(pg[k2].join(" · "))}</td></tr>`; }).join("");
   const pr = ask("Doors / windows found", `${keys.length ? `<table class="sh" style="font-size:11.5px"><thead><tr><th><input type="checkbox" id="dwAll" checked></th><th>Mark</th><th>Type</th><th class="n">Count</th><th>Schedule size (ft)</th><th class="n">Sch. qty</th><th>Pages</th></tr></thead><tbody>${rowsH}</tbody></table>` : ""}
     ${sw ? `<p style="margin-top:8px"><label class="pk"><input type="checkbox" id="dwSwOk" checked> Door swing symbols on this page: <b>${sw.length}</b> door${sw.length === 1 ? "" : "s"} (${sw.filter(x => x.leaves === 2).length} double) → condition “Doors (swings)”</label></p>` : ""}
     ${newSch.length ? `<p style="margin-top:6px"><label class="pk"><input type="checkbox" id="dwSch" checked> Add the ${newSch.length} size${newSch.length > 1 ? "s" : ""} read from the schedule (${newSch.map(esc).join(", ")}) to the opening schedule</label></p>` : ""}
@@ -14463,7 +14511,7 @@ async function qsChecks(key){
       if ((it.ai || it.det) && g && g.segs && g.segs.length && !it.shape) { const sup = lineSupport(it.pts, g, s.k);
         if (sup < 0.75) F("warn", "boundary", `${pn} — <b>${nm}</b>: incomplete boundary — only ${Math.round(sup * 100)} % of its outline lies on the drawing's lines (an open side or a gap closed across free floor?)`, [it.id]); }
       if (it.det && /leak|only part|smaller than|narrower|dashed/i.test(it.det.flag || "")) F("warn", "boundary", `${pn} — <b>${nm}</b>: ${esc(it.det.flag)}`, [it.id]);
-      if (it.det && it.det.a0 > 0) { const a = polyArea(it.pts) / s.k / s.k, e = (a - it.det.a0) / it.det.a0; if (Math.abs(e) > 0.005) F("info", "edited", `${pn} — <b>${nm}</b>: edited since it was detected (${fq(it.det.a0)} → ${fq(a)} Sft) — its quantity is the edited outline's`, [it.id]); }
+      if (it.det && it.det.a0 > 0) { const a = polyArea(it.pts) / s.k / s.k, e = (a - it.det.a0) / it.det.a0; if (Math.abs(e) > 0.005) F("info", "edited", `${pn} — <b>${nm}</b>: edited since it was detected (${fq(it.det.a0)} → ${uArea(a)}) — its quantity is the edited outline's`, [it.id]); }
     }
     // the sheet against the drawing: a quantity in Sft / ft is its outline's area / length × Nos × slope (the sheet rounds each
     // dimension to 3 dp, so it may differ by that much)
@@ -14471,7 +14519,7 @@ async function qsChecks(key){
       const rows = rowsOf(it, s.k), q = rows.reduce((a, r) => a + (r.below ? 0 : r.qty), 0), nos = +it.nos || 1, Fs = rows[0] && rows[0].F || 1, poly = itemPoly(it), sg = it.kind === "shape" ? 1 : -1;
       const geo = sg * nos * Fs * (c.type === "area" ? polyArea(poly) / s.k / s.k : (it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / s.k) + (c.type === "linear" ? rows.filter(r => r.rise).reduce((a, r) => a + r.qty, 0) : 0);
       const tol = 0.002 * nos * Fs * Math.max(1, it.pts.length) + 0.01;
-      if (!rows.some(r => r.below) && Math.abs(q - geo) > tol) F("err", "sheet", `${pn} — <b>${nm}</b>: the sheet says ${fq(q)} ${c.unit}, its outline on the drawing measures ${fq(geo)} ${c.unit} — the quantity does not match the geometry`, [it.id]);
+      if (!rows.some(r => r.below) && Math.abs(q - geo) > tol) F("err", "sheet", `${pn} — <b>${nm}</b>: the sheet says ${fq(q, c.unit)} ${uL(c.unit)}, its outline on the drawing measures ${fq(geo)} ${c.unit} — the quantity does not match the geometry`, [it.id]);
     }
   }
   if (M) {   // walls in two conditions of one thickness lying on one another: the same wall in two quantities
@@ -14479,7 +14527,7 @@ async function qsChecks(key){
     for (let a = 0; a < lin.length; a++) for (let b = a + 1; b < lin.length; b++) {
       const ca = cond(lin[a].cond), cb = cond(lin[b].cond); if (ca.id === cb.id || Math.abs(+ca.t - +cb.t) > 0.01) continue;
       const k = scaleAt(f, p, lin[a].pts[0]); if (!k) continue; const o = M.runOverlaps([lin[a].pts, lin[b].pts], 0.25 * k, k);
-      if (o.length) F("err", "duplicate", `${pn}: <b>${esc(lin[a].label || "a run")}</b> (${esc(ca.name)}) and <b>${esc(lin[b].label || "a run")}</b> (${esc(cb.name)}) lie on one another for about ${f3(o[0].shared / k)} ft — the same ${f3(+ca.t * 12)}" wall in two conditions?`, [lin[a].id, lin[b].id]);
+      if (o.length) F("err", "duplicate", `${pn}: <b>${esc(lin[a].label || "a run")}</b> (${esc(ca.name)}) and <b>${esc(lin[b].label || "a run")}</b> (${esc(cb.name)}) lie on one another for about ${uLenT(o[0].shared / k)} — the same ${f3(+ca.t * 12)}" wall in two conditions?`, [lin[a].id, lin[b].id]);
     }
   }
   return out;
@@ -14524,7 +14572,7 @@ const QS_COMMANDS = {
       if (!rooms.length) return {ok: false, error: (ph.length ? "no measured room on this page matches “" + (a.names || []).join(", ") + "”" : "no rooms are measured on this page") + " — measure them first (e.g. “measure every washroom separately”), then ask again"};
       const rows = rooms.map(it => { const k = itemScale(it), L = it.pts.map((q, i) => dist(q, it.pts[(i + 1) % it.pts.length]) / k); return {name: it.label || it.id, id: it.id, walls: L.map(v => +v.toFixed(3)), perimeter: +L.reduce((s, v) => s + v, 0).toFixed(3)}; });
       return {ok: true, changed: [], measured: rows, select: rooms.map(i => i.id),
-        message: `each wall's <b>internal face</b>, room by room, from the rooms' outlines (a wall shared by two rooms is listed in both — its two faces; for the wall itself once, on its centre line, use the walls agent):<br>` + rows.map(r => `<b>${esc(r.name)}</b>: ${r.walls.map(fq).join(" + ")} = <b>${fq(r.perimeter)} ft</b>`).join("<br>")};
+        message: `each wall's <b>internal face</b>, room by room, from the rooms' outlines (a wall shared by two rooms is listed in both — its two faces; for the wall itself once, on its centre line, use the walls agent):<br>` + rows.map(r => `<b>${esc(r.name)}</b>: ${r.walls.map(fq).join(" + ")} = <b>${uQL(r.perimeter)}</b>`).join("<br>")};
     }},
   internal_faces: {title: "Internal wall faces", target: "room boundaries", mutates: true, mustChange: true, inputs: {ids: {type: "array"}, names: {type: "array"}, condition: {type: "string"}},
     run: async a => {
@@ -14536,7 +14584,7 @@ const QS_COMMANDS = {
       mutate(() => rooms.forEach(it => { const nb = {id: uid("I"), cond: c.id, file: it.file, page: it.page, kind: "shape", pts: it.pts.map(q => q.slice()).concat([it.pts[0].slice()]), nos: 1, label: (it.label || "Room") + " — internal face", ai: true, det: {how: "from room outline", src: "the room's outline " + it.id, at: new Date().toISOString()}};
         LOC_KEYS.forEach(lk => { if (it[lk]) nb[lk] = it[lk]; }); P.proj.items.push(nb); ids.push(nb.id); }), "Internal faces of " + rooms.length + " room" + (rooms.length > 1 ? "s" : ""));
       const tot = ids.reduce((s, id) => s + qtyOf(P.proj.items.find(i => i.id === id)), 0);
-      return {ok: true, changed: ids, review: ids, message: `${ids.length} internal-face run${ids.length > 1 ? "s" : ""} into <b>${esc(c.name)}</b>, ${fq(tot)} ft in all — on each room's own outline (both faces of a shared wall are each in their room). Doors and windows are not deducted: add them with the Opening tool (O)${c.unit === "ft" ? "; give the condition its height H (never assumed) for Sft" : ""}`};
+      return {ok: true, changed: ids, review: ids, message: `${ids.length} internal-face run${ids.length > 1 ? "s" : ""} into <b>${esc(c.name)}</b>, ${uQL(tot)} in all — on each room's own outline (both faces of a shared wall are each in their room). Doors and windows are not deducted: add them with the Opening tool (O)${c.unit === "ft" ? "; give the condition its height H (never assumed) for Sft" : ""}`};
     }},
   count_openings: {title: "Count doors and windows", target: "door / window tags", mutates: true, inputs: {separate: {type: "boolean"}, scope: {type: "string", enum: QS_SCOPES}, what: {type: "string"}},
     run: async a => {
@@ -14573,7 +14621,7 @@ const QS_COMMANDS = {
       if (conf.length) mutate(() => conf.forEach(o => { if (P.proj.items.some(i => i.kind === "ded" && i.cond === c.id && i.from === o.id)) return; const id = uid("I"); P.proj.items.push({id, cond: c.id, file: o.file, page: o.page, kind: "ded", pts: itemPoly(o).map(q => q.slice()), nos: 1, ai: true, from: o.id, label: (o.label || "opening") + " (confirmed opening in the slab)"}); ids.push(id); }), "Slab openings");
       const gross = outl.reduce((s, o) => s + polyArea(itemPoly(o)) / k / k, 0), M = MEAS ? MEAS.slabArea({area: gross, thickness: +c.t || 0, openings: ops.map(o => ({name: o.label, area: polyArea(itemPoly(o)) / k / k, confirmed: o.qa === "checked"}))}) : null;
       return {ok: true, changed: ids, review: ids.concat(unconf.map(i => i.id)), measured: M ? [{gross: +gross.toFixed(3), net: +M.value.toFixed(3), unit: "Sft", volume: M.volume != null ? +M.volume.toFixed(3) : null}] : [],
-        message: `outline: ${esc(how)}. Gross <b>${fq(gross)} Sft</b>${conf.length ? `, less ${conf.length} confirmed opening${conf.length > 1 ? "s" : ""} (${fq(M.deductions)} Sft)` : ""} = <b>${fq(M ? M.value : gross)} Sft</b>${M && M.volume != null ? ` × ${f3(+c.t)} ft = <b>${fq(M.volume)} cft</b>` : " — <b>no thickness given</b>: the volume waits for T (never assumed)"}.`
+        message: `outline: ${esc(how)}. Gross <b>${uArea(gross)}</b>${conf.length ? `, less ${conf.length} confirmed opening${conf.length > 1 ? "s" : ""} (${uArea(M.deductions)})` : ""} = <b>${uArea(M ? M.value : gross)}</b>${M && M.volume != null ? ` × ${uLenT(+c.t)} = <b>${uVol(M.volume)}</b>` : " — <b>no thickness given</b>: the volume waits for T (never assumed)"}.`
           + (unconf.length ? ` <b>${unconf.length} opening${unconf.length > 1 ? "s" : ""} not deducted</b> until confirmed (✓ Check it): ${unconf.map(i => esc(i.label || i.id)).join(", ")}.` : "")
           + (named.length ? ` On the drawing but not measured: ${named.map(r => esc(r.name)).join(", ")} — measure ${named.length > 1 ? "them" : "it"}, check, and run this again to deduct.` : "")};
     }},
@@ -14594,7 +14642,7 @@ const QS_COMMANDS = {
         const j = key.lastIndexOf(":"), f = key.slice(0, j), p = +key.slice(j + 1), lin = P.proj.items.filter(i => i.file === f && i.page === p && i.kind === "shape" && !i.shape && (cond(i.cond) || {}).type === "linear" && i.pts.length >= 2);
         for (let x = 0; x < lin.length; x++) for (let y = x + 1; y < lin.length; y++) { const ca = cond(lin[x].cond), cb = cond(lin[y].cond); if (ca.id !== cb.id && Math.abs((+ca.t || 0) - (+cb.t || 0)) > 0.01) continue;
           const k = scaleAt(f, p, lin[x].pts[0]); if (!k || !MEAS) continue; const o = MEAS.runOverlaps([lin[x].pts, lin[y].pts], 0.25 * k, 0.5 * k);
-          if (o.length) L.push({key, ids: [lin[x].id, lin[y].id], ft: o[0].shared / k, msg: `${esc(keyName(key))}: <b>${esc(lin[x].label || "a run")}</b> (${esc(ca.name)}) and <b>${esc(lin[y].label || "a run")}</b> (${esc(cb.name)}) share about <b>${f3(o[0].shared / k)} ft</b>`}); }
+          if (o.length) L.push({key, ids: [lin[x].id, lin[y].id], ft: o[0].shared / k, msg: `${esc(keyName(key))}: <b>${esc(lin[x].label || "a run")}</b> (${esc(ca.name)}) and <b>${esc(lin[y].label || "a run")}</b> (${esc(cb.name)}) share about <b>${uLenT(o[0].shared / k)}</b>`}); }
       }
       return {ok: true, changed: [], findings: L, select: L.filter(x => x.key === S.key).flatMap(x => x.ids),
         message: L.length ? `${L.length} pair${L.length > 1 ? "s" : ""} of wall runs lying on one another (selected on the drawing — nothing deleted; keep one of each, or explain why both are needed, e.g. a room-by-room face takeoff):<br>` + L.map(x => "• " + x.msg).join("<br>") : "no wall run lies on another (same condition, or the same thickness in two conditions)"};
@@ -14610,7 +14658,7 @@ const QS_COMMANDS = {
       areas.filter(i => i.ai).forEach(a => areas.filter(b => !b.ai && b.file === a.file && b.page === a.page).forEach(b => { const k = itemScale(a); if (!k) return; const o = overlapSft(itemPoly(a), itemPoly(b), k), qa = qtyOf(a), qb = qtyOf(b);
         if (o > 0.5 * Math.min(polyArea(itemPoly(a)), polyArea(itemPoly(b))) / k / k) pairs.push({ai: a.label || a.id, manual: b.label || b.id, ai_qty: +qa.toFixed(3), manual_qty: +qb.toFixed(3), diff: +(qa - qb).toFixed(3), pct: qb ? +(100 * (qa - qb) / qb).toFixed(2) : null, ids: [a.id, b.id]}); }));
       return {ok: true, changed: [], measured: rows, pairs, select: pairs.flatMap(p => p.ids),
-        message: (rows.length ? rows.map(r => `<b>${esc(r.condition)}</b>: agent ${fq(r.ai, r.unit)} ${esc(r.unit)} (${r.ai_n}, ${r.ai_checked} checked) · by hand ${fq(r.manual, r.unit)} ${esc(r.unit)} (${r.manual_n})`).join("<br>") : "nothing is measured on this page")
+        message: (rows.length ? rows.map(r => `<b>${esc(r.condition)}</b>: agent ${fq(r.ai, r.unit)} ${esc(uL(r.unit))} (${r.ai_n}, ${r.ai_checked} checked) · by hand ${fq(r.manual, r.unit)} ${esc(uL(r.unit))} (${r.manual_n})`).join("<br>") : "nothing is measured on this page")
           + (pairs.length ? "<br>The same room both ways:<br>" + pairs.map(p => `• ${esc(p.ai)} (agent) ${fq(p.ai_qty)} vs ${esc(p.manual)} (by hand) ${fq(p.manual_qty)} — ${p.diff >= 0 ? "+" : ""}${fq(p.diff)}${p.pct != null ? " (" + p.pct + " %)" : ""}`).join("<br>") : "")};
     }},
   show_quantity_items: {title: "What is in this quantity", target: "measurements", inputs: {id: {type: "string"}, condition: {type: "string"}},
@@ -14621,7 +14669,7 @@ const QS_COMMANDS = {
       const lines = its.map(it => { const k = qScale(it), rows = k ? rowsOf(it, k) : []; return `<b>${esc(it.label || it.id)}</b>${it.ai ? " (agent)" : ""}: ` + rows.map(r => (r.sign < 0 ? "− " : "") + [r.nos, r.A, r.L, r.W, r.H, r.F].filter(v => v != null).map(v => f3(v)).join(" × ") + (r.runs && r.runs.length > 1 ? " [legs " + r.runs.map(f3).join(" + ") + "]" : "") + " = " + fq(r.qty, c.unit) + (r.below ? " (not deducted — at or under the threshold)" : "")).join("; "); });
       const tot = condTotals(c), pgTot = its.reduce((s, i) => s + (qtyOf(i) || 0), 0);
       return {ok: true, changed: [], select: its.map(i => i.id), measured: its.map(i => ({id: i.id, name: i.label, qty: +(qtyOf(i) || 0).toFixed(3)})),
-        message: `<b>${esc(c.name)}</b> on this page = <b>${fq(pgTot, c.unit)} ${esc(c.unit)}</b> from ${its.length} measurement${its.length > 1 ? "s" : ""} (selected on the drawing)${Math.abs(tot.net - pgTot) > 1e-6 ? ` — ${fq(tot.net, c.unit)} ${esc(c.unit)} in the whole project` : ""}:<br>` + lines.join("<br>")};
+        message: `<b>${esc(c.name)}</b> on this page = <b>${fq(pgTot, c.unit)} ${esc(uL(c.unit))}</b> from ${its.length} measurement${its.length > 1 ? "s" : ""} (selected on the drawing)${Math.abs(tot.net - pgTot) > 1e-6 ? ` — ${fq(tot.net, c.unit)} ${esc(uL(c.unit))} in the whole project` : ""}:<br>` + lines.join("<br>")};
     }},
   recalc_room: {title: "Recalculate a room", target: "room outline", inputs: {id: {type: "string"}},
     run: async a => {   // a room's quantity is worked out from its points every time: after an edit it is the edited outline's
@@ -14631,9 +14679,9 @@ const QS_COMMANDS = {
       const a2 = polyArea(itemPoly(it)) / k / k, per = polyLen(itemPoly(it), true) / k, q = qtyOf(it), v = MEAS ? MEAS.validatePolygon(it.pts, 0.01 * k) : {ok: true, issues: []}, F = await drawingFacts(it.file, it.page);
       const own = F.rooms.filter(r => pointInPoly(nameCentre(r), it.pts)), w = own.length === 1 && own[0].sft ? own[0] : null, st = reviewStatus(it);
       return {ok: true, changed: [], select: [it.id], measured: [{name: it.label, area: +a2.toFixed(3), perimeter: +per.toFixed(3), sheet: +q.toFixed(3), unit: (cond(it.cond) || {}).unit}],
-        message: `<b>${esc(it.label || it.id)}</b> now: <b>${fq(a2)} Sft</b>, perimeter ${fq(per)} ft — the sheet has ${fq(q, (cond(it.cond) || {}).unit)} (worked out from the current points; nothing to re-run)`
-          + (it.det && it.det.a0 ? ` · as detected ${fq(it.det.a0)} Sft (${a2 >= it.det.a0 ? "+" : ""}${fq(a2 - it.det.a0)})` : "")
-          + (w ? ` · written ${esc(w.size)} = ${fq(w.sft)} Sft (${(100 * (a2 - w.sft) / w.sft).toFixed(1)} %)` : "")
+        message: `<b>${esc(it.label || it.id)}</b> now: <b>${uArea(a2)}</b>, perimeter ${uQL(per)} — the sheet has ${fq(q, (cond(it.cond) || {}).unit)} (worked out from the current points; nothing to re-run)`
+          + (it.det && it.det.a0 ? ` · as detected ${uArea(it.det.a0)} (${a2 >= it.det.a0 ? "+" : ""}${fq(a2 - it.det.a0)})` : "")
+          + (w ? ` · written ${esc(w.size)} = ${uArea(w.sft)} (${(100 * (a2 - w.sft) / w.sft).toFixed(1)} %)` : "")
           + (v.ok ? " · outline valid" : ` · <b>outline not valid</b>: ${esc(v.issues.map(x => x.why).join("; "))}`) + ` · status: <b>${esc(st.t)}</b> (${esc(st.why)})`};
     }},
   undo_ai: {title: "Undo the last AI measurement", target: "agent run", inputs: {}, run: async () => undoAgentRun()},
@@ -14852,9 +14900,9 @@ async function agentDetails(){
   const d = aiLog("bot", `<b>Drawing details — ${esc(pageName({file: S.fileId, page: S.pageNo}))}</b>
     ${sec("Scale", (F.scales.length ? "Written: " + F.scales.map(esc).join(", ") : "No scale text found") + " · set: " + (k ? "yes" : "<span style='color:#b3261e'>not set — press K</span>"))}
     ${sec("Unit / type", F.types.map(esc).join("<br>"))}
-    ${sec("Rooms (" + F.rooms.length + ")", F.rooms.map(r => `${esc(r.name)}${r.size ? ` — ${esc(r.size)} = <b>${fq(r.sft)} Sft</b>` : ""}`).join("<br>") + (tot ? `<br><span class="small">Written sizes total ${fq(tot)} Sft (inside dimensions, not the covered area)</span>` : ""))}
-    ${Object.entries(groups).map(([g, l]) => sec(g + " (" + l.reduce((a, x) => a + x[1], 0) + " Nos)", l.sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})).map(x => `${esc(x[0])} × ${x[1]}${F.sched[x[0]] ? ` <span class="small">(${f3(F.sched[x[0]].w)} × ${f3(F.sched[x[0]].h)} ft${F.sched[x[0]].qty ? ", sch. qty " + F.sched[x[0]].qty : ""})</span>` : ""}`).join(" · "))).join("")}
-    ${Object.keys(F.sched).length ? sec("Door / window schedule (" + Object.keys(F.sched).length + " marks)", Object.entries(F.sched).sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})).map(([k2, v2]) => `${esc(k2)} ${f3(v2.w)} × ${f3(v2.h)} ft${v2.qty ? " · qty " + v2.qty : ""}`).join("<br>")) : ""}
+    ${sec("Rooms (" + F.rooms.length + ")", F.rooms.map(r => `${esc(r.name)}${r.size ? ` — ${esc(r.size)} = <b>${uArea(r.sft)}</b>` : ""}`).join("<br>") + (tot ? `<br><span class="small">Written sizes total ${uArea(tot)} (inside dimensions, not the covered area)</span>` : ""))}
+    ${Object.entries(groups).map(([g, l]) => sec(g + " (" + l.reduce((a, x) => a + x[1], 0) + " Nos)", l.sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})).map(x => `${esc(x[0])} × ${x[1]}${F.sched[x[0]] ? ` <span class="small">(${uLen(F.sched[x[0]].w)} × ${uLenT(F.sched[x[0]].h)}${F.sched[x[0]].qty ? ", sch. qty " + F.sched[x[0]].qty : ""})</span>` : ""}`).join(" · "))).join("")}
+    ${Object.keys(F.sched).length ? sec("Door / window schedule (" + Object.keys(F.sched).length + " marks)", Object.entries(F.sched).sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})).map(([k2, v2]) => `${esc(k2)} ${uLen(v2.w)} × ${uLenT(v2.h)}${v2.qty ? " · qty " + v2.qty : ""}`).join("<br>")) : ""}
     ${sec("Levels", F.levels.map(esc).join(" · "))}
     ${sec("Stairs / lifts", F.notes.map(esc).join("<br>"))}
     ${tasks.length ? `<div style="margin-top:8px"><b>Tasks</b> — give one to the agent:</div>` + tasks.map(([id, l2]) => `<div style="display:flex;gap:6px;align-items:center;margin-top:4px"><span style="flex:1">☐ ${esc(l2)}</span><button class="btn sm pri" data-task="${esc(id)}">Do it</button></div>`).join("") : ""}`);
@@ -14931,7 +14979,7 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
     if (!best) { res.push({name: r.name, error: "could not close the room"}); say("err", `${esc(r.name)}: auto area could not close the room — use the Fence tool on the open side, or draw it`); continue; }
     const cen = q => [q.reduce((a, v) => a + v[0], 0) / q.length, q.reduce((a, v) => a + v[1], 0) / q.length];
     const same = got.find(o => Math.abs(o.a - best.a) / best.a < 0.005 && dist(cen(o.pts), cen(best.pts)) < k);
-    if (same) { same2++; res.push({name: r.name, error: "leaked into " + same.name}); say("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${fq(best.a)} Sft) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
+    if (same) { same2++; res.push({name: r.name, error: "leaked into " + same.name}); say("err", `${esc(r.name)}: came out as the same outline as <b>${esc(same.name)}</b> (${uArea(best.a)}) — the line between them is dashed or open. Draw a <b>Fence</b> on it and run again, or turn on dashed boundaries in ⚙.`); continue; }
     const inside = F.rooms.filter(q => q !== r && pointInPoly(nameCentre(q), best.pts));
     const hit = inside.find(q => q.name !== r.name && got.some(o => sameRoom(o.room, q)));   // runs into a room already measured on its own: a leak, not open plan
     if (hit) { same2++; res.push({name: r.name, error: "leaked into " + hit.name}); say("err", `${esc(r.name)}: runs on into <b>${esc(hit.name)}</b> (already measured) — an opening is not closed. Draw a <b>Fence</b> across it and run again, or draw this room.`); continue; }
@@ -14946,7 +14994,7 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
       : {det: {how: "auto", src: (autoOpt().src === "vector" ? "vector lines" : "drawing image") + " (agent, from the room's name)", gap: +(over.gap || autoOpt().gap), flag: r.sft && best.err > 0.05 ? "differs from its written size " + r.size : "", a0: +best.a.toFixed(4), pts0: best.pts.map(q => q.slice()), at: new Date().toISOString()}})); });   // (as found: kept to show and restore, and to tell an edit from the detection)
     const bad = r.sft && best.err > 0.05; bad ? chk++ : ok++;   // best.err is against the written sizes of every room in the space
     res.push({name: nm, area_sft: +best.a.toFixed(2), written_sft: r.sft ? +wrt.toFixed(2) : null, check: !!bad, open_plan_with: others.map(q => q.name)});
-    say("tool", `${esc(nm)}: <b>${fq(best.a)} Sft</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? fq(wrt) + " Sft together" : esc(r.size) + " = " + fq(r.sft) + " Sft") + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + fq(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
+    say("tool", `${esc(nm)}: <b>${uArea(best.a)}</b> <span class="small">${others.length ? "one open space (no wall between) · " : ""}${r.sft ? "written " + (others.length ? uArea(wrt) + " together" : esc(r.size) + " = " + uArea(r.sft)) + (bad ? " — <b style='color:#b3261e'>check (" + (best.a > wrt ? "+" : "") + fq(best.a - wrt) + ")</b> — written sizes are often the main rectangle only; look at the outline" : " ✓") : "no size written"}${dup ? " · already had an area with this name" : ""}</span>`);
   }
   busy(""); refresh();
   if (stopAt >= 0) say("bot", `Stopped by you — ${rooms.length - stopAt} of ${rooms.length} room${rooms.length > 1 ? "s" : ""} not measured: ${rooms.slice(stopAt).map(r => esc(r.name)).slice(0, 12).join(", ")}${rooms.length - stopAt > 12 ? "…" : ""}.`);
@@ -14992,7 +15040,7 @@ async function agentUnit(no){
   const gaps = await fillGaps(u, U);
   r.rooms = r.rooms.concat(gaps);
   const tot = r.rooms.reduce((a, x) => a + (x.area_sft || 0), 0);
-  aiLog("bot", `Apartment ${esc(u.no)}: rooms measured <b>${fq(tot)} Sft</b>${u.sft ? ` · written on the drawing <b>${fq(u.sft)} Sft</b> (that figure usually includes the walls and is not a floor-finish area)` : ""}.`);
+  aiLog("bot", `Apartment ${esc(u.no)}: rooms measured <b>${uArea(tot)}</b>${u.sft ? ` · written on the drawing <b>${uArea(u.sft)}</b> (that figure usually includes the walls and is not a floor-finish area)` : ""}.`);
   return Object.assign(r, {unit: u.no, type: u.type, unit_written_sft: u.sft || null, rooms_total_sft: +tot.toFixed(2)});
 }
 /* the floor of an apartment that no named room covered — passages, wardrobes, shower stalls, the strip at a door: open
@@ -15020,7 +15068,7 @@ async function fillGaps(u, U){
     const nm = /^\s*SH\.?\s*$/i.test(t0) ? "SHOWER" : /^\s*W\.?C\.?\s*$/i.test(t0) ? "WC" : /BALCONY|WIDE/i.test(t0) ? "BALCONY" : /WARD/i.test(t0) ? "WARDROBE" : t0 || "PASSAGE / UNNAMED";
     mutate(() => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: res.pts, nos: 1, ai: true, unit: u.no, label: (nm + " (" + u.no + ")").slice(0, 60)}); });
     out.push({name: nm, area_sft: +a.toFixed(2), gap: true});
-    aiLog("tool", `${esc(nm)}: <b>${f2(a)} Sft</b> <span class="small">floor with no room name — check it belongs to apartment ${esc(u.no)}</span>`);
+    aiLog("tool", `${esc(nm)}: <b>${uArea2(a)}</b> <span class="small">floor with no room name — check it belongs to apartment ${esc(u.no)}</span>`);
   }
   busy("");
   if (!out.length) aiLog("bot", `No unmeasured floor left in apartment ${esc(u.no)}.`);
@@ -15052,7 +15100,7 @@ async function agentSwings(){
     const A = aiCountItem(c, S.fileId, S.pageNo); sw.forEach(d => { if (!A.has(d.p)) A.it.pts.push(d.p); }); A.done(); }, "Count door swings");
   refresh();
   const dbl = sw.filter(x => x.leaves === 2).length;
-  aiLog("tool", `Door swings: <b>${sw.length} doors</b> (${sw.length - dbl} single, ${dbl} double — ${sw.length + dbl} leaves)${extra.length ? ` · <b>${extra.length}</b> with no swing found, counted at their tag (${[...new Set(extra.map(x => x.tag))].map(esc).join(", ")})` : ""} · leaf widths ${[...new Set(sw.filter(x => x.w).map(x => f3(x.w)))].slice(0, 8).join(", ")} ft <span class="small">— check them: an arc of that size that is not a door is counted too</span>`);
+  aiLog("tool", `Door swings: <b>${sw.length} doors</b> (${sw.length - dbl} single, ${dbl} double — ${sw.length + dbl} leaves)${extra.length ? ` · <b>${extra.length}</b> with no swing found, counted at their tag (${[...new Set(extra.map(x => x.tag))].map(esc).join(", ")})` : ""} · leaf widths ${[...new Set(sw.filter(x => x.w).map(x => uLen(x.w)))].slice(0, 8).join(", ")} ${uL("ft")} <span class="small">— check them: an arc of that size that is not a door is counted too</span>`);
   return {doors: sw.length, double: dbl};
 }
 async function agentSchedule(){
@@ -15320,11 +15368,11 @@ function wallsAgent(o){
   if (!S.geo[S.key] || !S.geo[S.key].segs.length) return {error: "This page has no vector lines (scanned?) — walls cannot be found from face lines. Draw them, or use Claude to read them."};
   const T = +o.t; if (!(T > 0.15 && T < 3)) return {error: "Give the wall thickness in ft, e.g. 0.75 for 9\"."};
   const rect = o.page ? null : viewRect(), runs = findWalls(T, rect, o.bridge == null ? 6 : +o.bridge);
-  if (!runs || !runs.length) return {error: `No walls ${f3(T)} ft thick found ${o.page ? "on this page" : "in this view"}. Found thicknesses: ` + (wallThicknesses(rect).map(w => f3(w.t) + " ft (" + Math.round(w.len) + " ft)").join(", ") || "none")};
+  if (!runs || !runs.length) return {error: `No walls ${uLenT(T)} thick found ${o.page ? "on this page" : "in this view"}. Found thicknesses: ` + (wallThicknesses(rect).map(w => uLenT(w.t) + " (" + Math.round(uV(w.len, "ft")) + " " + uL("ft") + ")").join(", ") || "none")};
   let c = o.cond ? (cond(o.cond) || P.proj.conds.find(x => x.type === "linear" && x.name.toLowerCase() === String(o.cond).toLowerCase())) : null;
   const inch = Math.round(T * 12 * 2) / 2;
   if (!c) { const H = +o.h > 0 ? +o.h : 0;
-    c = {id: uid("C"), name: o.name || (T >= 0.6 ? "Brick masonry " + inch + "\" wall" : "Partition wall " + inch + "\" (thickness " + f3(T) + " ft)"), type: "linear", unit: H ? (T >= 0.6 ? "cft" : "Sft") : "ft", color: COLORS[P.proj.conds.length % COLORS.length], h: H || "", t: T, faces: 1, dedMin: 1.0}; }
+    c = {id: uid("C"), name: o.name || (T >= 0.6 ? "Brick masonry " + inch + "\" wall" : "Partition wall " + inch + "\" (thickness " + uLenT(T) + ")"), type: "linear", unit: H ? (T >= 0.6 ? "cft" : "Sft") : "ft", color: COLORS[P.proj.conds.length % COLORS.length], h: H || "", t: T, faces: 1, dedMin: 1.0}; }
   const polys = chainRuns(runs, 0.05 * k);
   let total = 0;
   mutate(() => {
@@ -15341,7 +15389,7 @@ async function agentWallsCmd(t){
   if (!T) return wallsDialog();
   const r = wallsAgent({t: T, page: /\b(whole|entire|all|page|sheet|floor)\b/.test(t)});
   if (r.error) return aiLog("err", esc(r.error));
-  aiLog("tool", `<b>${esc(r.condition)}</b>: ${r.runs} run${r.runs > 1 ? "s" : ""}, <b>${f3(r.total_length_ft)} ft</b> centre line ${r.scope === "view" ? "<b>in the part on screen only</b> — say <i>walls " + f3(T * 12).replace(/\.?0+$/, "") + "\" whole page</i> for the page's total" : "on the whole page"}`);
+  aiLog("tool", `<b>${esc(r.condition)}</b>: ${r.runs} run${r.runs > 1 ? "s" : ""}, <b>${uLenT(r.total_length_ft)}</b> centre line ${r.scope === "view" ? "<b>in the part on screen only</b> — say <i>walls " + f3(T * 12).replace(/\.?0+$/, "") + "\" whole page</i> for the page's total" : "on the whole page"}`);
   aiLog("bot", "Wall runs are marked (AI — check them). " + (r.needs_height ? "No wall height yet — edit the condition (✎) to give H and the unit cft, then deduct openings with the <b>Opening</b> tool (O)." : "Deduct door and window openings with the <b>Opening</b> tool (O) — they were bridged."));
 }
 async function wallsDialog(){
@@ -15349,21 +15397,21 @@ async function wallsDialog(){
   if (!curScale()) return aiLog("err", "Set the page scale first (K).");
   const found = wallThicknesses(viewRect()), lin = P.proj.conds.filter(c => c.type === "linear");
   const v = await ask("Walls agent", `<p>Finds walls from their two parallel face lines (vector PDFs exported from CAD), marks each run on its centre line and adds it to a length condition.</p>
-    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Wall thickness</label><select id="wlT">${found.map(w => `<option value="${w.t}">${f3(w.t)} ft (${Math.round(w.t * 12 * 2) / 2}") — about ${Math.round(w.len)} ft drawn in this view</option>`).join("")}<option value="">Other — type it</option></select>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Wall thickness</label><select id="wlT">${found.map(w => `<option value="${w.t}">${uLenT(w.t)} (${Math.round(w.t * 12 * 2) / 2}") — about ${Math.round(uV(w.len, "ft"))} ${uL("ft")} drawn in this view</option>`).join("")}<option value="">Other — type it</option></select>
       <input type="text" id="wlT2" placeholder='e.g. 9" or 0.75' style="margin-top:4px${found.length ? ";display:none" : ""}"></div>
       <div class="fg w2"><label>Into condition</label><select id="wlC"><option value="">+ New condition for this thickness</option>${lin.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select></div>
-      <div class="fg"><label>Wall height H (ft) — new condition</label><input type="text" id="wlH" placeholder="from the section; blank = length only"></div>
-      <div class="fg"><label>Bridge openings up to (ft)</label><input type="text" id="wlB" value="6.000"></div>
+      <div class="fg"><label>Wall height H (${uL("ft")}) — new condition</label><input type="text" id="wlH" placeholder="from the section; blank = length only"></div>
+      <div class="fg"><label>Bridge openings up to (${uL("ft")})</label><input type="text" id="wlB" value="${uLenIn(6)}"></div>
       <div class="fg w2"><label><input type="checkbox" id="wlP" style="width:auto"> Whole page (not only the part on screen) — title blocks and details may add false walls</label></div></div>
     <p class="small" style="margin-top:8px">${found.length ? "Thicknesses found in this view, most wall length first." : "No parallel wall faces found in this view — zoom to the plan, or the PDF has no vector lines."} Openings are bridged so they can be deducted as their own rows (Opening tool, O). Corners meet on the centre line; walls meeting a wall stop at its face, so nothing is counted twice. Running it again replaces its earlier runs.</p>`, "Find walls",
     () => { const tv = $("wlT").value || $("wlT2").value.trim(); let T = 0; const mm = /^(\d+(?:\.\d+)?)\s*("|in)$/.exec(tv); T = mm ? +mm[1] / 12 : parseFt(tv);
-      if (!(T > 0.15 && T < 3)) return "Choose or type the wall thickness"; const H = $("wlH").value.trim() ? parseFt($("wlH").value) : 0, B = parseFt($("wlB").value || "0");
+      if (!(T > 0.15 && T < 3)) return "Choose or type the wall thickness"; const H = $("wlH").value.trim() ? uParse($("wlH").value) : 0, B = uParse($("wlB").value || "0");
       if (isNaN(H) || isNaN(B)) return "Height and bridge are decimal feet"; return {t: T, cond: $("wlC").value || null, h: H, bridge: B, page: $("wlP").checked}; });
   if (!v) return;
   const r = await areaThen("walls", async () => { busy("Finding walls…"); await new Promise(r2 => setTimeout(r2, 20)); try { return wallsAgent(areaOf() ? Object.assign(v, {page: true}) : v); } finally { busy(""); } });   // with a box: the whole page, cut to it
   if (r.error === "cancelled") return;
   if (r.error) return aiLog("err", esc(r.error));
-  aiLog("tool", `<b>${esc(r.condition)}</b>: ${r.runs} run${r.runs > 1 ? "s" : ""}, <b>${f3(r.total_length_ft)} ft</b> centre line${r.unit !== "ft" ? " → see the sheet for " + esc(r.unit) : ""}`);
+  aiLog("tool", `<b>${esc(r.condition)}</b>: ${r.runs} run${r.runs > 1 ? "s" : ""}, <b>${uLenT(r.total_length_ft)}</b> centre line${r.unit !== "ft" ? " → see the sheet for " + esc(r.unit) : ""}`);
   aiLog("bot", "Check the runs on the drawing (they are marked AI). Deduct doors and windows with the <b>Opening</b> tool (O)." + (r.needs_height ? " Give the condition its height H (✎) to get cft." : ""));
 }
 document.addEventListener("change", e => { if (e.target.id === "wlT") $("wlT2").style.display = e.target.value ? "none" : ""; });
@@ -15521,7 +15569,7 @@ async function blockMasonryDialog(){
   busy("Finding block walls…"); await new Promise(r => setTimeout(r, 20));
   let r; try { r = blockMasonryAgent(v); } finally { busy(""); }
   if (r.error) return aiLog("err", esc(r.error));
-  aiLog("tool", `<b>Block masonry</b> — wall height ${f3(r.height_ft)} ft<br>` + r.rows.map(x => `${esc(x.type)}: ${f3(x.run_ft)} ft run · ${f3(x.gross_cft)} − ${f3(x.ded_cft)} = <b>${f3(x.net_cft)} cft</b> · <b>${x.blocks.toLocaleString()} blocks</b>`).join("<br>"));
+  aiLog("tool", `<b>Block masonry</b> — wall height ${uLenT(r.height_ft)}<br>` + r.rows.map(x => `${esc(x.type)}: ${uLenT(x.run_ft)} run · ${f3(uV(x.gross_cft, "cft"))} − ${f3(uV(x.ded_cft, "cft"))} = <b>${uVol(x.net_cft)}</b> · <b>${x.blocks.toLocaleString()} blocks</b>`).join("<br>"));
   aiLog("bot", "Runs and openings are marked AI. Check the external / internal split on the drawing (red-flag any run on the wrong block and move it with ✎), and the opening sizes on the sheet.");
 }
 /* ------------------------------------------------------------------ free agents II: ⚡ full takeoff · 🎨 finishes · ✅ check.
@@ -15571,12 +15619,12 @@ async function fullTakeoffDialog(scope){
       <label class="pk"><input type="checkbox" id="ftW" checked> 🧱 Walls — every standard thickness drawn (4.5", 9", 13.5" …), on the centre line</label>
       <label class="pk"><input type="checkbox" id="ftD" checked> 🚪 Doors / windows — every tag counted; sizes in a schedule table go to the opening schedule</label>
       <label class="pk"><input type="checkbox" id="ftF"${fc ? " checked" : ""}> 🎨 Finishes — wall finish and skirting of each room, doors and windows deducted as their own rows</label></div>
-    <div class="fg"><label>Room height H (ft) — finishes</label><input type="text" id="ftH" value="${fc && +fc.h ? f3(+fc.h) : ""}" placeholder="floor to ceiling, from the section"></div>
-    <div class="fg"><label>Door height (ft) — doors not in the schedule</label><input type="text" id="ftDH" value="${P.proj.finDH ? f3(P.proj.finDH) : ""}" placeholder="from the door schedule"></div></div>
+    <div class="fg"><label>Room height H (${uL("ft")}) — finishes</label><input type="text" id="ftH" value="${fc && +fc.h ? uLenIn(+fc.h) : ""}" placeholder="floor to ceiling, from the section"></div>
+    <div class="fg"><label>Door height (${uL("ft")}) — doors not in the schedule</label><input type="text" id="ftDH" value="${P.proj.finDH ? uLenIn(P.proj.finDH) : ""}" placeholder="from the door schedule"></div></div>
     <p class="small" style="margin-top:8px">A page with no scale, or a scale its written room sizes disagree with, is skipped and listed — nothing is measured at a doubtful scale. Rooms already measured are left as they are; walls and finishes found again replace the agent's own earlier runs. Everything added is marked <b>AI</b> until checked, and one <b>Ctrl+Z</b> takes the whole run back.</p>`, "Run",
     () => { const o = {scope: $("ftScope").value, rooms: $("ftR").checked, walls: $("ftW").checked, doors: $("ftD").checked, fin: $("ftF").checked};
       if (!o.rooms && !o.walls && !o.doors && !o.fin) return "Tick something to do";
-      const H = $("ftH").value.trim() ? parseFt($("ftH").value) : 0, DH = $("ftDH").value.trim() ? parseFt($("ftDH").value) : 0;
+      const H = $("ftH").value.trim() ? uParse($("ftH").value) : 0, DH = $("ftDH").value.trim() ? uParse($("ftDH").value) : 0;
       if (isNaN(H) || isNaN(DH)) return "Heights are in feet, e.g. 10.5 or 10'-6\"";
       if (o.fin && !(H > 0)) return "Give the room height H for the finishes (or untick Finishes)";
       return Object.assign(o, {H, DH}); });
@@ -15641,16 +15689,16 @@ function fullReport(o, rep, ms){
   const done = rep.filter(R => !R.skip), skip = rep.filter(R => R.skip), sum = (L, f) => L.reduce((a, x) => a + (+f(x) || 0), 0);
   const roomsL = R => R.rooms.err ? `<span style="color:var(--red)">${esc(R.rooms.err)}</span>` : !R.rooms.named ? "no room names in the page's text" + (o.filter ? " matching “" + esc(o.filter) + "”" : "")
     : R.rooms.had >= R.rooms.named ? `all ${R.rooms.named} rooms were already measured — left as they are`
-    : `<b>${R.rooms.ok + R.rooms.chk.length}</b> of ${R.rooms.named} rooms measured${R.rooms.had ? ` (${R.rooms.had} were already)` : ""}${R.rooms.sft ? ` · <b>${fq(R.rooms.sft)} Sft</b>` : ""}${R.rooms.chk.length ? ` · <b style="color:var(--amber)">check</b> ${R.rooms.chk.map(esc).join(", ")}` : ""}${R.rooms.bad.length ? `<br><span class="small" style="color:var(--red)">not closed: ${R.rooms.bad.map(esc).join("; ")} — a Fence across the opening, then run again</span>` : ""}`;
-  const wallsL = R => (R.walls.length ? R.walls.map(w => w.err ? `${inchOf(w.t)}: <span style="color:var(--red)">${esc(w.err)}</span>` : `${inchOf(w.t)} <b>${f3(w.ft)} ft</b> <span class="small">(${w.runs} run${w.runs > 1 ? "s" : ""})</span>`).join(" · ") : "no wall faces found (scanned page?)")
-    + (R.wallOther.length ? `<br><span class="small">Not taken: ${R.wallOther.map(w => inchOf(w.t) + " (" + Math.round(w.len) + " ft)").join(", ")} — window glass, counters and the like; 🧱 Walls takes one if it is a wall.</span>` : "");
+    : `<b>${R.rooms.ok + R.rooms.chk.length}</b> of ${R.rooms.named} rooms measured${R.rooms.had ? ` (${R.rooms.had} were already)` : ""}${R.rooms.sft ? ` · <b>${uArea(R.rooms.sft)}</b>` : ""}${R.rooms.chk.length ? ` · <b style="color:var(--amber)">check</b> ${R.rooms.chk.map(esc).join(", ")}` : ""}${R.rooms.bad.length ? `<br><span class="small" style="color:var(--red)">not closed: ${R.rooms.bad.map(esc).join("; ")} — a Fence across the opening, then run again</span>` : ""}`;
+  const wallsL = R => (R.walls.length ? R.walls.map(w => w.err ? `${inchOf(w.t)}: <span style="color:var(--red)">${esc(w.err)}</span>` : `${inchOf(w.t)} <b>${uLenT(w.ft)}</b> <span class="small">(${w.runs} run${w.runs > 1 ? "s" : ""})</span>`).join(" · ") : "no wall faces found (scanned page?)")
+    + (R.wallOther.length ? `<br><span class="small">Not taken: ${R.wallOther.map(w => inchOf(w.t) + " (" + Math.round(uV(w.len, "ft")) + " " + uL("ft") + ")").join(", ")} — window glass, counters and the like; 🧱 Walls takes one if it is a wall.</span>` : "");
   const tagsL = R => (Object.keys(R.tags).length ? Object.entries(R.tags).map(([m, n]) => esc(m) + " <b>×" + n + "</b>").join(" · ") : "no door / window tags") + (R.newSch.length ? `<br><span class="small">Sizes of ${R.newSch.map(esc).join(", ")} read from the schedule into the opening schedule.</span>` : "");
-  const finL = R => R.fin.none ? "no rooms measured on this page" : R.fin.error ? `<span style="color:var(--red)">${esc(R.fin.error)}</span>` : `${R.fin.rooms.length} rooms · wall finish <b>${fq(sum(R.fin.rooms, x => x.wallNet))} Sft</b> net · skirting <b>${fq(sum(R.fin.rooms, x => x.skirt))} ft</b>${sum(R.fin.rooms, x => x.notes.length) ? ` · <b style="color:var(--amber)">${sum(R.fin.rooms, x => x.notes.length)} opening${sum(R.fin.rooms, x => x.notes.length) > 1 ? "s" : ""} not deducted</b> <span class="small">(no size — see 🎨 Finishes)</span>` : ""}`;
+  const finL = R => R.fin.none ? "no rooms measured on this page" : R.fin.error ? `<span style="color:var(--red)">${esc(R.fin.error)}</span>` : `${R.fin.rooms.length} rooms · wall finish <b>${uArea(sum(R.fin.rooms, x => x.wallNet))}</b> net · skirting <b>${uQL(sum(R.fin.rooms, x => x.skirt))}</b>${sum(R.fin.rooms, x => x.notes.length) ? ` · <b style="color:var(--amber)">${sum(R.fin.rooms, x => x.notes.length)} opening${sum(R.fin.rooms, x => x.notes.length) > 1 ? "s" : ""} not deducted</b> <span class="small">(no size — see 🎨 Finishes)</span>` : ""}`;
   const blk = R => `<div style="margin-top:7px"><b>${esc(R.page)}</b>${R.rooms ? "<br>🏠 " + roomsL(R) : ""}${R.walls ? "<br>🧱 " + wallsL(R) : ""}${R.tags ? "<br>🚪 " + tagsL(R) : ""}${R.fin ? "<br>🎨 " + finL(R) : ""}${R.stop ? `<br><span class="small">■ Stopped by you part-way through this page</span>` : ""}</div>`;
   let tot = "";
   if (done.length > 1) {   // the run's totals, and the counts against the schedule's quantities
     const W = {}, G = {}; done.forEach(R => { (R.walls || []).forEach(w => { if (!w.err) W[w.t] = (W[w.t] || 0) + w.ft; }); Object.entries(R.tags || {}).forEach(([m, n]) => { G[m] = (G[m] || 0) + n; }); });
-    tot = `<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px"><b>All ${done.length} pages</b>${o.rooms ? `<br>🏠 <b>${fq(sum(done, R => R.rooms && R.rooms.sft))} Sft</b> of rooms measured` : ""}${Object.keys(W).length ? "<br>🧱 " + Object.keys(W).sort((a, b) => a - b).map(t => inchOf(+t) + " <b>" + f3(W[t]) + " ft</b>").join(" · ") : ""}${Object.keys(G).length ? "<br>🚪 " + Object.keys(G).sort(natSort).map(m => esc(m) + " <b>×" + G[m] + "</b>").join(" · ") : ""}</div>`;
+    tot = `<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px"><b>All ${done.length} pages</b>${o.rooms ? `<br>🏠 <b>${uArea(sum(done, R => R.rooms && R.rooms.sft))}</b> of rooms measured` : ""}${Object.keys(W).length ? "<br>🧱 " + Object.keys(W).sort((a, b) => a - b).map(t => inchOf(+t) + " <b>" + uLenT(W[t]) + "</b>").join(" · ") : ""}${Object.keys(G).length ? "<br>🚪 " + Object.keys(G).sort(natSort).map(m => esc(m) + " <b>×" + G[m] + "</b>").join(" · ") : ""}</div>`;
   }
   const sch = {}; rep.forEach(R => Object.assign(sch, R.sch || {}));
   const off = Object.entries(sch).map(([m, q]) => { const c = P.proj.conds.find(x => x.type === "count" && x.name.toUpperCase() === m), n = c ? condTotals(c).net : 0; return n && n !== q ? `${esc(m)}: schedule ${q}, counted ${n}` : ""; }).filter(Boolean);
@@ -15738,7 +15786,7 @@ function finishesRun(o){   // o: {H, DH, cond, ceiling} on this page -> {rooms: 
         const op = Object.assign({kind: "open", pts: [d.a.slice(), d.b.slice()], label: d.mk || "Door", ow: r3(w), oh: h ? r3(h) : 0}, s ? {sch: s.id} : {}, base);
         if (skc) { const sk = Object.assign({id: uid("I"), cond: skc.id}, op); P.proj.items.push(sk); R.s.push(sk.id); }   // the door's width off the skirting
         if (wc && h > 0) { const wo = Object.assign({id: uid("I"), cond: wc.id}, op); P.proj.items.push(wo); R.w.push(wo.id); }
-        else if (wc) R.notes.push(`${d.mk || "a door"} ${f3(w)} ft wide: no height (not in the opening schedule, no door height given) — not deducted from the wall finish`);
+        else if (wc) R.notes.push(`${d.mk || "a door"} ${uLenT(w)} wide: no height (not in the opening schedule, no door height given) — not deducted from the wall finish`);
         R.doors.push(d.mk || "door"); });
       wins[n].forEach(wn => {
         if (wn.door && mine.some(d => !d.mk && distSeg(wn.p, d.a, d.b) < 5 * k)) return;   // a tag a little far from a swing with no tag of its own: that door, already taken
@@ -15766,11 +15814,11 @@ async function finishesDialog(){
   const best = roomCondOf(), cs = Object.keys(byC).map(cond).filter(Boolean), wc = P.proj.conds.find(c => c.finAgent === "wall");
   const v = await ask("🎨 Finishes agent", `<p>For each room measured on this page: the wall finish (plaster / paint) round the room as Nos × L × H with every door and window on it deducted as its own row, the skirting less its doors, and the ceiling (= the floor area).</p>
     <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Rooms from</label><select id="fnC">${cs.map(c => `<option value="${esc(c.id)}"${c.id === best ? " selected" : ""}>${esc(c.name)} (${byC[c.id]} rooms)</option>`).join("")}${cs.length > 1 ? `<option value="">Every area condition (${rooms.length} rooms)</option>` : ""}</select></div>
-    <div class="fg"><label>Room height H (ft)</label><input type="text" id="fnH" value="${wc && +wc.h ? f3(+wc.h) : ""}" placeholder="floor to ceiling, from the section"></div>
-    <div class="fg"><label>Door height (ft) — doors not in the schedule</label><input type="text" id="fnDH" value="${P.proj.finDH ? f3(P.proj.finDH) : ""}" placeholder="from the door schedule"></div>
+    <div class="fg"><label>Room height H (${uL("ft")})</label><input type="text" id="fnH" value="${wc && +wc.h ? uLenIn(+wc.h) : ""}" placeholder="floor to ceiling, from the section"></div>
+    <div class="fg"><label>Door height (${uL("ft")}) — doors not in the schedule</label><input type="text" id="fnDH" value="${P.proj.finDH ? uLenIn(P.proj.finDH) : ""}" placeholder="from the door schedule"></div>
     <div class="fg w2"><label class="pk"><input type="checkbox" id="fnCl" checked> Ceiling finish as an assembly line of the room condition (= its floor area A) — for the Bill</label></div></div>
     <p class="small" style="margin-top:8px">Doors are found from their swings; a door tag beside one gives its size from the opening schedule (Bill → Opening schedule), else its drawn width × the door height above. Windows are found from their tags and need a size in the opening schedule — a window's height is never on a plan, so one with no size is listed, not deducted. Openings of 1.00 Sft or less are not deducted (house rule). Running it again replaces its own earlier runs on this page.</p>`, "Do finishes",
-    () => { const H = parseFt($("fnH").value), DH = $("fnDH").value.trim() ? parseFt($("fnDH").value) : 0;
+    () => { const H = uParse($("fnH").value), DH = $("fnDH").value.trim() ? uParse($("fnDH").value) : 0;
       if (!(H > 0)) return "Give the room height H (ft) — floor to ceiling"; if (isNaN(DH)) return "The door height is in feet, e.g. 7 or 7'-0\"";
       return {H, DH, cond: $("fnC").value || null, ceiling: $("fnCl").checked}; }, "fnH");
   if (!v) return;
@@ -15782,7 +15830,7 @@ function finReport(r){
   const tot = f => r.rooms.reduce((a, x) => a + x[f], 0), notes = r.rooms.flatMap(x => x.notes.map(n => `<b>${esc(x.name)}</b>: ${esc(n)}`)).concat(r.loose.map(m => `${esc(m)}: no measured room beside the tag — not deducted`));
   const tsv = [["Room", "Nos", "Floor Sft", "Ceiling Sft", "Perimeter ft", "Doors", "Windows", "Skirting ft", "Wall finish gross Sft", "Openings deducted Sft", "Wall finish net Sft"]]
     .concat(r.rooms.map(x => [x.name, x.nos, x.floor.toFixed(3), x.ceil.toFixed(3), x.per.toFixed(3), x.doors.join(" "), x.wins.join(" "), x.skirt.toFixed(3), x.wallGross.toFixed(3), x.wallDed.toFixed(3), x.wallNet.toFixed(3)])).map(a => a.join("\t")).join("\n");
-  const d = aiLog("bot", `<b>🎨 Finishes</b> — ${r.rooms.length} rooms, H = ${f3(r.H)} ft <button class="btn sm" data-cp="1">Copy for Excel</button>
+  const d = aiLog("bot", `<b>🎨 Finishes</b> — ${r.rooms.length} rooms, H = ${uLenT(r.H)} <button class="btn sm" data-cp="1">Copy for Excel</button>
     <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px"><tr><th align="left">Room</th><th align="right">Floor / ceiling Sft</th><th align="right">Wall finish Sft</th><th align="right">Skirting ft</th><th align="left">Openings</th></tr>
     ${r.rooms.map(x => `<tr><td>${esc(x.name)}${x.nos > 1 ? " ×" + x.nos : ""}</td><td align="right">${fq(x.floor)}</td><td align="right">${fq(x.wallNet)}</td><td align="right">${fq(x.skirt)}</td><td class="small">${esc(x.doors.concat(x.wins).join(" ")) || "—"}</td></tr>`).join("")}
     <tr><td><b>Total</b></td><td align="right"><b>${fq(tot("floor"))}</b></td><td align="right"><b>${fq(tot("wallNet"))}</b></td><td align="right"><b>${fq(tot("skirt"))}</b></td><td></td></tr></table>
@@ -15807,9 +15855,9 @@ function hatchSig(pl, g, k, ids){   // the pattern inside an outline -> {key, na
     .filter(d => d.sp > 0).sort((x, y) => x.a - y.a);
   if (!dirs.length) return {key: "none", name: "No pattern (plain)", dirs};
   const sp = a => (dirs.find(d => d.a === a) || {}).sp, grid = dirs.length === 2 && dirs[1].a - dirs[0].a === 90;
-  const name = grid && dirs[0].a === 0 ? "Grid " + f2(sp(90)) + " × " + f2(sp(0)) + " ft" : grid ? "Diagonal grid " + f2(dirs[0].sp) + " × " + f2(dirs[1].sp) + " ft"
-    : dirs.length === 1 ? "Lines " + f2(dirs[0].sp) + " ft apart, " + (dirs[0].a === 0 ? "horizontal" : dirs[0].a === 90 ? "vertical" : "at " + dirs[0].a + "°")
-    : dirs.map(d => f2(d.sp) + " ft at " + d.a + "°").join(" + ");
+  const name = grid && dirs[0].a === 0 ? "Grid " + f2(sp(90)) + " × " + uLen2(sp(0)) : grid ? "Diagonal grid " + f2(dirs[0].sp) + " × " + uLen2(dirs[1].sp)
+    : dirs.length === 1 ? "Lines " + uLen2(dirs[0].sp) + " apart, " + (dirs[0].a === 0 ? "horizontal" : dirs[0].a === 90 ? "vertical" : "at " + dirs[0].a + "°")
+    : dirs.map(d => uLen2(d.sp) + " at " + d.a + "°").join(" + ");
   return {key: dirs.map(d => d.a + "@" + d.sp.toFixed(2)).join("+"), name, dirs};
 }
 async function hatchSplitDialog(cid, mode){
@@ -15831,7 +15879,7 @@ async function hatchSplitDialog(cid, mode){
       <div class="fg"><label>The patterns are</label><select id="hsMode"><option value="ceil"${mode === "ceil" ? " selected" : ""}>Ceilings (reflected ceiling plan)</option><option value="floor"${mode === "floor" ? " selected" : ""}>Floor finishes</option></select></div></div>
     ${groups.length < 2 ? `<p class="small" style="margin-top:8px;color:#8a5a00">${groups[0] && groups[0].sg.key === "none" ? "No pattern found inside these areas — the drawing shows no hatch to tell them apart." : "Every area shows the same pattern."} They can still be copied into one condition.</p>` : ""}
     <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;max-height:46vh;overflow:auto">${groups.map((x, i) => { const tot = x.L.reduce((a, it) => a + sft(it), 0), nm = [...new Set(x.L.map(it => String(it.label || "").trim()).filter(Boolean))];
-      return `<div class="cand" style="flex-wrap:wrap"><input type="checkbox" data-hsck="${i}" checked><span style="flex:1;min-width:180px"><b>${esc(x.sg.name)}</b><br><span class="small">${x.L.length} area${x.L.length > 1 ? "s" : ""} · ${fq(tot)} Sft${nm.length ? " — " + esc(nm.slice(0, 4).join(", ")) + (nm.length > 4 ? " +" + (nm.length - 4) : "") : ""}</span></span>
+      return `<div class="cand" style="flex-wrap:wrap"><input type="checkbox" data-hsck="${i}" checked><span style="flex:1;min-width:180px"><b>${esc(x.sg.name)}</b><br><span class="small">${x.L.length} area${x.L.length > 1 ? "s" : ""} · ${uArea(tot)}${nm.length ? " — " + esc(nm.slice(0, 4).join(", ")) + (nm.length > 4 ? " +" + (nm.length - 4) : "") : ""}</span></span>
         <select data-hsc="${i}" title="The condition the group is copied into"><option value="">+ New condition</option>${tgt.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select><input type="text" data-hsn="${i}" value="${esc(dflt(x.sg, mode))}" style="min-width:200px" aria-label="Name of the new condition"></div>`; }).join("")}</div>`;
   const pr = ask("Areas by hatch pattern", body, "Copy the ticked", () => { const out = [];
     for (const ck of document.querySelectorAll("#dlgB [data-hsck]:checked")) { const i = +ck.dataset.hsck, to = document.querySelector(`#dlgB [data-hsc="${i}"]`).value, nm = document.querySelector(`#dlgB [data-hsn="${i}"]`).value.trim();
@@ -15940,12 +15988,12 @@ async function cutFillDialog(){
   const sel = outs.find(i => selIds().has(i.id)) || outs.slice().sort((a, b) => polyArea(itemPoly(b)) - polyArea(itemPoly(a)))[0];
   const ac = P.proj.conds.filter(c => c.type === "area" && c.unit === "cft"), CUT = "Excavation — cut (spot levels)", FILL = "Earth filling — fill (spot levels)";
   const opt = nm => `<option value="">+ New: ${esc(nm)}</option>` + ac.map(c => `<option value="${esc(c.id)}"${c.name === nm ? " selected" : ""}>${esc(c.name)}</option>`).join("");
-  const nm = it => (String(it.label || "").trim() || (cond(it.cond) || {}).name || "Area") + " — " + fq(polyArea(itemPoly(it)) / k / k) + " Sft";
+  const nm = it => (String(it.label || "").trim() || (cond(it.cond) || {}).name || "Area") + " — " + uArea(polyArea(itemPoly(it)) / k / k);
   let last = null;
   const calc = () => { const it = outs.find(i => i.id === $("cfO").value), F = lvParse($("cfF").value, false);
     last = it ? MEAS.cutFill({outline: itemPoly(it), k, formation: isFinite(F) ? lvFt(F) : "", levels: L.map(l => ({p: l.p, z: lvFt(l.z)}))}) : null;
     $("cfR").innerHTML = !last ? "" : last.value === null ? '<span style="color:#8a5a00">Needs: ' + esc(last.missing.join(", ")) + "</span>"
-      : `<b>Cut ${fq(last.cut)} cft</b> · <b>Fill ${fq(last.fill)} cft</b> · net ${last.value >= 0 ? "cut" : "fill"} ${fq(Math.abs(last.value))} cft<br><span class="small">over ${fq(last.area)} Sft · ground ${lvFmt(last.ground[0] * (u === "m" ? 0.3048 : 1))} to ${lvFmt(last.ground[1] * (u === "m" ? 0.3048 : 1))} ${u} · average depth: cut ${f3(last.depthCut)} ft, fill ${f3(last.depthFill)} ft${last.outside > 0.005 ? ` · <span style="color:#8a5a00">${Math.round(last.outside * 100)} % of the outline lies outside the spot levels — the ground there is taken from the nearest ones; add levels at its corners</span>` : ""}</span>`; };
+      : `<b>Cut ${uVol(last.cut)}</b> · <b>Fill ${uVol(last.fill)}</b> · net ${last.value >= 0 ? "cut" : "fill"} ${uVol(Math.abs(last.value))}<br><span class="small">over ${uArea(last.area)} · ground ${lvFmt(last.ground[0] * (u === "m" ? 0.3048 : 1))} to ${lvFmt(last.ground[1] * (u === "m" ? 0.3048 : 1))} ${u} · average depth: cut ${uLenT(last.depthCut)}, fill ${uLenT(last.depthFill)}${last.outside > 0.005 ? ` · <span style="color:#8a5a00">${Math.round(last.outside * 100)} % of the outline lies outside the spot levels — the ground there is taken from the nearest ones; add levels at its corners</span>` : ""}</span>`; };
   const body = `<p>The ground between the ${L.length} spot levels on this page is the plane of each triangle between them (a TIN, as a level sheet is worked by hand). Inside the outline, where the ground is above the formation level it is cut, where below it is filled. Each goes into a cft condition as the outline × its average depth.</p>
     <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Outline</label><select id="cfO">${outs.map(it => `<option value="${esc(it.id)}"${it === sel ? " selected" : ""}>${esc(nm(it))}</option>`).join("")}</select></div>
       <div class="fg"><label>Formation level (${u})</label><input type="text" id="cfF" value="${P.proj.cfF != null ? esc(String(P.proj.cfF)) : ""}" placeholder="e.g. 100.00 — never assumed"></div><div class="fg"><label>Levels in</label><input type="text" value="${u} (Spot levels › unit)" disabled></div>
@@ -15955,7 +16003,7 @@ async function cutFillDialog(){
   const pr = ask("⛰ Cut / fill from spot levels", body, "Add to the takeoff", () => { calc(); if (!last || last.value === null) return "Needs: " + (last ? last.missing.join(", ") : "an outline"); return {it: outs.find(i => i.id === $("cfO").value), F: lvParse($("cfF").value, false), r: last, cutC: $("cfC").value, fillC: $("cfL").value}; }, "cfF");
   ["cfO", "cfF"].forEach(id => $(id).addEventListener("input", calc)); $("cfO").addEventListener("change", calc); calc();
   const v = await pr; if (!v) return null;
-  const r = v.r, lab = (w, d) => w + " — " + L.length + " spot levels, formation " + lvFmt(v.F) + " " + u + " (average depth " + f3(d) + " ft)";
+  const r = v.r, lab = (w, d) => w + " — " + L.length + " spot levels, formation " + lvFmt(v.F) + " " + u + " (average depth " + uLenT(d) + ")";
   mutate(() => {
     P.proj.cfF = v.F; P.proj.items = P.proj.items.filter(i => !(i.cf && i.cf.from === v.it.id));
     const pick = (id, name) => { let c = id ? cond(id) : P.proj.conds.find(q => q.type === "area" && q.unit === "cft" && q.name === name); if (!c) { c = qkMake({name, type: "area", unit: "cft"}, {}, []); P.proj.conds.push(c); } c.cfCond = true; return c; };
@@ -15963,7 +16011,7 @@ async function cutFillDialog(){
       if (v.it.shape === "circle") y.shape = "circle"; if (v.it.arcs) y.arcs = JSON.parse(JSON.stringify(v.it.arcs)); P.proj.items.push(y); };
     if (r.cut > 1e-6) add(pick(v.cutC, CUT), r.depthCut, "Cut"); if (r.fill > 1e-6) add(pick(v.fillC, FILL), r.depthFill, "Fill");
   }, "Cut / fill");
-  toast("Cut " + fq(r.cut) + " cft · fill " + fq(r.fill) + " cft over " + fq(r.area) + " Sft from " + L.length + " spot levels" + (r.outside > 0.005 ? " — " + Math.round(r.outside * 100) + " % of the outline outside the levels" : ""), 6000);
+  toast("Cut " + uVol(r.cut) + " · fill " + uVol(r.fill) + " over " + uArea(r.area) + " from " + L.length + " spot levels" + (r.outside > 0.005 ? " — " + Math.round(r.outside * 100) + " % of the outline outside the levels" : ""), 6000);
   return {cut: r.cut, fill: r.fill, area: r.area};
 }
 
@@ -16221,7 +16269,7 @@ async function learnDialog(){
     ${K.skip.length ? `<h4 style="margin:10px 0 4px">Not measured as a room</h4>${K.skip.map(s => `<div class="cand">${ck("skip:" + s.type)}<span><b>${esc(cap(s.type))}</b> <span class="small">— the agent's ${s.type.toLowerCase()} deleted ${s.del} of ${s.made} times</span></span></div>`).join("")}` : ""}
     ${K.words.length ? `<h4 style="margin:10px 0 4px">Room names it learned</h4>${K.words.map(w => `<div class="cand">${ck("word:" + w.word)}<span><b>${esc(w.word)}</b> <span class="small">— measured by hand ${w.n} times on pages the agent had done</span></span></div>`).join("")}` : ""}
     ${Object.keys(K.take).length ? `<h4 style="margin:10px 0 4px">Which rooms an item takes</h4>${Object.entries(K.take).map(([k, t]) => `<div class="cand">${ck("take:" + k)}<span><b>${esc(t.name)}</b> <span class="small">— ${t.yes.map(cap).map(esc).join(", ")}; not ${t.no.map(cap).map(esc).join(", ")}</span></span></div>`).join("")}` : ""}
-    ${Object.keys(K.dflt).length ? `<h4 style="margin:10px 0 4px">Heights your team uses</h4>${Object.entries(K.dflt).map(([k, d]) => `<div class="cand">${ck("dflt:" + k)}<span><b>${esc(d.name)}</b> <span class="small">— H ${f3(d.h)} ft in ${d.np} projects (Quick items asks with it)</span></span></div>`).join("")}` : ""}
+    ${Object.keys(K.dflt).length ? `<h4 style="margin:10px 0 4px">Heights your team uses</h4>${Object.entries(K.dflt).map(([k, d]) => `<div class="cand">${ck("dflt:" + k)}<span><b>${esc(d.name)}</b> <span class="small">— H ${uLenT(d.h)} in ${d.np} projects (Quick items asks with it)</span></span></div>`).join("")}` : ""}
     ${mis.length ? `<p class="small" style="margin-top:8px">What the agent missed most (added by hand after it): ${mis.map(([t, n]) => esc(cap(t)) + " " + n).join(" · ")}</p>` : ""}
     ${st.log.length ? `<details style="margin-top:8px"><summary class="small">What it learned, day by day (${st.log.length})</summary><div class="small" style="max-height:24vh;overflow:auto">${st.log.slice().reverse().map(l => `<div>${esc(dmy(l.d))} — ${esc(l.t)}</div>`).join("")}</div></details>` : ""}
     <div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap"><button class="btn sm pri" type="button" data-la="page"${R.length && S.page ? "" : " disabled"}>Apply to the rooms on this page</button><button class="btn sm" type="button" data-la="all"${R.length && P.proj ? "" : " disabled"}>Apply to every page</button>
@@ -16272,13 +16320,13 @@ async function agentCheck(scope){
       let sz = 0, szBad = 0;   // measured against the size written in the room
       areas.forEach(i => { const k = itemScale(i); if (!k || !String(i.label || "").trim()) return; const pl = itemPoly(i), inn = Fa.rooms.filter(r => pointInPoly(lp(r), pl)); if (inn.length !== 1 || !inn[0].sft) return;
         sz++; const a = polyArea(pl) / k / k, w = inn[0].sft, e = (a - w) / w;
-        if (Math.abs(e) > 0.05) { szBad++; F("warn", `${pn} — <b>${esc(i.label)}</b>: measured ${fq(a)} Sft, written ${esc(inn[0].size)} = ${fq(w)} Sft (${e > 0 ? "+" : ""}${(100 * e).toFixed(1)} %) — look at the outline; a written size is often the main rectangle only`, show(key, [i.id])); } });
+        if (Math.abs(e) > 0.05) { szBad++; F("warn", `${pn} — <b>${esc(i.label)}</b>: measured ${uArea(a)}, written ${esc(inn[0].size)} = ${uArea(w)} (${e > 0 ? "+" : ""}${(100 * e).toFixed(1)} %) — look at the outline; a written size is often the main rectangle only`, show(key, [i.id])); } });
       if (sz && !szBad) passed.push(`${pn}: ${sz} room${sz > 1 ? "s" : ""} within 5 % of the size written in ${sz > 1 ? "them" : "it"}`);
       const byC = new Map(); areas.forEach(i => { if (!byC.has(i.cond)) byC.set(i.cond, []); byC.get(i.cond).push(i); });
       let ov = 0;   // the same floor measured twice: two outlines of one condition overlapping
       byC.forEach((L, cid) => { for (let a = 0; a < L.length; a++) for (let b = a + 1; b < L.length; b++) { const k = itemScale(L[a]); if (!k) continue;
         const A = itemPoly(L[a]), B = itemPoly(L[b]), x = overlapSft(A, B, k); if (!(x > 1 && x > 0.02 * Math.min(polyArea(A), polyArea(B)) / k / k)) continue;
-        ov++; F("err", `${pn} — ${esc(cond(cid).name)}: <b>${esc(L[a].label || "an area")}</b> and <b>${esc(L[b].label || "an area")}</b> overlap by about ${fq(x)} Sft — measured twice?`, show(key, [L[a].id, L[b].id])); } });
+        ov++; F("err", `${pn} — ${esc(cond(cid).name)}: <b>${esc(L[a].label || "an area")}</b> and <b>${esc(L[b].label || "an area")}</b> overlap by about ${uArea(x)} — measured twice?`, show(key, [L[a].id, L[b].id])); } });
       if (areas.length > 1 && !ov) passed.push(`${pn}: no two areas of one condition overlap`);
       /* walls and openings: a wall run measured twice (two runs of one condition on top of each other), an opening taken off twice, an
          opening on no run of its condition (it deducts from nothing), a void outside the area it is taken from or off twice */
@@ -16293,7 +16341,7 @@ async function agentCheck(scope){
               const rel = q => [(q[0] - A2.a[0]) * A2.u[0] + (q[1] - A2.a[1]) * A2.u[1], (q[0] - A2.a[0]) * -A2.u[1] + (q[1] - A2.a[1]) * A2.u[0]], q0 = rel(B2.a), q1 = rel(B2.b);
               if (Math.abs(q0[1]) > 0.25 * A2.k || Math.abs(q1[1]) > 0.25 * A2.k) return;
               const o = Math.min(A2.L, Math.max(q0[0], q1[0])) - Math.max(0, Math.min(q0[0], q1[0])); if (o > A2.k) ov2 += o / A2.k; }));
-            if (ov2 > 0) { wr++; F("err", `${pn} — ${esc(cond(cid).name)}: <b>${esc(L[x].label || "a run")}</b> and <b>${esc(L[y].label || "a run")}</b> lie on top of each other for about ${f3(ov2)} ft — the wall measured twice?`, show(key, [L[x].id, L[y].id])); } } });
+            if (ov2 > 0) { wr++; F("err", `${pn} — ${esc(cond(cid).name)}: <b>${esc(L[x].label || "a run")}</b> and <b>${esc(L[y].label || "a run")}</b> lie on top of each other for about ${uLenT(ov2)} — the wall measured twice?`, show(key, [L[x].id, L[y].id])); } } });
         if (lin.length > 1 && !wr) passed.push(`${pn}: no two runs of one condition lie on top of each other`);
         let op = 0;
         const mid = it => [(it.pts[0][0] + it.pts[1][0]) / 2, (it.pts[0][1] + it.pts[1][1]) / 2];
@@ -16304,7 +16352,7 @@ async function agentCheck(scope){
           const m = mid(o); if (!runs.some(i => legs(i).some(l => distSeg(m, l.a, l.b) <= 0.75 * k))) { op++; F("warn", `${pn} — ${esc(c2.name)}: opening <b>${esc(o.label || "")}</b> is on no run of this condition — it takes off from nothing`, show(key, [o.id])); } });
         const dedA = its.filter(i => i.kind === "ded" && (cond(i.cond) || {}).type === "area" && i.pts.length >= 3);
         dedA.forEach((d, x) => { const k = itemScale(d); if (!k) return; const D = itemPoly(d), c2 = cond(d.cond);
-          for (let y = x + 1; y < dedA.length; y++) if (dedA[y].cond === d.cond) { const o = overlapSft(D, itemPoly(dedA[y]), k); if (o > 1) { op++; F("err", `${pn} — ${esc(c2.name)}: two voids overlap by about ${fq(o)} Sft — taken off twice?`, show(key, [d.id, dedA[y].id])); } }
+          for (let y = x + 1; y < dedA.length; y++) if (dedA[y].cond === d.cond) { const o = overlapSft(D, itemPoly(dedA[y]), k); if (o > 1) { op++; F("err", `${pn} — ${esc(c2.name)}: two voids overlap by about ${uArea(o)} — taken off twice?`, show(key, [d.id, dedA[y].id])); } }
           const host = areas.filter(i => i.cond === d.cond); if (host.length && !host.some(h2 => pointInPoly(D[0], itemPoly(h2)) || pointInPoly([D.reduce((t, q) => t + q[0], 0) / D.length, D.reduce((t, q) => t + q[1], 0) / D.length], itemPoly(h2)))) { op++; F("warn", `${pn} — ${esc(c2.name)}: a void lies outside every area of its condition — it takes off from nothing`, show(key, [d.id])); } });
         if ((opens.length || dedA.length) && !op) passed.push(`${pn}: no opening or void is taken off twice or from nothing`);
       }
@@ -16332,10 +16380,10 @@ async function agentCheck(scope){
     Object.keys(sched).sort(natSort).forEach(m => { const s = sched[m], c = P.proj.conds.find(x => x.type === "count" && x.name.toUpperCase() === m), n2 = c ? condTotals(c).net : 0;
       if (s.qty && c) { if (n2 !== s.qty) F("warn", `<b>${esc(m)}</b>: the schedule (${esc(keyName(s.at))}) says <b>${s.qty}</b> Nos, <b>${fq(n2, "Nos")}</b> counted in the project`, null); else schOk++; }
       const o = (P.proj.openings || []).find(x => String(x.mark).toUpperCase() === m);
-      if (o && (Math.abs(o.w - s.w) > 0.01 || Math.abs(o.h - s.h) > 0.01)) F("warn", `<b>${esc(m)}</b>: the opening schedule has ${f3(o.w)} × ${f3(o.h)} ft, the drawing's schedule (${esc(keyName(s.at))}) ${f3(s.w)} × ${f3(s.h)} ft — a revised size?`, () => openingsDialog(), "Opening schedule"); });
+      if (o && (Math.abs(o.w - s.w) > 0.01 || Math.abs(o.h - s.h) > 0.01)) F("warn", `<b>${esc(m)}</b>: the opening schedule has ${uLen(o.w)} × ${uLenT(o.h)}, the drawing's schedule (${esc(keyName(s.at))}) ${uLen(s.w)} × ${uLenT(s.h)} — a revised size?`, () => openingsDialog(), "Opening schedule"); });
     if (schOk) passed.push(`${schOk} mark${schOk > 1 ? "s" : ""} counted exactly as the schedule's quantity`);
     P.proj.conds.forEach(c => { if (c.type === "linear" && c.unit === "ft" && +c.t >= 0.3 && P.proj.items.some(i => i.cond === c.id))
-      F("info", `<b>${esc(c.name)}</b>: ${f3(condTotals(c).net)} ft of length only — give it the wall height H and the unit cft (✎) for the volume`, () => editCond(c), "✎ Edit"); });
+      F("info", `<b>${esc(c.name)}</b>: ${uLenT(condTotals(c).net)} of length only — give it the wall height H and the unit cft (✎) for the volume`, () => editCond(c), "✎ Edit"); });
     const rv = P.proj.items.filter(needsReview);
     if (rv.length) F("info", `${rv.length} measurement${rv.length > 1 ? "s" : ""} made by the agents or copied, not yet checked — look ${rv.length > 1 ? "them" : "it"} over, then ✓ Check this page`, () => { S.qaFilter = "review"; S.rHide = false; setPanels(); refresh(); }, "Show on the sheet");
     else if (P.proj.items.length) passed.push("every agent / copied measurement has been checked");
@@ -16359,7 +16407,7 @@ function agentAnswer(t){
   const q = q0.replace(/\b(are|is|there|do|we|have|in|on|the|this|page|project|of|total|areas?|qty|quantity|measured|counted|please|sft|sq\.?\s*ft|all|every|nos)\b/gi, " ").replace(/\s+/g, " ").trim();
   const used = P.proj.conds.filter(c => P.proj.items.some(i => i.cond === c.id));
   const pageQ = c => P.proj.items.filter(i => i.cond === c.id && onPage(i)).reduce((a, it) => { const k = qScale(it); return k ? a + rowsOf(it, k).reduce((s2, r) => s2 + r.qty, 0) : a; }, 0);
-  const line = c => `<b>${esc(c.name)}</b>: <b>${fq(condTotals(c).net, c.unit)} ${esc(c.unit)}</b>${S.page ? ` <span class="small">(this page ${fq(pageQ(c), c.unit)})</span>` : ""}`;
+  const line = c => `<b>${esc(c.name)}</b>: <b>${fq(condTotals(c).net, c.unit)} ${esc(uL(c.unit))}</b>${S.page ? ` <span class="small">(this page ${fq(pageQ(c), c.unit)})</span>` : ""}`;
   const ans = L => L.map(c => ({name: c.name, qty: +condTotals(c).net.toFixed(3), unit: c.unit}));
   if (!q) { const L = used.filter(c => !area || c.type === "area"); aiLog("bot", L.length ? L.map(line).join("<br>") : "Nothing is measured yet."); return {answer: ans(L)}; }
   const tg = tagParse(q.replace(/\s+/g, "")), fam = /^doors?$/i.test(q) ? "Doors" : /^windows?$/i.test(q) ? "Windows" : /^vent/i.test(q) ? "Ventilators" : null, ws = q.split(" ");
@@ -16374,7 +16422,7 @@ function agentAnswer(t){
   }
   if (rooms.length) {
     const qa = it => { const k = qScale(it); return k ? rowsOf(it, k).reduce((a, r) => a + r.qty, 0) : 0; }, tot = rooms.reduce((a, i) => a + qa(i), 0);
-    aiLog("bot", `Rooms named like “${esc(q)}”: <b>${rooms.length}</b> — <b>${fq(tot)} Sft</b><br><span class="small">${rooms.map(i => esc(i.label) + " " + fq(qa(i))).join(" · ")}</span>`);
+    aiLog("bot", `Rooms named like “${esc(q)}”: <b>${rooms.length}</b> — <b>${uArea(tot)}</b><br><span class="small">${rooms.map(i => esc(i.label) + " " + fq(qa(i))).join(" · ")}</span>`);
     return {answer: [{name: q, qty: +tot.toFixed(3), unit: "Sft", rooms: rooms.length}]};
   }
   const onDwg = tg && S.page ? ((tagsOf(S.texts[S.key] || []).plan[tg.k]) || []).length : 0;
@@ -16865,9 +16913,9 @@ function cadCtxItems(q){   // right-click: the AutoCAD object under the cursor (
   const pg = cadPage(); if (!pg || !q) return [];
   const sc = S.cadSc[S.fileId], ei = cadPickAt(toScr(q), true); if (ei < 0) return [];
   const r = CAD.cadRec(pg, ei); if (!r || r.L < 0) return [];
-  const lname = (sc.layers[r.L] || {}).name || "0", blk = cadInBlock(pg, r), L = [{h: "AutoCAD: " + (r.t === "INSERT" ? "block " + (r.n || "") : r.t.toLowerCase()) + " · " + lname + (blk ? " · in block " + blk : ""), s: [r.area ? f2(r.area) + " Sft" : "", r.len ? f2(r.len) + " ft" : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ")}];
+  const lname = (sc.layers[r.L] || {}).name || "0", blk = cadInBlock(pg, r), L = [{h: "AutoCAD: " + (r.t === "INSERT" ? "block " + (r.n || "") : r.t.toLowerCase()) + " · " + lname + (blk ? " · in block " + blk : ""), s: [r.area ? uArea2(r.area) : "", r.len ? uLen2(r.len) : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ")}];
   if (r.t === "INSERT") { const hid = cadHidden(S.fileId, sc), same = pg.ents.concat(pg.subs || []).filter(x => x && x.t === "INSERT" && x.n === r.n && x.L >= 0 && !hid[x.L]).length; L.push({t: "Count this " + (r.n || "block"), fn: () => cadPick(ei, "count")}, {t: "Count every " + (r.n || "block") + " (" + same + ")…", fn: () => cadQtyDialog({B: r.n})}); }
-  else { if (r.cl && r.area > 0) L.push({t: "Take off its area — " + f2(r.area) + " Sft", fn: () => cadPick(ei, "area")}); if (r.len > 0) L.push({t: "Take off its length — " + f2(r.len) + " ft", fn: () => cadPick(ei, "line")}); }
+  else { if (r.cl && r.area > 0) L.push({t: "Take off its area — " + uArea2(r.area), fn: () => cadPick(ei, "area")}); if (r.len > 0) L.push({t: "Take off its length — " + uLen2(r.len), fn: () => cadPick(ei, "line")}); }
   L.push({t: "Quantities on layer " + lname + "…", fn: () => cadQtyDialog({L: r.L})}, {t: "Isolate layer " + lname + " (LAYISO)", fn: () => cadIsolate(lname)}, {t: "Layer " + lname + " off (LAYOFF)", fn: () => cadLayersOnOff([lname], false)}, {sep: 1},
     {t: "Select this object", k: "Shift+V", fn: () => { setTool("cadsel"); cadSelSet([ei]); }}, {t: "Select similar (same type and layer" + (r.t === "INSERT" ? ", same block" : "") + ")", fn: () => { setTool("cadsel"); cadSelSet([ei]); cadSelAct("similar"); }});
   const up = cadUp(pg, ei); if (up >= 0) L.push({t: "Select the block it is in (" + (CAD.cadRec(pg, up).n || blk) + ")", fn: () => { setTool("cadsel"); cadSelSet([up]); }});
@@ -16939,7 +16987,7 @@ function cadHoverAt(sp){ const ei = S.cbox ? -1 : cadPickAt(sp); if (ei !== S.ca
 function cadDesc(sc, r){ return (r.t === "INSERT" ? "Block " + (r.n || "") : r.t.charAt(0) + r.t.slice(1).toLowerCase()) + " · " + ((sc.layers[r.L] || {}).name || "0"); }
 function cadHoverText(){
   const pg = cadPage(), r = pg && S.cadHov >= 0 && CAD.cadRec(pg, S.cadHov); if (!r) return "";
-  return [cadDesc(S.cadSc[S.fileId], r), cadInBlock(pg, r) && "in block " + cadInBlock(pg, r), r.cl && r.area > 0 ? fq(r.area) + " Sft" : "", !r.cl && r.len > 0 ? f3(r.len) + " ft" : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ");
+  return [cadDesc(S.cadSc[S.fileId], r), cadInBlock(pg, r) && "in block " + cadInBlock(pg, r), r.cl && r.area > 0 ? uArea(r.area) : "", !r.cl && r.len > 0 ? uLenT(r.len) : "", r.att && r.att.length ? r.att.map(a => a.join(" ")).join(", ") : ""].filter(Boolean).join(" · ");
 }
 /* the selected objects drawn over the drawing: their own lines, in blue (a text as its box); a very big selection as the
    objects' boxes. Only what is in view. */
@@ -16981,7 +17029,7 @@ function cadSelHtml(ids){
     : B && ids.length === 1 ? `<div class="row small" style="margin-top:4px;color:var(--muted)">Click a part of the block again to pick that hatch, text or line on its own</div>` : "";
   const into = c ?"into <b>" + esc(c.name) + "</b> when its type fits, else a condition named after the layer / block" : "into conditions named after each layer / block";
   return `<h4>AutoCAD objects — ${o.n} selected <span style="font-weight:400;color:var(--muted);font-size:11px">Shift / Ctrl+click adds or takes out · box: left→right window, right→left crossing · Ctrl+A all · Esc clears</span></h4>
-    <div class="row"><span class="small" style="flex:1;min-width:220px">${[o.runs && "<b>Lines</b> " + o.runs + " · " + f3(o.len) + " ft", o.areas && "<b>Closed</b> " + o.areas + " · " + fq(o.area) + " Sft", B && "<b>Blocks</b> " + B + " (" + top(o.blocks, 4) + ")", o.txt && "<b>Text</b> " + o.txt, o.other && "other " + o.other].filter(Boolean).join(" &nbsp;|&nbsp; ") || "nothing to measure"}<br>
+    <div class="row"><span class="small" style="flex:1;min-width:220px">${[o.runs && "<b>Lines</b> " + o.runs + " · " + uLenT(o.len), o.areas && "<b>Closed</b> " + o.areas + " · " + uArea(o.area), B && "<b>Blocks</b> " + B + " (" + top(o.blocks, 4) + ")", o.txt && "<b>Text</b> " + o.txt, o.other && "other " + o.other].filter(Boolean).join(" &nbsp;|&nbsp; ") || "nothing to measure"}<br>
       <b>Types:</b> ${top(o.types, 6)} &nbsp;·&nbsp; <b>Layers:</b> ${top(o.layers, 6)}</span></div>${where}
     <div class="row" style="margin-top:6px;gap:4px;flex-wrap:wrap">
       <button class="btn pri sm" data-cact="take" title="Lines → length, closed outlines → area, blocks → count, ${into}"${o.runs || o.areas || B ? "" : " disabled"}>Take off</button>
@@ -17038,7 +17086,7 @@ function cadSelAct(act){
 function cadSelCtx(){   // right-click with AutoCAD objects selected
   const ids = cadSelIds(); if (!ids.length) return [];
   const o = cadSelSum(ids), A = a => () => cadSelAct(a);
-  return [{h: ids.length + " AutoCAD object" + (ids.length > 1 ? "s" : "") + " selected", s: [o.runs && f3(o.len) + " ft", o.areas && fq(o.area) + " Sft", o.blocks.size && [...o.blocks.values()].reduce((a, v) => a + v, 0) + " blocks"].filter(Boolean).join(" · ")},
+  return [{h: ids.length + " AutoCAD object" + (ids.length > 1 ? "s" : "") + " selected", s: [o.runs && uLenT(o.len), o.areas && uArea(o.area), o.blocks.size && [...o.blocks.values()].reduce((a, v) => a + v, 0) + " blocks"].filter(Boolean).join(" · ")},
     {t: "Take off the selection", fn: A("take")}, {t: "All as length", fn: A("len")}, {t: "Count them", fn: A("count")}, {t: "Select similar", fn: A("similar")}, {t: "Quick select…", fn: A("qsel")},
     {t: "Layer off (LAYOFF)", fn: A("layoff")}, {t: "Isolate their layers (LAYISO)", fn: A("iso")}, {t: "Zoom to the selection", fn: A("zoom")}, {t: "Clear the selection", k: "Esc", fn: A("clear")}, {sep: 1}];
 }
@@ -17238,7 +17286,7 @@ function cedExtend(pk){
         const wx = ed.a[0] - e0[0], wy = ed.a[1] - e0[1], s = (wx * sy - wy * sx) / den, u = (wx * v[1] - wy * v[0]) / den;
         if (s > 1e-6 && u >= -1e-9 && u <= 1 + 1e-9 && (!best || s < best.s)) best = {s, p: [e0[0] + v[0] * s, e0[1] + v[1] * s]}; });
       if (!best) return "Nothing in line with that end to extend to";
-      W.pts[m] = rp(best.p); msg = "Extended" + (k ? " by " + f3(best.s / k) + " ft" : "");
+      W.pts[m] = rp(best.p); msg = "Extended" + (k ? " by " + uLenT(best.s / k) : "");
     } else {   // an arc: round its circle
       let j0 = m - 1; while (j0 > 0 && W.cv[j0 - 1] === gid) j0--;
       const A = W.pts[j0], B = W.pts[Math.round((j0 + m) / 2)], C = e0, c = circ3(A, B, C); if (!c) return "That end's arc could not be read";
@@ -17250,7 +17298,7 @@ function cedExtend(pk){
       if (!best) return "Nothing round that arc's circle to extend it to";
       const steps = Math.max(2, Math.ceil(best.f / (Math.PI / 192)));
       for (let s = 1; s <= steps; s++) { const a = a0 + dir * best.f * s / steps; W.pts.push(rp([c.c[0] + c.r * Math.cos(a), c.c[1] + c.r * Math.sin(a)])); W.cv.push(gid); }
-      msg = "Arc extended" + (k ? " by " + f3(c.r * best.f / k) + " ft" : "");
+      msg = "Arc extended" + (k ? " by " + uLenT(c.r * best.f / k) : "");
     }
     if (atStart) { W.pts.reverse(); if (W.cv) W.cv.reverse(); }
     o.pts = W.pts; if (W.cv) o.cv = W.cv;
@@ -17285,7 +17333,7 @@ function cedBreak(pk, p, del){
     if (at.T < 1e-6 || at.T > n - 1e-6) return "That is the end of the object — nothing to break there";
     const A = plCut(o, 0, at.T), B = plCut(o, at.T, n); if (!A || !B) return "Nothing to break there";
     cedDrop(rec, o, [plMade(o, A), plMade(o, B)]);
-    const k = hereScale(at.p); msg = "Broken in two" + (k ? ": " + f3(polyLen(A.pts) / k) + " + " + f3(polyLen(B.pts) / k) + " ft" : "");
+    const k = hereScale(at.p); msg = "Broken in two" + (k ? ": " + f3(polyLen(A.pts) / k) + " + " + uLenT(polyLen(B.pts) / k) : "");
   }) !== null && msg && toast(msg, 2600);
 }
 /* FILLET / CHAMFER: two lines (or two sides of one polyline) cut or extended to meet, the corner rounded with an arc of the radius set
@@ -17324,7 +17372,7 @@ function cedFillet(pk){
     const nA = fin(S1, c.pts[0]), nB = fin(S2, c.pts[c.pts.length - 1]); if (!nA || !nB) return "Nothing would be left of one of the lines";
     const put = [plMade(A.a, nA)]; if (c.pts.length > 1) { const g = c.arc ? gid() : 0, arc = {pts: c.pts.map(rp)}; if (g) arc.cv = c.pts.slice(1).map(() => g); put.push(plMade(A.a, arc)); }
     cedDrop(rec, B.a, [plMade(B.a, nB)]); cedDrop(rec, A.a, put);
-    msg = c.pts.length > 1 ? (kind === "fillet" ? "Filleted — radius " + f3(S.fc.r) + " ft" : "Chamfered") : "The two lines now meet at a sharp corner";
+    msg = c.pts.length > 1 ? (kind === "fillet" ? "Filleted — radius " + uLenT(S.fc.r) : "Chamfered") : "The two lines now meet at a sharp corner";
   }) !== null && msg && toast(msg, 2400);
   draw();
 }
@@ -17416,7 +17464,7 @@ function cedOffsetClick(sp, p){
     const Q = near(A) <= near(B) ? A : B;
     if (Q.some(q => !isFinite(q[0]) || !isFinite(q[1]))) return "That object cannot be offset by this distance";
     rec.add.push(Object.assign({id: uid("A"), li: o.li, si: o.si, pts: Q.map(rp)}, o.cv ? {cv: o.cv.slice()} : {}, o.cl ? {cl: true} : {}));
-  }) !== null && toast("Offset " + f3(S.cedOD) + " ft — click the next object, or Esc", 2000);
+  }) !== null && toast("Offset " + uLenT(S.cedOD) + " — click the next object, or Esc", 2000);
   draw();
 }
 function cedModAct(a){   // Offset / Join / Explode buttons in AutoCAD mode
@@ -17460,8 +17508,8 @@ const CED_HINTS = {
 function cedHint(){
   const t = S.tool, n = (S.cedJ || []).length;
   if (t === "fillet" || t === "chamfer") return S.cedF ? "AutoCAD " + (t === "fillet" ? "Fillet" : "Chamfer") + ": click the second line (or the next side of the same polyline) · Esc: pick the first again."
-    : t === "fillet" ? "AutoCAD Fillet (radius " + f3(S.fc.r) + " ft): click the first line near the corner, then the second · Enter: change the radius · Esc when done." : "AutoCAD Chamfer (" + f3(S.fc.d1) + " × " + f3(S.fc.d2) + " ft): click the first line, then the second · Enter: change the distances · Esc when done.";
-  if (t === "cedoffset") return S.cedO ? "AutoCAD Offset " + f3(S.cedOD) + " ft: click the side to put the copy on · Esc: pick another." : "AutoCAD Offset " + f3(S.cedOD) + " ft: click the line, polyline, arc or circle to offset · Esc when done.";
+    : t === "fillet" ? "AutoCAD Fillet (radius " + uLenT(S.fc.r) + "): click the first line near the corner, then the second · Enter: change the radius · Esc when done." : "AutoCAD Chamfer (" + uLen(S.fc.d1) + " × " + uLenT(S.fc.d2) + "): click the first line, then the second · Enter: change the distances · Esc when done.";
+  if (t === "cedoffset") return S.cedO ? "AutoCAD Offset " + uLenT(S.cedOD) + ": click the side to put the copy on · Esc: pick another." : "AutoCAD Offset " + uLenT(S.cedOD) + ": click the line, polyline, arc or circle to offset · Esc when done.";
   return (CED_HINTS[t] || "") + (t === "cedjoin" && n ? " — " + n + " picked" : "");
 }
 
@@ -17501,8 +17549,8 @@ async function cadQtyDialog(pre){
   const LS = Q.layers.filter(l => l.runs || l.areas), BS = Q.blocks.filter(b => b.n);
   const body = `<div class="wide"></div><p>Read from the drawing's own objects, at its own scale: lines and polylines by layer (length), closed outlines — polylines, circles, hatches — by layer (area), and blocks by name (count). Tick what to take off: each becomes measurements in a condition named after its layer or block, marked <b>AI</b> for you to check.</p>
     <div class="cq"><table class="sh cqt"><thead><tr><th>Layer</th><th class="n">Lines → length</th><th class="n">Closed → area</th></tr></thead><tbody>${LS.map(l => `<tr${hid[l.li] ? ' class="dim"' : ""}><td>${sw(sc.layers[l.li].c)} ${esc(l.name)}${hid[l.li] ? ' <span class="small">(off)</span>' : ""}</td>
-      <td class="n">${l.runs ? `<label class="pk"><input type="checkbox" data-ql="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.runs} · ${f2(l.len)} ft</label>${twice(l.dlen, "ft")}` : ""}</td>
-      <td class="n">${l.areas ? `<label class="pk"><input type="checkbox" data-qa="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.areas} · ${f2(l.area)} Sft</label>${twice(l.darea, "Sft")}` : ""}</td></tr>`).join("") || '<tr><td colspan="3" class="small">No lines or outlines on these layers</td></tr>'}</tbody></table></div>
+      <td class="n">${l.runs ? `<label class="pk"><input type="checkbox" data-ql="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.runs} · ${uLen2(l.len)}</label>${twice(l.dlen, "ft")}` : ""}</td>
+      <td class="n">${l.areas ? `<label class="pk"><input type="checkbox" data-qa="${l.li}"${pre.L === l.li ? " checked" : ""}> ${l.areas} · ${uArea2(l.area)}</label>${twice(l.darea, "Sft")}` : ""}</td></tr>`).join("") || '<tr><td colspan="3" class="small">No lines or outlines on these layers</td></tr>'}</tbody></table></div>
     <div class="cq"><table class="sh cqt"><thead><tr><th>Block</th><th class="n">Count</th><th>Layer</th><th>Attributes</th></tr></thead><tbody>${BS.map((b, i) => `<tr><td><label class="pk"><input type="checkbox" data-qb="${i}"${pre.B === b.name ? " checked" : ""}> ${esc(b.name)}</label></td><td class="n">${b.n}${b.nn ? ` <span class="small" title="copies inside other blocks">(${b.nn} in blocks)</span>` : ""}${b.dn ? ` <span class="small cqd" title="Inserted twice on one spot: counted once">+${b.dn} twice</span>` : ""}</td><td class="small">${esc([...b.layers].join(", "))}</td><td class="small">${esc(att(b))}</td></tr>`).join("") || '<tr><td colspan="4" class="small">No blocks in model space</td></tr>'}</tbody></table></div>
     ${dup.size ? `<div class="cqdup" style="margin:8px 0;padding:8px;border:1px solid #f0c36d;background:#fff8e6;border-radius:6px"><b>${dup.size}</b> object${dup.size > 1 ? "s are" : " is"} drawn twice — a copy on top of itself, a block inserted twice on one spot, a line drawn again the other way round (AutoCAD's OVERKILL finds them). Counted once above; what they would add is shown as “twice”.
       <div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap"><label class="pk"><input type="checkbox" id="cqDup" checked> Leave them out of the takeoff</label><button class="btn sm" type="button" id="cqDupShow" title="Select them on the drawing">Show them</button></div></div>` : ""}
@@ -17588,7 +17636,7 @@ function cadCompareClouds(r){   // the clouds on this drawing (the earlier compa
   return r.clusters.length;
 }
 function cadCompareReport(r){
-  const oth = esc(cadFileName(r.other)), qr = x => `<tr><td>${esc(x.name)}</td><td class="small">${x.kind === "Nos" ? "block" : x.kind === "ft" ? "length" : "area"}</td><td class="n">${fq(x.v[0], x.kind)}</td><td class="n">${fq(x.v[1], x.kind)}</td><td class="n" style="color:${x.v[1] > x.v[0] ? CMP_COL.add : CMP_COL.del}">${x.v[1] > x.v[0] ? "+" : "−"}${fq(Math.abs(x.v[1] - x.v[0]), x.kind)} ${esc(x.kind)}</td></tr>`;
+  const oth = esc(cadFileName(r.other)), qr = x => `<tr><td>${esc(x.name)}</td><td class="small">${x.kind === "Nos" ? "block" : x.kind === "ft" ? "length" : "area"}</td><td class="n">${fq(x.v[0], x.kind)}</td><td class="n">${fq(x.v[1], x.kind)}</td><td class="n" style="color:${x.v[1] > x.v[0] ? CMP_COL.add : CMP_COL.del}">${x.v[1] > x.v[0] ? "+" : "−"}${fq(Math.abs(x.v[1] - x.v[0]), x.kind)} ${esc(uL(x.kind))}</td></tr>`;
   const none = !r.n.add && !r.n.del && !r.n.chg;
   const body = `<p>${r.older ? "Since" : "Against"} <b>${oth}</b>: <b style="color:${CMP_COL.add}">${r.n.add} added</b> · <b style="color:${CMP_COL.del}">${r.n.del} taken out</b> · <b style="color:${CMP_COL.chg}">${r.n.chg} changed</b> · ${r.n.same.toLocaleString()} the same${none ? " — the two drawings are alike" : ` — in ${r.clusters.length} place${r.clusters.length === 1 ? "" : "s"} on the drawing`}.</p>
     ${r.rows.length ? `<p style="margin-top:8px"><b>What it does to the quantities</b> <span class="small">(${r.older ? "old → new" : "this → that"}; objects drawn twice counted once)</span></p><div style="max-height:40vh;overflow:auto"><table class="sh"><thead><tr><th>Layer / block</th><th></th><th class="n">${r.older ? "Old" : "This"}</th><th class="n">${r.older ? "New" : "That"}</th><th class="n">Change</th></tr></thead><tbody>${r.rows.map(qr).join("")}</tbody></table></div>`
@@ -17790,7 +17838,7 @@ async function plotPdf(o){
   const ink = Lb.rgb(0.12, 0.17, 0.23);
   if (o.legend) {   // the conditions measured on this sheet, with their quantities
     const tot = new Map(); P.proj.items.filter(i => i.file === f && i.page === p && !hiddenItem(i)).forEach(it => { const c = cond(it.cond), kk = qScale(it); if (!c || !kk) return; tot.set(c.id, (tot.get(c.id) || 0) + rowsOf(it, kk).reduce((a, r) => a + r.qty, 0)); });
-    const rows = P.proj.conds.filter(c => tot.has(c.id)).map(c => [c, (c.boq ? c.boq + " · " : "") + c.name + ": " + fq(tot.get(c.id), c.unit) + " " + c.unit]).slice(0, 24);
+    const rows = P.proj.conds.filter(c => tot.has(c.id)).map(c => [c, (c.boq ? c.boq + " · " : "") + c.name + ": " + fq(tot.get(c.id), c.unit) + " " + uL(c.unit)]).slice(0, 24);
     if (rows.length) { const fs = 7.5, w = Math.min(lo.pw, 26 + Math.max(...rows.map(r => font.widthOfTextAtSize(r[1], fs)))), h = rows.length * 10 + 8, x = lo.x + 4, y = lo.y + 4;
       page.drawRectangle({x, y, width: w, height: h, color: Lb.rgb(1, 1, 1), opacity: 0.92, borderColor: Lb.rgb(0.79, 0.84, 0.89), borderWidth: 0.5});
       rows.forEach(([c, t], i) => { const yy = y + h - 12 - i * 10, col = /^#[0-9a-f]{6}$/i.test(c.color) ? Lb.rgb(parseInt(c.color.slice(1, 3), 16) / 255, parseInt(c.color.slice(3, 5), 16) / 255, parseInt(c.color.slice(5, 7), 16) / 255) : ink;
@@ -17923,7 +17971,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
   if (location.protocol !== "file:") learnTeamLoad();   // the team's learned method, added to this browser's
-  window.zdTakeoff = {agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {setUnits, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
