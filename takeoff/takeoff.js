@@ -9604,7 +9604,7 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
    through the GitHub API (a token with Contents: write on the repo, asked when saving and kept only while this page is open), or
    Download gives the file to commit by hand. */
 const TEAM_REPO = "sajjadsj44-max/ZD-Dashboard", TEAM_FILE = "takeoff/users.json", TEAM_ITER = 150000;
-const TM = {list: null, err: "", log: [], token: "", busy: false};
+const TM = {list: null, err: "", log: [], token: "", busy: false, act: null, actErr: "", actTry: 0};
 const teamHex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
 async function teamHash(pw, salt, iter){   // the same as the lock's: PBKDF2-SHA256 of the password, the salt's text as the salt, 32 bytes in hex
   const te = new TextEncoder(), k = await crypto.subtle.importKey("raw", te.encode(pw), "PBKDF2", false, ["deriveBits"]);
@@ -9648,19 +9648,81 @@ async function teamSave(){
   } catch (e) { if (e.tok) TM.token = ""; toast("Not saved: " + (e.message || e) + (e.tok ? " — check the token" : ""), 7000); }
   TM.busy = false; settingsDialog("team");
 }
+/* Team activity (Settings › Team logins): who used the app, day by day. A friend's browser announces its sign-in on the relay
+   each time the team view is opened and again every 20 minutes while it stays open (one computer at a time, index.html);
+   .github/workflows/chat-archive.yml sums those every half hour per user and day, Pakistan time, into takeoff-activity.json on
+   the chat-archive branch (tools/activity_archive.py), and the relay's events not summed yet are added here. A day's use is
+   about 20 minutes per announcement. */
+const ACT_TZ = 5 * 3600, ACT_DAYS = 14;
+const actDay = t => new Date((t + ACT_TZ) * 1000).toISOString().slice(0, 10);
+const actHm = t => new Date((t + ACT_TZ) * 1000).toISOString().slice(11, 16);
+async function teamActivity(){
+  await chatUrl(); const cfg = CH.cfg || {};
+  if (!cfg.relay || !cfg.topic) throw new Error("takeoff/chat.json names no relay");
+  const days = {}, seen = {}, users = new Set((TM.list || []).map(x => x.u));
+  if (cfg.archive) { const r = await fetch(String(cfg.archive).replace(/[^/]*$/, "takeoff-activity.json") + "?t=" + Date.now(), {cache: "no-store"}).catch(() => null);
+    if (r && r.ok) { const j = await r.json().catch(() => ({})); Object.assign(days, j.days || {}); Object.assign(seen, j.seen || {}); } }
+  const r = await fetch(String(cfg.relay).replace(/\/+$/, "") + "/s-" + cfg.topic + "/json?poll=1&since=all", {cache: "no-store"});
+  if (!r.ok) throw new Error("the relay said " + r.status);
+  (await r.text()).split("\n").forEach(l => {
+    let e, m; try { e = JSON.parse(l); m = JSON.parse(e.message); } catch (x) { return; }
+    if (!e.id || seen[e.id] || e.event !== "message" || !m || m.zs !== 1 || m.k !== "claim" || !users.has(m.u) || Math.abs(m.t - e.time) >= 600) return;
+    seen[e.id] = 1;
+    const t = +e.time, D = days[actDay(t)] = days[actDay(t)] || {}, d = D[m.u] = D[m.u] || {f: t, l: t, n: 0, s: []};
+    d.f = Math.min(d.f, t); d.l = Math.max(d.l, t); d.n++;
+    const sid = String(m.sid || "").slice(0, 8); if (sid && !d.s.includes(sid)) d.s.push(sid);
+  });
+  return days;
+}
+function teamActHtml(){   // daily active users (a bar a day) and the totals above the user list
+  if (!TM.act) return `<p class="small" id="tmAct" style="margin:8px 0">${TM.actErr ? esc(TM.actErr) : "Reading who used the app…"}</p>`;
+  const now = Date.now() / 1000, N = TM.list.length, names = new Set(TM.list.map(x => x.u));
+  const keys = Array.from({length: ACT_DAYS}, (_, i) => actDay(now - (ACT_DAYS - 1 - i) * 86400));
+  const who = keys.map(k => Object.keys(TM.act[k] || {}).filter(u => names.has(u)).sort());
+  const max = Math.max(1, ...who.map(w => w.length)), on = TM.list.filter(x => now - teamLast(x.u) < 25 * 60).length;
+  const week = new Set(who.slice(-7).flat()).size, top = who.reduce((a, w, i) => w.length > who[a].length ? i : a, 0);
+  const say = i => `${i === ACT_DAYS - 1 ? "Today" : dmy(keys[i])}: ${who[i].length ? who[i].length + " user" + (who[i].length > 1 ? "s" : "") + " — " + who[i].join(", ") : "nobody"}`;
+  return `<div class="tmact" id="tmAct">
+    <div class="tmhd"><b>Daily active users</b><span class="small">last ${ACT_DAYS} days · Pakistan time</span></div>
+    <div class="tmst"><span><b>${who[ACT_DAYS - 1].length}</b> of ${N} today</span><span><b>${on}</b> online now</span><span><b>${week}</b> in the last 7 days</span></div>
+    <div class="tmbars" id="tmBars" role="img" aria-label="Daily active users, last ${ACT_DAYS} days: ${esc(who.map(w => w.length).join(", "))}">${keys.map((k, i) => {
+      const n = who[i].length, lab = i === ACT_DAYS - 1 || (i === top && n) ? `<em>${n}</em>` : "";
+      return `<div class="tmb${i === ACT_DAYS - 1 ? " now" : ""}" data-tmd="${esc(say(i))}" tabindex="0">${lab}<i style="height:${n ? Math.max(8, Math.round(n / max * 100)) : 0}%"></i><span>${+k.slice(8)}</span></div>`; }).join("")}</div>
+    <div class="small tmread" id="tmRead">${esc(say(ACT_DAYS - 1))}</div></div>`;
+}
+const teamLast = u => Object.values(TM.act || {}).reduce((a, D) => D[u] ? Math.max(a, D[u].l) : a, 0);
+function teamActCells(u){   // Today, Last active, Days used for one user
+  if (!TM.act) return "<td>…</td><td>…</td><td>…</td>";
+  const now = Date.now() / 1000, d = (TM.act[actDay(now)] || {})[u], last = teamLast(u);
+  const days = Array.from({length: ACT_DAYS}, (_, i) => actDay(now - i * 86400)).filter(k => (TM.act[k] || {})[u]).length;
+  const dur = n => { const m = n * 20; return n <= 1 ? "under 20 min" : "~" + [m >= 60 ? Math.floor(m / 60) + " h" : "", m % 60 ? m % 60 + " min" : ""].filter(Boolean).join(" "); };
+  const on = last && now - last < 25 * 60;
+  const today = d ? `${on ? '<i class="tmon" title="Online now"></i>' : ""}${actHm(d.f)}${d.l > d.f ? "–" + actHm(d.l) : ""} <span class="small">· ${dur(d.n)}</span>` : '<span class="small">—</span>';
+  const lk = last ? actDay(last) : "", lastTxt = !last ? "not yet" : on ? "online now" : lk === actDay(now) ? "today " + actHm(last) : lk === actDay(now - 86400) ? "yesterday " + actHm(last) : dmy(lk);
+  return `<td>${today}</td><td>${esc(lastTxt)}</td><td class="n">${days}</td>`;
+}
 function teamPage(){
   const link = new URL("./?team", location.href).href;
   const html = () => !TM.list ? '<div class="small" id="tmBox">Reading the users list…</div>' : `<div id="tmBox" style="width:100%">
-    <p class="small">Friends open the link below and sign in with their own username and password, asked each time. They get the takeoff only — no backups, no settings file, no links to the other ZD pages — and their projects stay in their own browser. A removed user is signed out within 5 minutes of the site being published.</p>
+    <p class="small">Friends open the link below and sign in once with their own username and password — kept on their computer until Sign out, one computer at a time per login. They get the takeoff only — no backups, no settings file, no links to the other ZD pages — and their projects stay in their own browser. A removed user is signed out within 5 minutes of the site being published.</p>
     <div style="display:flex;gap:6px;margin:8px 0"><input type="text" readonly id="tmLink" value="${esc(link)}" style="flex:1" aria-label="Friends' link"><button class="btn sm" id="tmCopy">Copy link</button></div>
     <p class="small">Or give them the Windows app — its own window, no web address: <a href="${esc(new URL("../app/ZD-Takeoff.exe", location.href).href)}" download>ZD-Takeoff.exe</a> (run it once: it installs with a Desktop shortcut).</p>
     ${TM.err ? `<p class="small" style="color:#b42318">${esc(TM.err)}</p>` : ""}
-    ${TM.list.length ? `<table class="sh" style="margin:6px 0"><thead><tr><th>User</th><th>Added</th><th></th></tr></thead><tbody>${TM.list.map((u, i) => `<tr><td>${esc(u.u)}</td><td>${esc(u.at ? dmy(u.at) : "—")}</td><td class="n" style="white-space:nowrap"><button class="btn sm" data-tmpw="${i}">New password…</button> <button class="btn sm dng" data-tmdel="${i}">Remove</button></td></tr>`).join("")}</tbody></table>` : '<p class="small" style="margin:6px 0">No team users yet.</p>'}
+    ${TM.list.length ? teamActHtml() : ""}
+    ${TM.list.length ? `<table class="sh tmlist" style="margin:6px 0"><thead><tr><th>User</th><th>Today</th><th>Last active</th><th class="n" title="Days with any use in the last ${ACT_DAYS} days">Days (${ACT_DAYS})</th><th>Added</th><th></th></tr></thead><tbody>${TM.list.map((u, i) => `<tr><td>${esc(u.u)}</td>${teamActCells(u.u)}<td>${esc(u.at ? dmy(u.at) : "—")}</td><td class="n" style="white-space:nowrap"><button class="btn sm" data-tmpw="${i}">New password…</button> <button class="btn sm dng" data-tmdel="${i}">Remove</button></td></tr>`).join("")}</tbody></table>` : '<p class="small" style="margin:6px 0">No team users yet.</p>'}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0"><input type="text" id="tmU" data-enter="tmAdd" placeholder="Username" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="New user's name" style="width:140px"><input type="text" class="secret" id="tmP" data-enter="tmAdd" placeholder="Password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" aria-label="New user's password" style="width:140px"><button class="btn sm" id="tmAdd">Add user</button></div>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="small" style="flex:1">${TM.log.length ? "<b>Not saved to the site yet:</b> " + esc(TM.log.join(", ")) : "As on the site."}</span><button class="btn sm" id="tmDl" title="users.json to commit in takeoff/ by hand">Download users.json</button><button class="btn sm pri" id="tmSave"${TM.log.length && !TM.busy ? "" : " disabled"}>Save to the site…</button></div></div>`;
   const wire = paint => {
     if (!TM.list) { teamLoad().then(paint); return; }
+    if (TM.list.length && Date.now() - TM.actTry > 120000) {   // who used the app: read again when the page is shown after 2 minutes
+      TM.actTry = Date.now();
+      teamActivity().then(a => { TM.act = a; TM.actErr = ""; }, e => { if (!TM.act) TM.actErr = "Could not read who used the app (" + (e.message || e) + ")."; }).then(paint);
+    }
     const box = $("tmBox"); if (!box || box.dataset.w) return; box.dataset.w = 1;
+    const bars = $("tmBars");
+    if (bars) { const show = e => { const b = e.target.closest(".tmb"); if (b && $("tmRead")) $("tmRead").textContent = b.dataset.tmd; };
+      bars.addEventListener("mouseover", show); bars.addEventListener("focusin", show);
+      bars.addEventListener("mouseleave", () => { const b = bars.querySelector(".tmb.now"); if (b && $("tmRead")) $("tmRead").textContent = b.dataset.tmd; }); }
     const add = async () => {
       const u = $("tmU").value.trim().toLowerCase(), pw = $("tmP").value;
       if (!/^[a-z0-9._-]{2,32}$/.test(u)) return toast("A username is 2–32 letters, digits, dots, dashes or underscores", 3500);

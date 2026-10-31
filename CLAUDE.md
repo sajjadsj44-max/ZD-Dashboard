@@ -63,6 +63,9 @@
   password or a removed user asks again). **One computer / browser at a time per login:** each sign-in is announced (HMAC
   from the chat key) on the chat relay's topic `"s-" + topic`, renewed every 20 min while open and held for 2 h; another
   browser is refused while it is held, and a browser that was taken over after that is signed out. A new password frees it.
+  Those sign-in announcements also give the owner's Settings › Team logins its **daily active users** (14-day bars, per user:
+  today, last active, days used): `tools/activity_archive.py` sums them per user and day (Pakistan time) every half hour into
+  `takeoff-activity.json` on the `chat-archive` branch (`tools/test_activity_archive.py`); the page adds the relay's newer ones.
 - Feedback chat: friends' **Feedback** button ↔ the owner's **Inbox** (top bar). No server of our own: messages are events on
   the free relay ntfy.sh (topic in `takeoff/chat.json`; it keeps them 12 h), copied every half hour by
   `.github/workflows/chat-archive.yml` (`tools/chat_archive.py`) to `takeoff-chat.jsonl` on the `chat-archive` branch, read back
