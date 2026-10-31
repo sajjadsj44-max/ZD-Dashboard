@@ -29,6 +29,8 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
     if (/exceljs/.test(u)) return r.fulfill({path: path.join(LIBS, "exceljs/dist/exceljs.min.js"), contentType: "text/javascript", headers: H});
     return r.abort();
   });
+  // the relay and the chat-archive branch (Team logins reads who used the app): empty, no network
+  await ctx.route(/ntfy\.sh|raw\.githubusercontent\.com/, r => r.fulfill({status: 200, contentType: "text/plain", headers: {"Access-Control-Allow-Origin": "*"}, body: ""}));
   const page = await ctx.newPage(), errors = [];
   page.on("pageerror", e => errors.push(String(e)));
   page.on("console", m => { if (m.type() === "error" && !/favicon/.test(m.text())) errors.push("console: " + m.text()); });

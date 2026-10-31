@@ -16,12 +16,14 @@ const pb = (pw, s) => crypto.pbkdf2Sync(pw, s, 150000, 32, "sha256").toString("h
 const entry = (u, pw) => { const s = crypto.randomBytes(16).toString("hex"); return {u, s, h: pb(pw, s), c: crypto.createHash("sha256").update(pb(pw, s + ":chat")).digest("hex"), iter: 150000, at: "2026-10-29"}; };
 /* the relay (ntfy.sh) for the sign-ins: events in memory, each stamped with the time its sender's clock gives (a browser below
    runs 3 hours ahead, as a computer used later) */
-const RELAY = "https://relay.test", TOPIC = "zd-team-test", SESS = [];
+const RELAY = "https://relay.test", TOPIC = "zd-team-test", SESS = [], ARCH = "https://raw.test/chat-archive/takeoff-chat.jsonl";
+let ACT = "";   // takeoff-activity.json on the chat-archive branch (tools/activity_archive.py)
 const sessEv = () => SESS.map(e => JSON.parse(e.message));
 async function routes(ctx){
   await ctx.addInitScript(() => { try { delete Navigator.prototype.serviceWorker; } catch (e) {} });
   await ctx.route(/\/takeoff\/users\.json/, r => r.fulfill({status: 200, contentType: "application/json", body: LIST}));
-  await ctx.route(/\/takeoff\/chat\.json/, r => r.fulfill({status: 200, contentType: "application/json", body: JSON.stringify({relay: RELAY, topic: TOPIC})}));
+  await ctx.route(/\/takeoff\/chat\.json/, r => r.fulfill({status: 200, contentType: "application/json", body: JSON.stringify({relay: RELAY, topic: TOPIC, archive: ARCH})}));
+  await ctx.route(u => u.href.startsWith("https://raw.test/"), r => /takeoff-activity\.json/.test(r.request().url()) && ACT ? r.fulfill({status: 200, contentType: "application/json", headers: {"access-control-allow-origin": "*"}, body: ACT}) : r.fulfill({status: 404, body: ""}));
   await ctx.route(u => u.href.startsWith(RELAY + "/s-" + TOPIC), r => {
     const q = r.request(), cors = {"access-control-allow-origin": "*"};
     if (q.method() === "POST") { let m = {}; try { m = JSON.parse(q.postData()); } catch (e) {}
@@ -173,6 +175,35 @@ let LIST = "";
   ok(!(await c.$("#zd-lock")), "…and the new password signs in at once (the old sign-ins can't hold it)");
   ok(e3.length === 0, "no page errors" + (e3.length ? ": " + e3[0] : ""));
   await A.close(); await B.close(); await C.close();
+
+  console.log("the owner sees who used the app (Settings › Team logins)");
+  SESS.length = 0; LIST = JSON.stringify({iter: 150000, users: [entry("ali", "abc12345"), entry("bilal", "takeoff9"), entry("zara", "zz99zz")]});
+  const nowS = Math.floor(Date.now() / 1000), pk = t => new Date((t + 5 * 3600) * 1000).toISOString().slice(0, 10);
+  const push = (u, sid, t) => SESS.push({id: "s" + SESS.length, time: t, event: "message", topic: "s-" + TOPIC, message: JSON.stringify({zs: 1, u, sid, k: "claim", t, h: "x"})});
+  push("bilal", "aaaaaaaaaaaa", nowS - 1300); push("bilal", "aaaaaaaaaaaa", nowS - 900); push("bilal", "aaaaaaaaaaaa", nowS - 120);
+  push("ali", "bbbbbbbbbbbb", nowS - 1600);   // already summed in the archive (its id is in "seen"): counted once
+  push("nobody", "cccccccccccc", nowS - 100);   // not a user
+  ACT = JSON.stringify({tz: 5, seen: {s3: nowS - 1600}, days: {[pk(nowS - 86400)]: {ali: {f: nowS - 88000, l: nowS - 86400, n: 2, s: ["bbbbbbbb"]}}, [pk(nowS - 1600)]: {ali: {f: nowS - 1600, l: nowS - 1600, n: 1, s: ["bbbbbbbb"]}}}});
+  const O = await browser.newContext({viewport: {width: 1400, height: 900}}); await routes(O);
+  const ow = await O.newPage(), e4 = []; ow.on("pageerror", e => e4.push(String(e)));
+  await ow.goto(BASE, {waitUntil: "load"}); await ow.fill("#zd-lock-input", "sa"); await ow.press("#zd-lock-input", "Enter");
+  await ow.waitForSelector("#zd-lock", {state: "detached"}); await ow.waitForTimeout(800);
+  await ow.keyboard.press("Control+,"); await ow.waitForSelector("#stgNav"); await ow.click('#stgNav [data-spg="team"]');
+  await ow.waitForSelector(".tmact", {timeout: 10000}).catch(() => {});
+  const st = await ow.evaluate(() => { const a = document.querySelector(".tmact"); return a ? a.querySelector(".tmst").textContent.replace(/\s+/g, " ").trim() : ""; });
+  ok(/2 of 3 today/.test(st) && /1 online now/.test(st) && /2 in the last 7 days/.test(st), "daily active users: 2 of 3 today, 1 online now, 2 this week (" + st + ")");
+  const bars = await ow.evaluate(() => [...document.querySelectorAll("#tmBars .tmb")].map(b => ({now: b.classList.contains("now"), h: parseFloat(b.querySelector("i").style.height) || 0})));
+  ok(bars.length === 14 && bars[13].now && bars[13].h === 100 && bars[12].h > 0 && bars[12].h < 100 && bars.slice(0, 12).every(b => b.h === 0), "a bar a day for 14 days: today 2 users (full), yesterday 1, the others none");
+  await ow.hover("#tmBars .tmb:nth-child(13)");
+  ok(/: 1 user — ali$/.test(await ow.textContent("#tmRead")), "pointing at a day names who used it");
+  const rows = await ow.evaluate(() => [...document.querySelectorAll("table.tmlist tbody tr")].map(tr => [...tr.cells].slice(0, 4).map(td => td.textContent.replace(/\s+/g, " ").trim()).concat(!!tr.querySelector(".tmon"))));
+  const R2 = Object.fromEntries(rows.map(r => [r[0], r]));
+  ok(R2.bilal && R2.bilal[4] && /~1 h$/.test(R2.bilal[1]) && R2.bilal[2] === "online now" && R2.bilal[3] === "1", "bilal: online now, used about an hour today, 1 day (" + (R2.bilal || []).join(" | ") + ")");
+  ok(R2.ali && !R2.ali[4] && /under 20 min$/.test(R2.ali[1]) && /^today \d\d:\d\d$/.test(R2.ali[2]) && R2.ali[3] === "2", "ali: today (counted once, not twice), 2 days (" + (R2.ali || []).join(" | ") + ")");
+  ok(R2.zara && R2.zara[1] === "—" && R2.zara[2] === "not yet" && R2.zara[3] === "0", "zara: not used yet");
+  ok(!rows.some(r => r[0] === "nobody"), "only users in the list are shown");
+  ok(e4.length === 0, "no page errors" + (e4.length ? ": " + e4[0] : ""));
+  await O.close();
 
   await browser.close();
   console.log(`\n${pass} passed, ${fail} failed`);

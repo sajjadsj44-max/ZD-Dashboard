@@ -732,6 +732,19 @@ table.mattbl .mr{font-size:10px;color:var(--muted);font-weight:400}table.mattbl 
 .dlg:has(.setw){width:min(1000px,100%);height:min(720px,calc(100vh - 32px))}
 .dlg:has(.setw) .db{padding:0;overflow:hidden;display:flex;flex:1;min-height:0}.dlg:has(.setw) #dlgErr{display:none}
 .setw{flex:1;display:flex;min-height:0;min-width:0}
+/* Settings › Team logins: daily active users (one bar a day, today's in the accent) above the user list */
+.tmact{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0 4px;background:#fff}
+.tmhd{display:flex;align-items:baseline;gap:8px}.tmhd b{font-size:13px;color:var(--navy)}
+.tmst{display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 8px;font-size:12px;color:var(--muted)}.tmst b{font-size:18px;color:var(--txt);font-variant-numeric:tabular-nums;margin-right:2px}
+.tmbars{display:flex;align-items:flex-end;gap:2px;height:78px;border-bottom:1px solid var(--line);padding-top:14px}
+.tmb{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;position:relative;cursor:default;outline:0;border-radius:4px}
+.tmb i{display:block;width:100%;max-width:26px;background:#93c5fd;border-radius:4px 4px 0 0;min-height:0}
+.tmb.now i{background:var(--accent,#2563eb)}.tmb:hover i,.tmb:focus-visible i{background:#3b82f6}.tmb.now:hover i{background:#1d4ed8}
+.tmb:focus-visible{box-shadow:0 0 0 2px #bfdbfe}
+.tmb em{position:absolute;top:-14px;font-style:normal;font-size:10.5px;font-weight:600;color:var(--txt);font-variant-numeric:tabular-nums}
+.tmb span{position:absolute;bottom:-16px;font-size:9.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tmread{margin-top:20px;min-height:16px;color:var(--txt)}
+.tmlist td{white-space:nowrap}.tmon{display:inline-block;width:8px;height:8px;border-radius:50%;background:#16a34a;margin-right:5px;vertical-align:0;box-shadow:0 0 0 2px #dcfce7}
 .setw nav{width:210px;flex:none;overflow:auto;border-right:1px solid var(--line);background:#f6f8fb;padding:10px 8px;display:flex;flex-direction:column;gap:1px}
 .setw nav input{margin:0 0 8px;padding:5px 9px;font-size:12px}
 .setw .spg{border:0;background:none;text-align:left;padding:7px 10px;border-radius:6px;font:inherit;font-size:12.5px;color:#3c4c60;cursor:pointer}
@@ -1608,7 +1621,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-10-31d"></script>
+<script type="module" src="takeoff.js?v=2026-10-31p"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
