@@ -768,6 +768,14 @@ list moved to `dashboards/`; every dashboard keeps its own address. `tools/test_
   source reads `ZD Rate Analysis <code>, DD-Mon-YYYY — built-up rate …` and counts assumed rows. A code not in the
   library, priced in another unit, or with unrated rows gives **RATE NOT AVAILABLE** — never a guess. Open the
   dashboard and the takeoff on the same host (Netlify or GitHub Pages) — browser storage is per host.
+- **BOQ item picker** (New / Edit condition): a browser with no rate library yet (a friend's on `?team`, the Windows
+  app, one that never opened Rate Analysis) reads it from the QS Cost Control page on the same site by itself — that
+  page's own `raLoad()` run out of sight, without its dashboards' CDN libraries — and keeps it in `SAJ_QSCOST_v1`, as
+  a first visit to Rate Analysis would. A library read this way is read again when QS Cost Control is published anew
+  (its build in `version.json`). The items can be browsed by group — Concrete, Formwork, Steel, Block / Brick
+  masonry, Plaster, Ceiling, Flooring & tiles, Paint, Waterproofing & roofing, Doors, Windows, Earthwork and the
+  services trades — each listed in full under its sub-categories, with its unit and built-up rate; or suggested from
+  the condition's name. `tools/test_takeoff_boqlib.js` checks it.
 - **Opening schedule**: marks (D1, W2 …) with type, width and height, entered once; the Opening tool picks a
   mark (its size wins over the clicked width) or adds a new one, and can keep placing the same mark. Changing a
   size updates every opening with that mark.
