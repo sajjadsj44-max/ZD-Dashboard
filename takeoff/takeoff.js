@@ -8229,11 +8229,19 @@ async function exportExcel(){
     ws.mergeCells("A3:I3"); ws.getCell("A3").value = "Blue = measured / input · green = formula · grey = totals · yellow = check (see Assumptions)"; ws.getCell("A3").font = {size: 9, color: {argb: "FF52514E"}};
     const SR = sheetRows(), anyF = SR.some(g => g.rows.some(x => x.r.F != null));   // a slope: its factor in column L, inside the row's PRODUCT
     if (anyF) { ws.getColumn(12).width = 10; ws.getCell("A2").value += " · sloped rows × slope √(1 + p²) in column L"; }
+    /* a wall measured in ft whose condition has a height or thickness (its Properties): W = its thickness, H = its height on every row,
+       its Qty still its length (Nos × L), and its wall area (Nos × L × H × faces) and volume (Nos × L × W × H) in two columns of their
+       own — the figures its Properties show */
+    const wallWH = c => c.type === "linear" && c.unit === "ft" && (+c.h > 0 || +c.t > 0), anyW = SR.some(g => wallWH(g.c)), cA = anyF ? 13 : 12, cV = cA + 1;
+    if (anyW) { ws.getColumn(cA).width = 14; ws.getColumn(cV).width = 14;
+      ws.getCell("A2").value += " · a wall in " + uL("ft") + ": W its thickness, H its height (its Properties), Qty its length; wall area and volume in columns " + xlLetter(cA) + "–" + xlLetter(cV); }
     const hr = ws.getRow(4); hr.values = ["S.No", "Description", "Drawing / page", "Nos", "L (" + uL("ft") + ") / Area", "W (" + uL("ft") + ")", "H (" + uL("ft") + ")", "Qty", "Unit", "Location", "QA"].concat(anyF ? ["Slope ×"] : []);
+    if (anyW) { if (!anyF) hr.getCell(12).value = ""; hr.getCell(cA).value = "Wall area (" + uL("Sft") + ")"; hr.getCell(cV).value = "Volume (" + uL("cft") + ")"; }
     hr.font = {bold: true, color: {argb: "FFFFFFFF"}}; hr.eachCell(c => { c.fill = HEAD; });
     let row = 5, sn = 0; const totals = [];
     for (const g of SR) {
-      const head = ws.getRow(row); head.values = ["", (g.c.boq ? g.c.boq + " — " : "") + g.c.name + " (" + uL(g.c.unit) + ")" + (g.c.type === "linear" && g.c.unit !== "ft" ? " — H " + uLenT(+g.c.h) + (g.c.t ? ", T " + uLenT(+g.c.t) : "") + ((+g.c.faces || 1) > 1 ? ", " + g.c.faces + " faces" : "") : g.c.unit === "cft" ? " — T " + uLenT(+g.c.t) : "")];
+      const ww = wallWH(g.c), faces = +g.c.faces || 1;
+      const head = ws.getRow(row); head.values = ["", (g.c.boq ? g.c.boq + " — " : "") + g.c.name + " (" + uL(g.c.unit) + ")" + (ww ? " — " + [+g.c.h > 0 ? "H " + uLenT(+g.c.h) : "", +g.c.t > 0 ? "T " + uLenT(+g.c.t) : "", faces > 1 ? faces + " faces" : ""].filter(Boolean).join(", ") : g.c.type === "linear" && g.c.unit !== "ft" ? " — H " + uLenT(+g.c.h) + (g.c.t ? ", T " + uLenT(+g.c.t) : "") + ((+g.c.faces || 1) > 1 ? ", " + g.c.faces + " faces" : "") : g.c.unit === "cft" ? " — T " + uLenT(+g.c.t) : "")];
       head.font = {bold: true}; for (let n = 1; n <= 9; n++) head.getCell(n).fill = GREY;
       const first = ++row;
       g.rows.forEach(x => {
@@ -8241,16 +8249,22 @@ async function exportExcel(){
         rr.getCell(1).value = i === 0 ? ++sn : null;
         rr.getCell(2).value = rowDesc(x);
         rr.getCell(3).value = pageName(it);
-        [r.nos, r.A != null ? uX(r.A, "Sft") : uX(r.L, "ft"), uX(r.W, "ft"), uX(r.H, "ft")].forEach((v, j) => {
+        const W = ww ? (+g.c.t > 0 ? rD(+g.c.t) : null) : r.W, H = ww ? (+g.c.h > 0 ? rD(+g.c.h) : null) : r.H;
+        [r.nos, r.A != null ? uX(r.A, "Sft") : uX(r.L, "ft"), uX(W, "ft"), uX(H, "ft")].forEach((v, j) => {
           const cell = rr.getCell(4 + j);
           if (j === 1 && r.runs && r.runs.length > 1) cell.value = {formula: r.runs.map(x => isM() ? String(uX(x, "ft")) : f3(x)).join("+"), result: uX(r.L, "ft")};
           else cell.value = v == null ? null : v;
           if (v != null) { cell.fill = BLUE; cell.numFmt = j === 0 ? "0.###" : "0.000"; cell.protection = {locked: false}; }
         });
         if (r.F != null) { const fc = rr.getCell(12); fc.value = r.F; fc.fill = BLUE; fc.numFmt = "0.0000"; fc.protection = {locked: false}; }   // √(1 + p²) as an input cell, live in the PRODUCT
-        const q = rr.getCell(8);
-        q.value = r.below ? {formula: "0", result: 0} : {formula: (r.sign < 0 ? "-" : "") + (r.F != null ? `PRODUCT(D${row}:G${row},L${row})` : `PRODUCT(D${row}:G${row})`), result: uV(r.qty, r.unit)};
+        const q = rr.getCell(8), cols = ww ? `D${row}:E${row}` : `D${row}:G${row}`;   // (a wall in ft: its Qty its length — W and H not in it)
+        q.value = r.below ? {formula: "0", result: 0} : {formula: (r.sign < 0 ? "-" : "") + (r.F != null ? `PRODUCT(${cols},L${row})` : `PRODUCT(${cols})`), result: uV(r.qty, r.unit)};
         q.fill = r.below ? YELLOW : GREEN; q.numFmt = qFmt(r.unit);
+        if (ww) {   // its wall area and volume, as its Properties work them out (on plan: no slope)
+          const n0 = r.sign * (r.nos || 1) * (uX(r.L, "ft") || 0), neg = r.sign < 0 ? "-" : "";
+          if (H != null) { const c2 = rr.getCell(cA); c2.value = {formula: `${neg}D${row}*E${row}*G${row}` + (faces > 1 ? "*" + faces : ""), result: n0 * uX(H, "ft") * faces}; c2.fill = GREEN; c2.numFmt = qFmt("Sft"); }
+          if (H != null && W != null) { const c3 = rr.getCell(cV); c3.value = {formula: `${neg}D${row}*E${row}*F${row}*G${row}`, result: n0 * uX(W, "ft") * uX(H, "ft")}; c3.fill = GREEN; c3.numFmt = qFmt("cft"); }
+        }
         rr.getCell(9).value = uL(r.unit);
         if (i === 0) { rr.getCell(10).value = locText(locOf(it)); rr.getCell(11).value = QA_NAMES[it.qa || ""] + (it.qa === "checked" ? " — " + it.qaBy + ", " + dmy(it.qaAt) : "") + (it.ai && it.qa !== "checked" ? " · AI-generated" : "") + (it.copied && it.qa !== "checked" ? " · copied, not checked" : "") + (verOf(it) ? " · " + VER_NAMES[verOf(it)] : "");
           if (it.qa !== "checked") rr.getCell(11).fill = YELLOW; }
@@ -8259,6 +8273,8 @@ async function exportExcel(){
       });
       const tr = ws.getRow(row); tr.getCell(2).value = "Total " + g.c.name; tr.getCell(9).value = uL(g.c.unit);
       tr.getCell(8).value = {formula: `SUM(H${first}:H${row - 1})`, result: uV(g.t.net, g.c.unit)}; tr.getCell(8).numFmt = qFmt(g.c.unit);
+      if (ww) [[cA, "Sft", +g.c.h > 0], [cV, "cft", +g.c.h > 0 && +g.c.t > 0]].forEach(([n, u, on]) => { if (!on) return; const L1 = xlLetter(n), tc = tr.getCell(n);
+        tc.value = {formula: `SUM(${L1}${first}:${L1}${row - 1})`, result: g.rows.reduce((a, x) => { const v = ws.getRow(first + g.rows.indexOf(x)).getCell(n).value; return a + (v && typeof v.result === "number" ? v.result : 0); }, 0)}; tc.numFmt = qFmt(u); tc.fill = GREY; });
       tr.font = {bold: true}; for (let n = 1; n <= 9; n++) tr.getCell(n).fill = GREY;
       totals.push({c: g.c, cell: "H" + row, t: g.t}); row++;
     }
