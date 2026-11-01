@@ -3836,12 +3836,49 @@ async function colsDialog(){
   toast(P.proj.cols.length ? P.proj.cols.length + " custom column" + (P.proj.cols.length > 1 ? "s" : "") + " — hover a condition, or see the measurement sheet" : "No custom columns", 2600);
 }
 const asmLabel = l => l.f + (l.w ? " + " + l.w + " % waste" : "");
+/* the Workbook (workbook.js — the bill as an estimating workbook, as RIB CostX's): loaded with takeoff.js's ?v= when it is first
+   opened, given the app's own figures (conditions, quantity types, bill lines, rates, the rate library, formulas, units, dialogs) */
+let WBK = null;
+const wbMod = () => WBK || (WBK = import("./workbook.js" + CADV).catch(e => { WBK = null; throw e; }));
+const wbApi = () => ({P, S, save, refresh, toast, busy, ask, choose, esc, f2, fq, uL, uV, uR, uX, isM, dmy, today, uid, cond, condQ, condQTypes, QT_NAMES, condVars, condTotals,
+  billLines, billQ, billQty, rateOf, raPrice, raLib, boqMatches, boqGroups, BOQ_GROUPS, evalFormula, refOf, normU, loadExcel, saveBlob, fileBase, qFmt, xlLetter});
+async function openWb(){ if (!P.proj) return toast("Open a project first", 2000); try { (await wbMod()).open(wbApi()); } catch (e) { toast("The workbook could not be loaded — " + (e.message || e), 5000); } }
+async function wbXls(){ if (!P.proj) return toast("Open a project first", 2000); try { await (await wbMod()).exportExcel(wbApi()); } catch (e) { toast("The workbook could not be loaded — " + (e.message || e), 5000); } }
+/* a condition's quantities by type (CostX's quantity types): its own (Q, in its unit), length, wall area (× H × faces), volume
+   (× H × T), area, perimeter, perimeter less doors, count — each {v, unit, name} from its measurements (only: some of them).
+   null when the condition has no such quantity (a wall area needs H, a volume H and T, or an area T) */
+const QT_NAMES = {q: "Quantity", len: "Length", area: "Wall area", vol: "Volume", sarea: "Area", per: "Perimeter", pd: "Perimeter less doors", n: "Count"};
+function condQ(c, qt, only, vars){
+  const v = vars || condVars(c, only), H = +c.h || 0, T = +c.t || 0, fc = +c.faces || 1, mk = (x, unit) => ({v: x, unit, name: QT_NAMES[qt]});
+  if (!qt || qt === "q") return mk(v.Q, c.unit);
+  if (c.type === "linear") { const len = c.unit === "ft" ? v.Q : v.L;
+    if (qt === "len") return mk(len, "ft");
+    if (qt === "area") return c.unit === "Sft" ? mk(v.Q, "Sft") : H > 0 ? mk(len * H * fc, "Sft") : null;
+    if (qt === "vol") return c.unit === "cft" ? mk(v.Q, "cft") : H > 0 && T > 0 ? mk(len * H * T, "cft") : null;
+    if (qt === "n") return mk(v.N, "Nos"); return null; }
+  if (c.type === "area") {
+    if (qt === "sarea") return mk(c.unit === "Sft" ? v.Q : v.A, "Sft");
+    if (qt === "vol") return c.unit === "cft" ? mk(v.Q, "cft") : T > 0 ? mk(v.A * T, "cft") : null;
+    if (qt === "per") return mk(v.P, "ft"); if (qt === "pd") return mk(v.PD, "ft"); if (qt === "n") return mk(v.N, "Nos"); return null; }
+  return qt === "n" ? mk(v.N, "Nos") : null;
+}
+const condQTypes = c => (c.type === "linear" ? ["len", "area", "vol", "n"] : c.type === "area" ? ["sarea", "vol", "per", "pd", "n"] : ["n"]).filter(qt => condQ(c, qt, null, {Q: 0, A: 0, P: 0, PD: 0, D: 0, L: 0, N: 0, H: +c.h || 0, T: +c.t || 0}));
+/* the quantity a condition's bill line and summary carry: c.bq ("len", "area", "vol") or, unset, a wall measured in ft with its
+   height and thickness by its volume (cft), with its height only by its wall area (Sft) — as its rate is priced (masonry per cft);
+   a rate typed by hand for its own unit keeps it (its amount does not change). "" = its own quantity */
+function billQ(c){
+  if (c.bq) return c.bq === "len" && c.unit === "ft" ? "" : condQ(c, c.bq, null, {Q: 0, A: 0, P: 0, PD: 0, D: 0, L: 0, N: 0, H: +c.h || 0, T: +c.t || 0}) ? c.bq : "";
+  if (c.type !== "linear" || c.unit !== "ft" || !(+c.h > 0) || (+c.rate > 0 && !String(c.ra || "").trim())) return "";
+  return +c.t > 0 ? "vol" : "area";
+}
+function billQty(c, only, vars){ const bq = billQ(c), q = condQ(c, bq || "q", only, vars); return {qty: q ? q.v : 0, unit: q ? q.unit : c.unit, bq}; }
 function billLines(only){   // [{c, kind:"cond"|"asm", a, name, unit, qty, rate, src, date, ra, na, boq, f, w, err}]
   const out = [], ref = refOf(only);
   P.proj.conds.forEach(c => {
     const vars = condVars(c, only);
     if (!P.proj.items.some(i => i.cond === c.id && (!only || only(i))) && (only || !(c.asm || []).length)) return;
-    out.push(Object.assign({c, kind: "cond", name: c.name, unit: c.unit, qty: vars.Q, boq: c.boq || ""}, rateOf(c, c.unit)));
+    const bqx = billQty(c, only, vars);   // (its bill quantity: its volume or wall area when it is billed so — billQ)
+    out.push(Object.assign({c, kind: "cond", name: c.name, unit: bqx.unit, qty: bqx.qty, bq: bqx.bq, boq: c.boq || ""}, rateOf(c, bqx.unit)));
     (c.asm || []).forEach(a => { let qty = 0, err = ""; try { qty = evalFormula(a.f || "0", vars, ref) * (1 + (+a.w || 0) / 100); } catch (e) { err = e.message; }
       out.push(Object.assign({c, kind: "asm", a, name: a.name, unit: a.unit, qty, f: a.f, w: +a.w || 0, err, boq: a.boq || ""}, rateOf(a, a.unit))); });
   });
@@ -3870,7 +3907,7 @@ function renderBill(){
     L.forEach(l => {
       const amt = l.qty * l.rate, cp = compOf(l), ca = cp ? [cp.mat, cp.lab, cp.eqp, cp.oth].map(v => v * l.qty) : null; tot += amt; if (ca) ca.forEach((v, i) => { GC[i] += v; });
       h += `<tr class="${l.kind === "cond" ? "ch2" : "it"}"><td>${l.kind === "asm" ? "↳ " : `${++n}. <span class="sw" style="background:${l.c.color}"></span>`}${l.boq ? `<span class="boq">${esc(l.boq)}</span> ` : ""}${esc(l.name)}${l.kind === "cond" ? ` <button class="rn" data-asm="${esc(l.c.id)}" title="Items this condition drives, and rates">&#9881; Assembly</button>` : ""}
-        <div class="ds">${l.kind === "asm" ? (l.err ? '<span style="color:var(--red)">' + esc(l.err) + "</span>" : "= " + esc(asmLabel(l))) : "measured"} · ${rateNote(l)}${sp && l.rate > 0 && !cp ? " · typed rate — no split" : ""}</div>${sp && ca ? splitLn(ca) : ""}</td>
+        <div class="ds">${l.kind === "asm" ? (l.err ? '<span style="color:var(--red)">' + esc(l.err) + "</span>" : "= " + esc(asmLabel(l))) : l.bq ? "measured · " + esc(QT_NAMES[l.bq].toLowerCase()) + " = " + (l.bq === "vol" ? "L × H × T" : "L × H" + ((+l.c.faces || 1) > 1 ? " × " + l.c.faces + " faces" : "")) : "measured"} · ${rateNote(l)}${sp && l.rate > 0 && !cp ? " · typed rate — no split" : ""}</div>${sp && ca ? splitLn(ca) : ""}</td>
         <td class="n">${fq(l.qty, l.unit)}<div class="ds">${esc(uL(l.unit))}</div></td><td class="n">${l.rate ? f2(uR(l.rate, l.unit)) : "—"}</td><td class="n">${l.rate ? f2(amt) : "—"}</td></tr>`;
     });
     all += tot; GC.forEach((v, i) => { AC[i] += v; });
@@ -7980,6 +8017,7 @@ async function editCond(c){
      <div class="fg"><label>Height H (${uL("ft")})</label><input type="text" id="cH" value="${d.h ? uLenIn(+d.h) : ""}" placeholder="walls: floor to ceiling"></div>
      <div class="fg"><label>Thickness T (${uL("ft")})</label><input type="text" id="cT" value="${d.t ? uLenIn(+d.t) : ""}" placeholder="${isM() ? "230 mm = 0.23" : "9&quot; = 0.75"}"></div>
      <div class="fg"><label>Faces</label><input type="number" id="cF" min="1" max="2" step="1" value="${+d.faces || 1}"></div>
+     <div class="fg nocnt"><label title="The quantity its bill line, the summary and the workbook carry — as its rate is priced">Bill / summary as</label><select id="cBq"><option value=""${!d.bq ? " selected" : ""}>Auto — a wall in ${uL("ft")} with H and T by volume</option><option value="len"${d.bq === "len" ? " selected" : ""}>Length (${uL("ft")})</option><option value="area"${d.bq === "area" ? " selected" : ""}>Wall area (${uL("Sft")}) — L × H × faces</option><option value="vol"${d.bq === "vol" ? " selected" : ""}>Volume (${uL("cft")}) — L × H × T</option></select></div>
      <div class="fg"><label>Deduct openings / voids over${isM() ? " (" + uL(dedU(d)) + ")" : ""}</label><input type="text" id="cD" value="${isM() ? uDedIn(+d.dedMin || 0, dedU(d)) : f2(+d.dedMin || 0)}"></div>
      <div class="fg nocnt"><label>Slope (measured on plan)</label><input type="text" id="cPitch" value="${+d.pitch > 0 ? pitchIn(+d.pitch) : ""}" placeholder="flat · 4:12 · 33% · 18.4°" title="Roof, ramp or sloped run measured on plan: rise:run (4:12), percent (33%) or degrees (18.4°). Plan area / length × √(1 + p²)"><span class="small" id="cPitchF">${+d.pitch > 0 ? "× " + slopeF(+d.pitch).toFixed(4) + " (" + (Math.atan(+d.pitch) * 180 / Math.PI).toFixed(1) + "°)" : "plan × √(1 + p²)"}</span></div>
      <div class="fg w2"><label>Group (folder in the conditions list, e.g. Exterior working)</label><input type="text" id="cGrp" list="dlGrp" value="${esc(d.group || "")}" placeholder="none" autocomplete="off"><datalist id="dlGrp">${[...new Set(P.proj.conds.map(x => x.group).filter(Boolean))].map(g => `<option value="${esc(g)}">`).join("")}</datalist></div>
@@ -8005,15 +8043,18 @@ async function editCond(c){
     if (unit === "cft" && !(T > 0) && !(c && c.cfCond && type === "area")) return "A quantity in cft needs the thickness T";   // (a cut / fill from spot levels: each measurement has its depth)
     const pitch = type === "count" ? 0 : parsePitch($("cPitch").value); if (isNaN(pitch)) return "Slope: rise:run like 4:12, a percent like 33% or degrees like 18.4° (blank = flat)";
     return {name, type, unit, h: H || "", t: T || "", pitch: pitch > 0 ? +pitch.toFixed(6) : "", faces: Math.max(1, Math.min(2, +$("cF").value || 1)), dedMin: isM() && $("cD").value.trim() === uDedIn(+d.dedMin || 0, dedU(d)) ? +d.dedMin || 0 : Math.max(0, (parseFloat($("cD").value) || 0) / (isM() ? U_M[dedU({unit, type})][1] : 1)), color: $("cC").value,
-      sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value, group: $("cGrp").value.trim().slice(0, 60), boq: $("cBoq").value.trim(), ra: $("cRa").value.trim().toUpperCase(), ...apFromDialog(type),
+      sym: $("cSym").value, cap: $("cCap").value, capText: $("cCapT").value.trim(), sz: $("cSz").value, group: $("cGrp").value.trim().slice(0, 60), boq: $("cBoq").value.trim(), ra: $("cRa").value.trim().toUpperCase(), bq: type === "linear" && $("cBq").value ? $("cBq").value : "", ...apFromDialog(type),
       ...((P.proj.cols || []).length ? {cols: (k => k.length === P.proj.cols.length ? undefined : k)([...document.querySelectorAll("[data-ccol]")].filter(b => b.checked).map(b => b.dataset.ccol))} : {})};   // every column ticked: none listed, so new columns show too
   }, "cName");
   apDialogWire(d);
   const pk = {auto: false, boqAuto: false, nameAuto: false, grp: ""};   // grp: the item group listed (Plaster, Doors…), "" = suggested from the name
   const raInfo = () => { const code = $("cRa").value.trim(); if (!code) { $("cRaInfo").innerHTML = raLib().o ? "Link a Rate Analysis item to take its built-up rate (or type the rate in the bill’s Assembly)." : raConnect.state === "busy" ? "Reading the Rate Analysis library from QS Cost Control on this site…" : "Rate Analysis library not found in this browser — it is read from QS Cost Control on this site when this dialog opens (or open SAJ QSCOST → Rate Analysis once)."; return; }
-    const r = rateOf({ra: code.toUpperCase()}, $("cUnit").value), p = raPrice(code);
+    const bu = (() => { const H0 = uKeep($("cH").value, d.h), T0 = uKeep($("cT").value, d.t), x = {type: $("cType").value, unit: $("cUnit").value, h: H0, t: T0, faces: +$("cF").value || 1, bq: $("cBq").value, ra: code, rate: d.rate};
+      const q = $("cType").value === "linear" ? condQ(x, billQ(x) || "q", null, {Q: 0, A: 0, P: 0, PD: 0, D: 0, L: 0, N: 0, H: +H0 || 0, T: +T0 || 0}) : null; return q ? q.unit : $("cUnit").value; })();   // (the unit its bill line is in)
+    const r = rateOf({ra: code.toUpperCase()}, bu), p = raPrice(code);
     $("cRaInfo").innerHTML = "<div>" + (pk.auto ? '<span class="tag a" title="Picked by itself from the name — click another item to change, or clear the RA code">auto-picked</span> ' : "") + (r.na ? `<span style="color:var(--red)">${esc(r.na)}</span>` : `<b>${esc(p.code)}</b> — ${esc(String(p.desc).slice(0, 110))} · <b>PKR ${f2(r.rate)} / ${esc(p.unit)}</b> — rate taken from Rate Analysis${r.assumed ? ` · <span style="color:var(--amber)">${r.assumed} assumed row(s)</span>` : ""}`) + "</div>"; };
   $("cRa").addEventListener("input", () => { pk.auto = false; raInfo(); pkDraw(); }); $("cUnit").addEventListener("change", () => { raInfo(); pkDraw(); }); raInfo();
+  ["cBq", "cH", "cT"].forEach(k => $(k).addEventListener("change", raInfo));
   /* the BOQ item picker: library items ranked by the name typed (or filtered by the search), with their built-up rate; a click
      fills the RA code (so the rate follows it), the BOQ code if empty, the name if empty, and a fitting unit. A new condition
      takes the best match by itself when it is a clear one — marked auto-picked, and dropped again if the name changes away. */
@@ -8322,6 +8363,7 @@ async function exportExcel(){
     (V.L.length ? V.L : [{lvl: "PASS", msg: "No errors or warnings"}]).forEach(x => { const r = vs.addRow([x.lvl, x.msg]); r.getCell(1).font = {bold: true, color: {argb: x.lvl === "ERROR" ? "FFB32D2D" : x.lvl === "WARNING" ? "FF8A5A00" : "FF16723F"}}; });
     const sm = wb.addWorksheet("Summary");
     sm.columns = [{header: "Condition", width: 48}, {header: "Qty", width: 14}, {header: "Unit", width: 8}, {header: "Measurements", width: 14}];
+    const anyBq = totals.some(t => billQ(t.c));   // a condition billed as its volume or wall area: that quantity beside its own (columns after the others)
     const verSplit = c => { let a = 0, b = 0; P.proj.items.filter(i => i.cond === c.id).forEach(it => { const k = qScale(it); if (!k) return; const q = rowsOf(it, k).reduce((s2, r) => s2 + r.qty, 0); if (verOk(it)) a += q; else b += q; }); return [a, b]; };
     const anyVer = P.proj.items.some(i => verOf(i));
     sm.getRow(1).font = {bold: true, color: {argb: "FFFFFFFF"}}; sm.getRow(1).eachCell(c => { c.fill = HEAD; });
@@ -8331,6 +8373,12 @@ async function exportExcel(){
       if (XC.length) xlCols(r, t.c, uQx("B" + r.number, t.c.unit), 5, xlLetter);
       if (anyVer) { const [a, b] = verSplit(t.c), vc = 5 + XC.length; r.getCell(vc).value = +uV(a, t.c.unit).toFixed(3); r.getCell(vc + 1).value = +uV(b, t.c.unit).toFixed(3); r.getCell(vc).numFmt = qFmt(t.c.unit); r.getCell(vc + 1).numFmt = qFmt(t.c.unit); if (Math.abs(b) > 1e-9) r.getCell(vc + 1).fill = YELLOW; } });
     if (anyVer) [["Verified qty", 16], ["Needs review qty", 16]].forEach(([h, w], j) => { const c2 = sm.getRow(1).getCell(5 + XC.length + j); c2.value = h; c2.fill = HEAD; c2.font = {bold: true, color: {argb: "FFFFFFFF"}}; sm.getColumn(5 + XC.length + j).width = w; });
+    if (anyBq) { const b0 = 5 + XC.length + (anyVer ? 2 : 0);
+      [["Billed as", 26], ["Bill qty", 14], ["Bill unit", 9]].forEach(([h, w], j) => { const c2 = sm.getRow(1).getCell(b0 + j); c2.value = h; c2.fill = HEAD; c2.font = {bold: true, color: {argb: "FFFFFFFF"}}; sm.getColumn(b0 + j).width = w; });
+      totals.forEach((t, i) => { const bx = billQty(t.c), r = sm.getRow(2 + i); if (!bx.bq) return; const fc = +t.c.faces || 1;
+        r.getCell(b0).value = QT_NAMES[bx.bq] + (bx.bq === "vol" ? " = L × H × T" : " = L × H" + (fc > 1 ? " × " + fc + " faces" : ""));
+        const f = bx.bq === "vol" ? `B${r.number}*${xlNum(uX(+t.c.h, "ft"))}*${xlNum(uX(+t.c.t, "ft"))}` : bx.bq === "area" && t.c.unit === "ft" ? `B${r.number}*${xlNum(uX(+t.c.h, "ft"))}` + (fc > 1 ? "*" + fc : "") : null;
+        const q = r.getCell(b0 + 1); q.value = f ? {formula: f, result: uV(bx.qty, bx.unit)} : +uV(bx.qty, bx.unit).toFixed(6); q.numFmt = qFmt(bx.unit); q.fill = GREEN; r.getCell(b0 + 2).value = uL(bx.unit); }); }
     const SG = segRows();
     if (SG.length) {   // every wall / run leg and every side of every area, with its ends: the segment-by-segment audit trail
       const sg = wb.addWorksheet("Segments", {views: [{state: "frozen", ySplit: 1}]});
@@ -10563,7 +10611,7 @@ function ribbonInit(){
   const FN = {openings: () => openingsDialog(), revcost: () => revCompareDialog(), floors: () => floorsDialog(), quick: () => quickItemsDialog(), autowin: () => S.page ? autoWindowUI() : toast("Open a drawing first", 2000),
     symbols: () => symCountDialog(), levels: () => levelsMenu(), cutfill: () => cutFillDialog(), sheetlinks: () => sheetLinksMake(), hatchsplit: () => hatchSplitDialog(), cadcmp: () => cadCompareDialog(),   // (PlanSwift's: My symbols, earthworks, Auto Bookmark, ceilings by pattern)
     matview: () => matShow(), matkind: () => matShow("kind"), matfloor: () => matShow("floor"), matpage: () => matShow("page"), matitem: () => matShow("item"), matcond: () => matShow("cond"),   // the Material tab
-    mattot: () => matDialog(), matset: () => matSetupDialog(), matdef: () => matDefDialog(), matxls: () => exportMatExcel()};
+    mattot: () => matDialog(), matset: () => matSetupDialog(), matdef: () => matDefDialog(), matxls: () => exportMatExcel(), workbook: () => openWb(), wbxls: () => wbXls()};
   const PX = {bDefaults: () => settingsDialog("measure")};   // Costing → Defaults: the top bar's Defaults is now in Settings (the tool keeps its name, so My tools keeps it)
   document.querySelectorAll("#tools [data-px]").forEach(b => b.addEventListener("click", () => { if (PX[b.dataset.px]) return PX[b.dataset.px](); const t = $(b.dataset.px); if (t && !t.disabled) t.click(); setTimeout(syncPx, 60); }));
   document.querySelectorAll("#tools [data-fn]").forEach(b => b.addEventListener("click", () => { if (P.proj && FN[b.dataset.fn]) FN[b.dataset.fn](); else toast("Open a project first", 2000); }));
@@ -13189,7 +13237,7 @@ function wire(){
     const b = e.target.closest("[data-lall]"); if (!b) return; const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return; setLayer(Object.keys(cfg.getGroups()), b.dataset.lall === "1"); renderLayers(); });
   $("layerList").addEventListener("input", e => { if (e.target.id !== "lyrQ") return; const q = e.target.value.toLowerCase(); document.querySelectorAll("#layerList .lyr").forEach(l => { l.style.display = l.dataset.name.includes(q) ? "" : "none"; }); });
   $("bCompare").onclick = () => P.proj && compareDialog();
-  $("vSheet").onclick = () => rView("sheet"); $("vBill").onclick = () => rView("bill"); $("vMat").onclick = () => rView("mat");
+  $("vSheet").onclick = () => rView("sheet"); $("vBill").onclick = () => rView("bill"); $("vMat").onclick = () => rView("mat"); $("vWb").onclick = () => openWb();
   $("bill").addEventListener("click", e => { const a = e.target.closest("[data-asm]"); if (a) return asmDialog(cond(a.dataset.asm));
     const b = e.target.closest("[data-bact]"); if (b) return b.dataset.bact === "open" ? openingsDialog() : b.dataset.bact === "mat" ? matDialog() : revCompareDialog(); });
   $("bill").addEventListener("change", e => { if (e.target.id === "billGrp") { S.billGrp = e.target.value; renderBill(); } if (e.target.id === "billSplit") { S.billSplit = e.target.checked; pref("tkBillSplit", S.billSplit ? "1" : "0"); renderBill(); } });
@@ -18536,7 +18584,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   window.zdTakeoff = {setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
-    cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
+    cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, openWb, wbMod, wbApi, condQ, billQ, billQty, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
     mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, verReload, autoUpd, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
