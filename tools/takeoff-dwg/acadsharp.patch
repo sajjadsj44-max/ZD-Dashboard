@@ -1,0 +1,159 @@
+diff --git a/src/ACadSharp/IO/DWG/DwgStreamReaders/DwgObjectReader.cs b/src/ACadSharp/IO/DWG/DwgStreamReaders/DwgObjectReader.cs
+index 6adf0f1..b3984cf 100644
+--- a/src/ACadSharp/IO/DWG/DwgStreamReaders/DwgObjectReader.cs
++++ b/src/ACadSharp/IO/DWG/DwgStreamReaders/DwgObjectReader.cs
+@@ -68,6 +68,67 @@ namespace ACadSharp.IO.DWG
+ 		/// </summary>
+ 		private Queue<ulong> _handles;
+ 
++		// ZD PDF Takeoff (tools/takeoff-dwg/acadsharp.patch): a block's objects are read only once something uses the block — an
++		// insert, a dimension, a multileader, a style's arrowhead, a layout (AutoCAD 2004 and newer). A drawing full of block
++		// definitions nothing inserts (the JADE masonry drawing: 770,000 of its 1,016,357 objects) is read in a fraction of the
++		// time and memory: the takeoff reads it in the browser, in at most 4 GB.
++		private readonly HashSet<ulong> _zdBlocks = new HashSet<ulong>();
++		private readonly HashSet<ulong> _zdUsed = new HashSet<ulong>();
++		private readonly Dictionary<ulong, (CadBlockRecordTemplate Template, List<ulong> Owned, List<ulong> Pending)> _zdDeferred = new Dictionary<ulong, (CadBlockRecordTemplate, List<ulong>, List<ulong>)>();
++		private List<ulong> _zdCollect;   // while the block table or a block header is read: the handles it names, queued after
++
++		private void zdQueue(ulong value)
++		{
++			if (value != 0 &&
++				!this._builder.TryGetObjectTemplate(value, out CadTemplate _) &&
++				!this._readedObjects.ContainsKey(value))
++			{
++				this._handles.Enqueue(value);
++			}
++		}
++
++		private void zdUse(ulong handle)
++		{
++			if (!this._zdBlocks.Contains(handle) || !this._zdUsed.Add(handle))
++				return;
++			if (!this._zdDeferred.TryGetValue(handle, out var d))
++				return;
++			this._zdDeferred.Remove(handle);
++			foreach (ulong h in d.Owned)
++				d.Template.OwnedObjectsHandlers.Add(h);
++			foreach (ulong h in d.Pending)
++				this.zdQueue(h);
++		}
++
++		private void zdBlockRead(CadBlockRecordTemplate template, string name)
++		{
++			List<ulong> pending = this._zdCollect;
++			this._zdCollect = null;
++			ulong handle = template.CadObject.Handle;
++			bool keep = !this.R2004Plus || this._zdBlocks.Count == 0 || this._zdUsed.Contains(handle)
++				|| (name ?? "").StartsWith("*Model_Space", System.StringComparison.OrdinalIgnoreCase)
++				|| (name ?? "").StartsWith("*Paper_Space", System.StringComparison.OrdinalIgnoreCase);
++			if (keep)
++			{
++				foreach (ulong h in pending)
++					this.zdQueue(h);
++				return;
++			}
++			//the block's own BLOCK / ENDBLK and its layout now; its objects, extension dictionary and the like once it is used
++			HashSet<ulong> now = new HashSet<ulong> { template.BeginBlockHandle ?? 0, template.EndBlockHandle ?? 0, template.LayoutHandle ?? 0 };
++			List<ulong> later = new List<ulong>();
++			foreach (ulong h in pending)
++			{
++				if (now.Contains(h))
++					this.zdQueue(h);
++				else
++					later.Add(h);
++			}
++			List<ulong> owned = new List<ulong>(template.OwnedObjectsHandlers);
++			template.OwnedObjectsHandlers.Clear();
++			this._zdDeferred[handle] = (template, owned, later);
++		}
++
+ 		/// <summary>
+ 		/// Reader focused on the handles section of the stream.
+ 		/// </summary>
+@@ -164,6 +225,14 @@ namespace ACadSharp.IO.DWG
+ 				}
+ 				catch (Exception ex)
+ 				{
++					if (this._zdCollect != null)
++					{
++						List<ulong> named = this._zdCollect;
++						this._zdCollect = null;
++						foreach (ulong h in named)
++							this.zdQueue(h);
++					}
++
+ 					if (!this._builder.Configuration.Failsafe)
+ 						throw;
+ 
+@@ -292,6 +361,16 @@ namespace ACadSharp.IO.DWG
+ 			//Read the handle
+ 			ulong value = this._handlesReader.HandleReference(handle);
+ 
++			if (this._zdCollect != null)
++			{
++				if (value != 0)
++					this._zdCollect.Add(value);
++				return value;
++			}
++
++			if (value != 0)
++				this.zdUse(value);
++
+ 			if (value != 0 &&
+ 				!this._builder.TryGetObjectTemplate(value, out CadTemplate _) &&
+ 				!this._readedObjects.ContainsKey(value))
+@@ -664,11 +743,25 @@ namespace ACadSharp.IO.DWG
+ 			CadBlockCtrlObjectTemplate template = new CadBlockCtrlObjectTemplate(
+ 				new BlockRecordsTable());
+ 
+-			this.readDocumentTable(template);
++			this._zdCollect = new List<ulong>();
++			try
++			{
++				this.readDocumentTable(template);
+ 
+-			//*MODEL_SPACE and *PAPER_SPACE(hard owner).
+-			template.ModelSpaceHandle = this.handleReference();
+-			template.PaperSpaceHandle = this.handleReference();
++				//*MODEL_SPACE and *PAPER_SPACE(hard owner).
++				template.ModelSpaceHandle = this.handleReference();
++				template.PaperSpaceHandle = this.handleReference();
++			}
++			finally
++			{
++				List<ulong> entries = this._zdCollect;
++				this._zdCollect = null;
++				foreach (ulong h in entries)
++				{
++					this._zdBlocks.Add(h);
++					this.zdQueue(h);
++				}
++			}
+ 
+ 			return template;
+ 		}
+@@ -681,6 +774,7 @@ namespace ACadSharp.IO.DWG
+ 			CadBlockRecordTemplate template = new CadBlockRecordTemplate(record);
+ 			this._builder.BlockRecordTemplates.Add(template);
+ 
++			this._zdCollect = new List<ulong>();
+ 			this.readCommonNonEntityData(template);
+ 
+ 			//Common:
+@@ -800,12 +894,15 @@ namespace ACadSharp.IO.DWG
+ 				for (int i = 0; i < insertCount; ++i)
+ 				{
+ 					//Entries	//TODO: necessary to store the insert handles??
+-					template.InsertHandles.Add(this.handleReference());
++					//(R2004+: not read from here — an insert is read with the block it is in)
++					template.InsertHandles.Add(this.R2004Plus ? this._handlesReader.HandleReference(0) : this.handleReference());
+ 				}
+ 				//Layout Handle H(hard pointer)
+ 				template.LayoutHandle = this.handleReference();
+ 			}
+ 
++			this.zdBlockRead(template, name);
++
+ 			return template;
+ 		}
+ 

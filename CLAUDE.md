@@ -32,7 +32,9 @@
   `tools/test_takeoff_measure.js` in plain Node), and `takeoff/workbook.js` (the CostX-style Workbook, Costing → Workbook,
   tested by `tools/test_takeoff_workbook.js`).
 - `takeoff/dwg/_framework/` is the second DWG reader (ACadSharp compiled to WebAssembly, ~20 MB), built from
-  `tools/takeoff-dwg/ZdDwg.cs` by `tools/takeoff-dwg/build.ps1` (.NET 10 SDK + `dotnet workload install wasm-tools`); cad.js
+  `tools/takeoff-dwg/ZdDwg.cs` by `tools/takeoff-dwg/build.ps1` (.NET 10 SDK + `dotnet workload install wasm-tools`, git) on
+  ACadSharp's own source (v3.8.35 + CSUtilities a6505ab, fetched by the script) with `tools/takeoff-dwg/acadsharp.patch` — a
+  block's objects read only once something uses the block (a 53 MB drawing of mostly unused blocks: 668 MB, not over 4 GB); cad.js
   loads its `dotnet.js` with takeoff.js's `?v=`, so bump that `?v=` after a rebuild. It runs in a sandboxed frame of the page,
   never in a worker (Chrome 156 crashes a worker that starts .NET); the frame loads it across origins (Pages sends
   `Access-Control-Allow-Origin: *`; tests add that header). Every DWG LibreDWG reads wrong or in part goes to it.
