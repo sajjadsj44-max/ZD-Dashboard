@@ -10194,7 +10194,7 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
    through the GitHub API (a token with Contents: write on the repo, asked when saving and kept only while this page is open), or
    Download gives the file to commit by hand. */
 const TEAM_REPO = "sajjadsj44-max/ZD-Dashboard", TEAM_FILE = "takeoff/users.json", TEAM_ITER = 150000;
-const TM = {list: null, err: "", log: [], token: "", busy: false, act: null, actErr: "", actTry: 0};
+const TM = {list: null, open: false, err: "", log: [], token: "", busy: false, act: null, actErr: "", actTry: 0, gst: null, gDay: "", geo: {}};
 const teamHex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
 async function teamHash(pw, salt, iter){   // the same as the lock's: PBKDF2-SHA256 of the password, the salt's text as the salt, 32 bytes in hex
   const te = new TextEncoder(), k = await crypto.subtle.importKey("raw", te.encode(pw), "PBKDF2", false, ["deriveBits"]);
@@ -10205,15 +10205,15 @@ async function teamChatC(pw, salt){   // "c": SHA-256 of the chat key a friend's
 }
 async function teamLoad(){
   try { const r = await fetch("users.json?check=" + Date.now(), {cache: "no-store"});   // ?check: past the service worker and the site's 10-minute cache
-    if (r.status === 404) { TM.list = []; TM.err = ""; return; }
+    if (r.status === 404) { TM.list = []; TM.open = false; TM.err = ""; return; }
     if (!r.ok) throw new Error("HTTP " + r.status);
-    const j = await r.json(); TM.list = Array.isArray(j.users) ? j.users.filter(u => u && u.u && u.s && u.h) : []; TM.err = ""; }
+    const j = await r.json(); TM.list = Array.isArray(j.users) ? j.users.filter(u => u && u.u && u.s && u.h) : []; TM.open = j.open === true; TM.err = ""; }
   catch (e) { TM.list = []; TM.err = "Could not read the users list (" + (e.message || e) + ") — what you add here replaces it when saved."; }
   TM.log = [];
 }
 function teamText(){
   const L = TM.list.slice().sort((a, b) => a.u.localeCompare(b.u));
-  return '{\n "about": "PDF Takeoff team logins for takeoff/?team. Passwords are salted PBKDF2-SHA256 hashes. Edited from Settings > Team logins.",\n "iter": ' + TEAM_ITER +
+  return '{\n "about": "PDF Takeoff team logins for takeoff/?team. Passwords are salted PBKDF2-SHA256 hashes. Edited from Settings > Team logins. open: true switches the login off for now: anyone with the link uses the takeoff as a guest (each visit counted).",\n "open": ' + !!TM.open + ',\n "iter": ' + TEAM_ITER +
     ',\n "users": [' + (L.length ? "\n" + L.map(u => "  " + JSON.stringify({u: u.u, s: u.s, h: u.h, c: u.c || "", iter: u.iter || TEAM_ITER, at: u.at || ""})).join(",\n") + "\n " : "") + "]\n}\n";
 }
 async function teamSave(){
@@ -10242,19 +10242,30 @@ async function teamSave(){
    each time the team view is opened and again every 20 minutes while it stays open (one computer at a time, index.html);
    .github/workflows/chat-archive.yml sums those every half hour per user and day, Pakistan time, into takeoff-activity.json on
    the chat-archive branch (tools/activity_archive.py), and the relay's events not summed yet are added here. A day's use is
-   about 20 minutes per announcement. */
+   about 20 minutes per announcement.
+   While the login is switched off (users.json "open": true), guests are counted the same way per browser: their visits go to
+   the relay's "v-" topic (index.html) and are summed into the same file's "guests"; the IP address and place come sealed for
+   the owner's key and are opened here with the Inbox password. */
 const ACT_TZ = 5 * 3600, ACT_DAYS = 14;
 const actDay = t => new Date((t + ACT_TZ) * 1000).toISOString().slice(0, 10);
 const actHm = t => new Date((t + ACT_TZ) * 1000).toISOString().slice(11, 16);
 async function teamActivity(){
   await chatUrl(); const cfg = CH.cfg || {};
   if (!cfg.relay || !cfg.topic) throw new Error("takeoff/chat.json names no relay");
-  const days = {}, seen = {}, users = new Set((TM.list || []).map(x => x.u));
+  const days = {}, seen = {}, users = new Set((TM.list || []).map(x => x.u)), G = {days: {}, first: {}};
   if (cfg.archive) { const r = await fetch(String(cfg.archive).replace(/[^/]*$/, "takeoff-activity.json") + "?t=" + Date.now(), {cache: "no-store"}).catch(() => null);
-    if (r && r.ok) { const j = await r.json().catch(() => ({})); Object.assign(days, j.days || {}); Object.assign(seen, j.seen || {}); } }
-  const r = await fetch(String(cfg.relay).replace(/\/+$/, "") + "/s-" + cfg.topic + "/json?poll=1&since=all", {cache: "no-store"});
-  if (!r.ok) throw new Error("the relay said " + r.status);
-  (await r.text()).split("\n").forEach(l => {
+    if (r && r.ok) { const j = await r.json().catch(() => ({})); Object.assign(days, j.days || {}); Object.assign(seen, j.seen || {});
+      if (j.guests) { Object.assign(G.days, j.guests.days || {}); Object.assign(G.first, j.guests.first || {}); } } }
+  const poll = async pre => { const r = await fetch(String(cfg.relay).replace(/\/+$/, "") + "/" + pre + cfg.topic + "/json?poll=1&since=all", {cache: "no-store"});
+    if (!r.ok) throw new Error("the relay said " + r.status); return (await r.text()).split("\n"); };
+  const [S, V] = await Promise.all([poll("s-"), poll("v-").catch(() => [])]);
+  V.forEach(l => {
+    let e, m; try { e = JSON.parse(l); m = JSON.parse(e.message); } catch (x) { return; }
+    if (!e.id || seen[e.id] || e.event !== "message" || !m || m.zs !== 1 || m.k !== "visit" || !/^[0-9a-f]{12}$/.test(m.v) || Math.abs(m.t - e.time) >= 600) return;
+    seen[e.id] = 1; actGuest(G, m, +e.time);
+  });
+  TM.gst = G;
+  S.forEach(l => {
     let e, m; try { e = JSON.parse(l); m = JSON.parse(e.message); } catch (x) { return; }
     if (!e.id || seen[e.id] || e.event !== "message" || !m || m.zs !== 1 || m.k !== "claim" || !users.has(m.u) || Math.abs(m.t - e.time) >= 600) return;
     seen[e.id] = 1;
@@ -10263,6 +10274,54 @@ async function teamActivity(){
     const sid = String(m.sid || "").slice(0, 8); if (sid && !d.s.includes(sid)) d.s.push(sid);
   });
   return days;
+}
+function actGuest(G, m, t){   // one guest's visit into its day, as tools/activity_archive.py sums it
+  const k = actDay(t), D = G.days[k] = G.days[k] || {}, d = D[m.v] = D[m.v] || {f: t, l: t, n: 0, s: [], x: []};
+  d.f = Math.min(d.f, t); d.l = Math.max(d.l, t); d.n++; if (m.d) d.d = String(m.d).slice(0, 60);
+  const sid = String(m.s || "").slice(0, 8); if (sid && !d.s.includes(sid)) d.s.push(sid);
+  const x = m.x; if (x && typeof x.k === "string" && typeof x.iv === "string" && typeof x.ct === "string" && (d.x || (d.x = [])).length < 3 && !d.x.some(y => y.ct === x.ct)) d.x.push({k: x.k, iv: x.iv, ct: x.ct});
+  if (!G.first[m.v] || G.first[m.v] > k) G.first[m.v] = k;
+}
+async function guestOpen(x){   // a visit's sealed IP and place: its AES key opened with the owner's private key (CH.key)
+  try { const k = await crypto.subtle.importKey("raw", await crypto.subtle.decrypt({name: "RSA-OAEP"}, CH.key, chUn64(x.k)), "AES-GCM", false, ["decrypt"]);
+    return JSON.parse(chTd.decode(await crypto.subtle.decrypt({name: "AES-GCM", iv: chUn64(x.iv)}, k, chUn64(x.ct)))); } catch (e) { return null; }
+}
+async function guestGeo(){   // every guest day's IP and place, once the Inbox password has opened the owner's key
+  if (!CH.key || !TM.gst) return;
+  for (const [k, D] of Object.entries(TM.gst.days)) for (const [v, d] of Object.entries(D)) {
+    if (TM.geo[v + k] || !(d.x || []).length) continue;
+    const L = []; for (const x of d.x) { const o = await guestOpen(x); if (o && !L.some(y => y.ip === o.ip)) L.push(o); }
+    TM.geo[v + k] = L;
+  }
+}
+const actMin = m => m < 20 ? "under 20 min" : "~" + [m >= 60 ? Math.floor(m / 60) + " h" : "", m % 60 ? m % 60 + " min" : ""].filter(Boolean).join(" ");
+const actDur = n => n <= 1 ? "under 20 min" : actMin(n * 20);
+const guestDur = d => { const p = Math.max(1, (d.s || []).length); return actMin(Math.max(0, d.n - p) * 20 + p * 10); };   // each page about 10 min, each renewal 20
+function guestActHtml(){   // guests (no login): a bar a day, and who came on the day picked
+  const G = TM.gst;
+  if (!G) return TM.open ? `<p class="small" id="tmGst" style="margin:8px 0">${TM.actErr ? esc(TM.actErr) : "Reading the guests' visits…"}</p>` : "";
+  const now = Date.now() / 1000, keys = Array.from({length: ACT_DAYS}, (_, i) => actDay(now - (ACT_DAYS - 1 - i) * 86400));
+  const per = keys.map(k => Object.keys(G.days[k] || {})), nw = keys.map((k, i) => per[i].filter(v => G.first[v] === k).length);
+  if (!TM.open && !per.some(p => p.length)) return "";
+  const max = Math.max(1, ...per.map(p => p.length)), T = ACT_DAYS - 1, week = new Set(per.slice(-7).flat()).size;
+  const on = Object.values(G.days[keys[T]] || {}).filter(d => now - d.l < 25 * 60).length;
+  const si = keys.includes(TM.gDay) ? keys.indexOf(TM.gDay) : T, sel = keys[si];
+  const say = i => `${i === T ? "Today" : dmy(keys[i])}: ${per[i].length ? per[i].length + " guest" + (per[i].length > 1 ? "s" : "") + (nw[i] ? " (" + nw[i] + " new)" : "") : "nobody"}`;
+  const rows = Object.entries(G.days[sel] || {}).sort((a, b) => b[1].l - a[1].l).slice(0, 200), sealed = rows.some(([, d]) => (d.x || []).length);
+  const place = (v, d) => { const L = TM.geo[v + sel];
+    if (L && L.length) return L.map(o => `<span title="${esc([o.isp, o.region, o.ua].filter(Boolean).join(" · "))}">${esc([[o.city, o.country].filter(Boolean).join(", "), o.ip].filter(Boolean).join(" · "))}</span>`).join("<br>");
+    return `<span class="small">${(d.x || []).length && !CH.key ? "sealed" : "—"}</span>`; };
+  return `<div class="tmact" id="tmGst">
+    <div class="tmhd"><b>Guests — no login</b><span class="small">each browser counted once a day · last ${ACT_DAYS} days · Pakistan time</span></div>
+    <div class="tmst"><span><b>${per[T].length}</b> today</span><span><b>${nw[T]}</b> new today</span><span><b>${on}</b> online now</span><span><b>${week}</b> in the last 7 days</span></div>
+    <div class="tmbars" id="tmGBars" role="group" aria-label="Guests a day, last ${ACT_DAYS} days: ${esc(per.map(p => p.length).join(", "))}">${keys.map((k, i) => {
+      const n = per[i].length, lab = i === T || i === si ? `<em>${n}</em>` : "";
+      return `<div class="tmb${i === si ? " now" : ""}" data-tmg="${k}" data-tmd="${esc(say(i))}" tabindex="0" role="button" aria-pressed="${i === si}">${lab}<i style="height:${n ? Math.max(8, Math.round(n / max * 100)) : 0}%"></i><span>${+k.slice(8)}</span></div>`; }).join("")}</div>
+    <div class="small tmread" id="tmGRead">${esc(say(si))}</div>
+    ${rows.length ? `<div style="max-height:320px;overflow:auto;margin:6px 0"><table class="sh tmlist" id="tmGList"><thead><tr><th>Guest</th><th>Time</th><th>Device</th><th>Place · IP</th></tr></thead><tbody>${rows.map(([v, d]) =>
+      `<tr><td>#${esc(v.slice(0, 6))}${G.first[v] === sel ? ' <span class="tmnew">new</span>' : ""}</td><td>${si === T && now - d.l < 25 * 60 ? '<i class="tmon" title="Online now"></i>' : ""}${actHm(d.f)}${actHm(d.l) !== actHm(d.f) ? "–" + actHm(d.l) : ""} <span class="small">· ${guestDur(d)}</span></td><td>${esc(d.d || "—")}</td><td>${place(v, d)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${sealed && !CH.key ? `<div style="display:flex;gap:8px;align-items:center"><button class="btn sm" id="tmShowIp">Show place and IP…</button><span class="small">sealed for you — opened with the Inbox password</span></div>` : ""}
+    <p class="small" style="margin-top:6px">Click a day to list its guests. A guest is one browser (a random id kept in it), so the same person on a phone and a laptop counts twice.</p></div>`;
 }
 function teamActHtml(){   // daily active users (a bar a day) and the totals above the user list
   if (!TM.act) return `<p class="small" id="tmAct" style="margin:8px 0">${TM.actErr ? esc(TM.actErr) : "Reading who used the app…"}</p>`;
@@ -10284,8 +10343,7 @@ const teamLast = u => Object.values(TM.act || {}).reduce((a, D) => D[u] ? Math.m
 function teamActCells(u){   // Today, Last active, Days used for one user
   if (!TM.act) return "<td>…</td><td>…</td><td>…</td>";
   const now = Date.now() / 1000, d = (TM.act[actDay(now)] || {})[u], last = teamLast(u);
-  const days = Array.from({length: ACT_DAYS}, (_, i) => actDay(now - i * 86400)).filter(k => (TM.act[k] || {})[u]).length;
-  const dur = n => { const m = n * 20; return n <= 1 ? "under 20 min" : "~" + [m >= 60 ? Math.floor(m / 60) + " h" : "", m % 60 ? m % 60 + " min" : ""].filter(Boolean).join(" "); };
+  const days = Array.from({length: ACT_DAYS}, (_, i) => actDay(now - i * 86400)).filter(k => (TM.act[k] || {})[u]).length, dur = actDur;
   const on = last && now - last < 25 * 60;
   const today = d ? `${on ? '<i class="tmon" title="Online now"></i>' : ""}${actHm(d.f)}${d.l > d.f ? "–" + actHm(d.l) : ""} <span class="small">· ${dur(d.n)}</span>` : '<span class="small">—</span>';
   const lk = last ? actDay(last) : "", lastTxt = !last ? "not yet" : on ? "online now" : lk === actDay(now) ? "today " + actHm(last) : lk === actDay(now - 86400) ? "yesterday " + actHm(last) : dmy(lk);
@@ -10298,17 +10356,32 @@ function teamPage(){
     <div style="display:flex;gap:6px;margin:8px 0"><input type="text" readonly id="tmLink" value="${esc(link)}" style="flex:1" aria-label="Friends' link"><button class="btn sm" id="tmCopy">Copy link</button></div>
     <p class="small">Or give them the Windows app — its own window, no web address: <a href="${esc(new URL("../app/ZD-Takeoff.exe", location.href).href)}" download>ZD-Takeoff.exe</a> (run it once: it installs with a Desktop shortcut).</p>
     ${TM.err ? `<p class="small" style="color:#b42318">${esc(TM.err)}</p>` : ""}
+    <div class="tmsw"><label style="display:flex;gap:6px;align-items:center;font-weight:600"><input type="checkbox" class="stog" id="tmOpen"${TM.open ? "" : " checked"}> Ask for a login</label>
+      <span class="small" style="flex:1;min-width:220px">${TM.open ? "<b>Off for now:</b> anyone with the link uses the takeoff straight away, as a guest — each visit is counted below. Friends with a login can still sign in." : "On: each friend signs in with their own username and password."}</span></div>
+    ${guestActHtml()}
     ${TM.list.length ? teamActHtml() : ""}
     ${TM.list.length ? `<table class="sh tmlist" style="margin:6px 0"><thead><tr><th>User</th><th>Today</th><th>Last active</th><th class="n" title="Days with any use in the last ${ACT_DAYS} days">Days (${ACT_DAYS})</th><th>Added</th><th></th></tr></thead><tbody>${TM.list.map((u, i) => `<tr><td>${esc(u.u)}</td>${teamActCells(u.u)}<td>${esc(u.at ? dmy(u.at) : "—")}</td><td class="n" style="white-space:nowrap"><button class="btn sm" data-tmpw="${i}">New password…</button> <button class="btn sm dng" data-tmdel="${i}">Remove</button></td></tr>`).join("")}</tbody></table>` : '<p class="small" style="margin:6px 0">No team users yet.</p>'}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0"><input type="text" id="tmU" data-enter="tmAdd" placeholder="Username" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="New user's name" style="width:140px"><input type="text" class="secret" id="tmP" data-enter="tmAdd" placeholder="Password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" aria-label="New user's password" style="width:140px"><button class="btn sm" id="tmAdd">Add user</button></div>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="small" style="flex:1">${TM.log.length ? "<b>Not saved to the site yet:</b> " + esc(TM.log.join(", ")) : "As on the site."}</span><button class="btn sm" id="tmDl" title="users.json to commit in takeoff/ by hand">Download users.json</button><button class="btn sm pri" id="tmSave"${TM.log.length && !TM.busy ? "" : " disabled"}>Save to the site…</button></div></div>`;
   const wire = paint => {
     if (!TM.list) { teamLoad().then(paint); return; }
-    if (TM.list.length && Date.now() - TM.actTry > 120000) {   // who used the app: read again when the page is shown after 2 minutes
+    if ((TM.list.length || TM.open) && Date.now() - TM.actTry > 120000) {   // who used the app: read again when the page is shown after 2 minutes
       TM.actTry = Date.now();
-      teamActivity().then(a => { TM.act = a; TM.actErr = ""; }, e => { if (!TM.act) TM.actErr = "Could not read who used the app (" + (e.message || e) + ")."; }).then(paint);
+      teamActivity().then(async a => { TM.act = a; TM.actErr = ""; await guestGeo(); }, e => { if (!TM.act) TM.actErr = "Could not read who used the app (" + (e.message || e) + ")."; }).then(paint);
     }
     const box = $("tmBox"); if (!box || box.dataset.w) return; box.dataset.w = 1;
+    $("tmOpen").onchange = e => { TM.open = !e.target.checked; TM.log = TM.log.filter(x => !/^login switched/.test(x)); TM.log.push(TM.open ? "login switched off (open to everyone)" : "login switched on"); paint(); };
+    const gb = $("tmGBars");
+    if (gb) { const pick = b => { if (b) { TM.gDay = b.dataset.tmg; paint(); } }, show = e => { const b = e.target.closest(".tmb"); if (b && $("tmGRead")) $("tmGRead").textContent = b.dataset.tmd; };
+      gb.addEventListener("click", e => pick(e.target.closest("[data-tmg]")));
+      gb.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(e.target.closest("[data-tmg]")); } });
+      gb.addEventListener("mouseover", show); gb.addEventListener("focusin", show);
+      gb.addEventListener("mouseleave", () => { const b = gb.querySelector(".tmb.now"); if (b && $("tmGRead")) $("tmGRead").textContent = b.dataset.tmd; }); }
+    if ($("tmShowIp")) $("tmShowIp").onclick = async () => {
+      const r = await ask("Guests' place and IP", `<p class="small">Sealed in each guest's browser for your key only. The Inbox password opens it — asked each time, never saved.</p><div class="fg" style="margin-top:8px"><label>Inbox password</label><input type="text" class="secret" id="tmIpPw" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"></div>`, "Show", () => $("tmIpPw").value ? {pw: $("tmIpPw").value} : "Type the Inbox password", "tmIpPw");
+      if (r) { try { await chatUrl(); CH.key = await chatUnlock(r.pw); await guestGeo(); } catch (e) { toast(e.code === "auth" ? "Wrong inbox password" : "Could not open them: " + (e.message || e), 4000); } }
+      settingsDialog("team");
+    };
     const bars = $("tmBars");
     if (bars) { const show = e => { const b = e.target.closest(".tmb"); if (b && $("tmRead")) $("tmRead").textContent = b.dataset.tmd; };
       bars.addEventListener("mouseover", show); bars.addEventListener("focusin", show);
@@ -10418,6 +10491,7 @@ async function chatOwnerSend(u, text){
 const chatLen = t => { if (chTe.encode(t).length > 2400) throw new Error("too long — please split it into two messages"); return t; };   // the relay takes about 4 kB per message
 const chatWa = () => "https://wa.me/92" + CONTACT_NO.replace(/\D/g, "").replace(/^0/, "");
 const chatMe = () => window.zdChat || null;   // a friend signed in on the team link; else the owner (Inbox)
+const chatGuest = () => TEAM && !window.zdChat && document.documentElement.hasAttribute("data-zd-guest");   // the team link while the login is off
 const chatOn = () => !!(CH.panel && CH.panel.classList.contains("on"));
 function chatBubbles(L, mine){
   if (!L.length) return '<p class="small chq">No messages yet.</p>';
@@ -10454,7 +10528,11 @@ function chatFoot(ctx, ph, send){   // the message box: made again only when the
 function chatRender(){
   if (!CH.panel) return;
   const me = chatMe(), W = $("chW"), L0 = $("chL"), atEnd = !L0 || L0.scrollHeight - L0.scrollTop - L0.clientHeight < 40;
-  $("chT").textContent = me ? "Feedback — chat with Sajjad" : "Inbox — feedback from the team";
+  $("chT").textContent = me || chatGuest() ? "Feedback — chat with Sajjad" : "Inbox — feedback from the team";
+  if (!me && chatGuest()) {
+    W.innerHTML = `<p class="chq">Send your feedback on WhatsApp — or sign in with your team login to chat here.</p><p class="chq"><a class="btn sm pri" href="${chatWa()}" target="_blank" rel="noopener">Send feedback on WhatsApp</a> <button type="button" class="btn sm" id="chSignIn">Sign in</button></p>`;
+    chatFoot("", ""); $("chSignIn").onclick = () => { if (window.zdTeamSignIn) window.zdTeamSignIn(); }; return;
+  }
   if (CH.url === null) { W.innerHTML = '<p class="small chq">Connecting…</p>'; chatFoot("", ""); return; }
   if (!CH.url) {
     W.innerHTML = me ? `<p class="chq">The chat is not switched on yet — send your feedback on WhatsApp for now.</p><p class="chq"><a class="btn sm pri" href="${chatWa()}" target="_blank" rel="noopener">Send feedback on WhatsApp</a></p>`
@@ -10516,7 +10594,7 @@ function chatBadge(){
 }
 function chatInit(){   // Feedback (a friend) or Inbox (the owner) in the top bar
   const b = document.createElement("button"); b.className = "btn sm"; b.id = "bChat"; b.type = "button";
-  const set = () => { const me = chatMe(); b.innerHTML = (me ? "&#128172; Feedback" : "&#128229; Inbox") + '<span class="chbadge" id="chBadge" hidden></span>';
+  const set = () => { const me = chatMe() || chatGuest(); b.innerHTML = (me ? "&#128172; Feedback" : "&#128229; Inbox") + '<span class="chbadge" id="chBadge" hidden></span>';
     b.title = me ? "Feedback — chat with Sajjad: ideas, problems, questions" : "Inbox — feedback and questions from the team; reply to them"; chatBadge(); };
   set(); $("bExport").after(b); b.onclick = () => chatToggle();
   window.addEventListener("zd-signed-in", () => { set(); setTimeout(chatPeek, 1500); });
@@ -10527,6 +10605,14 @@ function teamInit(){   // the team view: who is signed in, and Sign out (the pag
   document.documentElement.classList.add("zd-team");
   const show = () => { const n = document.documentElement.getAttribute("data-zd-user"); if (n == null || $("teamWho")) return;
     const s = document.createElement("span"); s.id = "teamWho"; s.className = "small"; s.style.cssText = "white-space:nowrap;margin-left:6px";
+    if (document.documentElement.hasAttribute("data-zd-guest")) {   // the login is switched off for now: in as a guest, counted
+      s.title = "Open to everyone for now — no login needed. Each visit is counted (device and place) so the owner sees how many use the takeoff.";
+      s.innerHTML = `&#128100; Guest <button class="btn sm" id="bSignIn" title="Sign in with your team login — for the Feedback chat under your name">Sign in</button>`;
+      $("bExport").after(s); $("bSignIn").onclick = async () => { try { await flushSave(); } catch (e) {} if (window.zdTeamSignIn) window.zdTeamSignIn(); };
+      let told = "1"; try { told = localStorage.getItem("zd-guest-told") || ""; localStorage.setItem("zd-guest-told", "1"); } catch (e) {}
+      if (!told) setTimeout(() => toast("Open to everyone for now — no login needed. Visits are counted (device and place) for the owner.", 7000), 1500);
+      return;
+    }
     s.innerHTML = `&#128100; ${esc(n || "owner")} <button class="btn sm" id="bSignOut" title="Sign out — this computer forgets the login and the page asks for a username and password again; the login can then be used on another computer">Sign out</button>`;
     $("bExport").after(s); $("bSignOut").onclick = async () => { try { await flushSave(); } catch (e) {} try { if (window.zdTeamSignOut) await window.zdTeamSignOut(); } catch (e) {} location.reload(); }; };
   show(); window.addEventListener("zd-signed-in", show);
