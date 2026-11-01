@@ -12,7 +12,7 @@
    exact and needs no calibration. */
 const LDWG = "https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/dist/libredwg-web.js";
 const LDXF = "https://cdn.jsdelivr.net/npm/@mlightcad/dxf-json@1.2.8/dist/esm/bundle.mjs";
-export const CAD_VER = 11;         // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (11: a DWG LibreDWG read in part read again whole by the second DWG reader, ACadSharp; 10: each object's handle kept apart (hd) — a text's h is its height — for DWG compare; 9: justified text at a 0,0 point and backwards / upside-down text on its point; 8: lengths inside blocks stretched more one way measured as drawn; 7: text in its style's / \f font — Times for serif, condensed narrower — and LWDISPLAY; 6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
+export const CAD_VER = 12;         // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (12: the second DWG reader's ellipses as ellipses, not full circles, and its dimensions' measured lengths; 11: a DWG LibreDWG read in part read again whole by the second DWG reader, ACadSharp; 10: each object's handle kept apart (hd) — a text's h is its height — for DWG compare; 9: justified text at a 0,0 point and backwards / upside-down text on its point; 8: lengths inside blocks stretched more one way measured as drawn; 7: text in its style's / \f font — Times for serif, condensed narrower — and LWDISPLAY; 6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
 export const INK = -1;             // colour 7 (and true black or white): white on a black background, black on white
 export const isCadName = n => /\.(dwg|dxf)$/i.test(String(n || ""));
 const CAPS_FONT = /^(technic_|techb___|techl___|coprgt[bl]?|copperplate[\w ]*|stencil|engr|castelar|felixti|alger)\.(ttf|otf)$/i;   // fonts with capitals only (their small letters are small capitals)
@@ -194,6 +194,51 @@ function netLib(){   // the reader in this thread (tests)
     return (await rt.getAssemblyExports("ZdDwg.dll")).ZdDwg;
   })().catch(e => { netP = null; throw new Error("the second DWG reader could not be loaded — check the internet connection (" + (e && e.message || e) + ")"); }));
 }
+/* dxf-json reads each part of an object (from one 100 subclass marker to the next) as a set of codes and stops reading the object at
+   a code it does not know there. ACadSharp writes codes AutoCAD does not in two places, and dxf-json lost what came after them:
+   a thickness (39) in each ELLIPSE, before its axis ratio and parameters — every ellipse arc came out a full circle as big as its
+   major axis (the JADE plans: 2,392 of them); an insertion point (12), 41, 74 and 75 in each DIMENSION's AcDbDimension part, before
+   the points that measure it. Those parts keep only the codes dxf-json reads there — taken out of the binary DXF itself, its values
+   read with dxf-json's own types; a DXF not walked to its EOF is left as it is. -> the DXF (the same bytes, shorter) */
+const dxfSize = (c, u, i) => c >= 310 && c <= 319 || c === 1004 ? 1 + u[i] : c >= 290 && c <= 299 ? 1
+  : c >= 60 && c <= 79 || c >= 170 && c <= 179 || c >= 270 && c <= 289 || c >= 370 && c <= 389 || c >= 400 && c <= 409 || c >= 1060 && c <= 1070 ? 2
+  : c >= 90 && c <= 99 || c >= 420 && c <= 429 || c >= 440 && c <= 459 || c === 1071 ? 4
+  : c >= 10 && c <= 59 || c >= 110 && c <= 149 || c >= 160 && c <= 169 || c >= 210 && c <= 239 || c >= 460 && c <= 469 || c >= 1010 && c <= 1059 ? 8 : -1;   // (-1: a string, to its 0)
+const NET_KEEP = {ELLIPSE: ["AcDbEllipse", [100, 10, 20, 30, 11, 21, 31, 210, 220, 230, 40, 41, 42]],
+  DIMENSION: ["AcDbDimension", [100, 280, 2, 10, 20, 30, 11, 21, 31, 70, 71, 72, 42, 1, 53, 51, 210, 220, 230, 3]]};
+const latin = (u, i, j) => String.fromCharCode.apply(null, Array.from(u.subarray(i, Math.min(j, i + 40))));
+export function netDxfFix(u8){
+  if (!/^AutoCAD Binary DXF/.test(head(u8, 18))) return u8;
+  const n = u8.length, cut = [], keep = Object.fromEntries(Object.entries(NET_KEEP).map(([k, [sec, L]]) => [k, [sec, new Set(L)]]));
+  let i = 22, rule = null, inSec = false, end = false;
+  while (i + 1 < n) {
+    const g = i, c = u8[i] | u8[i + 1] << 8, sz = dxfSize(c, u8, i += 2);
+    let v = null;
+    if (sz >= 0) i += sz;
+    else { const j = u8.indexOf(0, i); if (j < 0) break; if (c === 0 || c === 100 && rule) v = latin(u8, i, j); i = j + 1; }
+    if (c === 0) { if (v === "EOF") { end = true; break; } rule = keep[v] || null; inSec = false; continue; }
+    if (!rule) continue;
+    if (c === 100) { inSec = v === rule[0]; continue; }
+    if (inSec && !rule[1].has(c)) cut.push(g, i);
+  }
+  if (!end || !cut.length) return u8;
+  let w = cut[0];
+  for (let k = 0; k < cut.length; k += 2) { const from = cut[k + 1], to = k + 2 < cut.length ? cut[k + 2] : n; u8.copyWithin(w, from, to); w += to - from; }
+  return u8.subarray(0, w);
+}
+/* what ACadSharp's DXF leaves out, put back as AutoCAD writes it: a dimension's measured length (42 — it tells a drawing's units,
+   unitGuess), worked out from its points as AutoCAD does for a linear (along its angle) or aligned one; MTEXT's line breaks (^J) */
+function netDxFix(dx){
+  const go = L => (L || []).forEach(e => {
+    if (!e) return;
+    if (e.type === "DIMENSION" && !(+e.measurement > 0)) {
+      const a = e.subDefinitionPoint1, b = e.subDefinitionPoint2, t = (+e.dimensionType || 0) & 7;
+      if (a && b && (t === 0 || t === 1)) { const x = (+b.x || 0) - (+a.x || 0), y = (+b.y || 0) - (+a.y || 0), r = (+e.rotationAngle || 0) * Math.PI / 180;
+        e.measurement = t === 1 ? Math.hypot(x, y) : Math.abs(x * Math.cos(r) + y * Math.sin(r)); }
+    } else if (e.type === "MTEXT" && typeof e.text === "string" && e.text.includes("^J")) e.text = e.text.replace(/\^J/g, "\\P");
+  });
+  go(dx.entities); Object.values(dx.blocks || {}).forEach(b => go(b && b.entities));
+}
 const joinParts = parts => { let n = 0; parts.forEach(p => n += p.length); const u = new Uint8Array(n); n = 0; parts.forEach(p => { u.set(p, n); n += p.length; }); parts.length = 0; return u; };
 const netErr = m => { m = String(m || "it could not be read").replace(/^\w+Exception: /, "");   // (.NET's messages are trimmed to their keys: Arg_EndOfStreamException…)
   return new Error(/terminated with exit|could not allocate|out of memory|OutOfMemory/i.test(m) ? "the drawing is too big for this browser's memory"
@@ -242,7 +287,7 @@ async function readDwgNet(u8, say, net){
   if (say) say("read2");
   const page = typeof document !== "undefined" && document.body && !LIB.net;
   const {dxf, notes} = await (net && !LIB.net ? net(u8) : page ? cadNetFrame(u8, say) : netHere(u8, say));
-  const md = await readDxf(dxf); md.fmt = "DWG"; md.ver = head(u8, 6); md.rdr = "ACadSharp"; md.warn = notes || 0;
+  const md = await readDxf(netDxfFix(dxf), netDxFix); md.fmt = "DWG"; md.ver = head(u8, 6); md.rdr = "ACadSharp"; md.warn = notes || 0;
   return md;
 }
 const head = (u, n) => String.fromCharCode.apply(null, Array.from(u.subarray(0, n)));
@@ -300,7 +345,7 @@ async function readLibre(u8, ver){
   }
   return md;
 }
-async function readDxf(u8){
+async function readDxf(u8, fix){   // fix(dx): what a DXF's writer left out, put back before it is read (ACadSharp's)
   const M = await dxfLib(), P = new M.DxfParser();
   let dx;
   if (/^AutoCAD Binary DXF/.test(head(u8, 18))) dx = P.parseBuffer(u8);
@@ -309,6 +354,7 @@ async function readDxf(u8){
       if (H.size) { fix(dx.entities); Object.values(dx.blocks || {}).forEach(b => fix(b && b.entities)); } }
     if (dx && /\nLEADER\r?\n/.test(t)) dx.zdLdr = dxfLeaders(t); }
   if (!dx || !Array.isArray(dx.entities)) throw new Error("the DXF could not be read");
+  if (fix) fix(dx);
   const md = normDxf(dx); if (dx.zdLdr) md.ldr = dx.zdLdr; return md;
 }
 /* from a DXF's text: its dimension styles (name -> {asz DIMASZ, dsc DIMSCALE, blk DIMLDRBLK's block handle}) and each leader's style and
