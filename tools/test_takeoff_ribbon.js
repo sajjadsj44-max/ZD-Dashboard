@@ -238,10 +238,26 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   await page.keyboard.press("Escape"); await wait(100);
 
   console.log("layout");
-  // + / − beside Pan zoom the drawing as the page bar's do (× 1.25, × 0.8, on its middle)
-  await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
-  const zv = () => T(() => zdTakeoff.S.view.s), z0 = await zv(); await page.click("#bTZi"); await wait(200); const z1 = await zv(); await page.click("#bTZo"); await page.click("#bTZo"); await wait(200); const z2 = await zv();
-  ok(await page.isVisible("#topTools #bTZi") && near(z1 / z0, 1.25, 1e-6) && near(z2 / z1, 0.64, 1e-6), `Zoom in / Zoom out beside Pan: × ${(z1 / z0).toFixed(3)}, then × 0.8 twice (${(z2 / z1).toFixed(3)})`);
+  // Zoom in / Zoom out beside Pan: the software's own zoom — the ribbon and the panels bigger, the drawing's zoom untouched and its
+  // pointer exact (the middle of the drawing area hovered reads the page point under it at 125 %); Shift+click back to 100 %, kept in the browser
+  await page.keyboard.press("Escape"); await page.keyboard.press("Escape"); await page.keyboard.press("m"); await wait(150);
+  const mid = () => T(() => { const V = zdTakeoff.S.view, st = document.getElementById("stage"); return [(st.clientWidth / 2 - V.tx) / V.s, (st.clientHeight / 2 - V.ty) / V.s, V.s]; });
+  const vs0 = await T(() => zdTakeoff.S.view.s), tw0 = await T(() => document.getElementById("tools").getBoundingClientRect().height), lw0 = await T(() => document.querySelector("aside.panel").getBoundingClientRect().width), m0 = await mid();
+  await page.click("#bTZi"); await page.click("#bTZi"); await wait(500);
+  const uz = await T(() => ({z: getComputedStyle(document.querySelector("header")).zoom, st: getComputedStyle(document.getElementById("stage")).zoom, s: zdTakeoff.S.view.s, tw: document.getElementById("tools").getBoundingClientRect().height, lw: document.querySelector("aside.panel").getBoundingClientRect().width, kept: localStorage.getItem("zdUiZoom")})), m1 = await mid();
+  const pt = await T(() => { const V = zdTakeoff.S.view, st = document.getElementById("stage"), r = st.getBoundingClientRect(), x = Math.round(st.clientWidth / 2), y = Math.round(st.clientHeight / 2);
+    return {x: r.left + x, y: r.top + y, p: [(x - V.tx) / V.s, (y - V.ty) / V.s], s: V.s}; });
+  await page.mouse.move(pt.x - 3, pt.y - 3); await wait(100); await page.mouse.move(pt.x, pt.y); await wait(150);
+  const cp = await T(() => zdTakeoff.S.cursor && [zdTakeoff.S.cursor[0], zdTakeoff.S.cursor[1]]), off = cp ? Math.hypot(cp[0] - pt.p[0], cp[1] - pt.p[1]) * pt.s : null;
+  ok(uz.z === "1.25" && uz.st === "1" && uz.s === vs0 && uz.tw > tw0 * 1.2 && uz.kept === "1.25", `Zoom in twice: the software at 125 % (the ribbon ${Math.round(tw0)} → ${Math.round(uz.tw)} px), the drawing area not scaled, its zoom as it was, kept in the browser`);
+  ok(cp && off <= 2, `…and the drawing's pointer exact: the page point under the mouse read ${off == null ? "nothing" : off.toFixed(2) + " screen px"} off`);
+  ok(uz.lw > lw0 * 1.2 && Math.hypot(m1[0] - m0[0], m1[1] - m0[1]) * m0[2] < 2, `…the side panel wider with its text (${Math.round(lw0)} → ${Math.round(uz.lw)} px), the middle of the drawing still in the middle`);
+  await T(() => { for (let i = 0; i < 6; i++) document.getElementById("bTZi").click(); }); await wait(400);
+  const big = await T(() => ({z: localStorage.getItem("zdUiZoom"), h: document.getElementById("stage").clientHeight, H: innerHeight, sw: document.documentElement.scrollWidth - document.documentElement.clientWidth}));
+  ok(big.h >= Math.min(200, big.H * .25) - 1 && big.sw <= 1, `Zoom in to the end: stops at ${Math.round(+big.z * 100)} %, the drawing still ${big.h} px high, no sideways scroll`);
+  await page.click("#bTZo", {modifiers: ["Shift"]}); await wait(400);
+  ok(await T(() => !document.documentElement.classList.contains("uiz") && getComputedStyle(document.querySelector("header")).zoom === "1" && !localStorage.getItem("zdUiZoom")), "Shift+click: back to 100 %");
+  await page.keyboard.press("Escape");
   await page.setViewportSize({width: 390, height: 844}); await wait(400);
   const over = await T(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   ok(over <= 1, `no sideways page scroll at 390 px (${over})`);
