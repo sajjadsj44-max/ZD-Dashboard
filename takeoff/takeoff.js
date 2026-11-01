@@ -17193,9 +17193,9 @@ function cadLoad(fid, proj = P.proj){
     if (rec && rec.scene && rec.scene.ver === C.CAD_VER) sc = rec.scene;
     else if (rec && rec.src) {
       const rn = meta.via ? String(rec.name || "drawing").replace(/\.dwg$/i, ".dxf") : rec.name || "";   // (opened by AutoCAD: what is kept is its DXF)
-      try { const r = await cadWorker(rec.src, rn || "the drawing", meta.map);
+      try { const r = await cadWorker(rec.src, rn || "the drawing", meta.map, meta.rdr === "ACadSharp" ? "acadsharp" : "");   // (read by the second DWG reader before: by it again)
         if (r) { sc = r.scene; if (r.pdf && r.pdf.byteLength) { rec.data = r.pdf.buffer.slice(r.pdf.byteOffset, r.pdf.byteOffset + r.pdf.byteLength); delete rec.pdfSha; } }   // its PDF written again too: exports show it as the screen does
-        else { busy("Reading " + (rec.name || "the drawing") + "…"); sc = C.cadScene(await C.cadRead(rec.src, rn), {map: meta.map}); }
+        else { busy("Reading " + (rec.name || "the drawing") + "…"); sc = C.cadScene(await C.cadRead(rec.src, rn, {reader: meta.rdr === "ACadSharp" ? "acadsharp" : ""}), {map: meta.map}); }
         rec.scene = sc; await dbPut("pdfs", rec, fid).catch(() => {}); }
       catch (e) { if (!rec.scene) throw e; sc = rec.scene; toast("Shown as it was first read — the drawing could not be read again here (" + (e.message || e) + ")", 6000); }   // the scene kept from before: still its objects
       finally { busy(""); } }
@@ -17206,19 +17206,24 @@ function cadLoad(fid, proj = P.proj){
    the reader's memory goes with the worker. Resolves {scene, pdf}, or null when this browser cannot start the worker (then it is
    read here) */
 const PDFLIB_ESM = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.esm.min.js";
-function cadWorker(buf, name, map){
+function cadWorker(buf, name, map, reader){   // reader: "acadsharp" — a DWG straight to the second DWG reader
   return new Promise((ok, bad) => {
     let w; try { w = new Worker(new URL("./cad-worker.js" + CADV, import.meta.url), {type: "module"}); } catch (e) { return ok(null); }
     const t0 = Date.now(), first = !S.cadRead, label = {load: "Loading the AutoCAD reader…", read: "Reading " + name + (first ? " — the first drawing loads the reader (about 10 MB, once)" : "") + "…",
+      read2: "Reading " + name + " again with the second DWG reader (the first could not read it whole)…", read2dxf: "Reading " + name + " — the second DWG reader is handing it over…",
       scene: "Drawing " + name + "…", pdf: "Writing " + name + " as a layered PDF…"};
     let step = "", started = false, last = Date.now();
     const say = () => busy((label[step] || "Reading " + name + "…") + (Date.now() - t0 > 3000 ? " " + Math.round((Date.now() - t0) / 1000) + " s" : ""));
     const tick = setInterval(() => { say(); if (Date.now() - last > 15 * 60000) { done(); bad(new Error("the reader stopped answering — the drawing may be too big for this browser")); } }, 1000);
     const done = () => { clearInterval(tick); try { w.terminate(); } catch (e) {} };
     w.onmessage = e => { const d = e.data || {}; last = Date.now(); if (d.step) { step = d.step; if (d.step !== "load") started = true; return say(); }
+      if (d.need2) {   // the second DWG reader, in a frame of this page (cad.js): the drawing handed back to the worker as a binary DXF
+        cadMod().then(C => C.cadNetFrame(new Uint8Array(buf), s => { step = s; last = Date.now(); say(); }))
+          .then(r => { last = Date.now(); const b = r.dxf.buffer; w.postMessage({dxf2: b, notes: r.notes}, [b]); }, er => w.postMessage({err2: String(er && er.message || er)}));
+        return; }
       done(); if (d.ok) { S.cadRead = true; ok(d); } else bad(new Error(d.error || "the drawing could not be read")); };
     w.onerror = e => { done(); if (!started) ok(null); else bad(new Error("the drawing was too big for this browser to read" + (e && e.message ? " (" + e.message + ")" : ""))); };
-    say(); const copy = buf.slice(0); w.postMessage({buf: copy, name, map: map || null, pdfLib: PDFLIB_ESM}, [copy]);
+    say(); const copy = buf.slice(0); w.postMessage({buf: copy, name, map: map || null, pdfLib: PDFLIB_ESM, reader: reader || ""}, [copy]);
   });
 }
 /* a DWG opened by the AutoCAD on this computer: its helper (tools/cad-bridge.js, on 127.0.0.1 only) runs AutoCAD's console on a
@@ -17234,7 +17239,7 @@ async function acadHelper(){   // (the first time, the browser asks to let this 
    set up on this computer, it is not asked again until the page is opened again */
 let acadAsk = true;
 async function acadStart(name){   // -> what the started helper says (as acadHelper), or null
-  if (!acadAsk) return null;
+  if (!acadAsk || TEAM) return null;   // (a friend's computer has no AutoCAD helper: the browser's two DWG readers read it)
   busy("");
   const v = await choose("Open " + name + " in AutoCAD?", `<p>The AutoCAD helper is not running on this computer. It opens the DWG in AutoCAD, whole — the browser's own DWG reader loses most of some big drawings.</p>
     <p class="small">If the browser asks whether this site may open <b>ZD AutoCAD helper</b>, tick <b>Always allow</b>. Not set up on this computer yet: in the ZD-Dashboard folder double-click <b>tools\\cad-bridge-setup.cmd</b> once — it also starts the helper with Windows.</p>`,
@@ -17284,6 +17289,7 @@ async function cadImport(f, buf, map){
     layers: sc.layers.map(l => ({name: l.name, c: l.c, aci: l.aci, off: l.off, frozen: l.frozen, plot: l.plot, lt: l.lt, lw: l.lw})),
     stats: {ents: st.ents, prims: st.prims, texts: st.texts, skipped: st.skipped, missing: Object.keys(st.missing).length, far: st.far, junk: st.junk || 0, trunc: st.trunc}};
   if (via) meta.via = via;   // opened by this computer's AutoCAD (src is then its DXF)
+  else if (sc.rdr) meta.rdr = sc.rdr;   // read by the second DWG reader (ACadSharp): LibreDWG could not read it whole
   return {pdf, src: buf, scene: sc, meta};
 }
 function cadAdopt(meta, cad, how){   // a drawing just added: its page's scale from its units; layers off or frozen in the drawing start off
@@ -17293,9 +17299,9 @@ function cadAdopt(meta, cad, how){   // a drawing just added: its page's scale f
 }
 function cadSay(name, m){
   const off = m.layers.filter(l => l.off || l.frozen).length, sk = Object.entries(m.stats.skipped || {}).map(([t, n]) => n + " " + t).join(", ");
-  /* the browser's DWG reader can lose most of a big drawing that AutoCAD reads without fault (its objects come back empty): said first, with the way round it */
+  /* both of the browser's DWG readers can lose part of a drawing that AutoCAD reads without fault (its objects come back empty): said first, with the way round it */
   const jk = m.stats.junk || 0, lost = m.fmt === "DWG" && jk > 0.1 * (jk + (m.stats.ents || 0));
-  return (lost ? "⚠ Only part of this drawing could be read — " + jk.toLocaleString() + " objects came out empty in the browser's DWG reader. Start the AutoCAD helper on this computer (it opens every DWG whole — set it up once with tools\cad-bridge-setup.cmd) and add the drawing again, or in AutoCAD use SAVEAS → DXF and add the .dxf. " : "") + name + (m.via ? " — opened by " + m.via + " on this computer" : "") + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
+  return (lost ? "⚠ Only part of this drawing could be read — " + jk.toLocaleString() + " objects came out empty in the browser's DWG readers. Start the AutoCAD helper on this computer (it opens every DWG whole — set it up once with tools\\cad-bridge-setup.cmd) and add the drawing again, or in AutoCAD use SAVEAS → DXF and add the .dxf. " : "") + name + (m.via ? " — opened by " + m.via + " on this computer" : m.rdr ? " — read by the second DWG reader (" + m.rdr + ")" : "") + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
     (m.assumed ? " — ⚠ the drawing has no units set: check the scale (chip → Verify)" : m.unitFix ? " — ⚠ its dimensions disagree with its units setting: check the scale (chip → Verify)" : " — scale exact") +
     " · " + m.layers.length + " layers" + (off ? " (" + off + " off / frozen)" : "") + " · " + (m.stats.ents || 0).toLocaleString() + " objects" +
     (sk ? " · not shown: " + sk : "") + (m.stats.missing ? " · " + m.stats.missing + " block(s) missing (xrefs?)" : "") + (m.stats.far ? " · " + m.stats.far + " far-off object(s) left off the page" : "") + (m.stats.junk ? " · " + m.stats.junk + " damaged object(s) left out" : "") + (m.stats.trunc ? " · ⚠ very large: shown in part" : "");
@@ -18514,7 +18520,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   window.zdTakeoff = {setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
-    cadLoad, cadMod, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
+    cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
     mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, verReload, autoUpd, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,

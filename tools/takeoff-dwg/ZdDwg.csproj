@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+  <!-- The PDF Takeoff's second DWG reader (ZdDwg.cs) as WebAssembly: built by build.ps1 into takeoff/dwg/ -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <WasmEnableWebcil>true</WasmEnableWebcil>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <DebuggerSupport>false</DebuggerSupport>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <!-- compiled ahead of time (2-3x quicker than the interpreter) and up to 4 GB of memory (a 36 MB DWG of 700,000 objects needs 3) -->
+    <WasmBuildNative>true</WasmBuildNative>
+    <RunAOTCompilation>true</RunAOTCompilation>
+    <EmccMaximumHeapSize>4294901760</EmccMaximumHeapSize>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ACadSharp" Version="3.8.35" />
+    <TrimmerRootAssembly Include="ACadSharp" />
+  </ItemGroup>
+</Project>

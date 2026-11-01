@@ -30,6 +30,11 @@
   `takeoff/trace.js` and `takeoff/trace-worker.js` (the vector trace of a PDF's wall layers).
   And for `takeoff/measure.js` (the measurement engine: geometry and QS formulas, unit-tested by
   `tools/test_takeoff_measure.js` in plain Node).
+- `takeoff/dwg/_framework/` is the second DWG reader (ACadSharp compiled to WebAssembly, ~20 MB), built from
+  `tools/takeoff-dwg/ZdDwg.cs` by `tools/takeoff-dwg/build.ps1` (.NET 10 SDK + `dotnet workload install wasm-tools`); cad.js
+  loads its `dotnet.js` with takeoff.js's `?v=`, so bump that `?v=` after a rebuild. It runs in a sandboxed frame of the page,
+  never in a worker (Chrome 156 crashes a worker that starts .NET); the frame loads it across origins (Pages sends
+  `Access-Control-Allow-Origin: *`; tests add that header). Every DWG LibreDWG reads wrong or in part goes to it.
 - When a `takeoff/cad.js` change alters how a DWG / DXF is read or drawn (text placement, geometry,
   layers), raise `CAD_VER` in cad.js too. Each browser keeps the drawing as it was first read and
   only reads it again from the DWG when `CAD_VER` changes, so without it drawings already added keep

@@ -1,7 +1,8 @@
 /* ZD PDF Takeoff — AutoCAD drawings (DWG and DXF) opened in the browser.
    The drawing is read here: DWG by LibreDWG compiled to WebAssembly (@mlightcad/libredwg-web), DXF by dxf-json — both
-   GPL-3.0, loaded from jsDelivr the first time a drawing is opened and then kept by the browser; the drawing itself is
-   never uploaded. Model space is flattened (blocks with their attributes, dimensions, hatches, text, leaders) into a scene
+   GPL-3.0, loaded from jsDelivr the first time a drawing is opened and then kept by the browser — and a DWG LibreDWG cannot
+   read whole by the second DWG reader, ACadSharp (MIT) compiled to WebAssembly in dwg/ beside this file; the drawing itself
+   is never uploaded. Model space is flattened (blocks with their attributes, dimensions, hatches, text, leaders) into a scene
    in page points, which is
    - drawn straight onto the canvas, only what is on screen and small things left out when zoomed out, so zoom and pan
      stay fast as in AutoCAD — on AutoCAD's black background with its colours, on white, or monochrome; and
@@ -11,7 +12,7 @@
    exact and needs no calibration. */
 const LDWG = "https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/dist/libredwg-web.js";
 const LDXF = "https://cdn.jsdelivr.net/npm/@mlightcad/dxf-json@1.2.8/dist/esm/bundle.mjs";
-export const CAD_VER = 10;         // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (10: each object's handle kept apart (hd) — a text's h is its height — for DWG compare; 9: justified text at a 0,0 point and backwards / upside-down text on its point; 8: lengths inside blocks stretched more one way measured as drawn; 7: text in its style's / \f font — Times for serif, condensed narrower — and LWDISPLAY; 6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
+export const CAD_VER = 11;         // the scene's version: a drawing stored by an older one is read again from its DWG / DXF (11: a DWG LibreDWG read in part read again whole by the second DWG reader, ACadSharp; 10: each object's handle kept apart (hd) — a text's h is its height — for DWG compare; 9: justified text at a 0,0 point and backwards / upside-down text on its point; 8: lengths inside blocks stretched more one way measured as drawn; 7: text in its style's / \f font — Times for serif, condensed narrower — and LWDISPLAY; 6: the objects inside blocks, each its own record for CAD pick; 5: a multileader's text height from a DXF's CONTEXT_DATA 41; 4: a multileader's text at its own height, not scaled twice; MTEXT sized by its leading \H; 3: a dimension's or block's points on Defpoints go with its layer; 2: MTEXT centred in its box by \pxqc; text in a capitals-only font in capitals)
 export const INK = -1;             // colour 7 (and true black or white): white on a black background, black on white
 export const isCadName = n => /\.(dwg|dxf)$/i.test(String(n || ""));
 const CAPS_FONT = /^(technic_|techb___|techl___|coprgt[bl]?|copperplate[\w ]*|stencil|engr|castelar|felixti|alger)\.(ttf|otf)$/i;   // fonts with capitals only (their small letters are small capitals)
@@ -178,18 +179,102 @@ function dxfLib(){
   return dxfP || (dxfP = (async () => LIB.dxf || await import(LDXF))()
     .catch(e => { dxfP = null; throw new Error("the DXF reader could not be loaded — check the internet connection (" + (e && e.message || e) + ")"); }));
 }
+/* the second DWG reader: ACadSharp (MIT) compiled to WebAssembly — tools/takeoff-dwg, built into dwg/ beside this file. LibreDWG
+   gets almost every object of some drawings wrong (AutoCAD 2018 drawings with AutoCAD Architecture objects: the type and text come
+   out, the points do not), and some it cannot open; ACadSharp reads them whole and hands the drawing back as a binary DXF, read
+   here as any DXF. Loaded (about 20 MB, once) only when a drawing needs it */
+let netP = null;
+const NET = {out: null, say: null}, JIT_OFF = ["--no-jiterpreter-traces-enabled", "--no-jiterpreter-interp-entry-enabled", "--no-jiterpreter-jit-call-enabled"];
+const netUrl = f => new URL(f + new URL(import.meta.url).search, import.meta.url).href;   // (with this file's own ?v=)
+function netLib(){   // the reader in this thread (tests)
+  return netP || (netP = (async () => {
+    const {dotnet} = LIB.net || await import(netUrl("./dwg/_framework/dotnet.js"));
+    const rt = await dotnet.withRuntimeOptions(JIT_OFF).create();
+    rt.setModuleImports("zddwg", {chunk: v => { if (NET.out) NET.out.push(v.slice()); }, step: s => { if (NET.say) NET.say(s); }});
+    return (await rt.getAssemblyExports("ZdDwg.dll")).ZdDwg;
+  })().catch(e => { netP = null; throw new Error("the second DWG reader could not be loaded — check the internet connection (" + (e && e.message || e) + ")"); }));
+}
+const joinParts = parts => { let n = 0; parts.forEach(p => n += p.length); const u = new Uint8Array(n); n = 0; parts.forEach(p => { u.set(p, n); n += p.length; }); parts.length = 0; return u; };
+const netErr = m => { m = String(m || "it could not be read").replace(/^\w+Exception: /, "");   // (.NET's messages are trimmed to their keys: Arg_EndOfStreamException…)
+  return new Error(/terminated with exit|could not allocate|out of memory|OutOfMemory/i.test(m) ? "the drawing is too big for this browser's memory"
+    : /EndOfStream/i.test(m) ? "the file ends too early — is it complete?" : /^\w+$/.test(m) ? "it could not be read (" + m + ")" : m); };
+function netHere(u8, say){   // the reader in this thread -> {dxf, notes}
+  return netLib().then(X => { let r, parts; NET.out = []; NET.say = s => { if (say && s === "dxf") say("read2dxf"); };
+    try { r = JSON.parse(X.ToDxf(u8)); } catch (e) { r = {ok: false, error: String(e && e.message || e)}; } finally { parts = NET.out; NET.out = NET.say = null; }
+    if (!r.ok) { netP = null; throw netErr(r.error); }   // (its memory may be spent: a new one next time)
+    return {dxf: joinParts(parts), notes: r.notes || 0}; });
+}
+/* the reader in a sandboxed frame of its own, removed as soon as the drawing is handed over. Chrome runs such a frame (an origin of
+   its own) in a process of its own: the page stays responsive while a big drawing is read, and the reader's memory — some GB for a
+   big one — goes with the frame. (Not a worker: Chrome 156 crashes a worker that starts .NET.) The frame loads dwg/_framework from
+   this site across origins (GitHub Pages answers with Access-Control-Allow-Origin: *). The page's own — a worker asks its page
+   (cad-worker.js). -> {dxf, notes} */
+export function cadNetFrame(u8, say){
+  return new Promise((ok, bad) => {
+    const f = document.createElement("iframe"), parts = [], mb = u8.length / 1048576;
+    f.sandbox = "allow-scripts"; f.setAttribute("aria-hidden", "true"); f.tabIndex = -1; f.style.cssText = "position:fixed;width:1px;height:1px;left:-9px;top:-9px;border:0;opacity:0";
+    f.srcdoc = `<!doctype html><meta charset="utf-8"><script type="module">
+addEventListener("message", async e => {
+  if (e.source !== parent) return;
+  try {
+    const {dotnet} = await import(${JSON.stringify(netUrl("./dwg/_framework/dotnet.js"))});
+    const rt = await dotnet.withRuntimeOptions(${JSON.stringify(JIT_OFF)}).create();
+    rt.setModuleImports("zddwg", {chunk: v => { const b = v.slice(); parent.postMessage({part: b}, "*", [b.buffer]); }, step: s => parent.postMessage({step: s}, "*")});
+    const X = (await rt.getAssemblyExports("ZdDwg.dll")).ZdDwg;
+    parent.postMessage(JSON.parse(X.ToDxf(new Uint8Array(e.data.buf))), "*");
+  } catch (er) { parent.postMessage({ok: false, error: String(er && er.message || er)}, "*"); }
+}, {once: true});
+parent.postMessage({ready: 1}, "*");
+<\/script>`;
+    const end = () => { clearTimeout(tm); removeEventListener("message", on); f.remove(); };
+    const tm = setTimeout(() => { end(); bad(new Error("the second DWG reader stopped answering — the drawing may be too big for this browser's memory")); }, (120 + 20 * mb) * 1000);
+    const on = e => { if (e.source !== f.contentWindow) return; const d = e.data || {};
+      if (d.ready) { const c = u8.slice(); f.contentWindow.postMessage({buf: c.buffer}, "*", [c.buffer]); return; }
+      if (d.part) { parts.push(d.part); return; }
+      if (d.step) { if (say && d.step === "dxf") say("read2dxf"); return; }
+      end(); if (d.ok) ok({dxf: joinParts(parts), notes: d.notes || 0}); else bad(netErr(d.error)); };
+    addEventListener("message", on); document.body.appendChild(f);
+  });
+}
+/* net(u8): how the reader is reached from here ({dxf, notes} for the DWG) — a worker asks its page; a page uses a frame; tests
+   (LIB.net) and anything else, this thread */
+async function readDwgNet(u8, say, net){
+  if (say) say("read2");
+  const page = typeof document !== "undefined" && document.body && !LIB.net;
+  const {dxf, notes} = await (net && !LIB.net ? net(u8) : page ? cadNetFrame(u8, say) : netHere(u8, say));
+  const md = await readDxf(dxf); md.fmt = "DWG"; md.ver = head(u8, 6); md.rdr = "ACadSharp"; md.warn = notes || 0;
+  return md;
+}
 const head = (u, n) => String.fromCharCode.apply(null, Array.from(u.subarray(0, n)));
-/* a DWG / DXF file -> the drawing as one model (whichever the reader, the same fields) */
-export async function cadRead(buf, name){
-  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  if (/^AC1\d{3}/.test(head(u8, 6))) return readDwg(u8);
+/* a DWG / DXF file -> the drawing as one model (whichever the reader, the same fields). o: {say(step) — "read2" / "read2dxf" when the
+   second DWG reader takes over, net(u8) — how a worker reaches it (its page), reader: "acadsharp" to read a DWG with it alone} */
+export async function cadRead(buf, name, o){
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf), say = o && o.say, net = o && o.net;
+  if (!u8.length) throw new Error("the file is empty (0 bytes) — copy or download it again");
+  if (/^AC1\d{3}/.test(head(u8, 6))) return o && o.reader === "acadsharp" ? readDwgNet(u8, say, net) : readDwg(u8, say, net);
   if (/^AutoCAD Binary DXF/.test(head(u8, 18))) return readDxf(u8);   // (a DWG kept as the DXF this computer's AutoCAD saved of it)
   if (/\.dwg$/i.test(name || "")) throw new Error("this is not a DWG file (it does not start like one — is it complete?)");
   return readDxf(u8);
 }
-async function readDwg(u8){
-  const ver = head(u8, 6), {m, lib} = await dwgLib(), W = lib.wasmInstance; dwgUsed = true;
+/* a DWG: LibreDWG first (quick, and what the drawings so far were read by); a drawing it cannot read, reads wrong (most objects
+   empty) or reads in part (a tenth or more empty) is read again by the second reader, ACadSharp — its read kept when it has more */
+async function readDwg(u8, say, net){
+  const ver = head(u8, 6);
   if (ver < "AC1012") throw new Error("AutoCAD " + (VERS[ver] || ver) + " drawings are too old for the DWG reader — save it again in AutoCAD as a newer DWG, or as DXF");
+  let md = null, e1 = null;
+  try { md = await readLibre(u8, ver); } catch (e) { e1 = e; }
+  const lost = md ? md.bogus || 0 : 0;
+  if (md && !(lost > 50 && lost > 0.1 * (lost + md.ents.length))) return md;
+  dwgP = null; dwgUsed = false;   // (LibreDWG's memory let go before the second reader takes its own)
+  try { const m2 = await readDwgNet(u8, say, net); if (!md || m2.ents.length > md.ents.length) return m2; }
+  catch (e2) {
+    if (!md || lost > 9 * md.ents.length) throw new Error((md ? "this DWG came out unreadable in the browser's DWG reader (" + lost.toLocaleString() + " of its objects could not be read)" : e1.message) +
+      ", and the second DWG reader could not read it either (" + e2.message + ") — start the AutoCAD helper on this computer (it opens the DWG in AutoCAD, whole — set it up once with tools\\cad-bridge-setup.cmd) and add it again, or in AutoCAD use SAVEAS → DXF and add the .dxf");
+  }
+  return md;
+}
+async function readLibre(u8, ver){
+  const {m, lib} = await dwgLib(), W = lib.wasmInstance; dwgUsed = true;
   let ptr = 0, err = 0;
   if (W && W.FS && typeof W.dwg_read_file === "function") {
     const fn = "/zd" + Date.now() % 1e9 + ".dwg";
@@ -204,7 +289,8 @@ async function readDwg(u8){
   let db, st = {};
   try { const r = typeof lib.convertEx === "function" ? lib.convertEx(ptr) : {database: lib.convert(ptr)}; db = r.database; st = r.stats || {}; }
   finally { try { lib.dwg_free(ptr); } catch (e) {} }
-  const md = normDwg(db); md.ver = ver; md.unk = st.unknownEntityCount || 0; md.warn = err;   // (normDwg throws for a drawing that came out unreadable)
+  const md = normDwg(db); md.ver = ver; md.unk = st.unknownEntityCount || 0; md.warn = err;
+  if (md.bogus > 50 && md.bogus > 0.1 * (md.bogus + md.ents.length)) return md;   // (read wrong, or in part: the second reader is tried — no second read here)
   const ovr = e => e.t === "LEADER" && e.dso;   // (LibreDWG's DXF of the drawing — a second read — only for leaders with overrides, and not for a big drawing)
   if (u8.length < 1.2e7 && typeof lib.dwg_write_dxf === "function" && (md.ents.some(ovr) || [...md.blocks.values()].some(b => b.ents.some(ovr)))) {
     let W2 = null;   // (in a new instance of its own: a second read in the first can come out short)
@@ -289,8 +375,7 @@ function normDwg(db){
   ((T.BLOCK_RECORD || {}).entries || []).forEach(b => { const k = String(b.name || "").toUpperCase(); if (b.handle) { md.bh.set(String(b.handle), k); if (/^\*PAPER_SPACE/.test(k)) paper.add(String(b.handle)); }
     if (k && !/^\*(MODEL|PAPER)_SPACE/.test(k)) md.blocks.set(k, {name: b.name, base: P2(b.basePoint), ents: normList(b.entities, true, {bogus: 0, real: 0})}); });
   // the reader lists the layouts' objects (title blocks, viewports) with the model's: only model space is drawn, as AutoCAD's zoom extents
-  md.ents = normList((db.entities || []).filter(e => !(e && paper.has(String(e.ownerBlockRecordSoftId)))), true, st); md.bogus = st.bogus;
-  if (st.bogus > 50 && st.bogus > 9 * st.real) throw new Error("this DWG came out unreadable in the browser's DWG reader (" + st.bogus.toLocaleString() + " of its objects could not be read) — start the AutoCAD helper on this computer (it opens the DWG in AutoCAD, whole — set it up once with tools\cad-bridge-setup.cmd) and add it again, or in AutoCAD use SAVEAS → DXF and add the .dxf");
+  md.ents = normList((db.entities || []).filter(e => !(e && paper.has(String(e.ownerBlockRecordSoftId)))), true, st); md.bogus = st.bogus;   // (objects that came out empty: readDwg judges)
   return md;
 }
 function normDxf(dx){
@@ -811,7 +896,7 @@ l => { const lw = LW(l), nat = emW(l, F.f) * em; L.push({l, f: F.f, lw, wf: nat 
     if (r.at) o.at = [PX(r.at[0]), PY(r.at[1])]; if (r.att && r.att.length) o.att = r.att; if (r.loops) o.loops = r.loops.map(l => l.map(p => [PX(p[0]), PY(p[1])])); if (r.p != null) o.p = dec(r.p); return o; };
   pg.ents = ENTS.map(rout); pg.subs = SUBS.map(rout);   // (ents: the drawing's own objects, as AutoCAD lists them; subs: the objects inside its blocks)
   pg.map = {den, x0: B[0], y1: B[3], ox, oy, w: W, h: H, uIn};
-  return {ver: CAD_VER, fmt: md.fmt, dver: md.ver, lwd: !!md.lwd, units, uIn, assumed, unitHow: unitFix || (md.units ? "" : inf ? inf.how : ""), unitFix: !!unitFix, unitName: units ? UNIT_NAME[units] : md.metric ? "millimetres (assumed)" : "inches (assumed)", metric: !!md.metric,
+  return {ver: CAD_VER, fmt: md.fmt, dver: md.ver, rdr: md.rdr || "", lwd: !!md.lwd, units, uIn, assumed, unitHow: unitFix || (md.units ? "" : inf ? inf.how : ""), unitFix: !!unitFix, unitName: units ? UNIT_NAME[units] : md.metric ? "millimetres (assumed)" : "inches (assumed)", metric: !!md.metric,
     layers: LAY.map(l => ({name: l.name, c: l.c, aci: l.aci, off: l.off, frozen: l.frozen, plot: l.plot, lw: l.lw, lt: l.lt})), pages: [pg],
     stats: {ents: md.ents.length, prims: n, texts: tn, segs: nO, skipped, missing, far, junk: junk + (md.bogus || 0), trunc, bad, unk: md.unk || 0, warn: md.warn || 0, ms: Date.now() - T0}};
 }
