@@ -60,5 +60,37 @@ A.main(cfg, users, out, dump)
 j2 = json.load(open(out))
 nb = sum(v.get("bilal", {}).get("n", 0) for v in j2["days"].values())
 ok(nb == 4, "a new announcement is added to what was summed")
+ok("guests" not in j2, "no guests: no guests part in the file")
+
+print("guests (the login switched off)")
+vdump = os.path.join(d, "visits.jsonl")
+X = {"k": "K" * 344, "iv": "I" * 16, "ct": "C" * 400}
+
+
+def visit(i, t, v, s, x=None, mt=None, dev="Windows · Chrome"):
+    m = {"zs": 1, "k": "visit", "v": v, "s": s, "d": dev, "t": t if mt is None else mt}
+    if x:
+        m["x"] = x
+    return ev(100 + i, t, m)
+
+
+g1, g2 = "a1b2c3d4e5f6", "0f0f0f0f0f0f"
+V = [visit(1, t0, g1, "p1", X), visit(2, t0 + 1200, g1, "p1"), visit(3, t0 + 4000, g1, "p2", dict(X, ct="D" * 400)),
+     visit(4, t0 + 100, g2, "p9", dev="Android · Chrome"), visit(5, t0 + 200, "NOT-AN-ID", "p0"),
+     visit(6, t0 + 300, g2, "p9", mt=t0 - 9000), visit(7, t0 + 400, g2, "p9", {"k": 5}, dev="Android · Chrome")]
+open(vdump, "w", encoding="utf-8").write("\n".join(V) + "\n")
+A.main(cfg, users, out, dump, vdump)
+j3 = json.load(open(out, encoding="utf-8"))
+G = j3.get("guests", {})
+a = G.get("days", {}).get(day(t0), {}).get(g1)
+ok(a and a["n"] == 3 and a["f"] == t0 and a["l"] == t0 + 4000 and a["s"] == ["p1", "p2"], "a guest: 3 visits from 2 page loads, first and last time")
+ok(a and len(a["x"]) == 2 and a["x"][0] == X, "…its sealed IP and place kept, each one once")
+b = G.get("days", {}).get(day(t0), {}).get(g2)
+ok(b and b["n"] == 2 and b["d"] == "Android · Chrome" and b["x"] == [], "a second guest with its device; a bad sealed part is dropped")
+ok(len(G["days"][day(t0)]) == 2, "a bad id and a sender's time far from the relay's are not counted")
+ok(G.get("first") == {g1: day(t0), g2: day(t0)}, "the first day of each guest is kept (new guests)")
+ok(sum(v.get("bilal", {}).get("n", 0) for v in j3["days"].values()) == 4, "the logins' activity is unchanged")
+A.main(cfg, users, out, dump, vdump)
+ok(json.load(open(out, encoding="utf-8")) == j3, "run again: no visit counted twice")
 print("\n%s" % ("all passed" if not fails else "%d failed" % fails))
 sys.exit(1 if fails else 0)
