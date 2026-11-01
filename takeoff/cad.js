@@ -182,7 +182,9 @@ function dxfLib(){
 /* the second DWG reader: ACadSharp (MIT) compiled to WebAssembly — tools/takeoff-dwg, built into dwg/ beside this file. LibreDWG
    gets almost every object of some drawings wrong (AutoCAD 2018 drawings with AutoCAD Architecture objects: the type and text come
    out, the points do not), and some it cannot open; ACadSharp reads them whole and hands the drawing back as a binary DXF, read
-   here as any DXF. Loaded (about 20 MB, once) only when a drawing needs it */
+   here as any DXF — ACadSharp built from its source with tools/takeoff-dwg/acadsharp.patch, which reads a block's objects only once
+   the block is used (the JADE masonry drawing: 668 MB instead of over the browser's 4 GB). Loaded (about 20 MB, once) only when a
+   drawing needs it */
 let netP = null;
 const NET = {out: null, say: null}, JIT_OFF = ["--no-jiterpreter-traces-enabled", "--no-jiterpreter-interp-entry-enabled", "--no-jiterpreter-jit-call-enabled"];
 const netUrl = f => new URL(f + new URL(import.meta.url).search, import.meta.url).href;   // (with this file's own ?v=)
@@ -190,7 +192,7 @@ function netLib(){   // the reader in this thread (tests)
   return netP || (netP = (async () => {
     const {dotnet} = LIB.net || await import(netUrl("./dwg/_framework/dotnet.js"));
     const rt = await dotnet.withRuntimeOptions(JIT_OFF).create();
-    rt.setModuleImports("zddwg", {chunk: v => { if (NET.out) NET.out.push(v.slice()); }, step: s => { if (NET.say) NET.say(s); }});
+    rt.setModuleImports("zddwg", {chunk: v => { if (NET.out) NET.out.push(v.slice()); }, step: s => { if (NET.say) NET.say(s); }, restart: () => { if (NET.out) NET.out.length = 0; }});
     return (await rt.getAssemblyExports("ZdDwg.dll")).ZdDwg;
   })().catch(e => { netP = null; throw new Error("the second DWG reader could not be loaded — check the internet connection (" + (e && e.message || e) + ")"); }));
 }
@@ -264,7 +266,7 @@ addEventListener("message", async e => {
   try {
     const {dotnet} = await import(${JSON.stringify(netUrl("./dwg/_framework/dotnet.js"))});
     const rt = await dotnet.withRuntimeOptions(${JSON.stringify(JIT_OFF)}).create();
-    rt.setModuleImports("zddwg", {chunk: v => { const b = v.slice(); parent.postMessage({part: b}, "*", [b.buffer]); }, step: s => parent.postMessage({step: s}, "*")});
+    rt.setModuleImports("zddwg", {chunk: v => { const b = v.slice(); parent.postMessage({part: b}, "*", [b.buffer]); }, step: s => parent.postMessage({step: s}, "*"), restart: () => parent.postMessage({restart: 1}, "*")});
     const X = (await rt.getAssemblyExports("ZdDwg.dll")).ZdDwg;
     parent.postMessage(JSON.parse(X.ToDxf(new Uint8Array(e.data.buf))), "*");
   } catch (er) { parent.postMessage({ok: false, error: String(er && er.message || er)}, "*"); }
@@ -276,6 +278,7 @@ parent.postMessage({ready: 1}, "*");
     const on = e => { if (e.source !== f.contentWindow) return; const d = e.data || {};
       if (d.ready) { const c = u8.slice(); f.contentWindow.postMessage({buf: c.buffer}, "*", [c.buffer]); return; }
       if (d.part) { parts.push(d.part); return; }
+      if (d.restart) { parts.length = 0; return; }   // (written again, whole: what came so far is void)
       if (d.step) { if (say && d.step === "dxf") say("read2dxf"); return; }
       end(); if (d.ok) ok({dxf: joinParts(parts), notes: d.notes || 0}); else bad(netErr(d.error)); };
     addEventListener("message", on); document.body.appendChild(f);

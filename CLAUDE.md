@@ -32,7 +32,9 @@
   `tools/test_takeoff_measure.js` in plain Node), and `takeoff/workbook.js` (the CostX-style Workbook, Costing → Workbook,
   tested by `tools/test_takeoff_workbook.js`).
 - `takeoff/dwg/_framework/` is the second DWG reader (ACadSharp compiled to WebAssembly, ~20 MB), built from
-  `tools/takeoff-dwg/ZdDwg.cs` by `tools/takeoff-dwg/build.ps1` (.NET 10 SDK + `dotnet workload install wasm-tools`); cad.js
+  `tools/takeoff-dwg/ZdDwg.cs` by `tools/takeoff-dwg/build.ps1` (.NET 10 SDK + `dotnet workload install wasm-tools`, git) on
+  ACadSharp's own source (v3.8.35 + CSUtilities a6505ab, fetched by the script) with `tools/takeoff-dwg/acadsharp.patch` — a
+  block's objects read only once something uses the block (a 53 MB drawing of mostly unused blocks: 668 MB, not over 4 GB); cad.js
   loads its `dotnet.js` with takeoff.js's `?v=`, so bump that `?v=` after a rebuild. It runs in a sandboxed frame of the page,
   never in a worker (Chrome 156 crashes a worker that starts .NET); the frame loads it across origins (Pages sends
   `Access-Control-Allow-Origin: *`; tests add that header). Every DWG LibreDWG reads wrong or in part goes to it.
@@ -71,6 +73,14 @@
   adds / removes them in Settings › Team logins, which saves users.json to main with a GitHub token asked
   when saving (kept only while the page is open) or downloads it. The team view hides backups, Recover,
   Settings › Backup & reset and the links to the other ZD pages. `tools/test_takeoff_team.js` checks it.
+- **Login switched off for now** (owner, 1-Nov-2026: "temporary off, I'll say when to turn it on"): `takeoff/users.json`
+  has `"open": true`, so `takeoff/?team` opens with no username / password, as a **Guest** (a friend's kept login
+  still signs in; Sign in stays offered; guests' Feedback → WhatsApp). To turn the login back on: set `"open": false`
+  (or Settings › Team logins › Ask for a login, Save to the site) — open guest pages ask within 5 minutes.
+  Each guest's visit is counted: a random id per browser (localStorage `zd-visitor`) posted to the relay topic
+  `v-` + the chat topic on open and every 20 min in view, with the device; the IP address and place (get.geojs.io)
+  sealed for chat.json's owner RSA key. `tools/activity_archive.py` sums them into takeoff-activity.json `guests`;
+  the owner sees them in Settings › Team logins › Guests (place / IP opened with the Inbox password `sa`).
   Exception asked for by the owner: a friend stays signed in on their computer until **Sign out** (localStorage
   `zd-team-login`: username, a sign-in id and the chat key — never the password; checked against `c` each time, so a new
   password or a removed user asks again). **One computer / browser at a time per login:** each sign-in is announced (HMAC
