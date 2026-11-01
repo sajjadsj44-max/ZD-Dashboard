@@ -393,6 +393,14 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
     return {rdr: md.rdr, fmt: md.fmt, ents: md.ents.length, texts: md.ents.filter(e => /TEXT/.test(e.t)).length, steps: steps.join(" "), empty}; }, fx("zd_text_2018.dwg"));
   ok(rd2.rdr === "ACadSharp" && rd2.fmt === "DWG" && rd2.ents > 0 && rd2.texts > 0 && /read2/.test(rd2.steps), "a DWG LibreDWG reads wrong is read again by the second reader, whole → " + JSON.stringify(rd2));
   ok(/empty \(0 bytes\)/.test(rd2.empty), "a 0-byte file is said to be empty: " + rd2.empty);
+  /* what ACadSharp writes where AutoCAD does not (an ELLIPSE's 39, a DIMENSION's 12 / 41 / 74 / 75) made dxf-json drop what followed:
+     the JADE plans' 2,392 ellipse arcs came out full circles, their dimensions without a length. Both readers, the same ellipse and
+     the same measured dimension */
+  const ed = await T(async b64 => { const C = await import("./cad.js?v=zd-reader2-geom"), u8 = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const pick = md => { const e = md.ents.find(x => x.t === "ELLIPSE"), d = md.ents.find(x => x.t === "DIMENSION"); return {e: e && [e.c, e.m, e.k, e.a0, e.a1].flat(), mv: d && d.mv}; };
+    return {lib: pick(await C.cadRead(u8.slice(), "zd_test_2018.dwg")), net: pick(await C.cadRead(u8.slice(), "zd_test_2018.dwg", {reader: "acadsharp"}))}; }, fx("zd_test_2018.dwg"));
+  ok(ed.lib.e && ed.net.e && ed.lib.e.every((v, i) => near(v, ed.net.e[i], 1e-6)), "the second reader's ellipse is LibreDWG's — centre, axis, ratio, start and end, not a full circle → " + JSON.stringify(ed));
+  ok(ed.lib.mv > 0 && near(ed.net.mv, ed.lib.mv, 1e-6), "and its dimension measures as LibreDWG's (" + ed.net.mv + ")");
 
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
   await browser.close();
