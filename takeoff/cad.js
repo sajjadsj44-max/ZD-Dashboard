@@ -195,8 +195,9 @@ function netLib(){   // the reader in this thread (tests)
   })().catch(e => { netP = null; throw new Error("the second DWG reader could not be loaded — check the internet connection (" + (e && e.message || e) + ")"); }));
 }
 const joinParts = parts => { let n = 0; parts.forEach(p => n += p.length); const u = new Uint8Array(n); n = 0; parts.forEach(p => { u.set(p, n); n += p.length; }); parts.length = 0; return u; };
-const netErr = m => { m = String(m || "it could not be read").replace(/^\w+Exception: /, "");
-  return new Error(/terminated with exit|could not allocate|out of memory|OutOfMemory/i.test(m) ? "the drawing is too big for this browser's memory" : m); };
+const netErr = m => { m = String(m || "it could not be read").replace(/^\w+Exception: /, "");   // (.NET's messages are trimmed to their keys: Arg_EndOfStreamException…)
+  return new Error(/terminated with exit|could not allocate|out of memory|OutOfMemory/i.test(m) ? "the drawing is too big for this browser's memory"
+    : /EndOfStream/i.test(m) ? "the file ends too early — is it complete?" : /^\w+$/.test(m) ? "it could not be read (" + m + ")" : m); };
 function netHere(u8, say){   // the reader in this thread -> {dxf, notes}
   return netLib().then(X => { let r, parts; NET.out = []; NET.say = s => { if (say && s === "dxf") say("read2dxf"); };
     try { r = JSON.parse(X.ToDxf(u8)); } catch (e) { r = {ok: false, error: String(e && e.message || e)}; } finally { parts = NET.out; NET.out = NET.say = null; }
