@@ -115,6 +115,15 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   await page.click('#wbRoot [data-w="cols"]'); await wait(); await page.click("#wbLr"); await page.click("#dlgOk"); await wait(300);
   ok((await hdr()).slice(0, 7).join() === "ref,code,desc,qty,unit,rate,tot" && !Object.keys((await wbv()).w).length, "Columns… → Reset layout: the first order and widths");
 
+  await page.click(hd("unit")); await wait();
+  ok(await page.isVisible(`${hd("unit")} .wbHa [data-w="colright"]`), "a column picked by its heading shows ◀ ▶ on it");
+  await page.click(`${hd("unit")} .wbHa [data-w="colright"]`); await wait(300);
+  const afterR = (await hdr()).slice(0, 7).join();
+  await page.click(`${hd("unit")} .wbHa [data-w="colleft"]`); await wait(300); await page.click(`${hd("unit")} .wbHa [data-w="colleft"]`); await wait(300);
+  ok(afterR === "ref,code,desc,qty,rate,unit,tot" && (await hdr()).slice(0, 7).join() === "ref,code,desc,unit,qty,rate,tot", "▶ moves Unit right of Rate, ◀ ◀ moves it left of Quantity → " + (await hdr()).join(","));
+  await page.click(`${hd("unit")} .wbHa [data-w="colright"]`); await wait(300);
+  ok((await hdr()).slice(0, 7).join() === "ref,code,desc,qty,unit,rate,tot", "▶ puts it back");
+
   console.log("rows: pick by number, move, drag, drop on a section, cut and paste");
   await page.click(gut("Zinc item")); await page.click(gut("Copper item"), {modifiers: ["Shift"]}); await wait();
   ok(await T(() => document.querySelectorAll("#wbRoot .wbSh tbody td.gut.hs").length) === 2, "a row number picks the row, Shift+click another: two rows");
@@ -217,7 +226,8 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
 
   if (process.env.TK_SHOTS) { await page.click(sel("Zinc item", "rate")); await page.click(sel("Bronze item", "tot"), {modifiers: ["Shift"]}); await wait(300); await page.screenshot({path: path.join(process.env.TK_SHOTS, "wbx-range.png")});
     await page.click(sel("Zinc item", "desc"), {button: "right"}); await wait(300); await page.screenshot({path: path.join(process.env.TK_SHOTS, "wbx-menu.png")}); await page.keyboard.press("Escape");
-    await page.click('#wbRoot [data-w="recover"]'); await wait(400); await page.screenshot({path: path.join(process.env.TK_SHOTS, "wbx-recover.png")}); await page.click("#dlgCancel"); }   // (screenshots for a look, when asked)
+    await page.click('#wbRoot [data-w="recover"]'); await wait(400); await page.screenshot({path: path.join(process.env.TK_SHOTS, "wbx-recover.png")}); await page.click("#dlgCancel");
+    await page.click(hd("qty")); await wait(300); await page.screenshot({path: path.join(process.env.TK_SHOTS, "wbx-header.png"), clip: {x: 210, y: 100, width: 960, height: 240}}); }   // (screenshots for a look, when asked)
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
   await browser.close();
   console.log(`\n${passes} passed, ${fails} failed`); process.exit(fails ? 1 : 0);

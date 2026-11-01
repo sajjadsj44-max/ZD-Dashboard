@@ -375,7 +375,7 @@ function render(keepPane){
 }
 function renderSheet(s, X){
   const old = UI.V, oc = old && old[UI.ri], oa = UI.anc && old && old[UI.anc.ri];   // the active row stays the active one, wherever it went
-  const C = cols(), V = visRows(s, X), si = WB().secs.indexOf(s) + 1, rv = UI.cmp ? revOf(UI.cmp) : null, vw = WB().view; UI.V = V; UI.C = C; UI.painted = []; UI.fh = null;
+  const C = cols(), V = visRows(s, X), si = WB().secs.indexOf(s) + 1, rv = UI.cmp ? revOf(UI.cmp) : null, vw = WB().view; UI.V = V; UI.C = C; UI.painted = []; UI.fh = null; UI.ha = null;
   if (oc && V.includes(oc)) UI.ri = V.indexOf(oc); if (oa && V.includes(oa)) UI.anc.ri = V.indexOf(oa);
   if (UI.ri >= V.length) UI.ri = Math.max(0, V.length - 1); if (!C.some(c => c.k === UI.ck)) UI.ck = (C.find(c => c.k === "desc") || C[0]).k;
   if (UI.anc && (UI.anc.ri >= V.length || !C.some(c => c.k === UI.anc.ck))) { UI.anc = null; UI.full = null; }
@@ -413,7 +413,7 @@ function renderSheet(s, X){
   const foot = `<tr class="tot"><td class="gut"></td>${C.map((c, ci) => `<td class="${c.n ? "n" : ""}${c.k === "dv" ? (d > 0.005 ? " up" : d < -0.005 ? " dn" : "") : ""}${fzc(ci)}"${fzs(ci)}>${ft(c)}</td>`).join("")}</tr>`;
   const tw = UI.tw = WIDTH.gut + C.reduce((t, c) => t + colW(c.k), 0);
   $w(".wbGrid").innerHTML = `<table class="wbT2 wbSh${vw.wrap ? " wrap" : ""}" style="width:max(100%, ${tw}px)"><colgroup><col style="width:${WIDTH.gut}px">${C.map(c => `<col data-k="${A.esc(c.k)}"${c.k === "desc" && !vw.w.desc ? "" : ` style="width:${colW(c.k)}px"`}>`).join("")}</colgroup>
-    <thead><tr><th class="gut" title="Select all (Ctrl+A)"></th>${C.map((c, ci) => `<th class="${c.n ? "n" : ""}${fzc(ci)}" data-hk="${A.esc(c.k)}" data-ci="${ci}"${fzs(ci)} title="${A.esc(c.t)} — click: select the column · drag a selected one to move it · drag its edge to resize · right-click: sort, move, hide, freeze">${A.esc(c.t)}<span class="rz" data-rz="${A.esc(c.k)}"></span></th>`).join("")}</tr></thead>
+    <thead><tr><th class="gut" title="Select all (Ctrl+A)"></th>${C.map((c, ci) => `<th class="${c.n ? "n" : ""}${fzc(ci)}" data-hk="${A.esc(c.k)}" data-ci="${ci}"${fzs(ci)} title="${A.esc(c.t)} — click: select the column, then its ◀ ▶ (or a drag of the heading) move it left or right · drag its edge to resize · right-click: sort, move, hide, freeze">${A.esc(c.t)}<span class="rz" data-rz="${A.esc(c.k)}"></span></th>`).join("")}</tr></thead>
     <tbody>${rowsH || `<tr><td class="gut"></td><td colspan="${C.length}" class="wbE">${UI.q || UI.flt !== "all" ? "No row matches." : "This section is empty — + Row, or Library to add an item."}</td></tr>`}</tbody><tfoot>${foot}</tfoot></table>`;
   if (fz) { const t = $w(".wbSh"), th = t.tHead.rows[0].cells; let x = th[0].offsetWidth; for (let i = 0; i < fz; i++) { t.style.setProperty("--l" + i, x + "px"); x += th[i + 1].offsetWidth; } $w(".wbGridW").style.scrollPaddingLeft = x + "px"; }
   else $w(".wbGridW").style.scrollPaddingLeft = WIDTH.gut + "px";
@@ -445,13 +445,17 @@ function rng(){   // → rows r0…r1 of those shown, columns c0…c1, n cells
 const selRows = () => { const R = rng(); return (UI.V || []).slice(R.r0, R.r1 + 1); };
 function curRow(){ return UI.V && UI.V[UI.ri] ? UI.V[UI.ri] : null; }
 function paintSel(noScroll){   // the selection drawn on the sheet as it is (no redraw): range, active cell, headings, row numbers, the fill handle
-  if (!UI) return; UI.painted.forEach(([el, c]) => el.classList.remove(...c)); UI.painted = []; if (UI.fh) { UI.fh.remove(); UI.fh = null; }
+  if (!UI) return; UI.painted.forEach(([el, c]) => el.classList.remove(...c)); UI.painted = []; if (UI.fh) { UI.fh.remove(); UI.fh = null; } if (UI.ha) { UI.ha.remove(); UI.ha = null; }
   const t = $w(".wbSh"), V = UI.V || [], C = UI.C || []; fxShow();
   if (!t || !V.length || !C.length) return stat(null);
   const R = rng(), body = t.tBodies[0], hs = t.tHead.rows[0].cells, ci = C.findIndex(c => c.k === UI.ck), add = (el, ...c) => { if (el) { el.classList.add(...c); UI.painted.push([el, c]); } };
   for (let i = R.r0; i <= R.r1; i++) { const tr = body.rows[i]; if (!tr) continue; add(tr.cells[0], "hs");
     for (let j = R.c0; j <= R.c1; j++) { const c = ["rs"]; if (i === R.r0) c.push("rT"); if (i === R.r1) c.push("rB"); if (j === R.c0) c.push("rL"); if (j === R.c1) c.push("rR"); add(tr.cells[j + 1], ...c); } }
   for (let j = R.c0; j <= R.c1; j++) add(hs[j + 1], "hs");
+  if (UI.full === "col" && hs[ci + 1]) {   // a picked column's heading: ◀ ▶ move it (the columns picked) left or right
+    const a = document.createElement("span"); a.className = "wbHa" + (C[ci].n ? " l" : "");
+    a.innerHTML = `<button type="button" data-w="colleft" title="Move left (Alt+Shift+←) — or drag the heading"${R.c0 === 0 ? " disabled" : ""}>&#9664;</button><button type="button" data-w="colright" title="Move right (Alt+Shift+→) — or drag the heading"${R.c1 >= C.length - 1 ? " disabled" : ""}>&#9654;</button>`;
+    hs[ci + 1].appendChild(a); UI.ha = a; }
   const act = body.rows[UI.ri] && body.rows[UI.ri].cells[ci + 1]; add(act, "act");
   if (CLIP && CLIP.cut && CLIP.sec === UI.sec) { const ids = new Set(CLIP.ids); V.forEach((r, i) => { if (!ids.has(r.id)) return; const tr = body.rows[i];
     if (CLIP.rows) add(tr.cells[0], "cut"); else CLIP.cks.forEach(k => { const j = C.findIndex(c => c.k === k); if (j >= 0) add(tr.cells[j + 1], "cut"); }); }); }
@@ -693,6 +697,7 @@ function onDown(e){
   const fo = el.closest("[data-fold]"); if (fo) { e.preventDefault(); return fold(fo.dataset.fold); }
   const rz = el.closest("[data-rz]"); if (rz) { e.preventDefault(); return dragResize(e, rz.dataset.rz); }
   if (el.closest(".wbFh")) { e.preventDefault(); return dragFill(e); }
+  if (el.closest(".wbHa")) return e.preventDefault();   // (the heading's ◀ ▶: a click, handled as a command — not a pick or a drag)
   if (el.closest("th.gut")) { e.preventDefault(); focusGrid(); return selAll(); }
   const th = el.closest("th[data-hk]"); if (th) { e.preventDefault(); return downHead(e, th); }
   const gu = el.closest("td.gut[data-gi]"); if (gu) { e.preventDefault(); return downGut(e, +gu.dataset.gi); }
@@ -1278,6 +1283,8 @@ function css(){
 #wbRoot .wbT2 th{position:sticky;top:0;background:#12263f;color:#fff;font-weight:600;padding:6px;text-align:left;z-index:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#wbRoot .wbT2 th.n,#wbRoot .wbT2 td.n{text-align:right}
 #wbRoot .wbT2 td{border-bottom:1px solid #edf1f6;border-right:1px solid #f1f4f8;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:cell}
 #wbRoot .wbSh th{cursor:pointer;user-select:none}#wbRoot .wbSh th.hs{background:#24507f;cursor:grab}#wbRoot .wbSh .rz{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize}#wbRoot .wbSh .rz:hover{background:rgba(255,255,255,.35)}
+#wbRoot .wbSh .wbHa{position:absolute;top:50%;right:9px;transform:translateY(-50%);display:flex;gap:2px}#wbRoot .wbSh .wbHa.l{right:auto;left:4px}
+#wbRoot .wbSh .wbHa button{width:18px;height:18px;padding:0;border:0;border-radius:3px;background:#fff;color:#12263f;font-size:9px;line-height:18px;cursor:pointer}#wbRoot .wbSh .wbHa button:hover{background:#ffe28a}#wbRoot .wbSh .wbHa button[disabled]{opacity:.35;cursor:default}
 #wbRoot .wbSh th.fz{z-index:4}#wbRoot .wbSh td.fz{position:sticky;z-index:1;background:#fff}#wbRoot .wbSh .fzl{border-right:2px solid #9fb3c8}
 #wbRoot .wbSh tr td.gut{position:sticky;left:0;z-index:1;background:#f3f5f8;color:#6b7d92;text-align:center;font-size:11px;cursor:pointer;user-select:none;padding:4px 2px;border-right:1px solid #dde3ea}
 #wbRoot .wbSh th.gut{left:0;z-index:5;background:#0d1d31;cursor:pointer}#wbRoot .wbSh tfoot td.gut{background:#e6e9ee}
