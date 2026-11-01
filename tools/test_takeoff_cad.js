@@ -19,7 +19,9 @@
    PDF; exports keep layers off; Project + PDFs carries the DWG; the scene read again from the DWG lands on the same page; a
    scaled multileader's text as high as AutoCAD draws it, from the DWG and the DXF (make_zd_mleader.lsp); line weights as the
    drawing's LWDISPLAY says, LWT per drawing; text in its own font at AutoCAD's widths (Times New Roman, ROMANS, Swiss Condensed),
-   a boxed MTEXT wrapping as AutoCAD's, a leader's own arrowhead from its dimension overrides (make_zd_text.lsp). */
+   a boxed MTEXT wrapping as AutoCAD's, a leader's own arrowhead from its dimension overrides (make_zd_text.lsp); the second DWG
+   reader (ACadSharp as WebAssembly, takeoff/dwg) — the worker hands it the DWG through the page, it reads the drawing as LibreDWG
+   does, a drawing LibreDWG reads wrong is read again by it, whole, and its frame is gone afterwards. */
 const path = require("path"), fs = require("fs"), os = require("os");
 let pw;
 try { pw = require("playwright"); } catch (e) { pw = require("/opt/node22/lib/node_modules/playwright"); }
@@ -43,6 +45,10 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
     m = /@mlightcad\/dxf-json@[^/]+\/(.+)$/.exec(u); if (m) return r.fulfill({path: path.join(LIBS, "@mlightcad/dxf-json", m[1]), contentType: js, headers: H});
     return r.abort();
   });
+  /* the second DWG reader's frame (an origin of its own) loads takeoff/dwg/_framework across origins: answered with
+     Access-Control-Allow-Origin, as GitHub Pages answers (python's http.server does not send it) */
+  await ctx.route(/\/takeoff\/dwg\/_framework\/[^/?]+/, r => { const f = /\/_framework\/([^/?]+)/.exec(r.request().url())[1];   // (from this checkout: some 30 files at once)
+    return r.fulfill({path: path.join(__dirname, "..", "takeoff", "dwg", "_framework", f), contentType: /\.wasm$/.test(f) ? "application/wasm" : "text/javascript", headers: {"Access-Control-Allow-Origin": "*"}}); });
   const page = await ctx.newPage(), errors = [];
   page.on("pageerror", e => errors.push(String(e)));
   page.on("console", m => { if (m.type() === "error" && !/favicon/.test(m.text()) && !/^http:\/\/127\.0\.0\.1:11436\//.test((m.location() || {}).url || "")) errors.push("console: " + m.text()); });   // (a DWG added looks for the AutoCAD helper first: none runs here)
@@ -365,6 +371,28 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
     ok(!!box, F + ": the MTEXT boxed as wide as its ink stays on one line → " + JSON.stringify(tx.o.filter(t => t.f === 4)));
     ok(near(tx.arrow, 14, 0.1), F + ": the leader's own 42\" open arrowhead (_OPEN, 14\" across) → " + tx.arrow.toFixed(2));
   }
+
+  console.log("the second DWG reader (ACadSharp — the drawings LibreDWG reads wrong)");
+  const fx = n => fs.readFileSync(path.join(FIX, n)).toString("base64");
+  /* in the takeoff's own worker, a DWG sent straight to the second reader: the worker asks the page, which reads it in a frame of its
+     own (removed after) — laid out as the first reader's read of the same drawing */
+  const two = await T(async b64 => { const u8 = Uint8Array.from(atob(b64), c => c.charCodeAt(0)), Z = zdTakeoff;
+    const st = sc => { const p = sc.pages[0]; return {n: p.n, tn: p.tn, ents: sc.stats.ents, prims: sc.stats.prims, texts: sc.stats.texts, rdr: sc.rdr, units: sc.unitName, den: p.den}; };
+    const a = await Z.cadWorker(u8.buffer.slice(0), "zd_test_2018.dwg", null, ""), b = await Z.cadWorker(u8.buffer.slice(0), "zd_test_2018.dwg", null, "acadsharp");
+    return {a: st(a.scene), b: st(b.scene), frames: document.querySelectorAll("iframe[sandbox]").length}; }, fx("zd_test_2018.dwg"));
+  ok(two.b.rdr === "ACadSharp" && !two.a.rdr, "the worker hands the DWG to the second reader through the page and gets the drawing back → " + JSON.stringify(two.b));
+  ok(["ents", "prims", "texts", "units", "den", "n", "tn"].every(k => two.a[k] === two.b[k]), "it reads the test drawing as LibreDWG does (objects, primitives, texts, units, scale) → " + JSON.stringify(two.a));
+  ok(two.frames === 0, "the reader's frame is gone once the drawing is handed over");
+  /* a DWG LibreDWG reads wrong — a stand-in for it whose every object comes out empty, as the JADE plans did (680,851 of them) — is
+     read again by the second reader, whole; a 0-byte file is said to be empty */
+  const rd2 = await T(async b64 => { const C = await import("./cad.js?v=zd-reader2-test"), u8 = Uint8Array.from(atob(b64), c => c.charCodeAt(0)), steps = [];
+    C.cadUse({dwg: {Dwg_Error: {}, LibreDwg: {create: async () => ({wasmInstance: {FS: {writeFile(){}, unlink(){}}, dwg_read_file: () => ({data: 1, error: 0})}, dwg_free(){},
+      convertEx: () => ({database: {header: {}, tables: {}, entities: Array.from({length: 400}, () => ({type: "LINE", handle: "0"}))}, stats: {}})})}}});
+    const md = await C.cadRead(u8, "zd_text_2018.dwg", {say: s => steps.push(s)});
+    let empty = ""; try { await C.cadRead(new Uint8Array(0), "x.dwg"); } catch (e) { empty = e.message; }
+    return {rdr: md.rdr, fmt: md.fmt, ents: md.ents.length, texts: md.ents.filter(e => /TEXT/.test(e.t)).length, steps: steps.join(" "), empty}; }, fx("zd_text_2018.dwg"));
+  ok(rd2.rdr === "ACadSharp" && rd2.fmt === "DWG" && rd2.ents > 0 && rd2.texts > 0 && /read2/.test(rd2.steps), "a DWG LibreDWG reads wrong is read again by the second reader, whole → " + JSON.stringify(rd2));
+  ok(/empty \(0 bytes\)/.test(rd2.empty), "a 0-byte file is said to be empty: " + rd2.empty);
 
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
   await browser.close();
