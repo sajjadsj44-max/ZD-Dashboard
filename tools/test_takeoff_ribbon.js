@@ -238,6 +238,10 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   await page.keyboard.press("Escape"); await wait(100);
 
   console.log("layout");
+  // + / − beside Pan zoom the drawing as the page bar's do (× 1.25, × 0.8, on its middle)
+  await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+  const zv = () => T(() => zdTakeoff.S.view.s), z0 = await zv(); await page.click("#bTZi"); await wait(200); const z1 = await zv(); await page.click("#bTZo"); await page.click("#bTZo"); await wait(200); const z2 = await zv();
+  ok(await page.isVisible("#topTools #bTZi") && near(z1 / z0, 1.25, 1e-6) && near(z2 / z1, 0.64, 1e-6), `Zoom in / Zoom out beside Pan: × ${(z1 / z0).toFixed(3)}, then × 0.8 twice (${(z2 / z1).toFixed(3)})`);
   await page.setViewportSize({width: 390, height: 844}); await wait(400);
   const over = await T(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   ok(over <= 1, `no sideways page scroll at 390 px (${over})`);

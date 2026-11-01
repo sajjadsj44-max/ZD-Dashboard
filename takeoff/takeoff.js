@@ -13179,6 +13179,7 @@ function wire(){
   $("bPrev").onclick = () => stepPage(-1); $("bNext").onclick = () => stepPage(1);
   $("bZi").onclick = () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2);
   $("bZo").onclick = () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2);
+  $("bTZi").onclick = () => $("bZi").click(); $("bTZo").onclick = () => $("bZo").click();   // the same, from the top tools beside Pan
   $("bFit").onclick = () => { fit(); renderHi(); };
   $("bDim").onclick = () => setDim(!S.dim);
   $("dimPct").oninput = e => setDim(+e.target.value);
