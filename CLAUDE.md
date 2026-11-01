@@ -29,7 +29,8 @@
   `?v=`, so bump that same `?v=` when either of them changes too. The same for
   `takeoff/trace.js` and `takeoff/trace-worker.js` (the vector trace of a PDF's wall layers).
   And for `takeoff/measure.js` (the measurement engine: geometry and QS formulas, unit-tested by
-  `tools/test_takeoff_measure.js` in plain Node).
+  `tools/test_takeoff_measure.js` in plain Node), and `takeoff/workbook.js` (the CostX-style Workbook, Costing → Workbook,
+  tested by `tools/test_takeoff_workbook.js`).
 - `takeoff/dwg/_framework/` is the second DWG reader (ACadSharp compiled to WebAssembly, ~20 MB), built from
   `tools/takeoff-dwg/ZdDwg.cs` by `tools/takeoff-dwg/build.ps1` (.NET 10 SDK + `dotnet workload install wasm-tools`); cad.js
   loads its `dotnet.js` with takeoff.js's `?v=`, so bump that `?v=` after a rebuild. It runs in a sandboxed frame of the page,
