@@ -3835,6 +3835,23 @@ async function colsDialog(){
     P.proj.conds.forEach(c => { const s = on.get(c.id); if (!s) return; const keep = P.proj.cols.filter(x => s.has(x.id)).map(x => x.id); if (keep.length === P.proj.cols.length) delete c.cols; else c.cols = keep; }); }, "Custom columns");
   toast(P.proj.cols.length ? P.proj.cols.length + " custom column" + (P.proj.cols.length > 1 ? "s" : "") + " — hover a condition, or see the measurement sheet" : "No custom columns", 2600);
 }
+/* the software's own zoom (Zoom in / Zoom out beside Pan): the top bar, the ribbon, the side panels, the page bar, the command line
+   and the agent bar bigger or smaller, as Ctrl + mouse wheel over them does — never the drawing area, which keeps its own zoom and
+   its pointer exact (a CSS zoom over the drawing would put every click off by the zoom). Kept in this browser */
+const UI_Z = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+const uiZoomNow = () => +getComputedStyle(document.documentElement).getPropertyValue("--uiz") || 1;
+const uiZoomStep = d => { const z = uiZoomNow(); return d > 0 ? UI_Z.find(v => v > z + 1e-6) || 2 : [...UI_Z].reverse().find(v => v < z - 1e-6) || 0.5; };
+function uiZoom(z, quiet){
+  z = Math.max(0.5, Math.min(2, +z || 1)); const d = document.documentElement;
+  const mid = PANES.filter(pn => pn.page && pn.el.stage.clientWidth).map(pn => { const st = pn.el.stage, v = pn.view; return [pn, (st.clientWidth / 2 - v.tx) / v.s, (st.clientHeight / 2 - v.ty) / v.s]; });   // the point in the middle of each drawing stays in the middle
+  const set = v => { d.style.setProperty("--uiz", String(v)); d.classList.toggle("uiz", v !== 1); window.dispatchEvent(new Event("resize")); };   // (resize: the side panels widen with it, the drawing area is drawn again to its new size)
+  set(z);
+  const st = stage(), room = () => !st.getClientRects().length || st.clientHeight >= Math.min(200, window.innerHeight * .25);   // bigger, but the drawing keeps a quarter of the window's height
+  let cut = false; while (z > 1 && !room()) { z = UI_Z.filter(v => v < z - 1e-6).pop(); set(z); cut = true; }
+  pref("zdUiZoom", z === 1 ? "" : String(z));
+  mid.forEach(([pn, x, y]) => { const st = pn.el.stage, s = pn.view.s; pn.view = {s, tx: st.clientWidth / 2 - x * s, ty: st.clientHeight / 2 - y * s}; applyView(pn); renderHi(false, pn); });
+  if (!quiet) toast("Software " + Math.round(z * 100) + " %" + (cut ? " — the most this window leaves room for the drawing" : "") + " · the drawing keeps its own zoom · Shift+click Zoom in / out: 100 %", 2200);
+}
 const asmLabel = l => l.f + (l.w ? " + " + l.w + " % waste" : "");
 /* the Workbook (workbook.js — the bill as an estimating workbook, as RIB CostX's): loaded with takeoff.js's ?v= when it is first
    opened, given the app's own figures (conditions, quantity types, bill lines, rates, the rate library, formulas, units, dialogs) */
@@ -13179,7 +13196,8 @@ function wire(){
   $("bPrev").onclick = () => stepPage(-1); $("bNext").onclick = () => stepPage(1);
   $("bZi").onclick = () => zoomAt(1.25, stage().clientWidth / 2, stage().clientHeight / 2);
   $("bZo").onclick = () => zoomAt(0.8, stage().clientWidth / 2, stage().clientHeight / 2);
-  $("bTZi").onclick = () => $("bZi").click(); $("bTZo").onclick = () => $("bZo").click();   // the same, from the top tools beside Pan
+  $("bTZi").onclick = e => uiZoom(e.shiftKey ? 1 : uiZoomStep(1)); $("bTZo").onclick = e => uiZoom(e.shiftKey ? 1 : uiZoomStep(-1));   // the software's zoom (top tools, beside Pan)
+  uiZoom(+pref("zdUiZoom") || 1, true);
   $("bFit").onclick = () => { fit(); renderHi(); };
   $("bDim").onclick = () => setDim(!S.dim);
   $("dimPct").oninput = e => setDim(+e.target.value);
@@ -17043,8 +17061,8 @@ function setPanels(){
   document.querySelector(".app > aside.panel:not(.right)").style.display = S.lHide ? "none" : "";
   rp.style.display = S.rHide ? "none" : "";
   $("openL").style.display = S.lHide ? "" : "none"; $("openR").style.display = S.rHide ? "" : "none";
-  const lw = S.lHide ? 0 : S.lw, rw = S.rHide ? 0 : S.rw;
-  app.style.gridTemplateColumns = wide ? `${lw}px minmax(0,1fr) ${rw}px` : "";
+  const lw = S.lHide ? 0 : S.lw, rw = S.rHide ? 0 : S.rw, k = S.pk = Math.min(uiZoomNow(), Math.max(lw + rw, window.innerWidth * .6) / Math.max(1, lw + rw));   // the software's zoom widens the panels with their text, as far as the drawing keeps 40 % of the width
+  app.style.gridTemplateColumns = wide ? `${Math.round(lw * k)}px minmax(0,1fr) ${Math.round(rw * k)}px` : "";
   pref("zdTakeoffPanels3", JSON.stringify({lw: S.lw, rw: S.rw, lHide: !!S.lHide, rHide: !!S.rHide}));
   if (S.page) { applyView(); renderHi(); }
 }
@@ -17052,7 +17070,7 @@ function wirePanels(){
   try { Object.assign(S, {lw: 260, rw: 360}, JSON.parse(pref("zdTakeoffPanels3") || "{}")); } catch (e) { S.lw = 260; S.rw = 360; }
   const drag = (el, side) => el.addEventListener("pointerdown", e => {
     e.preventDefault(); el.setPointerCapture(e.pointerId); const x0 = e.clientX, w0 = side === "l" ? S.lw : S.rw;
-    const mv = ev => { const d = ev.clientX - x0; if (side === "l") S.lw = Math.max(160, Math.min(520, w0 + d)); else S.rw = Math.max(260, Math.min(820, w0 - d)); setPanels(); };
+    const mv = ev => { const d = (ev.clientX - x0) / (S.pk || 1); if (side === "l") S.lw = Math.max(160, Math.min(520, w0 + d)); else S.rw = Math.max(260, Math.min(820, w0 - d)); setPanels(); };
     const up = () => { el.removeEventListener("pointermove", mv); el.removeEventListener("pointerup", up); };
     el.addEventListener("pointermove", mv); el.addEventListener("pointerup", up); });
   drag($("rzL"), "l"); drag($("rzR"), "r");
