@@ -197,7 +197,14 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
 
   console.log("exports");
   const dl = async sel => { await page.click("#bExport"); await wait(); const [d] = await Promise.all([page.waitForEvent("download", {timeout: 20000}), page.click(sel)]); const f = path.join(os.tmpdir(), "tk_" + d.suggestedFilename()); await d.saveAs(f); return f; };
+  /* a wall measured in ft whose condition has a height and thickness: on the sheet W = its thickness, H = its height (its Properties),
+     its Qty still its length, its wall area and volume in columns of their own (a copy of a wall drawn above, taken out again after) */
+  const wl = await T(() => { const p = zdTakeoff.P.proj, src = p.items.find(i => { const c = p.conds.find(x => x.id === i.cond); return c && c.type === "linear" && i.kind === "shape" && !i.shape && i.pts.length >= 2; });
+    const c0 = p.conds.find(x => x.id === src.cond); p.conds.push(Object.assign(JSON.parse(JSON.stringify(c0)), {id: "zzWallFt", name: "Partition wall 4in ft", unit: "ft", h: 10, t: 0.333, faces: 2, boq: ""}));
+    p.items.push(Object.assign(JSON.parse(JSON.stringify(src)), {id: "zzWallIt", cond: "zzWallFt", nos: 1, label: "Wall ft", rise: 0}));
+    return zdTakeoff.rowsOf(p.items[p.items.length - 1], zdTakeoff.qScale(p.items[p.items.length - 1]))[0].L; });
   const xf = await dl("#exXls");
+  await T(async () => { const Z = zdTakeoff, p = Z.P.proj; p.items = p.items.filter(i => i.id !== "zzWallIt"); p.conds = p.conds.filter(c => c.id !== "zzWallFt"); Z.save(); if (Z.flushSave) await Z.flushSave(); });   // (the export saved the project with it)
   ok(/_Measurement\.xlsx$/.test(xf), "Excel downloaded");
   const ExcelJS = require(path.join(LIBS, "exceljs"));
   const wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(xf);
@@ -206,6 +213,14 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   ms.eachRow(r => { const q = r.getCell(8).value; if (q && q.formula) fm.push([r.getCell(2).value, q.formula, r.getCell(5).value]); });
   ok(fm.some(x => /^PRODUCT\(D\d+:G\d+\)$/.test(x[1])) && fm.some(x => /^-PRODUCT\(D\d+:G\d+\)$/.test(x[1])) && fm.some(x => /^SUM\(H\d+:H\d+\)$/.test(x[1])), "Qty = PRODUCT(Nos:H), deductions −PRODUCT, totals SUM");
   ok(fm.some(x => x[2] && x[2].formula === "12.000+14.000+12.000+14.000"), "wall length cell is the formula of its runs");
+  { const hd = ms.getRow(4), col = t => { let n = 0; hd.eachCell((c, i) => { if (String(c.value).startsWith(t)) n = i; }); return n; }, cA = col("Wall area"), cV = col("Volume");
+    let w = null; ms.eachRow((r, i) => { if (!w && String(r.getCell(2).value || "").startsWith("Partition wall 4in ft")) w = {head: r.getCell(2).value, r: ms.getRow(i + 1)}; });
+    const v = n => w && w.r.getCell(n).value, fo = n => v(n) && v(n).formula, num = x => typeof x === "object" && x ? +(x.result ?? NaN) : +x;
+    ok(w && /H 10'-0", T 0'-4"|H 10\.000 ft, T 0\.333 ft/.test(w.head) && /2 faces/.test(w.head), "a wall in ft: its heading names its height, thickness and faces → " + (w && w.head));
+    ok(w && num(v(6)) === 0.333 && num(v(7)) === 10, "…W = its thickness 0.333, H = its height 10.000 (as its Properties) → W " + v(6) + ", H " + v(7));
+    ok(w && /^PRODUCT\(D\d+:E\d+\)$/.test(fo(8)) && Math.abs(num(v(8)) - wl) < 1e-9, "…its Qty still its length: PRODUCT(Nos:L) = " + num(v(8)) + " ft → " + fo(8));
+    ok(cA > 0 && cV === cA + 1 && /^D\d+\*E\d+\*G\d+\*2$/.test(fo(cA)) && Math.abs(num(v(cA)) - wl * 10 * 2) < 1e-6, "…wall area Nos × L × H × 2 faces = " + num(v(cA)) + " Sft → " + fo(cA));
+    ok(/^D\d+\*E\d+\*F\d+\*G\d+$/.test(fo(cV)) && Math.abs(num(v(cV)) - wl * 0.333 * 10) < 1e-6, "…volume Nos × L × W × H = " + num(v(cV)) + " cft → " + fo(cV)); }
   const blue = ms.getRow(6).getCell(5).fill, prot = ms.getRow(6).getCell(5).protection;
   ok(blue && /DDEBFF/.test(blue.fgColor.argb) && prot && prot.locked === false && ms.sheetProtection, "dimension cells blue and unlocked, sheet protected");
   ok(wb.getWorksheet("Assumptions").getColumn(2).values.some(v => /height H 10\.500/.test(String(v))), "assumptions list the heights entered");
