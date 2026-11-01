@@ -3841,7 +3841,15 @@ const asmLabel = l => l.f + (l.w ? " + " + l.w + " % waste" : "");
 let WBK = null;
 const wbMod = () => WBK || (WBK = import("./workbook.js" + CADV).catch(e => { WBK = null; throw e; }));
 const wbApi = () => ({P, S, save, refresh, toast, busy, ask, choose, esc, f2, fq, uL, uV, uR, uX, isM, dmy, today, uid, cond, condQ, condQTypes, QT_NAMES, condVars, condTotals,
-  billLines, billQ, billQty, rateOf, raPrice, raLib, boqMatches, boqGroups, BOQ_GROUPS, evalFormula, refOf, normU, loadExcel, saveBlob, fileBase, qFmt, xlLetter});
+  billLines, billQ, billQty, rateOf, raPrice, raLib, boqMatches, boqGroups, BOQ_GROUPS, evalFormula, refOf, normU, loadExcel, saveBlob, fileBase, qFmt, xlLetter,
+  dmyHm, TEAM, wbHist, wbBackups, wbOfBackup});
+/* the workbook's versions (its Recover): kept in this browser beside the project, not in it (record "wbh:<project>" of the pdfs
+   store); and the workbook as it was in one of the project's backups — listed by key only (a backup's id starts with the time it
+   was made), read only when it is asked for: a backup can be a 130 MB project */
+const wbHist = {get: pid => dbGet("pdfs", "wbh:" + pid), put: (pid, v) => dbPut("pdfs", v, "wbh:" + pid)};
+async function wbBackups(pid){ const ids = await tx("backups", "readonly", s => s.index("pid").getAllKeys(pid));
+  return ids.map(String).sort().reverse().map(id => ({id, t: parseInt(id.slice(1, 9), 36)})).filter(b => b.t > 946684800000).map(b => ({id: b.id, at: new Date(b.t).toISOString()})); }
+async function wbOfBackup(id){ const b = await tx("backups", "readonly", s => s.get(id)); if (!b || !b.data) return null; const pr = JSON.parse(b.data); return pr && pr.wb && Array.isArray(pr.wb.secs) ? pr.wb : null; }
 async function openWb(){ if (!P.proj) return toast("Open a project first", 2000); try { (await wbMod()).open(wbApi()); } catch (e) { toast("The workbook could not be loaded — " + (e.message || e), 5000); } }
 async function wbXls(){ if (!P.proj) return toast("Open a project first", 2000); try { await (await wbMod()).exportExcel(wbApi()); } catch (e) { toast("The workbook could not be loaded — " + (e.message || e), 5000); } }
 /* a condition's quantities by type (CostX's quantity types): its own (Q, in its unit), length, wall area (× H × faces), volume
