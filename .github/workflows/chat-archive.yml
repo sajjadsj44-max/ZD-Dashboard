@@ -3,9 +3,9 @@ name: Takeoff chat archive
 # PDF Takeoff's Feedback chat goes through a free relay (takeoff/chat.json) that keeps messages 12 hours.
 # This copies them every half hour to takeoff-chat.jsonl on the chat-archive branch (sealed, no readable text),
 # where the takeoff reads them back. It also merges what the takeoff agent learned in every browser of the team
-# (tools/learn_archive.py: learn.topic -> team-method.json), and sums the team logins' sign-ins per user and day for the
-# owner's Settings > Team logins (tools/activity_archive.py -> takeoff-activity.json). It never touches main, so it does not
-# publish the site.
+# (tools/learn_archive.py: learn.topic -> team-method.json), and sums the team logins' sign-ins per user and day, and the
+# guests' visits while the login is switched off, for the owner's Settings > Team logins (tools/activity_archive.py ->
+# takeoff-activity.json). It never touches main, so it does not publish the site.
 
 on:
   schedule:

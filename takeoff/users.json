@@ -1,5 +1,6 @@
 {
- "about": "PDF Takeoff team logins for takeoff/?team. Passwords are salted PBKDF2-SHA256 hashes. Edited from Settings > Team logins.",
+ "about": "PDF Takeoff team logins for takeoff/?team. Passwords are salted PBKDF2-SHA256 hashes. Edited from Settings > Team logins. open: true switches the login off for now: anyone with the link uses the takeoff as a guest (each visit counted).",
+ "open": true,
  "iter": 150000,
  "users": [
   {"u": "adil", "s": "11b4015d64e48a19b16a0006cf43aa01", "h": "5a9adff0ed9d34f05249bc3d64e7ae2f724246aa7721dc20817e846e9523cc6b", "c": "2d480c66266b7a5a75bb2a9958a352561dd94b126a48ebf649517f884ba92a24", "iter": 150000, "at": "2026-10-29"},
