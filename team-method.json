@@ -1,6 +1,6 @@
 {
  "about": "PDF Takeoff: how this team takes off, learned by the takeoff agent in every browser of the team and merged by tools/learn_archive.py. Item names, heights, room kinds and counts only.",
- "at": "2026-11-02T09:26:32.258Z",
+ "at": "2026-11-02T12:38:02.215Z",
  "projects": {
   "vvvcknb84sev:17a5e3f04bec": {
    "at": "2026-10-31T10:49:48.438Z",
@@ -455,7 +455,7 @@
    "words": {}
   },
   "vw1q94deeqh7": {
-   "at": "2026-10-31T07:57:29.984Z",
+   "at": "2026-11-02T10:26:19.295Z",
    "missed": {},
    "rejects": {
     "BALCONY": {
@@ -481,6 +481,10 @@
     "PASSAGE": {
      "del": 0,
      "made": 12
+    },
+    "ROOM": {
+     "del": 0,
+     "made": 1
     }
    },
    "words": {}
@@ -511,6 +515,36 @@
   },
   "vz1zvk565elh": {
    "at": "2026-11-02T09:26:32.258Z",
+   "missed": {},
+   "rejects": {},
+   "words": {}
+  },
+  "vz4pcjoiq60w": {
+   "at": "2026-11-02T10:42:20.353Z",
+   "missed": {},
+   "rejects": {},
+   "words": {}
+  },
+  "vz6rq4dw0x0z": {
+   "at": "2026-11-02T11:40:10.001Z",
+   "missed": {},
+   "rejects": {},
+   "words": {}
+  },
+  "vz73f0zvulpw": {
+   "at": "2026-11-02T11:49:15.519Z",
+   "missed": {},
+   "rejects": {},
+   "words": {}
+  },
+  "vz7undofkri0": {
+   "at": "2026-11-02T12:10:26.632Z",
+   "missed": {},
+   "rejects": {},
+   "words": {}
+  },
+  "vz8u5a2w8r5t": {
+   "at": "2026-11-02T12:38:02.215Z",
    "missed": {},
    "rejects": {},
    "words": {}
