@@ -1,6 +1,6 @@
 {
  "about": "PDF Takeoff: how this team takes off, learned by the takeoff agent in every browser of the team and merged by tools/learn_archive.py. Item names, heights, room kinds and counts only.",
- "at": "2026-11-01T15:36:56.741Z",
+ "at": "2026-11-02T09:26:32.258Z",
  "projects": {
   "vvvcknb84sev:17a5e3f04bec": {
    "at": "2026-10-31T10:49:48.438Z",
@@ -39,6 +39,33 @@
    },
    "sent": "2026-10-31T10:50:48.721Z"
   },
+  "vvvcknb84sev:8077edc44061": {
+   "at": "2026-11-02T04:53:42.437Z",
+   "conds": {
+    "floor area|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "Floor area",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    }
+   },
+   "rooms": {
+    "ROOM": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 4,
+       "per": []
+      }
+     },
+     "n": 4
+    }
+   },
+   "sent": "2026-11-02T06:44:42.313Z"
+  },
   "vvvcknb84sev:c0939f0b6a16": {
    "at": "2026-10-31T09:22:13.596Z",
    "conds": {
@@ -75,6 +102,137 @@
     }
    },
    "sent": "2026-10-31T09:23:13.940Z"
+  },
+  "vvvcknb84sev:c19ae16cebeb": {
+   "at": "2026-11-02T06:03:41.316Z",
+   "conds": {
+    "floor area|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "Floor area",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    }
+   },
+   "rooms": {
+    "BED ROOM": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 2,
+       "per": []
+      }
+     },
+     "n": 2
+    },
+    "HALL": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "KITCHEN": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "STORE": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    }
+   },
+   "sent": "2026-11-02T06:44:42.313Z"
+  },
+  "vvvcknb84sev:c39ae291396a": {
+   "at": "2026-11-02T04:18:35.460Z",
+   "conds": {
+    "floor area|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "Floor area",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    }
+   },
+   "rooms": {
+    "ROOM": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 3,
+       "per": []
+      }
+     },
+     "n": 3
+    }
+   },
+   "sent": "2026-11-02T04:19:35.517Z"
+  },
+  "vvvcknb84sev:dd53df0c6522": {
+   "at": "2026-11-02T06:43:41.315Z",
+   "conds": {
+    "floor area|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "Floor area",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    }
+   },
+   "rooms": {
+    "BATH": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "BED ROOM": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 2,
+       "per": []
+      }
+     },
+     "n": 2
+    },
+    "ROOM": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    }
+   },
+   "sent": "2026-11-02T06:44:42.313Z"
   },
   "vvzmfdqwuj5r:689802ebcf62": {
    "at": "2026-10-31T10:13:55.909Z",
@@ -212,13 +370,65 @@
     }
    },
    "sent": "2026-11-01T05:14:17.800Z"
+  },
+  "vynrhxewuv1e:0be6f6c8d261": {
+   "at": "2026-11-02T02:47:16.949Z",
+   "conds": {
+    "floor area|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "Floor area",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    }
+   },
+   "rooms": {
+    "ISSUED FOR": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    }
+   },
+   "sent": "2026-11-02T02:48:06.946Z"
   }
  },
  "senders": {
   "vvvcknb84sev": {
-   "at": "2026-10-31T09:03:14.813Z",
+   "at": "2026-11-02T07:04:41.602Z",
    "missed": {},
-   "rejects": {},
+   "rejects": {
+    "BATH": {
+     "del": 0,
+     "made": 19
+    },
+    "BED ROOM": {
+     "del": 0,
+     "made": 16
+    },
+    "HALL": {
+     "del": 0,
+     "made": 5
+    },
+    "KITCHEN": {
+     "del": 0,
+     "made": 9
+    },
+    "ROOM": {
+     "del": 0,
+     "made": 10
+    },
+    "STORE": {
+     "del": 0,
+     "made": 5
+    }
+   },
    "words": {}
   },
   "vvyymq5pforq": {
@@ -289,6 +499,18 @@
   },
   "vxzsdcbya8ni": {
    "at": "2026-11-01T15:36:56.741Z",
+   "missed": {},
+   "rejects": {},
+   "words": {}
+  },
+  "vynrhxewuv1e": {
+   "at": "2026-11-02T02:48:06.946Z",
+   "missed": {},
+   "rejects": {},
+   "words": {}
+  },
+  "vz1zvk565elh": {
+   "at": "2026-11-02T09:26:32.258Z",
    "missed": {},
    "rejects": {},
    "words": {}
