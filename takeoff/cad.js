@@ -305,14 +305,15 @@ export async function cadRead(buf, name, o){
   return readDxf(u8);
 }
 /* a DWG: LibreDWG first (quick, and what the drawings so far were read by); a drawing it cannot read, reads wrong (most objects
-   empty) or reads in part (a tenth or more empty) is read again by the second reader, ACadSharp — its read kept when it has more */
+   empty, or a real-sized drawing with nothing in model space) or reads in part (a tenth or more empty) is read again by the second
+   reader, ACadSharp — its read kept when it has more */
 async function readDwg(u8, say, net){
   const ver = head(u8, 6);
   if (ver < "AC1012") throw new Error("AutoCAD " + (VERS[ver] || ver) + " drawings are too old for the DWG reader — save it again in AutoCAD as a newer DWG, or as DXF");
   let md = null, e1 = null;
   try { md = await readLibre(u8, ver); } catch (e) { e1 = e; }
-  const lost = md ? md.bogus || 0 : 0;
-  if (md && !(lost > 50 && lost > 0.1 * (lost + md.ents.length))) return md;
+  const lost = md ? md.bogus || 0 : 0, blank = md && !md.ents.length && u8.length > 2e5;   // (a real-sized drawing with nothing in model space: read wrong, not empty — the ARX 11th floor plan, 52 MB, came out so)
+  if (md && !blank && !(lost > 50 && lost > 0.1 * (lost + md.ents.length))) return md;
   dwgP = null; dwgUsed = false;   // (LibreDWG's memory let go before the second reader takes its own)
   try { const m2 = await readDwgNet(u8, say, net); if (!md || m2.ents.length > md.ents.length) return m2; }
   catch (e2) {
