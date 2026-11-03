@@ -3,7 +3,9 @@
 # Needs the .NET 10 SDK with its WebAssembly tools (dotnet workload install wasm-tools) and git; $env:DOTNET names its dotnet.exe
 # when it is not on PATH. ACadSharp is built from its own source — v3.8.35 and its CSUtilities submodule at a6505ab, fetched from
 # GitHub (MIT) — with acadsharp.patch: a block's objects are read only once something uses the block, so a drawing full of block
-# definitions nothing inserts (the JADE masonry drawing: 770,000 of its 1,016,357 objects) fits the browser's 4 GB.
+# definitions nothing inserts (the JADE masonry drawing: 770,000 of its 1,016,357 objects) fits the browser's 4 GB, and the
+# paper-space layouts' own objects are never read (the takeoff shows model space only; the Zameen Quadrangle layout plans hold
+# 740,000 objects in blocks only their layouts insert).
 # Afterwards bump the ?v= on takeoff.js's <script> in takeoff/index.html: cad.js loads dwg/_framework/dotnet.js with it (the other
 # files there carry their own fingerprint in their names).
 $ErrorActionPreference = "Stop"

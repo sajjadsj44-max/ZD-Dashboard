@@ -1,17 +1,20 @@
 diff --git a/src/ACadSharp/IO/DWG/DwgStreamReaders/DwgObjectReader.cs b/src/ACadSharp/IO/DWG/DwgStreamReaders/DwgObjectReader.cs
-index 6adf0f1..b3984cf 100644
+index 6adf0f1..7ab57ad 100644
 --- a/src/ACadSharp/IO/DWG/DwgStreamReaders/DwgObjectReader.cs
 +++ b/src/ACadSharp/IO/DWG/DwgStreamReaders/DwgObjectReader.cs
-@@ -68,6 +68,67 @@ namespace ACadSharp.IO.DWG
+@@ -68,6 +68,73 @@ namespace ACadSharp.IO.DWG
  		/// </summary>
  		private Queue<ulong> _handles;
  
 +		// ZD PDF Takeoff (tools/takeoff-dwg/acadsharp.patch): a block's objects are read only once something uses the block — an
-+		// insert, a dimension, a multileader, a style's arrowhead, a layout (AutoCAD 2004 and newer). A drawing full of block
-+		// definitions nothing inserts (the JADE masonry drawing: 770,000 of its 1,016,357 objects) is read in a fraction of the
-+		// time and memory: the takeoff reads it in the browser, in at most 4 GB.
++		// insert, a dimension, a multileader, a style's arrowhead (AutoCAD 2004 and newer). A drawing full of block definitions
++		// nothing inserts (the JADE masonry drawing: 770,000 of its 1,016,357 objects) is read in a fraction of the time and
++		// memory: the takeoff reads it in the browser, in at most 4 GB. The paper-space layouts' own objects are never read: the
++		// takeoff shows model space only, and a layout can hold whole plans pasted in (the Zameen Quadrangle layout plans:
++		// 740,000 of its 1,089,000 objects, in blocks only the layouts insert).
 +		private readonly HashSet<ulong> _zdBlocks = new HashSet<ulong>();
 +		private readonly HashSet<ulong> _zdUsed = new HashSet<ulong>();
++		private readonly HashSet<ulong> _zdNever = new HashSet<ulong>();   // the paper-space layouts
 +		private readonly Dictionary<ulong, (CadBlockRecordTemplate Template, List<ulong> Owned, List<ulong> Pending)> _zdDeferred = new Dictionary<ulong, (CadBlockRecordTemplate, List<ulong>, List<ulong>)>();
 +		private List<ulong> _zdCollect;   // while the block table or a block header is read: the handles it names, queued after
 +
@@ -27,7 +30,7 @@ index 6adf0f1..b3984cf 100644
 +
 +		private void zdUse(ulong handle)
 +		{
-+			if (!this._zdBlocks.Contains(handle) || !this._zdUsed.Add(handle))
++			if (!this._zdBlocks.Contains(handle) || this._zdNever.Contains(handle) || !this._zdUsed.Add(handle))
 +				return;
 +			if (!this._zdDeferred.TryGetValue(handle, out var d))
 +				return;
@@ -43,9 +46,12 @@ index 6adf0f1..b3984cf 100644
 +			List<ulong> pending = this._zdCollect;
 +			this._zdCollect = null;
 +			ulong handle = template.CadObject.Handle;
-+			bool keep = !this.R2004Plus || this._zdBlocks.Count == 0 || this._zdUsed.Contains(handle)
-+				|| (name ?? "").StartsWith("*Model_Space", System.StringComparison.OrdinalIgnoreCase)
-+				|| (name ?? "").StartsWith("*Paper_Space", System.StringComparison.OrdinalIgnoreCase);
++			bool defer = this.R2004Plus && this._zdBlocks.Count > 0;
++			bool paper = defer && (name ?? "").StartsWith("*Paper_Space", System.StringComparison.OrdinalIgnoreCase);
++			if (paper)
++				this._zdNever.Add(handle);   // (its layout, read below, names it: that must not count as a use)
++			bool keep = !defer || (!paper && this._zdUsed.Contains(handle))
++				|| (name ?? "").StartsWith("*Model_Space", System.StringComparison.OrdinalIgnoreCase);
 +			if (keep)
 +			{
 +				foreach (ulong h in pending)
@@ -70,7 +76,7 @@ index 6adf0f1..b3984cf 100644
  		/// <summary>
  		/// Reader focused on the handles section of the stream.
  		/// </summary>
-@@ -164,6 +225,14 @@ namespace ACadSharp.IO.DWG
+@@ -164,6 +231,14 @@ namespace ACadSharp.IO.DWG
  				}
  				catch (Exception ex)
  				{
@@ -85,7 +91,7 @@ index 6adf0f1..b3984cf 100644
  					if (!this._builder.Configuration.Failsafe)
  						throw;
  
-@@ -292,6 +361,16 @@ namespace ACadSharp.IO.DWG
+@@ -292,6 +367,16 @@ namespace ACadSharp.IO.DWG
  			//Read the handle
  			ulong value = this._handlesReader.HandleReference(handle);
  
@@ -102,7 +108,7 @@ index 6adf0f1..b3984cf 100644
  			if (value != 0 &&
  				!this._builder.TryGetObjectTemplate(value, out CadTemplate _) &&
  				!this._readedObjects.ContainsKey(value))
-@@ -664,11 +743,25 @@ namespace ACadSharp.IO.DWG
+@@ -664,11 +749,25 @@ namespace ACadSharp.IO.DWG
  			CadBlockCtrlObjectTemplate template = new CadBlockCtrlObjectTemplate(
  				new BlockRecordsTable());
  
@@ -132,7 +138,7 @@ index 6adf0f1..b3984cf 100644
  
  			return template;
  		}
-@@ -681,6 +774,7 @@ namespace ACadSharp.IO.DWG
+@@ -681,6 +780,7 @@ namespace ACadSharp.IO.DWG
  			CadBlockRecordTemplate template = new CadBlockRecordTemplate(record);
  			this._builder.BlockRecordTemplates.Add(template);
  
@@ -140,7 +146,7 @@ index 6adf0f1..b3984cf 100644
  			this.readCommonNonEntityData(template);
  
  			//Common:
-@@ -800,12 +894,15 @@ namespace ACadSharp.IO.DWG
+@@ -800,12 +900,15 @@ namespace ACadSharp.IO.DWG
  				for (int i = 0; i < insertCount; ++i)
  				{
  					//Entries	//TODO: necessary to store the insert handles??

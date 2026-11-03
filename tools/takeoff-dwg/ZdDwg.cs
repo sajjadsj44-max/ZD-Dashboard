@@ -78,16 +78,19 @@ public static partial class ZdDwg
         }
     }
 
-    /* the blocks the drawing draws: those its model space and layouts insert, and theirs; dimensions' blocks, multileaders' arrowheads
-       and contents, the dimension and multileader styles' arrowheads, a dynamic block's own definition. The others — definitions
+    /* the blocks the drawing draws: those its model space inserts, and theirs; dimensions' blocks, multileaders' arrowheads and
+       contents, the dimension and multileader styles' arrowheads, a dynamic block's own definition. The others — definitions
        nothing inserts, three quarters of the JADE masonry drawing's objects — are left out of the DXF, which the takeoff then reads
-       in a quarter of the time and memory. -> how many blocks were left out */
+       in a quarter of the time and memory. The paper-space layouts stay (the DXF needs them) but what they insert does not count:
+       the takeoff shows model space only, and a layout can hold whole plans pasted in (700,000 objects in the Zameen Quadrangle
+       layout plans — the reader leaves those unread too, see acadsharp.patch). -> how many blocks were left out */
     static int Prune(CadDocument doc)
     {
         var used = new HashSet<BlockRecord>(); var todo = new Stack<BlockRecord>();
         void Add(BlockRecord b) { if (b != null && used.Add(b)) todo.Push(b); }
         foreach (var b in doc.BlockRecords)
-            if (b.Name.StartsWith("*Model_Space", StringComparison.OrdinalIgnoreCase) || b.Name.StartsWith("*Paper_Space", StringComparison.OrdinalIgnoreCase)) Add(b);
+            if (b.Name.StartsWith("*Model_Space", StringComparison.OrdinalIgnoreCase)) Add(b);
+            else if (b.Name.StartsWith("*Paper_Space", StringComparison.OrdinalIgnoreCase)) used.Add(b);
         foreach (var d in doc.DimensionStyles) { Add(d.ArrowBlock); Add(d.DimArrow1); Add(d.DimArrow2); Add(d.LeaderArrow); }
         foreach (var m in doc.MLeaderStyles) { Add(m.Arrowhead); Add(m.BlockContent); }
         while (todo.Count > 0)
