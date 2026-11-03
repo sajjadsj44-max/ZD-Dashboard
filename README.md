@@ -862,7 +862,10 @@ calculation table and live-retest checklist is `docs/takeoff-qa-report-2026-10-0
   pages. **Export → Pages** exports this page, pages with takeoff, ticked pages or every page as one PDF, a PDF per page,
   PNG or JPEG (up to 600 DPI) with a legend; **All project sheets (.pdf)** keeps every sheet in project order, including
   sheets without markups; **Report** prints the takeoff report. **Project + PDFs** packages every source PDF and the
-  takeoff together for transfer.
+  takeoff together for transfer; **All projects + PDFs** (also **Export projects** on the start screen and Settings ›
+  Saving & backups) puts every project with its PDFs in one `.zdtakeoff` file, saved where you choose — **Import project**
+  on the other computer lists them, adds the new ones and, when ticked, replaces a project already there (its copy goes
+  under Backups first).
 - **View menu** (header): fit page (`F`), **fit width** (`Shift+F`), dim the drawing, line weights on / off, PDF layers, hide
   markups, labels; `Home` / `End` go to the first / last page. The header wraps on narrow screens instead of
   pushing buttons off the edge.
