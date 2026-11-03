@@ -8598,19 +8598,29 @@ async function exportBundle(){
   busy("");
 }
 function isBundle(buf){ const m = new TextEncoder().encode(BUNDLE_MAGIC), u = new Uint8Array(buf, 0, Math.min(buf.byteLength, m.length)); return u.length === m.length && m.every((b, i) => u[i] === b); }
-async function importBundle(buf){ const u = await bundleUnpack(buf); return importProject(u.text, u.pre); }
-async function bundleUnpack(buf, known){   // a .zdtakeoff's PDFs and pictures stored in this browser -> {text: its project (ids moved off ones taken here), pre: check rows}; known: fingerprints not stored again (a merge: drawings the open project has)
-  /* buf: the file's bytes, or the file itself (a Blob, read a piece at a time: a big PDF in it is stored straight from the file,
-     never held whole in the page) */
+async function importBundle(buf){ const H = await bundleHead(buf); if (H.all) return importAll(buf, H); const u = await bundleStore(buf, H, [JSON.stringify(H.h.project)]); return importProject(u.texts[0], u.pre); }
+async function bundleHead(buf){   // a .zdtakeoff's header -> {h, base, size, all}: h its JSON (one project: h.project; Export projects: h.projects, all = true), base where its PDFs start
   const start = BUNDLE_MAGIC.length + 4, size = buf instanceof Blob ? buf.size : buf.byteLength;
   const bytes = async (a, b) => { const x = buf.slice(a, b); return x instanceof Blob ? x.arrayBuffer() : x; };
-  const part = async (a, b) => { const x = buf.slice(a, b); return x instanceof Blob && x.size <= BIG_REC ? x.arrayBuffer() : x; };   // (a big one stays a Blob)
-  const n = v => v instanceof Blob ? v.size : v.byteLength, fp = v => v instanceof Blob ? blobSha(v) : sha256(v);
   if (size < start) throw new Error("the file is cut short");
   const hl = new DataView(await bytes(BUNDLE_MAGIC.length, start)).getUint32(0);
   let h; try { h = JSON.parse(new TextDecoder().decode(await bytes(start, start + Math.min(hl, size - start)))); } catch (e) { throw new Error("the file is damaged (its header cannot be read)"); }
-  if (!h || h.format !== "zd-takeoff-bundle" || !h.project || !Array.isArray(h.pdfs)) throw new Error("not a takeoff project file");
-  let text = JSON.stringify(h.project); const base = start + hl, pre = [];
+  const all = !!(h && h.format === "zd-takeoff-all" && Array.isArray(h.projects));
+  if (!h || !Array.isArray(h.pdfs) || !(all || (h.format === "zd-takeoff-bundle" && h.project))) throw new Error("not a takeoff project file");
+  return {h, base: start + hl, size, all};
+}
+async function bundleUnpack(buf, known){   // a .zdtakeoff's PDFs and pictures stored in this browser -> {text: its project (ids moved off ones taken here), pre: check rows}; known: fingerprints not stored again (a merge: drawings the open project has)
+  const H = await bundleHead(buf);
+  if (H.all) throw new Error("this file holds " + H.h.projects.length + " projects — open it with Import project on the start screen");
+  const u = await bundleStore(buf, H, [JSON.stringify(H.h.project)], known); return {text: u.texts[0], pre: u.pre};
+}
+async function bundleStore(buf, H, texts, known){   // the file's PDFs and pictures stored in this browser -> {texts: its projects as given (ids moved off ones taken here), pre: check rows}
+  /* buf: the file's bytes, or the file itself (a Blob, read a piece at a time: a big PDF in it is stored straight from the file,
+     never held whole in the page); H: bundleHead(buf); known: fingerprints not stored again (a merge: drawings the open project has) */
+  const {h, base, size} = H, pre = [];
+  const bytes = async (a, b) => { const x = buf.slice(a, b); return x instanceof Blob ? x.arrayBuffer() : x; };
+  const part = async (a, b) => { const x = buf.slice(a, b); return x instanceof Blob && x.size <= BIG_REC ? x.arrayBuffer() : x; };   // (a big one stays a Blob)
+  const n = v => v instanceof Blob ? v.size : v.byteLength, fp = v => v instanceof Blob ? blobSha(v) : sha256(v);
   busy("Unpacking the PDFs…");
   try {
     for (const p of h.pdfs) {
@@ -8622,7 +8632,7 @@ async function bundleUnpack(buf, known){   // a .zdtakeoff's PDFs and pictures s
       let id = String(p.id); const have = await pdfSha(id), ident = src ? p.srcSha || sha : sha;
       if (have !== null && have === ident && ident) continue;   // the same drawing is already in this browser
       if (known && ident && known.has(ident)) continue;   // … or in the project it is merged into
-      if (have !== null) { const nid = uid("F"); text = remapFileId(text, id, nid); id = nid; }   // another drawing already uses this id here: this one gets its own
+      if (have !== null) { const nid = uid("F"); texts = texts.map(t => remapFileId(t, id, nid)); id = nid; }   // another drawing already uses this id here: this one gets its own (in every project of the file)
       const rec = Object.assign({name: p.name, size: n(src || data), data, sha: ident}, src ? {src, pdfSha: sha} : {}), bl = ["data", "src"].filter(k => rec[k] instanceof Blob);
       if (bl.length) rec.blobs = bl;   // (read back as bytes by everything but pdf.js, as recOut would mark them)
       await dbPut("pdfs", rec, id);
@@ -8634,7 +8644,123 @@ async function bundleUnpack(buf, known){   // a .zdtakeoff's PDFs and pictures s
     }
   } finally { busy(""); }
   if (!pre.length) pre.push({what: "PDFs in the file", a: h.pdfs.length, b: h.pdfs.length, st: "PASS", note: "fingerprints checked"});
-  return {text, pre};
+  return {texts, pre};
+}
+/* Export projects: every project (or the ticked ones) with its PDFs in ONE .zdtakeoff file, to open them all on another computer.
+   The same file as Project + PDFs (magic, 4-byte length, header, then the PDFs and pictures), its header
+   {format: "zd-takeoff-all", projects: [...], pdfs, assets} with each drawing in once however many projects share it (a duplicated
+   project). Saved where the user chooses (the browser's own Save as… where it has one — Chrome, Edge, the Windows app — else as a
+   download). On the other computer Import project opens it: importAll() adds the new projects and, when ticked, replaces one
+   already there (the same id) by the file's copy, keeping the copy there under its Backups first. */
+const ALL_NAME = () => "ZD_Takeoff_projects_" + today() + ".zdtakeoff";
+async function exportAll(ids, opt){   // ids: project ids to pack (null: every project); opt.blob: the file returned, not saved; opt.handle: a FileSystemFileHandle to write it to
+  opt = opt || {}; await flushSave();   // the open project's last change goes in too
+  let all = await dbAll("projects"); if (Array.isArray(ids)) { const want = new Set(ids); all = all.filter(p => want.has(p.id)); }
+  all.sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")));
+  if (!all.length) { toast("No project to export"); return null; }
+  busy("Packing " + all.length + " project" + (all.length === 1 ? "" : "s") + " and their PDFs…");
+  try {
+    const exported = new Date().toISOString(), parts = [], pdfs = [], assets = [], miss = [], seenF = new Set(), seenA = new Set(); let off = 0;
+    const n = v => v instanceof Blob ? v.size : v.byteLength, fp = v => v instanceof Blob ? blobSha(v) : sha256(v);
+    for (const pr of all) {
+      for (const f of pr.files || []) {
+        if (seenF.has(f.id)) continue; seenF.add(f.id);
+        const rec = await dbGetRaw("pdfs", f.id); if (!rec || !rec.data) { miss.push(pr.name + ": " + f.name); continue; }   // (as kept: a big PDF goes into the file as the Blob it is, never read into the page)
+        const sha = rec.src ? rec.pdfSha || await fp(rec.data) : rec.sha || await fp(rec.data), e = {id: f.id, name: f.name, size: n(rec.data), sha, off};
+        parts.push(rec.data); off += n(rec.data);
+        if (rec.src) { e.srcSha = rec.sha || await fp(rec.src); e.srcOff = off; e.srcSize = n(rec.src); parts.push(rec.src); off += n(rec.src); }   // the DWG / DXF too
+        pdfs.push(e);
+      }
+      for (const aid of [...new Set((pr.marks || []).flatMap(mkAids))]) {   // pictures and files of markups
+        if (seenA.has(aid)) continue; seenA.add(aid);
+        const r = await assetRec(aid); if (!r || !r.data) continue; assets.push({aid, name: r.name, type: r.type, size: r.data.byteLength, off}); parts.push(r.data); off += r.data.byteLength;
+      }
+    }
+    const projects = all.map(pr => Object.assign({format: "zd-takeoff", exported}, pr));
+    const head = new TextEncoder().encode(JSON.stringify({format: "zd-takeoff-all", exported, count: all.length, projects, pdfs, assets}));
+    const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, head.length);
+    const blob = new Blob([BUNDLE_MAGIC, len, head, ...parts], {type: "application/octet-stream"}), name = ALL_NAME();
+    if (opt.blob) return blob;
+    let where = "";
+    if (opt.handle) { try { const w = await opt.handle.createWritable(); await w.write(blob); await w.close(); where = opt.handle.name || name; } catch (e) { saveBlob(blob, name); } }   // (the place chosen cannot be written: the browser's download)
+    else saveBlob(blob, name);
+    const what = all.length + " project" + (all.length === 1 ? "" : "s") + " with " + pdfs.length + " PDF" + (pdfs.length === 1 ? "" : "s") + (assets.length ? " and " + assets.length + " markup picture" + (assets.length === 1 ? "" : "s") : "");
+    toast((miss.length ? what + " saved without " + miss.join(", ") + " — not in this browser (add it with + PDF first)" : what + " saved in one file" + (where ? " — " + where : "")) + " — open it on the other computer with Import project", miss.length ? 8000 : 5000);
+    return {projects: all.length, pdfs: pdfs.length, assets: assets.length, miss, size: blob.size, name: where || name};
+  } catch (e) { toast("Export failed: " + (e.message || e), 6000); return null; }
+  finally { busy(""); }
+}
+async function exportAllDialog(){   // the start screen's Export projects: tick the projects, see the file's size, choose where to save it
+  await flushSave();
+  const all = (await dbAll("projects")).sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")));
+  if (!all.length) return toast("No projects yet — nothing to export");
+  const sz = new Map(), of = {};   // each PDF's size once (projects can share a drawing)
+  for (const p of all) { let s = 0; for (const f of p.files || []) { if (!sz.has(f.id)) { const r = await dbGetRaw("pdfs", f.id).catch(() => null); sz.set(f.id, r ? recSize(r) + (r.src ? (r.src instanceof Blob ? r.src.size : r.src.byteLength) : 0) : 0); } s += sz.get(f.id); } of[p.id] = s; }
+  const mb = b => b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1e3)) + " KB";
+  const body = `<p class="small">Every ticked project goes into <b>one file</b> with its PDFs, drawings and markup pictures (a .zdtakeoff file you can save anywhere — a USB stick, a shared folder, a cloud drive). On the other computer open PDF Takeoff → <b>Import project</b> and pick the file: all of them open there.</p>
+    <p class="small"><a href="#" id="xaAll">All</a> · <a href="#" id="xaNone">None</a></p>
+    <div style="max-height:320px;overflow:auto"><table class="sh"><thead><tr><th></th><th>Project</th><th class="n">PDFs</th><th class="n">Measurements</th><th>Last changed</th><th class="n">Size</th></tr></thead><tbody>${all.map(p => `<tr><td><input type="checkbox" data-xa="${esc(p.id)}" checked aria-label="${esc(p.name)}"></td><td>${esc(p.name)}</td><td class="n">${(p.files || []).length}</td><td class="n">${(p.items || []).length}</td><td>${dmy(p.updated)}</td><td class="n">${mb(of[p.id])}</td></tr>`).join("")}</tbody></table></div>
+    <p class="small" id="xaSum" style="margin-top:8px"></p>`;
+  const pick = () => [...$("dlgB").querySelectorAll("[data-xa]:checked")].map(x => x.dataset.xa);
+  const sum = () => { const ids = new Set(pick()), fs = new Set(); all.filter(p => ids.has(p.id)).forEach(p => (p.files || []).forEach(f => fs.add(f.id))); let b = 0; fs.forEach(f => { b += sz.get(f) || 0; });
+    const el = $("xaSum"); if (el) el.textContent = ids.size + " project" + (ids.size === 1 ? "" : "s") + ", " + fs.size + " PDF" + (fs.size === 1 ? "" : "s") + " — about " + mb(b) + " in one file"; };
+  const p = ask("Export projects to another computer", body, "Save file…", () => { const ids = pick(); if (!ids.length) return "Tick at least one project";
+    /* where to save is asked right on the click (the browser allows the question only then), before the packing starts; a browser
+       without the question (Firefox) saves it as a download */
+    const h = typeof window.showSaveFilePicker === "function" ? window.showSaveFilePicker({suggestedName: ALL_NAME(), types: [{description: "ZD Takeoff projects", accept: {"application/octet-stream": [".zdtakeoff"]}}]}) : null;
+    return {ids, h}; });
+  $("xaAll").onclick = e => { e.preventDefault(); $("dlgB").querySelectorAll("[data-xa]").forEach(x => { x.checked = true; }); sum(); };
+  $("xaNone").onclick = e => { e.preventDefault(); $("dlgB").querySelectorAll("[data-xa]").forEach(x => { x.checked = false; }); sum(); };
+  $("dlgB").addEventListener("change", sum); sum();
+  const v = await p; if (!v) return null;
+  let handle = null;
+  if (v.h) { try { handle = await v.h; } catch (e) { if (e && e.name === "AbortError") return null; handle = null; } }   // closed without a place: nothing is saved; refused otherwise: the browser's download
+  return exportAll(v.ids, {handle});
+}
+async function importAll(buf, H){   // a file holding several projects (Export projects): which to bring in, then its PDFs and projects stored -> S.lastImport
+  const h = H.h, here = new Map((await dbAll("projects")).map(p => [p.id, p]));
+  const L = h.projects.filter(p => p && typeof p === "object" && !Array.isArray(p) && Array.isArray(p.items));
+  if (!L.length) throw new Error("the file holds no project");
+  const st = p => { const o = typeof p.id === "string" && here.get(p.id); if (!o) return {k: "new", t: "new — added", on: true};
+    const a = String(p.updated || ""), b = String(o.updated || "");
+    return a > b ? {k: "older", t: "here, an older copy — replaced (the copy here goes under its Backups)", on: true} : a === b ? {k: "same", t: "here, the same — left as it is", on: false} : {k: "newer", t: "here, a newer copy — kept (tick to replace it with the file's older one)", on: false}; };
+  const S0 = L.map(st);
+  const body = `<p class="small">This file holds <b>${L.length} project${L.length === 1 ? "" : "s"}</b> with their PDFs (saved ${esc(dmyHm(h.exported))}). Tick what to bring into this browser. A project already here is matched by its id: the file's copy replaces it when ticked, and the copy here goes under its <b>Backups</b> first.</p>
+    <div style="max-height:320px;overflow:auto"><table class="sh"><thead><tr><th></th><th>Project</th><th class="n">PDFs</th><th class="n">Measurements</th><th>Last changed</th><th>In this browser</th></tr></thead><tbody>${L.map((p, i) => `<tr><td><input type="checkbox" data-xi="${i}"${S0[i].on ? " checked" : ""} aria-label="${esc(p.name)}"></td><td>${esc(p.name || "Untitled")}</td><td class="n">${(p.files || []).length}</td><td class="n">${p.items.length}</td><td>${dmy(p.updated)}</td><td class="small" data-xst="${S0[i].k}">${esc(S0[i].t)}</td></tr>`).join("")}</tbody></table></div>`;
+  const v = await ask("Import " + L.length + " project" + (L.length === 1 ? "" : "s"), body, "Import", () => { const ids = [...$("dlgB").querySelectorAll("[data-xi]:checked")].map(x => +x.dataset.xi); return ids.length ? {ids} : "Tick at least one project"; });
+  if (!v) return null;
+  const want = v.ids.map(i => L[i]);
+  await flushSave();
+  const u = await bundleStore(buf, H, want.map(p => JSON.stringify(p)));
+  const rows = u.pre.filter(r => r.st !== "PASS"), openId = P.proj && P.proj.id; let reopen = false, nAdd = 0, nRep = 0;
+  busy("Storing the projects…");
+  try {
+    for (let i = 0; i < want.length; i++) {
+      let pr; try { pr = JSON.parse(u.texts[i]); } catch (e) { rows.push({what: want[i].name || "Untitled", a: "", b: "", st: "FAIL", note: "could not be read"}); continue; }
+      delete pr.format; delete pr.exported;
+      if (typeof pr.id !== "string" || !pr.id) pr.id = uid("P");
+      pr.name = pr.name || "Imported takeoff"; pr.created = pr.created || new Date().toISOString(); pr.updated = pr.updated || new Date().toISOString();
+      const rep = []; migrate(pr, rep);
+      const old = here.get(pr.id);
+      if (old) { await backupNow("before Import project replaced it", old).catch(() => {}); SAVE_PEND.delete(pr.id); SAVE_ERR.delete(pr.id); SAVE_FLIGHT.delete(pr.id); SAVED_AT.delete(pr.id); }   // (a retry kept from a failed save must not write over the file's copy)
+      await dbPut("projects", pr);
+      if (old) nRep++; else nAdd++;
+      if (old && openId === pr.id) reopen = true;
+      const miss = []; for (const f of pr.files || []) if (await pdfSha(f.id) === null) miss.push(f.name);
+      const nf = (pr.files || []).length;
+      rows.push({what: pr.name, a: nf + " PDF" + (nf === 1 ? "" : "s") + ", " + pr.items.length + " measurement" + (pr.items.length === 1 ? "" : "s"), b: old ? "replaced" : "added", st: miss.length ? "WARNING" : rep.some(r => /left out|removed/.test(r)) ? "FAIL" : "PASS",
+        note: (miss.length ? "add " + miss.join(", ") + " with + PDF — not in the file" : "") + (rep.length ? (miss.length ? " · " : "") + "repaired: " + rep.slice(0, 2).join(" · ") : "")});
+    }
+  } finally { busy(""); }
+  keepStorage();
+  if (reopen) await openProject(openId);   // the project on screen was replaced: the file's copy is read in
+  await showStart();
+  const lvl = rows.some(r => r.st === "FAIL") ? "FAIL" : rows.some(r => r.st === "WARNING") ? "WARNING" : "PASS";
+  S.lastImport = {lvl, rows, all: true, added: nAdd, replaced: nRep};
+  ask("Projects imported — " + lvl, `<p class="small">${nAdd} added${nRep ? ", " + nRep + " replaced (the earlier copies are under Backups)" : ""} — they are listed on the start screen.</p>
+    <table class="sh"><thead><tr><th>Project</th><th class="n">In the file</th><th class="n">Here</th><th>Status</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.what)}${r.note ? `<div class="ds">${esc(r.note)}</div>` : ""}</td><td class="n">${esc(r.a)}</td><td class="n">${esc(r.b)}</td><td style="font-weight:700;color:${r.st === "PASS" ? "var(--green)" : r.st === "WARNING" ? "var(--amber)" : "var(--red)"}">${r.st}</td></tr>`).join("")}</tbody></table>`, "");
+  $("dlgCancel").textContent = "Close";
+  return S.lastImport;
 }
 async function exportMenu(){
   if (!P.proj) return;
@@ -8643,13 +8769,13 @@ async function exportMenu(){
   $("dlgB").innerHTML = `<div class="wide"></div><p><b>Takeoff check: <span style="color:${lvlCol(V.lvl)}">${V.lvl}</span></b>${V.L.length ? ` — ${nE} error${nE === 1 ? "" : "s"}, ${nW} warning${nW === 1 ? "" : "s"}` : " — scales, heights, thicknesses, codes, rates, QA all in order"}</p>
     ${V.L.length ? `<div style="max-height:240px;overflow:auto;margin:6px 0;border:1px solid var(--line);border-radius:6px">${V.L.map(x => `<div style="padding:4px 8px;border-bottom:1px solid #f0f4f8;font-size:12px"><b style="color:${lvlCol(x.lvl)};display:inline-block;width:70px">${x.lvl}</b>${esc(x.msg)}</div>`).join("")}</div>` : ""}
     <p class="small">${V.lvl === "PASS" ? "" : "You can still export; the Excel file carries this list on its Validation sheet. "}Measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as rows).</p>`;
-  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button>${V.L.some(x => x.ov) ? '<button class="btn" id="exOv" title="Areas that overlap, counted twice — show and fix them">Fix overlaps…</button>' : ""}<button class="btn" id="exBak">Backups…</button><button class="btn" id="exJson" title="Measurements only — the PDFs are not inside">Project (.json)</button><button class="btn" id="exBnd" title="The project and all its PDFs in one file, to move it to another browser or computer">Project + PDFs</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA" title="Every sheet of the project in one PDF, with or without markups">All project sheets (.pdf)</button>
+  $("dlgF").innerHTML = `<button class="btn" id="dlgCancel">Close</button>${V.L.some(x => x.ov) ? '<button class="btn" id="exOv" title="Areas that overlap, counted twice — show and fix them">Fix overlaps…</button>' : ""}<button class="btn" id="exBak">Backups…</button><button class="btn" id="exJson" title="Measurements only — the PDFs are not inside">Project (.json)</button><button class="btn" id="exBnd" title="The project and all its PDFs in one file, to move it to another browser or computer">Project + PDFs</button><button class="btn" id="exAll" title="Every project in this browser with its PDFs in one file, to open them all on another computer">All projects + PDFs</button><button class="btn" id="exPng"${S.page ? "" : " disabled"}>Marked-up page (.png)</button><button class="btn" id="exPdf1"${S.page ? "" : " disabled"}>Marked-up page (.pdf)</button><button class="btn" id="exPdfA" title="Every sheet of the project in one PDF, with or without markups">All project sheets (.pdf)</button>
     <button class="btn pri" id="exPages" title="Choose the pages (this page, pages with takeoff, ticked pages, or any), the format (PDF, a PDF per page, PNG, JPEG), the resolution up to 600 DPI and the legend">&#8681; Pages — PDF / PNG / JPEG…</button><button class="btn" id="exPlot" title="A window, the view or the page on a paper size, at a scale, colour / monochrome — print it or save it as PDF (Ctrl+P)">&#128424; Plot / print…</button><button class="btn" id="exRepB" title="Report builder: rows by condition, page / sheet or floor, the columns you choose, group and grand totals — Excel or CSV">&#9638; Report…</button><button class="btn" id="exRep" title="A printable takeoff report with a summary, quantities by condition and floor, the bill, the drawings measured and the check — print it or save it as PDF">&#128438; Report (print / PDF)</button><button class="btn" id="exCsv">CSV</button><button class="btn" id="exSeg" title="Every leg of every run and every side of every area, with its ends in feet: the wall-by-wall list">Segments CSV</button><button class="btn" id="exDxf" title="This page's takeoff as an AutoCAD DXF: a layer per condition">DXF (AutoCAD)</button><button class="btn pri" id="exXls">Excel</button>`;
   $("dlgBack").classList.add("on");
   const close = () => $("dlgBack").classList.remove("on");
   $("dlgCancel").onclick = close;
   $("exXls").onclick = () => { close(); exportExcel(); }; $("exCsv").onclick = () => { close(); exportCsv(); }; $("exSeg").onclick = () => { close(); exportSegmentsCsv(); }; $("exDxf").onclick = () => { close(); exportDxf(); };
-  $("exPng").onclick = () => { close(); exportPng(); }; $("exPdf1").onclick = () => { close(); exportPdf(false, "ui"); }; $("exPdfA").onclick = () => { close(); exportPdf(true, "ui"); }; $("exJson").onclick = () => { close(); exportJson(); }; $("exBnd").onclick = () => { close(); exportBundle(); }; $("exBak").onclick = () => backupsDialog(); if ($("exOv")) $("exOv").onclick = () => overlapDialog("project");
+  $("exPng").onclick = () => { close(); exportPng(); }; $("exPdf1").onclick = () => { close(); exportPdf(false, "ui"); }; $("exPdfA").onclick = () => { close(); exportPdf(true, "ui"); }; $("exJson").onclick = () => { close(); exportJson(); }; $("exBnd").onclick = () => { close(); exportBundle(); }; $("exAll").onclick = () => { close(); exportAllDialog(); }; $("exBak").onclick = () => backupsDialog(); if ($("exOv")) $("exOv").onclick = () => overlapDialog("project");
   $("exPages").onclick = () => { close(); exportPagesDialog(); }; $("exPlot").onclick = () => { close(); plotDialog(); }; $("exRep").onclick = () => { close(); reportPrint(); }; $("exRepB").onclick = () => { close(); reportDialog(); };
 }
 
@@ -10202,6 +10328,7 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
       {t: "btn", n: "Save now", d: "projects are also saved on every change (Ctrl+S)", b: "Save", need: 1, stay: true, fn: () => { savePr = P.proj; return flushSave().then(ok => toast(ok ? "Saved in this browser" : "Not saved — see the message above", 2400)); }},
       {t: "btn", n: "Backups of this project", d: "go back to an earlier state", b: "Backups…", need: 1, fn: () => backupsDialog()},
       {t: "btn", n: "Copy a project to another computer", d: "the project with its PDFs (.zdtakeoff)", b: "Export…", need: 1, fn: exportBundle},
+      {t: "btn", n: "Copy every project to another computer", d: "all projects with their PDFs in one file (.zdtakeoff), saved where you choose — Import project opens them on the other computer", b: "Export all…", fn: exportAllDialog},
       {t: "btn", n: "Recover a deleted project", d: "deleted projects are kept " + TRASH_DAYS + " days", b: "Recover…", fn: recoverDialog}]},
     {id: "file", n: "Backup & reset settings", d: "settings to a file, on another computer, reset", rows: [
       {t: "btn", n: "Save my settings to a file", d: "every option here, My tools, Tool Chest, stamps, markup styles, agent rules — not your projects, not the AI key", b: "Export…", stay: true, fn: setExport},
@@ -12627,7 +12754,7 @@ function paletteCmds(){
     add(t, () => b.click(), g, k);
   };
   if (!P.proj) {
-    add("New project", () => $("bNewProj").click(), "Project"); add("Import project (.json or .zdtakeoff)", () => $("impIn").click(), "Project"); add("Recover a deleted project (from its backups)", recoverDialog, "Project"); add("Full screen", fullScreen, "View");
+    add("New project", () => $("bNewProj").click(), "Project"); add("Import project (.json or .zdtakeoff)", () => $("impIn").click(), "Project"); add("Export projects (.zdtakeoff) — every project with its PDFs, to another computer", exportAllDialog, "Project"); add("Recover a deleted project (from its backups)", recoverDialog, "Project"); add("Full screen", fullScreen, "View");
     add("Settings — every option in one window", () => settingsDialog(), "Settings", "Ctrl+,");
     return L;
   }
@@ -12654,7 +12781,7 @@ function paletteCmds(){
   add("Magnifier on / off — a 3× glass at the cursor while drawing and measuring", () => setMag(!MAG.on), "View", "Shift+G");
   if (S.page) { add("Marked-up page (.png)", exportPng, "Export"); add("Marked-up page (.pdf)", () => exportPdf(false, "ui"), "Export"); }
   add("All project sheets (.pdf)", () => exportPdf(true, "ui"), "Export"); add("Project (.json) — measurements only", exportJson, "Export");
-  add("Project + PDFs (.zdtakeoff) — to move to another computer", exportBundle, "Export");
+  add("Project + PDFs (.zdtakeoff) — to move to another computer", exportBundle, "Export"); add("All projects + PDFs (.zdtakeoff) — every project, to another computer", exportAllDialog, "Export");
   if (S.page && !cadMeta(S.fileId)) { add("Bluebeam: import this PDF's markups — measurements become conditions", () => bbImport(S.fileId), "Page");
     const bf = (P.proj.bbImp || {})[S.fileId]; if (bf && bf.off) add("Bluebeam: show the PDF's own markups (as printed by Bluebeam)", () => bbShowPdf(S.fileId, true), "View"); else if (bf) add("Bluebeam: hide the PDF's own markups", () => bbShowPdf(S.fileId, false), "View"); } if (!TEAM) add("Backups of this project", () => backupsDialog(), "Project"); add("Import measurements into this project (.json or .zdtakeoff)…", mergeFile, "Project");
   if (S.page) add("Plot / print — a window, the view or the page, at a scale", plotDialog, "Export", "Ctrl+P");
@@ -13423,6 +13550,7 @@ function wire(){
   $("bNewProj").onclick = async () => { const v = await ask("New project", '<div class="fg w2"><label>Project name</label><input type="text" id="dlgName" placeholder="e.g. NEO — Block A ground floor"></div>', "Create", () => ({name: $("dlgName").value.trim() || "Untitled takeoff"}), "dlgName");
     if (!v) return; const pr = newProject(v.name); await dbPut("projects", pr); keepStorage(); await openProject(pr.id); };
   $("bImport").onclick = () => $("impIn").click();
+  $("bExportAll").onclick = () => exportAllDialog();
   $("impIn").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return;
     try { await (isBundle(await f.slice(0, 64).arrayBuffer()) ? importBundle(f) : importProject(new TextDecoder().decode(await f.arrayBuffer()))); keepStorage(); } catch (er) { toast("Could not import: " + er.message, 5000); } };   // (a project file with its PDFs: read a piece at a time)
   $("projList").addEventListener("click", async e => {
@@ -18698,7 +18826,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, openWb, wbMod, wbApi, condQ, billQ, billQty, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
-    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, verReload, autoUpd, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
+    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, exportAll, exportAllDialog, importAll, bundleHead, bundleStore, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, verReload, autoUpd, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
     floorsDialog, floorAddMany, floorNext, floorTitleIn, floorZoom, floorMenu, floorBoxStart, floorNewAsk, floorLegends, floorLegendSplit, legendFloorSet, legendFit, legendTitle, floorTitleOf,

@@ -1656,10 +1656,10 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
   <h2>Sajjad QS PDF TAKEOFF Software <a class="btn sm" href="../dashboards/" style="float:right;font-size:12px;font-weight:600;text-decoration:none" title="Change Management, Drawing Tracker and the other ZD dashboards">All dashboards &rarr;</a></h2>
   <p class="sub">Measure areas, lengths and counts straight off PDF drawings, with the scale read from the drawing, snapping to the
     drawing's own lines, and a measurement sheet in the house format (Nos × L × W × H, decimal feet, deductions as their own rows).</p>
-  <div class="card"><div class="hd"><h3>Projects</h3><input type="search" id="projectSearch" placeholder="Search projects…" aria-label="Search projects"><button class="btn" id="bImport">Import project</button><input type="file" id="impIn" accept=".json,.zdtakeoff,application/json" hidden>
+  <div class="card"><div class="hd"><h3>Projects</h3><input type="search" id="projectSearch" placeholder="Search projects…" aria-label="Search projects"><button class="btn" id="bExportAll" title="Every project with its PDFs in one file, to open them all on another computer">Export projects</button><button class="btn" id="bImport">Import project</button><input type="file" id="impIn" accept=".json,.zdtakeoff,application/json" hidden>
     <button class="btn pri" id="bNewProj">+ New project</button></div><div id="projList"></div></div>
   <div class="note"><b>Your drawings stay on this computer.</b> PDFs and takeoffs are saved in this browser's storage (IndexedDB) on this device only —
-    nothing is uploaded, and another browser or computer will not see them. Use <b>Export → Project + PDFs</b> to move a takeoff with its drawings in one file (<b>Project (.json)</b> carries the measurements only; a PDF added again
+    nothing is uploaded, and another browser or computer will not see them. Use <b>Export projects</b> (above) to put every project with its drawings in one file for another computer — <b>Import project</b> opens them there — or <b>Export → Project + PDFs</b> for one takeoff (<b>Project (.json)</b> carries the measurements only; a PDF added again
     is checked against the drawing it was measured on, by its content, not its name). Vector PDFs exported from CAD snap to their lines; scanned PDFs can be measured but do not snap.</div>
 </div></div>
 
@@ -1684,7 +1684,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-11-03b"></script>
+<script type="module" src="takeoff.js?v=2026-11-03c"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
