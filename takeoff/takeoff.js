@@ -6064,7 +6064,7 @@ function renderConds(){
   const gHead = o => { const t = o.m.reduce((a, c) => a + P.proj.items.filter(x => x.cond === c.id).length, 0), ck = o.m.reduce((a, c) => a + P.proj.items.filter(x => x.cond === c.id && x.qa === "checked").length, 0);
     return `<div class="cgrp2" data-cgrp="${esc(o.g)}" title="Click to fold / unfold this group"><span class="car">${grpOff.has(o.g) ? "&#9656;" : "&#9662;"}</span><b>${o.g ? esc(o.g) : "Ungrouped"}</b><span class="small">${o.m.length} condition${o.m.length === 1 ? "" : "s"} · ${ck}/${t} checked</span></div>`; };
   const cardOf = c => { const i = P.proj.conds.indexOf(c), t = condTotals(c), its = P.proj.items.filter(x => x.cond === c.id), ck = its.filter(x => x.qa === "checked").length;
-    return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none"><button class="sw" style="background:${c.color}" title="Change colour" data-color="${esc(c.id)}"></button><div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + uLen(+c.h) : ""}${c.t ? " · T " + uLen(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}${its.length ? (ck ? ` · ${ck}/${its.length} checked<i class="pbar" title="${ck} of ${its.length} checked"><i style="width:${Math.round(100 * ck / its.length)}%"></i></i>` : "") : " · no measurements yet"}</span>${(P.proj.cols || []).length ? `<span class="ccols">${colChips(c)}</span>` : ""}</div>
+    return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none">${condSw(c)}<div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + uLen(+c.h) : ""}${c.t ? " · T " + uLen(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}${its.length ? (ck ? ` · ${ck}/${its.length} checked<i class="pbar" title="${ck} of ${its.length} checked"><i style="width:${Math.round(100 * ck / its.length)}%"></i></i>` : "") : " · no measurements yet"}</span>${(P.proj.cols || []).length ? `<span class="ccols">${colChips(c)}</span>` : ""}</div>
       <div class="q">${fq(t.net, c.unit)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(uL(c.unit))}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; };
   const vw = condView(), vbar = `<div class="cview" title="How the conditions are listed">${[["tree", "By page", "PlanSwift-style tree: every page with the conditions measured on it and that page's quantity"], ["list", "Compact", "One thin row per condition"], ["cards", "Cards", "Cards with check progress"]].map(([k, n, t]) => `<button data-cview="${k}" class="${vw === k ? "on" : ""}" title="${t}">${n}</button>`).join("")}</div>`;
   const body = !shown.length ? '<div class="empty">No condition matches this filter.</div>' : vw === "tree" ? condTreeHtml(shown)
@@ -6078,8 +6078,8 @@ function condRowHtml(c, q, lvl, pg){
   const nm = pg && c.flpk === pg ? condShort(c) : c.name;   // (a floor's own condition, under its floor: "Kitchen")
   const its = P.proj.items.filter(x => x.cond === c.id), ck = its.filter(x => x.qa === "checked").length, ty = c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count";
   return `<div class="crow${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"${pg ? ` data-cpg="${esc(pg)}"` : ""} style="padding-left:${4 + 10 * lvl}px" title="${esc(c.name)} — ${ty}${c.h ? " · H " + uLen(+c.h) : ""}${c.t ? " · T " + uLen(+c.t) : ""} · ${its.length} measurement${its.length === 1 ? "" : "s"}${its.length ? ", " + ck + " checked" : ""}${(P.proj.cols || []).length ? "\n" + esc(colTip(c)) : ""}${pg ? "\nClick: this condition on this page" : ""}">
-    <input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several"><i class="cic ${c.type}" style="--cc:${esc(c.color)}"></i><span class="cn">${esc(nm)}</span>
-    <span class="cq">${fq(q, c.unit)}</span><span class="cu">${esc(uL(c.unit))}</span><button class="sw" style="background:${esc(c.color)}" title="Change colour" data-color="${esc(c.id)}"></button>
+    <input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several"><i class="cic ${c.type}" style="--cc:${esc(c.color)}${c.type === "area" ? ";--cf:" + esc(apOf(c).fill) : ""}"></i><span class="cn">${esc(nm)}</span>
+    <span class="cq">${fq(q, c.unit)}</span><span class="cu">${esc(uL(c.unit))}</span>${condSw(c)}
     <button class="ed eye bulb${c.hidden ? " out" : ""}" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">&#128161;</button><button class="ed pen" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`;
 }
 function condTreeHtml(shown){
@@ -6189,7 +6189,7 @@ function rateLine(c){ const r = rateOf(c, c.unit); return r.na ? ["Rate", "not a
 function condDetailHtml(c){
   const t = condTotals(c), its = P.proj.items.filter(i => i.cond === c.id), ck = its.filter(i => i.qa === "checked").length, pages = new Set(its.map(i => keyOf(i.file, i.page))), r = rateOf(c, c.unit);
   const tp = c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count";
-  return `<div class="pcard"><div style="display:flex;gap:8px;align-items:center"><span class="lsw" style="background:${esc(c.color)};width:14px;height:14px"></span><b style="color:var(--navy);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}</b><button class="btn sm" data-act="editCond" title="Edit this condition: name, unit, H, T, faces, BOQ and Rate Analysis codes, colour">&#9998; Edit</button></div>
+  return `<div class="pcard"><div style="display:flex;gap:8px;align-items:center"><span class="lsw" style="${swCss(c)};width:14px;height:14px"></span><b style="color:var(--navy);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}</b><button class="btn sm" data-act="editCond" title="Edit this condition: name, unit, H, T, faces, BOQ and Rate Analysis codes, colour">&#9998; Edit</button></div>
     <div class="big" style="margin-top:6px">${fq(t.net, c.unit)}<small>${esc(uL(c.unit))}</small></div>
     <div class="dimstr">${t.ded ? "gross " + fq(t.gross, c.unit) + " − deductions " + fq(t.ded, c.unit) : its.length + " measurement" + (its.length === 1 ? "" : "s")}</div></div>
     <div class="psec">Totals</div>
@@ -6213,7 +6213,7 @@ function itemDetailHtml(it, c, k){
     : c.type === "area" ? [["Area", f3(uV(polyArea(it.pts) / k / k, "Sft")) + " " + uL("Sft")], ["Perimeter", uLenT(polyLen(it.pts, true) / k)], ["Points", String(pc)]]
     : c.type === "linear" ? [["Length", uLenT(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k)], it.kind === "open" ? null : ["Segments", String(Math.max(1, pc - 1))], it.kind === "open" ? null : ["Points", String(pc)]] : [["Count points", String(pc)]];
   const sc = (P.proj.scales || {})[keyOf(it.file, it.page)], st = it.qa === "checked" ? ["Checked", "ok"] : it.qa === "recheck" ? ["Recheck", "bad"] : ["Pending", ""];
-  return `<div class="pcard"><div style="display:flex;gap:8px;align-items:center"><span class="lsw" style="background:${esc(c.color)};width:14px;height:14px"></span><b style="color:var(--navy);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.label || kindName(it, c))}</b><span class="pstat ${st[1]}">${st[0]}</span></div>
+  return `<div class="pcard"><div style="display:flex;gap:8px;align-items:center"><span class="lsw" style="${swCss(c, it)};width:14px;height:14px"></span><b style="color:var(--navy);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.label || kindName(it, c))}</b><span class="pstat ${st[1]}">${st[0]}</span></div>
     <div class="big" style="margin-top:6px">${k ? (it.kind === "ded" || it.kind === "open" ? "−" : "") + fq(Math.abs(net), c.unit) : "—"}<small>${esc(uL(c.unit))}</small></div>
     <div class="dimstr">${r0 ? esc(dimText(r0)) : "scale not set on this page"}${rows.length > 1 ? " · +" + (rows.length - 1) + " more row" + (rows.length > 2 ? "s" : "") : ""}</div></div>
     <div class="psec">Details</div>
@@ -7899,13 +7899,31 @@ function mlWire(){
 
 /* ------------------------------------------------------------------ colour picker (condition swatch) */
 function swatches(cur){ return COLORS.map(x => `<button type="button" class="swb${x === cur ? " on" : ""}" data-sw="${x}" style="background:${x}" title="${x}"></button>`).join(""); }
-function colorPop(anchor, c){
-  const pop = $("pop"), r = anchor.getBoundingClientRect();
-  pop.innerHTML = `<div class="swg">${swatches(c.color)}</div><label class="cust">Custom <input type="color" id="popCustom" value="${/^#[0-9a-f]{6}$/i.test(c.color) ? c.color : "#2a78d6"}"></label>`;
-  pop.style.left = Math.min(r.left, window.innerWidth - 230) + "px"; pop.style.top = (r.bottom + 6) + "px"; pop.classList.add("on");
-  const set = col => { if (col && col !== c.color) mutate(() => { c.color = col; }); };
-  pop.onclick = e => { const b = e.target.closest("[data-sw]"); if (b) { set(b.dataset.sw); pop.classList.remove("on"); } };
-  $("popCustom").onchange = e => { set(e.target.value); pop.classList.remove("on"); };
+/* a condition's swatch: an area shows its fill inside a border of its line colour (as PlanSwift); a length or a count its one colour */
+function swCss(c, it){ if (c.type !== "area") return `background:${esc(c.color)}`; const a = apOf(c, it); return `background:${esc((+a.fillOp || 0) > 0 ? a.fill : "#fff")};border:2.5px solid ${esc(a.col)}`; }
+function condSw(c){
+  if (c.type !== "area") return `<button class="sw" style="${swCss(c)}" title="Change colour" data-color="${esc(c.id)}"></button>`;
+  const a = apOf(c);
+  return `<button class="sw" style="${swCss(c)}" title="Change colour — line ${esc(a.col)}, fill ${esc((+a.fillOp || 0) > 0 ? a.fill : "none")}" data-color="${esc(c.id)}"></button>`;
+}
+function colorPop(anchor, c){   // an area's has two parts: its line (outline) and its fill, which takes the line colour until it is given its own
+  const pop = $("pop"), r = anchor.getBoundingClientRect(), area = c.type === "area";
+  const draw = () => { const a = apOf(c), own = !!(c.ap && c.ap.fill), op = +a.fillOp || 0;
+    pop.innerHTML = (area ? `<div class="poph">Line (outline)</div>` : "") + `<div class="swg">${swatches(c.color)}</div><label class="cust">Custom <input type="color" id="popCustom" value="${apHex(c.color)}"></label>`
+      + (area ? `<div class="poph">Fill<label title="The fill takes the line colour (and changes with it)"><input type="checkbox" id="popSame"${own ? "" : " checked"}> Same as line</label></div><div class="swg" id="popFillSw">${swatches(a.fill)}</div>`
+        + `<label class="cust">Custom <input type="color" id="popFill" value="${apHex(a.fill)}"></label><label class="cust">Opacity <input type="range" id="popFillOp" min="0" max="100" step="1" value="${op}"><b id="popFillOpV">${op}%</b></label>` : ""); };
+  draw();
+  pop.style.left = Math.min(r.left, window.innerWidth - 230) + "px"; pop.classList.add("on"); pop.style.top = Math.max(4, Math.min(r.bottom + 6, window.innerHeight - pop.offsetHeight - 4)) + "px";
+  const done = () => { if (area) draw(); else pop.classList.remove("on"); };   // an area's stays open, so its fill can be chosen next
+  const apPut = (fn, lbl) => mutate(() => { const ap = Object.assign({}, c.ap || {}); fn(ap); if (Object.keys(ap).length) c.ap = ap; else delete c.ap; }, lbl);
+  const setLine = col => { if (col && col !== c.color) mutate(() => { c.color = col; if (c.ap) { delete c.ap.col; if (String(c.ap.fill || "").toLowerCase() === col.toLowerCase()) delete c.ap.fill; if (!Object.keys(c.ap).length) delete c.ap; } }, "Line colour"); done(); };
+  const setFill = col => { if (!col) return; apPut(ap => { if (col.toLowerCase() === String(c.color).toLowerCase()) delete ap.fill; else ap.fill = col; if (+ap.fillOp === 0) delete ap.fillOp; }, "Fill colour"); done(); };   // (a fill chosen while it was off is shown again)
+  pop.onclick = e => { const b = e.target.closest("[data-sw]"); if (b) b.closest("#popFillSw") ? setFill(b.dataset.sw) : setLine(b.dataset.sw); };
+  pop.oninput = e => { if (e.target.id === "popFillOp") $("popFillOpV").textContent = e.target.value + "%"; };
+  pop.onchange = e => { const t = e.target;
+    if (t.id === "popCustom") setLine(t.value); else if (t.id === "popFill") setFill(t.value);
+    else if (t.id === "popSame") { apPut(ap => { if (t.checked) delete ap.fill; else ap.fill = apOf(c).fill; }, "Fill colour"); done(); }   // unticked: the fill keeps today's colour when the line changes
+    else if (t.id === "popFillOp") { const v = Math.max(0, Math.min(100, +t.value || 0)); apPut(ap => { if (v === apBase(c).fillOp) delete ap.fillOp; else ap.fillOp = v; }, "Fill opacity"); done(); } };
   setTimeout(() => document.addEventListener("pointerdown", function off(e){ if (!pop.contains(e.target)) { pop.classList.remove("on"); document.removeEventListener("pointerdown", off, true); } }, true), 0);
 }
 
