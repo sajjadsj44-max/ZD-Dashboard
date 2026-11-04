@@ -1,6 +1,6 @@
 {
  "about": "PDF Takeoff: how this team takes off, learned by the takeoff agent in every browser of the team and merged by tools/learn_archive.py. Item names, heights, room kinds and counts only.",
- "at": "2026-11-04T11:12:35.309Z",
+ "at": "2026-11-04T12:20:26.774Z",
  "projects": {
   "vvvcknb84sev:17a5e3f04bec": {
    "at": "2026-10-31T10:49:48.438Z",
@@ -234,6 +234,33 @@
    },
    "sent": "2026-11-02T06:44:42.313Z"
   },
+  "vvyxastie8va:68f4cdf27e08": {
+   "at": "2026-11-04T12:01:30.212Z",
+   "conds": {
+    "floor|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "Floor",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    }
+   },
+   "rooms": {
+    "BED ROOM": {
+     "items": {
+      "floor|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    }
+   },
+   "sent": "2026-11-04T12:20:26.774Z"
+  },
   "vvyymq5pforq:dfba2afc9a0b": {
    "at": "2026-11-03T04:21:20.239Z",
    "conds": {
@@ -459,9 +486,60 @@
    "words": {}
   },
   "vvyxastie8va": {
-   "at": "2026-11-04T11:12:35.309Z",
-   "missed": {},
-   "rejects": {},
+   "at": "2026-11-04T12:20:26.774Z",
+   "missed": {
+    "PASSAGE": 2
+   },
+   "rejects": {
+    "BALCONY": {
+     "del": 0,
+     "made": 11
+    },
+    "BATH": {
+     "del": 0,
+     "made": 20
+    },
+    "BED ROOM": {
+     "del": 0,
+     "made": 15
+    },
+    "DRESS": {
+     "del": 0,
+     "made": 3
+    },
+    "KITCHEN": {
+     "del": 0,
+     "made": 8
+    },
+    "LIFT": {
+     "del": 4,
+     "made": 4
+    },
+    "LOUNGE": {
+     "del": 0,
+     "made": 6
+    },
+    "PASSAGE": {
+     "del": 0,
+     "made": 9
+    },
+    "SERVANT ROOM": {
+     "del": 0,
+     "made": 4
+    },
+    "STAIR": {
+     "del": 0,
+     "made": 4
+    },
+    "STORE": {
+     "del": 0,
+     "made": 4
+    },
+    "STUDY": {
+     "del": 0,
+     "made": 2
+    }
+   },
    "words": {}
   },
   "vvyymq5pforq": {
