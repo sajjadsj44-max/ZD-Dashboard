@@ -84,9 +84,10 @@ class RefreshData(unittest.TestCase):
                 else:
                     site, desc, k, _ = args
                     hits = [it for it in grn.items if it["site"] == site and it["desc"] == desc and it["last"]]
-                    last = max((it["last"] for it in hits), key=lambda l: (l["date"], l["grn"]))
-                    self.assertAlmostEqual(r["rate"], round(last["rate"] * k, 4), places=4)
-                    self.assertEqual(r["date"], last["date"])
+                    # the receipt the block cites; a newer one may have come in since (raGrnLatest takes it then)
+                    cited = [rc for it in hits for rc in it["rc"] if rc["date"] == r["date"]]
+                    self.assertTrue(cited, f"no {site} receipt of {r['date']}")
+                    self.assertTrue(any(abs(r["rate"] - round(rc["rate"] * k, 4)) < 1e-4 for rc in cited), r["rate"])
                     self.assertTrue(r["src"].startswith(f"{site} GRN "))
 
     def test_refreshed_lines_carry_their_previous_value(self):

@@ -168,12 +168,15 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   const L = await T(() => zdPriceTrends.links().map(o => ({code: o.x.code, why: o.why || "", dev: o.dev, last: o.last ? o.last.rcp : "", how: o.how})));
   const by = c => L.find(o => o.code === c);
   ok(L.length > 150, `${L.length} lines linked to a GRN`);
-  /* DIESEL 380.66/Ltr (06-Oct-2026: weighted average of the 30-Sep-2026 receipts) cites Phoenix RCP-326, which has
-     three receipts that day (371, 379, 383) — compared with the nearest of them, 379 */
-  ok(by("DIESEL") && by("DIESEL").last === "RCP-326" && Math.abs(by("DIESEL").dev - (380.66 / 379 - 1) * 100) < 0.01,
-     "DIESEL: several receipts on the latest day — compared with the nearest of them (+0.44%)");
+  /* DIESEL 380.15/Ltr (05-Nov-2026: weighted average of the 05-Oct-2026 receipts) cites EON RCP-12, which has
+     ten receipts that day (366–392) — compared with the nearest of them, 383 */
+  ok(by("DIESEL") && by("DIESEL").last === "RCP-12" && Math.abs(by("DIESEL").dev - (380.15 / 383 - 1) * 100) < 0.01,
+     "DIESEL: several receipts on the latest day — compared with the nearest of them (−0.74%)");
   ok(by("CEM") && by("CEM").how === "ARX RCP-322" && by("CEM").dev === 0, "CEM: a GRN of a newer site (ARX) in the remarks is linked (0%)");
-  ok(by("STL60") && by("STL60").dev === 0, "STL60: of the receipts within 2% on its GRN, the closest rate is taken (238, not the #10 bar at 240)");
+  /* STL60 242.86/Kg (05-Nov-2026) is the weighted average of Phoenix RCP-329 (242,000/ton) and GVR RCP-21 (244,000)
+     of 06-Oct-2026; it cites Phoenix RCP-329 and is compared with that GRN's own rate */
+  ok(by("STL60") && by("STL60").last === "RCP-329" && Math.abs(by("STL60").dev - (242.86 / 242 - 1) * 100) < 0.01,
+     "STL60: a two-site average is compared with the GRN it cites (242 per Kg, +0.36%)");
   ok(by("BLK-S4") && by("BLK-S4").how === "NEO RCP-3541" && by("BLK-S4").dev === 0, "BLK-S4: linked to its own NEO GRN (0%)");
   ok(by("GRAVEL-SB") && /cross-check/.test(by("GRAVEL-SB").how) && Math.abs(by("GRAVEL-SB").dev) > 10, "GRAVEL-SB: its 'Replaces … GRN' cross-check is compared (more than 10% off the receipt)");
   ok(!by("MAT-WB") && !by("MOULD") && !by("MAT-SND-ZDP"), "composites and assumptions are not linked to the receipts they mention");

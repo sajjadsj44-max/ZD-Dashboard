@@ -47,8 +47,8 @@ MARKET = Path(__file__).resolve().parent / "ra_refresh_market.json"
 BLOCK_RE = re.compile(r'(<script type="application/json" id="raRefreshData">)(.*?)(</script>)', re.S)
 PBS_RE = re.compile(r'<script type="application/json" id="raPbsData">(.*?)</script>', re.S)
 ANCHOR = '<script type="application/json" id="calcData">'
-LOADER_OLD = 'raSyncGrnLatest(e),e.set='
-LOADER_NEW = 'raSyncGrnLatest(e),raSyncBlk(e,raBlk("raRefreshData"),"refRev"),e.set='
+LOADER_OLD = 'raSyncGrnLatest(e),'   # raLoad merges this block right after the GRN-latest one (raGrnItems follows it)
+LOADER_NEW = LOADER_OLD + 'raSyncBlk(e,raBlk("raRefreshData"),"refRev"),'
 NOSRC = "ASSUMPTION — no dated source"
 STALE_MONTHS = 12
 
