@@ -29,7 +29,10 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
     const D = JSON.parse(document.getElementById("raRefreshData").textContent);
     const R = {}; RA.rates.forEach(r => R[r.code] = r);
     const B = {}; D.rates.forEach(r => B[r.code] = r);
-    const differ = D.rates.filter(b => !R[b.code] || R[b.code].rate !== b.rate || R[b.code].date !== b.date).map(b => b.code);
+    // a line a later GRN has moved on (raGrnLatest, dated after the block's value) holds that GRN instead
+    const G = {}; JSON.parse(document.getElementById("raGrnLatest").textContent).rates.forEach(r => G[r.code] = r);
+    const newer = b => G[b.code] && G[b.code].date > b.date && R[b.code].rate === G[b.code].rate && R[b.code].date === G[b.code].date;
+    const differ = D.rates.filter(b => !R[b.code] || R[b.code].rate !== b.rate || R[b.code].date !== b.date).filter(b => !newer(b)).map(b => b.code);
     const pile = RA.items.find(i => i.id === "CIV-PIL-102");
     return {rev: D.rev, refRev: RA.refRev, n: D.rates.length, differ, items: D.items.map(i => i.id),
             have: D.items.filter(i => RA.items.some(x => x.id === i.id)).length,
@@ -38,7 +41,7 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   });
   console.log("Fresh library");
   ok(fresh.refRev === fresh.rev, "block applied (refRev " + fresh.refRev + ")");
-  ok(fresh.differ.length === 0, "all " + fresh.n + " lines hold the block's value" + (fresh.differ.length ? ": " + fresh.differ.slice(0, 8) : ""));
+  ok(fresh.differ.length === 0, "all " + fresh.n + " lines hold the block's value or a newer GRN" + (fresh.differ.length ? ": " + fresh.differ.slice(0, 8) : ""));
   ok(fresh.have === fresh.items.length && fresh.items.length >= 80, "all " + fresh.items.length + " new items present");
   ok(Math.abs(fresh.pile - fresh.pileLine * 1.18) < 0.05, "24\" pile = MRS 3,177.20 + 8% OH + 10% profit (" + (fresh.pile || 0).toFixed(2) + ")");
   ok(fresh.helper === fresh.helperB, "L-HELPER at the PBS Lahore wage (" + fresh.helper + ")");

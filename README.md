@@ -153,6 +153,20 @@ take a new rate only while the line still holds a value published earlier; a rat
 typed in by hand is kept. Re-run the tool after each new GRN export
 (`tools/grn_register.py`, then `node tools/grn_rates.js`).
 
+**October GRNs, 05-Nov-2026** (Material Received at Store 28, receipts to 29-Oct-2026;
+record in [docs/grn-refresh-2026-11.md](docs/grn-refresh-2026-11.md)): 245 new receipts of nine
+sites; 54 Rate Database lines moved on to a newer GRN (37 at a new rate), among them SAND-LP
+240 → 229.17, CRSH-SG 185 → 168, ADMIX-SP 185 → 215, STL60 238 → 242.86, MAT-TADH 650 → 578.
+`grn_rates.js` now has **`ALIASES`**: lines whose material the store describes in other words
+("Sand Lawerncepur", a 20 kg tile-bond bag for a per-kg line, a 305 m Cat-6 coil for a per-Rft
+line), each pairing checked by hand, priced by the same rules and listed in the tool. 18 new rate
+analyses for work received with no item in the library (block `raGrnItems`,
+`tools/grn_items_data.py`, merged after the rate refresh): zone check assembly 3", 6" rubber
+bellow, MLTP with 125 kVAr PFI, synchronising panel, sub-main panel, missile-type submersible pumps
+0.75 / 3 HP, uPVC backflow preventers 4" / 6" and check valve 6" (GRN + MAK installation); MS
+parapet and powder-coated railing, MS louvre screen, MS manhole covers 30" / 36", cement-board
+bulkheads one / two sides (the fabricators' all-in GRNs); modular carpet tile (GRN + MRS labour).
+
 Every sheet with GRN columns is read (the ERP export's `Site / GRN # / Item Code /
 Item Description / Rec.Qty`, or the compiled workbook's `Location / GRN# / ITEMNO /
 ITEMDESC / Received Qty`); `--dry-run` reports what would be added. Receipts
@@ -1206,6 +1220,7 @@ zameen-developments/index.html      Zameen Developments dashboard
 drawing-tracker/index.html          Drawing Tracker dashboard
 takeoff/index.html, takeoff.js      PDF Takeoff (pdf.js viewer, scale, snapping, measurement sheet)
 tools/grn_register.py               merge GRN receiving exports into the GRN Price Register
+tools/grn_items_data.py             new rate analyses from the October-2026 GRNs (raGrnItems)
 tools/po_register.js                merge Sage POPOR01 purchase order PDFs into the GRN Price Register (raPoData)
 tools/mrs_register.py               load a Punjab MRS PDF into the Punjab MRS Rates register
 tools/test_mrs_register.py          tests for the MRS loader
