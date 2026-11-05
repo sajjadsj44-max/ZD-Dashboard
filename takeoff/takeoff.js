@@ -6217,7 +6217,7 @@ function itemDetailHtml(it, c, k){
     <div class="big" style="margin-top:6px">${k ? (it.kind === "ded" || it.kind === "open" ? "−" : "") + fq(Math.abs(net), c.unit) : "—"}<small>${esc(uL(c.unit))}</small></div>
     <div class="dimstr">${r0 ? esc(dimText(r0)) : "scale not set on this page"}${rows.length > 1 ? " · +" + (rows.length - 1) + " more row" + (rows.length > 2 ? "s" : "") : ""}</div></div>
     <div class="psec">Details</div>
-    ${dl([["Condition", c.name], ["Type", it.kind === "open" ? "Opening" : it.kind === "ded" ? "Deduction" : c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"], ["Page", pg], loc ? ["Location", loc] : null, ...geom,
+    ${dl([["Condition", c.name], ["Type", it.kind === "open" ? "Opening" : it.kind === "ded" ? "Deduction" : c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"], ["Page", pg], loc ? ["Location", loc] : null, ...geom, mergedParts(it) ? ["Merged from", mergedParts(it) + " areas (Unmerge splits it back)"] : null,
       pz > 0 ? ["Slope", pitchText(pz) + " × " + slopeF(pz).toFixed(4) + (it.pitch != null ? " (this one)" : "")] : null, +it.rise && c.type === "linear" ? [+it.rise > 0 ? "Rise" : "Drop", uLenT(Math.abs(+it.rise))] : null,
       c.h ? ["Height H", uLenT(+c.h)] : null, c.t ? ["Thickness T", uLenT(+c.t)] : null, ["BOQ code", c.boq || "not set", c.boq ? "" : "warn"], rateLine(c),
       ["Scale", sc ? (sc.verified ? "verified" : sc.how === "inherited" ? "inherited — not checked" : "not verified") : "not set", sc && sc.verified ? "ok" : "warn"],
@@ -6232,7 +6232,7 @@ function renderProps(){
       <div class="row"><div class="fg" style="flex:2"><label>Move to condition</label><select data-mact="cond"><option value="">—</option>${P.proj.conds.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select></div>
       <button class="btn" data-mact="check">✓ Mark checked</button><button class="btn" data-mact="hide">Hide their conditions</button><button class="btn dng" data-mact="del">Delete ${S.multi.size}</button></div>
       <div class="row" style="margin-top:6px">${(() => { const t = selTotals(S.multi); return t ? `<span class="small" style="flex:1"><b>Selected:</b> ${esc(t)}</span>` : ""; })()}
-      ${its.filter(isRun).length >= 2 ? '<button class="btn sm" data-mact="join" title="Make the selected runs one run">Join runs</button>' : ""}${its.filter(i => i.kind === "shape" && (cond(i.cond) || {}).type === "area").length >= 2 ? '<button class="btn sm" data-mact="combine" title="Make the selected areas one outline (union) — a gap between them up to ' + MERGE_GAP + ' ft, such as a wall, is filled">Merge areas</button>' : ""}<button class="btn sm" data-mact="dup" title="Duplicate (Ctrl+D)">Duplicate</button><button class="btn sm" data-mact="lock" title="Lock / unlock (Ctrl+Shift+L)">${[...S.multi].map(objById).every(o => o && o.locked) ? "Unlock" : "Lock"}</button><button class="btn sm" data-mact="rot" title="Rotate 90° clockwise">&#8635; 90°</button></div>`;
+      ${its.filter(isRun).length >= 2 ? '<button class="btn sm" data-mact="join" title="Make the selected runs one run">Join runs</button>' : ""}${its.filter(i => i.kind === "shape" && (cond(i.cond) || {}).type === "area").length >= 2 ? '<button class="btn sm" data-mact="combine" title="Make the selected areas one outline (union) — a gap between them up to ' + MERGE_GAP + ' ft, such as a wall, is filled">Merge areas</button>' : ""}${its.some(mergedParts) ? '<button class="btn sm" data-mact="unmerge" title="Merged areas back to the areas they were made from">Unmerge</button>' : ""}<button class="btn sm" data-mact="dup" title="Duplicate (Ctrl+D)">Duplicate</button><button class="btn sm" data-mact="lock" title="Lock / unlock (Ctrl+Shift+L)">${[...S.multi].map(objById).every(o => o && o.locked) ? "Unlock" : "Lock"}</button><button class="btn sm" data-mact="rot" title="Rotate 90° clockwise">&#8635; 90°</button></div>`;
     $("props").classList.add("on"); $("propsTag").textContent = S.multi.size + " selected"; return; }
   $("propsTag").textContent = "";
   const el = $("props"), it = S.sel && P.proj ? P.proj.items.find(i => i.id === S.sel) : null;
@@ -6251,7 +6251,7 @@ function renderProps(){
     ${c.type !== "count" && it.kind !== "open" ? `<div class="fg"><label>Measured as</label><select data-prop="kind"><option value="shape"${it.kind === "shape" ? " selected" : ""}>Add</option><option value="ded"${it.kind === "ded" ? " selected" : ""}>Deduct</option></select></div>` : ""}
     <div class="fg"><label>Condition</label><select data-prop="cond">${P.proj.conds.filter(x => x.type === c.type).map(x => `<option value="${esc(x.id)}"${x.id === it.cond ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div><div class="fg"><label>Condition colour</label><input type="color" data-prop="color" value="${/^#[0-9a-f]{6}$/i.test(c.color) ? c.color : "#2a78d6"}" style="height:30px;padding:0"></div><div class="fg"><label>Line weight</label><input type="number" min="0.25" max="24" step="0.25" data-prop="sw" value="${+c.sw || 2}"></div>
     <button class="btn dng" data-act="delItem"${it.locked ? " disabled" : ""}>Delete</button></div>
-    <div class="row" style="margin-top:6px;gap:4px">${it.locked ? '<span class="tag a">&#128274; locked</span>' : ""}<button class="btn sm" data-act="lock" title="Ctrl+Shift+L">${it.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn sm" data-act="dup" title="Ctrl+D">Duplicate</button>
+    <div class="row" style="margin-top:6px;gap:4px">${it.locked ? '<span class="tag a">&#128274; locked</span>' : ""}<button class="btn sm" data-act="lock" title="Ctrl+Shift+L">${it.locked ? "&#128275; Unlock" : "&#128274; Lock"}</button><button class="btn sm" data-act="dup" title="Ctrl+D">Duplicate</button>${mergedParts(it) ? `<button class="btn sm" data-act="unmerge" title="Back to the ${mergedParts(it)} areas it was made from, as they were before the merge"${it.locked ? " disabled" : ""}>Unmerge</button>` : ""}
       ${isRun(it) ? '<button class="btn sm" data-act="brk" title="Break tool (B): click where to cut the run">&#9986; Break…</button>' : ""}${S.selPt >= 0 && (c.type === "count" || editPts(it)) ? '<button class="btn sm dng" data-act="delPoint">Remove point ' + (S.selPt + 1) + "</button>" : ""}
       <span class="small" style="flex:1;min-width:160px">${editPts(it) && !it.locked ? "Double-click a side to add a point, a point to remove it · drag the + to add one" : ""} · right-click for more</span></div>
     ${it.kind === "open" ? `<div class="row" style="margin-top:6px"><div class="fg"><label>Schedule mark</label><select data-prop="sch"><option value="">— none (own size) —</option>${(P.proj.openings || []).map(o => `<option value="${esc(o.id)}"${o.id === it.sch ? " selected" : ""}>${esc(o.mark)} — ${uLen(o.w)} × ${uLen(o.h)} ${esc(o.type)}</option>`).join("")}</select></div></div>` : ""}
@@ -9704,12 +9704,44 @@ function combineAreas(ids, opt){
   }
   const it = ar[0], c = cond(it.cond), drop = new Set(ar.slice(1).map(i => i.id)), nos = +it.nos || 1;
   const voids = holes.map(Q => ({id: uid("I"), cond: it.cond, file: it.file, page: it.page, kind: "ded", nos, pts: Q.slice().reverse(), label: "Void in " + (it.label || c.name)}));
-  mutate(() => { it.pts = outs[0]; delete it.arcs; delete it.shape; qaMoved(it); P.proj.items = P.proj.items.filter(i => !drop.has(i.id)); P.proj.items.splice(P.proj.items.indexOf(it) + 1, 0, ...voids); }, "Combine " + ar.length + " areas");
+  const rec = {id: it.id, parts: ar.map(i => JSON.parse(JSON.stringify(i))), voids: voids.map(v => v.id), out: outs[0].map(p => p.slice())};   // what Unmerge brings back (a part merged before keeps its own: unmerged again after)
+  mutate(() => { it.pts = outs[0]; delete it.arcs; delete it.shape; qaMoved(it); it.merged = rec; P.proj.items = P.proj.items.filter(i => !drop.has(i.id)); P.proj.items.splice(P.proj.items.indexOf(it) + 1, 0, ...voids); }, "Combine " + ar.length + " areas");
   setSel([it.id]); refresh();
   const left = sel.length - ar.length;
   toast("Combined " + ar.length + " areas into one" + (k ? " — " + uArea(polyArea(outs[0]) / k / k) : "") + (fill ? k ? " · gap " + (fill.hi - fill.lo > 0.01 * k ? f3(fill.lo / k) + "–" : "") + uLenT(fill.hi / k) + " filled (+" + uArea(fill.a / k / k) + ")" : " · the gap between them filled" : "") + (voids.length ? " · " + voids.length + " space" + (voids.length > 1 ? "s" : "") + " closed round taken off as void" + (voids.length > 1 ? "s" : "") : "")
     + (nos > 1 ? " · Nos " + nos : "") + (left ? " · " + left + " other item" + (left > 1 ? "s" : "") + " left as " + (left > 1 ? "they were" : "it was") : ""), 5000);
   return it;
+}
+/* Unmerge: a merged area back to the areas it was made from, as they were before Merge areas, and the voids the merge made gone again.
+   They follow the merged area: its condition and page, and a move (the same shift on each). An outline edited since the merge is
+   lost, after asking. A copy of a merged area unmerges into new areas (its own ids) and leaves the voids of the one it was copied from */
+const mergedParts = it => it && it.merged && Array.isArray(it.merged.parts) && it.merged.parts.length >= 2 ? it.merged.parts.length : 0;
+function unmergeShift(it){   // [dx, dy] when the outline is the merged one, moved or not; null when it was edited
+  const o = it.merged.out || [], p = it.pts || []; if (!o.length || o.length !== p.length) return null;
+  const dx = p[0][0] - o[0][0], dy = p[0][1] - o[0][1], tol = 1e-6 * Math.max(1, ...o.map(q => Math.abs(q[0]) + Math.abs(q[1])));
+  return o.every((q, j) => Math.abs(p[j][0] - q[0] - dx) <= tol && Math.abs(p[j][1] - q[1] - dy) <= tol) ? [dx, dy] : null;
+}
+function unmergeAreas(ids){
+  const L = [...(ids || selIds())].map(id => P.proj.items.find(i => i.id === id)).filter(mergedParts), no = m => { toast(m, 4000); return null; };
+  if (!L.length) return no("Select a merged area to unmerge it (one made with Merge areas)");
+  if (L.some(i => i.locked)) return no("Not unmerged: unlock the area first (Ctrl+Shift+L)");
+  const go = () => {
+    const back = [], n = L.reduce((a, it) => a + mergedParts(it), 0); let nv = 0;
+    mutate(() => L.forEach(it => {
+      const rec = it.merged, d = unmergeShift(it) || [0, 0], own = rec.id === it.id;
+      const put = q => { const o = JSON.parse(JSON.stringify(q)); o.pts = o.pts.map(p => [p[0] + d[0], p[1] + d[1]]); o.cond = it.cond; o.file = it.file; o.page = it.page; return o; };
+      const first = Object.assign(put(rec.parts[0]), {id: it.id}), rest = rec.parts.slice(1).map(q => { const o = put(q); if (!own || objById(o.id)) o.id = uid("I"); return o; });
+      if (own && rec.voids && rec.voids.length) { const vs = new Set(rec.voids); nv += P.proj.items.filter(x => vs.has(x.id)).length; P.proj.items = P.proj.items.filter(x => !vs.has(x.id)); }
+      P.proj.items.splice(P.proj.items.indexOf(it), 1, first, ...rest); back.push(first.id, ...rest.map(o => o.id));
+    }), "Unmerge " + (L.length > 1 ? L.length + " merged areas" : n + " areas"));
+    setSel(back); refresh();
+    toast("Unmerged into " + n + " areas, as they were before the merge" + (nv ? " · " + nv + " void" + (nv > 1 ? "s" : "") + " the merge made taken away" : ""), 4000);
+    return back;
+  };
+  const ed = L.filter(it => !unmergeShift(it));
+  if (!ed.length) return go();
+  ask("Unmerge", `<p>${ed.length === 1 ? `<b>${esc(ed[0].label || (cond(ed[0].cond) || {}).name || "This area")}</b> was` : ed.length + " of these areas were"} changed after the merge. Unmerge brings back the ${ed.length === 1 ? mergedParts(ed[0]) + " " : ""}areas as they were before it — that change to the outline is lost.</p>`, "Unmerge").then(v => { if (v) go(); });
+  return null;
 }
 
 /* workspace: layouts, icon-only toolbar, minimap, full screen (kept per browser) */
@@ -10929,6 +10961,7 @@ function modAct(a){
   if (a === "front") return items.length ? orderSel(1) : need();
   if (a === "lock") return items.length ? lockSel() : need();
   if (a === "merge") { const ar = meas.filter(o => o.kind === "shape" && (cond(o.cond) || {}).type === "area"); return ar.length >= 2 ? combineAreas(new Set(ar.map(o => o.id))) : toast("Select two or more areas to merge (Shift-click, or drag a box round them)", 2800); }
+  if (a === "unmerge") { const mg = meas.filter(mergedParts); return mg.length ? unmergeAreas(new Set(mg.map(o => o.id))) : toast("Select a merged area to unmerge it (one made with Merge areas)", 2800); }
   if (cedOn() && (a === "offset" || a === "join" || a === "explode")) return cedModAct(a);   // AutoCAD mode: the drawing's own objects
   if (a === "offset") { if (meas.length !== 1) return toast("Select one measurement to offset", 2600); const c = cond(meas[0].cond); if (meas[0].kind === "open" || (c && c.type === "count")) return toast("A count point or an opening cannot be offset", 2600); return offsetDialog(meas[0]); }
   const runs = meas.filter(isRun);
@@ -12842,7 +12875,7 @@ function paletteCmds(){
 }
 /* AutoCAD command aliases: type tr + Enter for Trim, f for Fillet, sc for Scale… (the command whose name starts so; a "…" one — the dialog — first) */
 const PAL_ALIAS = [["tr", "trim"], ["ex", "extend"], ["f", "fillet"], ["fil", "fillet"], ["cha", "chamfer"], ["s", "stretch"], ["str", "stretch"], ["sc", "scale selection"], ["scale", "scale selection"],
-  ["ro", "rotate…"], ["rotate", "rotate…"], ["o", "offset"], ["off", "offset"], ["m", "move"], ["mo", "move"], ["co", "copy"], ["cp", "copy"], ["mi", "mirror"], ["br", "break"], ["j", "join"], ["x", "explode"], ["mer", "merge areas"], ["merge", "merge areas"], ["uni", "merge areas"], ["union", "merge areas"],
+  ["ro", "rotate…"], ["rotate", "rotate…"], ["o", "offset"], ["off", "offset"], ["m", "move"], ["mo", "move"], ["co", "copy"], ["cp", "copy"], ["mi", "mirror"], ["br", "break"], ["j", "join"], ["x", "explode"], ["mer", "merge areas"], ["merge", "merge areas"], ["uni", "merge areas"], ["union", "merge areas"], ["unm", "unmerge"], ["unmerge", "unmerge"],
   ["ar", "array"], ["l", "length"], ["rec", "rect"], ["qi", "quick items"], ["ci", "circle"], ["pol", "polygon"], ["qs", "quick select"], ["qselect", "quick select"], ["inv", "invert selection"], ["di", "measure"], ["dist", "measure"], ["dan", "angle"], ["dimangular", "angle"], ["dra", "radius"], ["dimradius", "radius"], ["ddi", "radius"], ["z", "zoom window"], ["pl", "plot"], ["xh", "cross-hair"], ["cross", "cross-hair"],
   ["dxf", "dxf"], ["dxfout", "dxf"], ["u", "undo"], ["re", "redo"], ["or", "ortho"], ["po", "polar"], ["os", "object snaps"], ["lock", "lock"], ["w", "auto area", 1], ["aa", "auto area", 1]];   // (1: the command of exactly that name — the Auto area tool, not "Auto area: every room in a window…")
 function palAlias(L){
@@ -13018,6 +13051,7 @@ function ctxItem(hi, sp, q, e){
   if (!many && c.type === "area" && it.kind !== "open" && it.shape !== "circle") L.push({t: "Square up to walls", fn: () => squareUpSel(it), dis: it.locked || !(S.geo[S.key] && S.geo[S.key].segs.length)});
   if (runs.length >= 2) L.push({t: "Join " + runs.length + " runs into one", fn: () => joinRuns(new Set(runs.map(r => r.id))), dis: lk});
   if (sel.filter(i => i.kind === "shape" && (cond(i.cond) || {}).type === "area").length >= 2) L.push({t: "Merge into one area (small gaps filled)", fn: () => combineAreas(ids), dis: lk});
+  { const mg = sel.filter(mergedParts); if (mg.length) L.push({t: "Unmerge — back to the " + (mg.length === 1 ? mergedParts(mg[0]) + " " : "") + "areas it was made from", fn: () => unmergeAreas(new Set(mg.map(o => o.id))), dis: mg.some(o => o.locked)}); }
   if (sel.some(o => o.lo)) L.push({t: "Reset label position" + (many ? "s" : "") + " (back into the object)", fn: () => resetLabelPos(new Set(sel.map(o => o.id))), dis: allLk});
   if (!many && c.type === "area" && it.kind === "shape") L.push({t: "Add a rectangular cut-out", k: "Shift+D", fn: () => { S.cond = c.id; setTool("dedrect"); }}, {t: "Add a polyline cut-out", k: "D", fn: () => { S.cond = c.id; setTool("ded"); }});
   if (!many && c.type === "area" && it.kind === "shape") { const under = cutTargets(it); if (under.length) L.push({t: "Cut out of the area" + (under.length > 1 ? "s" : "") + " it overlaps (" + under.slice(0, 2).map(u => u.label || (cond(u.cond) || {}).name).join(", ") + (under.length > 2 ? ", …" : "") + ")", fn: () => cutOutOf(it, under), dis: it.locked}); }
@@ -13665,6 +13699,7 @@ function wire(){
     if (ma && ma.dataset.mact === "del") return delSelected();
     if (ma && ma.dataset.mact === "join") return joinRuns(new Set(S.multi));
     if (ma && ma.dataset.mact === "combine") return combineAreas(new Set(S.multi));
+    if (ma && ma.dataset.mact === "unmerge") return unmergeAreas(new Set(S.multi));
     if (ma && ma.dataset.mact === "dup") return duplicateSel();
     if (ma && ma.dataset.mact === "lock") return lockSel();
     if (ma && ma.dataset.mact === "rot") return transformSel("cw");
@@ -13682,6 +13717,7 @@ function wire(){
     if (a.dataset.act === "delMark") return delObjects(new Set([S.selMark]));
     const it = P.proj.items.find(i => i.id === S.sel); if (!it) return;
     if (a.dataset.act === "delItem") return delObjects(new Set([it.id]));
+    if (a.dataset.act === "unmerge") return unmergeAreas(new Set([it.id]));
     if (a.dataset.act === "delPoint" && S.selPt >= 0) { delPoint(it, S.selPt); refresh(); }
   });
   document.addEventListener("keydown", e => {
@@ -18844,7 +18880,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, openWb, wbMod, wbApi, condQ, billQ, billQty, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
-    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, exportAll, exportAllDialog, importAll, bundleHead, bundleStore, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, verReload, autoUpd, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
+    mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, exportAll, exportAllDialog, importAll, bundleHead, bundleStore, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, verReload, autoUpd, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, unmergeAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,
     floorsDialog, floorAddMany, floorNext, floorTitleIn, floorZoom, floorMenu, floorBoxStart, floorNewAsk, floorLegends, floorLegendSplit, legendFloorSet, legendFit, legendTitle, floorTitleOf,

@@ -244,6 +244,40 @@ function unit(){
   ok(await T(() => zdTakeoff.P.proj.items.filter(i => /^v/.test(i.id)).length) === 1 && near(await area("v1"), 65), "…and merges them: " + await area("v1"));
   ok(await T(() => zdTakeoff.paletteCmds().some(c => /^Merge areas/.test(c.t) && (c.al || []).includes("merge"))), "palette: Merge areas, typed as ‘merge’ too");
 
+  console.log("unmerge");
+  const grp = re => T(r => JSON.stringify(zdTakeoff.P.proj.items.filter(i => new RegExp(r).test(i.id)).sort((a, b) => a.id < b.id ? -1 : 1)), re);
+  const m0 = await grp("^m");
+  await T(() => { zdTakeoff.combineAreas(new Set(["m1", "m2"])); }); await wait(150);
+  ok(await T(() => zdTakeoff.P.proj.items.filter(i => /^m/.test(i.id)).length === 1 && zdTakeoff.P.proj.items.find(i => i.id === "m1").merged.parts.length === 2), "merged: the 2 areas it was made from kept on it");
+  ok(await T(() => /Merged from\s*2 areas/.test(document.getElementById("props").textContent) && !!document.querySelector('#props [data-act="unmerge"]')), "Properties: “Merged from 2 areas” and an Unmerge button");
+  const nU = await T(() => zdTakeoff.S.undo.length);
+  await page.click('#props [data-act="unmerge"]'); await wait(200);
+  ok((await grp("^m")) === m0, "Unmerge: both areas back exactly as they were (ids, outlines, arc, labels, Nos, look)");
+  ok(/Unmerged into 2 areas/.test(await toast()) && await T(() => [...zdTakeoff.selIds()].sort().join()) === "m1,m2" && await T(() => zdTakeoff.S.undo.length) === nU + 1, "…both selected, one undo step — " + await toast());
+  ok(await T(() => { const P = zdTakeoff.P.proj; zdTakeoff.unmergeAreas(new Set(["u1"])); return P.items.filter(i => /^u/.test(i.id)).length === 2 && !P.items.some(i => i.label === "Void in U"); }) && near(await area("u1"), 63) && near(await area("u2"), 27),
+    "the U and the bar: back as two (63 + 27 Sft), the void the merge made gone — " + await toast());
+  ok(/1 void the merge made taken away/.test(await toast()), "…and the toast says so");
+  const g0 = await T(() => zdTakeoff.P.proj.items.filter(i => /^g/.test(i.id)).map(i => i.pts.map(p => [p[0] + 90, p[1] + 45])));
+  await T(() => { const Z = zdTakeoff, it = Z.combineAreas(new Set(["g1", "g2"])); it.pts = it.pts.map(p => [p[0] + 90, p[1] + 45]); Z.unmergeAreas(new Set(["g1"])); }); await wait(150);
+  { const g1 = await T(() => zdTakeoff.P.proj.items.filter(i => /^g/.test(i.id)).map(i => i.pts)), off = g1.length === 2 && g1.every((P2, j) => P2.length === g0[j].length && P2.every((q, n) => Math.abs(q[0] - g0[j][n][0]) < 1e-6 && Math.abs(q[1] - g0[j][n][1]) < 1e-6));
+    ok(off && !await page.isVisible("#dlgBack"), "merged, moved 10 ft right and 5 down, unmerged: both come back where it was moved to, without asking"); }
+  await T(() => { const it = zdTakeoff.P.proj.items.find(i => i.id === "w1"); it.pts = it.pts.slice(0, -1); zdTakeoff.setSel(["w1"]); zdTakeoff.refresh(); }); await wait(100);
+  const nW = await T(() => zdTakeoff.S.undo.length);
+  await T(() => { zdTakeoff.unmergeAreas(new Set(["w1"])); }); await wait(150);
+  ok(await page.isVisible("#dlgBack") && /changed after the merge/.test(await page.innerText("#dlgB")), "an outline edited after the merge: it asks first");
+  await page.click("#dlgCancel"); await wait(150);
+  ok(await T(() => zdTakeoff.P.proj.items.filter(i => /^w/.test(i.id)).length) === 1 && await T(() => zdTakeoff.S.undo.length) === nW, "Cancel: nothing changed");
+  await T(() => { zdTakeoff.unmergeAreas(new Set(["w1"])); }); await wait(150); await page.click("#dlgOk"); await wait(200);
+  ok(await T(() => zdTakeoff.P.proj.items.filter(i => /^w/.test(i.id)).length) === 2 && near(await area("w1"), 25) && near(await area("w2"), 25), "Unmerge: W1 and W2 back as they were before the merge (25 + 25)");
+  await T(() => { const Z = zdTakeoff, P = Z.P.proj, v = P.items.find(i => i.id === "v1"), c = JSON.parse(JSON.stringify(v)); c.id = "vc"; c.pts = c.pts.map(p => [p[0], p[1] + 90]); P.items.push(c); Z.unmergeAreas(new Set(["vc"])); });
+  ok(await T(() => { const P = zdTakeoff.P.proj, n = P.items.filter(i => i.id !== "v1" && /^V[12]$/.test(i.label || "")); return n.length === 2 && !n.some(i => i.merged) && !!P.items.find(i => i.id === "v1").merged && !P.items.some(i => i.id === "v2"); }), "a copy of a merged area unmerges into 2 areas of its own (new ids); the one copied from stays merged");
+  await T(() => { const Z = zdTakeoff; Z.setSel(["v1"]); Z.refresh(); Z.ribShow && Z.ribShow("modify"); });
+  ok(await T(() => !!document.querySelector('#tools [data-mod="unmerge"]')), "Modify ribbon: an Unmerge button");
+  await T(() => document.querySelector('#tools [data-mod="unmerge"]').click()); await wait(150);
+  ok(await T(() => zdTakeoff.P.proj.items.filter(i => /^v[12]$/.test(i.id)).length) === 2 && near(await area("v1"), 25), "…it unmerges the selected area");
+  ok(await T(() => zdTakeoff.paletteCmds().some(c => /^Unmerge/.test(c.t) && (c.al || []).includes("unm"))), "palette: Unmerge, typed as ‘unm’ too");
+  ok(await T(() => zdTakeoff.unmergeAreas(new Set(["x1"]))) === null && /Select a merged area/.test(await toast()), "an area never merged: nothing to unmerge — " + await toast());
+
   ok(errors.length === 0, "no page errors" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();
   console.log(`\n${passes} passed, ${fails} failed`); process.exit(fails ? 1 : 0);
