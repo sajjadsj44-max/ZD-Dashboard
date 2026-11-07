@@ -1,6 +1,6 @@
 {
  "about": "PDF Takeoff: how this team takes off, learned by the takeoff agent in every browser of the team and merged by tools/learn_archive.py. Item names, heights, room kinds and counts only.",
- "at": "2026-11-05T04:40:32.552Z",
+ "at": "2026-11-07T13:09:49.209Z",
  "projects": {
   "vvvcknb84sev:17a5e3f04bec": {
    "at": "2026-10-31T10:49:48.438Z",
@@ -288,32 +288,143 @@
    },
    "sent": "2026-11-03T04:21:22.590Z"
   },
-  "vvzmfdqwuj5r:689802ebcf62": {
-   "at": "2026-10-31T10:13:55.909Z",
+  "vvzmfdqwuj5r:087bd7715ee2": {
+   "at": "2026-11-01T07:32:47.010Z",
    "conds": {
-    "opening ddt|area|Sft": {
+    "add drop 300mm|area|Sft": {
      "ded": 0.0,
      "faces": 1.0,
      "h": 0.0,
-     "name": "opening ddt",
-     "t": 0.8202099737532808,
+     "name": "add drop 300mm",
+     "t": 0.9842519685039369,
      "type": "area",
      "unit": "Sft"
     },
-    "slab 250mm|area|Sft": {
+    "ddt openings|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "ddt openings",
+     "t": 0.9842519685039369,
+     "type": "area",
+     "unit": "Sft"
+    },
+    "slab 300mm 0.65 level|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "slab 300mm 0.65 Level",
+     "t": 0.9842519685039369,
+     "type": "area",
+     "unit": "Sft"
+    },
+    "slab300 mm 0 level|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "slab300 mm 0 level",
+     "t": 0.9842519685039369,
+     "type": "area",
+     "unit": "Sft"
+    }
+   },
+   "rooms": {
+    "CORE WALL": {
+     "items": {
+      "ddt openings|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "SLAB THICKNESS": {
+     "items": {
+      "slab 300mm 0.65 level|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "SSL": {
+     "items": {
+      "slab300 mm 0 level|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "WALL": {
+     "items": {
+      "add drop 300mm|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    }
+   },
+   "sent": "2026-11-07T13:09:49.209Z"
+  },
+  "vvzmfdqwuj5r:689802ebcf62": {
+   "at": "2026-11-04T10:29:15.541Z",
+   "conds": {
+    "slab 250mm|area|cft": {
      "ded": 0.0,
      "faces": 1.0,
      "h": 0.0,
      "name": "slab 250mm",
      "t": 0.8202099737532808,
      "type": "area",
+     "unit": "cft"
+    }
+   },
+   "rooms": {
+    "ROOF FLOOR": {
+     "items": {
+      "slab 250mm|area|cft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    }
+   },
+   "sent": "2026-11-07T13:09:49.209Z"
+  },
+  "vvzmfdqwuj5r:cfee485889b1": {
+   "at": "2026-11-01T10:01:26.345Z",
+   "conds": {
+    "add swimpool 100 mm|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "ADD SWIMPOOL 100 MM",
+     "t": 0.32808398950131235,
+     "type": "area",
+     "unit": "Sft"
+    },
+    "slab 300 mm|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "SLAB 300 MM",
+     "t": 0.9842519685039369,
+     "type": "area",
      "unit": "Sft"
     }
    },
    "rooms": {
-    "BOTTOM MESH": {
+    "SLAB THICKNESS": {
      "items": {
-      "slab 250mm|area|Sft": {
+      "add swimpool 100 mm|area|Sft": {
        "how": "area",
        "n": 1,
        "per": []
@@ -321,9 +432,9 @@
      },
      "n": 1
     },
-    "CORE WALL": {
+    "SSL": {
      "items": {
-      "opening ddt|area|Sft": {
+      "slab 300 mm|area|Sft": {
        "how": "area",
        "n": 1,
        "per": []
@@ -332,7 +443,7 @@
      "n": 1
     }
    },
-   "sent": "2026-10-31T14:55:56.347Z"
+   "sent": "2026-11-07T13:09:49.209Z"
   },
   "vvzmfdqwuj5r:f760b68b52d6": {
    "at": "2026-10-31T07:56:17.978Z",
@@ -451,6 +562,73 @@
     }
    },
    "sent": "2026-11-02T02:48:06.946Z"
+  },
+  "vz7undofkri0:230cd92bf692": {
+   "at": "2026-11-07T11:35:14.561Z",
+   "conds": {
+    "floor area|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "Floor area",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    }
+   },
+   "rooms": {
+    "GYM": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "LIFT": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "LINTEL": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "MINI THEATER": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "POOL": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    }
+   },
+   "sent": "2026-11-07T11:36:13.132Z"
   }
  },
  "senders": {
