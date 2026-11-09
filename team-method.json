@@ -1,6 +1,6 @@
 {
  "about": "PDF Takeoff: how this team takes off, learned by the takeoff agent in every browser of the team and merged by tools/learn_archive.py. Item names, heights, room kinds and counts only.",
- "at": "2026-11-07T13:09:49.209Z",
+ "at": "2026-11-09T14:57:35.732Z",
  "projects": {
   "vvvcknb84sev:17a5e3f04bec": {
    "at": "2026-10-31T10:49:48.438Z",
@@ -846,6 +846,18 @@
   },
   "w323n1xsjg2u": {
    "at": "2026-11-05T04:40:32.552Z",
+   "missed": {},
+   "rejects": {},
+   "words": {}
+  },
+  "w99i7u084xrd": {
+   "at": "2026-11-09T12:54:27.353Z",
+   "missed": {},
+   "rejects": {},
+   "words": {}
+  },
+  "w9dwkmtgivcn": {
+   "at": "2026-11-09T14:57:35.732Z",
    "missed": {},
    "rejects": {},
    "words": {}
