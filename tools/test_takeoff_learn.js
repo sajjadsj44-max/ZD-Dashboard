@@ -56,6 +56,7 @@ function makePdf(){
   /* the team's relay and its merged method, stood in for (a copy run here sends nothing unless told: this test tells it) */
   let team = null; const sent = [];
   await ctx.addInitScript(() => { try { localStorage.setItem("zdTakeoffLearnRelay", "on"); } catch (e) {} });
+  await ctx.addInitScript(() => { try { if (!localStorage.getItem("zdTakeoffLearn")) localStorage.setItem("zdTakeoffLearn", JSON.stringify({off: ["seed"]})); } catch (e) {} });   // what is tested here is learning from the team: the reference method (learn-seed.json) off — tools/test_takeoff_learnseed.js tests it
   await ctx.route(/ntfy\.sh\//, r => { if (r.request().method() === "POST") sent.push(r.request().postData() || ""); return r.fulfill({contentType: "application/json", body: "{}", headers: {"Access-Control-Allow-Origin": "*"}}); });
   await ctx.route(/raw\.githubusercontent\.com\/.*team-method\.json/, r => r.fulfill({contentType: "application/json", headers: {"Access-Control-Allow-Origin": "*"}, body: JSON.stringify(team || {v: 2, at: "", senders: {}, projects: {}})}));
   const page = await ctx.newPage(), errors = [];

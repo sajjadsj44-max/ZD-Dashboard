@@ -25,6 +25,13 @@ const {K, segs, text, LAYERS, WALL} = require("./takeoff_trace_fixture");   // t
   ok(open && near(open.w, 3) && near(open.d, 0.375) && open.how === "traced", `the open door: a threshold 3 ft × 4½" between BED ROOM and LOUNGE (${open && open.w.toFixed(3)} × ${open && open.d.toFixed(3)})`);
   ok(shut && near(shut.w, 2.5) && near(shut.d, 0.375) && shut.how === "closed-door", `the door drawn closed: a threshold 2'-6" × 4½" between BATH and LOUNGE, where the hatch stops (${shut && shut.w.toFixed(3)} × ${shut && shut.d.toFixed(3)})`);
   ok(res.ducts.length === 1 && near(res.ducts[0].sft, 3), "the duct box found, 3 Sft, not part of the bath's floor");
+  { const b0 = text.find(x => x.s === "BED ROOM"), tags = ["TO DB-203", "EP1", "DB-2", "P5"].map((s, i) => Object.assign({}, b0, {s, cx: b0.cx + (i - 1.5) * 4 * K, cy: b0.cy + 3 * K, y: b0.y + 3 * K}));
+    const r2 = E.traceFloor({segs, layers: LAYERS, lines: text.concat(tags), k: K}, {}), bed2 = r2.spaces.find(s => s.names.includes("BED ROOM"));
+    ok(bed2 && bed2.names.length === 1 && near(bed2.sft, 14.25 * 18.5), `electrical tags in a room (TO DB-203, EP1, DB-2, P5) are notes, not names: the bed room stays one room (${bed2 && bed2.names.join(" + ")}, ${bed2 && bed2.sft.toFixed(3)} Sft) — Phoenix plans`);
+    const br = Object.assign({}, b0, {s: "BR-2"}), r3 = E.traceFloor({segs, layers: LAYERS, lines: text.filter(x => x !== b0).concat([br]), k: K}, {});
+    ok(r3.spaces.some(s => s.names.includes("BR-2")), "…but BR-2 (a bed room's short name) is still a room name");
+    ["BED 2", "WC 1", "TV 2", "KIT 1"].forEach(nm => { const r4 = E.traceFloor({segs, layers: LAYERS, lines: text.filter(x => x !== b0).concat([Object.assign({}, b0, {s: nm})]), k: K}, {});
+      ok(r4.spaces.some(s => s.names.includes(nm)), "…and " + nm + " (a numbered room) is still a room name"); }); }
   const E1 = bath && bath.edges || [], gross = E1.reduce((a, e) => a + e.L, 0), opn = E1.reduce((a, e) => a + e.open.reduce((b, [u, v]) => b + v - u, 0), 0);
   ok(near(gross, 2 * (13.875 + 9.25), 0.01), `BATH wall face round the room ${gross.toFixed(3)} ft = 2 × (13.875 + 9.25) = 46.25 (the duct's notch adds nothing)`);
   ok(near(opn, 2.5, 0.06), `…its door opening on the face ${opn.toFixed(3)} ft (2'-6"), kept apart, not deducted`);

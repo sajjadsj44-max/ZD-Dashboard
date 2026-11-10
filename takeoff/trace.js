@@ -20,7 +20,7 @@
    Units: page points (y down) in, the page's scale k (pt per ft). */
 export const TRACE_VER = 2;   // 2: plans of an AutoCAD sheet one by one at 9 pt per ft, solid fills as hatch, open plans split on wall lines, foyers
 
-const NOTE_RX = /Ø|\bT\s*\/\s*B\b|\bRWP\b|\bF\s*\/\s*B\b|\b[SWVB]\.\s*[SDF]\b|VALVE|BREECH|\bRISER\b|\bPIPES?\b|\bGAS\b|\bFHC\b|SPRINKL|HYDRANT|\bC\.?\s*H\s*=|F\.?F\.?L\b|^LEV\b|\bRATIO\b|^TYPE\s*[-–]|\bS\.?\s*FT\b|\bSQ\.?\s*FT\b|FIRE\s+DEPART|WALK\s+THROUGH|ENTRANCE\s+GATE|PLOT\s+LINE|TALL\s+UNIT|^\(?TYPICAL\)?$|OPENING\s+IN\b|^SIZE\s*:|\bSLAB\b|\bCOUNTER\b|\bSINK\b|FRIDGE|\bW\s*\/\s*M\b|VANITY|\bHOB\b|CUPBOARD|\bABOVE\b|SKY\s*-?\s*LIGHT|\bOVER\s*-?\s*HEAD\b|^LINE\s+OF\b/i;   // notes in a space, never its name (what is above it — a skylight, a beam, a loft — is no floor space)
+const NOTE_RX = /Ø|\bT\s*\/\s*B\b|\bRWP\b|\bF\s*\/\s*B\b|\b[SWVB]\.\s*[SDF]\b|VALVE|BREECH|\bRISER\b|\bPIPES?\b|\bGAS\b|\bFHC\b|SPRINKL|HYDRANT|\bC\.?\s*H\s*=|F\.?F\.?L\b|^LEV\b|\bRATIO\b|^TYPE\s*[-–]|\bS\.?\s*FT\b|\bSQ\.?\s*FT\b|FIRE\s+DEPART|WALK\s+THROUGH|ENTRANCE\s+GATE|PLOT\s+LINE|TALL\s+UNIT|^\(?TYPICAL\)?$|OPENING\s+IN\b|^SIZE\s*:|\bSLAB\b|\bCOUNTER\b|\bSINK\b|FRIDGE|\bW\s*\/\s*M\b|VANITY|\bHOB\b|CUPBOARD|\bABOVE\b|SKY\s*-?\s*LIGHT|\bOVER\s*-?\s*HEAD\b|^LINE\s+OF\b|\bTO\s+D\.?\s*B\b|^(?:E\.?\s?P|P|D\.?\s?B|S\.?\s?D?B|L\.?\s?P|J\.?\s?B|F\.?\s?P|C\.?\s?P)\s*-?\s*\d{1,3}[A-Z]?$/i;   // notes in a space, never its name (an electrical tag — "TO DB-203", "EP1" — names no room: Phoenix) (what is above it — a skylight, a beam, a loft — is no floor space)
 const NAME_SKIP = /^(UP|DN|DOWN|N|S|E|W|NORTH|SOUTH|FROM\s+ROAD\s+LEVEL|SCALE.*|.*\bPLAN\b.*|SC|SECTION.*|\d+(\.\d+)?|\d+\s*(UP|DN|DOWN)|(UP|DN|DOWN)\s*\d+)$/i;
 const WEAK_RX = /^(STAIR|TREAD|RISER|LANDING)\s*=/i;   // a stair's note (STAIR = 4'-6" WIDE, TREAD = 11"): names a space only when nothing else does
 const SIZE_RX = /(\d+)\s*'\s*-?\s*(\d+)?\s*(?:(\d)\s*\/\s*(\d))?\s*(½)?\s*"?\s*[xX×]\s*(\d+)\s*'\s*-?\s*(\d+)?\s*(?:(\d)\s*\/\s*(\d))?\s*(½)?\s*"?/;
@@ -489,7 +489,7 @@ function traceOne(inp, opt){
   pending.slice().sort((a, b) => sft(b) - sft(a)).forEach(r => { if (thin(r) || done.has(r)) return;
     const direct = nbS([r]), via = new Map(); nbrs(r).forEach((_, o2) => { const g = gOf.get(o2); if (g && !g.some(x => done.has(x))) nbS(g).forEach(([s, v]) => via.set(s, v)); });
     const all = direct.concat([...via.entries()]), kinds = new Set(all.map(e => e[0].kind));
-    const walk = isOutside(r) ? all.filter(([o2]) => o2.kind !== "balcony" && o2.names.some(x => /PASSAGE|CORRIDOR|WALKWAY|GALLERY|WALK/i.test(x))) : [];
+    const walk = isOutside(r) ? all.filter(([o2]) => o2.kind !== "balcony" && o2.names.some(x => /PASSAGE|CORRIDOR|WALKWAY|GALLERY|\bWALK\b/i.test(x))) : [];
     if (walk.length && all.every(([o2]) => o2 === walk[0][0] || o2.kind === "balcony") && new Set(walk.map(e => e[0])).size === 1) { const s = walk[0][0]; s.regs.push(r); r2s.set(r, s); done.add(r); s.notes.push("an open walk of " + sft(r).toFixed(1) + " Sft outside the walls, off this passage only, joined"); return; }
     if ((kinds.size === 1 && kinds.has("balcony")) || (isOutside(r) && kinds.has("balcony"))) { const tb = all.filter(e => e[0].kind === "balcony").sort((a, b) => b[1] - a[1])[0][0];
       if (all.filter(e => e[0].kind === "balcony").every(e => acrossRail([r], e[0])) && (isOutside(r) || kinds.size === 1)) { log.push("a piece of " + sft(r).toFixed(1) + " Sft beyond the railing of " + tb.names[0] + " left out (a ledge / planter outside the rail)"); done.add(r); return; }
