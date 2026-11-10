@@ -6245,9 +6245,13 @@ function thumbWant(k){ S.thumbQ = S.thumbQ || []; if ((S.thumbs || {})[k] || S.t
 const THUMB_CACHE = "zd-thumbs-v1", THUMB_QUIET = 600;
 let lastInput = 0, thumbTask = null;
 const thumbHalt = () => { if (thumbTask) { try { thumbTask.cancel(); } catch (e) {} } };   // a thumbnail being drawn gives way at once (drawn again later)
-const onInput = () => { lastInput = performance.now(); thumbHalt(); };
+/* scrolling or clicking in the Pages tab or the page strip is not work on the drawing: it is how the thumbnails are looked at, so it
+   neither stops the one being drawn nor holds the next back (a heavy sheet takes about a second — every wheel step started it again,
+   and a list scrolled through never showed one) */
+const thumbArea = e => { const t = e.target; return !!(t && t.closest && t.closest("#pageList, #pageStrip")); };
+const onInput = e => { if (e && thumbArea(e)) return; lastInput = performance.now(); thumbHalt(); };
 ["wheel", "pointerdown", "keydown"].forEach(t => addEventListener(t, onInput, {capture: true, passive: true}));
-addEventListener("pointermove", e => { if (e.buttons) onInput(); }, {capture: true, passive: true});
+addEventListener("pointermove", e => { if (e.buttons) onInput(e); }, {capture: true, passive: true});
 const thumbUrl = (pr, f, p) => { const m = pr.files.find(x => x.id === f); if (!m || m.locked || (S.docs[f] || {}).zdLocked) return ""; const fp = m.sha || [m.size, m.replaced || m.added || ""].join("-");   // (a locked PDF: no picture kept)
   return location.origin + "/zd-thumb/" + encodeURIComponent(m.id + "-" + fp) + "/" + p + "-" + rotOf(pr, keyOf(f, p)) + "-" + strHash((bbOffOf(f) ? 1 : 0) + "|" + ocOff(f)) + ".png"; };
 async function thumbKept(u){ try { if (!u || !window.caches) return ""; const r = await (await caches.open(THUMB_CACHE)).match(u); return r ? await dataUrlOf(await r.blob()) : ""; } catch (e) { return ""; } }

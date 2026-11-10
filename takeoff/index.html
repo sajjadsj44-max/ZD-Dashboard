@@ -107,6 +107,9 @@ details.apdlg summary{cursor:pointer;font-weight:700;color:var(--navy);font-size
 .pgt:hover{border-color:var(--blue)}.pgt.on{border-color:var(--purple);box-shadow:0 0 0 2px #d9d2ff}
 .pgt.sel{border-color:var(--blue);box-shadow:0 0 0 2px #cfe0ff;background:#f5f9ff}.pgt.on.sel{box-shadow:0 0 0 2px #d9d2ff,0 0 0 4px #cfe0ff}
 .pgt img{width:100%;height:calc(var(--pgw,92px) * .92);background:#f4f7fb;border:1px solid #eef2f7;object-fit:contain;display:block}
+.pgt img:not([src]){background:linear-gradient(90deg,#f4f7fb 30%,#e3eaf4 50%,#f4f7fb 70%) 0 0/200% 100%;animation:pgsh 1.4s linear infinite}   /* thumbnail still being drawn */
+@keyframes pgsh{from{background-position:100% 0}to{background-position:-100% 0}}
+@media (prefers-reduced-motion: reduce){.pgt img:not([src]){animation:none}}
 .pgt .pgl{font-size:10.5px;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pgt .pgl.ok{color:var(--green)}.pgt .pgl.warn{color:#8a5a00}.pgt .pgl.bad{color:var(--red)}.pgt .pgl.pgtt{color:var(--navy);font-weight:600}
 .pgact{display:flex;gap:4px;justify-content:center}.pgact .btn{flex:1;min-width:0;padding:2px 4px;font-size:10px}
@@ -1689,7 +1692,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-11-10e"></script>
+<script type="module" src="takeoff.js?v=2026-11-10f"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
