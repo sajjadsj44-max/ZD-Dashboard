@@ -995,7 +995,7 @@ function showDrop(on){ $("drop").style.display = on ? "flex" : "none"; }
    layer switched off (furniture, text, hatch) is gone everywhere. Switched-off layers are saved by name. */
 /* layer roles, from the layer names: what bounds a room (walls, doors and windows, columns, railings) and what does
    not (furniture, fixtures, glass screens, hatch, text, clouds). Used by auto area, the agents and the presets. */
-const ROLES = [["column", /column|^col\b|\bcols\b/i],["hatch", /hatch|patt/i], ["glass", /glass|glaz/i], ["fixture", /(wood(en)?|mdf|timber|joinery|wardrobes?)/i], ["wall", /\bwalls?\b|r\.?c\.?c|partition|block ?work|masonry|parapet/i],
+const ROLES = [["column", /column|^col\b|\bcols\b/i],["hatch", /hatch|patt/i], ["glass", /glass|glaz/i], ["fixture", /^(?!.*\bwalls?\b).*\b(mdf|joinery|wardrobes?)\b/i], ["wall", /\bwalls?\b|r\.?c\.?c|partition|block ?work|masonry|parapet/i],
   ["tag", /^\s*d\s*-\s*w\s*$|tag/i], ["opening", /door|window|gate|vent|\bwin\b|^wn$/i], ["railing", /railing|balcon|metal.*frame|\brall\b/i], ["unit", /apartment|appartment|\bunit\b/i],
   ["text", /text|title|area|size|dim|grid|note|section|seal|cloud|label|tag|lable/i], ["fixture", /fixt|fict|furn|bath|kit|sanit|plant|tree|equip|mep|elect|light|lcd|marble|stair|step|\bwh\b|d\.b|j\.b|access|trap|cupboard|ac |wood|landscape|ramp|parking|ceiling|beam|lintel/i]];
 const BOUND = new Set(["wall", "opening", "column", "railing"]);
