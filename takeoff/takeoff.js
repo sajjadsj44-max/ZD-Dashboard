@@ -468,6 +468,10 @@ function migrate(p, rep){
     if (MK_TYPES.has(m.type)) mkSanitize(m);
     mkCommon(m);
     if (m.type === "legend" && m.floor != null) m.floor = String(m.floor).slice(0, 60);
+    if (m.type === "legend") { if (m.psCols != null) m.psCols = Array.isArray(m.psCols) ? m.psCols.map(String).slice(0, 40) : undefined; if (m.types != null) m.types = Array.isArray(m.types) ? m.types.filter(x => ["area", "linear", "count"].includes(x)) : undefined;
+      if (m.colLabels != null) { if (typeof m.colLabels !== "object" || Array.isArray(m.colLabels)) delete m.colLabels; else Object.keys(m.colLabels).forEach(k2 => { m.colLabels[k2] = String(m.colLabels[k2]).slice(0, 40); }); }
+      if (m.fcols != null) m.fcols = Array.isArray(m.fcols) ? m.fcols.filter(f => f && typeof f === "object").slice(0, 20).map(f => ({id: String(f.id || uid("F")).slice(0, 20), name: String(f.name || "Formula").slice(0, 40), expr: String(f.expr || "0").slice(0, 300), unit: String(f.unit || "").slice(0, 12)})) : undefined;
+      if (m.group != null && m.group !== "type" && m.group !== "group") delete m.group; }
     if (m.type === "legend" && m.conds != null) m.conds = Array.isArray(m.conds) ? m.conds.map(String).slice(0, 500) : undefined;
     if (m.type === "legend") ["border", "fill", "headerFill", "titleFill", "textColor"].forEach(k2 => { if (m[k2] != null && !HEXCOL.test(String(m[k2]))) { note("The legend's colour “" + String(m[k2]).slice(0, 40) + "” is not a colour — reset"); delete m[k2]; } });   // (written into the drawing's SVG)
     if (m.color != null && !HEXCOL.test(String(m.color))) { note("A markup's colour “" + String(m.color).slice(0, 40) + "” is not a colour — replaced"); m.color = "#d03b3b"; } return true; });
@@ -5674,12 +5678,12 @@ async function labelDialog(){
     if (n && S.lbl.autoName && await ask("Name the areas already drawn?", `<p>${n} area${n > 1 ? "s" : ""} on this page ${n > 1 ? "have" : "has"} no name. Name ${n > 1 ? "them" : "it"} from the room text inside?</p>`, "Name them")) nameAreas(); }
 }
 /* ------------------------------------------------------------------ embedded takeoff legend (Bluebeam-style) */
-const LEGEND_COLS = [{id:'symbol',label:'Symbol',on:true},{id:'boq',label:'BOQ',on:true},{id:'description',label:'Description',on:true},{id:'unit',label:'Unit',on:true},{id:'qty',label:'Quantity',on:true},{id:'perim',label:'Perimeter',on:true},{id:'rate',label:'Rate',on:false},{id:'amount',label:'Amount',on:false}];
+const LEGEND_COLS = [{id:'symbol',label:'Symbol',on:true},{id:'boq',label:'BOQ',on:true},{id:'description',label:'Description',on:true},{id:'unit',label:'Unit',on:true},{id:'qty',label:'Quantity',on:true},{id:'perim',label:'Perimeter',on:true},{id:'rate',label:'Rate',on:false},{id:'amount',label:'Amount',on:false},{id:'n',label:'Measurements',on:false},{id:'nos',label:'Nos',on:false},{id:'length',label:'Length',on:false},{id:'area',label:'Area',on:false},{id:'warea',label:'Wall area',on:false},{id:'height',label:'Height',on:false},{id:'thick',label:'Thickness',on:false},{id:'volume',label:'Volume',on:false},{id:'gross',label:'Gross',on:false},{id:'ded',label:'Deducted',on:false},{id:'pdoor',label:'Perim. less doors',on:false},{id:'faces',label:'Faces',on:false},{id:'checked',label:'Checked',on:false},{id:'pages',label:'Pages',on:false},{id:'group',label:'Group',on:false},{id:'ra',label:'RA code',on:false}];
 function legendOfPage(file=S.fileId,page=S.pageNo){return (P.proj.marks||[]).filter(m=>m.type==='legend'&&m.file===file&&m.page===page);}
-function legendCols(m){const src=Array.isArray(m.columns)?m.columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id);return src.map(id=>LEGEND_COLS.find(x=>x.id===id)).filter(Boolean);}
+function legendCols(m){const src=Array.isArray(m.columns)?m.columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id),D=legColDefs(m),L=m.colLabels||{};return src.map(id=>D.find(x=>x.id===id)).filter(Boolean).map(c=>L[c.id]?Object.assign({},c,{label:String(L[c.id])}):c);}
 /* a legend's floor (m.floor): "" the whole sheet, "*" split by floor — a section for each floor of the sheet with its own rows — or a
    floor's name: that floor only (a legend for each floor). Floors are those of the By page tree (floor boundaries, Move to floor) */
-function legendRows(m){
+function legendRows0(m){
   const only = Array.isArray(m.conds) ? new Set(m.conds) : null, list = (m.scope === 'all' ? P.proj.items.filter(i => !hiddenItem(i)) : P.proj.items.filter(i => i.file === m.file && i.page === m.page && !hiddenItem(i))).filter(i => !only || only.has(i.cond)), fl = m.scope === 'all' ? "" : String(m.floor || "");
   if (fl && fl !== "*") return legendRowsOf(list.filter(it => flLow(locOf(it).floor) === flLow(fl)), m).map(r => Object.assign(r, {nm: condShort(r.c)}));
   if (fl === "*") { const by = new Map(); list.forEach(it => { const n = flLow(locOf(it).floor); if (!by.has(n)) by.set(n, []); by.get(n).push(it); });
@@ -5723,6 +5727,163 @@ function legSym(c, a, x, y, w, h, z){   // in a box at x, y: h high, up to w wid
 }
 function legendQty(x,m){const d=Math.max(0,Math.min(3,Math.round(+m.precision||3)));return x.has?(+x.q||0).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';}
 function legendRate(c,m){const r=uR(Number(c&&c.rate),c&&c.unit);if(!isFinite(r)||r===0)return'—';const d=Math.max(0,Math.min(2,Math.round(+m.moneyPrecision||2)));return r.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
+/* ------------------------------------------------------------------ the legend, further than Bluebeam's
+   Columns: every figure a QS asks of a condition, worked out from the measurements the legend covers (its page, its floor, or the
+   conditions put on it), never the whole project — measurements and Nos; length (a run's net length, an area's perimeter), perimeter
+   less the doors (skirting); area, wall area (a wall's length × H × faces, a room's girth × H); height, thickness, volume; gross and
+   deducted; faces, checked, pages, group, RA code; the project's custom columns, and the legend's own formula columns (m.fcols:
+   {id, name, expr, unit} over Q A P PD D L N H T RATE AMT and the custom columns by name). Any column renamed on the legend
+   (m.colLabels); the PlanSwift look shows the ones chosen for it (m.psCols) between the name and the quantity.
+   Rows: only some kinds (m.types), none with nothing measured (m.hideZero), grouped by type or condition group (m.group), a totals
+   row (m.totals) adding up each column whose figures share a unit. Settings › Ask takes plain words ("add wall area and thickness,
+   remove rate, totals, group by type") and ✨ Smart columns picks them from what the legend holds — both here in the page, no key. */
+const LEG_IMPLICIT_PS = ["symbol", "description", "qty", "unit"];
+const LEG_HELP = {symbol: "the condition's look", boq: "BOQ code", description: "condition name", unit: "the quantity's unit", qty: "net quantity", perim: "perimeter of its areas",
+  rate: "condition rate", amount: "quantity × rate", n: "how many measurements", nos: "count points × Nos, or measurements × Nos", length: "net run length · an area's perimeter",
+  area: "net area · a wall's length × H × faces", warea: "a wall's length × H × faces · a room's girth × H", height: "condition H", thick: "condition T (thickness / width)",
+  volume: "area × T · length × H × T", gross: "before cut-outs and openings", ded: "cut-outs and openings taken off", pdoor: "perimeter less door openings (skirting)",
+  faces: "faces of a wall", checked: "measurements checked", pages: "pages it is measured on", group: "condition group", ra: "Rate Analysis code"};
+function legColDefs(m){
+  return LEGEND_COLS.concat(((P.proj && P.proj.cols) || []).map(x => ({id: "col:" + x.id, label: x.name, proj: true})), ((m && m.fcols) || []).map(f => ({id: "f:" + f.id, label: f.name || "Formula", formula: true})));
+}
+function legPsCols(m){ const D = legColDefs(m), L = m.colLabels || {}; return (m.psCols || []).filter(id => !LEG_IMPLICIT_PS.includes(id)).map(id => D.find(x => x.id === id)).filter(Boolean).map(c => L[c.id] ? Object.assign({}, c, {label: String(L[c.id])}) : c); }
+function legVars(r){   // a row's variables (as a custom column's) and its gross / deducted / checked, from its own measurements: worked out once per row
+  if (r._v) return r._v;
+  const ids = new Set((r.its || []).map(i => i.id)), only = it => ids.has(it.id), c = r.c, g = {ga: 0, da: 0, gl: 0, dl: 0, n: 0, ck: 0, pg: new Set()};
+  (r.its || []).forEach(it => { g.pg.add(keyOf(it.file, it.page)); if (it.kind === "shape") { g.n++; if (it.qa === "checked") g.ck++; }
+    const k = qScale(it); if (!k || c.type === "count") return; const nos = +it.nos || 1, neg = it.kind === "ded" || it.kind === "open", poly = itemPoly(it);
+    if (c.type === "area") { const A = polyArea(poly) / k / k * nos; if (neg) g.da += A; else g.ga += A; }
+    else { const L = (it.kind === "open" ? dist(it.pts[0], it.pts[1]) : it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k * nos; if (neg) g.dl += L; else g.gl += L; } });
+  r._only = only; r._g = g; r._v = condVars(c, only); return r._v;
+}
+const legMoney = (v, m) => { const d = Math.max(0, Math.min(2, Math.round(m.moneyPrecision == null ? 2 : +m.moneyPrecision))); return (+v).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d}); };
+function legVal(col, r, m){   // a cell -> {s: as shown, v: its figure (null: none), u: its unit, al}
+  const id = col.id, none = {s: "—", v: null, al: "end"};
+  if (r.tot) return legTotCell(col, r, m);
+  const c = r.c, V = legVars(r), g = r._g, H = +c.h || 0, T = +c.t || 0, F = +c.faces || 1;
+  const num = (v, u) => v == null || !isFinite(v) ? none : {v, u, s: legendQty({has: true, q: uV(v, u)}, m) + (uL(u) ? " " + uL(u) : ""), al: "end"};
+  const txt = s => ({s: s == null || s === "" ? "—" : String(s), v: null, al: "start"}), cnt = n => ({v: n, u: "#", s: String(Math.round(n * 1000) / 1000), al: "end"});
+  switch (id) {
+    case "boq": return txt(c.boq);
+    case "unit": return {s: uL(c.unit) || "—", v: null, al: "middle"};
+    case "qty": return r.has ? {v: +r.q || 0, u: c.unit, s: legendQty({has: true, q: uV(+r.q || 0, c.unit)}, m), al: "end"} : none;
+    case "perim": return c.type === "area" && r.has ? num(r.per, "ft") : none;
+    case "rate": return {s: legendRate(c, m), v: null, al: "end"};
+    case "amount": { const rate = Number(c.rate); return isFinite(rate) && rate ? {v: (+r.q || 0) * rate, u: "Rs", s: legMoney((+r.q || 0) * rate, m), al: "end"} : none; }
+    case "n": return cnt(g.n);
+    case "nos": return cnt(V.N);
+    case "length": return c.type === "linear" ? num(V.L, "ft") : c.type === "area" ? num(V.P, "ft") : none;
+    case "area": return c.type === "area" ? num(V.A, "Sft") : c.type === "linear" && H ? num(V.L * H * F, "Sft") : none;
+    case "warea": return c.type === "linear" && H ? num(V.L * H * F, "Sft") : c.type === "area" && H ? num(V.P * H, "Sft") : none;
+    case "height": return H ? num(H, "ft") : none;
+    case "thick": return T ? num(T, "ft") : none;
+    case "volume": return c.type === "area" && T ? num(V.A * T, "cft") : c.type === "linear" && H && T ? num(V.L * H * T, "cft") : none;
+    case "gross": return c.type === "area" ? num(g.ga, "Sft") : c.type === "linear" ? num(g.gl, "ft") : none;
+    case "ded": return c.type === "area" && g.da ? num(g.da, "Sft") : c.type === "linear" && g.dl ? num(g.dl, "ft") : none;
+    case "pdoor": return c.type === "area" ? num(V.PD, "ft") : none;
+    case "faces": return c.type === "linear" ? cnt(F) : none;
+    case "checked": return g.n ? {s: g.ck + "/" + g.n, v: null, al: "end"} : none;
+    case "pages": return cnt(g.pg.size);
+    case "group": return txt(c.group);
+    case "ra": return txt(c.ra);
+  }
+  if (id.startsWith("col:")) { const x = colVals(c, r._only, P.proj.cols || [], true).find(y => "col:" + y.col.id === id); return !x ? none : x.err ? {s: "#ERR", v: null, al: "end", err: x.err} : num(x.v, x.col.unit || ""); }
+  if (id.startsWith("f:")) { const f = ((m && m.fcols) || []).find(y => "f:" + y.id === id); if (!f) return none;
+    try { const vars = Object.assign({}, V), rate = Number(c.rate); vars.RATE = isFinite(rate) ? rate : 0; vars.AMT = (+r.q || 0) * vars.RATE;
+      colVals(c, r._only, P.proj.cols || [], true).forEach(x => { if (!x.err) vars[colKey(x.col.name)] = x.v; });
+      return num(evalFormula(String(f.expr || "0").trim() || "0", vars, refOf(r._only)), f.unit || ""); }
+    catch (e) { return {s: "#ERR", v: null, al: "end", err: e.message}; } }
+  return none;
+}
+const LEG_NOSUM = new Set(["symbol", "description", "unit", "boq", "rate", "group", "ra", "checked", "height", "thick", "faces"]);
+function legTotCell(col, r, m){   // a column of the totals row, added up the first time it is asked for (Sft and ft rows together: left blank)
+  const id = col.id, vals = r.vals = r.vals || {}; if (id in vals) return vals[id] || {s: "", v: null, al: "end"};
+  if (id === "unit") { legTotCell({id: "qty"}, r, m); return vals.unit || {s: "", v: null, al: "middle"}; }
+  vals[id] = null; if (LEG_NOSUM.has(id)) return {s: "", v: null, al: "end"};
+  const V = r.rows.map(x => legVal(col, x, m)).filter(x => x.v != null); if (!V.length || new Set(V.map(x => x.u)).size !== 1) return {s: "", v: null, al: "end"};
+  const u = V[0].u, tt = V.reduce((a, x) => a + x.v, 0), ps = legPS(m);
+  vals[id] = {v: tt, u, al: "end", s: u === "#" ? String(Math.round(tt * 1000) / 1000) : u === "Rs" ? legMoney(tt, m) : id === "qty" ? legendQty({has: true, q: uV(tt, u)}, m) + (ps ? " " + psU(u) : "") : legendQty({has: true, q: uV(tt, u)}, m) + (uL(u) ? " " + uL(u) : "")};
+  if (id === "qty") vals.unit = {s: uL(u), v: null, al: "middle"};
+  return vals[id];
+}
+function legTotals(rows, m){ const r = {tot: true, rows, vals: {}}; (legPS(m) ? legPsCols(m).concat([{id: "qty"}]) : legendCols(m)).forEach(col => legTotCell(col, r, m)); return r; }
+function legendRows(m){
+  let rows = legendRows0(m); const ty = Array.isArray(m.types) && m.types.length ? new Set(m.types) : null;
+  if (ty || m.hideZero) { rows = rows.filter(r => r.sec != null || ((!ty || ty.has(r.c.type)) && (!m.hideZero || Math.abs(+r.q || 0) > 1e-9))); rows = rows.filter((r, i) => r.sec == null || (rows[i + 1] && rows[i + 1].sec == null)); }
+  if ((m.group === "type" || m.group === "group") && !rows.some(r => r.sec != null)) {
+    const key = r => m.group === "type" ? ({area: "Areas", linear: "Lengths", count: "Counts"})[r.c.type] || "Other" : (r.c.group || "Ungrouped"), by = new Map();
+    rows.forEach(r => { const k = key(r); if (!by.has(k)) by.set(k, []); by.get(k).push(r); });
+    const ord = m.group === "type" ? ["Areas", "Lengths", "Counts", "Other"].filter(k => by.has(k)) : [...by.keys()];
+    if (by.size > 1 || m.group === "group") rows = ord.flatMap(k => [{sec: k}].concat(by.get(k)));
+  }
+  if (m.totals) { const L = rows.filter(r => r.sec == null && !r.tot); if (L.length) rows = rows.concat([legTotals(L, m)]); }
+  return rows;
+}
+/* ✨ the columns that suit what the legend holds: areas their perimeter, walls with a height their height and wall area, anything with a
+   thickness its thickness and volume, counts their Nos, rates their amount */
+function legSmart(rows, look){
+  const C = [...new Set(rows.filter(r => r.c).map(r => r.c))], has = t => C.some(c => c.type === t), anyH = C.some(c => c.type === "linear" && +c.h > 0), anyT = C.some(c => +c.t > 0);
+  const L = look === "ps" ? [] : ["symbol"].concat(C.some(c => c.boq) ? ["boq"] : [], ["description", "qty", "unit"]);
+  if (has("area")) L.push("perim"); if (anyH) L.push("height", "warea"); if (anyT) L.push("thick", "volume"); if (has("count") && C.length > 1) L.push("nos");
+  if (C.some(c => +c.rate)) L.push("rate", "amount");
+  return [...new Set(L)];
+}
+/* Ask: plain words into the legend's settings, read here (no AI service, no key): verbs add / show / include … and remove / hide / drop /
+   without …, carried on to the next words ("add wall area, height and thickness"); "only …" keeps just those; totals; group by type /
+   group; sort by quantity / name / BOQ; only areas / lengths / counts; hide zero; N decimals; font N; title …; PlanSwift / table look;
+   smart columns. -> what it did, as words */
+const LEG_WORDS = [["pdoor", /skirting|less\s+doors?|perimeter\s+less/], ["warea", /wall\s*areas?|wall\s*faces?|girth/], ["perim", /perimeters?|\bperim\b/], ["area", /\bareas?\b|\bsft\b|sq\.?\s*ft/],
+  ["length", /lengths?|\brft\b|\bruns?\b|\blf\b/], ["height", /heights?|\bht\b/], ["thick", /thick(ness)?|widths?/], ["volume", /volumes?|\bcft\b|cubic/], ["nos", /\bnos\b|\bnumbers?\b|\bcounts?\b/],
+  ["n", /measurements?|\bitems?\b|pieces/], ["gross", /gross/], ["ded", /deduct(ed|ions?)?|cut\s*-?\s*outs?|openings?/], ["faces", /\bfaces?\b|\bsides?\b/], ["checked", /checked|\bqa\b|progress/],
+  ["pages", /\bpages?\b|\bsheets?\b/], ["ra", /rate\s+analysis|\bra\b/], ["amount", /amounts?|\bcosts?\b|money|\bvalues?\b/], ["rate", /\brates?\b|unit\s+price/], ["boq", /\bboq\b|item\s+codes?|\bcodes?\b/],
+  ["unit", /\bunits?\b/], ["qty", /quantit(y|ies)|\bqty\b/], ["description", /descriptions?|\bnames?\b/], ["symbol", /symbols?|\bicons?\b|swatch/]];
+function legAsk(text, st, defs){
+  const said = [], raw = String(text || ""), low = raw.toLowerCase(); let mm;
+  if ((mm = /\b(?:title|call\s+it|name\s+it)\s*[:=]?\s*["“']?([^"”',;]+?)["”']?\s*(?:[,;]|$)/i.exec(raw))) { st.title = mm[1].trim().slice(0, 80); said.push("title “" + st.title + "”"); }
+  if (/plan\s*swift|\bps\s+look/.test(low)) { st.look = "ps"; said.push("PlanSwift look"); } else if (/\btable\b/.test(low)) { st.look = "table"; said.push("table look"); }
+  if (/\b(no|without|remove|hide|drop)\s+(the\s+)?totals?\b/.test(low)) { st.totals = false; said.push("no totals row"); } else if (/\btotals?\b|\bsum\b/.test(low)) { st.totals = true; said.push("totals row"); }
+  if (/\b(no|without)\s+group|ungroup/.test(low)) { st.group = ""; said.push("not grouped"); }
+  else if ((mm = /group(?:ed)?\s+by\s+(type|kind|group|trade|category|section)/.exec(low))) { st.group = /type|kind/.test(mm[1]) ? "type" : "group"; said.push(st.group === "type" ? "grouped by type" : "grouped by condition group"); }
+  if ((mm = /(?:sort|order)(?:ed)?\s+by\s+([a-z\- ]+)/.exec(low)) || (mm = /(largest|biggest)\s+first/.exec(low))) { const w = mm[1];
+    st.sort = /quant|qty|size|large|big/.test(w) ? "qty" : /name|alpha|a\s*-?\s*z/.test(w) ? "condition" : /boq|code/.test(w) ? "boq" : /list/.test(w) ? "list" : "drawing"; said.push("order: " + ({qty: "quantity, largest first", condition: "name A → Z", boq: "BOQ code", list: "condition list", drawing: "drawing"})[st.sort]); }
+  if ((mm = /only\s+(areas?|lengths?|linear|runs?|counts?)(?:\s*(?:and|&|,)\s*(areas?|lengths?|linear|runs?|counts?))?/.exec(low))) { st.types = [mm[1], mm[2]].filter(Boolean).map(w => /area/.test(w) ? "area" : /count/.test(w) ? "count" : "linear"); said.push("only " + st.types.map(x => ({area: "areas", linear: "lengths", count: "counts"})[x]).join(" and ")); }
+  else if (/\b(all|every)\s+(kinds?|types?|conditions?)\b/.test(low)) { st.types = []; said.push("every kind of condition"); }
+  if (/hide\s+(the\s+)?(zeros?|empty|blank)|no\s+zeros?/.test(low)) { st.hideZero = true; said.push("rows with nothing measured hidden"); } else if (/show\s+(the\s+)?(zeros?|empty)/.test(low)) { st.hideZero = false; said.push("rows with nothing measured shown"); }
+  if ((mm = /(\d)\s*decimals?|precision\s*(\d)/.exec(low))) { st.prec = Math.min(3, +(mm[1] || mm[2])); said.push(st.prec + " decimals"); }
+  if ((mm = /font\s*(?:size)?\s*(\d+(?:\.\d+)?)/.exec(low))) { st.fs = Math.max(5, Math.min(32, +mm[1])); said.push("font " + st.fs + " pt"); }
+  const ps = st.look === "ps", key = ps ? "ps" : "tbl"; let cols = (st[key] || []).slice();
+  if (/smart|best\s+columns|suggest|auto\s*-?\s*columns|you\s+(choose|pick|decide)|\bai\b/.test(low) && st.rows) { cols = legSmart(st.rows, st.look); said.push("✨ smart columns"); }
+  const strip = low.replace(/\b(?:title|call\s+it|name\s+it)\b[^,;]*/g, " ").replace(/group(?:ed)?\s+by\s+\w+|(?:sort|order)(?:ed)?\s+by\s+[a-z\- ]+?(?=,|;|$|\band\b)|(?:largest|biggest)\s+first|only\s+(?:areas?|lengths?|linear|runs?|counts?)(?:\s*(?:and|&|,)\s*(?:areas?|lengths?|linear|runs?|counts?))?|\btotals?\b|\bsum\b|\d\s*decimals?|precision\s*\d|font\s*(?:size)?\s*\d+(?:\.\d+)?|plan\s*swift|\bps\s+look|\btable\b|(?:hide|show)\s+(?:the\s+)?(?:zeros?|empty|blank)|no\s+zeros?/g, " ");
+  const dyn = (defs || []).filter(d => d.proj || d.formula).map(d => [d.id, new RegExp("\\b" + String(d.label).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s*") + "\\b")]);
+  const nm = id => { const d = (defs || []).find(x => x.id === id); return d ? d.label : id; };
+  let verb = 1, onlyDone = false;
+  strip.split(/[,;\n]|\band\b|\bthen\b|\bplus\b|&|\balso\b/).forEach(sg => { let s = " " + sg + " ";
+    if (/\b(remove|hide|drop|without|delete|no|take\s+out|minus|except)\b/.test(s)) verb = -1; else if (/\bonly\b/.test(s)) verb = 2; else if (/\b(add|show|include|with|put|need|want|give|also)\b/.test(s)) verb = 1;
+    const hit = []; dyn.concat(LEG_WORDS).forEach(([id, rx]) => { if (rx.test(s)) { hit.push(id); s = s.replace(rx, " "); } });
+    if (!hit.length) return;
+    if (verb === 2 && !onlyDone) { cols = ps ? [] : ["symbol", "description", "qty", "unit"]; onlyDone = true; said.push("only the columns named"); }
+    hit.forEach(id => { if (ps && LEG_IMPLICIT_PS.includes(id)) return;
+      if (verb < 0) { if (cols.includes(id)) { cols = cols.filter(x => x !== id); said.push("− " + nm(id)); } }
+      else if (!cols.includes(id)) { cols.push(id); said.push("+ " + nm(id)); } }); });
+  st[key] = cols;
+  return said;
+}
+/* the legend as a table (the columns shown, every row, the totals): Copy table (Excel / WhatsApp) and CSV */
+function legTable(m){
+  const rows = legendRows(m), cols = legPS(m) ? [{id: "description", label: "Description"}].concat(legPsCols(m), [{id: "qty", label: "Quantity"}, {id: "unit", label: "Unit"}]) : legendCols(m).filter(c => c.id !== "symbol");
+  const out = [cols.map(c => c.label)];
+  rows.forEach(r => { if (r.sec != null) { out.push([r.sec]); return; }
+    out.push(cols.map(c => c.id === "description" ? (r.tot ? "Total" : String(r.nm || r.c.name || "")) : String(legVal(c, r, m).s || "").replace(/^—$/, ""))); });
+  return out;
+}
+/* the PlanSwift look as wide as its rows need with the columns chosen for it (never narrower than it is) */
+function legPsWiden(m){
+  const pp = m.pts; if (!Array.isArray(pp) || pp.length < 2) return; const fs = Math.max(5, Math.min(32, +m.fontSize || 10)), rows = legendRows(m).filter(r => r.sec == null), ex = legPsCols(m);
+  const nw = Math.min(fs * 22, Math.max(fs * 4, ...rows.map(r => lblTextW(r.tot ? "Total" : String(r.nm || r.c.name || ""), "Arial", 400, fs)))), qw = Math.max(fs * 3, ...rows.map(r => lblTextW(r.tot ? legTotCell({id: "qty"}, r, m).s || "" : legPsQty(r, m), "Arial", 700, fs)));
+  const ew = ex.reduce((a, col) => a + Math.max(...rows.map(r => lblTextW(legVal(col, r, m).s || "", "Arial", 400, fs))) + fs * .7, 0);
+  const need = Math.ceil(fs * .38 * 2 + fs * 1.15 + fs * .3 + nw + fs * .9 + ew + qw + fs * .4 + fs * 1.05 + 2), x0 = Math.min(pp[0][0], pp[1][0]), w = Math.abs(pp[1][0] - pp[0][0]);
+  if (w + 0.5 < need) { const i = pp[0][0] > pp[1][0] ? 0 : 1; pp[i] = [x0 + need, pp[i][1]]; m.refW = need; }
+}
 function legendSvg(m,T){   // the legend is in drawing units: its text scales with the zoom like its box, and shrinks (never grows) when the box is dragged narrower than refW
  const k=Math.abs(T([1,0])[0]-T([0,0])[0])||1,pp=m.pts||[[80,80],[420,260]],w=Math.abs(T(pp[0])[0]-T(pp[1])[0]);
  return legendSvg0(m,T,k*Math.min(1,w/k/(+m.refW||340)));
@@ -5735,8 +5896,8 @@ function legendSvg0(m,T,z){
  const widths=Array.isArray(m.colWidths)?m.colWidths.map(Number):[],weights=cols.map((c,i)=>Math.max(.05,Number(widths[i])||LEG_W0[c.id]||.15)),sum=weights.reduce((a,b)=>a+b,0);for(let i=0;i<weights.length;i++)weights[i]/=sum;const xs=[];let xx=x0;cols.forEach((c,i)=>{xs.push(xx);xx+=W*weights[i]});
  if(hh){out+='<rect x="'+x0.toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+hh.toFixed(1)+'" fill="'+head+'"/>';cols.forEach((c,i)=>{out+='<text x="'+(xs[i]+pad).toFixed(1)+'" y="'+(yy+hh*.67).toFixed(1)+'" font-size="'+Math.max(5,fs*.9).toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(c.label)+'</text>'});yy+=hh}
  const cell=function(x,y,w,s,al,bold){al=al||'start';const tx=al==='end'?x+w-pad:al==='middle'?x+w/2:x+pad;return '<text x="'+tx.toFixed(1)+'" y="'+y.toFixed(1)+'" text-anchor="'+(al==='end'?'end':al==='middle'?'middle':'start')+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="'+(bold?700:400)+'" fill="'+textCol+'">'+esc(s==null?'—':s)+'</text>';};
- rows.forEach(function(r,ri){const y=yy+ri*rh,c=r.c;if(r.sec!=null){out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="'+head+'"/><text x="'+(x0+pad).toFixed(1)+'" y="'+(y+rh*.67).toFixed(1)+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(r.sec)+'</text>';return}if(ri%2)out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="#f7f9fb"/>';cols.forEach(function(col,i){const cw=W*weights[i],x=xs[i];if(col.id==='symbol'){const hs=Math.min(cw-pad*2,rh*.46);out+=legSym(c,r.ap||apOf(c),x+pad,y+(rh-hs)/2,cw-pad*2,hs,z)}else if(col.id==='boq')out+=cell(x,y+rh*.67,cw,c.boq||'—');else if(col.id==='description'){const nm=String(r.nm||c.name||'—'),n=Math.max(4,Math.floor((cw-pad*2)/(fs*.55))),t=nm.length>n?nm.slice(0,n-1)+'…':nm;out+=(t!==nm?'<g><title>'+esc(nm)+'</title>':'')+cell(x,y+rh*.67,cw,t)+(t!==nm?'</g>':'')}
-   else if(col.id==='perim')out+=cell(x,y+rh*.67,cw,c.type==='area'&&r.has?legendQty({has:true,q:uV(r.per,'ft')},m)+' '+uL('ft'):'—','end');else if(col.id==='unit')out+=cell(x,y+rh*.67,cw,uL(c.unit)||'—','middle');else if(col.id==='qty')out+=cell(x,y+rh*.67,cw,legendQty({has:r.has,q:uV(+r.q||0,c.unit)},m),'end');else if(col.id==='rate')out+=cell(x,y+rh*.67,cw,legendRate(c,m),'end');else{const rate=Number(c.rate),amt=isFinite(rate)&&rate?(+r.q||0)*rate:null;out+=cell(x,y+rh*.67,cw,amt==null?'—':f2(amt),'end')}})});
+ rows.forEach(function(r,ri){const y=yy+ri*rh,c=r.c;if(r.tot){out+='<line x1="'+x0.toFixed(1)+'" y1="'+y.toFixed(1)+'" x2="'+(x0+W).toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="'+border+'" stroke-width="'+Math.max(z*.8,bw).toFixed(1)+'"/>';const di=Math.max(0,cols.findIndex(cc=>cc.id==='description'));cols.forEach(function(col,i){const cw=W*weights[i],x=xs[i];if(i===di)out+=cell(x,y+rh*.67,cw,'Total','start',true);else if(col.id!=='symbol'){const vv=legVal(col,r,m);if(vv.s)out+=cell(x,y+rh*.67,cw,vv.s,vv.al,true)}});return}if(r.sec!=null){out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="'+head+'"/><text x="'+(x0+pad).toFixed(1)+'" y="'+(y+rh*.67).toFixed(1)+'" font-size="'+fs.toFixed(1)+'" font-family="Arial,sans-serif" font-weight="700" fill="'+textCol+'">'+esc(r.sec)+'</text>';return}if(ri%2)out+='<rect x="'+x0.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+W.toFixed(1)+'" height="'+rh.toFixed(1)+'" fill="#f7f9fb"/>';cols.forEach(function(col,i){const cw=W*weights[i],x=xs[i];if(col.id==='symbol'){const hs=Math.min(cw-pad*2,rh*.46);out+=legSym(c,r.ap||apOf(c),x+pad,y+(rh-hs)/2,cw-pad*2,hs,z)}else if(col.id==='boq')out+=cell(x,y+rh*.67,cw,c.boq||'—');else if(col.id==='description'){const nm=String(r.nm||c.name||'—'),n=Math.max(4,Math.floor((cw-pad*2)/(fs*.55))),t=nm.length>n?nm.slice(0,n-1)+'…':nm;out+=(t!==nm?'<g><title>'+esc(nm)+'</title>':'')+cell(x,y+rh*.67,cw,t)+(t!==nm?'</g>':'')}
+   else{const vv=legVal(col,r,m);out+=(vv.err?'<g><title>'+esc(vv.err)+'</title>':'')+cell(x,y+rh*.67,cw,vv.s,vv.al)+(vv.err?'</g>':'')}})});
  if(cols.length>1)for(let i=1;i<cols.length;i++){out+='<line x1="'+xs[i].toFixed(1)+'" y1="'+(y0+pad).toFixed(1)+'" x2="'+xs[i].toFixed(1)+'" y2="'+Math.min(y1,y0+pad+th+hh+rows.length*rh).toFixed(1)+'" stroke="'+border+'" stroke-opacity=".22" stroke-width=".6"/>'}
  out+='</g>';return out;
 }
@@ -5766,11 +5927,17 @@ function legendPsSvg(m, T, z){
   let out = `<g clip-path="url(#lg${esc(m.id)})"><defs><clipPath id="lg${esc(m.id)}"><rect x="${f(x0)}" y="${f(y0)}" width="${f(W)}" height="${f(H)}"/></clipPath></defs><rect x="${f(x0)}" y="${f(y0)}" width="${f(W)}" height="${f(H)}" fill="${hx(m.fill, "#ffffff")}" fill-opacity="${m.fillOpacity == null ? 1 : Math.max(.05, Math.min(1, +m.fillOpacity))}" stroke="${hx(m.border, "#000000")}" stroke-width="${bw.toFixed(2)}"/>`;
   let yy = y0 + pad * .6;
   if (th) { out += tx(x0 + pad, yy + th * .7, legendTitle(m), 700, tc); yy += th; }
-  const ic = fs * 1.15, sw = fs * 1.05, xq = x0 + W - pad - sw - fs * .4, xn = x0 + pad + ic + fs * .3;
+  const ic = fs * 1.15, sw = fs * 1.05, xq = x0 + W - pad - sw - fs * .4, xn = x0 + pad + ic + fs * .3, ex = legPsCols(m), body = rows.filter(r => r.sec == null), gap = fs * .7;
+  const qw = Math.max(0, ...body.map(r => lblTextW(r.tot ? legTotCell({id: "qty"}, r, m).s || "" : legPsQty(r, m), "Arial", 700, fs)));
+  const ew = ex.map(col => Math.max(0, ...body.map(r => lblTextW(legVal(col, r, m).s || "", "Arial", r.tot ? 700 : 400, fs)))), xe = [];
+  let xr = xq - (ex.length ? qw + gap : 0); for (let j = ex.length - 1; j >= 0; j--) { xe[j] = xr; xr -= ew[j] + gap; }
   rows.forEach((r, i) => { const y = yy + i * rh, by = y + rh * .5 + fs * .36;
     if (r.sec != null) { out += tx(x0 + pad, by, r.sec, 700, tc); return; }
-    const c = r.c, q = legPsQty(r, m), nm = String(r.nm || c.name || "—"), t = legPsFitText(nm, xq - lblTextW(q, "Arial", 700, fs) - fs * .6 - xn, 400, fs);
-    out += legPsIcon(c, x0 + pad, y + (rh - ic) / 2, ic) + (t !== nm ? `<g><title>${esc(nm)}</title>` : "") + tx(xn, by, t, 400, tc) + (t !== nm ? "</g>" : "") + tx(xq, by, q, 700, "#0000ff", "end") + legPsSwatch(c, r.ap || apOf(c), x0 + W - pad - sw, y + (rh - sw) / 2, sw); });
+    if (r.tot) { const qs = legTotCell({id: "qty"}, r, m).s; out += `<line x1="${f(x0 + pad)}" y1="${f(y)}" x2="${f(x0 + W - pad)}" y2="${f(y)}" stroke="${tc}" stroke-width="${f(Math.max(.5 * z, bw))}"/>` + tx(xn, by, "Total", 700, tc)
+        + ex.map((col, j) => { const s = legTotCell(col, r, m).s; return s ? tx(xe[j], by, s, 700, tc, "end") : ""; }).join("") + (qs ? tx(xq, by, qs, 700, "#0000ff", "end") : ""); return; }
+    const c = r.c, q = legPsQty(r, m), nm = String(r.nm || c.name || "—"), room = (ex.length ? xr + gap : xq - lblTextW(q, "Arial", 700, fs) - fs * .6) - xn, t = legPsFitText(nm, room, 400, fs);
+    out += legPsIcon(c, x0 + pad, y + (rh - ic) / 2, ic) + (t !== nm ? `<g><title>${esc(nm)}</title>` : "") + tx(xn, by, t, 400, tc) + (t !== nm ? "</g>" : "")
+      + ex.map((col, j) => tx(xe[j], by, legVal(col, r, m).s, 400, tc, "end")).join("") + tx(xq, by, q, 700, "#0000ff", "end") + legPsSwatch(c, r.ap || apOf(c), x0 + W - pad - sw, y + (rh - sw) / 2, sw); });
   return out + "</g>";
 }
 /* a new legend in PlanSwift's look: its text 1.2 % of the sheet's long side (8 – 32 pt: 14 pt on A3, 29 pt on A1), as wide as its rows (a name past ~40
@@ -5781,14 +5948,14 @@ function legendPsInit(m){
   const w = Math.max(120, Math.min(base.width - 40, Math.ceil(fs * 0.38 * 2 + fs * 1.15 + fs * .3 + nw + fs * .9 + qw + fs * .4 + fs * 1.05 + 2)));
   const x0 = Math.max(20, base.width - w - 20), y0 = Math.min(m.pts[0][1], m.pts[1][1]);
   Object.assign(m, {look: "ps", showTitle: false, showHeaders: false, precision: isM() ? 3 : 1, fontSize: fs, rowH: Math.round(fs * 14) / 10, refW: w, lineWidth: .75, border: "#000000", fill: "#ffffff", fillOpacity: 1, textColor: "#000000", pts: [[x0, y0], [x0 + w, y0 + 10]]});
-  legendFit(m); return m;
+  legPsWiden(m); legendFit(m); return m;
 }
 function defaultLegend(file=S.fileId,page=S.pageNo){const st=legendStyle()||{},base=S.base||{width:1000,height:1000},w=Math.max(80,Math.min(st.w||400,base.width-40)),h=Math.max(60,Math.min(st.h||190,base.height-60)),x0=Math.max(20,Math.min(Math.max(20,base.width-w-20),base.width-80)),y0=30;const look=st.look||(Object.keys(st).length?'table':lblPS()?'ps':'table');delete st.w;delete st.h;delete st.look;const m0=Object.assign({id:uid('M'),type:'legend',file,page,pts:[[x0,y0],[x0+w,y0+h]],title:'Takeoff Legend',showTitle:true,showHeaders:true,columns:LEGEND_COLS.filter(x=>x.on).map(x=>x.id),precision:3,refW:400,moneyPrecision:2,fontSize:9,rowH:18,headerH:22,titleH:24,pad:5,lineWidth:1,border:'#40556b',fill:'#ffffff',fillOpacity:.96,headerFill:'#eef2f7',textColor:'#172b3f',sort:'drawing',colWidths:LEGEND_COLS.filter(x=>x.on).map(x=>LEG_W0[x.id]||.15),subject:'Takeoff Legend'},{author:qaUser(),status:'',at:new Date().toISOString()});if(look==='ps'){if(Object.keys(st).length){Object.assign(m0,st,{look:'ps'});legendFit(m0)}else legendPsInit(m0)}else Object.assign(m0,st);return m0;}
 const LEG_W0 = {symbol: .11, boq: .14, description: .31, unit: .11, qty: .16, perim: .15, rate: .12, amount: .15};
 /* the legend's look set as default (right-click → Set as default, or Properties): a legend placed after it starts with that
    title, columns, order, sizes and colours, at that size — kept in this browser like the other tools' defaults */
 const LEGEND_STYLE_KEY = "zdTakeoffLegendStyle";
-const LEGEND_STYLE_KEYS = ["look", "title", "subject", "showTitle", "showHeaders", "columns", "colWidths", "precision", "moneyPrecision", "sort", "fontSize", "rowH", "headerH", "titleH", "pad", "lineWidth", "refW", "border", "fill", "fillOpacity", "headerFill", "titleFill", "textColor"];
+const LEGEND_STYLE_KEYS = ["look", "title", "subject", "showTitle", "showHeaders", "columns", "colWidths", "precision", "moneyPrecision", "sort", "fontSize", "rowH", "headerH", "titleH", "pad", "lineWidth", "refW", "border", "fill", "fillOpacity", "headerFill", "titleFill", "textColor", "psCols", "colLabels", "fcols", "totals", "group", "types", "hideZero"];
 const LEGEND_SORTS = ["drawing", "list", "condition", "boq", "qty"];
 function saveLegendStyle(m){
   const o = {}, pp = m.pts || [[0, 0], [400, 190]];
@@ -5802,7 +5969,13 @@ function legendStyle(){   // the saved look, checked before it is drawn into the
   const s = {};
   LEGEND_STYLE_KEYS.forEach(k => { const v = o[k]; if (v == null) return;
     if (["border", "fill", "headerFill", "titleFill", "textColor"].includes(k)) { if (HEXCOL.test(String(v))) s[k] = v; }
-    else if (k === "columns") { const c = Array.isArray(v) ? v.filter(id => LEGEND_COLS.some(x => x.id === id)) : []; if (c.length) s.columns = c; }
+    else if (k === "columns") { const c = Array.isArray(v) ? v.filter(id => LEGEND_COLS.some(x => x.id === id) || (/^f:/.test(id) && (o.fcols || []).some(f => f && "f:" + f.id === id))) : []; if (c.length) s.columns = c; }
+    else if (k === "psCols") { if (Array.isArray(v)) s.psCols = v.filter(id => LEGEND_COLS.some(x => x.id === id) || (/^f:/.test(id) && (o.fcols || []).some(f => f && "f:" + f.id === id))); }
+    else if (k === "types") { if (Array.isArray(v)) s.types = v.filter(x => ["area", "linear", "count"].includes(x)); }
+    else if (k === "colLabels") { if (v && typeof v === "object" && !Array.isArray(v)) s.colLabels = Object.fromEntries(Object.entries(v).map(([a, b]) => [String(a).slice(0, 60), String(b).slice(0, 40)])); }
+    else if (k === "fcols") { if (Array.isArray(v)) s.fcols = v.filter(f => f && typeof f === "object").slice(0, 20).map(f => ({id: String(f.id || uid("F")).slice(0, 20), name: String(f.name || "Formula").slice(0, 40), expr: String(f.expr || "0").slice(0, 300), unit: String(f.unit || "").slice(0, 12)})); }
+    else if (k === "group") { if (v === "type" || v === "group") s.group = v; }
+    else if (k === "totals" || k === "hideZero") s[k] = !!v;
     else if (k === "colWidths") { if (Array.isArray(v)) s.colWidths = v.map(Number); }
     else if (k === "title" || k === "subject") s[k] = String(v).slice(0, 200);
     else if (k === "sort") { if (LEGEND_SORTS.includes(v)) s.sort = v; }
@@ -5818,7 +5991,64 @@ function legendDescShare(m){ const cols = legendCols(m), w = cols.map((c, i) => 
 function legendWidths(ids, share){   // column weights with the description at the share given, the others in their usual proportions
   const others = ids.filter(id => id !== "description"), t = others.reduce((a, id) => a + (LEG_W0[id] || .15), 0) || 1, rest = ids.includes("description") ? 1 - share : 1;
   return ids.map(id => id === "description" ? +share.toFixed(3) : +((LEG_W0[id] || .15) / t * rest).toFixed(3)); }
-async function editLegend(m){const cols=legendCols(m),body='<div class="grid"><div class="fg w2"><label>Look</label><select id="lgLook"><option value="ps"'+(legPS(m)?' selected':'')+'>PlanSwift — icon, name, quantity and colour of each condition</option><option value="table"'+(legPS(m)?'':' selected')+'>Table — columns and headers</option></select></div><div class="fg w2"><label>Title</label><input type="text" id="lgTitle" value="'+esc(m.title||'Takeoff Legend')+'"></div><div class="fg"><label>Font size (pt)</label><input type="number" id="lgFs" min="5" max="32" step=".5" value="'+(+m.fontSize||9)+'"></div><div class="fg"><label>Row height (pt)</label><input type="number" id="lgRh" min="8" max="60" step="1" value="'+(+m.rowH||18)+'"></div><div class="fg"><label>Precision</label><select id="lgPrec">'+[0,1,2,3].map(n=>'<option value="'+n+'" '+((+m.precision||3)===n?'selected':'')+'>'+n+' decimals</option>').join('')+'</select></div><div class="fg"><label>Order</label><select id="lgSort">'+[['drawing','Drawing order'],['list','Condition list order'],['condition','Name A → Z'],['boq','BOQ code'],['qty','Quantity, largest first']].map(([v,t])=>'<option value="'+v+'"'+((m.sort||'drawing')===v?' selected':'')+'>'+t+'</option>').join('')+'</select></div><div class="fg"><label>Description width %</label><input type="number" id="lgDw" min="15" max="70" step="1" value="'+Math.round(100*legendDescShare(m))+'" title="Share of the legend width given to the description; the other columns share the rest"></div>'+(m.scope==='all'?'':'<div class="fg"><label>Floors</label><select id="lgFloor" title="The whole sheet, a section for each floor, or one floor only (a legend for each floor)">'+legendFloorOpts(m)+'</select></div>')+'<div class="fg"><label>Border colour</label><input type="color" id="lgBorder" value="'+(HEXCOL.test(m.border||'')?m.border:'#40556b')+'"></div><div class="fg"><label>Header fill</label><input type="color" id="lgHead" value="'+(HEXCOL.test(m.headerFill||'')?m.headerFill:'#eef2f7')+'"></div><div class="fg"><label>Fill</label><input type="color" id="lgFill" value="'+(HEXCOL.test(m.fill||'')?m.fill:'#ffffff')+'"></div><div class="fg w2"><label><input type="checkbox" id="lgTitleOn" style="width:auto" '+(m.showTitle===false?'':'checked')+'> Show title</label><label><input type="checkbox" id="lgHeadOn" style="width:auto" '+(m.showHeaders===false?'':'checked')+'> Show column headers</label></div><div class="fg w2"><label>Columns</label><div class="grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">'+LEGEND_COLS.map(c=>'<label class="pk"><input type="checkbox" data-lgcol="'+c.id+'" style="width:auto" '+(cols.some(x=>x.id===c.id)?'checked':'')+'> '+esc(c.label)+'</label>').join('')+'</div></div></div><p class="small">Unit and Quantity are live from the takeoff condition. Rate and Amount use the condition rate when one exists; no rate is invented.</p>';const v=await ask('Edit Legend',body,'Save',()=>{const columns=[...document.querySelectorAll('[data-lgcol]:checked')].map(x=>x.dataset.lgcol);if(!columns.length)return'Choose at least one column';const look=$('lgLook').value,sw=look!==(legPS(m)?'ps':'table');return{look,title:$('lgTitle').value.trim()||'Takeoff Legend',fontSize:Math.max(5,Math.min(32,+$('lgFs').value||9)),rowH:Math.max(8,Math.min(60,+$('lgRh').value||18)),precision:+$('lgPrec').value||0,sort:$('lgSort').value,border:$('lgBorder').value,headerFill:$('lgHead').value,fill:$('lgFill').value,showTitle:sw&&look==='table'?true:$('lgTitleOn').checked,showHeaders:sw?look==='table':$('lgHeadOn').checked,columns,colWidths:legendWidths(columns,Math.max(15,Math.min(70,+$('lgDw').value||31))/100),floor:$('lgFloor')?$('lgFloor').value:(m.floor||'')}});if(v)mutate(()=>{Object.assign(m,v);if(!m.floor)delete m.floor;legendFit(m)},'Edit Legend');}
+async function editLegend(m){
+  let tbl = legendCols(m).map(c => c.id), ps = (m.psCols || []).slice(), all = false; const labels = Object.assign({}, m.colLabels || {}), fcols = JSON.parse(JSON.stringify(m.fcols || []));
+  const opt = (v, t2, cur) => `<option value="${v}"${cur === v ? " selected" : ""}>${t2}</option>`, ty = new Set(Array.isArray(m.types) && m.types.length ? m.types : ["area", "linear", "count"]);
+  const body = '<div class="grid"><div class="fg w2"><label>Look</label><select id="lgLook"><option value="ps"'+(legPS(m)?' selected':'')+'>PlanSwift — icon, name, quantity and colour of each condition</option><option value="table"'+(legPS(m)?'':' selected')+'>Table — columns and headers</option></select></div><div class="fg w2"><label>Title</label><input type="text" id="lgTitle" value="'+esc(m.title||'Takeoff Legend')+'"></div><div class="fg"><label>Font size (pt)</label><input type="number" id="lgFs" min="5" max="32" step=".5" value="'+(+m.fontSize||9)+'"></div><div class="fg"><label>Row height (pt)</label><input type="number" id="lgRh" min="8" max="60" step="1" value="'+(+m.rowH||18)+'"></div><div class="fg"><label>Precision</label><select id="lgPrec">'+[0,1,2,3].map(n=>'<option value="'+n+'" '+((+m.precision||3)===n?'selected':'')+'>'+n+' decimals</option>').join('')+'</select></div><div class="fg"><label>Order</label><select id="lgSort">'+[['drawing','Drawing order'],['list','Condition list order'],['condition','Name A → Z'],['boq','BOQ code'],['qty','Quantity, largest first']].map(([v,t])=>'<option value="'+v+'"'+((m.sort||'drawing')===v?' selected':'')+'>'+t+'</option>').join('')+'</select></div><div class="fg"><label>Description width %</label><input type="number" id="lgDw" min="15" max="70" step="1" value="'+Math.round(100*legendDescShare(m))+'" title="Share of the legend width given to the description; the other columns share the rest"></div>'+(m.scope==='all'?'':'<div class="fg"><label>Floors</label><select id="lgFloor" title="The whole sheet, a section for each floor, or one floor only (a legend for each floor)">'+legendFloorOpts(m)+'</select></div>')+'<div class="fg"><label>Border colour</label><input type="color" id="lgBorder" value="'+(HEXCOL.test(m.border||'')?m.border:'#40556b')+'"></div><div class="fg"><label>Header fill</label><input type="color" id="lgHead" value="'+(HEXCOL.test(m.headerFill||'')?m.headerFill:'#eef2f7')+'"></div><div class="fg"><label>Fill</label><input type="color" id="lgFill" value="'+(HEXCOL.test(m.fill||'')?m.fill:'#ffffff')+'"></div><div class="fg w2"><label><input type="checkbox" id="lgTitleOn" style="width:auto" '+(m.showTitle===false?'':'checked')+'> Show title</label><label><input type="checkbox" id="lgHeadOn" style="width:auto" '+(m.showHeaders===false?'':'checked')+'> Show column headers</label></div>' + `</div>
+    <h4 style="margin:10px 0 4px">✨ Ask the legend</h4>
+    <div class="row" style="gap:6px"><input type="text" id="lgAsk" style="flex:1;min-width:0" placeholder="e.g. add wall area, height and thickness, remove rate, totals, group by type, sort by quantity"><button class="btn sm pri" type="button" id="lgAskGo">Apply</button><button class="btn sm" type="button" id="lgSmart" title="Pick the columns that suit what this legend holds: areas their perimeter, walls their height and wall area, a thickness its volume, counts their Nos, rates their amount">✨ Smart columns</button></div>
+    <div class="small" id="lgAskSay" style="min-height:1.3em;color:var(--muted)">Type what you want in plain words, then Apply — it sets the boxes below; nothing is saved until Save.</div>
+    <h4 style="margin:10px 0 4px">Columns</h4><div class="small" id="lgColHint"></div>
+    <div id="lgCols" style="max-height:30vh;overflow:auto;border:1px solid var(--line, #d6dde6);border-radius:6px;padding:3px 6px"></div>
+    <h4 style="margin:10px 0 4px">Formula columns</h4>
+    <div class="small">Q net quantity · A area · P perimeter · PD perimeter less doors · D door widths · L length · N count · H height · T thickness · RATE · AMT · the project's custom columns by name · [Condition name].A — ceil floor round min max abs sqrt. E.g. Tiles = <b>Q / 4 * 1.05</b>, Bags = <b>ceil(A * T / 1.25)</b>.</div>
+    <div id="lgF"></div><button class="btn sm" type="button" id="lgFAdd" style="margin-top:4px">＋ Formula column</button>
+    <h4 style="margin:10px 0 4px">Rows</h4>
+    <div class="row" style="gap:12px;flex-wrap:wrap;align-items:center"><label class="pk"><input type="checkbox" id="lgTot" style="width:auto"${m.totals ? " checked" : ""}> Totals row</label>
+      <label>Group <select id="lgGroup">${opt("", "None", m.group || "")}${opt("type", "By type — areas, lengths, counts", m.group || "")}${opt("group", "By condition group", m.group || "")}</select></label>
+      ${[["area", "Areas"], ["linear", "Lengths"], ["count", "Counts"]].map(([k2, t2]) => `<label class="pk"><input type="checkbox" data-lgty="${k2}" style="width:auto"${ty.has(k2) ? " checked" : ""}> ${t2}</label>`).join("")}
+      <label class="pk"><input type="checkbox" id="lgZero" style="width:auto"${m.hideZero ? " checked" : ""}> Hide rows with nothing measured</label>
+      ${legConds(m) ? `<button class="btn sm" type="button" id="lgAll" title="This legend lists only the conditions put on it (right-click a measurement → Add to legend)">List every condition again</button>` : ""}</div>
+    <div class="row" style="gap:6px;margin-top:8px"><button class="btn sm" type="button" id="lgCopy" title="Copy the legend as a table — paste into Excel, a sheet or WhatsApp">Copy table</button><button class="btn sm" type="button" id="lgCsv" title="Save the legend as a CSV file">CSV</button></div>
+    <p class="small" style="margin-top:6px">Every figure is worked out from the measurements this legend covers (its page or floor, or the conditions put on it). Rate and Amount use the condition's rate when it has one; no rate is invented.</p>`;
+  const pr = ask("Edit Legend", body, "Save", () => { read(); const s = settings(); if (s.look === "table" && !s.columns.length) return "Choose at least one column"; if (fcols.some(f => !String(f.name || "").trim())) return "Give every formula column a name"; if (!s.types0.length) return "Tick at least one kind of row: areas, lengths or counts"; return s; });
+  const B = $("dlgB"), box = B.querySelector("#lgCols"), fb = B.querySelector("#lgF"), look = () => B.querySelector("#lgLook").value, say = s => { B.querySelector("#lgAskSay").textContent = s; };
+  const draw = () => { const p = look() === "ps", on = p ? ps : tbl, defs = legColDefs({fcols}), order = on.map(id => defs.find(d => d.id === id)).filter(Boolean).concat(defs.filter(d => !on.includes(d.id)));
+    B.querySelector("#lgColHint").textContent = p ? "PlanSwift look: the icon, name, quantity and colour are always there — the columns ticked sit between the name and the quantity. ▲▼ to order, type a header to rename." : "Tick to show, ▲▼ to order, type a header to rename it on the legend.";
+    box.innerHTML = order.map(d => { const imp = p && LEG_IMPLICIT_PS.includes(d.id), ck = imp || on.includes(d.id);
+      return `<div class="lgc" data-id="${esc(d.id)}" style="display:flex;gap:6px;align-items:center;padding:1px 0"><input type="checkbox" data-lgc="1"${ck ? " checked" : ""}${imp ? " disabled" : ""} style="width:auto" title="Show this column"><input type="text" data-lgl="1" value="${esc(labels[d.id] || "")}" placeholder="${esc(d.label)}" style="width:9em" title="The header shown on the legend (empty: ${esc(d.label)})"><span class="small" style="flex:1;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(LEG_HELP[d.id] || (d.proj ? "the project's custom column" : d.formula ? "formula column" : ""))}</span><button class="btn sm" type="button" data-lgm="-1" title="Earlier">&#9650;</button><button class="btn sm" type="button" data-lgm="1" title="Later">&#9660;</button></div>`; }).join(""); };
+  const read = () => { const els = [...box.querySelectorAll(".lgc")]; els.forEach(el => { const v = el.querySelector("[data-lgl]").value.trim(); if (v) labels[el.dataset.id] = v.slice(0, 40); else delete labels[el.dataset.id]; });
+    const ids = els.filter(el => { const c = el.querySelector("[data-lgc]"); return c.checked && !c.disabled; }).map(el => el.dataset.id); if (look() === "ps") ps = ids; else tbl = ids; };
+  const drawF = () => { fb.innerHTML = fcols.map((f, i) => `<div class="row" style="gap:4px;margin:2px 0" data-fi="${i}"><input type="text" data-ff="name" value="${esc(f.name || "")}" placeholder="Name" style="width:9em"><span>=</span><input type="text" data-ff="expr" value="${esc(f.expr || "")}" placeholder="Q / 4 * 1.05" style="flex:1;min-width:0;font-family:monospace"><input type="text" data-ff="unit" value="${esc(f.unit || "")}" placeholder="unit" style="width:5em" title="Its unit (Nos, Sft, bags…)"><button class="btn sm dng" type="button" data-fdel="${i}" title="Remove this column">&#10005;</button></div>`).join(""); };
+  const settings = () => { const lk = look(), types0 = [...B.querySelectorAll("[data-lgty]")].filter(x => x.checked).map(x => x.dataset.lgty), q = id => B.querySelector("#" + id);
+    return {look: lk, title: q("lgTitle").value.trim() || "Takeoff Legend", fontSize: Math.max(5, Math.min(32, +q("lgFs").value || 9)), rowH: Math.max(8, Math.min(60, +q("lgRh").value || 18)), precision: +q("lgPrec").value || 0, sort: q("lgSort").value,
+      border: q("lgBorder").value, headerFill: q("lgHead").value, fill: q("lgFill").value, showTitle: q("lgTitleOn").checked, showHeaders: q("lgHeadOn").checked, columns: tbl.slice(), colWidths: legendWidths(tbl, Math.max(15, Math.min(70, +q("lgDw").value || 31)) / 100),
+      psCols: ps.slice(), colLabels: Object.assign({}, labels), fcols: JSON.parse(JSON.stringify(fcols)), totals: q("lgTot").checked, group: q("lgGroup").value, types0, types: types0.length === 3 ? [] : types0, hideZero: q("lgZero").checked, floor: q("lgFloor") ? q("lgFloor").value : (m.floor || ""), all}; };
+  const tmp = () => { const s = settings(), o = Object.assign({}, m, s); if (s.all) delete o.conds; return o; };
+  draw(); drawF();
+  const lk0 = B.querySelector("#lgLook"); let lkWas = lk0.value; lk0.onchange = () => { const sw = lk0.value !== lkWas; lkWas = lk0.value; if (sw) { B.querySelector("#lgHeadOn").checked = lk0.value === "table"; if (lk0.value === "table") B.querySelector("#lgTitleOn").checked = true; } draw(); };
+  box.onchange = read; box.oninput = read;
+  box.onclick = e => { const b = e.target.closest("[data-lgm]"); if (!b) return; const el = b.closest(".lgc"); if (+b.dataset.lgm < 0 && el.previousElementSibling) el.parentNode.insertBefore(el, el.previousElementSibling); else if (+b.dataset.lgm > 0 && el.nextElementSibling) el.parentNode.insertBefore(el.nextElementSibling, el); read(); };
+  fb.oninput = e => { const r = e.target.closest("[data-fi]"), k2 = e.target.dataset.ff; if (r && k2) fcols[+r.dataset.fi][k2] = e.target.value; };
+  fb.onchange = e => { if (e.target.dataset.ff === "name") { read(); draw(); } };
+  fb.onclick = e => { const d = e.target.closest("[data-fdel]"); if (!d) return; read(); const f = fcols.splice(+d.dataset.fdel, 1)[0]; if (f) { tbl = tbl.filter(x => x !== "f:" + f.id); ps = ps.filter(x => x !== "f:" + f.id); delete labels["f:" + f.id]; } drawF(); draw(); };
+  B.querySelector("#lgFAdd").onclick = () => { read(); const f = {id: uid("F").slice(-6), name: "Formula " + (fcols.length + 1), expr: "Q", unit: ""}; fcols.push(f); tbl.push("f:" + f.id); ps.push("f:" + f.id); drawF(); draw(); const el = fb.querySelector(`[data-fi="${fcols.length - 1}"] [data-ff="name"]`); if (el) { el.focus(); el.select(); } };
+  B.querySelector("#lgSmart").onclick = () => { read(); const L = legSmart(legendRows(tmp()), look()); if (look() === "ps") ps = L; else tbl = L; draw(); const D = legColDefs({fcols}); say("✨ Smart columns: " + (L.filter(id => !(look() === "ps" && LEG_IMPLICIT_PS.includes(id))).map(id => (D.find(d => d.id === id) || {label: id}).label).join(", ") || "the name and quantity only — nothing else suits these conditions")); };
+  const go = () => { read(); const q = id => B.querySelector("#" + id), st = {look: look(), tbl: tbl.slice(), ps: ps.slice(), totals: q("lgTot").checked, group: q("lgGroup").value, sort: q("lgSort").value, types: [...B.querySelectorAll("[data-lgty]")].filter(x => x.checked).map(x => x.dataset.lgty),
+      hideZero: q("lgZero").checked, prec: +q("lgPrec").value, fs: +q("lgFs").value, title: q("lgTitle").value, rows: legendRows(tmp())};
+    const said = legAsk(q("lgAsk").value, st, legColDefs({fcols})); if (!said.length) { say("Nothing understood — try: add wall area and thickness · remove rate · totals · group by type · sort by quantity · only areas · smart columns"); return; }
+    if (st.look !== look()) { q("lgLook").value = st.look; lk0.onchange(); }
+    tbl = st.tbl; ps = st.ps; q("lgTot").checked = !!st.totals; q("lgGroup").value = st.group || ""; q("lgSort").value = st.sort; q("lgZero").checked = !!st.hideZero; q("lgPrec").value = String(st.prec); q("lgFs").value = String(st.fs); q("lgTitle").value = st.title;
+    const T2 = new Set(st.types && st.types.length ? st.types : ["area", "linear", "count"]); B.querySelectorAll("[data-lgty]").forEach(x => { x.checked = T2.has(x.dataset.lgty); });
+    draw(); say("Done: " + said.join(" · ") + " — Save to keep it"); };
+  B.querySelector("#lgAskGo").onclick = go; B.querySelector("#lgAsk").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); go(); } };
+  if (B.querySelector("#lgAll")) B.querySelector("#lgAll").onclick = e => { all = true; e.target.disabled = true; e.target.textContent = "Every condition is listed again (on Save)"; };
+  B.querySelector("#lgCopy").onclick = () => { read(); const tsv = legTable(tmp()).map(r => r.join("\t")).join("\n"); (navigator.clipboard ? navigator.clipboard.writeText(tsv) : Promise.reject()).then(() => toast("Legend copied as a table — paste it into Excel", 2500), () => toast("Could not copy — use CSV", 3000)); };
+  B.querySelector("#lgCsv").onclick = () => { read(); const csv = legTable(tmp()).map(r => r.map(s => /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s).join(",")).join("\r\n"); saveBlob(new Blob(["\ufeff" + csv], {type: "text/csv"}), fileBase() + "_legend.csv"); };
+  const v = await pr; if (!v) return;
+  mutate(() => { const a = v.all; delete v.all; delete v.types0; Object.assign(m, v); if (!m.floor) delete m.floor; if (a) delete m.conds; if (!m.group) delete m.group; if (!m.types.length) delete m.types; if (!m.totals) delete m.totals; if (!m.hideZero) delete m.hideZero;
+    if (!m.fcols.length) delete m.fcols; if (!Object.keys(m.colLabels).length) delete m.colLabels; if (legPS(m)) legPsWiden(m); legendFit(m); }, "Edit Legend");
+}
 /* the choices of a legend's Floors: the whole sheet, split by floor, or each floor of its sheet */
 function legendFloorOpts(m){ const cur = String(m.floor || ""), fls = floorsOf(keyOf(m.file, m.page)).map(f => f.name);
   if (cur && cur !== "*" && !fls.some(n => flLow(n) === flLow(cur))) fls.push(cur);
@@ -18960,7 +19190,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
   if (location.protocol !== "file:") learnSeedLoad().finally(() => learnTeamLoad());   // the reference method, then the team's learned method, added to this browser's
-  window.zdTakeoff = {roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {legendSvg, legVal, legAsk, legSmart, legTable, legendCols, editLegend, roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, openWb, wbMod, wbApi, condQ, billQ, billQty, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
