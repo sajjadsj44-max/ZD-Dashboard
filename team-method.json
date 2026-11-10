@@ -1,6 +1,6 @@
 {
  "about": "PDF Takeoff: how this team takes off, learned by the takeoff agent in every browser of the team and merged by tools/learn_archive.py. Item names, heights, room kinds and counts only.",
- "at": "2026-11-10T02:05:02.824Z",
+ "at": "2026-11-11T00:13:27.314Z",
  "projects": {
   "vvvcknb84sev:17a5e3f04bec": {
    "at": "2026-10-31T10:49:48.438Z",
@@ -38,6 +38,87 @@
     }
    },
    "sent": "2026-10-31T10:50:48.721Z"
+  },
+  "vvvcknb84sev:21c2c43e10ee": {
+   "at": "2026-11-11T00:12:27.047Z",
+   "conds": {
+    "brick masonry 9\" wall|linear|cft": {
+     "ded": 1.0,
+     "faces": 1.0,
+     "h": 10.0,
+     "name": "Brick masonry 9\" wall",
+     "t": 0.75,
+     "type": "linear",
+     "unit": "cft"
+    },
+    "floor area|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "Floor area",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    }
+   },
+   "rooms": {
+    "BATH": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "BED ROOM": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 2,
+       "per": []
+      }
+     },
+     "n": 2
+    },
+    "KITCHEN": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "OPEN": {
+     "items": {
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "ROOM": {
+     "items": {
+      "brick masonry 9\" wall|linear|cft": {
+       "how": "wall",
+       "n": 1,
+       "per": []
+      },
+      "floor area|area|Sft": {
+       "how": "area",
+       "n": 2,
+       "per": []
+      }
+     },
+     "n": 2
+    }
+   },
+   "sent": "2026-11-11T00:13:27.314Z"
   },
   "vvvcknb84sev:8077edc44061": {
    "at": "2026-11-02T04:53:42.437Z",
@@ -235,8 +316,17 @@
    "sent": "2026-11-02T06:44:42.313Z"
   },
   "vvyxastie8va:68f4cdf27e08": {
-   "at": "2026-11-04T12:01:30.212Z",
+   "at": "2026-11-10T10:57:08.725Z",
    "conds": {
+    "balcony area flooring|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "Balcony Area Flooring",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    },
     "floor|area|Sft": {
      "ded": 0.0,
      "faces": 1.0,
@@ -248,7 +338,17 @@
     }
    },
    "rooms": {
-    "BED ROOM": {
+    "BALCONY": {
+     "items": {
+      "balcony area flooring|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "LOUNGE": {
      "items": {
       "floor|area|Sft": {
        "how": "area",
@@ -259,10 +359,10 @@
      "n": 1
     }
    },
-   "sent": "2026-11-04T12:20:26.774Z"
+   "sent": "2026-11-10T10:57:39.095Z"
   },
   "vvyymq5pforq:dfba2afc9a0b": {
-   "at": "2026-11-03T04:21:20.239Z",
+   "at": "2026-11-10T08:23:58.994Z",
    "conds": {
     "floor area|area|Sft": {
      "ded": 0.0,
@@ -286,7 +386,7 @@
      "n": 2
     }
    },
-   "sent": "2026-11-03T04:21:22.590Z"
+   "sent": "2026-11-10T08:24:56.531Z"
   },
   "vvzmfdqwuj5r:087bd7715ee2": {
    "at": "2026-11-01T07:32:47.010Z",
@@ -633,12 +733,12 @@
  },
  "senders": {
   "vvvcknb84sev": {
-   "at": "2026-11-02T07:04:41.602Z",
+   "at": "2026-11-10T23:43:27.878Z",
    "missed": {},
    "rejects": {
     "BATH": {
      "del": 0,
-     "made": 19
+     "made": 22
     },
     "BED ROOM": {
      "del": 0,
@@ -650,27 +750,32 @@
     },
     "KITCHEN": {
      "del": 0,
-     "made": 9
+     "made": 12
     },
     "ROOM": {
      "del": 0,
-     "made": 10
+     "made": 19
     },
     "STORE": {
      "del": 0,
-     "made": 5
+     "made": 10
     }
    },
    "words": {}
   },
   "vvyxastie8va": {
-   "at": "2026-11-04T12:20:26.774Z",
+   "at": "2026-11-10T04:23:58.249Z",
    "missed": {
-    "PASSAGE": 2
+    "BALCONY": 1,
+    "KITCHEN": 1,
+    "LOUNGE": 1,
+    "PASSAGE": 3,
+    "SER": 1,
+    "STAIR": 1
    },
    "rejects": {
     "BALCONY": {
-     "del": 0,
+     "del": 1,
      "made": 11
     },
     "BATH": {
@@ -686,7 +791,7 @@
      "made": 3
     },
     "KITCHEN": {
-     "del": 0,
+     "del": 1,
      "made": 8
     },
     "LIFT": {
@@ -694,7 +799,7 @@
      "made": 4
     },
     "LOUNGE": {
-     "del": 0,
+     "del": 1,
      "made": 6
     },
     "PASSAGE": {
@@ -718,12 +823,63 @@
      "made": 2
     }
    },
-   "words": {}
+   "words": {
+    "SER": 1
+   }
   },
   "vvyymq5pforq": {
-   "at": "2026-10-31T14:07:53.258Z",
+   "at": "2026-11-10T08:24:56.531Z",
    "missed": {},
-   "rejects": {},
+   "rejects": {
+    "BALCONY": {
+     "del": 0,
+     "made": 24
+    },
+    "BATH": {
+     "del": 0,
+     "made": 30
+    },
+    "BED ROOM": {
+     "del": 0,
+     "made": 28
+    },
+    "CARGO LIFT": {
+     "del": 0,
+     "made": 1
+    },
+    "DRESS": {
+     "del": 0,
+     "made": 19
+    },
+    "DUCT": {
+     "del": 0,
+     "made": 1
+    },
+    "ELECTRIC ROOM": {
+     "del": 0,
+     "made": 1
+    },
+    "KITCHEN": {
+     "del": 0,
+     "made": 16
+    },
+    "LIFT": {
+     "del": 0,
+     "made": 2
+    },
+    "LOUNGE": {
+     "del": 0,
+     "made": 7
+    },
+    "STAIR": {
+     "del": 0,
+     "made": 3
+    },
+    "STORE": {
+     "del": 0,
+     "made": 2
+    }
+   },
    "words": {}
   },
   "vvzj1wppjp8d": {
