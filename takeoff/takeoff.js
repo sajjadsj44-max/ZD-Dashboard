@@ -10408,7 +10408,7 @@ function autoMenu(){
     {t: "Full takeoff — rooms, walls, doors / windows, finishes…", fn: ag("agFull")},
     {t: "Rooms — every named room on this page", fn: ag("agRooms"), dis: !pg}, {t: "Rooms in a window — box part of the plan", fn: autoWindowUI, dis: !pg},
     {t: "Trace the whole floor — from the drawing's wall layers", fn: traceFloorUI, dis: !pg}, {t: "Apartment — one unit by its number…", fn: ag("agUnit"), dis: !pg}, {sep: 1},
-    {t: "Walls — from their two face lines…", fn: ag("agWalls"), dis: !pg}, {t: "Beams — centre lines by width and beam mark…", fn: ag("agBeams"), dis: !pg || !$("agBeams")}, {t: "Block masonry — 4\" and 8\" with deductions and block count…", fn: ag("agBlock"), dis: !pg || !$("agBlock")},
+    {t: "Walls — from their two face lines…", fn: ag("agWalls"), dis: !pg}, {t: "Beams — centre lines by width and beam mark…", fn: ag("agBeams"), dis: !pg || !$("agBeams")}, {t: "Slabs — outline and openings deducted…", fn: ag("agSlabs"), dis: !pg || !$("agSlabs")}, {t: "Block masonry — 4\" and 8\" with deductions and block count…", fn: ag("agBlock"), dis: !pg || !$("agBlock")},
     {t: "Doors / windows — tags and schedules…", fn: ag("agTags"), dis: !pg}, {t: "Finishes — plaster, paint, skirting, ceiling per room…", fn: ag("agFin"), dis: !pg},
     {t: "Name rooms by contents (this page)", fn: nameRooms, dis: !pg}, {t: "Ceilings / floors by hatch pattern…", fn: () => hatchSplitDialog(), dis: !pg}, {t: "🧠 Apply learned skills — what your team takes off with each room", fn: () => learnApply("page"), dis: !pg}, {t: "🧠 Learned skills — how your team takes off…", fn: () => learnDialog()}, {t: "Count my symbols — WC, basin, light point… kept from Find similar", fn: () => symCountDialog()}, {sep: 1},
     {t: "Earthworks: spot levels — click in, or read those written…", fn: levelsMenu, dis: !pg}, {t: "Earthworks: cut / fill from the spot levels…", fn: () => cutFillDialog(), dis: !pg}, {sep: 1},
@@ -13854,7 +13854,7 @@ function wire(){
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
   $("aiDetails").onclick = () => agentCmd("drawing details");
-  $("agRooms").onclick = () => agentDo(() => agentCmd("measure all rooms")); $("agUnit").onclick = () => agentDo(unitDialog); $("agWalls").onclick = () => agentDo(wallsDialog); if ($("agBeams")) $("agBeams").onclick = () => agentDo(beamsDialog); if ($("agBlock")) $("agBlock").onclick = () => agentDo(blockMasonryDialog); $("agTags").onclick = () => agentDo(doorWinDialog);
+  $("agRooms").onclick = () => agentDo(() => agentCmd("measure all rooms")); $("agUnit").onclick = () => agentDo(unitDialog); $("agWalls").onclick = () => agentDo(wallsDialog); if ($("agBeams")) $("agBeams").onclick = () => agentDo(beamsDialog); if ($("agSlabs")) $("agSlabs").onclick = () => agentDo(slabsDialog); if ($("agBlock")) $("agBlock").onclick = () => agentDo(blockMasonryDialog); $("agTags").onclick = () => agentDo(doorWinDialog);
   $("agFull").onclick = () => agentDo(fullTakeoffDialog); $("agFin").onclick = () => agentDo(finishesDialog); $("agCheck").onclick = () => P.proj && agentDo(() => agentCheck("all"));
   document.querySelectorAll(".agStop").forEach(b => { b.onclick = agentStop; }); agStopUi();
   document.addEventListener("keydown", e => { if (e.key === "Escape" && AG.n && !$("dlgBack").classList.contains("on") && agentStop()) e.preventDefault(); }, true);
@@ -15997,6 +15997,7 @@ async function agentStep(text){
     let um = /(?:apartment|appartment|apt|unit|flat)\s*(?:no\.?|#)?\s*([0-9]{1,4}[a-z]?)/.exec(t) || /^\s*(?:measure\s+)?([0-9]{2,4}[a-z]?)\s*$/.exec(t);
     if (um) return agentUnit(um[1]);
     if (/\b(apartments?|units?|flats?)\b/.test(t)) return unitDialog();
+    if (/\bslabs?\b/.test(t) && !/block|masonry|brick|beam/.test(t)) return agentSlabsCmd(t);   // (slab outline and openings)
     if (/\bbeams?\s*(centre|center|c\/?l)\s*-?\s*lines?\b|\b(centre|center)\s*-?\s*lines?\s+of\s+(the\s+)?beams\b|\b(draw|find|mark|trace|take\s*off|measure)\s+(all\s+|the\s+|every\s+)?beams?\b|^\s*beams?(\s+(per|by)\s+(mark|prefix|floor))?\s*$/.test(t) && !/block|masonry|brick|deduct/.test(t)) return agentBeamsCmd(t);   // (a block-masonry sentence that names beams stays block masonry)
     if (/block\s*(work|masonry)|masonry\s*block|\bblocks?\b/.test(t)) return blockMasonryDialog();
     if (/\b(walls?|masonry|brick\w*|block\s*work)\b/.test(t)) return agentWallsCmd(t);
@@ -16825,6 +16826,178 @@ async function agentBeamsCmd(t){
   if (r.error) return aiLog("err", esc(r.error));
   beamReport(r);
 }
+/* ------------------------------------------------------------------ ▦ slab agent: every slab's outline and its openings, deducted.
+   Learned from the JADE BOQ backup drawing 06 Slab.dwg (the QS's own Slab Line outlines and 608 Slab Deduction polylines):
+   - the outline runs on the outer face of the perimeter beams, columns and walls (every one of its 139 vertices lies on such a line);
+     columns are not deducted (none of the 608 deductions is a column);
+   - deducted: duct boxes (426, the boxes on the duct layer, crossed or not, down to 0.6 Sft), lift shafts (inside the shear walls, to their
+     inner faces), stair openings (the bay round the stair, to the beams' inner faces), voids and double-height openings (the bay with the
+     note); each is its own cut-out row;
+   - a slab per floor plan, named from the plan's title (FIRST FLOOR SLAB, ROOF SLAB …), T from its note (SLAB THICKNESS = 6").
+   How: the beams', columns' and walls' lines on a fine grid (o.res in, 2" by default), the outside flooded in from the sheet's edge; what
+   is left traced and every side snapped back onto the line it runs along (so the corners are the drawing's, not the grid's). An opening:
+   the bay round its note (or the stair's treads, UP / DN), flooded the same way. slabCore(segs, kind 1 beam edge | 2 column / wall |
+   3 duct | 4 stair, texts, k, o) -> {slabs: [{pts, sft, title, t, opens: [{pts, sft, what}]}]} */
+const SLAB_OPEN_RX = /\b(VOID|DOUBLE\s*-?\s*HEIGHT|O\.?\s*T\.?\s*S\.?|OPEN\s+TO\s+SKY|CUT\s*-?\s*OUT|SHAFT|LIFT|ELEVATOR|STAIR(S|CASE|\s*WELL)?|SKY\s*-?\s*LIGHT|OPENING|LIGHT\s*WELL|DUCT)\b/i;
+const SLAB_STAIR_TXT = /^\s*(UP|DN\.?|DOWN)\s*$/i, SLAB_TITLE_RX = /\b(SLAB|FLOOR\s+PLAN|FRAMING)\b/i, SLAB_T_RX = /SLAB\s*(?:THICKNESS|THK\.?)\s*[=:]?\s*(\d+(?:\.\d+)?)\s*["”]|(\d+(?:\.\d+)?)\s*["”]\s*(?:THICK|THK\.?)\s*(?:R\.?C\.?C\.?\s*)?SLAB/i;
+function slabLayers(g){   // -> {kind(i): 1 beam edge | 2 column / wall | 3 duct | 4 stair | 0, names} from the page's layers, or null
+  const L = g && g.layerIds && g.file && layerInfo(g.file); if (!L || !g.layerIds.length) return null;
+  const nm = g.layerIds.map(id => (L[id] && L[id].name) || ""), kd = nm.map(n => BEAM_CL_RX.test(n) || /slab|hatch|text|dim|grid|arrow/i.test(n) ? 0 : BEAM_LAYER_RX.test(n) ? 1 : /duct|shaft|o\.?t\.?s\b/i.test(n) ? 3 : /stair|step|tread/i.test(n) ? 4 : ["column", "wall"].includes(layerRole(n)) ? 2 : 0);
+  if (!kd.some(x => x === 1 || x === 2)) return null;
+  return {kind: i => { const li = g.segs[i][7]; return li >= 0 ? kd[li] : 0; }, names: [...new Set(nm.filter((n, i) => kd[i] === 1 || kd[i] === 2))]};
+}
+function slabCore(segs, kind, texts, k, o){
+  o = o || {}; const inch = k / 12, D = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const C = 12 * k, sg = new Map(), cellsOf = (x0, y0, x1, y1, fn) => { for (let x = Math.floor(Math.min(x0, x1) / C); x <= Math.floor(Math.max(x0, x1) / C); x++) for (let y = Math.floor(Math.min(y0, y1) / C); y <= Math.floor(Math.max(y0, y1) / C); y++) fn(x + "," + y); };
+  segs.forEach((s, i) => { if (!kind[i]) return; cellsOf(s[0], s[1], s[2], s[3], c => { let L = sg.get(c); if (!L) sg.set(c, L = []); L.push(i); }); });
+  const segsBox = (x0, y0, x1, y1) => { const out = new Set(); cellsOf(x0, y0, x1, y1, c => (sg.get(c) || []).forEach(i => out.add(i))); return [...out]; };
+  const pArea = P => Math.abs(P.reduce((s, p, i) => { const q = P[(i + 1) % P.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2 / k / k;
+  const inP = (p, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+  const mid = x => { const a = +x.r || 0, h = x.h || 6, w = x.w || 0.55 * h * String(x.s || "").length; return [x.x + Math.cos(a) * w / 2 + Math.sin(a) * h / 2, x.y + Math.sin(a) * w / 2 - Math.cos(a) * h / 2]; };
+  // the floor plans of the sheet: structure lines within 8 ft of each other, together
+  const par = segs.map((_, i) => i), find = i => { while (par[i] !== i) i = par[i] = par[par[i]]; return i; }, gap = 8 * k, gc = new Map();
+  segs.forEach((s, i) => { if (kind[i] !== 1 && kind[i] !== 2) return; for (let x = Math.floor((Math.min(s[0], s[2]) - gap) / gap); x <= Math.floor((Math.max(s[0], s[2]) + gap) / gap); x++) for (let y = Math.floor((Math.min(s[1], s[3]) - gap) / gap); y <= Math.floor((Math.max(s[1], s[3]) + gap) / gap); y++) { const kk = x + "," + y, j = gc.get(kk); if (j == null) gc.set(kk, i); else par[find(i)] = find(j); } });
+  const cl = new Map(); segs.forEach((s, i) => { if (kind[i] !== 1 && kind[i] !== 2) return; const r = find(i); let b = cl.get(r); if (!b) cl.set(r, b = [Infinity, Infinity, -Infinity, -Infinity, 0]);
+    b[0] = Math.min(b[0], s[0], s[2]); b[1] = Math.min(b[1], s[1], s[3]); b[2] = Math.max(b[2], s[0], s[2]); b[3] = Math.max(b[3], s[1], s[3]); b[4]++; });
+  const slabs = [];
+  for (const B of cl.values()) { if (B[4] < 8 || (B[2] - B[0]) * (B[3] - B[1]) < 40 * k * k) continue;
+    let px = (+o.res || 2) * inch; const mg = 6; let W = Math.ceil((B[2] - B[0]) / px) + 2 * mg, H = Math.ceil((B[3] - B[1]) / px) + 2 * mg;
+    while (W * H > 2e7) { px *= 1.3; W = Math.ceil((B[2] - B[0]) / px) + 2 * mg; H = Math.ceil((B[3] - B[1]) / px) + 2 * mg; }
+    const X0 = B[0] - mg * px, Y0 = B[1] - mg * px, toP = (x, y) => [X0 + x * px, Y0 + y * px], N = W * H, bar = new Uint8Array(N);   // 1: a beam's line, 2: a column's or a wall's
+    const ids = segsBox(B[0], B[1], B[2], B[3]);
+    ids.forEach(i => { const kd = kind[i]; if (kd !== 1 && kd !== 2) return; const s = segs[i], ax = (s[0] - X0) / px, ay = (s[1] - Y0) / px, bx = (s[2] - X0) / px, by = (s[3] - Y0) / px, n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) * 2));
+      for (let j = 0; j <= n; j++) { const x = Math.round(ax + (bx - ax) * j / n), y = Math.round(ay + (by - ay) * j / n); for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H) { const q = yy * W + xx; if (bar[q] !== 2) bar[q] = kd; } } } });
+    // floods on one stamp array: a region is its list of pixels (each flood touches only its own region)
+    const vis = new Int32Array(N), Q = new Int32Array(N); let stamp = 0;
+    const flood = seed => { stamp++; if (bar[seed] || vis[seed]) return null; let h = 0, t = 0; vis[seed] = stamp; Q[t++] = seed; let wall = 0, beam = 0, x0 = W, y0 = H, x1 = -1, y1 = -1;
+      while (h < t) { const p = Q[h++], x = p % W, y = (p - x) / W; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, y > 0 ? p - W : -1, y < H - 1 ? p + W : -1]) { if (q < 0) continue; const b = bar[q]; if (b) { if (b === 2) wall++; else beam++; continue; } if (!vis[q]) { vis[q] = stamp; Q[t++] = q; } } }
+      return {list: Q.slice(0, t), stamp, wall, beam, box: [x0, y0, x1, y1]}; };
+    // the outside: flooded in from the edge of the plan's box
+    const outS = []; for (let x = 0; x < W; x++) for (const p of [x, (H - 1) * W + x]) { const r = flood(p); if (r) outS.push(r.stamp); } for (let y = 0; y < H; y++) for (const p of [y * W, y * W + W - 1]) { const r = flood(p); if (r) outS.push(r.stamp); }
+    const outSet = new Set(outS), isOut = p => !bar[p] && outSet.has(vis[p]);
+    // a region's outline: its pixel-edge loop (in its own box), simplified, every side snapped onto the structure line it runs along
+    const traceBox = (inn, bx) => { const [x0, y0, x1, y1] = bx, nx = new Map(), K = (x, y) => y * (W + 1) + x, add = (a, b) => { let L = nx.get(a); if (!L) nx.set(a, L = []); L.push(b); };
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { if (!inn(x, y)) continue;
+        if (!inn(x, y - 1)) add(K(x, y), K(x + 1, y)); if (!inn(x + 1, y)) add(K(x + 1, y), K(x + 1, y + 1)); if (!inn(x, y + 1)) add(K(x + 1, y + 1), K(x, y + 1)); if (!inn(x - 1, y)) add(K(x, y + 1), K(x, y)); }
+      let best = null;
+      while (nx.size) { const s0 = nx.keys().next().value, loop = []; let v = s0, guard = 0;
+        do { const L = nx.get(v); if (!L) break; const w = L.pop(); if (!L.length) nx.delete(v); loop.push(v); v = w; } while (v !== s0 && ++guard < 4e6);
+        if (loop.length < 4) continue; const P0 = loop.map(c => [c % (W + 1), Math.floor(c / (W + 1))]), a = Math.abs(P0.reduce((s, p, i) => { const q = P0[(i + 1) % P0.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2;
+        if (!best || a > best.a) best = {P: P0, a}; }
+      if (!best) return null;
+      const P0 = best.P, keep = new Uint8Array(P0.length);
+      const dp = (i, j) => { let m = -1, dm = 0; const a = P0[i], b = P0[j % P0.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1e-9;
+        for (let q = i + 1; q < j; q++) { const c = P0[q % P0.length], d = Math.abs((b[0] - a[0]) * (a[1] - c[1]) - (a[0] - c[0]) * (b[1] - a[1])) / L; if (d > dm) { dm = d; m = q; } }
+        if (dm > 1.2 && m > 0) { keep[m % P0.length] = 1; dp(i, m); dp(m, j); } };
+      let far = 0; P0.forEach((p, i) => { if (D(p, P0[0]) > D(P0[far], P0[0])) far = i; }); keep[0] = keep[far] = 1; dp(0, far); dp(far, P0.length);
+      const Sx = P0.filter((_, i) => keep[i]).map(p => toP(p[0], p[1])); if (Sx.length < 3) return null;
+      const lines = Sx.map((a, i) => { const b = Sx[(i + 1) % Sx.length], L = D(a, b), u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L]; let b2 = null;
+        if (L >= 3 * px) segsBox(Math.min(a[0], b[0]) - 4 * px, Math.min(a[1], b[1]) - 4 * px, Math.max(a[0], b[0]) + 4 * px, Math.max(a[1], b[1]) + 4 * px).forEach(j => { if (kind[j] !== 1 && kind[j] !== 2) return;
+          const s = segs[j], l2 = Math.hypot(s[2] - s[0], s[3] - s[1]); if (l2 < 1e-9) return; const v = [(s[2] - s[0]) / l2, (s[3] - s[1]) / l2]; if (Math.abs(u[0] * v[1] - u[1] * v[0]) > 0.035) return;
+          const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], d = Math.abs((m[0] - s[0]) * v[1] - (m[1] - s[1]) * v[0]); if (d > 3.2 * px) return;   // (the traced side lies up to 3 px off its line: the line drawn a pixel thick each side, the simplifying)
+          const t0 = (s[0] - a[0]) * u[0] + (s[1] - a[1]) * u[1], t1 = (s[2] - a[0]) * u[0] + (s[3] - a[1]) * u[1], ov = Math.min(L, Math.max(t0, t1)) - Math.max(0, Math.min(t0, t1)); if (ov < 0.5 * L) return;
+          if (!b2 || d < b2.d) b2 = {d, p: [s[0], s[1]], v}; });
+        return b2 ? {p: b2.p, v: b2.v} : {p: a, v: u}; });
+      const out = Sx.map((a, i) => { const A = lines[(i - 1 + Sx.length) % Sx.length], Bq = lines[i], den = A.v[0] * Bq.v[1] - A.v[1] * Bq.v[0];
+        if (Math.abs(den) < 0.05) { const tt = (a[0] - Bq.p[0]) * Bq.v[0] + (a[1] - Bq.p[1]) * Bq.v[1]; return [Bq.p[0] + Bq.v[0] * tt, Bq.p[1] + Bq.v[1] * tt]; }
+        const tt = ((Bq.p[0] - A.p[0]) * Bq.v[1] - (Bq.p[1] - A.p[1]) * Bq.v[0]) / den, Xp = [A.p[0] + A.v[0] * tt, A.p[1] + A.v[1] * tt]; return D(Xp, a) <= 4 * px ? Xp : a; });
+      const clean = out.filter((p, i) => D(p, out[(i + 1) % out.length]) > 0.05 * inch); return clean.length >= 3 ? clean : null; };
+    const outline = traceBox((x, y) => x >= 0 && y >= 0 && x < W && y < H && !isOut(y * W + x), [0, 0, W - 1, H - 1]); if (!outline) continue; const sft = pArea(outline); if (sft < (+o.minSlab || 40)) continue;
+    const region = r => traceBox((x, y) => x >= 0 && y >= 0 && x < W && y < H && vis[y * W + x] === r.stamp && !bar[y * W + x], [Math.max(0, r.box[0] - 1), Math.max(0, r.box[1] - 1), Math.min(W - 1, r.box[2] + 1), Math.min(H - 1, r.box[3] + 1)]);
+    // openings: the bay round each note, a stair's UP / DN, the middle of a stair's treads, a shaft walled in; then the duct boxes
+    const pix = p => { const x = Math.round((p[0] - X0) / px), y = Math.round((p[1] - Y0) / px); return x >= 0 && y >= 0 && x < W && y < H ? y * W + x : -1; }, seeds = [];
+    texts.forEach(x => { const s = String(x.s || "").trim(); if (!s) return; const p = mid(x); if (p[0] < B[0] || p[0] > B[2] || p[1] < B[1] || p[1] > B[3]) return;
+      if (SLAB_STAIR_TXT.test(s)) seeds.push({p, what: "Stair opening"});
+      else if (SLAB_OPEN_RX.test(s) && s.length <= 30 && !/\bSLAB\b|\bPLAN\b|\bROOM\b|\bLEVEL\b|\bLOBBY\b|\bMACHINE\b/i.test(s)) seeds.push({p, what: /STAIR/i.test(s) ? "Stair opening" : /LIFT|ELEV/i.test(s) ? "Lift shaft" : /DOUBLE/i.test(s) ? "Double height" : /VOID/i.test(s) ? "Void" : /DUCT|SHAFT|O\.?\s*T\.?\s*S/i.test(s) ? "Shaft" : "Opening"}); });
+    if (o.stairs !== false) { const st = ids.filter(i => kind[i] === 4), g2 = new Map(); st.forEach(i => { const s = segs[i], c = Math.floor((s[0] + s[2]) / 2 / (4 * k)) + "," + Math.floor((s[1] + s[3]) / 2 / (4 * k)); if (!g2.has(c)) g2.set(c, []); g2.get(c).push(i); });
+      g2.forEach(L => { if (L.length < 6) return; let sx = 0, sy = 0; L.forEach(i => { const s = segs[i]; sx += s[0] + s[2]; sy += s[1] + s[3]; }); seeds.push({p: [sx / (2 * L.length), sy / (2 * L.length)], what: "Stair opening"}); }); }
+    const opens = [], maxO = (+o.maxOpen || 2500), done = new Set();
+    seeds.forEach(sd => { let p0 = pix(sd.p); if (p0 < 0) return; if (bar[p0]) { let f = -1; for (let r = 1; r <= 4 && f < 0; r++) for (let dy = -r; dy <= r && f < 0; dy++) for (let dx = -r; dx <= r && f < 0; dx++) { const q = p0 + dy * W + dx; if (q >= 0 && q < N && !bar[q]) f = q; } if (f < 0) return; p0 = f; }
+      if (isOut(p0) || done.has(vis[p0]) && vis[p0]) return; const r = vis[p0] ? null : flood(p0); if (!r) return; done.add(r.stamp); if (r.list.length * px * px / k / k > maxO) return;
+      const Pp = region(r); if (!Pp) return; const a = pArea(Pp); if (a < 1) return; opens.push({pts: Pp, sft: a, what: sd.what}); });
+    // a shaft walled in: a bay closed by walls (three quarters of its edge or more), small (lifts, ducts in the core)
+    // (not a wall's or a column's own body — the strip between a wall's faces, a column's outline, the ring of wall round the shafts: a
+    // shaft is 20 Sft or more, 3 ft wide or more on average (2 × area ÷ perimeter), with nothing walled inside it)
+    if (o.shafts !== false && sft > 1000) for (let p = 0; p < N; p++) { if (bar[p] || vis[p]) continue; const r = flood(p); if (!r) continue; const a = r.list.length * px * px / k / k;
+      if (a < 20 || a > (+o.maxShaft || 200) || r.wall < 0.75 * (r.wall + r.beam)) continue;
+      const Pp = region(r); if (!Pp) continue; const pa = pArea(Pp), per = Pp.reduce((s2, q, i) => s2 + D(q, Pp[(i + 1) % Pp.length]), 0) / k;
+      if (pa > 1.25 * a || 2 * pa / per < 2) continue;
+      opens.push({pts: Pp, sft: pa, what: "Lift / shaft"}); }
+    if (o.ducts !== false) { const du = ids.filter(i => kind[i] === 3), pd = new Map(), f3 = i => { while (pd.get(i) !== i) i = pd.get(i); return i; }; du.forEach(i => pd.set(i, i));
+      const sd = (a, b, c) => { const dx = c[0] - b[0], dy = c[1] - b[1], L2 = dx * dx + dy * dy, tt = L2 ? Math.max(0, Math.min(1, ((a[0] - b[0]) * dx + (a[1] - b[1]) * dy) / L2)) : 0; return Math.hypot(a[0] - b[0] - tt * dx, a[1] - b[1] - tt * dy); };
+      const cross = (s, q) => { const o1 = (q[0] - s[0]) * (s[3] - s[1]) - (q[1] - s[1]) * (s[2] - s[0]), o2 = (q[2] - s[0]) * (s[3] - s[1]) - (q[3] - s[1]) * (s[2] - s[0]), o3 = (s[0] - q[0]) * (q[3] - q[1]) - (s[1] - q[1]) * (q[2] - q[0]), o4 = (s[2] - q[0]) * (q[3] - q[1]) - (s[3] - q[1]) * (q[2] - q[0]); return o1 * o2 < 0 && o3 * o4 < 0; };
+      const touch = (s, q) => cross(s, q) || Math.min(sd([s[0], s[1]], [q[0], q[1]], [q[2], q[3]]), sd([s[2], s[3]], [q[0], q[1]], [q[2], q[3]]), sd([q[0], q[1]], [s[0], s[1]], [s[2], s[3]]), sd([q[2], q[3]], [s[0], s[1]], [s[2], s[3]])) <= inch;
+      const dg = new Map(), DC = 2 * k; du.forEach(i => { const s = segs[i]; for (let x = Math.floor((Math.min(s[0], s[2]) - inch) / DC); x <= Math.floor((Math.max(s[0], s[2]) + inch) / DC); x++) for (let y = Math.floor((Math.min(s[1], s[3]) - inch) / DC); y <= Math.floor((Math.max(s[1], s[3]) + inch) / DC); y++) { const kk = x + "," + y; if (!dg.has(kk)) dg.set(kk, []); dg.get(kk).push(i); } });
+      dg.forEach(L => { for (let a = 0; a < L.length; a++) for (let b = a + 1; b < L.length; b++) { const i = L[a], j = L[b]; if (f3(i) !== f3(j) && touch(segs[i], segs[j])) pd.set(f3(i), f3(j)); } });
+      const comp = new Map(); du.forEach(i => { const r = f3(i); if (!comp.has(r)) comp.set(r, []); comp.get(r).push(i); });
+      comp.forEach(L => { const pts = []; L.forEach(i => { const s = segs[i]; pts.push([s[0], s[1]], [s[2], s[3]]); }); if (pts.length < 4) return;   // (a box's X alone is enough: its four ends are the box's corners)
+        pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]); const cr = (O, A, Bb) => (A[0] - O[0]) * (Bb[1] - O[1]) - (A[1] - O[1]) * (Bb[0] - O[0]), lo = [], hi = [];
+        pts.forEach(p => { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }); for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (hi.length >= 2 && cr(hi[hi.length - 2], hi[hi.length - 1], p) <= 0) hi.pop(); hi.push(p); }
+        const Hh = lo.slice(0, -1).concat(hi.slice(0, -1)); if (Hh.length < 3) return; const a = pArea(Hh); if (a < (+o.minDed || 0) || a > 1500) return;
+        const c = [Hh.reduce((s, p) => s + p[0], 0) / Hh.length, Hh.reduce((s, p) => s + p[1], 0) / Hh.length]; if (!inP(c, outline) || opens.some(op => inP(c, op.pts))) return;
+        opens.push({pts: Hh, sft: a, what: "Duct"}); }); }
+    // the slab's name and thickness: the title written under (or over) its plan, the thickness note nearest it
+    const dB = p => Math.hypot(Math.max(B[0] - p[0], 0, p[0] - B[2]), Math.max(B[1] - p[1], 0, p[1] - B[3]));
+    const tit = texts.filter(x => SLAB_TITLE_RX.test(x.s || "") && String(x.s).length > 8 && !SLAB_T_RX.test(x.s)).map(x => ({x, d: dB(mid(x))})).filter(z => z.d < 40 * k).sort((a, b) => a.d - b.d)[0];
+    const th = texts.filter(x => SLAB_T_RX.test(x.s || "")).map(x => ({x, d: dB(mid(x))})).filter(z => z.d < 60 * k).sort((a, b) => a.d - b.d)[0];
+    const title = tit ? String(tit.x.s).replace(/%%[uUoO]/g, "").replace(/\\[A-Za-z][^;]*;/g, "").replace(/\s+/g, " ").trim() : "";
+    if (!title && !o.rebar && slabs.some(s2 => Math.abs(s2.sft - sft) <= 0.003 * sft)) { (slabs.skipped = slabs.skipped || []).push("a repeat of a slab already traced, with no title of its own (" + Math.round(sft) + " Sft — a reinforcement or key plan of the same floor)"); continue; }
+    const mt = th && SLAB_T_RX.exec(th.x.s), tIn = mt ? +(mt[1] || mt[2]) : 0;
+    slabs.push({pts: outline, sft, title, t: tIn / 12, opens, box: B.slice(0, 4)}); }
+  return {slabs, skipped: slabs.skipped || []};
+}
+function slabName(s){ const m = /\(([^)]*SLAB[^)]*)\)/i.exec(s.title || "") || /((?:[A-Z0-9&.]+\s+){0,4}(?:FLOOR\s+)?SLAB)/i.exec(s.title || ""); return (m ? m[1].trim().replace(/\b\w/g, c => c.toUpperCase()).replace(/\B\w/g, c => c.toLowerCase()) : "Slab"); }
+function slabsAgent(o){
+  o = o || {}; const k = curScale(); if (!k) return {error: "Set the page scale first (K) — an AutoCAD drawing has it already."};
+  const g = S.geo[S.key]; if (!g || !g.segs.length) return {error: "This page has no vector lines (scanned?) — the slab cannot be traced from its beams and walls."};
+  const Ly = slabLayers(g); if (!Ly) return {error: "No beam, column or wall layer on this page — the slab agent traces the slab from them (an AutoCAD drawing, or a PDF exported with layers)."};
+  // (the structure's layers are read even when switched off for the view: hiding the beams to see the slab does not take them away)
+  const rect = o.page ? null : (o.rect || viewRect()), ids = g.segs.map((_, i) => i).filter(i => { if (!rect) return true; const q = g.segs[i]; return Math.max(q[0], q[2]) >= rect[0] && Math.min(q[0], q[2]) <= rect[2] && Math.max(q[1], q[3]) >= rect[1] && Math.min(q[1], q[3]) <= rect[3]; });
+  const segs = [], kind = []; ids.forEach(i => { const kd = Ly.kind(i); if (!kd) return; const q = g.segs[i]; if (kd <= 2 && (q[4] & 9)) return; segs.push([q[0], q[1], q[2], q[3], q[4]]); kind.push(kd); });
+  const T = S.texts[S.key] || [], R = slabCore(segs, kind, T, k, o);
+  if (!R.slabs.length) return {error: "No slab traced " + (rect ? "in this view" : "on this page") + " — the beams, columns and walls must close round it."};
+  const made = []; let gross = 0, ded = 0, nOpen = 0;
+  mutate(() => {
+    P.proj.items = P.proj.items.filter(i => !(i.slabAuto && i.file === S.fileId && i.page === S.pageNo && (!rect || i.pts.every(q => q[0] >= rect[0] && q[0] <= rect[2] && q[1] >= rect[1] && q[1] <= rect[3]))));
+    R.slabs.sort((a, b) => a.box[0] - b.box[0] || a.box[1] - b.box[1]).forEach((s, n) => { const base = o.one ? "Slab" : slabName(s), tt = s.t || (+o.t > 0 ? +o.t : 0), nm = base + (tt ? " " + f3(tt * 12).replace(/\.?0+$/, "") + "\"" : "") + (o.one ? "" : R.slabs.filter(x => slabName(x) === base).length > 1 ? " (" + (n + 1) + ")" : "");
+      let c = P.proj.conds.find(x => x.type === "area" && x.name === nm);
+      if (!c) { c = {id: uid("C"), name: nm, type: "area", unit: "Sft", color: COLORS[(P.proj.conds.length + made.length) % COLORS.length], h: "", t: tt || "", faces: 1, dedMin: 0, group: "Slabs"}; P.proj.conds.push(c); }
+      P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: s.pts, nos: 1, ai: true, slabAuto: true, label: (s.title ? slabName(s) : "Slab") + " — outline"});
+      s.opens.forEach(op => { P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "ded", pts: op.pts, nos: 1, ai: true, slabAuto: true, label: op.what}); });
+      const d = s.opens.reduce((a, op) => a + op.sft, 0); gross += s.sft; ded += d; nOpen += s.opens.length;
+      const by = {}; s.opens.forEach(op => { by[op.what] = (by[op.what] || 0) + 1; });
+      made.push({cond: nm, id: c.id, gross_sft: +s.sft.toFixed(2), deducted_sft: +d.toFixed(2), net_sft: +(s.sft - d).toFixed(2), openings: s.opens.length, by, t_in: tt ? +(tt * 12).toFixed(2) : 0}); });
+  }, "Slab outlines and openings");
+  if (made[0]) S.cond = made[0].id; refresh();
+  return {slabs: made.length, gross_sft: +gross.toFixed(2), deducted_sft: +ded.toFixed(2), net_sft: +(gross - ded).toFixed(2), openings: nOpen, conditions: made, skipped: R.skipped, scope: rect ? "view" : "page"};
+}
+async function slabsDialog(){
+  if (!P.proj || !S.page) return aiLog("err", "Open a drawing page first.");
+  if (!curScale()) return aiLog("err", "Set the page scale first (K).");
+  const v = await ask("▦ Slab outline and openings", `<p>Traces every slab's <b>outline</b> on the outer face of its perimeter beams, columns and walls, and marks its <b>openings</b> as cut-outs: duct boxes, lift shafts, stair openings, voids and double-height openings (each its own row, as the JADE slab backup is taken off). Columns are not deducted.</p>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Conditions</label><select id="slG"><option value="">A slab each, named from its plan title (First Floor Slab, Roof Slab …)</option><option value="one">All in one condition: Slab</option></select></div>
+      <div class="fg"><label>Slab thickness (in) — when no note gives it</label><input type="text" id="slT" placeholder="e.g. 6"></div>
+      <div class="fg"><label>Smallest duct deducted (Sft)</label><input type="text" id="slMin" value="0"></div>
+      <div class="fg"><label>Largest opening (Sft)</label><input type="text" id="slMax" value="2500"></div>
+      <div class="fg"><label>Grid (in) — finer is slower</label><input type="text" id="slRes" value="2"></div>
+      <div class="fg w2"><label><input type="checkbox" id="slDu" style="width:auto" checked> Deduct duct boxes</label> <label><input type="checkbox" id="slSt" style="width:auto" checked> Deduct stair openings (from the stair's treads, UP / DN)</label></div>
+      <div class="fg w2"><label><input type="checkbox" id="slP" style="width:auto" checked> Whole page (every floor plan on the sheet)</label></div></div>
+    <p class="small" style="margin-top:6px">Openings are found from their notes (VOID, DOUBLE HEIGHT, LIFT, STAIR, SHAFT, OTS, OPEN TO SKY, CUT OUT), a stair's treads and the duct layer. All are marked AI — check them; run it again to replace what it drew.</p>`, "Trace slabs",
+    () => { const t = $("slT").value.trim() ? +$("slT").value : 0, mn = +$("slMin").value || 0, mx = +$("slMax").value || 2500, rs = +$("slRes").value || 2; if (isNaN(t) || t < 0) return "The thickness is in inches"; if (!(rs >= 0.5 && rs <= 12)) return "The grid is 0.5 to 12 inches";
+      return {one: $("slG").value === "one", t: t / 12, minDed: mn, maxOpen: mx, res: rs, ducts: $("slDu").checked, stairs: $("slSt").checked, page: $("slP").checked}; });
+  if (!v) return;
+  const r = await areaThen("slabs", async () => { busy("Tracing slabs…"); await new Promise(r2 => setTimeout(r2, 20)); try { return slabsAgent(areaOf() ? Object.assign(v, {page: true}) : v); } finally { busy(""); } });
+  if (r.error === "cancelled") return;
+  if (r.error) return aiLog("err", esc(r.error));
+  slabReport(r);
+}
+function slabReport(r){
+  aiLog("tool", `▦ <b>${r.slabs} slab${r.slabs === 1 ? "" : "s"}</b>: gross <b>${f2(uV(r.gross_sft, "Sft"))} ${uL("Sft")}</b> − ${r.openings} opening${r.openings === 1 ? "" : "s"} ${f2(uV(r.deducted_sft, "Sft"))} = net <b>${f2(uV(r.net_sft, "Sft"))} ${uL("Sft")}</b>${r.scope === "view" ? " (the part on screen)" : ""}<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px"><tr><th align="left">Slab</th><th align="right">Gross</th><th align="right">Openings</th><th align="right">Net</th></tr>${r.conditions.map(c => `<tr><td>${esc(c.cond)}<div class="small" style="color:var(--muted)">${esc(Object.entries(c.by).map(([w, n]) => n + " " + w.toLowerCase()).join(", "))}</div></td><td align="right">${f2(uV(c.gross_sft, "Sft"))}</td><td align="right">${c.openings} · ${f2(uV(c.deducted_sft, "Sft"))}</td><td align="right">${f2(uV(c.net_sft, "Sft"))}</td></tr>`).join("")}</table>`);
+  if (r.skipped && r.skipped.length) aiLog("bot", "Left out: " + r.skipped.length + " " + esc(r.skipped[0]) + (r.skipped.length > 1 ? " (and " + (r.skipped.length - 1) + " more)" : "") + ".");
+  aiLog("bot", "Outlines and openings are marked AI — check them on the drawing. " + (r.conditions.some(c => !c.t_in) ? "Give a slab its thickness T (✎) to get its cft." : "The slab thickness came from the drawing's note: the cft is on the sheet."));
+}
+async function agentSlabsCmd(t){ const r = slabsAgent({page: !/\b(view|screen|here)\b/.test(t), one: /\bone\b|\bsingle\b/.test(t)}); if (r.error) return aiLog("err", esc(r.error)); slabReport(r); }
 /* ------------------------------------------------------------------ 🧱 block masonry, the QS way (learned from a marked-up
    Bluebeam block-work takeoff and its working sheet): every wall run on its centre line, by block —
      4" walls → Block masonry 4"x8"x12" · 8" walls with outside, a balcony, a courtyard or an open-to-sky / look-below void
@@ -19401,7 +19574,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
   if (location.protocol !== "file:") learnSeedLoad().finally(() => learnTeamLoad());   // the reference method, then the team's learned method, added to this browser's
-  window.zdTakeoff = {beamsAgent, findBeams, beamCore, beamLayers, legendSvg, legVal, legAsk, legSmart, legTable, legendCols, editLegend, roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {slabsAgent, slabCore, slabLayers, beamsAgent, findBeams, beamCore, beamLayers, legendSvg, legVal, legAsk, legSmart, legTable, legendCols, editLegend, roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, openWb, wbMod, wbApi, condQ, billQ, billQty, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
