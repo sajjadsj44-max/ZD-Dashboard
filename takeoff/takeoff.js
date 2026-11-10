@@ -10404,7 +10404,7 @@ function autoMenu(){
     {t: "Full takeoff — rooms, walls, doors / windows, finishes…", fn: ag("agFull")},
     {t: "Rooms — every named room on this page", fn: ag("agRooms"), dis: !pg}, {t: "Rooms in a window — box part of the plan", fn: autoWindowUI, dis: !pg},
     {t: "Trace the whole floor — from the drawing's wall layers", fn: traceFloorUI, dis: !pg}, {t: "Apartment — one unit by its number…", fn: ag("agUnit"), dis: !pg}, {sep: 1},
-    {t: "Walls — from their two face lines…", fn: ag("agWalls"), dis: !pg}, {t: "Block masonry — 4\" and 8\" with deductions and block count…", fn: ag("agBlock"), dis: !pg || !$("agBlock")},
+    {t: "Walls — from their two face lines…", fn: ag("agWalls"), dis: !pg}, {t: "Beams — centre lines by width and beam mark…", fn: ag("agBeams"), dis: !pg || !$("agBeams")}, {t: "Block masonry — 4\" and 8\" with deductions and block count…", fn: ag("agBlock"), dis: !pg || !$("agBlock")},
     {t: "Doors / windows — tags and schedules…", fn: ag("agTags"), dis: !pg}, {t: "Finishes — plaster, paint, skirting, ceiling per room…", fn: ag("agFin"), dis: !pg},
     {t: "Name rooms by contents (this page)", fn: nameRooms, dis: !pg}, {t: "Ceilings / floors by hatch pattern…", fn: () => hatchSplitDialog(), dis: !pg}, {t: "🧠 Apply learned skills — what your team takes off with each room", fn: () => learnApply("page"), dis: !pg}, {t: "🧠 Learned skills — how your team takes off…", fn: () => learnDialog()}, {t: "Count my symbols — WC, basin, light point… kept from Find similar", fn: () => symCountDialog()}, {sep: 1},
     {t: "Earthworks: spot levels — click in, or read those written…", fn: levelsMenu, dis: !pg}, {t: "Earthworks: cut / fill from the spot levels…", fn: () => cutFillDialog(), dis: !pg}, {sep: 1},
@@ -13850,7 +13850,7 @@ function wire(){
   $("aiCopy").onclick = () => freeCopy();
   $("aiImport").onclick = () => freeImport();
   $("aiDetails").onclick = () => agentCmd("drawing details");
-  $("agRooms").onclick = () => agentDo(() => agentCmd("measure all rooms")); $("agUnit").onclick = () => agentDo(unitDialog); $("agWalls").onclick = () => agentDo(wallsDialog); if ($("agBlock")) $("agBlock").onclick = () => agentDo(blockMasonryDialog); $("agTags").onclick = () => agentDo(doorWinDialog);
+  $("agRooms").onclick = () => agentDo(() => agentCmd("measure all rooms")); $("agUnit").onclick = () => agentDo(unitDialog); $("agWalls").onclick = () => agentDo(wallsDialog); if ($("agBeams")) $("agBeams").onclick = () => agentDo(beamsDialog); if ($("agBlock")) $("agBlock").onclick = () => agentDo(blockMasonryDialog); $("agTags").onclick = () => agentDo(doorWinDialog);
   $("agFull").onclick = () => agentDo(fullTakeoffDialog); $("agFin").onclick = () => agentDo(finishesDialog); $("agCheck").onclick = () => P.proj && agentDo(() => agentCheck("all"));
   document.querySelectorAll(".agStop").forEach(b => { b.onclick = agentStop; }); agStopUi();
   document.addEventListener("keydown", e => { if (e.key === "Escape" && AG.n && !$("dlgBack").classList.contains("on") && agentStop()) e.preventDefault(); }, true);
@@ -15993,6 +15993,7 @@ async function agentStep(text){
     let um = /(?:apartment|appartment|apt|unit|flat)\s*(?:no\.?|#)?\s*([0-9]{1,4}[a-z]?)/.exec(t) || /^\s*(?:measure\s+)?([0-9]{2,4}[a-z]?)\s*$/.exec(t);
     if (um) return agentUnit(um[1]);
     if (/\b(apartments?|units?|flats?)\b/.test(t)) return unitDialog();
+    if (/\bbeams?\s*(centre|center|c\/?l)\s*-?\s*lines?\b|\b(centre|center)\s*-?\s*lines?\s+of\s+(the\s+)?beams\b|\b(draw|find|mark|trace|take\s*off|measure)\s+(all\s+|the\s+|every\s+)?beams?\b|^\s*beams?(\s+(per|by)\s+(mark|prefix|floor))?\s*$/.test(t) && !/block|masonry|brick|deduct/.test(t)) return agentBeamsCmd(t);   // (a block-masonry sentence that names beams stays block masonry)
     if (/block\s*(work|masonry)|masonry\s*block|\bblocks?\b/.test(t)) return blockMasonryDialog();
     if (/\b(walls?|masonry|brick\w*|block\s*work)\b/.test(t)) return agentWallsCmd(t);
     if (/\b(schedules?|list|table|export|csv)\b/.test(t)) return agentSchedule();
@@ -16614,6 +16615,212 @@ async function wallsDialog(){
   aiLog("bot", "Check the runs on the drawing (they are marked AI). Deduct doors and windows with the <b>Opening</b> tool (O)." + (r.needs_height ? " Give the condition its height H (✎) to get cft." : ""));
 }
 document.addEventListener("change", e => { if (e.target.id === "wlT") $("wlT2").style.display = e.target.value ? "none" : ""; });
+/* ------------------------------------------------------------------ 🏗 beams agent: beam centre lines from the beam layer's two edge lines.
+   Learned from the JADE above-ground BOQ backup drawing (Beam Claude.dwg: 7 floors, 1,781 centre lines a QS drew by hand):
+   - a beam is drawn as two parallel edge lines its width apart (layer S-Beam); its centre line runs exactly midway (0.0" off in the
+     median), and the QS keeps one layer per width (BC-CL-W15, -W12, -W9, -W8) — the width is read from the drawing, never assumed;
+   - it runs face to face: from a column's face (69 % of the ends), a shear wall's face (8 %) or the face of the beam it frames into
+     (7 %), never column centre to centre; two beams meeting at a corner with no column both run on to where their centre lines
+     cross; a beam framing into the side of another stops at that beam's face;
+   - one centre line a span: an edge broken where another beam frames into the side is still the same span (the other edge runs on);
+   - each span carries the mark written along it about 8" off its edge (FB-5, RB-12a); a span with no mark of its own (a continuous
+     beam marked once) takes the mark of the span it continues. A mark written with a size ("B1 (9x18)", or a size line under it)
+     gives the depth, and a width that disagrees with the drawing is flagged.
+   Lines on centre-line layers already in the drawing (BC-CL…, CL, centre line) are never read as edges.
+   beamsAgent({page, group: "width" | "prefix" | "mark", wMin, wMax (in), h}) -> what it drew; findBeams(rect) -> the runs. */
+const BEAM_LAYER_RX = /\bbeams?\b|^s-?b(ea)?m\b|\bbm\b|girder/i, BEAM_CL_RX = /\bc\.?l\b|cent(re|er)\s*-?\s*lines?|(^|[-_ ])cl([-_ ]|$)/i;
+const BEAM_MARK_RX = /^\s*([A-Z]{1,4}\s*-?\s*\d{1,3}[A-Za-z]?)\s*(?:[(\s]+(\d{1,3}(?:\.\d+)?)\s*["”]?\s*[xX×]\s*(\d{1,3}(?:\.\d+)?)\s*["”]?\s*\)?)?\s*$/;
+const BEAM_SIZE_RX = /^\s*\(?\s*(\d{1,3}(?:\.\d+)?)\s*["”]?\s*[xX×]\s*(\d{1,3}(?:\.\d+)?)\s*["”]?\s*\)?\s*$/;
+function beamLayers(g){   // -> {edge(i), sup(i), names: the beam layers} from the page's layers, or null (no beam layer)
+  const L = g && g.layerIds && g.file && layerInfo(g.file); if (!L || !g.layerIds.length) return null;
+  const nm = g.layerIds.map(id => (L[id] && L[id].name) || ""), edge = nm.map(n => BEAM_LAYER_RX.test(n) && !BEAM_CL_RX.test(n)), sup = nm.map((n, i) => !edge[i] && !BEAM_CL_RX.test(n) && ["column", "wall"].includes(layerRole(n)));
+  if (!edge.some(Boolean)) return null;
+  return {edge: i => { const li = g.segs[i][7]; return li >= 0 && edge[li]; }, sup: i => { const li = g.segs[i][7]; return li >= 0 && sup[li]; }, names: [...new Set(nm.filter((n, i) => edge[i]))]};
+}
+function findBeams(rect, o){   // the page's lines and text handed to beamCore (which works on its own: tested on the JADE drawing outside the browser)
+  o = o || {}; const k = curScale(), g = S.geo[S.key]; if (!k || !g || !g.segs.length) return {error: "no lines"};
+  const Ly = beamLayers(g); if (!Ly) return {error: "no beam layer"};
+  const off = layerOffIx(g), ids = (rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i)).filter(i => !off || !off.has(g.segs[i][7]));
+  const segs = [], kind = []; ids.forEach(i => { const e = Ly.edge(i), s = !e && Ly.sup(i); if (!e && !s) return; const q = g.segs[i]; segs.push([q[0], q[1], q[2], q[3], q[4]]); kind.push(e ? 1 : 2); });
+  const T = (S.texts[S.key] || []).filter(x => !rect || (x.x >= rect[0] - 4 * k && x.x <= rect[2] + 4 * k && x.y >= rect[1] - 4 * k && x.y <= rect[3] + 4 * k));
+  return Object.assign(beamCore(segs, kind, T, k, o), {layers: Ly.names});
+}
+/* beamCore(segs [[x0, y0, x1, y1, flags]], kind [1 edge | 2 support], texts [{s, x, y, w, h, r}], k pt per ft, o) -> {runs, lonely}.
+   Edges may be dashed (a beam under the slab is drawn dashed); curves and clip paths are not edges. */
+function beamCore(segs, kind, texts, k, o){
+  o = o || {}; const inch = k / 12, wMin = (+o.wMin || 4) * inch, wMax = (+o.wMax || 48) * inch, tol = 0.25 * inch, D = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const C = Math.max(6 * k, 1), grid = new Map(), cellsOf = (x0, y0, x1, y1, fn) => { for (let x = Math.floor(Math.min(x0, x1) / C); x <= Math.floor(Math.max(x0, x1) / C); x++) for (let y = Math.floor(Math.min(y0, y1) / C); y <= Math.floor(Math.max(y0, y1) / C); y++) fn(x + "," + y); };
+  segs.forEach((s, i) => cellsOf(s[0], s[1], s[2], s[3], c => { let L = grid.get(c); if (!L) grid.set(c, L = []); L.push(i); }));
+  const near = (x0, y0, x1, y1) => { const out = new Set(); cellsOf(x0, y0, x1, y1, c => (grid.get(c) || []).forEach(i => out.add(i))); return [...out]; };
+  const supNear = (x0, y0, x1, y1) => near(x0, y0, x1, y1).filter(i => kind[i] === 2);
+  // the edges by direction (0.5° bins), as {o, t0, t1}; pieces of one edge in line (a dashed line broken) joined
+  const E = []; segs.forEach((s, i) => { if (kind[i] !== 1 || (s[4] & 9)) return; const dx = s[2] - s[0], dy = s[3] - s[1], L = Math.hypot(dx, dy); if (L < 0.1 * k) return;
+    let a = Math.atan2(dy, dx); if (a < 0) a += Math.PI; if (a >= Math.PI - 0.0044) a -= Math.PI; E.push({s, a, L}); });
+  E.sort((x, y) => x.a - y.a); const groups = [];
+  E.forEach(e => { const G = groups[groups.length - 1]; if (G && e.a - G.last <= 0.004) { G.es.push(e); G.last = e.a; } else groups.push({es: [e], last: e.a}); });
+  groups.forEach(G => { const W = G.es.reduce((a, e) => a + e.L, 0); G.a = G.es.reduce((a, e) => a + e.a * e.L, 0) / W; if (Math.abs(G.a - Math.PI / 2) < 0.0044) G.a = Math.PI / 2; if (Math.abs(G.a) < 0.0005) G.a = 0;
+    G.u = [Math.cos(G.a), Math.sin(G.a)]; G.n = [-G.u[1], G.u[0]];
+    G.L = G.es.map(({s}) => { const t0 = G.u[0] * s[0] + G.u[1] * s[1], t1 = G.u[0] * s[2] + G.u[1] * s[3]; return {o: (G.n[0] * (s[0] + s[2]) + G.n[1] * (s[1] + s[3])) / 2, t0: Math.min(t0, t1), t1: Math.max(t0, t1)}; }); });
+  const runs = [], hist = new Map(), wkey = d => Math.round(d / inch * 2);
+  groups.forEach(gr => {
+    const L0 = gr.L.sort((a, b) => a.o - b.o || a.t0 - b.t0), L = [];
+    // (pieces that touch end to end only: the same line on another floor of the sheet, in line with this one, is another edge)
+    L0.forEach(l => { const q = L.length && L.slice(-12).reverse().find(m => Math.abs(m.o - l.o) <= 0.05 * inch && l.t0 <= m.t1 + 0.1 * inch && l.t1 >= m.t0 - 0.1 * inch); if (q) { q.t0 = Math.min(q.t0, l.t0); q.t1 = Math.max(q.t1, l.t1); } else L.push(Object.assign({}, l)); });
+    L.sort((a, b) => a.o - b.o);
+    const pairs = [];
+    for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length && L[j].o - L[i].o <= wMax; j++) { const A = L[i], B = L[j], d = B.o - A.o; if (d < wMin) continue;
+      let t0 = Math.max(A.t0, B.t0), t1 = Math.min(A.t1, B.t1); if (t1 - t0 < Math.max(2 * inch, 0.5 * d)) continue;
+      if (Math.abs(A.t0 - B.t0) <= 1.2 * d) t0 = (A.t0 + B.t0) / 2; if (Math.abs(A.t1 - B.t1) <= 1.2 * d) t1 = (A.t1 + B.t1) / 2;   // (a face at a slant: where it crosses the centre line)
+      let blocked = false; for (let m = i + 1; m < j && !blocked; m++) { const Cm = L[m]; if (Cm.o - A.o < tol || B.o - Cm.o < tol) continue; if (Math.min(Cm.t1, t1) - Math.max(Cm.t0, t0) > 0.3 * (t1 - t0)) blocked = true; }
+      if (!blocked) { const p = {o: (A.o + B.o) / 2, w: d, t0, t1, A, B}; pairs.push(p); (A.up = A.up || []).push(p); (B.dn = B.dn || []).push(p); hist.set(wkey(d), (hist.get(wkey(d)) || 0) + (t1 - t0)); } }
+    gr.pairs = pairs; gr.L2 = L; });
+  /* a line is one beam's edge, with the beam on one side: a line paired on both sides over the same stretch keeps the pair of the width
+     drawn most on the sheet (the other is a slab edge or a parapet beside the beam) — the narrower when the two are drawn as much */
+  const pop = p => hist.get(wkey(p.w)) || 0, ov = (p, q) => Math.min(p.t1, q.t1) - Math.max(p.t0, q.t0) > 0.5 * Math.min(p.t1 - p.t0, q.t1 - q.t0);
+  groups.forEach(gr => gr.L2.forEach(l => (l.up || []).forEach(p => (l.dn || []).forEach(q => { if (p.drop || q.drop || !ov(p, q)) return;
+    const a = pop(p), b = pop(q); (a > b || (a === b && p.w <= q.w) ? q : p).drop = true; }))));
+  groups.forEach(gr => { const u = gr.u, n = gr.n, P = (t, oo) => [u[0] * t + n[0] * oo, u[1] * t + n[1] * oo], L = gr.L2, pairs = gr.pairs.filter(p => !p.drop);
+    // one band (the same centre and width) is one beam: its pieces join across a gap with no column or wall in it (a beam framing into
+    // its side, or a beam crossing it — which of two crossing beams runs on is settled below); not where both edges stop at a support
+    const bands = []; pairs.sort((a, b) => a.o - b.o || a.t0 - b.t0).forEach(p => { const bd = bands.find(b => Math.abs(b.o - p.o) <= tol && Math.abs(b.w - p.w) <= 2 * tol); if (bd) bd.ps.push(p); else bands.push({o: p.o, w: p.w, ps: [p]}); });
+    const edgeAcross = (bd, a, b) => L.some(l => (Math.abs(l.o - (bd.o - bd.w / 2)) <= tol || Math.abs(l.o - (bd.o + bd.w / 2)) <= tol) && l.t0 <= a + tol && l.t1 >= b - tol);
+    const inGap = (bd, a, b, test) => { const q = [P(a - tol, bd.o - bd.w / 2 - tol), P(b + tol, bd.o + bd.w / 2 + tol), P(a - tol, bd.o + bd.w / 2 + tol), P(b + tol, bd.o - bd.w / 2 - tol)], xs = q.map(v => v[0]), ys = q.map(v => v[1]);
+      return near(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)).some(i => { if (!test(i)) return false; const s = segs[i], t1 = u[0] * s[0] + u[1] * s[1], o1 = n[0] * s[0] + n[1] * s[1], t2 = u[0] * s[2] + u[1] * s[3], o2 = n[0] * s[2] + n[1] * s[3];
+        if (kind[i] === 1 && !(Math.min(o1, o2) <= bd.o - bd.w / 2 + tol && Math.max(o1, o2) >= bd.o + bd.w / 2 - tol)) return false;   // (a beam edge must cross the band right through — one that stops at its face is a beam framing in)
+        return Math.max(t1, t2) >= a - tol && Math.min(t1, t2) <= b + tol && Math.max(o1, o2) >= bd.o - bd.w / 2 - tol && Math.min(o1, o2) <= bd.o + bd.w / 2 + tol; }); };
+    const supIn = (bd, a, b) => inGap(bd, a, b, i => kind[i] === 2);
+    bands.forEach(bd => { const iv = bd.ps.map(p => [p.t0, p.t1]).sort((a, b) => a[0] - b[0]), M = [];
+      iv.forEach(([a, b]) => { const q = M[M.length - 1];
+        if (q && a <= q[1] + tol) q[1] = Math.max(q[1], b);
+        else if (q && a - q[1] <= Math.max(4 * k, 3 * bd.w) && !supIn(bd, q[1], a)) { if (!edgeAcross(bd, q[1], a)) (q.br = q.br || []).push([q[1], a]); q[1] = Math.max(q[1], b); }
+        else M.push([a, b]); });
+      M.forEach(m => { const [a, b] = m; if (b - a >= Math.max(3 * inch, bd.w * 0.6)) runs.push({a: P(a, bd.o), b: P(b, bd.o), w: bd.w / k, u, o: bd.o, t0: a, t1: b, gr, br: m.br || []}); }); });
+  });
+  /* beams crossing (the QS's rule, 10-Nov-2026): the wider runs on and the narrower stops at its faces; of two as wide, the one whose own
+     edges carry on across the other in the drawing runs on — else the one resting on columns or walls at more of its ends (the main beam:
+     the other is a secondary beam, carried by beams), else the shorter (the main beam spans its bay; a secondary run on through several
+     beams is long). On the JADE drawing at 376 of the QS's 377 crossings one beam runs through and the other stops */
+  const X2 = (a, b, c, d) => { const r = [b[0] - a[0], b[1] - a[1]], s2 = [d[0] - c[0], d[1] - c[1]], den = r[0] * s2[1] - r[1] * s2[0]; if (Math.abs(den) < 1e-12) return null; const t = ((c[0] - a[0]) * s2[1] - (c[1] - a[1]) * s2[0]) / den; return [a[0] + t * r[0], a[1] + t * r[1]]; };
+  const atSup = p => supNear(p[0] - 1.5 * inch, p[1] - 1.5 * inch, p[0] + 1.5 * inch, p[1] + 1.5 * inch).some(i => { const s = segs[i], dx = s[2] - s[0], dy = s[3] - s[1], L2 = dx * dx + dy * dy, tt = L2 ? Math.max(0, Math.min(1, ((p[0] - s[0]) * dx + (p[1] - s[1]) * dy) / L2)) : 0; return Math.hypot(p[0] - s[0] - tt * dx, p[1] - s[1] - tt * dy) <= 1.5 * inch; });
+  const sup = R => (atSup(R.a) ? 1 : 0) + (atSup(R.b) ? 1 : 0);   // how many of a run's ends sit on a column or wall
+  const brAt = (R, X) => { const t = R.u[0] * X[0] + R.u[1] * X[1]; return (R.br || []).some(([a, b]) => t >= a - R.w * k && t <= b + R.w * k); };
+  // a run's pieces outside the columns and walls its edges are drawn through: it stops at a column, a shear wall or a lift core's face
+  // and carries on after it (a point is inside a support when a ray from it crosses the support's outline an odd number of times)
+  const inSup = p => { let c = 0; near(p[0], p[1] - 0.01, p[0] + 60 * k, p[1] + 0.01).forEach(i => { if (kind[i] !== 2) return; const s = segs[i];
+      if ((s[1] > p[1]) !== (s[3] > p[1]) && p[0] < (s[2] - s[0]) * (p[1] - s[1]) / (s[3] - s[1]) + s[0]) c++; }); return c % 2 === 1; };
+  const sCut = []; runs.forEach(R => { const ts = []; const L0 = D(R.a, R.b), v = [(R.b[0] - R.a[0]) / L0, (R.b[1] - R.a[1]) / L0], xs = [R.a[0], R.b[0]], ys = [R.a[1], R.b[1]];
+    supNear(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)).forEach(i => { const s = segs[i], X = X2(R.a, R.b, [s[0], s[1]], [s[2], s[3]]); if (!X) return;
+      const tl = (X[0] - R.a[0]) * v[0] + (X[1] - R.a[1]) * v[1], on = Math.min(s[0], s[2]) - 0.01 <= X[0] && X[0] <= Math.max(s[0], s[2]) + 0.01 && Math.min(s[1], s[3]) - 0.01 <= X[1] && X[1] <= Math.max(s[1], s[3]) + 0.01;
+      if (on && tl > 0.5 * inch && tl < L0 - 0.5 * inch) ts.push(tl); });
+    if (!ts.length) { sCut.push(R); return; }
+    const cuts = [0].concat([...new Set(ts.map(x => Math.round(x / (0.05 * inch)) * 0.05 * inch))].sort((a, b) => a - b), [L0]), at = s => [R.a[0] + v[0] * s, R.a[1] + v[1] * s];
+    for (let m = 0; m + 1 < cuts.length; m++) { const s0 = cuts[m], s1 = cuts[m + 1]; if (s1 - s0 < 3 * inch || (s1 - s0 <= 6 * k && inSup(at((s0 + s1) / 2)))) continue;   // (a column or a wall crossed: a few feet — a beam lying along a wall over the lift core is kept)
+      const a = at(s0), b = at(s1), t0 = R.u[0] * a[0] + R.u[1] * a[1], t1 = R.u[0] * b[0] + R.u[1] * b[1]; sCut.push(Object.assign({}, R, {a, b, t0: Math.min(t0, t1), t1: Math.max(t0, t1)})); } });
+  runs.length = 0; sCut.forEach(r => runs.push(r));
+  for (let pass = 0; pass < 4; pass++) { const cutAt = new Map();   // every crossing of this pass: the narrower run's cut points, then all cut at once
+    for (let i = 0; i < runs.length; i++) for (let j = i + 1; j < runs.length; j++) { const R = runs[i], Q = runs[j], sn = Math.abs(R.u[0] * Q.u[1] - R.u[1] * Q.u[0]); if (sn < 0.2) continue;
+      if (Math.max(R.a[0], R.b[0]) < Math.min(Q.a[0], Q.b[0]) || Math.max(Q.a[0], Q.b[0]) < Math.min(R.a[0], R.b[0]) || Math.max(R.a[1], R.b[1]) < Math.min(Q.a[1], Q.b[1]) || Math.max(Q.a[1], Q.b[1]) < Math.min(R.a[1], R.b[1])) continue;
+      const X = X2(R.a, R.b, Q.a, Q.b); if (!X) continue; const inR = D(R.a, X) + D(X, R.b) - D(R.a, R.b) < 0.05 * inch, inQ = D(Q.a, X) + D(X, Q.b) - D(Q.a, Q.b) < 0.05 * inch; if (!inR || !inQ) continue;
+      const hR = (Q.w * k) / 2 / sn, hQ = (R.w * k) / 2 / sn; if (D(R.a, X) <= hR + inch || D(X, R.b) <= hR + inch || D(Q.a, X) <= hQ + inch || D(X, Q.b) <= hQ + inch) continue;   // (a beam ending on the other: a T, already face to face)
+      const bR = brAt(R, X), bQ = brAt(Q, X);
+      const lose = Math.abs(R.w - Q.w) * 12 > 0.6 ? (R.w < Q.w ? R : Q) : bR !== bQ ? (bR ? R : Q) : sup(R) !== sup(Q) ? (sup(R) < sup(Q) ? R : Q) : (D(R.a, R.b) > D(Q.a, Q.b) ? R : Q), win = lose === R ? Q : R, h = (win.w * k) / 2 / sn;
+      const s = D(lose.a, X); if (!cutAt.has(lose)) cutAt.set(lose, []); cutAt.get(lose).push([s - h, s + h]); }
+    if (!cutAt.size) break;
+    cutAt.forEach((iv, lose) => { const L0 = D(lose.a, lose.b), v = [(lose.b[0] - lose.a[0]) / L0, (lose.b[1] - lose.a[1]) / L0], at = s => [lose.a[0] + v[0] * s, lose.a[1] + v[1] * s], parts = []; let s0 = 0;
+      iv.sort((a, b) => a[0] - b[0]).forEach(([c0, c1]) => { if (c0 - s0 >= 3 * inch) parts.push([s0, c0]); s0 = Math.max(s0, c1); }); if (L0 - s0 >= 3 * inch) parts.push([s0, L0]);
+      runs.splice(runs.indexOf(lose), 1, ...parts.map(([p0, p1]) => { const a = at(p0), b = at(p1), t0 = lose.u[0] * a[0] + lose.u[1] * a[1], t1 = lose.u[0] * b[0] + lose.u[1] * b[1]; return Object.assign({}, lose, {a, b, t0: Math.min(t0, t1), t1: Math.max(t0, t1), crossCut: true}); })); }); }
+  // a corner with no column: both runs on to where their centre lines cross (a T stays face to face)
+  runs.forEach(R => { R.endA = atSup(R.a); R.endB = atSup(R.b); });
+  for (const R of runs) for (const end of ["a", "b"]) { const EK = "end" + end.toUpperCase(); if (R[EK]) continue; const E = R[end];
+    for (const Q of runs) { if (Q === R || Math.abs(R.u[0] * Q.u[0] + R.u[1] * Q.u[1]) > 0.3) continue;
+      const X = X2(R.a, R.b, Q.a, Q.b); if (!X) continue; const reach = (Q.w * k) / 2 + 1.5 * inch;
+      if (D(E, X) > reach + (R.w * k) / 2) continue;
+      const qe = D(Q.a, X) < D(Q.b, X) ? "a" : "b", QK = "end" + qe.toUpperCase(); if (D(Q[qe], X) > reach + (Q.w * k) / 2 || Q[QK]) continue;   // the other run ends there too: a corner
+      R[end] = X; Q[qe] = X; R[EK] = Q[QK] = "corner"; break; } }
+  // marks: the label along a span nearest its centre line, within 4 ft of its edge; else the mark of the span it continues
+  const mid = x => { const a = +x.r || 0, h = x.h || 6, w = x.w || 0.55 * h * String(x.s || "").length; return [x.x + Math.cos(a) * w / 2 + Math.sin(a) * h / 2, x.y + Math.sin(a) * w / 2 - Math.cos(a) * h / 2]; };
+  const marks = texts.filter(x => BEAM_MARK_RX.test(x.s || "")).map(x => ({t: x, p: mid(x)})), sizes = texts.filter(x => BEAM_SIZE_RX.test(x.s || "")).map(x => ({t: x, p: mid(x)}));
+  const MC = Math.max(8 * k, 1), mg = new Map(); marks.forEach(m => { const c = Math.floor(m.p[0] / MC) + "," + Math.floor(m.p[1] / MC); let L = mg.get(c); if (!L) mg.set(c, L = []); L.push(m); });
+  runs.forEach(R => { const L = D(R.a, R.b), u = [(R.b[0] - R.a[0]) / L, (R.b[1] - R.a[1]) / L], nn = [-u[1], u[0]], reach = (R.w * k) / 2 + 4 * k; let best = null;
+    const xs = [R.a[0], R.b[0]], ys = [R.a[1], R.b[1]], cand = new Set();
+    for (let x = Math.floor((Math.min(...xs) - reach) / MC); x <= Math.floor((Math.max(...xs) + reach) / MC); x++) for (let y = Math.floor((Math.min(...ys) - reach) / MC); y <= Math.floor((Math.max(...ys) + reach) / MC); y++) (mg.get(x + "," + y) || []).forEach(m => cand.add(m));
+    cand.forEach(m => { const s = (m.p[0] - R.a[0]) * u[0] + (m.p[1] - R.a[1]) * u[1], d = Math.abs((m.p[0] - R.a[0]) * nn[0] + (m.p[1] - R.a[1]) * nn[1]);
+      if (s < -1 * k || s > L + 1 * k || d > reach) return; const par = Math.abs(Math.sin((+m.t.r || 0) - Math.atan2(u[1], u[0]))) < 0.2, sc = d + (par ? 0 : 3 * k);
+      if (!best || sc < best.sc) best = {sc, m}; });
+    if (best) { const mm = BEAM_MARK_RX.exec(best.m.t.s); R.mark = mm[1].replace(/\s+/g, ""); R.mt = best.m;
+      let sz = mm[2] ? [+mm[2], +mm[3]] : null;
+      if (!sz) { const h = best.m.t.h || 6, near = sizes.filter(z => D(z.p, best.m.p) < 2.2 * h).sort((a, b) => D(a.p, best.m.p) - D(b.p, best.m.p))[0]; if (near) { const z = BEAM_SIZE_RX.exec(near.t.s); sz = [+z[1], +z[2]]; } }
+      if (sz) { R.size = sz; R.depth = Math.max(sz[0], sz[1]) / 12; const wl = Math.min(sz[0], sz[1]); if (Math.abs(wl - R.w * 12) > 1) R.flag = "label " + R.mark + " says " + sz[0] + "x" + sz[1] + ", drawn " + (Math.round(R.w * 12 * 10) / 10) + "\" wide"; } } });
+  for (let pass = 0; pass < 6; pass++) { let ch = false;
+    runs.forEach(R => { if (R.mark) return; const c = runs.filter(Q => Q.mark && Q.gr === R.gr && Math.abs(Q.o - R.o) <= tol && Math.abs(Q.w - R.w) <= 2 * tol / k).map(Q => ({Q, gap: Math.max(Q.t0 - R.t1, R.t0 - Q.t1)})).filter(x => x.gap <= 6 * k).sort((a, b) => a.gap - b.gap)[0];
+      if (c) { R.mark = c.Q.mark; R.inherited = true; if (c.Q.depth) R.depth = c.Q.depth; ch = true; } });
+    if (!ch) break; }
+  const used = new Set(runs.filter(r => r.mt).map(r => r.mt)), lonely = marks.filter(m => !used.has(m));
+  runs.forEach(r => { delete r.gr; delete r.mt; });
+  return {runs, lonely};
+}
+function beamWidthIn(w){ return Math.round(w * 12 * 2) / 2; }
+function beamsAgent(o){
+  o = o || {}; const k = curScale(); if (!k) return {error: "Set the page scale first (K) — an AutoCAD drawing has it already."};
+  if (!S.geo[S.key] || !S.geo[S.key].segs.length) return {error: "This page has no vector lines (scanned?) — beams cannot be found from their edge lines."};
+  const rect = o.page ? null : (o.rect || viewRect()), F = findBeams(rect, o);
+  if (F.error === "no beam layer") return {error: "No beam layer on this page — the agent reads the beams' edge lines from a layer named like S-Beam / BEAM / BM (an AutoCAD drawing, or a PDF exported from it with layers)."};
+  if (F.error) return {error: "No lines here."};
+  if (!F.runs.length) return {error: "No beam edges found " + (rect ? "in this view" : "on this page") + " (layer " + F.layers.join(", ") + ") — zoom to the framing plan, or check the beams are drawn as two parallel lines."};
+  const grp = o.group || "width", key = r => { const w = beamWidthIn(r.w), pre = String(r.mark || "").replace(/[-\d].*$/, "");
+    return grp === "mark" ? (r.mark || "Unmarked") + "|" + w : grp === "prefix" ? (pre || "Unmarked") + "|" + w : String(w); };
+  const name = r => { const w = beamWidthIn(r.w), pre = String(r.mark || "").replace(/[-\d].*$/, "");
+    return (grp === "mark" ? (r.mark || "Unmarked beam") + " — " : grp === "prefix" ? (pre ? pre + " beams" : "Unmarked beams") + " — " : "") + "Beam " + w + "\" wide (centre line)"; };
+  const byK = new Map(); F.runs.forEach(r => { const kk = key(r); if (!byK.has(kk)) byK.set(kk, []); byK.get(kk).push(r); });
+  const made = [], keep = new Set(); let total = 0;
+  mutate(() => {
+    P.proj.items = P.proj.items.filter(i => !(i.beamAuto && i.file === S.fileId && i.page === S.pageNo && (!rect || i.pts.every(q => q[0] >= rect[0] && q[0] <= rect[2] && q[1] >= rect[1] && q[1] <= rect[3]))));
+    [...byK.entries()].sort((a, b) => b[1].length - a[1].length).forEach(([kk, L]) => { const r0 = L[0], nm = name(r0), dep = L.map(r => r.depth).find(Boolean) || (+o.h > 0 ? +o.h : 0);
+      let c = P.proj.conds.find(x => x.type === "linear" && x.name === nm);
+      if (!c) { c = {id: uid("C"), name: nm, type: "linear", unit: "ft", color: COLORS[(P.proj.conds.length + made.length) % COLORS.length], h: dep || "", t: +(beamWidthIn(r0.w) / 12).toFixed(4), faces: 1, dedMin: 0, group: "Beams"}; P.proj.conds.push(c); }
+      else if (dep && !(+c.h > 0)) c.h = dep;
+      let len = 0; L.forEach(r => { const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts: [r.a, r.b], nos: 1, ai: true, beamAuto: true, label: r.mark || "", bw: +r.w.toFixed(4)};
+        if (r.flag) it.note = r.flag; P.proj.items.push(it); len += dist(r.a, r.b) / k; });
+      total += len; keep.add(c.id); made.push({cond: c.name, id: c.id, spans: L.length, length_ft: +len.toFixed(3), width_in: beamWidthIn(r0.w), marks: [...new Set(L.map(r => r.mark).filter(Boolean))].length}); });
+  }, "Beam centre lines");
+  if (made[0]) S.cond = made[0].id; refresh();
+  const runs = F.runs, unl = runs.filter(r => !r.mark).length, inh = runs.filter(r => r.inherited).length, flags = runs.filter(r => r.flag).map(r => r.flag), corners = runs.filter(r => r.endA === "corner" || r.endB === "corner").length;
+  return {spans: runs.length, total_length_ft: +total.toFixed(3), conditions: made, widths_in: [...new Set(runs.map(r => beamWidthIn(r.w)))].sort((a, b) => b - a), marked: runs.length - unl, inherited: inh, unmarked: unl, corners, flags, lonely_marks: F.lonely.map(m => m.t.s.trim()).slice(0, 40), lonely_n: F.lonely.length, layers: F.layers, scope: rect ? "view" : "page"};
+}
+async function beamsDialog(){
+  if (!P.proj || !S.page) return aiLog("err", "Open a drawing page first.");
+  if (!curScale()) return aiLog("err", "Set the page scale first (K).");
+  const g = S.geo[S.key], Ly = g && beamLayers(g);
+  const v = await ask("🏗 Beam centre lines", `<p>Draws every beam's <b>centre line</b> from its two edge lines${Ly ? " (layer <b>" + esc(Ly.names.join(", ")) + "</b>)" : ""}: midway between them, face to face of the columns, walls and beams it sits on, one line a span — with the <b>beam mark</b> written along it and the <b>width</b> read from the drawing (as the JADE backup drawings are drawn: a layer per width).</p>
+    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Conditions</label><select id="bmG"><option value="width">One per width — Beam 15", Beam 12" … (as BC-CL-W15, -W12)</option><option value="prefix">Per mark prefix and width — FB beams 15", RB beams 12" … (a floor each)</option><option value="mark">Per beam mark — FB-1, FB-2 … (every mark its own)</option></select></div>
+      <div class="fg"><label>Narrowest beam (in)</label><input type="text" id="bmMin" value="4"></div><div class="fg"><label>Widest beam (in)</label><input type="text" id="bmMax" value="48"></div>
+      <div class="fg w2"><label>Beam depth for new conditions (ft) — when no label gives it</label><input type="text" id="bmH" placeholder="blank = length only (Rft)"></div>
+      <div class="fg w2"><label><input type="checkbox" id="bmP" style="width:auto" checked> Whole page (not only the part on screen)</label></div></div>
+    ${Ly ? "" : '<p class="small" style="margin-top:6px;color:var(--amber)">⚠ This page has no layer named like a beam layer (S-Beam, BEAM, BM) — the agent needs one.</p>'}
+    <p class="small" style="margin-top:6px">Each span is marked AI with its beam mark as its name; a span with no mark of its own takes the mark of the span it continues. Run it again to replace what it drew.</p>`, "Draw centre lines",
+    () => { const a = +$("bmMin").value, b = +$("bmMax").value, h = $("bmH").value.trim() ? uParse($("bmH").value) : 0; if (!(a > 0) || !(b > a)) return "Give the narrowest and widest beam in inches"; if (isNaN(h)) return "The depth is decimal feet";
+      return {group: $("bmG").value, wMin: a, wMax: b, h, page: $("bmP").checked}; });
+  if (!v) return;
+  const r = await areaThen("beams", async () => { busy("Finding beams…"); await new Promise(r2 => setTimeout(r2, 20)); try { return beamsAgent(areaOf() ? Object.assign(v, {page: true}) : v); } finally { busy(""); } });
+  if (r.error === "cancelled") return;
+  if (r.error) return aiLog("err", esc(r.error));
+  beamReport(r);
+}
+function beamReport(r){
+  aiLog("tool", `🏗 <b>${r.spans} beam span${r.spans === 1 ? "" : "s"}</b>, <b>${uLenT(r.total_length_ft)}</b> of centre line ${r.scope === "view" ? "in the part on screen" : "on the page"} — widths ${r.widths_in.map(w => w + "\"").join(", ")}<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px"><tr><th align="left">Condition</th><th align="right">Spans</th><th align="right">Marks</th><th align="right">Length</th></tr>${r.conditions.map(c => `<tr><td>${esc(c.cond)}</td><td align="right">${c.spans}</td><td align="right">${c.marks}</td><td align="right">${uLenT(c.length_ft)}</td></tr>`).join("")}</table>`);
+  const notes = [];
+  if (r.inherited) notes.push(r.inherited + " span" + (r.inherited === 1 ? "" : "s") + " took the mark of the span they continue");
+  if (r.unmarked) notes.push("<b>" + r.unmarked + " span" + (r.unmarked === 1 ? " has" : "s have") + " no mark</b> — named blank: check them");
+  if (r.corners) notes.push(r.corners + " corner" + (r.corners === 1 ? "" : "s") + " with no column: run on to where the centre lines cross");
+  if (r.flags.length) notes.push("<b>" + r.flags.length + " width" + (r.flags.length === 1 ? "" : "s") + " disagree with the label</b>: " + r.flags.slice(0, 4).map(esc).join("; "));
+  if (r.lonely_marks.length) notes.push(r.lonely_marks.length + " mark" + (r.lonely_marks.length === 1 ? "" : "s") + " found no beam: " + r.lonely_marks.slice(0, 8).map(esc).join(", "));
+  aiLog("bot", "Centre lines marked AI — check them on the drawing." + (notes.length ? "<br>" + notes.join("<br>") : ""));
+}
+async function agentBeamsCmd(t){
+  const r = beamsAgent({page: !/\b(view|screen|here)\b/.test(t), group: /\bper\s+mark|\bby\s+mark|each\s+mark/.test(t) ? "mark" : /\bprefix|floor|level/.test(t) ? "prefix" : "width"});
+  if (r.error) return aiLog("err", esc(r.error));
+  beamReport(r);
+}
 /* ------------------------------------------------------------------ 🧱 block masonry, the QS way (learned from a marked-up
    Bluebeam block-work takeoff and its working sheet): every wall run on its centre line, by block —
      4" walls → Block masonry 4"x8"x12" · 8" walls with outside, a balcony, a courtyard or an open-to-sky / look-below void
@@ -19190,7 +19397,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
   if (location.protocol !== "file:") learnSeedLoad().finally(() => learnTeamLoad());   // the reference method, then the team's learned method, added to this browser's
-  window.zdTakeoff = {legendSvg, legVal, legAsk, legSmart, legTable, legendCols, editLegend, roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {beamsAgent, findBeams, beamCore, beamLayers, legendSvg, legVal, legAsk, legSmart, legTable, legendCols, editLegend, roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, openWb, wbMod, wbApi, condQ, billQ, billQty, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
