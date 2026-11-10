@@ -1,6 +1,6 @@
 {
  "about": "PDF Takeoff: how this team takes off, learned by the takeoff agent in every browser of the team and merged by tools/learn_archive.py. Item names, heights, room kinds and counts only.",
- "at": "2026-11-11T00:13:27.314Z",
+ "at": "2026-11-11T01:23:27.327Z",
  "projects": {
   "vvvcknb84sev:17a5e3f04bec": {
    "at": "2026-10-31T10:49:48.438Z",
@@ -40,17 +40,8 @@
    "sent": "2026-10-31T10:50:48.721Z"
   },
   "vvvcknb84sev:21c2c43e10ee": {
-   "at": "2026-11-11T00:12:27.047Z",
+   "at": "2026-11-11T01:22:27.052Z",
    "conds": {
-    "brick masonry 9\" wall|linear|cft": {
-     "ded": 1.0,
-     "faces": 1.0,
-     "h": 10.0,
-     "name": "Brick masonry 9\" wall",
-     "t": 0.75,
-     "type": "linear",
-     "unit": "cft"
-    },
     "floor area|area|Sft": {
      "ded": 0.0,
      "faces": 1.0,
@@ -104,11 +95,6 @@
     },
     "ROOM": {
      "items": {
-      "brick masonry 9\" wall|linear|cft": {
-       "how": "wall",
-       "n": 1,
-       "per": []
-      },
       "floor area|area|Sft": {
        "how": "area",
        "n": 2,
@@ -118,7 +104,7 @@
      "n": 2
     }
    },
-   "sent": "2026-11-11T00:13:27.314Z"
+   "sent": "2026-11-11T01:23:27.327Z"
   },
   "vvvcknb84sev:8077edc44061": {
    "at": "2026-11-02T04:53:42.437Z",
