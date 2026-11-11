@@ -32,6 +32,17 @@ function cmp(msg, ref, got, tol, unit){   // tol: absolute, in the unit
   cmp("regular hexagon side 5: 3√3 / 2 × 25", 3 * Math.sqrt(3) / 2 * 25, M.roomArea(P(hex), k).value, 1e-9, "Sft");
   r = M.roomArea(P([[0, 0], [20, 0], [20, 20], [0, 20]]), k, [P([[5, 5], [9, 5], [9, 10], [5, 10]])]); cmp("room 20 × 20 less a 4 × 5 shaft", 380, r.value, E, "Sft"); cmp("…gross kept apart", 400, r.gross, E, "Sft");
   ok(M.roomArea(bed, 0).value === null && M.roomArea(bed, 0).missing.includes("page scale"), "no scale: no area, 'page scale' missing");
+  // an outline that is not a valid boundary gives no area at all — not a figure flagged on the side (by coordinates a figure of
+  // eight is the difference of its halves: 10 × 10 drawn as a bow tie reads 0, one with unequal halves a wrong positive figure)
+  r = M.roomArea(P([[0, 0], [12, 6], [12, 0], [0, 8]]), k); ok(r.value === null && r.missing.some(m => /do not cross.*crosses/.test(m)) && !r.valid.ok, "a figure of eight: no area, says which sides cross (“" + (r.missing[0] || "") + "”)");
+  r = M.roomArea(P([[0, 0], [10, 0], [10, 10], [10, 4], [10, 2], [0, 10]]), k); ok(r.value === null && /touches/.test(r.missing.join()), "a side doubling back on itself: no area");
+  r = M.roomArea(P([[0, 0], [5, 0], [10, 0]]), k); ok(r.value === null && /an area/.test(r.missing.join()), "corners on one line: no area");
+  r = M.roomArea(P([[0.75, 0.75], [12.75, 0.75], [12.75, 0.75], [12.75, 13.75], [0.75, 13.75], [0.75, 0.75]]), k);
+  cmp("a corner clicked twice and the first clicked again to close: still 12 × 13", 156, r.value, E, "Sft"); ok(r.valid.ok && r.inputs.corners === 4, "…worked on its 4 corners");
+  r = M.roomArea(P([[0, 0], [20, 0], [20, 20], [0, 20]]), k, [P([[0, 5], [4, 5], [4, 10], [0, 10]])]); cmp("a 4 × 5 shaft against the wall (on the room's side) is deducted", 380, r.value, E, "Sft");
+  r = M.roomArea(P([[0, 0], [20, 0], [20, 20], [0, 20]]), k, [P([[25, 5], [29, 5], [29, 10], [25, 10]])]); ok(r.value === null && /void 1 inside/.test(r.missing.join()), "a void outside the room is not deducted from it: no area");
+  r = M.roomArea(P([[0, 0], [20, 0], [20, 20], [0, 20]]), k, [P([[15, 5], [25, 5], [25, 10], [15, 10]])]); ok(r.value === null && /void 1 inside/.test(r.missing.join()), "a void across the room's wall: no area");
+  r = M.roomArea(P([[0, 0], [20, 0], [20, 20], [0, 20]]), k, [P([[5, 5], [9, 10], [9, 5], [5, 10]])]); ok(r.value === null && /void 1 whose sides/.test(r.missing.join()), "a void that crosses itself: no area");
 
   console.log("lengths");
   cmp("polyline 3 + 4 + 5 legs", 12, M.wallLength([P([[0, 0], [3, 0], [3, 4], [0, 0]])], k).value, E, "ft");
@@ -110,6 +121,9 @@ function cmp(msg, ref, got, tol, unit){   // tol: absolute, in the unit
   ok(r.outside > 0.6 && r.outside < 0.8, "levels inside a bigger outline: the share outside them is reported (" + (r.outside * 100).toFixed(1) + " %)"); cmp("…the ground there from the nearest levels", 400, r.cut, 1e-6, "Cft");
   r = M.cutFill({outline: site, k, formation: 100, levels: lv([[0, 0, 100], [100, 0, 101]])}); ok(r.value === null && /3 spot levels/.test(r.missing.join()), "two levels are not enough — not worked out");
   r = M.cutFill({outline: site, k, formation: "", levels: lv([[0, 0, 100], [100, 0, 101], [0, 50, 100]])}); ok(r.value === null && /formation level/.test(r.missing.join()), "no formation level — never assumed");
+  const lv4 = lv([[0, 0, 100], [100, 0, 101], [100, 50, 101], [0, 50, 100]]);
+  r = M.cutFill({outline: P([[0, 0], [100, 50], [100, 0], [0, 40]]), k, formation: 99, levels: lv4}); ok(r.value === null && r.cut === undefined && /do not cross/.test(r.missing.join()), "a site outline that crosses itself: no cut or fill (“" + (r.missing[0] || "") + "”)");
+  r = M.cutFill({outline: site.concat([site[0]]), k, formation: 100.5, levels: lv4}); cmp("the site outline closed on its first corner again: same cut", 625, r.cut, 2, "Cft");
 
   if (process.env.TK_REPORT) fs.writeFileSync(process.env.TK_REPORT, JSON.stringify({at: new Date().toISOString(), checks: rows}, null, 1));
   console.log("\n" + passes + " passed, " + fails + " failed"); process.exit(fails ? 1 : 0);

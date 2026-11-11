@@ -144,6 +144,14 @@ const BAG = 50 / 1440 / 0.028316846592;
       const o = c ? {ra: c.ra || "", boq: c.boq || "", sug: Z.boqMatches(c.name, c.unit, true).length} : null; if (c) Z.P.proj.conds = Z.P.proj.conds.filter(x => x.id !== c.id); Z.setTool("select"); return o; });
     ok(r && r.ra === "" && r.boq === "" && r.sug >= 1, "a Quick item (Floor tile) gets no BOQ item by itself, though the library has a matching one"); }
   await T(() => { const P = zdTakeoff.P.proj; P.conds = P.conds.filter(c => c.name !== "Bedroom flooring"); zdTakeoff.S.cond = "cB"; zdTakeoff.refresh(); });
+  // the type a preset gives is kept whatever the name typed: when items were picked by themselves, "Floor area" named after a
+  // wall item became a length in cft, and "Custom count" an area (its own name matched an area item)
+  await page.click("#bNewCond"); await wait(200);
+  await page.selectOption("#cPre", {label: "Floor area"}); await wait(100);
+  await page.fill("#cName", '8" Block wall'); await page.dispatchEvent("#cName", "input"); await wait(150);
+  ok((await page.inputValue("#cType")) === "area" && (await page.inputValue("#cUnit")) === "Sft" && (await page.inputValue("#cRa")) === "",
+    "a preset chosen (Floor area), then a name matching a cft wall item: still an area in Sft, no item linked");
+  await page.click("#dlgCancel"); await wait(150);
 
   console.log("bill: material / labour / equipment split");
   await T(() => { zdTakeoff.S.billSplit = true; zdTakeoff.S.billView = true; });

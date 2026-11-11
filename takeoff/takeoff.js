@@ -121,7 +121,9 @@ function parseFt(s){
 const polyLen = (P, closed) => { let s = 0; for (let i = 1; i < P.length; i++) s += dist(P[i - 1], P[i]); if (closed && P.length > 2) s += dist(P[P.length - 1], P[0]); return s; };
 const polyArea = P => { let s = 0; for (let i = 0, j = P.length - 1; i < P.length; j = i++) s += (P[j][0] + P[i][0]) * (P[j][1] - P[i][1]); return Math.abs(s) / 2; };
 /* a closed outline whose sides cross (corners clicked out of order, a point dragged across a side): its area by
-   coordinates is then not the area enclosed, so it is flagged on the sheet, in the export check and when drawn */
+   coordinates is then not the area enclosed — a figure of eight is the difference of its halves — so it has no quantity: left
+   out of the totals, the sheet, the bill and the exports (as a measurement on a page with no scale), flagged on the sheet, in the
+   warning bar and the export check, and said when drawn, until its points are fixed */
 function selfCross(P){
   const n = P.length; if (n < 4) return false;
   const o = (a, b, c) => { const v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); return Math.abs(v) < 1e-9 ? 0 : Math.sign(v); };
@@ -130,8 +132,13 @@ function selfCross(P){
       if (o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0) return true; } }
   return false;
 }
-const crossed = it => { const c = cond(it.cond); return !!c && c.type === "area" && it.shape !== "circle" && it.kind !== "open" && selfCross(it.pts); };
-const crossMsg = "⚠ This outline crosses itself — its area is not the area drawn. Drag the points so the sides do not cross (or Ctrl+Z).";
+const XCR = new WeakMap();   // selfCross of an outline, kept with its points array and its corners as they were (rowsOf asks on every redraw)
+const crossed = it => { const c = cond(it.cond); if (!c || c.type !== "area" || it.shape === "circle" || it.kind === "open" || !Array.isArray(it.pts) || it.pts.length < 4) return false;
+  if (it.pts.length <= 8) return selfCross(it.pts);
+  let s1 = 0, s2 = 0; for (let i = 0; i < it.pts.length; i++) { const p = it.pts[i]; s1 += p[0] * (i + 1.37) + p[1] * (0.61 * i + 2.11); s2 += (p[0] + 0.29) * (p[1] + 0.53) * (i + 0.5); }   // (a fingerprint of the corners: a moved point changes it — a string of them cost more than the check)
+  const e = XCR.get(it.pts); if (e && e.n === it.pts.length && e.s1 === s1 && e.s2 === s2) return e.v;
+  const v = selfCross(it.pts); XCR.set(it.pts, {n: it.pts.length, s1, s2, v}); return v; };
+const crossMsg = "⚠ This outline crosses itself — its area by coordinates is not the area drawn, so it is left out of the totals. Drag the points so the sides do not cross (or Ctrl+Z).";
 function pointInPoly(p, P){ let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if (((a[1] > p[1]) !== (b[1] > p[1])) && (p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0])) c = !c; } return c; }
 function distSeg(p, a, b){ const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy; let t = L ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L : 0; t = Math.max(0, Math.min(1, t)); return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); }
 function projSeg(p, a, b){ const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy; let t = L ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L : 0; t = Math.max(0, Math.min(1, t)); return [a[0] + t * dx, a[1] + t * dy]; }
@@ -1569,6 +1576,8 @@ async function indexPage(){
    bed in the way of one does not count); span ÷ written size gives pt per ft for that room, the median of all rooms the drawing's scale. A note that
    disagrees by more than 15 % is flagged: the PDF is then printed at another size than the note was written for. */
 function sizeDims(t){ const m = /^\s*([^xX×*]+?)\s*[xX×*]\s*([^xX×*]+?)\s*$/.exec(String(t || "")); if (!m) return null; const a = parseFt(m[1]), b = parseFt(m[2]); return a > 0 && b > 0 ? [a, b] : null; }
+/* a point in a room name's own frame -> the page: a along the name from its start, c down from its baseline (turned with the text) */
+function nameAt(r, a, c){ const co = Math.cos(r.r || 0), sn = Math.sin(r.r || 0); return [r.x + a * co - c * sn, r.y + a * sn + c * co]; }
 async function scaleFromRooms(key){
   const [f, pg] = key.split(":"), g = S.geo[key]; if (!g || !g.segs.length) return null;
   const F = await drawingFacts(f, +pg), est = [], bf = segRoleFilter(g, BOUND);   // walls / openings / columns only, when the PDF has layers: a bed or a table is not the room's edge
@@ -1589,11 +1598,14 @@ async function scaleFromRooms(key){
     return best; };
   const one = r => {
     const d = sizeDims(r.size); if (!d || d[0] < 4 || d[1] < 4) return;
-    const R = 40 * r.h * Math.max(d[0], d[1]) / 10, c = [r.x + r.w / 2, r.y - r.h / 2], below = r.sizeY != null ? r.sizeY + r.h * 0.6 : r.y + r.h * 1.5;
-    // seven parallel rays each way (across: at seven heights round the name; up and down: at seven places side by side); the
-    // span most of them agree on (within 1 %) is the room's: a ray through a door or one blocked by a bed disagrees with the rest
-    const mid = [c[0], (c[1] + below) / 2];
-    const span = (dx, dy) => { const st = dy ? Math.max(r.w * 0.35, 1.5 * r.h) : 1.2 * r.h, v = [];
+    // the middle of the name and its size line, worked in the name's own frame: on a page turned 90° the name is written up the
+    // page, and its box taken as written across put the rays beside the room's label (fixed 11-Nov-2026)
+    const R = 40 * r.h * Math.max(d[0], d[1]) / 10, below = r.sizeA != null ? r.sizeA + r.h * 0.6 : r.h * 1.5, up = Math.abs(Math.sin(r.r || 0)) > Math.abs(Math.cos(r.r || 0));
+    // seven parallel rays each way (across: at seven heights round the name; up and down: at seven places side by side — along the
+    // name's length whichever way it is written); the span most of them agree on (within 1 %) is the room's: a ray through a door
+    // or one blocked by a bed disagrees with the rest
+    const mid = nameAt(r, r.w / 2, (below - r.h / 2) / 2);
+    const span = (dx, dy) => { const st = (dy ? !up : up) ? Math.max(r.w * 0.35, 1.5 * r.h) : 1.2 * r.h, v = [];
       for (let j = -3; j <= 3; j++) { const q = dy ? [mid[0] + j * st, mid[1]] : [mid[0], mid[1] + j * st]; v.push(ray(q, dx, dy, R) + ray(q, -dx, -dy, R)); }
       let best = null; v.forEach(a => { const n = v.filter(b => Math.abs(b / a - 1) < 0.01).length; if (!best || n > best.n || (n === best.n && a < best.a)) best = {a, n}; });
       return best.n >= 2 ? v.filter(b => Math.abs(b / best.a - 1) < 0.01).reduce((t, b) => t + b, 0) / best.n : 2 * R; };
@@ -3499,8 +3511,9 @@ function rowsOf(it, k){
     rows = parts && parts.length === 1 ? [R({nos, L: rD(parts[0].L), W: rD(parts[0].W), H, how: "rect"})]
          : [R({nos, A: rA(polyArea(F)), H, how: "poly", sides: F.length})];
     if (it.kind === "ded") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0); if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }
+    if (crossed(it)) rows.forEach(r => { r.bad = "crosses"; });   // its sides cross: no quantity (the area by coordinates is not the area drawn)
   }
-  rows.forEach(r => { r.qty = r.below ? 0 : qty(r); });
+  rows.forEach(r => { r.qty = r.below || r.bad ? 0 : qty(r); });
   return rows;
 }
 function condTotals(c){
@@ -3704,7 +3717,7 @@ function matHtml(c, Q, own){
 function condVars(c, only){
   const v = {Q: 0, A: 0, P: 0, PD: 0, D: 0, L: 0, N: 0, H: +c.h || 0, T: +c.t || 0};
   P.proj.items.filter(i => i.cond === c.id && (!only || only(i))).forEach(it => {
-    const k = itemScale(it); if (!k) return;
+    const k = itemScale(it); if (!k || crossed(it)) return;   // (an outline crossing itself: none of its figures — area, perimeter, count)
     const rows = rowsOf(it, k), sg = it.kind === "shape" ? 1 : -1, nos = +it.nos || 1;
     rows.forEach(r => { v.Q += r.qty; if (r.below) return;
       if (c.type === "area") v.A += r.sign * (r.nos || 1) * (r.A != null ? r.A : (r.L || 0) * (r.W || 0)); });
@@ -5228,7 +5241,7 @@ function hoverText(id){
   if (!o.cond) return MK_TYPES.has(o.type) ? mkHover(o) : (MARK_TOOLS[o.type] || (o.type === "legend" ? "Takeoff legend" : o.type)) + (o.text ? " — " + o.text : "") + (o.locked ? " · locked" : "");
   const c = cond(o.cond), k = itemScale(o); if (!c) return "";
   const q = k ? rowsOf(o, k).reduce((a, r) => a + r.qty, 0) : null;
-  return (o.label ? o.label + " · " : "") + c.name + (q == null ? " · scale not set" : " · " + fq(q, c.unit) + " " + uL(c.unit)) + (o.locked ? " · locked" : "");
+  return (o.label ? o.label + " · " : "") + c.name + (q == null ? " · scale not set" : crossed(o) ? " · ⚠ crosses itself — left out of the totals" : " · " + fq(q, c.unit) + " " + uL(c.unit)) + (o.locked ? " · locked" : "");
 }
 /* ------------------------------------------------------------------ appearance (as Bluebeam's Properties toolbar, and more)
    Every condition has an appearance (c.ap) — line colour, opacity, style, width (screen px or paper pt), start / end heads,
@@ -5360,8 +5373,8 @@ function apLabelPt(scr, area, a, z, d){   // where the label goes: in the shape 
 /* a measurement (area or run) as SVG: o {T page -> screen, z sizes, sp page pt -> screen px, sel, k, lbl (labels on), seg (segment lengths on), small} */
 function measSvg(it, c, o){
   const a = apOf(c, it), T = o.T, z = o.z || 1, sp = o.sp || 1, ded = it.kind === "ded", poly = itemPoly(it), scr = poly.map(T), area = c.type === "area", closed = area || it.shape === "circle";
-  const wz = o.wz || 1, col = ded ? "#d03b3b" : a.col, op = Math.max(0.05, Math.min(1, (+a.lineOp || 100) / 100)), w0 = (a.swU === "pt" ? +a.sw * sp : +a.sw * z) * wz, w = Math.max(hairPx(z), o.sel ? w0 + (area ? 1.4 : 2) * z : w0);
-  const dash = ded && a.dash === "solid" ? `${7 * z} ${4 * z}` : apDash(a.dash, w), ps = scr.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" "), out = [];
+  const wz = o.wz || 1, col = ded ? "#d03b3b" : a.col, op = Math.max(0.05, Math.min(1, (+a.lineOp || 100) / 100)), w0 = (a.swU === "pt" ? +a.sw * sp : +a.sw * z) * wz, w = Math.max(hairPx(z * wz), o.sel ? w0 + (area ? 1.4 : 2) * z : w0);   // (the hairline floor in line units too: on paper z carries the label size, and a floor of hairPx(z) made thin lines heavier with larger labels)
+  const dash = ded && a.dash === "solid" ? `${7 * z * wz} ${4 * z * wz}` : apDash(a.dash, w), ps = scr.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" "), out = [];
   if (area) {
     if (ded) out.push(`<polygon points="${ps}" fill="${o.screen ? "url(#hatch)" : "#d03b3b"}" fill-opacity="${o.screen ? 1 : 0.14}" stroke="none"/>`);
     else {
@@ -5435,8 +5448,8 @@ function apClean(c, v){   // keep only what differs from the condition's standar
 }
 /* the totals a condition's measurements add up to, read in its appearance's units */
 function condTotalsList(c, its){
-  const a = apOf(c), T0 = {len: 0, ded: 0, area: 0, darea: 0, per: 0, n: 0, pts: 0, segs: 0, noScale: 0}, out = [];
-  its.forEach(it => { const k = qScale(it); if (!k) { T0.noScale++; return; } const poly = itemPoly(it), sgn = it.kind === "ded" || it.kind === "open" ? -1 : 1, nos = +it.nos || 1;
+  const a = apOf(c), T0 = {len: 0, ded: 0, area: 0, darea: 0, per: 0, n: 0, pts: 0, segs: 0, noScale: 0, crossed: 0}, out = [];
+  its.forEach(it => { const k = qScale(it); if (!k) { T0.noScale++; return; } if (crossed(it)) { T0.crossed++; return; } const poly = itemPoly(it), sgn = it.kind === "ded" || it.kind === "open" ? -1 : 1, nos = +it.nos || 1;
     if (c.type === "count") { T0.pts += it.pts.length * nos; return; }
     if (c.type === "area") { const A = polyArea(poly) / k / k * nos; if (sgn > 0) T0.area += A; else T0.darea += A; T0.per += polyLen(poly, true) / k * nos * (sgn > 0 ? 1 : 0); }
     else { const L = (it.kind === "open" ? dist(it.pts[0], it.pts[1]) : it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k * nos; if (sgn > 0) T0.len += L; else T0.ded += L; T0.segs += Math.max(1, it.pts.length - 1);
@@ -5450,12 +5463,14 @@ function condTotalsList(c, its){
   out.push(["Quantity", fq(q.net, c.unit) + " " + uL(c.unit) + (c.unit !== "ft" && c.unit !== "Sft" && c.unit !== "cft" ? "" : a.units !== "ft" ? " (" + apQty(q.net, c.unit, a) + ")" : "")], ["Measurements", String(T0.n)]);
   if (T0.sloped) out.push(["Sloped", T0.sloped + " × √(1 + p²) in the quantity (the figures above are on plan)"]);
   if (T0.noScale) out.push(["No scale", T0.noScale + " measurement" + (T0.noScale > 1 ? "s" : "")]);
+  if (T0.crossed) out.push(["Crosses itself", T0.crossed + " outline" + (T0.crossed > 1 ? "s" : "") + " left out — fix the points"]);
   return out;
 }
 
 function itemTotalsList(it, c, k){   // one measurement's own totals, in its appearance's units
   const a = apOf(c, it); if (!k) return [["Scale", "not set"]];
   const poly = itemPoly(it), nos = +it.nos || 1, rows = rowsOf(it, k), q = rows.reduce((s2, r) => s2 + (r.below ? 0 : r.qty), 0), out = [];
+  if (crossed(it)) return [["Area", "— the outline crosses itself"], ["Quantity", "left out of the totals until its points are fixed"]];
   if (c.type === "area") { out.push(["Area", apArea(polyArea(poly) / k / k * nos, a)], ["Perimeter", apLen(polyLen(poly, true) / k * nos, a)]); if (+c.t) out.push(["Volume", apVol(polyArea(poly) / k / k * +c.t * nos, a)]); }   // (perimeter × Nos, as the area)
   else if (c.type === "linear") { const L = (it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k; out.push(["Length", apLen(L * nos, a)]); if (+c.h) out.push(["Wall area", apArea(L * +c.h * (+c.faces || 1) * nos, a)]); out.push(["Segments", String(Math.max(1, it.pts.length - 1))]);
     if (it.shape !== "circle" && +it.rise) out.push([+it.rise > 0 ? "Rise" : "Drop", apLen(Math.abs(+it.rise) * nos, a)]); }
@@ -6431,10 +6446,11 @@ function shSorted(its, c){
 function renderSheet(){
   const el = $("sheet");
   if (!P.proj) { el.innerHTML = ""; return; }
-  const missing = P.proj.items.filter(it => !itemScale(it)).length;
+  const missing = P.proj.items.filter(it => !itemScale(it)).length, xc = P.proj.items.filter(it => itemScale(it) && crossed(it)).length;
   const unv = Object.values(P.proj.scales).filter(s => !s.verified && s.how !== "inherited").length, inh = Object.values(P.proj.scales).filter(s => !s.verified && s.how === "inherited").length;
   const wb = $("warnbar"), msgs = [];
   if (missing) msgs.push(missing + " measurement" + (missing > 1 ? "s are" : " is") + " on a page with no scale — set it with <b>K</b>; they are left out of the totals.");
+  if (xc) msgs.push(xc + " outline" + (xc > 1 ? "s cross themselves" : " crosses itself") + " (marked ⚠ on the sheet) — the area by coordinates is not the area drawn, so " + (xc > 1 ? "they are" : "it is") + " left out of the totals until the points are fixed.");
   if (unv) msgs.push(unv + " page scale" + (unv > 1 ? "s were" : " was") + " read from the drawing note or chosen by hand, and not yet checked — click the scale chip → <b>Verify</b> with a known dimension.");
   if (inh) msgs.push(inh + " page scale" + (inh > 1 ? "s were" : " was") + " copied from another page (inherited) and not yet checked on that page — open it, click the scale chip → <b>Verify</b>.");
   if (S.otherTab) msgs.unshift(`<b>⚠ This project is ${esc(S.otherTab)}.</b> Two open copies overwrite each other's work when they save — keep one open. <button class="btn sm" data-reload="1">Reload this one</button>`);
@@ -6453,9 +6469,9 @@ function renderSheet(){
         const sub = [pg, r.runs && r.runs.length > 1 ? "runs " + r.runs.map(uLen).join(" + ") : "", r.F != null ? "slope " + pitchText(pitchOf(it, c)) + " — plan × √(1 + p²) = × " + r.F.toFixed(4) : "", r.rise ? "vertical " + uLenT(r.rise) + ", added once" : "", r.how === "poly" ? "plan area of the " + r.sides + "-sided outline" : "", r.how === "circle" ? "circle, dia " + uLenT(r.D) + (c.type === "area" ? " — area = π/4 × D²" : " — length = π × D") : "",
                      c.type === "linear" && c.unit === "Sft" && (+c.faces || 1) > 1 && it.kind !== "ded" ? "Nos includes " + c.faces + " faces" : "",
                      r.below ? "≤ " + f2(uV(+c.dedMin || 0, dedU(c))) + " " + uL(dedU(c)) + " — not deducted (house rule)" : "",
-                     i === 0 && crossed(it) ? "⚠ OUTLINE CROSSES ITSELF — area not right, fix the points" : ""].filter(Boolean).join(" · ");
-        h += `<tr class="it${r.sign < 0 ? " ded" : ""}${r.below ? " below" : ""}${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${i === 0 ? ++n : ""}</td><td>${esc(desc)}${i === 0 ? qaBadges(it) + `<button class="rn" title="Rename (e.g. Bedroom 1)" data-rename="${esc(it.id)}">&#9998;</button>` : ""}<div class="ds">${esc(sub)}</div></td>
-          <td class="n">${dimText(r)}</td><td class="n">${fq(r.below ? 0 : r.qty, c.unit)}</td></tr>`;
+                     i === 0 && r.bad ? "⚠ OUTLINE CROSSES ITSELF — its area by coordinates is not the area drawn: left out of the total, fix the points" : ""].filter(Boolean).join(" · ");
+        h += `<tr class="it${r.sign < 0 ? " ded" : ""}${r.below || r.bad ? " below" : ""}${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${i === 0 ? ++n : ""}</td><td>${esc(desc)}${i === 0 ? qaBadges(it) + `<button class="rn" title="Rename (e.g. Bedroom 1)" data-rename="${esc(it.id)}">&#9998;</button>` : ""}<div class="ds">${esc(sub)}</div></td>
+          <td class="n">${r.bad ? "—" : dimText(r)}</td><td class="n">${r.bad ? "—" : fq(r.below ? 0 : r.qty, c.unit)}</td></tr>`;
       });
     });
     h += `<tr class="tot"><td></td><td>Total ${esc(c.name)}${t.ded ? `<div class="ds">gross ${fq(t.gross, c.unit)} − deductions ${fq(t.ded, c.unit)}</div>` : ""}</td><td></td><td class="n">${fq(t.net, c.unit)} ${esc(uL(c.unit))}</td></tr>`;
@@ -6512,12 +6528,12 @@ function itemDetailHtml(it, c, k){
   const poly = itemPoly(it), rows = k ? rowsOf(it, k) : [], net = rows.reduce((a, r) => a + (r.below ? 0 : r.qty), 0), r0 = rows[0], pg = pageName(it), loc = locText(locOf(it)), pc = it.pts.length;
   const pz = c.type !== "count" && it.kind !== "open" ? pitchOf(it, c) : 0;
   const geom = !k ? [] : it.shape === "circle" ? [["Radius R", uLenT(dist(it.pts[0], it.pts[1]) / k)], ["Diameter D", uLenT(2 * dist(it.pts[0], it.pts[1]) / k)], ["Circumference", uLenT(polyLen(poly, true) / k)], ["Area", uArea2(polyArea(poly) / k / k)]]
-    : c.type === "area" ? [["Area", f3(uV(polyArea(it.pts) / k / k, "Sft")) + " " + uL("Sft")], ["Perimeter", uLenT(polyLen(it.pts, true) / k)], ["Points", String(pc)]]
+    : c.type === "area" ? [["Area", crossed(it) ? "— the outline crosses itself" : f3(uV(polyArea(it.pts) / k / k, "Sft")) + " " + uL("Sft")], ["Perimeter", uLenT(polyLen(it.pts, true) / k)], ["Points", String(pc)]]
     : c.type === "linear" ? [["Length", uLenT(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k)], it.kind === "open" ? null : ["Segments", String(Math.max(1, pc - 1))], it.kind === "open" ? null : ["Points", String(pc)]] : [["Count points", String(pc)]];
   const sc = (P.proj.scales || {})[keyOf(it.file, it.page)], st = it.qa === "checked" ? ["Checked", "ok"] : it.qa === "recheck" ? ["Recheck", "bad"] : ["Pending", ""];
   return `<div class="pcard"><div style="display:flex;gap:8px;align-items:center"><span class="lsw" style="${swCss(c, it)};width:14px;height:14px"></span><b style="color:var(--navy);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.label || kindName(it, c))}</b><span class="pstat ${st[1]}">${st[0]}</span></div>
-    <div class="big" style="margin-top:6px">${k ? (it.kind === "ded" || it.kind === "open" ? "−" : "") + fq(Math.abs(net), c.unit) : "—"}<small>${esc(uL(c.unit))}</small></div>
-    <div class="dimstr">${r0 ? esc(dimText(r0)) : "scale not set on this page"}${rows.length > 1 ? " · +" + (rows.length - 1) + " more row" + (rows.length > 2 ? "s" : "") : ""}</div></div>
+    <div class="big" style="margin-top:6px">${k && !(r0 && r0.bad) ? (it.kind === "ded" || it.kind === "open" ? "−" : "") + fq(Math.abs(net), c.unit) : "—"}<small>${esc(uL(c.unit))}</small></div>
+    <div class="dimstr">${r0 && r0.bad ? "⚠ the outline crosses itself — left out of the totals; drag its points so the sides do not cross" : r0 ? esc(dimText(r0)) : "scale not set on this page"}${rows.length > 1 ? " · +" + (rows.length - 1) + " more row" + (rows.length > 2 ? "s" : "") : ""}</div></div>
     <div class="psec">Details</div>
     ${dl([["Condition", c.name], ["Type", it.kind === "open" ? "Opening" : it.kind === "ded" ? "Deduction" : c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"], ["Page", pg], loc ? ["Location", loc] : null, ...geom, mergedParts(it) ? ["Merged from", mergedParts(it) + " areas (Unmerge splits it back)"] : null,
       pz > 0 ? ["Slope", pitchText(pz) + " × " + slopeF(pz).toFixed(4) + (it.pitch != null ? " (this one)" : "")] : null, +it.rise && c.type === "linear" ? [+it.rise > 0 ? "Rise" : "Drop", uLenT(Math.abs(+it.rise))] : null,
@@ -6545,7 +6561,7 @@ function renderProps(){
   $("propsTag").textContent = "measurement";
   const c = cond(it.cond), k = itemScale(it), poly = itemPoly(it);
   const meas = !k ? "scale not set" : it.shape === "circle" ? "R " + f3(dist(it.pts[0], it.pts[1]) / k) + " · dia " + uLenT(2 * dist(it.pts[0], it.pts[1]) / k) + " · " + (c.type === "area" ? uArea(polyArea(poly) / k / k) : uLenT(polyLen(poly, true) / k) + " round")
-    : c.type === "area" ? uArea(polyArea(it.pts) / k / k) + " measured · perimeter " + uLenT(polyLen(it.pts, true) / k) : c.type === "linear" ? uLenT(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k) + " measured" : it.pts.length + " points";
+    : c.type === "area" ? (crossed(it) ? "⚠ crosses itself, no area" : uArea(polyArea(it.pts) / k / k) + " measured") + " · perimeter " + uLenT(polyLen(it.pts, true) / k) : c.type === "linear" ? uLenT(it.kind === "open" ? dist(it.pts[0], it.pts[1]) / k : polyLen(it.pts) / k) + " measured" : it.pts.length + " points";
   el.innerHTML = '<div class="pdet">' + itemDetailHtml(it, c, k) + '</div><div class="pedit">' + `<h4>${esc(c.name)} — ${esc(kindName(it, c))} <span style="font-weight:400;color:var(--muted);font-size:11px">${esc(meas)}</span></h4>
     <div class="row"><div class="fg" style="flex:2"><label>Label</label><input type="text" data-prop="label" value="${esc(it.label)}" placeholder="e.g. Bed room 1"></div>
     <div class="fg"><label>Nos (×)</label><input type="number" min="1" step="1" data-prop="nos" value="${+it.nos || 1}"></div>
@@ -8601,7 +8617,7 @@ function exportSegmentsCsv(){
 function loadExcel(){ return window.ExcelJS ? Promise.resolve(window.ExcelJS) : new Promise((ok, bad) => { const s = document.createElement("script"); s.src = EXCELJS; s.onload = () => ok(window.ExcelJS); s.onerror = () => bad(new Error("Excel library could not be loaded (offline?) — use CSV")); document.head.appendChild(s); }); }
 function saveBlob(blob, name){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); }
 const fileBase = () => (P.proj.name || "takeoff").replace(/[^A-Za-z0-9]+/g, "_") + "_" + today();
-function rowDesc(x){ const {r, it, i} = x, c = cond(it.cond); return (r.sign < 0 ? "Ded. " : "") + (it.label || kindName(it, c)) + (r.part ? " — part " + String.fromCharCode(96 + r.part) : "") + (r.rise ? " — " + (r.rise > 0 ? "rise" : "drop") + " " + uLenT(Math.abs(r.rise)) : "") + (r.F != null ? " × slope " + pitchIn(pitchOf(it, c)) + " (√(1 + p²) = " + r.F.toFixed(4) + ")" : "") + (r.below ? " (≤ " + f2(+c.dedMin || 0) + " — not deducted)" : "") + (r.how === "poly" ? " (plan area, " + r.sides + "-sided outline — area in the L column)" : r.how === "circle" ? " (circle dia " + uLenT(r.D) + (r.A != null ? ", π/4 × D² — area in the L column)" : ", π × D)") : ""); }
+function rowDesc(x){ const {r, it, i} = x, c = cond(it.cond); return (r.sign < 0 ? "Ded. " : "") + (it.label || kindName(it, c)) + (r.part ? " — part " + String.fromCharCode(96 + r.part) : "") + (r.rise ? " — " + (r.rise > 0 ? "rise" : "drop") + " " + uLenT(Math.abs(r.rise)) : "") + (r.F != null ? " × slope " + pitchIn(pitchOf(it, c)) + " (√(1 + p²) = " + r.F.toFixed(4) + ")" : "") + (r.below ? " (≤ " + f2(+c.dedMin || 0) + " — not deducted)" : "") + (r.bad ? " — ⚠ OUTLINE CROSSES ITSELF: its area by coordinates is not the area drawn, left out of the total until the points are fixed" : r.how === "poly" ? " (plan area, " + r.sides + "-sided outline — area in the L column)" : r.how === "circle" ? " (circle dia " + uLenT(r.D) + (r.A != null ? ", π/4 × D² — area in the L column)" : ", π × D)") : ""); }
 async function exportExcel(){
   busy("Building Excel…");
   try {
@@ -8637,16 +8653,16 @@ async function exportExcel(){
         rr.getCell(2).value = rowDesc(x);
         rr.getCell(3).value = pageName(it);
         const W = ww ? (+g.c.t > 0 ? rD(+g.c.t) : null) : r.W, H = ww ? (+g.c.h > 0 ? rD(+g.c.h) : null) : r.H;
-        [r.nos, r.A != null ? uX(r.A, "Sft") : uX(r.L, "ft"), uX(W, "ft"), uX(H, "ft")].forEach((v, j) => {
+        (r.bad ? [r.nos, null, null, null] : [r.nos, r.A != null ? uX(r.A, "Sft") : uX(r.L, "ft"), uX(W, "ft"), uX(H, "ft")]).forEach((v, j) => {   // (an outline crossing itself: no dimensions, Qty 0 in yellow)
           const cell = rr.getCell(4 + j);
-          if (j === 1 && r.runs && r.runs.length > 1) cell.value = {formula: r.runs.map(x => isM() ? String(uX(x, "ft")) : f3(x)).join("+"), result: uX(r.L, "ft")};
+          if (j === 1 && r.runs && r.runs.length > 1 && !r.bad) cell.value = {formula: r.runs.map(x => isM() ? String(uX(x, "ft")) : f3(x)).join("+"), result: uX(r.L, "ft")};
           else cell.value = v == null ? null : v;
           if (v != null) { cell.fill = BLUE; cell.numFmt = j === 0 ? "0.###" : "0.000"; cell.protection = {locked: false}; }
         });
         if (r.F != null) { const fc = rr.getCell(12); fc.value = r.F; fc.fill = BLUE; fc.numFmt = "0.0000"; fc.protection = {locked: false}; }   // √(1 + p²) as an input cell, live in the PRODUCT
         const q = rr.getCell(8), cols = ww ? `D${row}:E${row}` : `D${row}:G${row}`;   // (a wall in ft: its Qty its length — W and H not in it)
-        q.value = r.below ? {formula: "0", result: 0} : {formula: (r.sign < 0 ? "-" : "") + (r.F != null ? `PRODUCT(${cols},L${row})` : `PRODUCT(${cols})`), result: uV(r.qty, r.unit)};
-        q.fill = r.below ? YELLOW : GREEN; q.numFmt = qFmt(r.unit);
+        q.value = r.below || r.bad ? {formula: "0", result: 0} : {formula: (r.sign < 0 ? "-" : "") + (r.F != null ? `PRODUCT(${cols},L${row})` : `PRODUCT(${cols})`), result: uV(r.qty, r.unit)};
+        q.fill = r.below || r.bad ? YELLOW : GREEN; q.numFmt = qFmt(r.unit);
         if (ww) {   // its wall area and volume, as its Properties work them out (on plan: no slope)
           const n0 = r.sign * (r.nos || 1) * (uX(r.L, "ft") || 0), neg = r.sign < 0 ? "-" : "";
           if (H != null) { const c2 = rr.getCell(cA); c2.value = {formula: `${neg}D${row}*E${row}*G${row}` + (faces > 1 ? "*" + faces : ""), result: n0 * uX(H, "ft") * faces}; c2.fill = GREEN; c2.numFmt = qFmt("Sft"); }
@@ -8762,7 +8778,7 @@ function exportCsv(){
   const rows = [["S.No", "Condition", "Description", "Drawing / page", "Nos", "L (" + uL("ft") + ") / Area (" + uL("Sft") + ")", "W (" + uL("ft") + ")", "H (" + uL("ft") + ")", "Qty", "Unit", "BOQ code", "Location", "QA"]];
   let sn = 0; const SR = sheetRows(), anyF = SR.some(g => g.rows.some(x => x.r.F != null)); if (anyF) rows[0].push("Slope ×");   // a slope's factor: its own last column
   const anyV = P.proj.items.some(i => verOf(i)); if (anyV) rows[0].push("Verification");   // how far each outline is proved (a traced / imported takeoff)
-  SR.forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.A != null ? f3(uV(r.A, "Sft")) : r.L == null ? "" : uLen(r.L), r.W == null ? "" : uLen(r.W), r.H == null ? "" : uLen(r.H), qCsv(uV(r.qty, r.unit), r.unit), uL(r.unit), g.c.boq || "", x.i === 0 ? locText(locOf(x.it)) : "", x.i === 0 ? QA_NAMES[x.it.qa || ""] + (x.it.ai && x.it.qa !== "checked" ? " · AI" : "") + (x.it.copied && x.it.qa !== "checked" ? " · copied" : "") : ""].concat(anyF ? [r.F != null ? r.F.toFixed(4) : ""] : []).concat(anyV ? [x.i === 0 && verOf(x.it) ? VER_NAMES[verOf(x.it)] : ""] : [])); });
+  SR.forEach(g => { g.rows.forEach(x => { const r = x.r; rows.push([x.i === 0 ? ++sn : "", g.c.name, rowDesc(x), pageName(x.it), r.nos ?? "", r.bad ? "" : r.A != null ? f3(uV(r.A, "Sft")) : r.L == null ? "" : uLen(r.L), r.bad || r.W == null ? "" : uLen(r.W), r.bad || r.H == null ? "" : uLen(r.H), qCsv(uV(r.qty, r.unit), r.unit), uL(r.unit), g.c.boq || "", x.i === 0 ? locText(locOf(x.it)) : "", x.i === 0 ? QA_NAMES[x.it.qa || ""] + (x.it.ai && x.it.qa !== "checked" ? " · AI" : "") + (x.it.copied && x.it.qa !== "checked" ? " · copied" : "") : ""].concat(anyF ? [r.F != null ? r.F.toFixed(4) : ""] : []).concat(anyV ? [x.i === 0 && verOf(x.it) ? VER_NAMES[verOf(x.it)] : ""] : [])); });
     rows.push(["", g.c.name, "Total " + g.c.name, "", "", "", "", "", qCsv(uV(g.t.net, g.c.unit), g.c.unit), uL(g.c.unit), g.c.boq || "", "", ""]); });
   const t = rows.map(r => r.map(v => { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(",")).join("\r\n");
   saveBlob(new Blob(["﻿" + t], {type: "text/csv;charset=utf-8"}), fileBase() + "_Measurement.csv");
@@ -8818,7 +8834,7 @@ function pageOverlaySvg0(file, page, sc, W, H, legend){
     const c = cond(it.cond); if (!c) return;
     const k = qScale(it), rows = k ? rowsOf(it, k) : [], q = rows.reduce((a, r) => a + r.qty, 0), col = c.color, ded = it.kind === "ded";
     tot[c.id] = (tot[c.id] || 0) + q; (its[c.id] = its[c.id] || []).push(it);
-    if (c.type === "area" && it.kind === "shape" && k) per[c.id] = (per[c.id] || 0) + (+it.nos || 1) * polyLen(itemPoly(it), true) / k;   // (as P in the bill)
+    if (c.type === "area" && it.kind === "shape" && k && !crossed(it)) per[c.id] = (per[c.id] || 0) + (+it.nos || 1) * polyLen(itemPoly(it), true) / k;   // (as P in the bill)
     if (c.type === "count") { h.push(countSvg(c, it.pts, T, z, -1)); return; }
     if (it.kind === "open") { const a = T(it.pts[0]), b = T(it.pts[1]); h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${4 * z * wz}" stroke-linecap="round"/>`); return; }
     h.push(measSvg(it, c, {T, z, lz: o.z > 0 ? z : z * lblPageK(file, page), lps: lblPS() && !(o.z > 0), wz, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false}));   // (a plot gives its labels' size on paper)
@@ -12263,9 +12279,9 @@ function validate(){
     if (!String(c.boq || "").trim()) E("WARNING", `${c.name}: no BOQ code`);
     const t = condTotals(c); if (t.net < 0) E("ERROR", `${c.name}: net quantity is negative (${fq(t.net, c.unit)} ${uL(c.unit)}) — deductions exceed the gross`);
     its.forEach(it => { const k = qScale(it); if (!k) return; const q = rowsOf(it, k).reduce((a, r) => a + Math.abs(r.qty), 0);
-      if (!(q > 0) && !rowsOf(it, k).some(r => r.below)) E("ERROR", `${c.name} — ${it.label || kindName(it, c)} on ${pageName(it)}: zero quantity`);
+      if (!(q > 0) && !rowsOf(it, k).some(r => r.below || r.bad)) E("ERROR", `${c.name} — ${it.label || kindName(it, c)} on ${pageName(it)}: zero quantity`);
       if (it.kind === "open" && c.unit !== "ft" && !(openH(it) > 0)) E("ERROR", `${c.name} — opening ${it.label || ""} on ${pageName(it)}: height missing`);
-      if (crossed(it)) E("ERROR", `${c.name} — ${it.label || kindName(it, c)} on ${pageName(it)}: the outline crosses itself, so its area is not the area drawn`);
+      if (crossed(it)) E("ERROR", `${c.name} — ${it.label || kindName(it, c)} on ${pageName(it)}: the outline crosses itself, so its area by coordinates is not the area drawn — left out of the totals until its points are fixed`);
       if (c.type === "area" && it.kind === "shape" && it.shape !== "circle") { const w = sizeMismatch(it, k); if (w) E("WARNING", `${c.name} — ${it.label} on ${pageName(it)}: ${w}`); }
       if (!locOf(it).floor) noFloor.add(c.name); });
   });
@@ -15615,13 +15631,15 @@ async function drawingFacts(fileId, pageNo){
     if ((m = /\b(TYPE\s*[-–]?\s*[A-Z0-9]{1,3}|\d\s*BED(ROOM)?S?\b(?!\s*ROOM\s*\d)|STUDIO|PENTHOUSE|\d{3,5}\s*S\.?\s*FT|\d{3,5}\s*SQ\.?\s*FT)/i.exec(l.s)) && !SIZE_RX.test(l.s)) types.add(l.s.slice(0, 50));
     if (/\b(STAIR|STAIRCASE|LIFT|RAMP|UP|DN|DOWN)\b/i.test(l.s) && /STAIR|LIFT|RAMP|\bUP\b|\bDN\b/i.test(l.s)) notes.add(l.s.slice(0, 60));
     if ((ROOM_RX.test(l.s) || learnWord(l.s)) && !SIZE_RX.test(l.s) && l.s.length <= 32 && !/\bSCALE\b|PLAN\b|DETAIL|SECTION|ELEVATION|NOTE|TYPE\b|TYPE-|S\.?\s*FT|SQ\.?\s*FT|\bUP\b|\bDN\b|\bDOWN\b|^\d+\s*BED/i.test(l.s)) {
-      const cx = l.x + l.w / 2;
-      const near = sizes.filter(z => !used.has(z) && Math.abs(z.l.x + z.l.w / 2 - cx) < Math.max(3 * l.h, l.w) && z.l.y > l.y - 0.2 * l.h && z.l.y - l.y < 3.2 * l.h).sort((a, b) => a.l.y - b.l.y)[0];
-      if (near) used.add(near);
-      rooms.push({name: l.s, x: l.x, y: l.y, w: l.w, h: l.h, cx: l.cx, cy: l.cy, size: near ? near.txt : "", sft: near ? near.a : 0, sizeY: near ? near.l.y : null});
+      /* its size line is the one under it — under in the name's own frame (along it, centre to centre; down from its baseline), so a
+         name written up a page turned 90° finds its size too (it found none there, and the scale check by room sizes saw no rooms) */
+      const co = Math.cos(l.r || 0), sn = Math.sin(l.r || 0), fr = z => { const dx = z.l.x - l.x, dy = z.l.y - l.y; return {a: dx * co + dy * sn + (z.l.w - l.w) / 2, c: -dx * sn + dy * co}; };
+      const near = sizes.map(z => ({z, f: used.has(z) ? null : fr(z)})).filter(o => o.f && Math.abs(o.f.a) < Math.max(3 * l.h, l.w) && o.f.c > -0.2 * l.h && o.f.c < 3.2 * l.h).sort((a, b) => a.f.c - b.f.c)[0];
+      if (near) used.add(near.z);
+      rooms.push({name: l.s, x: l.x, y: l.y, w: l.w, h: l.h, r: l.r || 0, cx: l.cx, cy: l.cy, size: near ? near.z.txt : "", sft: near ? near.z.a : 0, sizeY: near ? near.z.l.y : null, sizeA: near ? near.f.c : null});
     } else if ((ROOM_RX.test(l.s) || learnWord(l.s)) && SIZE_RX.test(l.s)) {   // name and size on one line
       const z = sizes.find(o => o.l === l); used.add(z);
-      rooms.push({name: l.s.replace(SIZE_RX, "").trim(), x: l.x, y: l.y, w: l.w, h: l.h, cx: l.cx, cy: l.cy, size: z.txt, sft: z.a, sizeY: null});
+      rooms.push({name: l.s.replace(SIZE_RX, "").trim(), x: l.x, y: l.y, w: l.w, h: l.h, r: l.r || 0, cx: l.cx, cy: l.cy, size: z.txt, sft: z.a, sizeY: null, sizeA: null});
     }
   });
   const uniq = []; rooms.forEach(r => { if (!uniq.some(q => q.name === r.name && Math.abs(q.x - r.x) < 1.5 * r.h && Math.abs(q.y - r.y) < 1.5 * r.h)) uniq.push(r); });   // the same name drawn twice (bold) is one room
@@ -15722,7 +15740,7 @@ async function qsChecks(key){
       const rows = rowsOf(it, s.k), q = rows.reduce((a, r) => a + (r.below ? 0 : r.qty), 0), nos = +it.nos || 1, Fs = rows[0] && rows[0].F || 1, poly = itemPoly(it), sg = it.kind === "shape" ? 1 : -1;
       const geo = sg * nos * Fs * (c.type === "area" ? polyArea(poly) / s.k / s.k : (it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / s.k) + (c.type === "linear" ? rows.filter(r => r.rise).reduce((a, r) => a + r.qty, 0) : 0);
       const tol = 0.002 * nos * Fs * Math.max(1, it.pts.length) + 0.01;
-      if (!rows.some(r => r.below) && Math.abs(q - geo) > tol) F("err", "sheet", `${pn} — <b>${nm}</b>: the sheet says ${fq(q, c.unit)} ${uL(c.unit)}, its outline on the drawing measures ${fq(geo)} ${c.unit} — the quantity does not match the geometry`, [it.id]);
+      if (!rows.some(r => r.below || r.bad) && Math.abs(q - geo) > tol) F("err", "sheet", `${pn} — <b>${nm}</b>: the sheet says ${fq(q, c.unit)} ${uL(c.unit)}, its outline on the drawing measures ${fq(geo)} ${c.unit} — the quantity does not match the geometry`, [it.id]);
     }
   }
   if (M) {   // walls in two conditions of one thickness lying on one another: the same wall in two quantities
@@ -16164,8 +16182,10 @@ async function agentMeasure(filter, only, opt){   // only: these rooms (an apart
   for (const [n, r] of rooms.entries()) {
     if (agStopped()) { stopAt = n; break; }
     busy(`Measuring ${n + 1} of ${rooms.length}: ${r.name}…`); await new Promise(q => setTimeout(q, 10));
-    const cx = r.x + r.w / 2, below = r.sizeY != null ? r.sizeY : r.y, lc = nameCentre(r);   // (the name's own centre, turned with the page)   // lc: the name itself — the room it is written in is the one wanted
-    const seeds = [lc, [cx, r.y - r.h * 1.7], [cx, below + r.h * 0.9], [r.x - r.h, r.y - r.h / 2], [r.x + r.w + r.h, r.y - r.h / 2], [cx, below + r.h * 2.5], [cx, r.y - r.h * 3.5]];
+    const sa = r.sizeA != null ? r.sizeA : 0, lc = nameCentre(r);   // lc: the name itself — the room it is written in is the one wanted
+    // the other tries round the name — above it, under its size line, either side — in the name's own frame (nameAt: along it, down
+    // from its baseline), so on a page turned 90° they are above and below the name as it reads, not beside it
+    const seeds = [lc, nameAt(r, r.w / 2, -r.h * 1.7), nameAt(r, r.w / 2, sa + r.h * 0.9), nameAt(r, -r.h, -r.h / 2), nameAt(r, r.w + r.h, -r.h / 2), nameAt(r, r.w / 2, sa + r.h * 2.5), nameAt(r, r.w / 2, -r.h * 3.5)];
     if (got.some(o => o.with.some(q => sameRoom(q, r)))) { const o = got.find(g2 => g2.with.some(q => sameRoom(q, r))); res.push({name: r.name, shared_with: o.name}); say("tool", `${esc(r.name)}: <span class="small">in the same open space as <b>${esc(o.name)}</b> — measured with it</span>`); continue; }
     let best = null; const dd = sizeDims(r.size), tried = [];
     const over = Object.assign({own: lc}, dd ? {gap: Math.max(2.5, Math.min(autoOpt().gap, 0.6 * Math.min(dd[0], dd[1])))} : {});   // a 5 ft bath: close gaps up to 3 ft, not 4
@@ -17571,7 +17591,7 @@ async function cutFillDialog(){
   const sel = outs.find(i => selIds().has(i.id)) || outs.slice().sort((a, b) => polyArea(itemPoly(b)) - polyArea(itemPoly(a)))[0];
   const ac = P.proj.conds.filter(c => c.type === "area" && c.unit === "cft"), CUT = "Excavation — cut (spot levels)", FILL = "Earth filling — fill (spot levels)";
   const opt = nm => `<option value="">+ New: ${esc(nm)}</option>` + ac.map(c => `<option value="${esc(c.id)}"${c.name === nm ? " selected" : ""}>${esc(c.name)}</option>`).join("");
-  const nm = it => (String(it.label || "").trim() || (cond(it.cond) || {}).name || "Area") + " — " + uArea(polyArea(itemPoly(it)) / k / k);
+  const nm = it => (String(it.label || "").trim() || (cond(it.cond) || {}).name || "Area") + " — " + (crossed(it) ? "⚠ crosses itself" : uArea(polyArea(itemPoly(it)) / k / k));
   let last = null;
   const calc = () => { const it = outs.find(i => i.id === $("cfO").value), F = lvParse($("cfF").value, false);
     last = it ? MEAS.cutFill({outline: itemPoly(it), k, formation: isFinite(F) ? lvFt(F) : "", levels: L.map(l => ({p: l.p, z: lvFt(l.z)}))}) : null;

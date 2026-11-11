@@ -900,11 +900,24 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
     for (const [x, y] of [[44, 2], [50, 8], [50, 2], [44, 8]]) await click(hx(x), hy(y), {mod: "Control"});   // equal halves: they cancel to 0 Sft
     await page.keyboard.press("Enter"); await wait(200); const bmsg0 = await page.innerText("#toast");
     ok((await T(() => zdTakeoff.P.proj.items.length)) === nb0 && /crosses itself.*cancel out/.test(bmsg0), "a figure of eight with equal halves (0 Sft): not added, and says why (“" + bmsg0.slice(0, 70) + "”)");
-    for (const [x, y] of [[44, 2], [52, 8], [52, 2], [44, 6]]) await click(hx(x), hy(y), {mod: "Control"});   // unequal halves
+    const totF = () => T(id => zdTakeoff.condTotals(zdTakeoff.P.proj.conds.find(c => c.id === id)).net, cf), totX0 = await totF();
+    for (const [x, y] of [[44, 2], [52, 8], [52, 2], [44, 6]]) await click(hx(x), hy(y), {mod: "Control"});   // unequal halves: 6.4 + 14.4 Sft drawn, 8.0 by coordinates
     await page.keyboard.press("Enter"); await wait(200);
     const bw = await lastItem(), bmsg = await page.innerText("#toast");
     ok(bw && bw.pts.length === 4 && /crosses itself/.test(bmsg), "a figure of eight with unequal halves: warned as it is finished (“" + bmsg.slice(0, 60) + "”)");
     ok(/CROSSES ITSELF/.test(await page.innerText(`#sheet tr[data-item="${bw.id}"]`)) && (await T(() => zdTakeoff.validation().L.some(x => x.lvl === "ERROR" && /crosses itself/.test(x.msg)))), "…flagged on the sheet and an ERROR in the export check");
+    // …and it has no quantity: its area by coordinates (8.000 Sft, the difference of its halves) is not taken into the total, the bill or an export
+    const bq = await qtyOf(bw.id), totX1 = await totF();
+    ok(bq === 0 && Math.abs(totX1 - totX0) < 1e-9, `…left out of the totals: no quantity, the condition's total unchanged (${totX0.toFixed(3)} → ${totX1.toFixed(3)} Sft)`);
+    ok(/crosses itself.*left out of the totals/.test(await page.innerText("#warnbar")) && /—/.test(await page.innerText(`#sheet tr[data-item="${bw.id}"] td:last-child`)), "…said in the warning bar, its sheet row shows no quantity");
+    const xRow = fs.readFileSync(await dl("#exCsv"), "utf8").split(/\r?\n/).find(l => /CROSSES ITSELF/.test(l)) || "";
+    ok(/,1,,,,0\.000,Sft,/.test(xRow), "…in the CSV its row says why, with no dimensions and Qty 0 (" + xRow.slice(-60) + ")");
+    { const ExcelJS = require(path.join(LIBS, "exceljs")), xw = new ExcelJS.Workbook(); await xw.xlsx.readFile(await dl("#exXls"));
+      let xr = null; xw.getWorksheet("Measurement").eachRow(r => { if (/CROSSES ITSELF/.test(String(r.getCell(2).value || ""))) xr = r; });
+      const qv = xr && xr.getCell(8).value, vrows = []; xw.getWorksheet("Validation").eachRow(r => vrows.push(String(r.getCell(2).value || "")));
+      ok(!!xr && xr.getCell(5).value == null && qv && qv.formula === "0" && xr.getCell(8).fill.fgColor.argb === "FFFFF2C2" && vrows.some(m => /crosses itself.*left out of the totals/.test(m)),
+        "…in Excel: no dimensions, Qty =0 in yellow, and the Validation sheet says it is left out (" + JSON.stringify(qv) + ")"); }
+    await closeDlg();
     await T(id => { zdTakeoff.P.proj.items = zdTakeoff.P.proj.items.filter(i => i.id !== id); zdTakeoff.setSel([]); zdTakeoff.setTool("select"); }, bw.id);
     // odd characters in names
     const odd = '<b>Q&A "x"</b> 😀 ٹائلیں';
