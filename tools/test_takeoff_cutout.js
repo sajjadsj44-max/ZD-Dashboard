@@ -67,7 +67,8 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   await page.keyboard.press("s");   // snap off: the cut-outs go exactly where clicked
 
   console.log("ribbon and keys");
-  const btn = await T(() => ["dedrect", "ded"].map(t => { const b = document.querySelector('#tools .tool[data-tool="' + t + '"]'); return b ? {lbl: b.querySelector(".tl").textContent, vis: b.offsetParent !== null, ic: (b.querySelector("use") || {}).getAttribute("href")} : null; }));
+  await page.click('#tools .rtab[data-rtab="takeoff"]'); await wait(150);   // the ribbon opens on My tools (Settings › home tab): the cut-outs are on the Takeoff tab
+  const btn =await T(() => ["dedrect", "ded"].map(t => { const b = document.querySelector('#tools .tool[data-tool="' + t + '"]'); return b ? {lbl: b.querySelector(".tl").textContent, vis: b.offsetParent !== null, ic: (b.querySelector("use") || {}).getAttribute("href")} : null; }));
   ok(btn[0] && btn[0].lbl === "Cut-out rect" && btn[0].vis && btn[0].ic === "#i-dedrect", "Cut-out rect button in the Takeoff ribbon");
   ok(btn[1] && btn[1].lbl === "Cut-out poly" && btn[1].vis && btn[1].ic === "#i-ded", "Cut-out poly button beside it");
   await page.keyboard.press("Shift+D");

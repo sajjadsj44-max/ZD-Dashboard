@@ -7,7 +7,9 @@
    Rules. A formula never assumes an input: a wall finish without a height, a volume without a thickness, an opening without a size
    is not worked out — the result lists what is missing (missing: [...]) and its value is null. Deductions at or under the
    threshold are listed but not deducted, saying so (the house rule: masonry and plaster 1.00 Sft, formwork 5.00 Sft, concrete
-   0.50 cft). Every result carries its formula as printed, its inputs and its unit, for the measurement sheet's audit trail. */
+   0.50 cft). Every result carries its formula as printed, its inputs and its unit, for the measurement sheet's audit trail.
+   An outline that is not a valid boundary (validatePolygon: sides crossing or touching, no area) gives no area and no volume —
+   value null, the fault in missing — never a figure that looks like a quantity. */
 
 export const FT_M = 0.3048, SFT_M2 = 0.09290304, CFT_M3 = 0.028316846592, KG_TON = 1000;   // exact; "ton" = metric tonne (Pakistan steel)
 export const UNITS = {
@@ -53,6 +55,26 @@ export function validatePolygon(P, eps = 1e-6){
     if (r) issues.push({type: r === "cross" ? "self-cross" : "self-touch", at: [i, j], why: "side " + (i + 1) + " " + (r === "cross" ? "crosses" : "touches") + " side " + (j + 1)});
   }
   return {ok: !issues.length, issues};
+}
+/* an outline as worked: a corner on top of the one before it (a double click, the first corner clicked again to close it) is
+   dropped — it changes no area — so what validatePolygon then finds is a fault of the outline itself */
+export function dropRepeats(P, eps = 1e-6){
+  const out = []; (P || []).forEach(p => { if (!out.length || dist(out[out.length - 1], p) > eps) out.push(p); });
+  while (out.length > 1 && dist(out[0], out[out.length - 1]) <= eps) out.pop();
+  return out;
+}
+/* what an outline that is not a valid boundary needs, as a result's missing list says it */
+function geomNeeds(what, v){
+  const t = new Set(v.issues.map(x => x.type)), cr = v.issues.filter(x => x.type === "self-cross" || x.type === "self-touch");
+  return [t.has("open") ? what + " with 3 corners or more" : "", t.has("degenerate") ? what + " with an area (its corners lie on one line)" : "",
+    cr.length ? what + " whose sides do not cross or touch (" + cr.slice(0, 3).map(x => x.why).join("; ") + (cr.length > 3 ? "; …" : "") + ")" : ""].filter(Boolean);
+}
+const inPoly = (q, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > q[1]) !== (b[1] > q[1]) && q[0] < (b[0] - a[0]) * (q[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+const segDist = (q, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy, t = L ? Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / L)) : 0; return Math.hypot(q[0] - a[0] - t * dx, q[1] - a[1] - t * dy); };
+/* the outline H lies inside O (on its sides counts: a shaft against the wall): every corner in or on O, and no side of H crossing one of O */
+function within(H, O, eps){
+  const on = q => O.some((a, i) => segDist(q, a, O[(i + 1) % O.length]) <= eps);
+  return H.every(q => on(q) || inPoly(q, O)) && !H.some((a, i) => O.some((c, j) => segInter(a, H[(i + 1) % H.length], c, O[(j + 1) % O.length], eps) === "cross"));
 }
 /* the turn at each corner, in degrees off the nearest of 0 / 90 / 180: a square room has 0 everywhere */
 export function cornerDeviation(P){
@@ -110,11 +132,20 @@ function deduct(list, threshold, factor){
   const bad = rows.filter(r => !(r.w > 0) || !(r.h > 0)).map(r => "opening size (" + (r.name || "unnamed") + ")");
   return {rows, total: rows.reduce((s, r) => s + r.qty, 0), bad};
 }
-/* room floor area: the outline (pt) at k pt per ft, less voids (outlines inside it) */
+/* room floor area: the outline (pt) at k pt per ft, less voids (outlines inside it). An outline that is not a valid boundary —
+   open, no area, its sides crossing or touching — gives no area (value null, what it needs in missing), never a figure: by
+   coordinates a figure of eight is the difference of its two halves, not their sum. The same for a void that is not a valid
+   boundary or not inside the room. A corner repeating the one before it is dropped first (it changes no area). */
 export function roomArea(outline, k, voids = []){
+  const f = "Σ(xᵢ·yᵢ₊₁ − xᵢ₊₁·yᵢ) ÷ 2 ÷ k²" + (voids.length ? " − voids" : "");
   if (!(k > 0)) return miss("Sft", "area by coordinates ÷ k²", {k}, ["page scale"]);
-  const v = validatePolygon(outline, 1e-6 * k), gross = polyArea(outline) / k / k, ded = voids.reduce((s, h) => s + polyArea(h) / k / k, 0);
-  return res(gross - ded, "Sft", "Σ(xᵢ·yᵢ₊₁ − xᵢ₊₁·yᵢ) ÷ 2 ÷ k²" + (voids.length ? " − voids" : ""), {k, corners: outline.length}, {gross, deductions: ded, perimeter: perimeter(outline) / k, valid: v});
+  const eps = 1e-6 * k, O = dropRepeats(outline, eps), v = validatePolygon(O, eps), H = (voids || []).map(h => dropRepeats(h, eps)), hv = H.map(h => validatePolygon(h, eps));
+  const bad = geomNeeds("an outline", v);
+  hv.forEach((x, i) => bad.push(...geomNeeds("void " + (i + 1), x)));
+  if (v.ok) H.forEach((h, i) => { if (hv[i].ok && !within(h, O, eps)) bad.push("void " + (i + 1) + " inside the room's outline"); });
+  if (bad.length) return Object.assign(miss("Sft", f, {k, corners: O.length}, bad), {valid: v, voidsValid: hv});
+  const gross = polyArea(O) / k / k, ded = H.reduce((s, h) => s + polyArea(h) / k / k, 0);
+  return res(gross - ded, "Sft", f, {k, corners: O.length}, {gross, deductions: ded, perimeter: perimeter(O) / k, valid: v});
 }
 /* a wall's length on the sheet: the sum of its legs (pt) at k */
 export function wallLength(runs, k){
@@ -159,7 +190,6 @@ export function slabFormwork(o){
   return res(o.area - ded + o.perimeter * o.depth, "Sft", `${fmt(o.area)} − openings + ${fmt(o.perimeter)} × ${fmt(o.depth)}`, o, {soffit: o.area - ded, edges: o.perimeter * o.depth, openings: d});
 }
 /* ------------------------------------------------------------------ earthworks: cut and fill from spot levels */
-const inPoly = (q, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > q[1]) !== (b[1] > q[1]) && q[0] < (b[0] - a[0]) * (q[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
 /* Delaunay triangles of points [[x, y], …] (Bowyer–Watson) -> [[i, j, k], …]; fewer than 3 points, or all on one line, give [] */
 export function delaunay(P){
   const n = P.length; if (n < 3) return [];
@@ -198,14 +228,17 @@ export function groundAt(q, P, Z, T){
    worked by hand); outside the outermost levels the nearest ones decide, and the share of the area lying there is reported
    (outside). The outline is worked in cells (about 62,500 over its box): cut = Σ (ground − formation) where the ground is above
    the formation, fill = Σ (formation − ground) where it is below, each cell carrying the outline's exact area ÷ the cells. The
-   formation level is never assumed. value = cut − fill (Cft) */
+   formation level is never assumed. value = cut − fill (Cft). An outline that is not a valid boundary (its sides crossing or
+   touching, no area) gives no volume: a figure of eight's area by coordinates is the difference of its halves, its cells both */
 export function cutFill(o){
   const k = +o.k, F = o.formation === "" || o.formation == null ? NaN : +o.formation, L = (o.levels || []).filter(l => l && Array.isArray(l.p) && isFinite(+l.z));
   const miss2 = []; if (!(k > 0)) miss2.push("page scale"); if (!(o.outline && o.outline.length >= 3)) miss2.push("the outline");
   if (L.length < 3) miss2.push("3 spot levels or more (" + L.length + " given)"); if (!isFinite(F)) miss2.push("formation level (never assumed)");
   const inputs = {k, levels: L.length, formation: F};
   if (miss2.length) return miss("Cft", "Σ cells (ground − formation) × cell area", inputs, miss2);
-  const ft = p => [p[0] / k, p[1] / k], O = o.outline.map(ft), Pt = [], Z = [];
+  const Oc = dropRepeats(o.outline, 1e-6 * k), v = validatePolygon(Oc, 1e-6 * k);
+  if (!v.ok) return Object.assign(miss("Cft", "Σ cells (ground − formation) × cell area", inputs, geomNeeds("an outline", v)), {valid: v});
+  const ft = p => [p[0] / k, p[1] / k], O = Oc.map(ft), Pt = [], Z = [];
   L.forEach(l => { const q = ft(l.p); if (Pt.some(x => Math.hypot(x[0] - q[0], x[1] - q[1]) < 1e-6)) return; Pt.push(q); Z.push(+l.z); });   // two levels on one point: the first
   const T = delaunay(Pt); if (!T.length) return miss("Cft", "Σ cells (ground − formation) × cell area", inputs, ["spot levels not all on one line"]);
   const A = polyArea(O); let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity; O.forEach(p => { bx0 = Math.min(bx0, p[0]); by0 = Math.min(by0, p[1]); bx1 = Math.max(bx1, p[0]); by1 = Math.max(by1, p[1]); });

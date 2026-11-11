@@ -137,6 +137,26 @@ const BAG = 50 / 1440 / 0.028316846592;
   ok(await T(() => { const c = zdTakeoff.P.proj.conds.find(x => x.name === "Bedroom flooring"); return c && c.ra === "FIN-PLS-001" && c.boq === "FIN-PLS-001" && c.unit === "Sft"; }), "the condition is created with the BOQ item, and its rate comes from Rate Analysis");
   ok(await T(() => { const M = zdTakeoff.boqMatches("tiles", "Sft", true); return M.length && M[0].it.code === "FIN-TIL-001"; }) && await T(() => zdTakeoff.boqMatches("zzz qq", "Sft", true).length === 0), "matching: tiles → FIN-TIL-001; nothing in common → no suggestion");
   await T(() => { const P = zdTakeoff.P.proj; P.conds = P.conds.filter(c => c.name !== "Bedroom flooring"); zdTakeoff.S.cond = "cB"; zdTakeoff.refresh(); });
+  // an item picked by itself and then dropped (the name changed away from it) takes back the type, unit and T it set
+  await page.click("#bNewCond"); await wait(200);
+  const st0 = await T(() => ["cType", "cUnit", "cT"].map(id => document.getElementById(id).value));
+  await page.fill("#cName", '8" Block wall'); await page.dispatchEvent("#cName", "input"); await wait(150);
+  const st1 = await T(() => ["cRa", "cType", "cUnit", "cT"].map(id => document.getElementById(id).value));
+  await page.fill("#cName", "zzz qq"); await page.dispatchEvent("#cName", "input"); await wait(150);
+  const st2 = await T(() => ["cRa", "cType", "cUnit", "cT"].map(id => document.getElementById(id).value));
+  ok(st1[0] === "CIV-MAS-008" && st1[1] === "linear" && st2[0] === "" && JSON.stringify(st2.slice(1)) === JSON.stringify(st0),
+    `an auto-pick dropped puts back what it set: ${st0.join(" / ")} → ${st1.slice(1).join(" / ")} → ${st2.slice(1).join(" / ")}`);
+  await page.click("#dlgCancel"); await wait(150);
+  // a type the user chose (a preset, or the type box) is never changed by an item picked by itself from the name: "Floor area"
+  // named after a wall item stayed an area only until the name matched the cft wall, and then was taken off as a length
+  await page.click("#bNewCond"); await wait(200);
+  await page.selectOption("#cPre", {label: "Floor area"}); await wait(100);
+  await page.fill("#cName", '8" Block wall'); await page.dispatchEvent("#cName", "input"); await wait(150);
+  ok((await page.inputValue("#cType")) === "area" && (await page.inputValue("#cUnit")) === "Sft" && (await page.inputValue("#cRa")) !== "CIV-MAS-008",
+    "a preset chosen (Floor area): a name matching a cft wall item does not turn it into a length — RA “" + await page.inputValue("#cRa") + "”");
+  await page.click('#cBoqL [data-boqpick="CIV-MAS-008"]').catch(() => {}); await wait(150);
+  ok((await page.inputValue("#cRa")) === "CIV-MAS-008" && (await page.inputValue("#cType")) === "linear" && (await page.inputValue("#cUnit")) === "cft", "…clicking the wall item still takes its unit (linear, cft)");
+  await page.click("#dlgCancel"); await wait(150);
 
   console.log("bill: material / labour / equipment split");
   await T(() => { zdTakeoff.S.billSplit = true; zdTakeoff.S.billView = true; });
