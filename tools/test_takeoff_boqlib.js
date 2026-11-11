@@ -62,8 +62,9 @@ const ok = (c, m) => { if (c) { passes++; console.log("  ✓ " + m); } else { fa
   console.log("browsed by item group");
   const chips = await T(() => Object.fromEntries([...document.querySelectorAll("#cBoqG .boqc")].map(b => [b.dataset.boqg || "Suggested", +(b.querySelector("span") || {}).textContent || 0])));
   for (const g of ["Concrete", "Block masonry", "Brick masonry", "Plaster", "Ceiling", "Flooring & tiles", "Paint", "Doors", "Windows"]) ok(chips[g] > 0, `${g}: ${chips[g]} items`);
-  ok("Suggested" in chips && /suggested|type a name/.test(await page.textContent("#cBoqHint")), "Suggested (from the name) is the group at first");
   const rows = () => T(() => [...document.querySelectorAll("#cBoqL .boqr")].map(r => r.dataset.boqpick));
+  ok("Suggested" in chips && /none picked/.test(await page.textContent("#cBoqHint")) && (await rows()).length === 0 && await T(() => ![...document.querySelectorAll("#cBoqG .boqc")].some(b => b.getAttribute("aria-pressed") === "true")) && (await page.inputValue("#cRa")) === "" && (await page.inputValue("#cBoq")) === "",
+    "at first no group is on, the item list is empty and nothing is picked");
   const inGroup = (g, codes) => T(([g, codes]) => { const G = zdTakeoff.boqGroups(zdTakeoff.raLib()).get(g), s = new Set(G.map(it => String(it.code || it.id))); return codes.every(c => s.has(c)) && codes.length === G.length; }, [g, codes]);
   await page.click('#cBoqG [data-boqg="Plaster"]'); await wait(150);
   { const r = await rows(); ok(r.length === chips.Plaster && await inGroup("Plaster", r), `Plaster lists all its ${r.length} items`); }
@@ -93,6 +94,8 @@ const ok = (c, m) => { if (c) { passes++; console.log("  ✓ " + m); } else { fa
   ok((await rows()).length === chips.Windows && await T(() => [...document.querySelectorAll("#cBoqL .boqr")].every(x => /window|screen|grill/i.test(x.title))), "Windows: window items only");
   await page.click('#cBoqG [data-boqg=""]'); await wait(150);
   ok(/suggested from the name/.test(await page.textContent("#cBoqHint")) && (await rows()).length >= 1, "Suggested lists the items matching the name again");
+  await page.click('#cBoqG [data-boqg=""]'); await wait(150);
+  ok((await rows()).length === 0 && (await page.inputValue("#cRa")) === nosDoor, "Suggested pressed again: off, the list empty — the item picked by hand stays");
   await page.click("#dlgCancel"); await wait(200);
 
   console.log("item groups (a small library)");

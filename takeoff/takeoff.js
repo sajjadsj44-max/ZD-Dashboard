@@ -8392,22 +8392,23 @@ async function editCond(c){
       ...((P.proj.cols || []).length ? {cols: (k => k.length === P.proj.cols.length ? undefined : k)([...document.querySelectorAll("[data-ccol]")].filter(b => b.checked).map(b => b.dataset.ccol))} : {})};   // every column ticked: none listed, so new columns show too
   }, "cName");
   apDialogWire(d);
-  const pk = {auto: false, boqAuto: false, nameAuto: false, grp: ""};   // grp: the item group listed (Plaster, Doors…), "" = suggested from the name
-  const raInfo = () => { const code = $("cRa").value.trim(); if (!code) { $("cRaInfo").innerHTML = raLib().o ? "Link a Rate Analysis item to take its built-up rate (or type the rate in the bill’s Assembly)." : raConnect.state === "busy" ? "Reading the Rate Analysis library from QS Cost Control on this site…" : "Rate Analysis library not found in this browser — it is read from QS Cost Control on this site when this dialog opens (or open SAJ QSCOST → Rate Analysis once)."; return; }
+  const pk = {boqAuto: false, nameAuto: false, grp: null};   // grp: the item group listed (Plaster, Doors…), "" = suggested from the name, null = none: the list stays empty
+  const raInfo = () => { const code = $("cRa").value.trim(); if (!code) { $("cRaInfo").innerHTML = raLib().o ? "No BOQ item linked — none is picked for you. Link a Rate Analysis item to take its built-up rate (or type the rate in the bill’s Assembly)." : raConnect.state === "busy" ? "Reading the Rate Analysis library from QS Cost Control on this site…" : "Rate Analysis library not found in this browser — it is read from QS Cost Control on this site when this dialog opens (or open SAJ QSCOST → Rate Analysis once)."; return; }
     const bu = (() => { const H0 = uKeep($("cH").value, d.h), T0 = uKeep($("cT").value, d.t), x = {type: $("cType").value, unit: $("cUnit").value, h: H0, t: T0, faces: +$("cF").value || 1, bq: $("cBq").value, ra: code, rate: d.rate};
       const q = $("cType").value === "linear" ? condQ(x, billQ(x) || "q", null, {Q: 0, A: 0, P: 0, PD: 0, D: 0, L: 0, N: 0, H: +H0 || 0, T: +T0 || 0}) : null; return q ? q.unit : $("cUnit").value; })();   // (the unit its bill line is in)
     const r = rateOf({ra: code.toUpperCase()}, bu), p = raPrice(code);
-    $("cRaInfo").innerHTML = "<div>" + (pk.auto ? '<span class="tag a" title="Picked by itself from the name — click another item to change, or clear the RA code">auto-picked</span> ' : "") + (r.na ? `<span style="color:var(--red)">${esc(r.na)}</span>` : `<b>${esc(p.code)}</b> — ${esc(String(p.desc).slice(0, 110))} · <b>PKR ${f2(r.rate)} / ${esc(p.unit)}</b> — rate taken from Rate Analysis${r.assumed ? ` · <span style="color:var(--amber)">${r.assumed} assumed row(s)</span>` : ""}`) + "</div>"; };
-  $("cRa").addEventListener("input", () => { pk.auto = false; raInfo(); pkDraw(); }); $("cUnit").addEventListener("change", () => { raInfo(); pkDraw(); }); raInfo();
+    $("cRaInfo").innerHTML = "<div>" + (r.na ? `<span style="color:var(--red)">${esc(r.na)}</span>` : `<b>${esc(p.code)}</b> — ${esc(String(p.desc).slice(0, 110))} · <b>PKR ${f2(r.rate)} / ${esc(p.unit)}</b> — rate taken from Rate Analysis${r.assumed ? ` · <span style="color:var(--amber)">${r.assumed} assumed row(s)</span>` : ""}`) + "</div>"; };
+  $("cRa").addEventListener("input", () => { raInfo(); pkDraw(); }); $("cUnit").addEventListener("change", () => { raInfo(); pkDraw(); }); raInfo();
   ["cBq", "cH", "cT"].forEach(k => $(k).addEventListener("change", raInfo));
   /* the BOQ item picker: library items ranked by the name typed (or filtered by the search), with their built-up rate; a click
-     fills the RA code (so the rate follows it), the BOQ code if empty, the name if empty, and a fitting unit. A new condition
-     takes the best match by itself when it is a clear one — marked auto-picked, and dropped again if the name changes away. */
+     fills the RA code (so the rate follows it), the BOQ code if empty, the name if empty, and a fitting unit. Nothing is picked
+     by itself (as the owner asked): the list is empty until a search, a group or Suggested (the items matching the name) is
+     chosen, and the RA / BOQ codes stay empty until an item is clicked. */
   const pkUnit = it => { const u = normU(it.unit); return u === "ft" ? ["linear", "ft"] : u === "nos" ? ["count", "Nos"] : u === "sft" ? [$("cType").value === "linear" ? "linear" : "area", "Sft"] : u === "cft" ? [/wall|block|brick|masonry|partition/i.test([it.desc, it.sub, $("cName").value].join(" ")) ? "linear" : $("cType").value === "count" ? "area" : $("cType").value, "cft"] : null; };   // walls are taken off as runs (L × H × T)
-  const pkFill = (code, auto) => { const L = raLib(), it = L.items.get(String(code).toUpperCase()); if (!it) return;
-    $("cRa").value = it.code || it.id; pk.auto = !!auto;
+  const pkFill = code => { const L = raLib(), it = L.items.get(String(code).toUpperCase()); if (!it) return;
+    $("cRa").value = it.code || it.id;
     // a click also replaces a BOQ code that is another library item's (the one picked before); a WBS code typed by hand stays
-    const bq = $("cBoq").value.trim(); if (!bq || pk.boqAuto || (!auto && L.items.has(bq.toUpperCase()))) { $("cBoq").value = it.code || it.id; pk.boqAuto = true; }
+    const bq = $("cBoq").value.trim(); if (!bq || pk.boqAuto || L.items.has(bq.toUpperCase())) { $("cBoq").value = it.code || it.id; pk.boqAuto = true; }
     if (!$("cName").value.trim()) { $("cName").value = String(it.desc || "").slice(0, 80); pk.nameAuto = true; }
     const tu = pkUnit(it); if (tu && !used) { if ($("cType").value !== tu[0]) { $("cType").value = tu[0]; $("cType").dispatchEvent(new Event("change", {bubbles: true})); }
       $("cUnit").innerHTML = UNITS[tu[0]].map(u => `<option value="${u}"${u === tu[1] ? " selected" : ""}>${uL(u)}</option>`).join("");
@@ -8420,29 +8421,29 @@ async function editCond(c){
     // the item groups, with how many items each holds: one picked lists all its items under their sub-categories
     const G = [...boqGroups(L)].filter(([, a]) => a.length), sig = G.map(([n, a]) => n + a.length).join();
     if (ge.dataset.sig !== sig) { ge.dataset.sig = sig;   // drawn again only when the groups change, so a chip pressed keeps the keyboard focus
-      ge.innerHTML = `<button type="button" class="boqc" data-boqg="" data-enter="click" title="Items suggested from the condition’s name">Suggested</button>` +
+      ge.innerHTML = `<button type="button" class="boqc" data-boqg="" data-enter="click" title="List the items matching the condition’s name (nothing is picked until you click one)">Suggested</button>` +
         G.map(([n, a]) => `<button type="button" class="boqc" data-boqg="${esc(n)}" data-enter="click">${esc(n)} <span>${a.length}</span></button>`).join(""); }
-    ge.querySelectorAll("[data-boqg]").forEach(b => { const on = b.dataset.boqg === pk.grp; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); });
-    const q = $("cBoqQ").value.trim(), g = pk.grp, list = boqMatches(q || (g ? "" : $("cName").value), $("cUnit").value, !q && !g, g), cur = $("cRa").value.trim().toUpperCase();
-    $("cBoqHint").textContent = q ? list.length + " found" + (g ? " in " + g : "") : g ? list.length + " items — " + g : list.length ? "suggested from the name" : "type a name or search, or pick a group";
+    ge.querySelectorAll("[data-boqg]").forEach(b => { const on = pk.grp !== null && b.dataset.boqg === pk.grp; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); });
+    const q = $("cBoqQ").value.trim(), g = pk.grp, cur = $("cRa").value.trim().toUpperCase();
+    if (!q && g === null) { $("cBoqHint").textContent = cur ? "" : "· none picked";   // empty until the user asks: nothing listed, nothing picked
+      el.innerHTML = '<div class="small boqe" style="padding:6px">No item is picked for you. Search above, pick a group, or press <b>Suggested</b> for the items matching the name — then click the item to link it.</div>'; return; }
+    const list = boqMatches(q || (g ? "" : $("cName").value), $("cUnit").value, !q && !g, g || "");
+    $("cBoqHint").textContent = q ? list.length + " found" + (g ? " in " + g : "") : g ? list.length + " items — " + g : list.length ? "suggested from the name" : "nothing matches the name — search or pick a group";
     let sub = null;
     el.innerHTML = list.slice(0, g ? 400 : 40).map(o => { const r = o.p.err ? null : o.p, ok = r && !r.gaps, same = normU(o.it.unit) === normU($("cUnit").value);
       const hd = g && !q && String(o.it.sub || "") !== sub ? `<div class="boqh">${esc((sub = String(o.it.sub || "")) || "—")}</div>` : "";
       return hd + `<div class="boqr${String(o.it.code || o.it.id).toUpperCase() === cur ? " on" : ""}" data-boqpick="${esc(o.it.code || o.it.id)}" title="${esc(o.it.desc || "")}"><b>${esc(o.it.code || o.it.id)}</b><span class="bd">${esc(String(o.it.desc || "").slice(0, 90))}</span><span class="bu${same ? "" : " x"}">${esc(o.it.unit || "")}</span><span class="br">${ok ? f2(r.rate) : '<i>no rate</i>'}</span></div>`; }).join("")
       || '<div class="small" style="padding:6px">No library item matches — type the BOQ code and rate yourself, or add the item in Rate Analysis.</div>'; };
   $("cBoqL").addEventListener("click", e => { if (e.target.id === "cBoqTry") { $("cBoqQ").focus(); return pkConnect(raConnect()); }   // (the button goes with the list it is in)
-    const r = e.target.closest("[data-boqpick]"); if (r) pkFill(r.dataset.boqpick, false); });
-  $("cBoqG").addEventListener("click", e => { const b = e.target.closest("[data-boqg]"); if (!b) return; pk.grp = b.dataset.boqg === pk.grp ? "" : b.dataset.boqg; box.scrollTop = 0; pkDraw(); });
+    const r = e.target.closest("[data-boqpick]"); if (r) pkFill(r.dataset.boqpick); });
+  $("cBoqG").addEventListener("click", e => { const b = e.target.closest("[data-boqg]"); if (!b) return; pk.grp = b.dataset.boqg === pk.grp ? null : b.dataset.boqg; box.scrollTop = 0; pkDraw(); });   // the chip pressed again: off, the list empty
   $("cBoqQ").addEventListener("input", pkDraw);
   $("cBoq").addEventListener("input", () => { pk.boqAuto = false; });
-  const pkAuto = () => { if (!isNew || (!pk.auto && $("cRa").value.trim())) return pkDraw();   // only a new condition, and never over a code the user chose
-    const m = boqMatches($("cName").value, $("cUnit").value, true)[0];
-    if (m && m.score >= 0.6) pkFill(m.it.code || m.it.id, true); else if (pk.auto) { $("cRa").value = ""; if (pk.boqAuto) $("cBoq").value = ""; pk.auto = false; raInfo(); pkDraw(); } else pkDraw(); };
-  $("cName").addEventListener("input", () => { pk.nameAuto = false; pkAuto(); }); $("cType").addEventListener("change", pkDraw);
-  document.getElementById("cPre") && $("cPre").addEventListener("change", () => setTimeout(pkAuto, 0));
+  $("cName").addEventListener("input", () => { pk.nameAuto = false; pkDraw(); }); $("cType").addEventListener("change", pkDraw);   // (Suggested, when on, follows the name; nothing is picked)
+  document.getElementById("cPre") && $("cPre").addEventListener("change", () => setTimeout(pkDraw, 0));
   pkDraw();
   // no library in this browser: read from QS Cost Control now (the list says so meanwhile); one read here: read again when it is republished
-  const pkConnect = p => { pkDraw(); raInfo(); p.then(() => { if (box.isConnected) { raInfo(); pkAuto(); } }); };
+  const pkConnect = p => { pkDraw(); raInfo(); p.then(() => { if (box.isConnected) { raInfo(); pkDraw(); } }); };
   if (!raLib().o) pkConnect(raConnect()); else raFresh().then(ok => { if (ok && box.isConnected) { raInfo(); pkDraw(); } });
   const showCnt = () => { document.querySelectorAll(".dlg .cntonly").forEach(el => { el.style.display = $("cType").value === "count" ? "" : "none"; }); document.querySelectorAll(".dlg .nocnt").forEach(el => { el.style.display = $("cType").value === "count" ? "none" : ""; }); };
   showCnt(); $("cType").addEventListener("change", showCnt);
@@ -10331,8 +10332,7 @@ function qkColor(taken){ const used = new Set(P.proj.conds.map(c => String(c.col
 function qkMake(p, v, taken){   // the condition a preset makes, as the New condition dialog makes it from the same preset — H / T as typed for this project
   const d = toolDefaults(), c = {id: uid("C"), name: p.name, type: p.type, unit: p.unit, color: qkColor(taken), sw: d.condWidth, h: +v.h > 0 ? +v.h : "", t: +v.t > 0 ? +v.t : +p.t > 0 ? +p.t : "", faces: p.faces || 1, dedMin: p.dedMin || 0};
   if (d.apBy && d.apBy[p.type]) c.ap = JSON.parse(JSON.stringify(d.apBy[p.type]));
-  try { const m = boqMatches(p.name, p.unit, true)[0]; if (m && m.score >= 0.6) { c.ra = String(m.it.code || m.it.id).toUpperCase(); c.boq = m.it.code || m.it.id; } } catch (e) {}   // a clear Rate Analysis match, as the dialog picks by itself
-  return c;
+  return c;   // no BOQ / Rate Analysis item: none is picked for the user — they link one themselves (Edit condition)
 }
 async function quickItemsDialog(){
   if (!P.proj) { toast("Open a project first", 2000); return null; }
