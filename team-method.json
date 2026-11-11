@@ -1,6 +1,6 @@
 {
  "about": "PDF Takeoff: how this team takes off, learned by the takeoff agent in every browser of the team and merged by tools/learn_archive.py. Item names, heights, room kinds and counts only.",
- "at": "2026-11-11T01:23:27.327Z",
+ "at": "2026-11-11T18:41:41.153Z",
  "projects": {
   "vvvcknb84sev:17a5e3f04bec": {
    "at": "2026-10-31T10:49:48.438Z",
@@ -40,32 +40,103 @@
    "sent": "2026-10-31T10:50:48.721Z"
   },
   "vvvcknb84sev:21c2c43e10ee": {
-   "at": "2026-11-11T01:22:27.052Z",
+   "at": "2026-11-11T17:20:40.903Z",
    "conds": {
-    "floor area|area|Sft": {
+    "doors|count|Nos": {
      "ded": 0.0,
      "faces": 1.0,
      "h": 0.0,
-     "name": "Floor area",
+     "name": "Doors",
+     "t": 0.0,
+     "type": "count",
+     "unit": "Nos"
+    },
+    "outer wall plaster|linear|Sft": {
+     "ded": 1.0,
+     "faces": 1.0,
+     "h": 11.0,
+     "name": "Outer wall plaster",
+     "t": 0.0,
+     "type": "linear",
+     "unit": "Sft"
+    },
+    "pcc — state thickness|linear|cft": {
+     "ded": 0.5,
+     "faces": 1.0,
+     "h": 2.5,
+     "name": "PCC — state thickness",
+     "t": 0.5,
+     "type": "linear",
+     "unit": "cft"
+    },
+    "plain gypsum ceiling|area|Sft": {
+     "ded": 1.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "Plain gypsum ceiling",
      "t": 0.0,
      "type": "area",
      "unit": "Sft"
+    },
+    "rcc slab — state thickness|area|cft": {
+     "ded": 0.5,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "RCC slab — state thickness",
+     "t": 0.4166666666666667,
+     "type": "area",
+     "unit": "cft"
+    },
+    "screending|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "SCREENDING",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    },
+    "tile|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.0,
+     "name": "Tile",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    },
+    "windows|count|Nos": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 7.0,
+     "name": "Windows",
+     "t": 4.0,
+     "type": "count",
+     "unit": "Nos"
     }
    },
    "rooms": {
-    "BATH": {
-     "items": {
-      "floor area|area|Sft": {
-       "how": "area",
-       "n": 1,
-       "per": []
-      }
-     },
-     "n": 1
-    },
     "BED ROOM": {
      "items": {
-      "floor area|area|Sft": {
+      "doors|count|Nos": {
+       "how": "count",
+       "n": 2,
+       "per": [
+        1.0,
+        1.0
+       ]
+      },
+      "plain gypsum ceiling|area|Sft": {
+       "how": "area",
+       "n": 2,
+       "per": []
+      },
+      "screending|area|Sft": {
+       "how": "area",
+       "n": 2,
+       "per": []
+      },
+      "tile|area|Sft": {
        "how": "area",
        "n": 2,
        "per": []
@@ -73,9 +144,14 @@
      },
      "n": 2
     },
-    "KITCHEN": {
+    "OPEN": {
      "items": {
-      "floor area|area|Sft": {
+      "screending|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      },
+      "tile|area|Sft": {
        "how": "area",
        "n": 1,
        "per": []
@@ -83,28 +159,59 @@
      },
      "n": 1
     },
-    "OPEN": {
+    "ROOF": {
      "items": {
-      "floor area|area|Sft": {
+      "doors|count|Nos": {
+       "how": "count",
+       "n": 1,
+       "per": [
+        6.0
+       ]
+      },
+      "outer wall plaster|linear|Sft": {
+       "how": "wall",
+       "n": 1,
+       "per": []
+      },
+      "pcc — state thickness|linear|cft": {
+       "how": "wall",
+       "n": 1,
+       "per": []
+      },
+      "rcc slab — state thickness|area|cft": {
        "how": "area",
        "n": 1,
        "per": []
+      },
+      "windows|count|Nos": {
+       "how": "count",
+       "n": 1,
+       "per": [
+        3.0
+       ]
       }
      },
      "n": 1
     },
     "ROOM": {
      "items": {
-      "floor area|area|Sft": {
+      "doors|count|Nos": {
+       "how": "count",
+       "n": 1,
+       "per": [
+        1.0
+       ]
+      },
+      "plain gypsum ceiling|area|Sft": {
        "how": "area",
-       "n": 2,
+       "n": 1,
        "per": []
       }
      },
-     "n": 2
+     "n": 1
     }
    },
-   "sent": "2026-11-11T01:23:27.327Z"
+   "sent": "2026-11-11T18:41:41.153Z"
   },
   "vvvcknb84sev:8077edc44061": {
    "at": "2026-11-02T04:53:42.437Z",
@@ -301,6 +408,152 @@
    },
    "sent": "2026-11-02T06:44:42.313Z"
   },
+  "vvvcknb84sev:e12a96f05028": {
+   "at": "2026-11-11T18:40:40.905Z",
+   "conds": {
+    "brick masonry 13.5\" wall|linear|cft": {
+     "ded": 1.0,
+     "faces": 1.0,
+     "h": 4.0,
+     "name": "Brick masonry 13.5\" wall",
+     "t": 1.125,
+     "type": "linear",
+     "unit": "cft"
+    },
+    "brick masonry 9\" wall|linear|cft": {
+     "ded": 1.0,
+     "faces": 1.0,
+     "h": 10.5,
+     "name": "Brick masonry 9\" wall",
+     "t": 0.75,
+     "type": "linear",
+     "unit": "cft"
+    },
+    "excavation — foundation trench|linear|cft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 4.0,
+     "name": "Excavation — foundation trench",
+     "t": 2.5,
+     "type": "linear",
+     "unit": "cft"
+    },
+    "internal plaster on walls — both faces|linear|Sft": {
+     "ded": 1.0,
+     "faces": 1.0,
+     "h": 10.5,
+     "name": "Internal plaster on walls — both faces",
+     "t": 0.0,
+     "type": "linear",
+     "unit": "Sft"
+    },
+    "partition wall 4.5\" (thickness 0.375 ft)|linear|cft": {
+     "ded": 1.0,
+     "faces": 1.0,
+     "h": 10.5,
+     "name": "Partition wall 4.5\" (thickness 0.375 ft)",
+     "t": 0.375,
+     "type": "linear",
+     "unit": "cft"
+    },
+    "pcc 1:4:8 floor|area|Sft": {
+     "ded": 0.0,
+     "faces": 1.0,
+     "h": 0.25,
+     "name": "PCC 1:4:8 floor",
+     "t": 0.0,
+     "type": "area",
+     "unit": "Sft"
+    },
+    "pcc 1:6:12|linear|ft": {
+     "ded": 0.5,
+     "faces": 1.0,
+     "h": 0.333,
+     "name": "PCC 1:6:12",
+     "t": 2.5,
+     "type": "linear",
+     "unit": "ft"
+    }
+   },
+   "rooms": {
+    "BED ROOM": {
+     "items": {
+      "brick masonry 13.5\" wall|linear|cft": {
+       "how": "wall",
+       "n": 1,
+       "per": []
+      },
+      "brick masonry 9\" wall|linear|cft": {
+       "how": "wall",
+       "n": 1,
+       "per": []
+      },
+      "excavation — foundation trench|linear|cft": {
+       "how": "wall",
+       "n": 1,
+       "per": []
+      },
+      "internal plaster on walls — both faces|linear|Sft": {
+       "how": "wall",
+       "n": 1,
+       "per": []
+      },
+      "pcc 1:4:8 floor|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      },
+      "pcc 1:6:12|linear|ft": {
+       "how": "wall",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    },
+    "KITCHEN": {
+     "items": {
+      "internal plaster on walls — both faces|linear|Sft": {
+       "how": "wall",
+       "n": 2,
+       "per": []
+      },
+      "partition wall 4.5\" (thickness 0.375 ft)|linear|cft": {
+       "how": "wall",
+       "n": 1,
+       "per": []
+      },
+      "pcc 1:4:8 floor|area|Sft": {
+       "how": "area",
+       "n": 2,
+       "per": []
+      }
+     },
+     "n": 2
+    },
+    "ROOM": {
+     "items": {
+      "brick masonry 9\" wall|linear|cft": {
+       "how": "wall",
+       "n": 1,
+       "per": []
+      },
+      "internal plaster on walls — both faces|linear|Sft": {
+       "how": "wall",
+       "n": 1,
+       "per": []
+      },
+      "pcc 1:4:8 floor|area|Sft": {
+       "how": "area",
+       "n": 1,
+       "per": []
+      }
+     },
+     "n": 1
+    }
+   },
+   "sent": "2026-11-11T18:41:41.153Z"
+  },
   "vvyxastie8va:68f4cdf27e08": {
    "at": "2026-11-10T10:57:08.725Z",
    "conds": {
@@ -348,7 +601,7 @@
    "sent": "2026-11-10T10:57:39.095Z"
   },
   "vvyymq5pforq:dfba2afc9a0b": {
-   "at": "2026-11-10T08:23:58.994Z",
+   "at": "2026-11-11T03:20:19.867Z",
    "conds": {
     "floor area|area|Sft": {
      "ded": 0.0,
@@ -372,7 +625,7 @@
      "n": 2
     }
    },
-   "sent": "2026-11-10T08:24:56.531Z"
+   "sent": "2026-11-11T03:21:17.574Z"
   },
   "vvzmfdqwuj5r:087bd7715ee2": {
    "at": "2026-11-01T07:32:47.010Z",
@@ -719,12 +972,15 @@
  },
  "senders": {
   "vvvcknb84sev": {
-   "at": "2026-11-10T23:43:27.878Z",
-   "missed": {},
+   "at": "2026-11-11T18:41:41.153Z",
+   "missed": {
+    "BED ROOM": 3,
+    "OPEN": 1
+   },
    "rejects": {
     "BATH": {
-     "del": 0,
-     "made": 22
+     "del": 2,
+     "made": 27
     },
     "BED ROOM": {
      "del": 0,
@@ -735,19 +991,21 @@
      "made": 5
     },
     "KITCHEN": {
-     "del": 0,
-     "made": 12
+     "del": 2,
+     "made": 17
     },
     "ROOM": {
-     "del": 0,
-     "made": 19
+     "del": 2,
+     "made": 23
     },
     "STORE": {
-     "del": 0,
-     "made": 10
+     "del": 2,
+     "made": 15
     }
    },
-   "words": {}
+   "words": {
+    "OPEN": 1
+   }
   },
   "vvyxastie8va": {
    "at": "2026-11-10T04:23:58.249Z",
