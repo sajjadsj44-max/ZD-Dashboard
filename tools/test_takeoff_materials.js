@@ -121,41 +121,36 @@ const BAG = 50 / 1440 / 0.028316846592;
   await page.waitForTimeout(3100);
   await page.click("#bNewCond"); await wait(200);
   await page.fill("#cName", '8" Block wall'); await page.dispatchEvent("#cName", "input"); await wait(150);
-  ok((await page.inputValue("#cRa")) === "CIV-MAS-008" && (await page.inputValue("#cBoq")) === "CIV-MAS-008" && /auto-picked/.test(await page.textContent("#cRaInfo")) && /PKR 400\.00 \/ Cft/.test(await page.textContent("#cRaInfo")),
-    'typing "8" Block wall" auto-picks CIV-MAS-008 with its Rate Analysis rate PKR 400.00 / Cft');
+  ok((await page.inputValue("#cRa")) === "" && (await page.inputValue("#cBoq")) === "" && (await page.locator("#cBoqL .boqr").count()) === 0 && /none picked/.test(await page.textContent("#cBoqHint")) && /No BOQ item linked/.test(await page.textContent("#cRaInfo")),
+    'typing "8" Block wall" picks nothing: RA and BOQ codes empty, the item list empty until the user asks');
+  await page.click('#cBoqG [data-boqg=""]'); await wait(150);
+  ok((await page.locator("#cBoqL .boqr").count()) >= 1 && /suggested/.test(await page.textContent("#cBoqHint")) && (await page.inputValue("#cRa")) === "", "Suggested (pressed by the user) lists the matching BOQ items — still none picked");
+  await page.click('#cBoqL [data-boqpick="CIV-MAS-008"]'); await wait(150);
+  ok((await page.inputValue("#cRa")) === "CIV-MAS-008" && (await page.inputValue("#cBoq")) === "CIV-MAS-008" && /PKR 400\.00 \/ Cft/.test(await page.textContent("#cRaInfo")),
+    'clicking CIV-MAS-008 links it with its Rate Analysis rate PKR 400.00 / Cft');
   ok((await page.inputValue("#cType")) === "linear" && (await page.inputValue("#cUnit")) === "cft", "a block wall item in cft is taken off as a Length run in cft (L × H × T)");
   ok((await page.inputValue("#cT")) === "0.667", 'T filled from the 8" in the name: 0.667 ft');
   if (process.env.TK_SHOTS) await page.locator(".dlg").screenshot({path: path.join(process.env.TK_SHOTS, "takeoff-boq-picker.png")});
-  ok((await page.locator("#cBoqL .boqr").count()) >= 1 && /suggested/.test(await page.textContent("#cBoqHint")), "the matching BOQ items are listed under the search box");
   await page.fill("#cBoqQ", "plaster"); await page.dispatchEvent("#cBoqQ", "input"); await wait(100);
   ok((await page.locator("#cBoqL .boqr").count()) === 1 && /FIN-PLS-001/.test(await page.textContent("#cBoqL")) && /70\.00/.test(await page.textContent("#cBoqL")), "search “plaster” lists FIN-PLS-001 with its rate 70.00");
   await page.click('#cBoqL [data-boqpick="FIN-PLS-001"]'); await wait(150);
-  ok((await page.inputValue("#cRa")) === "FIN-PLS-001" && (await page.inputValue("#cBoq")) === "FIN-PLS-001" && (await page.inputValue("#cUnit")) === "Sft" && !/auto-picked/.test(await page.textContent("#cRaInfo")), "clicking an item picks it: RA and BOQ codes, unit Sft");
+  ok((await page.inputValue("#cRa")) === "FIN-PLS-001" && (await page.inputValue("#cBoq")) === "FIN-PLS-001" && (await page.inputValue("#cUnit")) === "Sft", "clicking an item picks it: RA and BOQ codes, unit Sft");
   await page.fill("#cBoqQ", ""); await page.fill("#cName", "Bedroom flooring"); await page.dispatchEvent("#cName", "input"); await wait(100);
   ok((await page.inputValue("#cRa")) === "FIN-PLS-001", "an item picked by hand is not replaced when the name changes");
   await page.fill("#cH", "10"); await page.click("#dlgOk"); await wait(250);
   ok(await T(() => { const c = zdTakeoff.P.proj.conds.find(x => x.name === "Bedroom flooring"); return c && c.ra === "FIN-PLS-001" && c.boq === "FIN-PLS-001" && c.unit === "Sft"; }), "the condition is created with the BOQ item, and its rate comes from Rate Analysis");
   ok(await T(() => { const M = zdTakeoff.boqMatches("tiles", "Sft", true); return M.length && M[0].it.code === "FIN-TIL-001"; }) && await T(() => zdTakeoff.boqMatches("zzz qq", "Sft", true).length === 0), "matching: tiles → FIN-TIL-001; nothing in common → no suggestion");
+  { const r = await T(async () => { const Z = zdTakeoff, c = await Z.quickItemsAdd([Z.PRESETS.findIndex(p => p.name === "Floor tile")], "draw");
+      const o = c ? {ra: c.ra || "", boq: c.boq || "", sug: Z.boqMatches(c.name, c.unit, true).length} : null; if (c) Z.P.proj.conds = Z.P.proj.conds.filter(x => x.id !== c.id); Z.setTool("select"); return o; });
+    ok(r && r.ra === "" && r.boq === "" && r.sug >= 1, "a Quick item (Floor tile) gets no BOQ item by itself, though the library has a matching one"); }
   await T(() => { const P = zdTakeoff.P.proj; P.conds = P.conds.filter(c => c.name !== "Bedroom flooring"); zdTakeoff.S.cond = "cB"; zdTakeoff.refresh(); });
-  // an item picked by itself and then dropped (the name changed away from it) takes back the type, unit and T it set
-  await page.click("#bNewCond"); await wait(200);
-  const st0 = await T(() => ["cType", "cUnit", "cT"].map(id => document.getElementById(id).value));
-  await page.fill("#cName", '8" Block wall'); await page.dispatchEvent("#cName", "input"); await wait(150);
-  const st1 = await T(() => ["cRa", "cType", "cUnit", "cT"].map(id => document.getElementById(id).value));
-  await page.fill("#cName", "zzz qq"); await page.dispatchEvent("#cName", "input"); await wait(150);
-  const st2 = await T(() => ["cRa", "cType", "cUnit", "cT"].map(id => document.getElementById(id).value));
-  ok(st1[0] === "CIV-MAS-008" && st1[1] === "linear" && st2[0] === "" && JSON.stringify(st2.slice(1)) === JSON.stringify(st0),
-    `an auto-pick dropped puts back what it set: ${st0.join(" / ")} → ${st1.slice(1).join(" / ")} → ${st2.slice(1).join(" / ")}`);
-  await page.click("#dlgCancel"); await wait(150);
-  // a type the user chose (a preset, or the type box) is never changed by an item picked by itself from the name: "Floor area"
-  // named after a wall item stayed an area only until the name matched the cft wall, and then was taken off as a length
+  // the type a preset gives is kept whatever the name typed: when items were picked by themselves, "Floor area" named after a
+  // wall item became a length in cft, and "Custom count" an area (its own name matched an area item)
   await page.click("#bNewCond"); await wait(200);
   await page.selectOption("#cPre", {label: "Floor area"}); await wait(100);
   await page.fill("#cName", '8" Block wall'); await page.dispatchEvent("#cName", "input"); await wait(150);
-  ok((await page.inputValue("#cType")) === "area" && (await page.inputValue("#cUnit")) === "Sft" && (await page.inputValue("#cRa")) !== "CIV-MAS-008",
-    "a preset chosen (Floor area): a name matching a cft wall item does not turn it into a length — RA “" + await page.inputValue("#cRa") + "”");
-  await page.click('#cBoqL [data-boqpick="CIV-MAS-008"]').catch(() => {}); await wait(150);
-  ok((await page.inputValue("#cRa")) === "CIV-MAS-008" && (await page.inputValue("#cType")) === "linear" && (await page.inputValue("#cUnit")) === "cft", "…clicking the wall item still takes its unit (linear, cft)");
+  ok((await page.inputValue("#cType")) === "area" && (await page.inputValue("#cUnit")) === "Sft" && (await page.inputValue("#cRa")) === "",
+    "a preset chosen (Floor area), then a name matching a cft wall item: still an area in Sft, no item linked");
   await page.click("#dlgCancel"); await wait(150);
 
   console.log("bill: material / labour / equipment split");
