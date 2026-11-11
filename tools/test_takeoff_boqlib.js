@@ -98,6 +98,19 @@ const ok = (c, m) => { if (c) { passes++; console.log("  ✓ " + m); } else { fa
   ok((await rows()).length === 0 && (await page.inputValue("#cRa")) === nosDoor, "Suggested pressed again: off, the list empty — the item picked by hand stays");
   await page.click("#dlgCancel"); await wait(200);
 
+  console.log("a preset keeps its own type");
+  /* when an item was picked by itself from the name it switched the type to the item's unit: Windows became an area (a window item
+     per Sft), Wiring / conduit run a count (light points), Custom count an area (a Corian "counter" top, "customised" size), Floor area
+     named "Slab edge" a length. Nothing is picked by itself now (#287): each stays as its preset made it, with no item linked */
+  const preType = async (label, name) => { await page.click("#bNewCond"); await wait(200); await page.selectOption("#cPre", {label}); await wait(250);
+    if (name) { await page.fill("#cName", name); await page.dispatchEvent("#cName", "input"); await wait(200); }
+    const r = {type: await page.inputValue("#cType"), ra: await page.inputValue("#cRa"), unit: await page.inputValue("#cUnit")}; await page.click("#dlgCancel"); await wait(150); return r; };
+  { const w = await preType("Windows"), c = await preType("Wiring / conduit run"), k = await preType("Custom count"), s = await preType("Floor area", "Slab edge");
+    ok(w.type === "count" && w.unit === "Nos" && !w.ra, `Windows stays a count in Nos (${w.type}, ${w.unit}${w.ra ? ", " + w.ra : ""})`);
+    ok(c.type === "linear" && c.unit === "ft" && !c.ra, `Wiring / conduit run stays a length in ft, not a count of points (${c.type}, ${c.unit}${c.ra ? ", " + c.ra : ""})`);
+    ok(k.type === "count" && !k.ra, `Custom count stays a count (${k.type}${k.ra ? ", " + k.ra : ""})`);
+    ok(s.type === "area" && !s.ra, `Floor area named "Slab edge" stays an area (${s.type}${s.ra ? ", " + s.ra : ""})`); }
+
   console.log("item groups (a small library)");
   { const g = await T(() => { const mk = (code, cat, sub, desc) => ({code, cat, sub, desc, unit: "Sft"});
       const items = [mk("D1", "Finishing", "Doors", "Providing and fixing steel window with openable glazed panels"), mk("D2", "Finishing", "Aluminium windows", "Providing and fixing glazed aluminium door 1.6 mm"),

@@ -265,6 +265,12 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
   await page.click('[data-rtab="takeoff"]');
   const tb = await T(() => document.getElementById("tools").getBoundingClientRect().height);
   ok(tb < 130, `the toolbar is two short rows (${Math.round(tb)} px high) at 1366 × 768`);
+  // the Claude panel opens under the ribbon, not over its right end: Select, Pan, Snap… stay clickable while it is open
+  await page.click("#bClaude"); await wait(300);
+  const ai = await T(() => { const p = document.getElementById("aiPanel"), r = p.getBoundingClientRect(), t = document.getElementById("tools").getBoundingClientRect(), on = [...document.querySelectorAll("#topTools .tool")].filter(b => b.offsetParent);
+    return {on: p.classList.contains("on"), top: r.top, tb: t.bottom, n: on.length, hit: on.filter(b => { const q = b.getBoundingClientRect(), e = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return e && b.contains(e); }).length}; });
+  ok(ai.on && Math.abs(ai.top - ai.tb) <= 1 && ai.n > 0 && ai.hit === ai.n, `the Claude panel opens under the ribbon (top ${Math.round(ai.top)} px, ribbon to ${Math.round(ai.tb)} px): all ${ai.n} tools at its right end can still be clicked (${ai.hit})`);
+  await page.click("#bClaude"); await wait(200);
   if (SHOTS) { await page.screenshot({path: path.join(SHOTS, "ribbon-takeoff.png")}); await page.click('[data-rtab="modify"]'); await page.screenshot({path: path.join(SHOTS, "ribbon-modify.png")}); }
   ok(errors.length === 0, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
   await browser.close();

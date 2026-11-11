@@ -176,7 +176,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 1e-6 : t);
   ok(s1.length === 2 && s1.some(x => x.t === "INSERT" && x.n === "DOOR3"), "Shift+click adds a door (block DOOR3)");
   await clickD(30, 18, ["Shift"]);
   ok((await sel()).length === 1, "Shift+click on it again takes it out");
-  await clickD(500, 300);
+  await clickD(500, 180);   // empty, inside the sheet (500,300 is above it and fell on the command bar once the ribbon grew)
   ok((await sel()).length === 0, "a click on nothing clears the selection");
   await drag([-20, 165], [140, -20]);   // left → right: window
   s1 = await sel();
