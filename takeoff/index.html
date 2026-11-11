@@ -410,7 +410,7 @@ table.sh .ds{font-size:10.5px;color:var(--muted)}
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;display:none;z-index:20;max-width:90vw;text-align:center}
 
 /* Claude panel */
-#aiPanel{position:fixed;top:var(--hh);right:0;bottom:0;width:min(400px,100vw);background:#fff;border-left:1px solid var(--line);box-shadow:-6px 0 24px rgba(15,41,66,.14);z-index:9;display:none;flex-direction:column}
+#aiPanel{position:fixed;top:var(--tb,var(--hh));right:0;bottom:0;width:min(400px,100vw);background:#fff;border-left:1px solid var(--line);box-shadow:-6px 0 24px rgba(15,41,66,.14);z-index:9;display:none;flex-direction:column}
 #aiPanel.on{display:flex}
 #aiPanel .aih{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 #aiPanel .aih b{color:var(--navy)}
@@ -1692,7 +1692,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-11-11b"></script>
+<script type="module" src="takeoff.js?v=2026-11-11c"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with

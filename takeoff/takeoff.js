@@ -13885,7 +13885,9 @@ function wire(){
   document.addEventListener("pointerdown", e => { if (vpop.classList.contains("on") && !e.target.closest("#viewPop,#bView")) vOpen(false); }, true);
   document.addEventListener("keydown", e => { if (e.key === "Escape" && vpop.classList.contains("on")) { vOpen(false); e.stopPropagation(); } }, true);
   $("bFitW").onclick = () => { fitWidth(); vOpen(false); };
-  { const hd = document.querySelector("header"); new ResizeObserver(() => document.documentElement.style.setProperty("--hh", hd.offsetHeight + "px")).observe(hd); }   // the bar's height (one row, or two on a narrower screen)
+  { const hd = document.querySelector("header"), tb = $("tools"), ro = new ResizeObserver(() => { const R = document.documentElement.style; R.setProperty("--hh", hd.offsetHeight + "px");
+      R.setProperty("--tb", Math.round(Math.max(hd.getBoundingClientRect().bottom, tb ? tb.getBoundingClientRect().bottom : 0)) + "px"); });   // --tb: the ribbon's lower edge — the Claude panel opens under it, not over its right end (Select, Pan, Snap…)
+    ro.observe(hd); if (tb) ro.observe(tb); }   // the bar's height (one row, or two on a narrower screen)
   if ($("rbLblDed")) $("rbLblDed").onclick = dedLblToggle;   // View ribbon: Cut-out labels on / off, and ⚙ for the rest
   if ($("rbLblMenu")) $("rbLblMenu").onclick = e => { e.stopPropagation(); lblMenu(e.currentTarget); };
   $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => { vOpen(false); labelDialog(); }; $("bLegend").onclick = () => legendButton();

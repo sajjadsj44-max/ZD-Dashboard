@@ -216,7 +216,7 @@ const LOCKISH = /lock|pass|pw|unlock|secret/i;
   await tp.click("#dlgCancel"); await tp.waitForTimeout(500);
   await tp.click("#tPages"); await tp.waitForTimeout(2000);
   const th = await tp.evaluate(() => (zdTakeoff.S.thumbs || {})[zdTakeoff.P.proj.files[0].id + ":1"]);
-  ok(!(await dlgOn()) && th === "x", "turned down: the page thumbnails don't ask again (left blank)");
+  ok(!(await dlgOn()) && (th === "x" || th == null), "turned down: the page thumbnails don't ask again (left blank: they wait until the PDF is opened)");
   await tp.evaluate(() => { zdTakeoff.gotoPage(zdTakeoff.P.proj.files[0].id, 1); });
   ok(await tp.waitForSelector("#dlgPw", {timeout: 10000}).then(() => true, () => false), "opening one of its pages asks again");
   await tp.fill("#dlgPw", "open-me"); await tp.click("#dlgOk");

@@ -138,6 +138,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.005 : t);
 
   console.log("sync zoom & pan");
   await menu("#spSync"); await wait(100);
+  await page.keyboard.press("Escape"); await wait(100);   // the menu stays open after a toggle and lies over the second window: closed before dragging in it
   ok(await T(() => zdTakeoff.SPLIT.sync && !!zdTakeoff.SPLIT.rel), "Sync zoom & pan on");
   let S0 = await info(); const ratio0 = S0.views[1].s / S0.views[0].s;
   c1 = await cx(0); await page.mouse.move(c1[0], c1[1]); await page.mouse.wheel(0, -500); await wait(600);
