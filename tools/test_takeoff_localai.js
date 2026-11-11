@@ -18,11 +18,13 @@ const LIBS = process.env.TK_LIBS || "";
 let fails = 0, passes = 0;
 function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } else { fails++; console.log("  ✗ " + msg); } }
 const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.01 : t);
+/* until the stand-in Ollama on port answers (up to 10 s): a fixed 400 ms was too short where node takes longer to start ("not running") */
+const upOn = async port => { for (let i = 0; i < 100; i++) { try { await fetch("http://127.0.0.1:" + port + "/api/version"); return; } catch (e) { await new Promise(r => setTimeout(r, 100)); } } };
 
 (async () => {
   if (!LIBS || !fs.existsSync(path.join(LIBS, "pdfjs-dist/build/pdf.min.mjs"))) { console.log("TK_LIBS must hold pdfjs-dist (and exceljs) — see the header"); process.exit(2); }
   const mock = spawn(process.execPath, [path.join(__dirname, "mock_ollama.js"), "11500", new globalThis.URL(URL).origin], {stdio: "ignore"});
-  await new Promise(r => setTimeout(r, 400));
+  await upOn(11500);
   const browser = await pw.chromium.launch();
   const ctx = await browser.newContext({viewport: {width: 1440, height: 900}}); await require("./zd_unlock")(ctx);
   const cloud = [];
@@ -114,7 +116,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.01 : t);
   let L = await T(() => zdTakeoff.locHealth().then(x => ({st: x.st, msg: x.msg})));
   ok(L.st === "offline" && /Ollama is not running/.test(L.msg) && /Ollama is running/.test(L.msg), "nothing listening: says Ollama is not running, how to check (" + L.msg.slice(0, 70) + "…)");
   // Ollama running but not allowing this site (OLLAMA_ORIGINS unset): told apart from "not running"
-  const mock2 = spawn(process.execPath, [path.join(__dirname, "mock_ollama.js"), "11503", "https://some-other-site.example"], {stdio: "ignore"}); await new Promise(r => setTimeout(r, 400));
+  const mock2 = spawn(process.execPath, [path.join(__dirname, "mock_ollama.js"), "11503", "https://some-other-site.example"], {stdio: "ignore"}); await upOn(11503);
   await T(u => localStorage.setItem("zdTakeoffLocalUrl", u), "http://127.0.0.1:11503");
   L = await T(() => zdTakeoff.locHealth().then(x => ({st: x.st, msg: x.msg})));
   ok(L.st === "blocked" && /IS running/.test(L.msg) && /OLLAMA_ORIGINS=/.test(L.msg) && /Quit Ollama|QUIT Ollama/i.test(L.msg), "running but not allowed: says so, with OLLAMA_ORIGINS and ‘quit and restart Ollama’ (" + L.msg.slice(0, 60) + "…)");
@@ -131,8 +133,10 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.01 : t);
   await T(() => localStorage.setItem("zdTakeoffLocalModel", "mock-tools:8b"));
   L = await T(() => zdTakeoff.locHealth().then(x => ({st: x.st, msg: x.msg})));
   ok(L.st === "ready" && /tools/.test(L.msg), "chosen and installed: ready, with its capabilities (" + L.msg + ")");
-  // a site Ollama does not allow (another origin): refused
-  const page2 = await ctx.newPage(); await page2.goto("http://localhost:8765/takeoff/", {waitUntil: "load"}).catch(() => {});
+  // a site Ollama does not allow (another origin): refused — the same test server under its other name (127.0.0.1 ↔ localhost) is
+  // another origin on whatever port TK_URL uses (a fixed localhost:8765 was not served when the tests ran on another port: "n/a")
+  const other = new globalThis.URL(URL); other.hostname = other.hostname === "localhost" ? "127.0.0.1" : "localhost";
+  const page2 = await ctx.newPage(); await page2.goto(other.href, {waitUntil: "load"}).catch(() => {});
   const blocked = await page2.evaluate(async u => { try { await fetch(u + "/api/version"); return "allowed"; } catch (e) { return "refused"; } }, MOCK).catch(() => "n/a");
   ok(blocked === "refused", "a site not in OLLAMA_ORIGINS is refused by Ollama (" + blocked + ")"); await page2.close();
 

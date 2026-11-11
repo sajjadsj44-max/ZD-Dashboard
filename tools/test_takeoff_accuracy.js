@@ -69,6 +69,25 @@ const fmt = v => (Math.round(v * 1000) / 1000).toFixed(3);
     const sc = await T(() => { const Z = zdTakeoff; return {k: Z.scaleAt ? Z.scaleAt(Z.S.fileId, Z.S.pageNo) : (Z.P.proj.scales[Z.S.key] || {}).ptPerFt, st: Z.scaleState(Z.P.proj.scales[Z.S.key]), how: (Z.P.proj.scales[Z.S.key] || {}).how}; });
     cmp(`p.${pn} scale from the note (pt per ft)`, g.k, sc.k, TOL.scale, "pt/ft");
     ok(sc.st && !/verified/i.test(String(sc.st.label || sc.st)) || (sc.st && /not verified|note/i.test(JSON.stringify(sc.st))), `p.${pn} a scale read from the note is not shown as verified (${JSON.stringify(sc.st)})`);
+    // the scale check by the room sizes written on the drawing reads the rooms on every page — on the page turned 90° too, where the
+    // names are written up the page (it paired 2 of 7 names with their sizes there and gave no answer: a wrong note went unseen)
+    const ev = await T(() => zdTakeoff.scaleFromRooms(zdTakeoff.S.key).then(e => e && {k: e.ptPerFt, agree: e.agree}));
+    ok(!!ev && ev.agree >= 3 && Math.abs(ev.k / g.k - 1) * 100 <= TOL.scale, `p.${pn} the room-size scale check reads the rooms: ${ev ? ev.agree + " agree at " + fmt(ev.k) + " pt/ft" : "no answer"}`, {ref: g.k, got: ev && ev.k, unit: "pt/ft"});
+    if (g.rotate) {   // …and a wrong note there is caught
+      const wrong = await T(k2 => { const Z = zdTakeoff, kk = Z.S.key, was = JSON.stringify(Z.P.proj.scales[kk]); Z.P.proj.scales[kk] = {ptPerFt: k2, how: "note", text: "SCALE 1/4\" = 1'-0\"", verified: false};
+        return Z.checkScale(kk, false).then(r => { Z.P.proj.scales[kk] = JSON.parse(was); return r && {ok: r.ok, sug: r.sug && r.sug.ptPerFt}; }); }, 2 * g.k);
+      ok(!!wrong && wrong.ok === false && Math.abs(wrong.sug / g.k - 1) < 1e-9, `p.${pn} a wrong note (1/4") on the turned page is caught by the room sizes${wrong ? ", which say " + fmt(wrong.sug) + " pt/ft" : ""}`);
+    }
+    // the rooms agent on every page: each room against the reference, and each checked against the size written under its name —
+    // on the turned page too (before, no size was found there for 5 of the 7 rooms that have one, so they went unchecked)
+    const ag = await T(async () => { const Z = zdTakeoff, before = new Set(Z.P.proj.items.map(i => i.id)), o = await Z.agentMeasure("", null, {whole: true, quiet: true});
+      Z.P.proj.items = Z.P.proj.items.filter(i => before.has(i.id)); return o; });
+    if (ag.error) ok(false, `p.${pn} rooms agent: ${ag.error}`);
+    else {
+      for (const [nm] of A.ROOMS) { const x = ag.rooms.find(q => q.name === nm); cmp(`p.${pn} rooms agent: ${nm}`, A.REF.rooms[nm].area, x ? x.area_sft : null, TOL.area, "Sft"); }
+      const sized = A.ROOMS.filter(q => q[2]).length, w = ag.rooms.filter(q => q.written_sft != null).length, flagged = ag.rooms.filter(q => q.check).map(q => q.name);
+      ok(w === sized && !flagged.length, `p.${pn} rooms agent: ${w} of the ${sized} rooms with a written size checked against it${flagged.length ? ", flagged: " + flagged.join(", ") : ", none off"}`);
+    }
     let tot = 0;
     for (const [nm] of A.ROOMS) {
       const ref = A.REF.rooms[nm], r = await trace(i, nm);
