@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* Browser test: the beams agent (🏗 Beams) — beam centre lines from the beam layer's two edge lines, as the JADE BOQ backup drawings
-   are drawn (Beam Claude.dwg: one layer per width, face to face of columns, walls and beams, a mark per span). On a DXF written here:
+   are drawn (Beam Claude.dwg: one layer per width, face to face of columns, walls and beams, a mark per span); the same drawing read
+   with no layers at all (a flat PDF, a Revit one), and a page that is a picture (a Revit sheet printed as one) read off its pixels. On a DXF written here:
      three 24" columns at x = 0, 300, 600 (in); beam B1, 15" wide (edges y = ±7.5), over two spans from column face to column face
      (12 → 288, 312 → 588: 276" each), marked once ("B1", under the first span); its top edge broken where B2 frames in;
      beam B2, 12" wide (edges x = 144, 156), from B1's top face (y = 7.5) to a shear wall's face (y = 207): 199.5", marked "B2 (12x18)"
@@ -19,8 +20,9 @@ const ents = [
   ...L("S-Beam", 12, -7.5, 288, -7.5), ...L("S-Beam", 312, -7.5, 588, -7.5),                    // B1's bottom edge, both spans
   ...L("S-Beam", 12, 7.5, 144, 7.5), ...L("S-Beam", 156, 7.5, 288, 7.5), ...L("S-Beam", 312, 7.5, 588, 7.5),   // its top edge, broken by B2
   ...L("S-Beam", 144, 7.5, 144, 207), ...L("S-Beam", 156, 7.5, 156, 207),                       // B2
-  ...box("SHEAR WALLS", 100, 207, 220, 225),
+  ...box("SHEAR WALLS", 100, 207, 220, 225), ...[110, 130, 150, 170, 190].flatMap(x => L("HATCH", x, 208, x + 16, 224)),   // the wall, hatched
   ...TX("Text", 130, -32, 9, "B1"), ...TX("Text", 136, 80, 9, "B2 (12x18)", 90),
+  ...L("Beam Text", 40, -30, 60, -30),                                                          // a beam layer's text (an underline): not an edge layer
   ...L("BC-CL-W15", 12, 0, 288, 0)];                                                            // a centre line already drawn: never read as an edge
 const dxf = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1015", "9", "$INSUNITS", "70", "1", "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES", ...ents, "0", "ENDSEC", "0", "EOF"].join("\n");
 (async () => {
@@ -43,7 +45,7 @@ const dxf = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1015", "9",
     return F && Z.S.fileId === F.id && Z.S.page && Z.S.cadSc && Z.S.cadSc[F.id] && Z.S.geo && Z.S.geo[Z.S.key] && Z.S.geo[Z.S.key].segs.length; }, null, {timeout: 60000}); await wait(800);
   console.log("the drawing's layers");
   const ly = await T(() => { const Z = zdTakeoff, g = Z.S.geo[Z.S.key], L = Z.beamLayers(g); return L && L.names; });
-  ok(ly && ly.join() === "S-Beam", "the beam layer is S-Beam — the centre-line layer BC-CL-W15 is not an edge layer (" + ly + ")");
+  ok(ly && ly.join() === "S-Beam", "the beam layer is S-Beam — the centre-line layer BC-CL-W15 and the text layer Beam Text are not edge layers (" + ly + ")");
   console.log("the agent");
   const r = await T(() => zdTakeoff.beamsAgent({page: true}));
   ok(!r.error && r.spans === 3, "3 spans: B1 twice (column face to face), B2 once (" + (r.error || r.spans) + ")");
@@ -67,9 +69,25 @@ const dxf = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1015", "9",
   await page.mouse.click(700, 450); await page.keyboard.press("Control+z"); await wait(300);
   const n3 = await T(() => zdTakeoff.P.proj.items.filter(i => i.beamAuto && /^B[12] —/.test((zdTakeoff.P.proj.conds.find(c => c.id === i.cond) || {}).name || "")).length);
   ok(n3 === 0, "Ctrl+Z takes the run back in one step (" + n3 + " left)");
-  console.log("no beam layer");
-  const r4 = await T(() => { const Z = zdTakeoff, g = Z.S.geo[Z.S.key], keep = g.layerIds; g.layerIds = []; const r = Z.beamsAgent({page: true}); g.layerIds = keep; return r; });
-  ok(r4.error && /No beam layer/.test(r4.error), "a page with no beam layer says so: " + (r4.error || "").slice(0, 70));
+  console.log("no layers at all (a PDF plotted flat, or from Revit)");
+  const r4 = await T(async () => { const Z = zdTakeoff, g = Z.S.geo[Z.S.key], keep = g.layerIds; g.layerIds = []; try { const r = await Z.beamsAgent({page: true}); const k = Z.P.proj.scales[Z.S.key].ptPerFt;
+    return Object.assign(r, {its: Z.P.proj.items.filter(i => i.beamAuto).map(i => ({mark: i.label, ft: Math.hypot(i.pts[1][0] - i.pts[0][0], i.pts[1][1] - i.pts[0][1]) / k, w: i.bw * 12})).sort((a, b) => b.ft - a.ft)}); } finally { g.layerIds = keep; } });
+  ok(!r4.error && r4.how === "styles", "with no layers the agent still runs, picking the beams out by their shape (" + (r4.error || r4.how) + ")");
+  const f4 = (r4.its || []).map(i => i.mark + " " + i.ft.toFixed(2) + " ft " + i.w.toFixed(1) + "\"").join(", ");
+  ok(r4.spans === 3 && r4.its.filter(i => i.mark === "B1" && near(i.ft, 23, 0.02) && near(i.w, 15, 0.01)).length === 2 && r4.its.some(i => i.mark === "B2" && near(i.ft, 16.625, 0.02) && near(i.w, 12, 0.01)),
+    "…the same 3 spans: the columns found by their outlines, the hatched wall as a wall, the centre line between B1's edges not an edge (" + f4 + ")");
+  console.log("a page that is a picture (a Revit sheet printed as one, a scan)");
+  const pic = await T(() => { const Z = zdTakeoff, W = 600, H = 200, g = new Uint8Array(W * H).fill(255), box = (x0, y0, x1, y1, v) => { for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) g[y * W + x] = v; };
+    box(50, 84, 82, 116, 110); box(450, 84, 482, 116, 110);   // two 24" columns, filled grey (4 px a point, 4 pt a foot: 16 px a foot)
+    for (const y of [92, 108]) for (let x = 82; x < 450; x++) if ((x - 82) % 12 < 8) g[y * W + x] = 220;   // the beam's edges 12" apart, in light grey dashes (a beam under the slab)
+    for (let x = 0; x < W; x++) if (x % 40 < 30 || x % 40 === 34) g[100 * W + x] = 0;   // the grid line down its middle, black dash-dot
+    const R = Z.beamPixLines(g, W, H, 4, 16), px = 0.25, k = 4, segs = R.segs.map(s => [s[0] * px, s[1] * px, s[2] * px, s[3] * px, s[4], s[5], s[6]]);
+    const src = Z.beamSource({segs, styles: []}, segs.map((_, i) => i), k, [], {tv: 1.5 * px, res: px, skipStyle: si => si % 3 === 2 && si < 9});
+    const F = Z.beamCore(src.segs, src.kind, [], k, {loose: true, res: px}); Z.beamSnapW(F.runs, 1.25 * px / k * 12);
+    return {boxes: R.boxes, styles: R.segs.filter(s => !(s[4] & 4)).map(s => s[6]).sort(), runs: F.runs.map(r => ({w: r.w * 12, ft: Math.hypot(r.b[0] - r.a[0], r.b[1] - r.a[1]) / k}))}; });
+  ok(pic.boxes === 2, "the picture's two filled columns are read as boxes (" + pic.boxes + ")");
+  ok(pic.styles.filter(s => s === 7).length === 2 && pic.styles.every(s => s === 7 || s === 2) && pic.styles.includes(2), "its lines: the two dashed light-grey edges (style 7) and the dash-dot grid line (style 2, in pieces between the columns), which is never an edge (" + pic.styles + ")");
+  ok(pic.runs.length === 1 && near(pic.runs[0].w, 12, 1e-6) && near(pic.runs[0].ft, 23, 0.1), "one span, 12\" wide, 23 ft from column face to column face (" + JSON.stringify(pic.runs) + ")");
   ok(errors.length === 0, "no page errors" + (errors.length ? ": " + errors[0] : ""));
   await browser.close(); console.log(fails ? fails + " FAILED" : "all passed"); process.exit(fails ? 1 : 0);
 })();

@@ -16900,22 +16900,192 @@ document.addEventListener("change", e => { if (e.target.id === "wlT") $("wlT2").
      gives the depth, and a width that disagrees with the drawing is flagged.
    Lines on centre-line layers already in the drawing (BC-CL…, CL, centre line) are never read as edges.
    beamsAgent({page, group: "width" | "prefix" | "mark", wMin, wMax (in), h}) -> what it drew; findBeams(rect) -> the runs. */
-const BEAM_LAYER_RX = /\bbeams?\b|^s-?b(ea)?m\b|\bbm\b|girder/i, BEAM_CL_RX = /\bc\.?l\b|cent(re|er)\s*-?\s*lines?|(^|[-_ ])cl([-_ ]|$)/i;
+const BEAM_LAYER_RX = /(^|[^a-z])(beams?|bm|girders?|fram(ing)?)(?![a-z])|^s-?b(ea)?m(?![a-z])/i, BEAM_CL_RX = /\bc\.?l\b|cent(re|er)\s*-?\s*lines?|(^|[-_ ])cl([-_ ]|$)/i;
+const BEAM_NOT_RX = /te?xt|dim|hatch|patt|tag|label|mark|elev|sect|detail|sched|note|steel|reinf|\bbars?\b|anno|call/i;   // a beam layer's text, hatch, elevations or steel ("Beam Text", "BEAM ELEV."): not its edges
+const BEAM_SKIP_RX = /te?xt|dim|hatch|patt|tag|label|elev|sect|detail|sched|note|title|tital|border|sheet|north|seal|logo|grid|gride|axis|vport|viewport|defpoints|furn|fixt|door|window|glass|steel|reinf|anno|call|\blev(el)?s?\b|arrow|symbol|cloud|\brev/i;   // layers never holding beam edges, when the agent has to find the beam layer itself
 const BEAM_MARK_RX = /^\s*([A-Z]{1,4}\s*-?\s*\d{1,3}[A-Za-z]?)\s*(?:[(\s]+(\d{1,3}(?:\.\d+)?)\s*["”]?\s*[xX×]\s*(\d{1,3}(?:\.\d+)?)\s*["”]?\s*\)?)?\s*$/;
 const BEAM_SIZE_RX = /^\s*\(?\s*(\d{1,3}(?:\.\d+)?)\s*["”]?\s*[xX×]\s*(\d{1,3}(?:\.\d+)?)\s*["”]?\s*\)?\s*$/;
 function beamLayers(g){   // -> {edge(i), sup(i), names: the beam layers} from the page's layers, or null (no beam layer)
   const L = g && g.layerIds && g.file && layerInfo(g.file); if (!L || !g.layerIds.length) return null;
-  const nm = g.layerIds.map(id => (L[id] && L[id].name) || ""), edge = nm.map(n => BEAM_LAYER_RX.test(n) && !BEAM_CL_RX.test(n)), sup = nm.map((n, i) => !edge[i] && !BEAM_CL_RX.test(n) && ["column", "wall"].includes(layerRole(n)));
+  const nm = g.layerIds.map(id => (L[id] && L[id].name) || ""), edge = nm.map(n => BEAM_LAYER_RX.test(n) && !BEAM_CL_RX.test(n) && !BEAM_NOT_RX.test(n)), sup = nm.map((n, i) => !edge[i] && !BEAM_CL_RX.test(n) && ["column", "wall"].includes(layerRole(n)));
   if (!edge.some(Boolean)) return null;
   return {edge: i => { const li = g.segs[i][7]; return li >= 0 && edge[li]; }, sup: i => { const li = g.segs[i][7]; return li >= 0 && sup[li]; }, names: [...new Set(nm.filter((n, i) => edge[i]))]};
 }
+const beamTexts = (rect, k) => (S.texts[S.key] || []).filter(x => !rect || (x.x >= rect[0] - 4 * k && x.x <= rect[2] + 4 * k && x.y >= rect[1] - 4 * k && x.y <= rect[3] + 4 * k));
+const beamScore = (F, k) => (F.runs || []).reduce((a, r) => a + Math.min(Math.hypot(r.b[0] - r.a[0], r.b[1] - r.a[1]) / k, 30), 0);   // the spans found, each counted up to 30 ft
 function findBeams(rect, o){   // the page's lines and text handed to beamCore (which works on its own: tested on the JADE drawing outside the browser)
   o = o || {}; const k = curScale(), g = S.geo[S.key]; if (!k || !g || !g.segs.length) return {error: "no lines"};
   const off = layerOffIx(g), ids = (rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i)).filter(i => !off || !off.has(g.segs[i][7]));
-  let Ly = beamLayers(g); if (!Ly && (g.vec || o.anyLines)) Ly = beamLinesAny(g, k, ids); if (!Ly) return {error: "no beam layer"};
-  const segs = [], kind = []; ids.forEach(i => { const e = Ly.edge(i), s = !e && Ly.sup(i); if (!e && !s) return; const q = g.segs[i]; segs.push([q[0], q[1], q[2], q[3], q[4]]); kind.push(e ? 1 : 2); });
-  const T = (S.texts[S.key] || []).filter(x => !rect || (x.x >= rect[0] - 4 * k && x.x <= rect[2] + 4 * k && x.y >= rect[1] - 4 * k && x.y <= rect[3] + 4 * k));
-  return Object.assign(beamCore(segs, kind, T, k, o), {layers: Ly.names});
+  if (!o.from && (g.vec || o.anyLines) && !beamLayers(g)) {   // a scan's lines read by OCR (g.vec), or every line asked for: any straight line may be an edge, small closed boxes are columns (beamLinesAny)
+    const Ly = beamLinesAny(g, k, ids), T = beamTexts(rect, k), segs = [], kind = []; ids.forEach(i => { const e = Ly.edge(i), s = !e && Ly.sup(i); if (!e && !s) return; const q = g.segs[i]; segs.push([q[0], q[1], q[2], q[3], q[4]]); kind.push(e ? 1 : 2); });
+    return Object.assign(beamCore(segs, kind, T, k, o), {layers: Ly.names, how: g.vec ? "scan" : "lines", tried: 0}); }
+  const T = beamTexts(rect, k), src = beamSource(g, ids, k, T, o);
+  return Object.assign(beamCore(src.segs, src.kind, T, k, Object.assign({}, o, {loose: src.loose})), {layers: src.names, how: src.how, tried: src.tried || 0});
+}
+/* where the beams' edges are read from -> {segs, kind (1 edge | 2 column / wall), names, how, loose}:
+   - "named": the layers named like a beam layer (S-Beam, BEAM, BM, S-FRAM — not "Beam Text"), columns and walls from their layers;
+   - "chosen": the layer picked in the dialog (o.from = "layer:NAME"); "lines": every line on the page together (o.from = "lines");
+   - "guess": no layer named so — each layer tried alone, and the one giving the most beam spans taken (a framing plan's beams are on
+     "Conc. outline", "0", "STR-2" …);
+   - "styles": a PDF with no layers at all (Revit, a flattened plot) — each line style (colour and weight) tried alone the same way: the
+     grid, the dimensions and the slab edges are drawn in styles of their own, the beams' edges in theirs.
+   Away from a named layer the agent reads loosely (beamCore o.loose) and finds the columns and walls by their outlines (beamShapes). */
+function beamSource(g, ids, k, T, o){
+  const Li = g.layerIds && g.layerIds.length && g.file && layerInfo(g.file), nm = Li ? g.layerIds.map(id => (Li[id] && Li[id].name) || "") : [];
+  const li = i => { const x = g.segs[i][7]; return x >= 0 && x < nm.length ? x : -1; };
+  const supLy = nm.map(n => !BEAM_CL_RX.test(n) && ["column", "wall"].includes(layerRole(n)));
+  const from = String(o.from || ""), named = !from && beamLayers(g);
+  if (named) { const segs = [], kind = []; ids.forEach(i => { const e = named.edge(i), s = !e && named.sup(i); if (!e && !s) return; const q = g.segs[i]; segs.push([q[0], q[1], q[2], q[3], q[4]]); kind.push(e ? 1 : 2); });
+    return {segs, kind, names: named.names, how: "named", loose: false}; }
+  const want = from.startsWith("layer:") ? from.slice(6) : null, edgeLy = nm.map(n => want != null ? n === want : !BEAM_CL_RX.test(n) && !BEAM_SKIP_RX.test(n) && !["text", "tag", "glass", "opening", "railing", "fixture", "unit", "hatch", "column", "wall"].includes(layerRole(n)));
+  const textLy = nm.map(n => ["text", "tag"].includes(layerRole(n)) || /te?xt|dim|anno|title|tital|border|sheet/i.test(n)), hatchLy = nm.map(n => layerRole(n) === "hatch" || BEAM_CL_RX.test(n));
+  if (want != null) nm.forEach((n, x) => { if (edgeLy[x]) supLy[x] = textLy[x] = hatchLy[x] = false; });   // (the layer picked is read as beams' edges, whatever its name says)
+  // the page's straight lines (on a layer of text, dimensions or the title block: never), the columns and walls among them by their outlines
+  const cand = ids.filter(i => { const s = g.segs[i]; if (s[4] & 9) return false; const x = li(i); return x < 0 || (want != null && edgeLy[x]) || !textLy[x] || supLy[x]; });
+  const loc = cand.map(i => { const s = g.segs[i]; return [s[0], s[1], s[2], s[3], s[4], s[5]]; }), SH = beamShapes(loc, k, T, o.tv);
+  const supJ = [], byLy = nm.length > 0 && cand.some(i => li(i) >= 0), groups = new Map();
+  cand.forEach((i, j) => { const x = li(i); if (SH.sup.has(j) || (x >= 0 && supLy[x])) { supJ.push(j); return; } if (SH.skip.has(j) || (g.segs[i][4] & 4)) return;
+    const kk = x >= 0 && hatchLy[x] ? null : from === "lines" ? "all" : want != null ? (x >= 0 && edgeLy[x] ? "L" + x : null) : byLy ? (x < 0 ? "L-1" : edgeLy[x] ? "L" + x : null) : o.skipStyle && o.skipStyle(g.segs[i][6] || 0) ? null : "S" + (g.segs[i][6] || 0);   // (o.skipStyle: a picture's dash-dot lines)
+    if (kk == null) return; let a = groups.get(kk); if (!a) groups.set(kk, a = []); a.push(j); });
+  const build = (js, help) => { const segs = [], kind = []; js.forEach(j => { segs.push(loc[j]); kind.push(1); }); (help || []).forEach(j => { segs.push(loc[j]); kind.push(3); }); supJ.forEach(j => { segs.push(loc[j]); kind.push(2); }); return {segs, kind}; };
+  const nameOf = kk => kk === "all" ? "every line" : kk === "L-1" ? "(no layer)" : kk[0] === "L" ? nm[+kk.slice(1)] : "lines drawn " + String((g.styles || [])[+kk.slice(1)] || "#" + kk.slice(1)).replace("|", ", weight ");
+  let pick = [...groups.entries()].map(([kk, js]) => ({kk, js}));
+  if (from !== "lines" && want == null && pick.length > 1) {   // each layer (or line style) alone: the beam spans it gives, a span counted up to 30 ft (a sheet border is four long "beams")
+    pick = pick.filter(t => t.js.reduce((a, j) => { const s = loc[j], L = Math.hypot(s[2] - s[0], s[3] - s[1]); return a + (L >= 1.25 * k ? L : 0); }, 0) >= 20 * k);
+    pick.forEach(t => { const b = build(t.js), R = beamCore(b.segs, b.kind, [], k, Object.assign({}, o, {loose: true})); t.sc = R.runs.reduce((a, r) => a + Math.min(Math.hypot(r.b[0] - r.a[0], r.b[1] - r.a[1]) / k, 30), 0); });
+    pick.sort((a, b) => b.sc - a.sc); const best = pick[0] && pick[0].sc >= 8 ? pick[0].sc : 0;
+    pick = best ? pick.filter(t => t.sc >= (byLy ? 0.6 : 0.3) * best) : []; }
+  // the lines of the layers / styles not taken may still be a beam's other edge, beside one of the lines taken (a slab's outline drawn
+  // over a beam's edge, a black line over a grey one): kind 3
+  const took = new Set(pick.map(t => t.kk)), help = from !== "lines" && want == null && pick.length ? [].concat(...[...groups.entries()].filter(([kk]) => !took.has(kk)).map(([, js]) => js)) : [];
+  const b = build([].concat(...pick.map(t => t.js)), help);
+  return Object.assign(b, {names: pick.map(t => nameOf(t.kk)), how: from === "lines" ? "lines" : want != null ? "chosen" : byLy ? "guess" : "styles", loose: true, tried: groups.size});
+}
+/* beamShapes(segs [[x0, y0, x1, y1, flags, subpath]], k, texts) -> {sup, skip}: the indexes of the lines that outline a column or a wall
+   (what a beam stops at, on a page with no column or wall layer) and of the lines inside one (its hatch: never a beam's edge).
+   An outline: four lines meeting at right angles, or one closed path of straight lines. A column: 8" to 8 ft a side, at most 6 times as
+   long as wide, filled, hatched or empty (a box with only text in it is a tag); a wall: 4" to 3 ft thick, up to 60 ft long, filled or
+   hatched. The squarest first: a beam drawn flush between two columns closes a box with their sides, and is not a column. */
+function beamShapes(segs, k, texts, tv0){   // tv0: how far apart two line ends may be and still meet (a line read off a picture: a pixel and a half)
+  const inch = k / 12, tv = Math.max(0.3 * inch, 0.01, tv0 || 0), sup = new Set(), skip = new Set(), shapes = [], seen = new Set(), len = s => Math.hypot(s[2] - s[0], s[3] - s[1]);
+  const C = Math.max(4 * k, 1), grid = new Map(), cellsOf = (x0, y0, x1, y1, fn) => { for (let x = Math.floor(Math.min(x0, x1) / C); x <= Math.floor(Math.max(x0, x1) / C); x++) for (let y = Math.floor(Math.min(y0, y1) / C); y <= Math.floor(Math.max(y0, y1) / C); y++) fn(x + "," + y); };
+  segs.forEach((s, i) => { if ((s[4] & 9) || len(s) > 60 * k) return; cellsOf(s[0], s[1], s[2], s[3], c => { let L = grid.get(c); if (!L) grid.set(c, L = []); L.push(i); }); });
+  const V = new Map(), ends = (x, y) => { const a = Math.round(x / tv), b = Math.round(y / tv), r = []; for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) { const L = V.get((a + dx) + "," + (b + dy)); if (L) for (const e of L) if (Math.abs(e.x - x) <= 2 * tv && Math.abs(e.y - y) <= 2 * tv) r.push(e); } return r; };
+  segs.forEach((s, i) => { if (s[4] & 9) return; const L = len(s); if (L < 3 * inch || L > 60 * k) return;
+    [[s[0], s[1], s[2], s[3]], [s[2], s[3], s[0], s[1]]].forEach(([x, y, ox, oy]) => { const kk = Math.round(x / tv) + "," + Math.round(y / tv); let a = V.get(kk); if (!a) V.set(kk, a = []); a.push({i, x, y, ox, oy, L}); }); });
+  V.forEach(list => list.forEach(e1 => { const A = [e1.x, e1.y], B = [e1.ox, e1.oy], ab = [B[0] - A[0], B[1] - A[1]];
+    for (const e2 of ends(B[0], B[1])) { if (e2.i === e1.i) continue; const bc = [e2.ox - B[0], e2.oy - B[1]];
+      if (Math.min(e1.L, e2.L) > 8 * k || Math.abs(ab[0] * bc[0] + ab[1] * bc[1]) > 0.03 * e1.L * e2.L) continue;   // (a right angle)
+      const Cc = [e2.ox, e2.oy], Dd = [A[0] + bc[0], A[1] + bc[1]], fit = (e, p) => Math.abs(e.ox - p[0]) <= 2 * tv && Math.abs(e.oy - p[1]) <= 2 * tv;
+      const e3 = ends(Cc[0], Cc[1]).find(e => e.i !== e2.i && e.i !== e1.i && fit(e, Dd)); if (!e3) continue;
+      const e4 = ends(Dd[0], Dd[1]).find(e => e.i !== e3.i && e.i !== e2.i && e.i !== e1.i && fit(e, A)); if (!e4) continue;
+      const key = [e1.i, e2.i, e3.i, e4.i].sort((a, b) => a - b).join(); if (seen.has(key)) continue; seen.add(key);
+      shapes.push({ids: [e1.i, e2.i, e3.i, e4.i], P: [A, B, Cc, Dd], mn: Math.min(e1.L, e2.L), mx: Math.max(e1.L, e2.L)}); } }));
+  const bySp = new Map(); segs.forEach((s, i) => { if ((s[4] & 9) || s[5] == null) return; let a = bySp.get(s[5]); if (!a) bySp.set(s[5], a = []); a.push(i); });
+  bySp.forEach(ids => { if (ids.length < 3 || ids.length > 64) return; const f = segs[ids[0]], l = segs[ids[ids.length - 1]]; if (Math.hypot(f[0] - l[2], f[1] - l[3]) > 2 * tv) return;
+    for (let j = 1; j < ids.length; j++) { const p = segs[ids[j - 1]], q = segs[ids[j]]; if (Math.hypot(p[2] - q[0], p[3] - q[1]) > 2 * tv) return; }   // (one closed chain)
+    const key = ids.slice().sort((a, b) => a - b).join(); if (seen.has(key)) return; seen.add(key);
+    const P = ids.map(i => [segs[i][0], segs[i][1]]), xs = P.map(p => p[0]), ys = P.map(p => p[1]), w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+    shapes.push({ids, P, mn: Math.min(w, h), mx: Math.max(w, h)}); });
+  const inP = (p, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+  const tmid = (texts || []).map(x => { const a = +x.r || 0, hh = x.h || 6, ww = x.w || 0.55 * hh * String(x.s || "").length; return [x.x + Math.cos(a) * ww / 2 + Math.sin(a) * hh / 2, x.y + Math.sin(a) * ww / 2 - Math.cos(a) * hh / 2]; });
+  shapes.forEach(sh => { const P = sh.P; let A2 = 0, per = 0; P.forEach((p, i) => { const q = P[(i + 1) % P.length]; A2 += p[0] * q[1] - q[0] * p[1]; per += Math.hypot(q[0] - p[0], q[1] - p[1]); });
+    sh.t = per ? Math.abs(A2) / per : 0; sh.r = sh.mx / Math.max(sh.mn, 1e-9); });   // t = 2 × area ÷ perimeter: a thin shape's thickness
+  shapes.filter(sh => sh.mn >= 4 * inch && sh.mx <= 60 * k && sh.t >= 2 * inch).sort((a, b) => a.r - b.r).forEach(sh => {
+    if (sh.ids.some(i => sup.has(i))) return;   // (a side of a column already found: the box a flush beam closes between two columns)
+    const P = sh.P, xs = P.map(p => p[0]), ys = P.map(p => p[1]), x0 = Math.min(...xs) - tv, x1 = Math.max(...xs) + tv, y0 = Math.min(...ys) - tv, y1 = Math.max(...ys) + tv, own = new Set(sh.ids), inside = new Set();
+    cellsOf(x0, y0, x1, y1, c => (grid.get(c) || []).forEach(i => { if (own.has(i) || inside.has(i)) return; const s = segs[i];
+      if (Math.min(s[0], s[2]) >= x0 && Math.max(s[0], s[2]) <= x1 && Math.min(s[1], s[3]) >= y0 && Math.max(s[1], s[3]) <= y1 && inP([(s[0] + s[2]) / 2, (s[1] + s[3]) / 2], P)) inside.add(i); }));
+    const filled = sh.ids.some(i => segs[i][4] & 4), hatched = [...inside].filter(i => len(segs[i]) >= 0.4 * sh.mn).length >= 3, txt = tmid.some(p => p[0] > x0 && p[0] < x1 && p[1] > y0 && p[1] < y1 && inP(p, P));
+    const col = sh.mn >= 8 * inch && sh.mx <= 8 * k && sh.r <= 6 && sh.t >= 4 * inch && (filled || hatched || (!inside.size && !txt));
+    const wall = (filled || hatched) && sh.t >= 4 * inch && sh.t <= 3 * k;
+    if (col || wall) { sh.ids.forEach(i => sup.add(i)); inside.forEach(i => skip.add(i)); } });
+  return {sup, skip};
+}
+/* beamPixLines(gray Uint8Array (W × H, 0 black … 255 white), W, H, ppt px per pt, kpx px per ft) -> {segs, boxes} in pixels: the straight
+   lines of a picture — a Revit sheet printed as one (raster processing: any shaded view on the sheet makes the whole sheet a picture),
+   or a scan. A line: a row (or column) of ink 1.25 ft or longer and at most 1 pt thick, carried across a line crossing it; its style
+   how dark it is (0 black, 1 grey, 2 light grey). A box: ink thicker than 3" both ways (a filled column or wall), split into rectangles
+   row band by row band. Lines across (hatch at 45°) are not read: beams run square to the sheet. */
+function beamPixLines(gray, W, H, ppt, kpx){
+  const N = W * H, ink = new Uint8Array(N), vth = new Uint16Array(N), hth = new Uint16Array(N);
+  for (let i = 0; i < N; i++) ink[i] = gray[i] < 240 ? 1 : 0;   // (Revit draws a beam under the slab in light grey dashes: grey 200–235)
+  for (let y = 0; y < H; y++) { let x = 0; while (x < W) { const i = y * W + x; if (!ink[i]) { x++; continue; } let e = x; while (e < W && ink[y * W + e]) e++; const L = Math.min(e - x, 65535); for (let q = x; q < e; q++) hth[y * W + q] = L; x = e; } }
+  for (let x = 0; x < W; x++) { let y = 0; while (y < H) { if (!ink[y * W + x]) { y++; continue; } let e = y; while (e < H && ink[e * W + x]) e++; const L = Math.min(e - y, 65535); for (let q = y; q < e; q++) vth[q * W + x] = L; y = e; } }
+  const tmax = Math.max(3, Math.ceil(1.0 * ppt)), tfill = Math.max(tmax + 2, Math.ceil(kpx * 3 / 12)), Lmin = Math.max(8, Math.round(1.25 * kpx), Math.round(10 * ppt)), gapMax = Math.max(3, Math.round(4 * ppt)), segs = [], boxes = [];
+  const lines = horiz => {   // horiz: rows of ink thin across (vth small); else columns (hth small)
+    const nA = horiz ? H : W, nB = horiz ? W : H, at = (a, b) => horiz ? a * W + b : b * W + a, thin = horiz ? vth : hth, along = horiz ? hth : vth, P = [], Lpc = Math.max(6, Math.round(2 * ppt)); let open = [];
+    const fill = i => ink[i] && thin[i] >= tfill && along[i] >= tfill;
+    for (let a = 0; a < nA; a++) { const runs = []; let b = 0;
+      while (b < nB) { let i = at(a, b); if (!(ink[i] && thin[i] <= tmax)) { b++; continue; }
+        let s = b, e = b, g = 0, n = 0, br = 0, gap = 0, pc = 0; const pcs = [];
+        while (b < nB) { i = at(a, b);
+          if (ink[i] && thin[i] <= tmax) { if (gap && pc) { pcs.push(pc); pc = 0; } e = b; g += gray[i]; n++; pc++; br = gap = 0; b++; }
+          else if (ink[i] && along[i] <= tmax + 2 && br < tmax + 1) { br++; pc++; b++; }   // (a line crossing: carried across)
+          else if (!ink[i] && gap < gapMax) { gap++; b++; }   // (the gap of a dashed line: up to 4 pt)
+          else break; }
+        if (pc) pcs.push(pc);
+        b = e + 1; if (e - s + 1 < Lpc || n < 0.5 * (e - s + 1)) continue;   // (half of it ink at least: a row through a line of text is no line)
+        // its pattern: solid (0), dashed (1), or dash-dot (2: dots of 1.5 pt or less between long dashes — a grid or centre line, never a beam's edge)
+        const dot = Math.max(2, 1.5 * ppt), nd = pcs.filter(p => p <= dot).length, pat = pcs.length < 3 ? 0 : nd >= 0.3 * pcs.length && pcs.some(p => p >= 4 * dot) ? 2 : 1;
+        for (let q = s - 1; q >= Math.max(0, s - gapMax - 1); q--) if (fill(at(a, q))) { s = q + 1; break; }   // (a dashed edge stopping a gap short of a column: run on to its face)
+        for (let q = e + 1; q <= Math.min(nB - 1, e + gapMax + 1); q++) if (fill(at(a, q))) { e = q - 1; break; }
+        runs.push({s, e, g, n, pat}); }
+      const next = [];
+      runs.forEach(r => { const q = open.find(l => !l.took && Math.min(l.e, r.e) - Math.max(l.s, r.s) >= 0.7 * Math.min(l.e - l.s, r.e - r.s));
+        if (q) { q.took = true; q.s = Math.min(q.s, r.s); q.e = Math.max(q.e, r.e); q.as += a; q.na++; q.g += r.g; q.n += r.n; q.last = a; if (r.n > q.bn) { q.bn = r.n; q.pat = r.pat; } next.push(q); }
+        else next.push({s: r.s, e: r.e, as: a, na: 1, g: r.g, n: r.n, last: a, bn: r.n, pat: r.pat}); });
+      open.forEach(l => { if (!l.took) done(l); }); next.forEach(l => { l.took = false; }); open = next; }
+    open.forEach(done);
+    function done(l){ if (l.na > tmax + 1) return; const gv = l.g / Math.max(l.n, 1); P.push({s: l.s, e: l.e, c: l.as / l.na + 0.5, cls: gv < 100 ? 0 : gv < 170 ? 1 : 2, pat: l.pat}); }
+    /* a line a little off square (a slanted plot boundary's beam) is a staircase of short pieces one row apart: chained back into one slanted
+       line — the steps all the same way and alike in length (a letter's curve is not) — and 10 pt long at least, as any line */
+    P.sort((p, q) => p.s - q.s); const byS = new Map(); P.forEach(p => { const b0 = Math.floor(p.s / 8); let L = byS.get(b0); if (!L) byS.set(b0, L = []); L.push(p); });
+    const nextOf = (p, dir) => { let best = null; for (let b0 = Math.floor((p.s + 0.3 * (p.e - p.s)) / 8); b0 <= Math.floor((p.e + gapMax) / 8); b0++) (byS.get(b0) || []).forEach(q => {
+        if (q.used || q.cls !== p.cls || q.s < p.s + 0.3 * (p.e - p.s) || q.s > p.e + gapMax || q.e <= p.e) return; const dc = q.c - p.c;
+        if (Math.abs(dc) < 0.5 || Math.abs(dc) > 2.2 || (dir && Math.sign(dc) !== dir)) return; if (!best || Math.abs(q.s - p.e) < Math.abs(best.s - p.e)) best = q; }); return best; };
+    const out = (x0, y0, x1, y1, st) => segs.push(horiz ? [x0, y0, x1, y1, 0, segs.length + 1, st] : [y0, x0, y1, x1, 0, segs.length + 1, st]);
+    P.forEach(p => { if (p.used) return; p.used = true; const ch = [p]; let dir = 0, q;
+      while ((q = nextOf(ch[ch.length - 1], dir))) { if (!dir) dir = Math.sign(q.c - ch[ch.length - 1].c); q.used = true; ch.push(q); }
+      const steps = ch.slice(1).map((q2, i) => q2.s - ch[i].s), mid = steps.slice(1, -1), even = mid.length < 2 || Math.max(...mid) <= 2 * Math.max(1, Math.min(...mid));
+      const top = ch.reduce((a, x) => x.e - x.s > a.e - a.s ? x : a, p), st = top.cls * 3 + top.pat;
+      if (ch.length >= 2 && even && ch[ch.length - 1].e + 1 - p.s >= Lmin) {   // (the line through the pieces' middles, length-weighted)
+        let sw = 0, sx = 0, sy = 0, sxx = 0, sxy = 0; ch.forEach(x => { const w = x.e - x.s + 1, m = (x.s + x.e + 1) / 2; sw += w; sx += w * m; sy += w * x.c; sxx += w * m * m; sxy += w * m * x.c; });
+        const den = sw * sxx - sx * sx, bb = den ? (sw * sxy - sx * sy) / den : 0, aa = (sy - bb * sx) / sw, x0 = p.s, x1 = ch[ch.length - 1].e + 1; out(x0, aa + bb * x0, x1, aa + bb * x1, st); return; }
+      ch.slice(1).forEach(x => { x.used = false; });   // (no staircase: each piece on its own)
+      if (p.e - p.s + 1 >= Lmin) out(p.s, p.c, p.e + 1, p.c, p.cls * 3 + p.pat); });
+  };
+  lines(true); lines(false);
+  let open = [];   // the boxes: runs of thick ink, stacked while a run keeps its ends
+  for (let y = 0; y < H; y++) { const runs = []; let x = 0;
+    while (x < W) { const i = y * W + x; if (!(ink[i] && vth[i] >= tfill && hth[i] >= tfill)) { x++; continue; } let e = x; while (e < W && ink[y * W + e] && vth[y * W + e] >= tfill && hth[y * W + e] >= tfill) e++; if (e - x >= tfill) runs.push({s: x, e}); x = e; }
+    const next = []; runs.forEach(r => { const q = open.find(b => !b.took && Math.abs(b.s - r.s) <= 2 && Math.abs(b.e - r.e) <= 2); if (q) { q.took = true; q.y1 = y; next.push(q); } else next.push({s: r.s, e: r.e, y0: y, y1: y}); });
+    open.forEach(b => { if (!b.took && b.y1 - b.y0 + 1 >= tfill) boxes.push(b); }); next.forEach(b => { b.took = false; }); open = next; }
+  open.forEach(b => { if (b.y1 - b.y0 + 1 >= tfill) boxes.push(b); });
+  boxes.forEach(b => { const x0 = b.s, x1 = b.e + 1, y0 = b.y0, y1 = b.y1 + 1, sp = segs.length + 1; [[x0, y0, x1, y0], [x1, y0, x1, y1], [x1, y1, x0, y1], [x0, y1, x0, y0]].forEach(q => segs.push([q[0], q[1], q[2], q[3], 4, sp, 9])); });
+  return {segs, boxes: boxes.length};
+}
+function beamSnapW(runs, tolIn){   // widths read off a picture are a pixel rough: the widths within tolIn (in) of the commonest one are one width — their mean, to the inch
+  const len = r => Math.hypot(r.b[0] - r.a[0], r.b[1] - r.a[1]), wk = r => Math.round(r.w * 24) / 2, H = new Map(); runs.forEach(r => H.set(wk(r), (H.get(wk(r)) || 0) + len(r)));
+  const left = new Set(H.keys()), to = new Map();
+  while (left.size) { const w0 = [...left].sort((a, b) => H.get(b) - H.get(a))[0], grp = [...left].filter(w => Math.abs(w - w0) <= tolIn); let s = 0, n = 0;
+    grp.forEach(w => { s += w * H.get(w); n += H.get(w); left.delete(w); }); const v = Math.max(1, Math.round(s / n)); grp.forEach(w => to.set(w, v)); }
+  runs.forEach(r => { r.w = to.get(wk(r)) / 12; });
+}
+const BEAM_PIX_STYLES = ["black", "black dashed", "black dash-dot", "grey", "grey dashed", "grey dash-dot", "light grey", "light grey dashed", "light grey dash-dot", "filled"];
+/* the page (or rect) drawn as a picture and its lines read off it (beamPixLines), in page points: {segs, styles, px} — the beams' source
+   when the plan is a picture (S.beamPix keeps it for the page and the box) */
+async function beamPicture(rect, k){
+  const B = rect || [0, 0, S.base.width, S.base.height], w = B[2] - B[0], h = B[3] - B[1], key = S.key + "|" + B.map(v => Math.round(v)).join(",");
+  S.beamPix = S.beamPix || {}; if (S.beamPix[key]) return S.beamPix[key];
+  const px = Math.max(0.25, Math.sqrt(w * h / 24e6)), W = Math.max(1, Math.round(w / px)), H = Math.max(1, Math.round(h / px));   // (4 pixels a point, at most 24 million pixels)
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  await sliced(S.page.render({...lay(S.fileId), canvasContext: ctx, viewport: S.page.getViewport({scale: 1 / px}), transform: [1, 0, 0, 1, -B[0] / px, -B[1] / px]})).promise; await breathe();
+  let gray = new Uint8Array(W * H); { const d = ctx.getImageData(0, 0, W, H).data; for (let i = 0, j = 0; j < gray.length; i += 4, j++) gray[j] = Math.min(d[i], d[i + 1], d[i + 2]); }
+  cv.width = cv.height = 1; await breathe();
+  const R = beamPixLines(gray, W, H, 1 / px, k / px); gray = null;
+  const segs = R.segs.map(s => [B[0] + s[0] * px, B[1] + s[1] * px, B[0] + s[2] * px, B[1] + s[3] * px, s[4], s[5], s[6]]);
+  const out = {segs, styles: BEAM_PIX_STYLES, px, boxes: R.boxes}; S.beamPix = {[key]: out}; return out;   // (one kept at a time)
 }
 /* no beam layer (a scan's lines, or a framing plan PDF with no layers): any straight line may be a beam's edge; the outlines of filled
    shapes (a column drawn solid) and small closed boxes (a column drawn as its outline, 4" to 4 ft a side) are the supports, and the lines
@@ -16939,32 +17109,64 @@ function smallBoxes(g, k, ids){   // the sides of closed axis-aligned boxes 4" t
   return out;
 }
 /* beamCore(segs [[x0, y0, x1, y1, flags]], kind [1 edge | 2 support], texts [{s, x, y, w, h, r}], k pt per ft, o) -> {runs, lonely}.
-   Edges may be dashed (a beam under the slab is drawn dashed); curves and clip paths are not edges. */
+   Edges may be dashed (a beam under the slab is drawn dashed); curves and clip paths are not edges.
+   o.loose (the edges not from a beam layer: a layer or line style found by the agent, or every line): a dashed edge plotted as separate
+   dashes is joined across its gaps (not across a column); filled shapes (text drawn as outlines) and lines under 1.25 ft (hatch, text
+   strokes) are not edges; a line midway between two others is a grid or centre line, not a third edge; a span under 1.5 ft, or lying
+   inside a column or a wall, is none. */
 function beamCore(segs, kind, texts, k, o){
-  o = o || {}; const inch = k / 12, wMin = (+o.wMin || 4) * inch, wMax = (+o.wMax || 48) * inch, tol = 0.25 * inch, D = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  o = o || {}; const inch = k / 12, wMin = (+o.wMin || 4) * inch, wMax = (+o.wMax || 48) * inch, tol = Math.max(0.25 * inch, 0.75 * (+o.res || 0)), D = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);   // (o.res: a picture's pixel, pt — its lines' places are that rough)
+  const lz = !!o.loose, otol = lz ? Math.max(0.05 * inch, 0.03, 0.5 * (+o.res || 0)) : 0.05 * inch;
   const C = Math.max(6 * k, 1), grid = new Map(), cellsOf = (x0, y0, x1, y1, fn) => { for (let x = Math.floor(Math.min(x0, x1) / C); x <= Math.floor(Math.max(x0, x1) / C); x++) for (let y = Math.floor(Math.min(y0, y1) / C); y <= Math.floor(Math.max(y0, y1) / C); y++) fn(x + "," + y); };
   segs.forEach((s, i) => cellsOf(s[0], s[1], s[2], s[3], c => { let L = grid.get(c); if (!L) grid.set(c, L = []); L.push(i); }));
   const near = (x0, y0, x1, y1) => { const out = new Set(); cellsOf(x0, y0, x1, y1, c => (grid.get(c) || []).forEach(i => out.add(i))); return [...out]; };
   const supNear = (x0, y0, x1, y1) => near(x0, y0, x1, y1).filter(i => kind[i] === 2);
+  // a point inside a column or a wall: a ray from it crosses the support's outline an odd number of times (loose: an outline drawn twice,
+  // a fill and its stroke, counted once)
+  const inSup = p => { let c = 0; const xs = []; near(p[0], p[1] - 0.01, p[0] + 60 * k, p[1] + 0.01).forEach(i => { if (kind[i] !== 2) return; const s = segs[i];
+      if ((s[1] > p[1]) !== (s[3] > p[1])) { const x = (s[2] - s[0]) * (p[1] - s[1]) / (s[3] - s[1]) + s[0]; if (p[0] < x) { c++; xs.push(x); } } });
+    if (lz && xs.length > 1) { xs.sort((a, b) => a - b); c = xs.filter((x, i) => !i || x - xs[i - 1] > 0.1 * inch).length; } return c % 2 === 1; };
   // the edges by direction (0.5° bins), as {o, t0, t1}; pieces of one edge in line (a dashed line broken) joined
-  const E = []; segs.forEach((s, i) => { if (kind[i] !== 1 || (s[4] & 9)) return; const dx = s[2] - s[0], dy = s[3] - s[1], L = Math.hypot(dx, dy); if (L < 0.1 * k) return;
-    let a = Math.atan2(dy, dx); if (a < 0) a += Math.PI; if (a >= Math.PI - 0.0044) a -= Math.PI; E.push({s, a, L}); });
+  const E = []; segs.forEach((s, i) => { if ((kind[i] !== 1 && kind[i] !== 3) || (s[4] & (lz ? 13 : 9))) return; const dx = s[2] - s[0], dy = s[3] - s[1], L = Math.hypot(dx, dy); if (L < 0.1 * k) return;
+    let a = Math.atan2(dy, dx); if (a < 0) a += Math.PI; if (a >= Math.PI - 0.0044) a -= Math.PI; E.push({s, a, L, pri: kind[i] === 1}); });   // (kind 3: a line of another style, an edge only beside a kind-1 line)
   E.sort((x, y) => x.a - y.a); const groups = [];
   E.forEach(e => { const G = groups[groups.length - 1]; if (G && e.a - G.last <= 0.004) { G.es.push(e); G.last = e.a; } else groups.push({es: [e], last: e.a}); });
   groups.forEach(G => { const W = G.es.reduce((a, e) => a + e.L, 0); G.a = G.es.reduce((a, e) => a + e.a * e.L, 0) / W; if (Math.abs(G.a - Math.PI / 2) < 0.0044) G.a = Math.PI / 2; if (Math.abs(G.a) < 0.0005) G.a = 0;
     G.u = [Math.cos(G.a), Math.sin(G.a)]; G.n = [-G.u[1], G.u[0]];
-    G.L = G.es.map(({s}) => { const t0 = G.u[0] * s[0] + G.u[1] * s[1], t1 = G.u[0] * s[2] + G.u[1] * s[3]; return {o: (G.n[0] * (s[0] + s[2]) + G.n[1] * (s[1] + s[3])) / 2, t0: Math.min(t0, t1), t1: Math.max(t0, t1)}; }); });
+    G.L = G.es.map(({s, pri}) => { const t0 = G.u[0] * s[0] + G.u[1] * s[1], t1 = G.u[0] * s[2] + G.u[1] * s[3]; return {o: (G.n[0] * (s[0] + s[2]) + G.n[1] * (s[1] + s[3])) / 2, t0: Math.min(t0, t1), t1: Math.max(t0, t1), pri}; }); });
   const runs = [], hist = new Map(), wkey = d => Math.round(d / inch * 2);
   groups.forEach(gr => {
-    const L0 = gr.L.sort((a, b) => a.o - b.o || a.t0 - b.t0), L = [];
-    // (pieces that touch end to end only: the same line on another floor of the sheet, in line with this one, is another edge)
-    L0.forEach(l => { const q = L.length && L.slice(-12).reverse().find(m => Math.abs(m.o - l.o) <= 0.05 * inch && l.t0 <= m.t1 + 0.1 * inch && l.t1 >= m.t0 - 0.1 * inch); if (q) { q.t0 = Math.min(q.t0, l.t0); q.t1 = Math.max(q.t1, l.t1); } else L.push(Object.assign({}, l)); });
+    const L0 = gr.L.sort((a, b) => a.o - b.o || a.t0 - b.t0), L = [], P0 = (t, oo) => [gr.u[0] * t + gr.n[0] * oo, gr.u[1] * t + gr.n[1] * oo];
+    // (pieces that touch end to end only: the same line on another floor of the sheet, in line with this one, is another edge; loose: the
+    // gap of a dashed line too — up to 1.25 ft, and 1.5 times the shorter piece — unless a column or wall stands in it)
+    const joins = (m, l) => { if (Math.abs(m.o - l.o) > otol) return false; const gap = Math.max(l.t0 - m.t1, m.t0 - l.t1); if (gap <= 0.1 * inch) return true;
+      if (!lz || gap > Math.min(1.25 * k, 1.5 * Math.min(m.t1 - m.t0, l.t1 - l.t0))) return false; return !inSup(P0(l.t0 > m.t1 ? (m.t1 + l.t0) / 2 : (l.t1 + m.t0) / 2, l.o)); };
+    L0.forEach(l => { const q = L.length && L.slice(-12).reverse().find(m => joins(m, l)); if (q) { q.t0 = Math.min(q.t0, l.t0); q.t1 = Math.max(q.t1, l.t1); q.pri = q.pri || l.pri; } else L.push(Object.assign({}, l)); });
     L.sort((a, b) => a.o - b.o);
-    const pairs = [];
-    for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length && L[j].o - L[i].o <= wMax; j++) { const A = L[i], B = L[j], d = B.o - A.o; if (d < wMin) continue;
+    if (lz) {   // loose: no line under 1.25 ft (scored on the JADE sheet read with no layers: 2.5 ft lost 3 % of the spans); a line midway between two others over their common stretch is a grid or centre line
+      // and four or more lines evenly spaced are hatch (a slab's diagonal hatch 3 ft apart would be a row of 36" beams): all left out
+      const keep = L.filter(l => l.t1 - l.t0 >= 1.25 * k), cl = new Set(), mid = new Map(); L.length = 0; keep.forEach(l => L.push(l));
+      const lb = x => { let lo = 0, hi = L.length; while (lo < hi) { const q = (lo + hi) >> 1; if (L[q].o < x) lo = q + 1; else hi = q; } return lo; };
+      for (let m = 0; m < L.length; m++) { const M = L[m]; let hit = null;
+        const same = []; for (let q = lb(M.o - tol); q < L.length && L[q].o <= M.o + tol; q++) same.push(L[q]);   // (M and the pieces in line with it: a grid line broken by labels)
+        const cover = (t0, t1) => { let c = 0, at = t0; same.map(l => [Math.max(l.t0, t0), Math.min(l.t1, t1)]).filter(v => v[1] > v[0]).sort((p, q) => p[0] - q[0]).forEach(([p, q]) => { if (q > at) { c += q - Math.max(p, at); at = q; } }); return c; };
+        for (let a = m - 1; a >= 0 && !hit && M.o - L[a].o <= wMax + tol; a--) { const A = L[a], h = M.o - A.o; if (h < tol) continue;
+          for (let b = lb(M.o + h - tol); b < L.length && L[b].o <= M.o + h + tol; b++) { const B = L[b]; if (B === M) continue;
+            const t0 = Math.max(A.t0, B.t0, M.t0 - 2 * k), t1 = Math.min(A.t1, B.t1, M.t1 + 2 * k); if (t1 - t0 >= 1.25 * k && cover(t0, t1) >= 0.8 * (t1 - t0)) { hit = {A, B, h}; break; } } }
+        if (hit) mid.set(M, hit); }
+      mid.forEach((x, M) => { const same = Q => mid.has(Q) && Math.abs(mid.get(Q).h - x.h) <= tol;
+        if (same(x.A) || same(x.B)) [x.A, M, x.B].forEach(l => cl.add(l));   // (a run of evenly spaced lines: hatch)
+        else if (x.h >= wMin / 2 - tol && x.h <= wMax / 2 + tol) cl.add(M); });   // (one line midway between two: a grid or centre line)
+      if (cl.size) { const k2 = L.filter(l => !cl.has(l)); L.length = 0; k2.forEach(l => L.push(l)); } }
+    // (with lines of other styles about (kind 3): first the pairs of two lines taken, which those others do not block; then an other line
+    // beside a line taken, where that line has no pair of its own on that side — a slab's outline drawn over a beam's edge)
+    const pairs = [], help = lz && L.some(l => !l.pri);
+    for (const ph of help ? [1, 2] : [0]) for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length && L[j].o - L[i].o <= wMax; j++) { const A = L[i], B = L[j], d = B.o - A.o;
+      if (d < wMin || (!A.pri && !B.pri) || (ph === 1 && !(A.pri && B.pri)) || (ph === 2 && A.pri && B.pri)) continue;
       let t0 = Math.max(A.t0, B.t0), t1 = Math.min(A.t1, B.t1); if (t1 - t0 < Math.max(2 * inch, 0.5 * d)) continue;
       if (Math.abs(A.t0 - B.t0) <= 1.2 * d) t0 = (A.t0 + B.t0) / 2; if (Math.abs(A.t1 - B.t1) <= 1.2 * d) t1 = (A.t1 + B.t1) / 2;   // (a face at a slant: where it crosses the centre line)
-      let blocked = false; for (let m = i + 1; m < j && !blocked; m++) { const Cm = L[m]; if (Cm.o - A.o < tol || B.o - Cm.o < tol) continue; if (Math.min(Cm.t1, t1) - Math.max(Cm.t0, t0) > 0.3 * (t1 - t0)) blocked = true; }
+      let blocked = false; for (let m = i + 1; m < j && !blocked; m++) { const Cm = L[m]; if (ph === 1 && !Cm.pri) continue; if (Cm.o - A.o < tol || B.o - Cm.o < tol) continue; if (Math.min(Cm.t1, t1) - Math.max(Cm.t0, t0) > 0.3 * (t1 - t0)) blocked = true; }
+      if (!blocked && ph === 2 && ((A.pri ? A.up : B.dn) || []).some(q => Math.min(q.t1, t1) - Math.max(q.t0, t0) > 0.5 * (t1 - t0))) blocked = true;
       if (!blocked) { const p = {o: (A.o + B.o) / 2, w: d, t0, t1, A, B}; pairs.push(p); (A.up = A.up || []).push(p); (B.dn = B.dn || []).push(p); hist.set(wkey(d), (hist.get(wkey(d)) || 0) + (t1 - t0)); } }
     gr.pairs = pairs; gr.L2 = L; });
   /* a line is one beam's edge, with the beam on one side: a line paired on both sides over the same stretch keeps the pair of the width
@@ -16987,7 +17189,7 @@ function beamCore(segs, kind, texts, k, o){
         if (q && a <= q[1] + tol) q[1] = Math.max(q[1], b);
         else if (q && a - q[1] <= Math.max(4 * k, 3 * bd.w) && !supIn(bd, q[1], a)) { if (!edgeAcross(bd, q[1], a)) (q.br = q.br || []).push([q[1], a]); q[1] = Math.max(q[1], b); }
         else M.push([a, b]); });
-      M.forEach(m => { const [a, b] = m; if (b - a >= Math.max(3 * inch, bd.w * 0.6)) runs.push({a: P(a, bd.o), b: P(b, bd.o), w: bd.w / k, u, o: bd.o, t0: a, t1: b, gr, br: m.br || []}); }); });
+      M.forEach(m => { const [a, b] = m; if (b - a >= Math.max(lz ? 1.5 * k : 3 * inch, bd.w * 0.6)) runs.push({a: P(a, bd.o), b: P(b, bd.o), w: bd.w / k, u, o: bd.o, t0: a, t1: b, gr, br: m.br || []}); }); });
   });
   /* beams crossing (the QS's rule, 10-Nov-2026): the wider runs on and the narrower stops at its faces; of two as wide, the one whose own
      edges carry on across the other in the drawing runs on — else the one resting on columns or walls at more of its ends (the main beam:
@@ -16998,14 +17200,12 @@ function beamCore(segs, kind, texts, k, o){
   const sup = R => (atSup(R.a) ? 1 : 0) + (atSup(R.b) ? 1 : 0);   // how many of a run's ends sit on a column or wall
   const brAt = (R, X) => { const t = R.u[0] * X[0] + R.u[1] * X[1]; return (R.br || []).some(([a, b]) => t >= a - R.w * k && t <= b + R.w * k); };
   // a run's pieces outside the columns and walls its edges are drawn through: it stops at a column, a shear wall or a lift core's face
-  // and carries on after it (a point is inside a support when a ray from it crosses the support's outline an odd number of times)
-  const inSup = p => { let c = 0; near(p[0], p[1] - 0.01, p[0] + 60 * k, p[1] + 0.01).forEach(i => { if (kind[i] !== 2) return; const s = segs[i];
-      if ((s[1] > p[1]) !== (s[3] > p[1]) && p[0] < (s[2] - s[0]) * (p[1] - s[1]) / (s[3] - s[1]) + s[0]) c++; }); return c % 2 === 1; };
+  // and carries on after it (inSup above)
   const sCut = []; runs.forEach(R => { const ts = []; const L0 = D(R.a, R.b), v = [(R.b[0] - R.a[0]) / L0, (R.b[1] - R.a[1]) / L0], xs = [R.a[0], R.b[0]], ys = [R.a[1], R.b[1]];
     supNear(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)).forEach(i => { const s = segs[i], X = X2(R.a, R.b, [s[0], s[1]], [s[2], s[3]]); if (!X) return;
       const tl = (X[0] - R.a[0]) * v[0] + (X[1] - R.a[1]) * v[1], on = Math.min(s[0], s[2]) - 0.01 <= X[0] && X[0] <= Math.max(s[0], s[2]) + 0.01 && Math.min(s[1], s[3]) - 0.01 <= X[1] && X[1] <= Math.max(s[1], s[3]) + 0.01;
       if (on && tl > 0.5 * inch && tl < L0 - 0.5 * inch) ts.push(tl); });
-    if (!ts.length) { sCut.push(R); return; }
+    if (!ts.length) { if (!(lz && L0 <= 6 * k && inSup([(R.a[0] + R.b[0]) / 2, (R.a[1] + R.b[1]) / 2]))) sCut.push(R); return; }   // (loose: two hatch lines in a wall are no beam)
     const cuts = [0].concat([...new Set(ts.map(x => Math.round(x / (0.05 * inch)) * 0.05 * inch))].sort((a, b) => a - b), [L0]), at = s => [R.a[0] + v[0] * s, R.a[1] + v[1] * s];
     for (let m = 0; m + 1 < cuts.length; m++) { const s0 = cuts[m], s1 = cuts[m + 1]; if (s1 - s0 < 3 * inch || (s1 - s0 <= 6 * k && inSup(at((s0 + s1) / 2)))) continue;   // (a column or a wall crossed: a few feet — a beam lying along a wall over the lift core is kept)
       const a = at(s0), b = at(s1), t0 = R.u[0] * a[0] + R.u[1] * a[1], t1 = R.u[0] * b[0] + R.u[1] * b[1]; sCut.push(Object.assign({}, R, {a, b, t0: Math.min(t0, t1), t1: Math.max(t0, t1)})); } });
@@ -17053,13 +17253,23 @@ function beamCore(segs, kind, texts, k, o){
   return {runs, lonely};
 }
 function beamWidthIn(w){ return Math.round(w * 12 * 2) / 2; }
-function beamsAgent(o){
+async function beamsAgent(o){
   o = o || {}; const k = curScale(); if (!k) return {error: "Set the page scale first (K) — an AutoCAD drawing has it already."};
-  if (!S.geo[S.key] || !S.geo[S.key].segs.length) return {error: "This page has no vector lines (a scan?) — beams are found from their edge lines" + " — read its lines first: Auto takeoff › Read the drawing (OCR), free, in this browser."};
-  const rect = o.page ? null : (o.rect || viewRect()), F = findBeams(rect, o);
-  if (F.error === "no beam layer") return {error: "No beam layer on this page — the agent reads the beams' edge lines from a layer named like S-Beam / BEAM / BM (an AutoCAD drawing, or a PDF exported from it with layers). A framing plan with no layers: tick “Every line” in the Beams agent and box the plan; a scan: read its lines first (Auto takeoff › Read the drawing)."};
-  if (F.error) return {error: "No lines here."};
-  if (!F.runs.length) return {error: "No beam edges found " + (rect ? "in this view" : "on this page") + " (layer " + F.layers.join(", ") + ") — zoom to the framing plan, or check the beams are drawn as two parallel lines."};
+  const g = S.geo[S.key]; if (!g) return {error: "Open a drawing page first."};
+  if (o.from == null && S.beamFrom && S.beamFrom[S.fileId]) o = Object.assign({}, o, {from: S.beamFrom[S.fileId]});   // (the layer last picked for this drawing in 🏗 Beams)
+  const rect = o.page ? null : (o.rect || viewRect()), from = String(o.from || ""), none = {runs: [], lonely: [], layers: [], how: "none"};
+  let F = from !== "picture" && g.segs.length ? findBeams(rect, o) : none; if (F.error) F = none;
+  if (F.how !== "named" && F.how !== "chosen" && from !== "lines" && (from === "picture" || g.images > 0 || !g.segs.length)) {
+    /* the plan is a picture — Revit prints a whole sheet as one when any view on it is shaded (raster processing), or a scan: its lines read off
+       the pixels (beamPixLines), and whichever reads more beams, the PDF's own lines or the picture's, is taken */
+    if (o.busy) o.busy("Reading the beams off the page's picture…");
+    const pic = await beamPicture(rect, k), T = beamTexts(rect, k);
+    const src = beamSource({segs: pic.segs, styles: pic.styles}, pic.segs.map((_, i) => i), k, T, Object.assign({}, o, {from: "", tv: 1.5 * pic.px, res: pic.px, skipStyle: si => si % 3 === 2 && si < 9}));
+    const F2 = Object.assign(beamCore(src.segs, src.kind, T, k, Object.assign({}, o, {loose: true, res: pic.px})), {layers: src.names, how: "picture", tried: src.tried || 0});
+    if (from === "picture" || beamScore(F2, k) > beamScore(F, k)) { F = F2; beamSnapW(F.runs, 1.25 * pic.px / k * 12); }
+  }
+  if (!F.runs.length) return {error: "No beam edges found " + (rect ? "in this view" : "on this page") + (F.how === "named" || F.how === "chosen" ? " (layer " + F.layers.join(", ") + ")" : F.how === "guess" ? " — no layer here has lines in pairs a beam's width apart" : F.how === "picture" ? " — no straight lines in the page's picture run in pairs a beam's width apart" : " — no lines here run in pairs a beam's width apart") +
+    ". Zoom to the framing plan, check the scale and the narrowest / widest beam, or pick the beams' layer in 🏗 Beams. A plan drawing each beam as one line (as Revit's coarse view) has no width to read."};
   const grp = o.group || "width", key = r => { const w = beamWidthIn(r.w), pre = String(r.mark || "").replace(/[-\d].*$/, "");
     return grp === "mark" ? (r.mark || "Unmarked") + "|" + w : grp === "prefix" ? (pre || "Unmarked") + "|" + w : String(w); };
   const name = r => { const w = beamWidthIn(r.w), pre = String(r.mark || "").replace(/[-\d].*$/, "");
@@ -17078,26 +17288,30 @@ function beamsAgent(o){
   }, "Beam centre lines");
   if (made[0]) S.cond = made[0].id; refresh();
   const runs = F.runs, unl = runs.filter(r => !r.mark).length, inh = runs.filter(r => r.inherited).length, flags = runs.filter(r => r.flag).map(r => r.flag), corners = runs.filter(r => r.endA === "corner" || r.endB === "corner").length;
-  return {spans: runs.length, total_length_ft: +total.toFixed(3), conditions: made, widths_in: [...new Set(runs.map(r => beamWidthIn(r.w)))].sort((a, b) => b - a), marked: runs.length - unl, inherited: inh, unmarked: unl, corners, flags, lonely_marks: F.lonely.map(m => m.t.s.trim()).slice(0, 40), lonely_n: F.lonely.length, layers: F.layers, scope: rect ? "view" : "page"};
+  return {spans: runs.length, total_length_ft: +total.toFixed(3), conditions: made, widths_in: [...new Set(runs.map(r => beamWidthIn(r.w)))].sort((a, b) => b - a), marked: runs.length - unl, inherited: inh, unmarked: unl, corners, flags, lonely_marks: F.lonely.map(m => m.t.s.trim()).slice(0, 40), lonely_n: F.lonely.length, layers: F.layers, how: F.how, tried: F.tried, scope: rect ? "view" : "page"};
 }
 async function beamsDialog(){
   if (!P.proj || !S.page) return aiLog("err", "Open a drawing page first.");
   if (!curScale()) return aiLog("err", "Set the page scale first (K).");
   if (!(await scanLinesFirst("beams agent"))) return;
-  const g = S.geo[S.key], Ly = g && beamLayers(g), scan = !!(g && g.vec);
+  const g = S.geo[S.key], Ly = g && beamLayers(g), scan = !!(g && g.vec), Li = g && g.layerIds && g.layerIds.length && g.file && layerInfo(g.file), cnt = new Map();
+  if (Li) g.segs.forEach(s => { if (s[7] < 0 || (s[4] & 9)) return; const n = (Li[g.layerIds[s[7]]] || {}).name; if (n) cnt.set(n, (cnt.get(n) || 0) + 1); });   // the page's layers with lines on it
+  const lys = [...cnt.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})), prev = (S.beamFrom || {})[S.fileId] || "";
+  const pic = !!g && (g.images > 0 || !g.segs.length), sel = v => prev === v ? " selected" : "";
+  const fromSel = lys.length || pic ? `<div class="fg w2"><label>Beam edges from</label><select id="bmF"><option value="">${Ly ? "Layer " + esc(Ly.names.join(", ")) + " — named as a beam layer" : lys.length ? "The layer drawn most like beams — found by the agent" : "Found by the agent — the lines drawn as beams" + (pic ? ", or the page's picture" : "")}</option>${lys.map(([n, c]) => `<option value="layer:${esc(n)}"${sel("layer:" + n)}>Layer ${esc(n)} (${c} line${c === 1 ? "" : "s"})</option>`).join("")}${g && g.segs.length ? `<option value="lines"${sel("lines")}>Every line of the PDF${lys.length ? " (all layers together)" : ""}</option>` : ""}${pic ? `<option value="picture"${sel("picture")}>The page's picture (a Revit sheet printed as a picture, a scan)</option>` : ""}</select></div>` : "";
   const v = await ask("🏗 Beam centre lines", `<p>Draws every beam's <b>centre line</b> from its two edge lines${Ly ? " (layer <b>" + esc(Ly.names.join(", ")) + "</b>)" : ""}: midway between them, face to face of the columns, walls and beams it sits on, one line a span — with the <b>beam mark</b> written along it and the <b>width</b> read from the drawing (as the JADE backup drawings are drawn: a layer per width).</p>
-    <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Conditions</label><select id="bmG"><option value="width">One per width — Beam 15", Beam 12" … (as BC-CL-W15, -W12)</option><option value="prefix">Per mark prefix and width — FB beams 15", RB beams 12" … (a floor each)</option><option value="mark">Per beam mark — FB-1, FB-2 … (every mark its own)</option></select></div>
+    <div class="grid" style="margin-top:8px">${fromSel}<div class="fg w2"><label>Conditions</label><select id="bmG"><option value="width">One per width — Beam 15", Beam 12" … (as BC-CL-W15, -W12)</option><option value="prefix">Per mark prefix and width — FB beams 15", RB beams 12" … (a floor each)</option><option value="mark">Per beam mark — FB-1, FB-2 … (every mark its own)</option></select></div>
       <div class="fg"><label>Narrowest beam (in)</label><input type="text" id="bmMin" value="4"></div><div class="fg"><label>Widest beam (in)</label><input type="text" id="bmMax" value="48"></div>
       <div class="fg w2"><label>Beam depth for new conditions (ft) — when no label gives it</label><input type="text" id="bmH" placeholder="blank = length only (Rft)"></div>
-      <div class="fg w2"><label><input type="checkbox" id="bmP" style="width:auto" checked> Whole page (not only the part on screen)</label></div>
-      ${Ly ? "" : `<div class="fg w2"><label><input type="checkbox" id="bmAny" style="width:auto"${scan ? " checked disabled" : ""}> Every line — ${scan ? "the lines read from the scan" : "no beam layer"}: each two parallel lines 4" to 48" apart is a beam, filled shapes and small closed boxes are columns (box the framing plan, A)</label></div>`}</div>
-    ${Ly || scan ? "" : '<p class="small" style="margin-top:6px;color:var(--amber)">⚠ This page has no layer named like a beam layer (S-Beam, BEAM, BM) — tick <b>Every line</b> on a framing plan, and box the plan (walls and dimensions are lines too).</p>'}
+      <div class="fg w2"><label><input type="checkbox" id="bmP" style="width:auto" checked> Whole page (not only the part on screen)</label></div></div>
+    ${Ly || scan ? "" : `<p class="small" style="margin-top:6px;color:var(--amber)">${lys.length ? "No layer here is named like a beam layer (S-Beam, BEAM, BM)" : "This page has no layers (a PDF plotted flat, or from Revit)"}: the agent finds the beams by their shape — two parallel lines a beam's width apart, in the layer or line style drawn most so${pic ? ", or in the page's picture (Revit prints a whole sheet as a picture when a view on it is shaded)" : ""} — and the columns and walls by their outlines. Check what it draws closely${lys.length ? ", or pick the beams' layer above" : ""}.</p>`}
     ${scan ? '<p class="small" style="margin-top:6px">A scan: the beams are found from the lines read off its picture — dashed edges (a beam under the slab) included. Box the framing plan so dimensions and the title block stay out.</p>' : ""}
     <p class="small" style="margin-top:6px">Each span is marked AI with its beam mark as its name; a span with no mark of its own takes the mark of the span it continues. Run it again to replace what it drew.</p>`, "Draw centre lines",
     () => { const a = +$("bmMin").value, b = +$("bmMax").value, h = $("bmH").value.trim() ? uParse($("bmH").value) : 0; if (!(a > 0) || !(b > a)) return "Give the narrowest and widest beam in inches"; if (isNaN(h)) return "The depth is decimal feet";
-      return {group: $("bmG").value, wMin: a, wMax: b, h, page: $("bmP").checked, anyLines: !!($("bmAny") && $("bmAny").checked)}; });
+      return {group: $("bmG").value, wMin: a, wMax: b, h, page: $("bmP").checked, from: $("bmF") ? $("bmF").value : ""}; });
   if (!v) return;
-  const r = await areaThen("beams", async () => { busy("Finding beams…"); await new Promise(r2 => setTimeout(r2, 20)); try { return beamsAgent(areaOf() ? Object.assign(v, {page: true}) : v); } finally { busy(""); } });
+  S.beamFrom = S.beamFrom || {}; S.beamFrom[S.fileId] = v.from;
+  const r = await areaThen("beams", async () => { busy("Finding beams…"); await new Promise(r2 => setTimeout(r2, 20)); try { return await beamsAgent(Object.assign(areaOf() ? Object.assign(v, {page: true}) : v, {busy})); } finally { busy(""); } });
   if (r.error === "cancelled") return;
   if (r.error) return aiLog("err", esc(r.error));
   beamReport(r);
@@ -17110,10 +17324,14 @@ function beamReport(r){
   if (r.corners) notes.push(r.corners + " corner" + (r.corners === 1 ? "" : "s") + " with no column: run on to where the centre lines cross");
   if (r.flags.length) notes.push("<b>" + r.flags.length + " width" + (r.flags.length === 1 ? "" : "s") + " disagree with the label</b>: " + r.flags.slice(0, 4).map(esc).join("; "));
   if (r.lonely_marks.length) notes.push(r.lonely_marks.length + " mark" + (r.lonely_marks.length === 1 ? "" : "s") + " found no beam: " + r.lonely_marks.slice(0, 8).map(esc).join(", "));
-  aiLog("bot", "Centre lines marked AI — check them on the drawing." + (notes.length ? "<br>" + notes.join("<br>") : ""));
+  const src = r.how === "guess" ? "No layer here is named like a beam layer — the edges were read from layer <b>" + esc((r.layers || []).join(", ")) + "</b>, the one drawn most like beams (pick another in 🏗 Beams if that is wrong)"
+    : r.how === "styles" ? "This page has no layers — the beams were picked out by their shape (two parallel lines a beam's width apart, " + (r.layers || []).length + " of " + r.tried + " line styles), the columns and walls by their outlines"
+    : r.how === "picture" ? "The plan on this page is a picture (Revit prints a whole sheet as one when a view on it is shaded; or a scan) — the beams were read off its pixels: straight lines across and down the sheet only (a beam at a slant is missed), the columns and walls from its filled shapes"
+    : r.how === "lines" ? "Every line on the page read as a possible beam edge" : r.how === "chosen" ? "Edges read from layer <b>" + esc((r.layers || []).join(", ")) + "</b>, as picked" : "";
+  aiLog("bot", "Centre lines marked AI — check them on the drawing" + (src ? ", <b>closely</b>: " + src : "") + "." + (notes.length ? "<br>" + notes.join("<br>") : ""));
 }
 async function agentBeamsCmd(t){
-  const r = beamsAgent({page: !/\b(view|screen|here)\b/.test(t), group: /\bper\s+mark|\bby\s+mark|each\s+mark/.test(t) ? "mark" : /\bprefix|floor|level/.test(t) ? "prefix" : "width"});
+  const r = await beamsAgent({page: !/\b(view|screen|here)\b/.test(t), group: /\bper\s+mark|\bby\s+mark|each\s+mark/.test(t) ? "mark" : /\bprefix|floor|level/.test(t) ? "prefix" : "width"});
   if (r.error) return aiLog("err", esc(r.error));
   beamReport(r);
 }
@@ -19866,7 +20084,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
   if (location.protocol !== "file:") learnSeedLoad().finally(() => learnTeamLoad());   // the reference method, then the team's learned method, added to this browser's
-  window.zdTakeoff = {compressPdf, cmpRun, cmpAsk, cmpDb: dbGetRaw, cmpSet: setSave, slabsAgent, slabCore, slabLayers, beamsAgent, findBeams, beamCore, beamLayers, legendSvg, legVal, legAsk, legSmart, legTable, legendCols, editLegend, roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {compressPdf, cmpRun, cmpAsk, cmpDb: dbGetRaw, cmpSet: setSave, slabsAgent, slabCore, slabLayers, beamsAgent, findBeams, beamCore, beamLayers, beamSource, beamShapes, beamPixLines, beamPicture, beamSnapW, legendSvg, legVal, legAsk, legSmart, legTable, legendCols, editLegend, roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, vecSegs, vecPage, vecPack, vecUnpack, vecToggle, vecSvg, scanLinesFirst, smallBoxes, beamLinesAny, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, openWb, wbMod, wbApi, condQ, billQ, billQty, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
