@@ -4905,16 +4905,20 @@ async function finish(pts){
     // a short span magnifies the click error: one screen pixel off over under an inch of paper is over 1 % of the scale
     const shortW = d < 72 ? `<p class="small" style="color:#b42318">⚠ The two points are under 1 inch apart on the paper — a click a little off changes the scale by over 1 %. Calibrate on the longest dimension you can find.</p>` : "";
     if (vp) {
-      const v = await ask("Viewport scale — " + vp.name, `<p>The two points are <b>${d.toFixed(2)} pt</b> apart${inVp ? `, inside the viewport <b>${esc(vp.name)}</b> — its own scale is set, the page's is not changed` : ""}. Enter the real length they measure.</p>${shortW}<div class="grid" style="margin-top:10px">${lenBox("Real length")}</div>`, "Set scale",
+      const askP = ask("Viewport scale — " + vp.name, `<p>The two points are <b>${d.toFixed(2)} pt</b> apart${inVp ? `, inside the viewport <b>${esc(vp.name)}</b> — its own scale is set, the page's is not changed` : ""}. Enter the real length they measure.</p>${shortW}<div class="grid" style="margin-top:10px">${lenBox("Real length")}</div>${panPad()}`, "Set scale",
         () => { const r = lenRead(); return r.ft > 0 ? r : r.err; }, "dlgLen");
+      wirePan();
+      const v = await askP;
       S.calVp = null;
       if (v) mutate(() => { vp.ptPerFt = d / v.ft; vp.text = "calibrated: " + v.t + " over " + d.toFixed(2) + " pt"; vp.cal = {a: pts[0], b: pts[1], ft: v.ft, span: +d.toFixed(2), at: new Date().toISOString()}; });
       setTool("select"); return;
     }
-    const v = await ask("Set the scale", `<p>The two points are <b>${d.toFixed(2)} pt</b> apart on the sheet. Enter the real length they measure.</p>${shortW}
+    const askP = ask("Set the scale", `<p>The two points are <b>${d.toFixed(2)} pt</b> apart on the sheet. Enter the real length they measure.</p>${shortW}
       <div class="grid" style="margin-top:10px">${lenBox("Real length")}
-      <div class="fg w2"><label><input type="checkbox" id="dlgAll" style="width:auto"> Then choose other pages to copy it to (Copy scale to…)</label></div></div>`, "Set scale",
+      <div class="fg w2"><label><input type="checkbox" id="dlgAll" style="width:auto"> Then choose other pages to copy it to (Copy scale to…)</label></div></div>${panPad()}`, "Set scale",
       () => { const r = lenRead(); if (!(r.ft > 0)) return r.err; return {ft: r.ft, t: r.t, all: $("dlgAll").checked}; }, "dlgLen");
+    wirePan();
+    const v = await askP;
     if (v) mutate(() => {
       const k = d / v.ft;
       P.proj.scales[S.key] = {ptPerFt: k, how: "calibrated", text: v.t + " over " + d.toFixed(2) + " pt", cal: {a: pts[0], b: pts[1], ft: v.ft, page: S.key}, verified: true, at: new Date().toISOString()};
@@ -8263,6 +8267,20 @@ function ask(title, body, okLabel, read, focusId){
     if ($("dlgOk")) $("dlgOk").onclick = ok;
     const f = focusId && $(focusId); if (f) { f.focus(); if (f.select) f.select(); }   // at once: a delayed focus could steal keystrokes already typed
   });
+}
+function panPad(){   // 4 arrow buttons a dialog can offer so the drawing underneath can be nudged into view without closing (e.g. Set the scale)
+  return `<div class="small" style="margin-top:10px;display:flex;align-items:center;gap:10px">
+    <span>Move the view to see the dimension (Shift for a bigger step):</span>
+    <div style="display:grid;grid-template-columns:repeat(3,26px);grid-template-rows:repeat(3,26px);gap:2px;flex:none">
+      <span></span><button type="button" class="btn" id="dlgPanU" title="Pan up" style="padding:0;font-size:11px;line-height:24px">&#9650;</button><span></span>
+      <button type="button" class="btn" id="dlgPanL" title="Pan left" style="padding:0;font-size:11px;line-height:24px">&#9664;</button><span></span><button type="button" class="btn" id="dlgPanR" title="Pan right" style="padding:0;font-size:11px;line-height:24px">&#9654;</button>
+      <span></span><button type="button" class="btn" id="dlgPanD" title="Pan down" style="padding:0;font-size:11px;line-height:24px">&#9660;</button><span></span>
+    </div></div>`;
+}
+function wirePan(){
+  const step = 120, by = (dx, dy, big) => { const k = big ? 2 : 1; S.view = {s: S.view.s, tx: S.view.tx + dx * k, ty: S.view.ty + dy * k}; applyView(); renderHi(); };
+  const btn = (id, dx, dy) => { const b = $(id); if (b) b.onclick = e => { e.preventDefault(); by(dx, dy, e.shiftKey); }; };
+  btn("dlgPanU", 0, step); btn("dlgPanD", 0, -step); btn("dlgPanL", step, 0); btn("dlgPanR", -step, 0);
 }
 const PRESETS = [
   {name: "Floor area", type: "area", unit: "Sft"},
