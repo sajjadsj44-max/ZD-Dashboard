@@ -1,6 +1,6 @@
 {
  "about": "PDF Takeoff: how this team takes off, learned by the takeoff agent in every browser of the team and merged by tools/learn_archive.py. Item names, heights, room kinds and counts only.",
- "at": "2026-11-11T18:41:41.153Z",
+ "at": "2026-11-12T05:23:30.774Z",
  "projects": {
   "vvvcknb84sev:17a5e3f04bec": {
    "at": "2026-10-31T10:49:48.438Z",
@@ -717,7 +717,7 @@
    "sent": "2026-11-11T11:13:47.269Z"
   },
   "vvyymq5pforq:dfba2afc9a0b": {
-   "at": "2026-11-11T03:20:19.867Z",
+   "at": "2026-11-12T05:22:32.628Z",
    "conds": {
     "floor area|area|Sft": {
      "ded": 0.0,
@@ -741,7 +741,7 @@
      "n": 2
     }
    },
-   "sent": "2026-11-11T03:21:17.574Z"
+   "sent": "2026-11-12T05:23:30.774Z"
   },
   "vvzmfdqwuj5r:087bd7715ee2": {
    "at": "2026-11-01T07:32:47.010Z",
@@ -1188,7 +1188,7 @@
    }
   },
   "vvyymq5pforq": {
-   "at": "2026-11-10T08:24:56.531Z",
+   "at": "2026-11-12T05:23:30.774Z",
    "missed": {},
    "rejects": {
     "BALCONY": {
@@ -1230,6 +1230,10 @@
     "LOUNGE": {
      "del": 0,
      "made": 7
+    },
+    "SLAB OUTLINE": {
+     "del": 0,
+     "made": 1
     },
     "STAIR": {
      "del": 0,
