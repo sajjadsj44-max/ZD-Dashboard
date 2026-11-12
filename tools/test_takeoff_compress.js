@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Browser tests for compressing a big PDF in the PDF Takeoff app (takeoff/: compressPdf, cmpAsk, compress-worker.js).
+/* Browser tests for compressing a big PDF in the PDF Takeoff app (takeoff/: compressPdf, compress-worker.js).
 
      python3 -m http.server 8765 &            # from the repo root
      TK_LIBS=<folder with pdfjs-dist + exceljs + pdf-lib> node tools/test_takeoff_compress.js
@@ -7,14 +7,15 @@
    The fixture (made here with pdf-lib, its pictures drawn by the browser's canvas): two A1 sheets with vector lines on two PDF
    layers (A-WALL, S-HATCH), text, a sticky-note markup, a 2400 × 1600 hatch JPEG drawn 4 in wide (600 dpi) on both sheets and again
    inside a form XObject at half scale (so drawn 300 pt wide at most), and a 1200 × 800 photo stored as raw Flate pixels with an
-   alpha mask. "Big" is lowered to 1 MB for the test (localStorage zd-tk-cmp-min).
-   Checks: adding it asks (Balanced first); Compress, then add keeps the smaller copy in the browser (meta.orig: the original's
-   fingerprint and size); the hatch is resampled to the biggest size it is drawn at (625 × 417 at 150 dpi, form matrix followed),
-   the photo becomes a JPEG, its mask is kept; every page's content stream, the layers, the markup and the page sizes are byte-for-byte
-   / exactly as before; the app shows the same layers, vector lines (snap) and text as the uncompressed copy; the picture on screen
-   looks the same. Add as it is keeps it whole; Pages → Compress (Strong) shrinks it in place — the same file id, pages, measurements
-   and project; adding the original again re-attaches it and keeps the compressed copy; "remember" sets Settings (never / always);
-   Esc adds nothing; a vector-only PDF is left as it is ("compact already"); no page errors. */
+   alpha mask. The Compress button's size limit is lowered to 1 MB for the test (localStorage zd-tk-cmp-min).
+   Checks: a PDF being added is never asked about and is kept as the original (an old "always compress" setting is ignored);
+   Pages → Compress asks the level (Balanced first) and keeps the smaller copy (meta.orig: the original's fingerprint and size);
+   the hatch is resampled to the biggest size it is drawn at (625 × 417 at 150 dpi, form matrix followed), the photo becomes a JPEG,
+   its mask is kept; every page's content stream, the layers, the markup and the page sizes are byte-for-byte / exactly as before;
+   the app shows the same layers, vector lines (snap) and text as the uncompressed copy; the picture on screen looks the same.
+   Strong shrinks it in place — the same file id, pages, measurements and project; Light writes a raw photo as a JPEG at its own
+   size; adding the original again re-attaches it (same id) and keeps the original; a vector-only PDF is left as it is
+   ("compact already"); no page errors. */
 const path = require("path"), fs = require("fs"), os = require("os");
 let pw;
 try { pw = require("playwright"); } catch (e) { pw = require("/opt/node22/lib/node_modules/playwright"); }
@@ -49,7 +50,6 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
     await page.click("#bNewProj"); await page.fill("#dlgName", name); await page.click("#dlgOk"); await wait(400); };
   const shown = () => page.waitForFunction(() => { const Z = zdTakeoff, f = Z.P.proj && Z.P.proj.files[0]; return f && Z.S.fileId === f.id && Z.S.page && !document.getElementById("busy").textContent; }, null, {timeout: 120000, polling: 100});
   const indexed = () => page.waitForFunction(() => zdTakeoff.S.page && zdTakeoff.S.geo[zdTakeoff.S.key] && zdTakeoff.S.texts[zdTakeoff.S.key], null, {timeout: 30000});
-  const askShown = () => page.waitForFunction(() => document.getElementById("dlgBack").classList.contains("on") && /Big PDF/.test(document.getElementById("dlgT").textContent), null, {timeout: 30000}).then(() => true, () => false);
   /* what the app sees of page 1: layers, vector lines (the snap's), text */
   const seen = () => T(() => { const S = zdTakeoff.S, g = S.geo[S.key], cfg = S.ocgs && S.ocgs[S.fileId];
     let sum = 0; g.segs.forEach(s => { sum += s[0] * 1.3 + s[1] * 1.7 + s[2] * 1.9 + s[3] * 2.3; });
@@ -108,14 +108,21 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   };
   const A0 = await anatomy(origBytes);
 
-  console.log("adding a big PDF: asked, compressed (Balanced)");
+  console.log("adding a big PDF: no question, kept as the original; then Pages → Compress (Balanced)");
+  await T(() => zdTakeoff.cmpSet({bigPdf: "always"}));   // (a setting left by the version that asked when adding: ignored now)
   await newProject("Compress A");
-  await page.setInputFiles("#fileIn", file);
-  ok(await askShown(), "adding it asks whether to compress it first");
-  ok((await T(() => document.getElementById("cmpLv").value)) === "balanced", "…Balanced (150 dpi) is the first choice");
-  ok(await T(() => [...document.querySelectorAll("#dlgF button")].map(b => b.textContent).join("|")) === "Cancel|Add as it is|Compress, then add", "…with Add as it is / Compress, then add");
-  await page.click('#dlgF [data-ch="1"]');
+  await page.setInputFiles("#fileIn", file); await wait(600);
+  ok(!(await dlgOn()), "adding it asks nothing (an old “always compress” setting in this browser is ignored)");
   await shown(); await indexed();
+  { const f = await T(async () => { const f = zdTakeoff.P.proj.files[0], r = await zdTakeoff.cmpDb("pdfs", f.id); return {size: f.size, orig: f.orig || null, rs: r.size}; });
+    ok(f.size === origBytes.length && f.rs === origBytes.length && !f.orig, "it is kept as the original (" + (f.size / 1048576).toFixed(2) + " MB)"); }
+  await page.click("#tPages"); await wait(300);
+  ok(await page.locator("#pageList [data-cmppdf]").count() === 1, "Pages: the drawing has a Compress button");
+  await page.click("#pageList [data-cmppdf]"); await wait(200);
+  ok(await dlgOn() && /^Compress /.test(await dlgTitle()), "…which asks for the level");
+  ok((await T(() => document.getElementById("cmpLv").value)) === "balanced", "…Balanced (150 dpi) first");
+  await page.click("#dlgOk");
+  await page.waitForFunction(() => zdTakeoff.P.proj.files[0].orig, null, {timeout: 120000, polling: 100}); await shown(); await indexed();
   ok(await toastHas(/compressed: .* smaller/), "a toast says how much smaller it is: " + (await T(() => document.getElementById("toast").textContent)).slice(0, 120));
   const fa = await T(() => { const f = zdTakeoff.P.proj.files[0]; return {id: f.id, size: f.size, sha: f.sha, orig: f.orig, pages: f.pages}; }), pidA = await T(() => zdTakeoff.P.proj.id);
   ok(fa.orig && fa.orig.size === origBytes.length && /^[0-9a-f]{64}$/.test(fa.orig.sha || "") && fa.orig.level === "balanced", "the drawing keeps the original's fingerprint and size (meta.orig)");
@@ -137,26 +144,22 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   ok(seenA.layers.join() === "A-WALL,S-HATCH", "the app lists both layers: " + seenA.layers.join(", "));
   ok(seenA.segs >= 100 && /GROUND FLOOR PLAN/.test(seenA.text), "the app reads the vector lines (" + seenA.segs + ") and the text");
 
-  console.log("added as it is, then Pages → Compress (Strong)");
+  console.log("another project: added, then Pages → Compress (Strong)");
   await newProject("Compress B");
   await page.setInputFiles("#fileIn", file);
-  ok(await askShown(), "asked again (nothing remembered)");
-  await page.click('#dlgF [data-ch="0"]');
   await shown(); await indexed();
   const fb = await T(() => { const f = zdTakeoff.P.proj.files[0]; return {id: f.id, size: f.size, orig: f.orig || null}; });
-  ok(fb.size === origBytes.length && !fb.orig, "Add as it is: kept whole");
+  ok(fb.size === origBytes.length && !fb.orig, "kept as the original");
   const seenB = await seen();
   ok(JSON.stringify(seenB) === JSON.stringify(seenA), "the compressed drawing shows the same layers, vector lines (snap points " + seenA.segs + ", checksum " + seenA.sum + "), text and page size as the original");
   if (await dlgOn()) { await page.keyboard.press("Escape"); await wait(150); }
-  await page.locator("#bNewCond").click({force: true}); await page.selectOption("#cPre", {label: "Floor area"}); await page.click("#dlgOk"); await wait(250);
+  await page.click("#tCond"); await wait(200); await page.locator("#bNewCond").click({force: true}); await page.selectOption("#cPre", {label: "Floor area"}); await page.click("#dlgOk"); await wait(250);
   await T(() => { const P = zdTakeoff.P.proj, c = P.conds.find(x => x.name === "Floor area").id;
     P.items.push({id: "Ikeep", cond: c, file: P.files[0].id, page: 1, pts: [[300, 300], [700, 300], [700, 800], [300, 800]], nos: 1, label: "", kind: "shape"}); zdTakeoff.refresh && zdTakeoff.refresh(); });
   await wait(300);
   const projBefore = await T(() => { const o = JSON.parse(JSON.stringify(zdTakeoff.P.proj)); delete o.files; delete o.updated; delete o.last; return JSON.stringify(o); });
   await page.click("#tPages"); await wait(300);
-  ok(await page.locator("#pageList [data-cmppdf]").count() === 1, "Pages: the drawing has a Compress button");
   await page.click("#pageList [data-cmppdf]"); await wait(200);
-  ok(await dlgOn() && /^Compress /.test(await dlgTitle()), "…which asks for the level");
   await page.selectOption("#cmpLv", "strong"); await page.click("#dlgOk");
   await page.waitForFunction(() => zdTakeoff.P.proj.files[0].orig, null, {timeout: 120000, polling: 100}); await shown(); await indexed();
   const fb2 = await T(() => { const f = zdTakeoff.P.proj.files[0]; return {id: f.id, size: f.size, orig: f.orig, pages: f.pages}; });
@@ -180,29 +183,16 @@ function ok(cond, msg){ if (cond) { passes++; console.log("  ✓ " + msg); } els
   console.log("the original added again");
   await T(id => zdTakeoff.openProject(id), pidA); await wait(500); await shown();
   await page.setInputFiles("#fileIn", file); await wait(400);
-  ok(!(await dlgOn()), "no question: it is the drawing already in the project");
-  ok(await toastHas(/same drawing — re-attached, its compressed copy kept/), "re-attached as the same drawing, its compressed copy kept");
-  { const r = await T(async () => { const P = zdTakeoff.P.proj, f = P.files[0], rec = await zdTakeoff.cmpDb("pdfs", f.id); return {n: P.files.length, size: f.size, rs: rec.size, orig: !!f.orig}; });
-    ok(r.n === 1 && r.size === fa.size && r.rs === fa.size && r.orig, "still one drawing, still the smaller copy (" + (r.rs / 1048576).toFixed(2) + " MB)"); }
+  ok(!(await dlgOn()), "no question");
+  ok(await toastHas(/same drawing — re-attached as the original/), "re-attached as the same drawing, as the original");
+  { const r = await T(async () => { const P = zdTakeoff.P.proj, f = P.files[0], rec = await zdTakeoff.cmpDb("pdfs", f.id); return {n: P.files.length, id: f.id, size: f.size, rs: rec.size, sha: f.sha, rsha: rec.sha, orig: !!f.orig}; });
+    ok(r.n === 1 && r.id === fa.id && r.size === origBytes.length && r.rs === origBytes.length && r.sha === r.rsha && !r.orig, "still one drawing (the same id): the original is kept now (" + (r.rs / 1048576).toFixed(2) + " MB)"); }
 
-  console.log("remembered choices, Esc, a vector-only PDF");
-  await newProject("Compress C");
-  await page.setInputFiles("#fileIn", file); ok(await askShown(), "asked");
-  await page.keyboard.press("Escape"); await wait(400);
-  ok((await T(() => zdTakeoff.P.proj.files.length)) === 0 && await toastHas(/not added/), "Esc: not added");
-  await page.setInputFiles("#fileIn", file); await askShown();
-  await page.check("#cmpRem"); await page.click('#dlgF [data-ch="0"]'); await shown();
-  ok((await T(() => zdTakeoff.cmpSet({}).bigPdf)) === "never", "“Do the same for every big PDF” with Add as it is: Settings › big PDF = never");
-  await newProject("Compress D");
-  await page.setInputFiles("#fileIn", file); await wait(500);
-  ok(!(await dlgOn()), "…then a big PDF is added without a question"); await shown();
-  ok((await T(() => zdTakeoff.P.proj.files[0].size)) === origBytes.length, "…as it is");
-  await T(() => zdTakeoff.cmpSet({bigPdf: "always", bigPdfLevel: "light"}));
+  console.log("Light; a vector-only PDF");
   await newProject("Compress E");
-  await page.setInputFiles("#fileIn", file); await wait(500);
-  ok(!(await dlgOn()), "Settings › always: no question"); await page.waitForFunction(() => (zdTakeoff.P.proj.files[0] || {}).orig, null, {timeout: 120000, polling: 100}); await shown();
-  { const f = await T(() => zdTakeoff.P.proj.files[0]); ok(f.orig.level === "light" && f.size < 0.25 * origBytes.length && f.size > fa.size, "…compressed at the level set (Light: " + (f.size / 1048576).toFixed(2) + " MB — the photo, not over-sampled at 200 dpi, still written as a JPEG at its own size)"); }
-  await T(() => zdTakeoff.cmpSet({bigPdf: "ask", bigPdfLevel: "balanced"}));
+  await page.setInputFiles("#fileIn", file); await shown();
+  { const f = await T(async () => { const f = zdTakeoff.P.proj.files[0]; await zdTakeoff.compressPdf(f.id, "light"); return {size: f.size, orig: f.orig}; });
+    ok(f.orig && f.orig.level === "light" && f.size < 0.25 * origBytes.length && f.size > fa.size, "Light: " + (f.size / 1048576).toFixed(2) + " MB — the photo, not over-sampled at 200 dpi, still written as a JPEG at its own size"); }
   await newProject("Compress F");
   await page.setInputFiles("#fileIn", vfile); await shown(); await wait(300);
   if (await dlgOn()) { await page.keyboard.press("Escape"); await wait(150); }
