@@ -898,15 +898,14 @@ async function pdfSha(id){   // the stored PDF's fingerprint (worked out once fo
    A 250 MB drawing set is mostly pictures — hatch tiles, scans, photos stored at 300–600 dpi — that pdf.js decodes again for every
    view and every page card. Compressing (compress-worker.js, in a worker) resamples only those pictures to the level's dpi, worked
    out from the size each is drawn at on its sheet; the lines, text, layers, markups and page sizes are left exactly as they are, so
-   the view, the layers, the snap and every measurement stay the same. Offered when a big PDF is added (Settings › General: ask /
-   always / never) and for a PDF already in the project (Pages → Compress). The file on the computer is never changed: the copy kept
-   in this browser is the smaller one, and meta.orig keeps the original's fingerprint and size, so adding the original again
-   re-attaches it as the same drawing (the smaller copy kept). */
+   the view, the layers, the snap and every measurement stay the same. Only from the Pages tab (Pages → Compress): a PDF being added
+   is always kept as the original, never asked about. The file on the computer is never changed: the copy kept in this browser is
+   the smaller one, and meta.orig keeps the original's fingerprint and size, so adding the original again re-attaches it as the
+   same drawing — kept as the original then (compress it again from Pages). */
 const CMP_LEVELS = {light: ["Light — 200 dpi", "nearly as sharp; about a third smaller"], balanced: ["Balanced — 150 dpi", "the usual choice; about half the size"],
   strong: ["Strong — 100 dpi", "the smallest; very fine hatching goes soft"]};
-const cmpMin = () => +pref("zd-tk-cmp-min") || 40 * 1048576;   // a PDF this big or bigger is offered compression when added (zd-tk-cmp-min: for the tests)
 const cmpLevel = v => CMP_LEVELS[v] ? v : "balanced";
-const CMP_BTN = 8 * 1048576;   // Pages → Compress is offered for a PDF this big or bigger
+const cmpBtnMin = () => +pref("zd-tk-cmp-min") || 8 * 1048576;   // Pages → Compress is offered for a PDF this big or bigger (zd-tk-cmp-min: for the tests)
 const cmpOpts = sel => Object.keys(CMP_LEVELS).map(k => `<option value="${k}"${k === sel ? " selected" : ""}>${esc(CMP_LEVELS[k][0])} — ${esc(CMP_LEVELS[k][1])}</option>`).join("");
 const CMP_SAFE = "Only the pictures inside are made lighter: the lines, text, layers, markups and page sizes are not touched, so the view, the layers, the snap and every measurement stay the same.";
 function cmpRun(src, level, label){   // src: File | Blob | ArrayBuffer -> {blob, stats}; throws — the PDF is then as it was
@@ -933,21 +932,6 @@ async function cmpCheck(blob, pages, name){
   catch (e) { if (o) try { o.d.destroy(); } catch (er) {} return null; }
 }
 const cmpSaid = (name, a, b, st) => name + " compressed: " + fmtBytes(a) + " → " + fmtBytes(b) + " (" + Math.round(100 * (1 - b / a)) + " % smaller" + (st && st.shrunk ? ", " + st.shrunk + " picture" + (st.shrunk > 1 ? "s" : "") + " made lighter" : "") + ") — lines, layers and snap as before";
-/* a big PDF being added: compress it first? -> a level, "" (add it as it is) or null (not added) — Settings › General can answer for good */
-async function cmpAsk(f){
-  const st = setPref(); if (st.bigPdf === "never") return ""; if (st.bigPdf === "always") return cmpLevel(st.bigPdfLevel);
-  busy("");
-  const v = await choose("Big PDF — compress it first?", `<p><b>${esc(f.name)}</b> is <b>${fmtBytes(f.size)}</b>. A PDF this big is slow to show — on screen and as page cards.</p>
-    <p style="margin-top:6px">${esc(CMP_SAFE)}</p>
-    <div class="fg w2" style="margin-top:10px"><label>Level</label><select id="cmpLv">${cmpOpts(cmpLevel(st.bigPdfLevel))}</select></div>
-    <label class="small" style="display:flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="cmpRem"> Do the same for every big PDF from now on (Settings › General changes it)</label>
-    <p class="small" style="margin-top:6px">The file on your computer is not changed. It takes about a minute for each 100 MB; a PDF already added can be compressed later from Pages → Compress.</p>`,
-    [{t: "Add as it is", v: "no"}, {t: "Compress, then add", v: "yes", pri: true}]);
-  if (!v) return null;
-  const lv = cmpLevel($("cmpLv") && $("cmpLv").value);
-  if ($("cmpRem") && $("cmpRem").checked) setSave({bigPdf: v === "yes" ? "always" : "never", bigPdfLevel: lv});
-  return v === "yes" ? lv : "";
-}
 /* Pages → Compress: a PDF already in the project made smaller in place (the same id, pages and measurements). level: skips the question */
 async function compressPdf(fid, level){
   const f = P.proj && P.proj.files.find(x => x.id === fid); if (!f) return null;
@@ -1005,31 +989,18 @@ function dropFileCache(fid){
 }
 async function addFiles(files){
   if (!P.proj) return;
-  for (let f of files) {
+  for (const f of files) {
     const cadF = isCadFile(f);
     if (!cadF && !/\.pdf$/i.test(f.name) && f.type !== "application/pdf") { toast(f.name + " is not a PDF or an AutoCAD drawing (DWG / DXF)"); continue; }
     busy("Opening " + f.name + "…");
     try {
-      let big = !cadF && f.size > BIG_REC;   // a big PDF: fingerprinted, opened and kept as the file it is — never read whole into the page
-      let data = big ? f : await f.arrayBuffer(), cad = null; let sha = big ? await blobSha(f, p => busy("Opening " + f.name + "… " + p + " %")) : await sha256(data);
+      const big = !cadF && f.size > BIG_REC;   // a big PDF: fingerprinted, opened and kept as the file it is — never read whole into the page
+      let data = big ? f : await f.arrayBuffer(), cad = null; const sha = big ? await blobSha(f, p => busy("Opening " + f.name + "… " + p + " %")) : await sha256(data);
       if (cadF) { const pre = P.proj.files.find(x => x.sha === sha && x.cad), held = pre && (P.proj.items.some(i => i.file === pre.id) || ((P.proj.floors || {})[keyOf(pre.id, 1)] || []).some(x => x.r));   // the same drawing again: onto its old page while measurements (or floor boundaries) sit on it — else laid out afresh (read whole now, it may reach further)
         cad = await cadImport(f, data, held ? pre.cad.map : null); data = cad.pdf; }   // the drawing as a layered vector PDF (+ its scene)
       const lib = await loadPdfjs();
       let {d, pw} = await openPdfData(lib, data, f.name);
       for (const x of P.proj.files) if (!x.sha) { const h = await pdfSha(x.id); if (h) x.sha = h; }   // PDFs added before fingerprints
-      let orig = null;   // a big PDF compressed before it is kept: the original's fingerprint and size
-      if (!cadF && !pw && f.size >= cmpMin() && f.size <= PDFLIB_MAX && !P.proj.files.some(x => x.sha === sha || (x.orig && x.orig.sha === sha))) {   // (a drawing in the project already is not asked about)
-        const lv = await cmpAsk(f); if (lv === null) { d.destroy(); toast(f.name + " not added"); continue; }
-        if (lv) { let r = null;
-          try { r = await cmpRun(f, lv, f.name); } catch (e) { toast(f.name + " was not compressed (" + (e.message || e) + ") — added as it is", 7000); }
-          if (r && r.blob.size > 0.92 * f.size) { toast(f.name + " is compact already — added as it is", 5000); r = null; }
-          const c = r && (busy("Checking the smaller " + f.name + "…"), await cmpCheck(r.blob, d.numPages, f.name));
-          if (r && !c) toast(f.name + ": the smaller PDF did not open the same — added as it is", 7000);
-          if (c) { const nf = new File([r.blob], f.name, {type: "application/pdf", lastModified: f.lastModified});
-            orig = {sha, size: f.size, level: lv, at: new Date().toISOString(), stats: r.stats}; d.destroy(); d = c.d; f = nf; big = f.size > BIG_REC; data = big ? f : c.data;
-            sha = big ? await blobSha(f, p => busy("Opening " + f.name + "… " + p + " %")) : await sha256(data); } }
-        busy("Opening " + f.name + "…");
-      }
       let meta = sha ? P.proj.files.find(x => x.sha === sha || (x.orig && x.orig.sha === sha)) : null, name = f.name, how = meta ? "same" : "new";
       const named = meta ? null : P.proj.files.find(x => x.name === f.name);
       if (named && !sha) { if (named.size === f.size) { meta = named; how = "same"; } }   // no fingerprint in this browser: the old name + size rule
@@ -1056,24 +1027,24 @@ async function addFiles(files){
           meta = P.proj.files.find(x => x.id === nid);
         }
       }
-      let reuse = how === "same" && !!(meta && meta.orig && meta.orig.sha === sha);   // the original of a drawing compressed here, added again: the smaller copy kept is used
-      if (reuse && !(await dbGetRaw("pdfs", meta.id).catch(() => null))) { delete meta.orig; reuse = false; }   // (none kept in this browser: the original is kept, as it is)
+      const wasCmp = how === "same" && !!(meta && meta.orig && meta.orig.sha === sha);   // the original of a drawing compressed in Pages, added again: kept as the original now
+      let keepCmp = false;   // (unless this browser has no room for it: the compressed copy it has stays)
       const id = meta ? meta.id : uid("F");
-      if (big && !reuse) busy("Keeping " + f.name + " in this browser…");
+      if (big) busy("Keeping " + f.name + " in this browser…");
       let kept = true;
-      try { if (!reuse) await dbPut("pdfs", Object.assign({name, size: f.size, data, sha}, big ? {blobs: ["data"]} : {}, cad ? {src: cad.src, scene: cad.scene, pdfSha: await sha256(data)} : {}), id); }   // stored first: a PDF listed in the project is always one that can be opened
+      try { await dbPut("pdfs", Object.assign({name, size: f.size, data, sha}, big ? {blobs: ["data"]} : {}, cad ? {src: cad.src, scene: cad.scene, pdfSha: await sha256(data)} : {}), id); }   // stored first: a PDF listed in the project is always one that can be opened
       catch (e) { if (!big || !/quota/i.test((e && e.name) + " " + (e && e.message))) throw e; kept = false; }   // (no room left in this browser for a copy of a big PDF: open for this visit only, read from the file itself)
       if (!kept) { const old = await dbGetRaw("pdfs", id).catch(() => null);
-        if (old && (sha && old.sha ? old.sha === sha : how === "same")) kept = true;   // the same drawing (by its fingerprint), kept before: that copy is used
+        if (old && (sha && old.sha ? old.sha === sha || wasCmp : how === "same")) { kept = true; keepCmp = wasCmp; }   // the same drawing (by its fingerprint, or its compressed copy), kept before: that copy is used
         else if (old) {   // another drawing kept under this id (the one a revision replaces): it stays as it is and the project's references move to a new id (its PDF added again next time), so it is never opened in place of this one
           const nid = uid("F"), o = JSON.parse(remapFileId(JSON.stringify(P.proj), meta.id, nid));
           dropFileCache(meta.id); Object.keys(o).forEach(k => { P.proj[k] = o[k]; }); S.undo = []; S.redo = []; S.sel = null; S.selMark = null; S.multi.clear();
           meta = P.proj.files.find(x => x.id === nid); } }
-      if ((big || reuse) && kept) { const back = await dbGetRaw("pdfs", id), o = back && (back.data instanceof Blob || reuse) ? await openPdfData(lib, back.data, f.name, "", pw).catch(() => null) : null;   // read from the browser's copy from now on (the file added may be moved or changed on the disk)
+      if (big && kept) { const back = await dbGetRaw("pdfs", id), o = back && (back.data instanceof Blob || keepCmp) ? await openPdfData(lib, back.data, f.name, "", pw).catch(() => null) : null;   // read from the browser's copy from now on (the file added may be moved or changed on the disk)
         if (o) { d.destroy(); d = o.d; } }
       const locked = !!pw; pw = null;
-      if (!meta) { meta = {id, name, size: f.size, sha, pages: d.numPages, added: new Date().toISOString()}; if (orig) meta.orig = orig; if (cad) meta.cad = cad.meta; P.proj.files.push(meta); }
-      else { meta.pages = d.numPages; if (!reuse) { meta.size = f.size; if (sha) meta.sha = sha; if (orig) meta.orig = orig; else delete meta.orig; } if (how === "replace") meta.replaced = new Date().toISOString(); if (cad) meta.cad = cad.meta; else delete meta.cad; }
+      if (!meta) { meta = {id, name, size: f.size, sha, pages: d.numPages, added: new Date().toISOString()}; if (cad) meta.cad = cad.meta; P.proj.files.push(meta); }
+      else { meta.pages = d.numPages; if (!keepCmp) { meta.size = f.size; if (sha) meta.sha = sha; delete meta.orig; } if (how === "replace") meta.replaced = new Date().toISOString(); if (cad) meta.cad = cad.meta; else delete meta.cad; }
       if (locked) meta.locked = true; else delete meta.locked;   // (locked with a password: no picture of its pages is kept in the browser)
       S.visitOnly = S.visitOnly || new Set(); if (kept) S.visitOnly.delete(meta.id); else S.visitOnly.add(meta.id);   // (open for this visit only: pruneCaches keeps it open)
       if (cad) cadAdopt(meta, cad, how);
@@ -1082,8 +1053,7 @@ async function addFiles(files){
       save(); buildPageSel();
       await gotoPage(meta.id, 1);
       toast(how === "replace" ? f.name + " replaced — " + d.numPages + " page" + (d.numPages > 1 ? "s" : "") + " · check the measurements sit on the new drawing"
-        : name + (name !== f.name ? " (added as a new drawing)" : how === "same" ? " (same drawing — re-attached" + (reuse ? ", its compressed copy kept" : "") + ")" : "") + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""), how === "new" && name === f.name ? 2600 : 5000);
-      if (orig) toast(cmpSaid(name, orig.size, f.size, orig.stats) + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""), 8000);
+        : name + (name !== f.name ? " (added as a new drawing)" : how === "same" ? " (same drawing — re-attached" + (keepCmp ? ", its compressed copy kept: no room here for the original" : wasCmp ? " as the original — Pages → Compress makes it smaller again" : "") + ")" : "") + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""), how === "new" && name === f.name ? 2600 : 5000);
       if (!kept) setTimeout(() => toast("⚠ " + name + " is open for this visit only — this browser has no room left to keep a copy of a " + fmtBytes(f.size) + " file (free some disk space). Next time, add it again with + PDF: its measurements come back with it.", 20000), 300);
       if (cad) setTimeout(() => { const t = cadSay(name, cad.meta); toast(t, /^⚠/.test(t) ? 30000 : 9000); }, 300);
       else if (how !== "replace") await bbImport(meta.id, {auto: true}).catch(e => toast("Bluebeam markups could not be read: " + (e.message || e), 6000));   // markups taken in Bluebeam: brought in as conditions
@@ -6360,7 +6330,7 @@ function renderPages(){
   else if (!S.pgSort) {   // drawing order: PDF by PDF, pinned pages first
     const pin = L.filter(o => o.pin), rest = L.filter(o => !o.pin);
     body = (pin.length ? `<div class="pgf"><b>&#9733; Pinned</b><span class="small">${pin.length} p.</span></div>` + grid(pin) : "") + P.proj.files.map(f => { const fl = rest.filter(o => o.f.id === f.id); if (!fl.length && (S.pgQ || F || pin.some(o => o.f.id === f.id))) return "";
-      return `<div class="pgf"><b title="${esc(f.name)}">${esc(f.name.replace(/\.pdf$/i, ""))}</b>${f.vset ? `<span class="tag g" title="Version set${f.vdate ? " · issued " + esc(dmy(f.vdate)) : ""}">${esc(f.vset)}</span>` : ""}<span class="small">${f.pages} p.${f.size ? " · " + fmtBytes(f.size) : ""}</span>${f.orig ? `<span class="tag g" title="Compressed in this app from ${esc(fmtBytes(f.orig.size || 0))} (${esc((CMP_LEVELS[f.orig.level] || [""])[0])}) — lines, layers and snap as before">compressed</span>` : ""}${!f.cad && !f.locked && f.size >= Math.min(CMP_BTN, cmpMin()) ? `<button class="btn sm" data-cmppdf="${esc(f.id)}" title="Make this PDF smaller and quicker to show: only its pictures are made lighter — lines, text, layers, snap and measurements stay the same">Compress</button>` : ""}<button class="btn sm dng" data-rmpdf="${esc(f.id)}" title="Remove this PDF and its measurements from the project">Remove</button></div>` + grid(fl); }).join("");
+      return `<div class="pgf"><b title="${esc(f.name)}">${esc(f.name.replace(/\.pdf$/i, ""))}</b>${f.vset ? `<span class="tag g" title="Version set${f.vdate ? " · issued " + esc(dmy(f.vdate)) : ""}">${esc(f.vset)}</span>` : ""}<span class="small">${f.pages} p.${f.size ? " · " + fmtBytes(f.size) : ""}</span>${f.orig ? `<span class="tag g" title="Compressed in this app from ${esc(fmtBytes(f.orig.size || 0))} (${esc((CMP_LEVELS[f.orig.level] || [""])[0])}) — lines, layers and snap as before">compressed</span>` : ""}${!f.cad && !f.locked && f.size >= cmpBtnMin() ? `<button class="btn sm" data-cmppdf="${esc(f.id)}" title="Make this PDF smaller and quicker to show: only its pictures are made lighter — lines, text, layers, snap and measurements stay the same">Compress</button>` : ""}<button class="btn sm dng" data-rmpdf="${esc(f.id)}" title="Remove this PDF and its measurements from the project">Remove</button></div>` + grid(fl); }).join("");
   } else body = grid(L);
   const top = el.scrollTop, a = document.activeElement, foc = a && a.id === "pgQ", caret = foc ? a.selectionStart : 0;
   el.style.setProperty("--pgw", (PG_SZ[S.pgSz] || PG_SZ.m) + "px");
@@ -10707,7 +10677,7 @@ async function nosSelDialog(){
    on, whether it follows the tool picked, snap and pick distances, your own shortcuts) are kept under SET_KEY. All of it stays in this
    browser — Settings → Backup & reset saves it to a file for another computer. */
 const SET_KEY = "zdTakeoffSet";
-const SET_DEF = {homeTab: "mine", ribFollow: "smart", openLast: true, snapStart: true, snapPx: 11, hitPx: 7, keys: [], look: "pro", condBtn: false, bigPdf: "ask", bigPdfLevel: "balanced"};
+const SET_DEF = {homeTab: "mine", ribFollow: "smart", openLast: true, snapStart: true, snapPx: 11, hitPx: 7, keys: [], look: "pro", condBtn: false, bigPdfLevel: "balanced"};
 let SETV = null;
 function setPref(){ if (!SETV) { let o = null; try { o = JSON.parse(pref(SET_KEY) || "null"); } catch (e) { o = null; } SETV = Object.assign({}, SET_DEF, o && typeof o === "object" ? o : {}); if (!Array.isArray(SETV.keys)) SETV.keys = []; } return SETV; }
 function setSave(ch){ SETV = Object.assign({}, setPref(), ch); pref(SET_KEY, JSON.stringify(SETV)); setApply(); return SETV; }
@@ -10804,11 +10774,10 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
       {t: "tog", n: "Open the last project when the app starts", d: "off: start on the list of projects", get: () => setPref().openLast !== false, set: v => { setSave({openLast: v}); }},
       {t: "sel", n: "Units", d: "of every figure — labels on the drawing, the conditions, the sheet, the exports; kept with the project, a new one takes the last chosen. Change it any time (the chip by the scale too): every measurement follows", o: [["ft", "Feet — ft, Sft, cft"], ["m", "Metres — m, m², m³"]], get: () => P.proj ? (isM() ? "m" : "ft") : pref("zdTakeoffUnits") === "m" ? "m" : "ft", set: v => setUnits(v)},
       {t: "tog", n: "Load a new version by itself", d: "when the app is opened or you come back to its tab, after saving — no Ctrl + F5; off: a bar offers Reload. The same for every ZD page", get: autoUpd, set: v => pref("zd-auto-update", v ? "" : "0")},
-      {t: "sel", n: "A big PDF being added (" + Math.round(cmpMin() / 1048576) + " MB or more)", d: "compressed first, it shows much quicker: only its pictures are made lighter — lines, text, layers, snap and measurements stay the same. The file on your computer is not changed. A PDF already added: Pages → Compress", o: [["ask", "Ask each time"], ["always", "Always compress it"], ["never", "Never — add it as it is"]], get: () => setPref().bigPdf, set: v => { setSave({bigPdf: v}); }},
-      {t: "sel", n: "Compression level", d: "for a big PDF being added and the first choice in Pages → Compress", o: Object.keys(CMP_LEVELS).map(k => [k, CMP_LEVELS[k][0] + " — " + CMP_LEVELS[k][1]]), get: () => cmpLevel(setPref().bigPdfLevel), set: v => { setSave({bigPdfLevel: cmpLevel(v)}); }},
+      {t: "sel", n: "Compression level", d: "the first choice in Pages → Compress (a PDF is always added as the original)", o: Object.keys(CMP_LEVELS).map(k => [k, CMP_LEVELS[k][0] + " — " + CMP_LEVELS[k][1]]), get: () => cmpLevel(setPref().bigPdfLevel), set: v => { setSave({bigPdfLevel: cmpLevel(v)}); }},
       {t: "txt", n: "Your name", d: "on markups, checks, comments and legends", get: qaUser, set: v => pref("zdTakeoffUser", String(v).trim().slice(0, 60))},
       {t: "btn", n: "Command palette", d: "every tool, export and dialog by name (Ctrl+K)", b: "Open", fn: openPalette}],
-     reset: () => { setSave({homeTab: SET_DEF.homeTab, ribFollow: SET_DEF.ribFollow, openLast: true, bigPdf: SET_DEF.bigPdf, bigPdfLevel: SET_DEF.bigPdfLevel}); pref("zd-auto-update", ""); }},
+     reset: () => { setSave({homeTab: SET_DEF.homeTab, ribFollow: SET_DEF.ribFollow, openLast: true, bigPdfLevel: SET_DEF.bigPdfLevel}); pref("zd-auto-update", ""); }},
     {id: "ribbon", n: "Ribbon & toolbar", d: "the look, tabs, My tools, icons, compact ribbon", rows: [
       {t: "sel", n: "Look", d: "Professional: a slate title bar, a white ribbon, one blue accent · Colourful: a colour for each tool family · Classic: the first look", o: [["pro", "Professional"], ["colourful", "Colourful"], ["classic", "Classic"]], get: lookNow, set: v => { setSave({look: v}); }},
       {t: "tog", n: "Compact ribbon", d: "the same tools, about half the height", get: () => !!pcPref().compact, set: v => pcSave({off: pcPref().off || [], compact: v})},
@@ -20084,7 +20053,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
   if (location.protocol !== "file:") learnSeedLoad().finally(() => learnTeamLoad());   // the reference method, then the team's learned method, added to this browser's
-  window.zdTakeoff = {compressPdf, cmpRun, cmpAsk, cmpDb: dbGetRaw, cmpSet: setSave, slabsAgent, slabCore, slabLayers, beamsAgent, findBeams, beamCore, beamLayers, beamSource, beamShapes, beamPixLines, beamPicture, beamSnapW, legendSvg, legVal, legAsk, legSmart, legTable, legendCols, editLegend, roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {compressPdf, cmpRun, cmpDb: dbGetRaw, cmpSet: setSave, slabsAgent, slabCore, slabLayers, beamsAgent, findBeams, beamCore, beamLayers, beamSource, beamShapes, beamPixLines, beamPicture, beamSnapW, legendSvg, legVal, legAsk, legSmart, legTable, legendCols, editLegend, roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, vecSegs, vecPage, vecPack, vecUnpack, vecToggle, vecSvg, scanLinesFirst, smallBoxes, beamLinesAny, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, openWb, wbMod, wbApi, condQ, billQ, billQty, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),

@@ -28,7 +28,7 @@
 - `takeoff/cad.js` and `takeoff/cad-worker.js` are loaded with takeoff.js's own
   `?v=`, so bump that same `?v=` when either of them changes too. The same for
   `takeoff/trace.js` and `takeoff/trace-worker.js` (the vector trace of a PDF's wall layers).
-  And for `takeoff/compress-worker.js` (Pages → Compress / a big PDF compressed when added: only its pictures are resampled,
+  And for `takeoff/compress-worker.js` (Pages → Compress only — a PDF is always added as the original: only its pictures are resampled,
   vectors, layers and markups untouched; `tools/test_takeoff_compress.js`).
   And for `takeoff/scanlines.js` (reading the lines of a scanned drawing — "line OCR" — in a worker; unit-tested by
   `tools/test_takeoff_scanlines.js` in plain Node, the app on a scan by `tools/test_takeoff_scan.js`).
