@@ -9715,6 +9715,54 @@ window.zdProd={open:showProd,data:D,rowCalc:rowCalc,schedule:schedule,liftFactor
 </script>
 
 <script>
+/* GRN Price Register lock (asked for by the owner): the GRN tab asks the password 'sa' every time it is shown, on every
+   computer, the trusted one too. Nothing is remembered: it locks again as soon as the tab is left (another sub-tab, another
+   module) or the page is brought back with Back / Forward. The field is a plain text field drawn as dots, not in a <form>,
+   so no browser offers to save it. */
+(function () {
+  var sec = document.getElementById('rav-grn');
+  if (!sec) return;
+  var PW = 'sa';
+  var st = document.createElement('style');
+  st.textContent = '#rav-grn.grn-locked > :not(.grn-gate){display:none!important}#rav-grn:not(.grn-locked) > .grn-gate{display:none}'
+    + '.grn-gate{display:flex;justify-content:center;padding:48px 16px}.grn-gate .grn-card{width:min(100%,360px);padding:26px;background:#fff;border:1px solid #f3d3bd;border-radius:14px;box-shadow:0 12px 34px rgba(15,41,66,.12);font:14px Segoe UI,Arial,sans-serif;color:#1e2b3a}'
+    + '.grn-gate h3{margin:0 0 6px;color:#0f2942;font-size:19px}.grn-gate p{margin:0 0 16px;color:#6b7d92}.grn-gate label{display:block;color:#0f2942;font-size:12px;font-weight:600;margin-bottom:6px}'
+    + '.grn-gate input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #dde5ee;border-radius:7px;font:inherit;margin-bottom:12px;-webkit-text-security:disc}'
+    + '.grn-gate button{width:100%;border:0;border-radius:7px;padding:11px;background:#e8590c;color:#fff;font:inherit;font-weight:700;cursor:pointer}.grn-gate .err{margin-top:10px;color:#b42318;font-size:12px;min-height:1em}';
+  document.head.appendChild(st);
+  var gate = document.createElement('div');
+  gate.className = 'grn-gate';
+  gate.innerHTML = '<div class="grn-card" role="dialog" aria-labelledby="grnGateH"><h3 id="grnGateH">&#128274; GRN Price Register</h3>'
+    + '<p>This tab is locked. Enter the password to open it.</p><label for="grnGatePw">Password</label>'
+    + '<input id="grnGatePw" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore>'
+    + '<button type="button" id="grnGateGo">Unlock</button><div class="err" id="grnGateErr" aria-live="polite"></div></div>';
+  sec.insertBefore(gate, sec.firstChild);
+  var pw = gate.querySelector('#grnGatePw'), err = gate.querySelector('#grnGateErr');
+  // only touches the class when it changes: classList.add of a class already there still rewrites the attribute, which would
+  // wake the MutationObserver below again and again
+  function lock() { if (!sec.classList.contains('grn-locked')) sec.classList.add('grn-locked'); pw.value = ''; err.textContent = ''; }
+  function tryOpen() {
+    if (pw.value === PW) { pw.value = ''; err.textContent = ''; sec.classList.remove('grn-locked'); }
+    else { pw.value = ''; err.textContent = 'Wrong password.'; pw.focus(); }
+  }
+  gate.querySelector('#grnGateGo').addEventListener('click', tryOpen);
+  pw.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); tryOpen(); } });
+  lock();
+  // locks again whenever the tab stops being on screen (sub-tab or module switched); focuses the field when it is shown locked
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) {
+      es.forEach(function (e) {
+        if (!e.isIntersecting && !sec.offsetParent) lock();
+        else if (e.isIntersecting && sec.classList.contains('grn-locked')) setTimeout(function () { pw.focus({preventScroll: true}); }, 0);
+      });
+    }).observe(sec);
+  }
+  new MutationObserver(function () { if (!sec.classList.contains('on')) lock(); }).observe(sec, {attributes: true, attributeFilter: ['class']});
+  window.addEventListener('pageshow', function (e) { if (e.persisted) lock(); });
+}());
+</script>
+
+<script>
 /* ZD Dashboard start screen + lock. The page opens on a start screen that picks what to open: the complete Dashboard, the PDF
    Takeoff, or one module on its own (Payments, Change Management, Calculator, Productivity) — ?app=all|pay|cm|calc|prod. A module opened on its own
    shows only that module (the other modules' buttons and screens are hidden). Payments has its own password; everything else
