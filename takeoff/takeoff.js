@@ -894,6 +894,99 @@ async function pdfSha(id){   // the stored PDF's fingerprint (worked out once fo
   const rec = await dbGetRaw("pdfs", id); if (!rec) return null; if (rec.sha) return rec.sha;   // (as kept: a big PDF is not read whole for a fingerprint it has)
   const h = rec.data instanceof Blob ? await blobSha(rec.data) : await sha256(rec.data); if (h) { rec.sha = h; await dbPut("pdfs", rec, id).catch(() => {}); } return h;
 }
+/* ------------------------------------------------------------------ Compress a big PDF
+   A 250 MB drawing set is mostly pictures — hatch tiles, scans, photos stored at 300–600 dpi — that pdf.js decodes again for every
+   view and every page card. Compressing (compress-worker.js, in a worker) resamples only those pictures to the level's dpi, worked
+   out from the size each is drawn at on its sheet; the lines, text, layers, markups and page sizes are left exactly as they are, so
+   the view, the layers, the snap and every measurement stay the same. Offered when a big PDF is added (Settings › General: ask /
+   always / never) and for a PDF already in the project (Pages → Compress). The file on the computer is never changed: the copy kept
+   in this browser is the smaller one, and meta.orig keeps the original's fingerprint and size, so adding the original again
+   re-attaches it as the same drawing (the smaller copy kept). */
+const CMP_LEVELS = {light: ["Light — 200 dpi", "nearly as sharp; about a third smaller"], balanced: ["Balanced — 150 dpi", "the usual choice; about half the size"],
+  strong: ["Strong — 100 dpi", "the smallest; very fine hatching goes soft"]};
+const cmpMin = () => +pref("zd-tk-cmp-min") || 40 * 1048576;   // a PDF this big or bigger is offered compression when added (zd-tk-cmp-min: for the tests)
+const cmpLevel = v => CMP_LEVELS[v] ? v : "balanced";
+const CMP_BTN = 8 * 1048576;   // Pages → Compress is offered for a PDF this big or bigger
+const cmpOpts = sel => Object.keys(CMP_LEVELS).map(k => `<option value="${k}"${k === sel ? " selected" : ""}>${esc(CMP_LEVELS[k][0])} — ${esc(CMP_LEVELS[k][1])}</option>`).join("");
+const CMP_SAFE = "Only the pictures inside are made lighter: the lines, text, layers, markups and page sizes are not touched, so the view, the layers, the snap and every measurement stay the same.";
+function cmpRun(src, level, label){   // src: File | Blob | ArrayBuffer -> {blob, stats}; throws — the PDF is then as it was
+  return new Promise(async (ok, bad) => {
+    let buf; try { buf = src instanceof Blob ? await src.arrayBuffer() : src.slice(0); } catch (e) { return bad(new Error("the PDF could not be read (" + (e.message || e) + ")")); }
+    let w; try { w = new Worker(new URL("./compress-worker.js" + CADV, import.meta.url), {type: "module"}); } catch (e) { return bad(new Error("this browser cannot start the compressor")); }
+    const t0 = Date.now(), txt = {load: "loading the compressor", open: "opening the PDF", scan: "finding where each picture sits, page", pictures: "making the pictures lighter", save: "writing the smaller PDF"};
+    let step = "", n = 0, of = 0, last = Date.now();
+    const say = () => busy("Compressing " + label + " — " + (txt[step] || "starting") + (of ? " " + n + " of " + of : "") + "… " + Math.round((Date.now() - t0) / 1000) + " s");
+    const tick = setInterval(() => { say(); if (Date.now() - last > 20 * 60000) { done(); bad(new Error("the compressor stopped answering")); } }, 1000);
+    const done = () => { clearInterval(tick); try { w.terminate(); } catch (e) {} };
+    w.onmessage = e => { const m = e.data || {}; last = Date.now(); if (m.step) { step = m.step; n = m.n || 0; of = m.of || 0; return say(); }
+      done(); if (m.ok) ok({blob: new Blob([m.bytes], {type: "application/pdf"}), stats: m.stats});
+      else bad(new Error(m.locked ? "it is locked with a password" : m.error || "it could not be compressed")); };
+    w.onerror = e => { done(); bad(new Error("the PDF was too big for this browser to compress" + (e && e.message ? " (" + e.message + ")" : ""))); };
+    say(); w.postMessage({buf, level: cmpLevel(level), pdfLib: PDFLIB_ESM}, [buf]);
+  });
+}
+/* the smaller PDF opened as pdf.js will open it, and checked: the same pages, its first and last page readable -> {d, data} | null */
+async function cmpCheck(blob, pages, name){
+  const data = blob.size > BIG_REC ? blob : await blob.arrayBuffer();
+  let o = null; try { o = await openPdfData(await loadPdfjs(), data, name, "checked");
+    if (o.d.numPages !== pages) throw new Error("pages"); for (const p of new Set([1, pages])) await (await o.d.getPage(p)).getOperatorList(); return {d: o.d, data}; }
+  catch (e) { if (o) try { o.d.destroy(); } catch (er) {} return null; }
+}
+const cmpSaid = (name, a, b, st) => name + " compressed: " + fmtBytes(a) + " → " + fmtBytes(b) + " (" + Math.round(100 * (1 - b / a)) + " % smaller" + (st && st.shrunk ? ", " + st.shrunk + " picture" + (st.shrunk > 1 ? "s" : "") + " made lighter" : "") + ") — lines, layers and snap as before";
+/* a big PDF being added: compress it first? -> a level, "" (add it as it is) or null (not added) — Settings › General can answer for good */
+async function cmpAsk(f){
+  const st = setPref(); if (st.bigPdf === "never") return ""; if (st.bigPdf === "always") return cmpLevel(st.bigPdfLevel);
+  busy("");
+  const v = await choose("Big PDF — compress it first?", `<p><b>${esc(f.name)}</b> is <b>${fmtBytes(f.size)}</b>. A PDF this big is slow to show — on screen and as page cards.</p>
+    <p style="margin-top:6px">${esc(CMP_SAFE)}</p>
+    <div class="fg w2" style="margin-top:10px"><label>Level</label><select id="cmpLv">${cmpOpts(cmpLevel(st.bigPdfLevel))}</select></div>
+    <label class="small" style="display:flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="cmpRem"> Do the same for every big PDF from now on (Settings › General changes it)</label>
+    <p class="small" style="margin-top:6px">The file on your computer is not changed. It takes about a minute for each 100 MB; a PDF already added can be compressed later from Pages → Compress.</p>`,
+    [{t: "Add as it is", v: "no"}, {t: "Compress, then add", v: "yes", pri: true}]);
+  if (!v) return null;
+  const lv = cmpLevel($("cmpLv") && $("cmpLv").value);
+  if ($("cmpRem") && $("cmpRem").checked) setSave({bigPdf: v === "yes" ? "always" : "never", bigPdfLevel: lv});
+  return v === "yes" ? lv : "";
+}
+/* Pages → Compress: a PDF already in the project made smaller in place (the same id, pages and measurements). level: skips the question */
+async function compressPdf(fid, level){
+  const f = P.proj && P.proj.files.find(x => x.id === fid); if (!f) return null;
+  if (f.cad) { toast("An AutoCAD drawing is kept as a light vector PDF already — nothing to compress", 4000); return null; }
+  if (f.locked || (S.docs[fid] || {}).zdLocked) { toast(f.name + " is locked with a password — it cannot be compressed here", 5000); return null; }
+  const rec = await dbGetRaw("pdfs", fid);
+  if (!rec || !rec.data) { toast(f.name + " is not kept in this browser — add it again with + PDF, then compress it", 6000); return null; }
+  const size = recSize(rec);
+  if (size > PDFLIB_MAX) { toast(f.name + " is " + fmtBytes(size) + " — over " + Math.round(PDFLIB_MAX / 1048576) + " MB is too big to compress in the browser", 7000); return null; }
+  if (!level) {
+    const v = await ask("Compress " + f.name, `<p><b>${esc(f.name)}</b> — ${f.pages} page${f.pages > 1 ? "s" : ""}, <b>${fmtBytes(size)}</b>${f.orig ? ` (compressed once already, from ${fmtBytes(f.orig.size)})` : ""}.</p>
+      <p style="margin-top:6px">${esc(CMP_SAFE)}</p>
+      <div class="fg w2" style="margin-top:10px"><label>Level</label><select id="cmpLv">${cmpOpts(cmpLevel(setPref().bigPdfLevel))}</select></div>
+      <p class="small" style="margin-top:6px">The copy kept in this browser is replaced by the smaller one; the file on your computer is not changed (add it again to go back). About a minute for each 100 MB.</p>`,
+      "Compress", () => ({lv: cmpLevel($("cmpLv").value)}));
+    if (!v) return null; level = v.lv;
+  }
+  let r;
+  try { r = await cmpRun(rec.data, level, f.name); }
+  catch (e) { busy(""); toast(f.name + " was not compressed — " + (e.message || e) + ". It is as it was.", 7000); return null; }
+  if (r.blob.size > 0.92 * size) { busy(""); toast(f.name + " is compact already (only " + fmtBytes(Math.max(0, size - r.blob.size)) + " to gain) — kept as it is", 6000); return {size, after: size, kept: true}; }
+  busy("Checking the smaller PDF…");
+  const c = await cmpCheck(r.blob, f.pages, f.name);
+  if (!c) { busy(""); toast(f.name + ": the smaller PDF did not open the same — kept as it was", 7000); return null; }
+  c.d.destroy();
+  busy("Keeping the smaller " + f.name + " in this browser…");
+  const big = c.data instanceof Blob, sha = big ? await blobSha(c.data) : await sha256(c.data);
+  const nrec = Object.assign({}, rec, {size: r.blob.size, sha, data: c.data}); if (big) nrec.blobs = ["data"]; else delete nrec.blobs;
+  try { await dbPut("pdfs", nrec, fid); }
+  catch (e) { busy(""); toast(f.name + " was not changed — the smaller copy could not be kept (" + (e.message || e) + ")", 7000); return null; }
+  f.orig = {sha: (f.orig && f.orig.sha) || f.sha || rec.sha || "", size: (f.orig && f.orig.size) || size, level, at: new Date().toISOString()};
+  f.size = r.blob.size; f.sha = sha;
+  dropFileCache(fid); if (S.visitOnly) S.visitOnly.delete(fid);
+  save(); busy("");
+  if (S.fileId === fid) await gotoPage(fid, S.pageNo); else refresh();
+  renderPages();
+  toast(cmpSaid(f.name, size, r.blob.size, r.stats), 8000);
+  return {size, after: r.blob.size, stats: r.stats};
+}
 /* a dialog with its own buttons: resolves to the chosen button's v, or null (Cancel / Esc / Enter) */
 function choose(title, body, btns){
   const p = ask(title, body, ""), cur = ask.cur;
@@ -912,19 +1005,32 @@ function dropFileCache(fid){
 }
 async function addFiles(files){
   if (!P.proj) return;
-  for (const f of files) {
+  for (let f of files) {
     const cadF = isCadFile(f);
     if (!cadF && !/\.pdf$/i.test(f.name) && f.type !== "application/pdf") { toast(f.name + " is not a PDF or an AutoCAD drawing (DWG / DXF)"); continue; }
     busy("Opening " + f.name + "…");
     try {
-      const big = !cadF && f.size > BIG_REC;   // a big PDF: fingerprinted, opened and kept as the file it is — never read whole into the page
-      let data = big ? f : await f.arrayBuffer(), cad = null; const sha = big ? await blobSha(f, p => busy("Opening " + f.name + "… " + p + " %")) : await sha256(data);
+      let big = !cadF && f.size > BIG_REC;   // a big PDF: fingerprinted, opened and kept as the file it is — never read whole into the page
+      let data = big ? f : await f.arrayBuffer(), cad = null; let sha = big ? await blobSha(f, p => busy("Opening " + f.name + "… " + p + " %")) : await sha256(data);
       if (cadF) { const pre = P.proj.files.find(x => x.sha === sha && x.cad), held = pre && (P.proj.items.some(i => i.file === pre.id) || ((P.proj.floors || {})[keyOf(pre.id, 1)] || []).some(x => x.r));   // the same drawing again: onto its old page while measurements (or floor boundaries) sit on it — else laid out afresh (read whole now, it may reach further)
         cad = await cadImport(f, data, held ? pre.cad.map : null); data = cad.pdf; }   // the drawing as a layered vector PDF (+ its scene)
       const lib = await loadPdfjs();
       let {d, pw} = await openPdfData(lib, data, f.name);
       for (const x of P.proj.files) if (!x.sha) { const h = await pdfSha(x.id); if (h) x.sha = h; }   // PDFs added before fingerprints
-      let meta = sha ? P.proj.files.find(x => x.sha === sha) : null, name = f.name, how = meta ? "same" : "new";
+      let orig = null;   // a big PDF compressed before it is kept: the original's fingerprint and size
+      if (!cadF && !pw && f.size >= cmpMin() && f.size <= PDFLIB_MAX && !P.proj.files.some(x => x.sha === sha || (x.orig && x.orig.sha === sha))) {   // (a drawing in the project already is not asked about)
+        const lv = await cmpAsk(f); if (lv === null) { d.destroy(); toast(f.name + " not added"); continue; }
+        if (lv) { let r = null;
+          try { r = await cmpRun(f, lv, f.name); } catch (e) { toast(f.name + " was not compressed (" + (e.message || e) + ") — added as it is", 7000); }
+          if (r && r.blob.size > 0.92 * f.size) { toast(f.name + " is compact already — added as it is", 5000); r = null; }
+          const c = r && (busy("Checking the smaller " + f.name + "…"), await cmpCheck(r.blob, d.numPages, f.name));
+          if (r && !c) toast(f.name + ": the smaller PDF did not open the same — added as it is", 7000);
+          if (c) { const nf = new File([r.blob], f.name, {type: "application/pdf", lastModified: f.lastModified});
+            orig = {sha, size: f.size, level: lv, at: new Date().toISOString(), stats: r.stats}; d.destroy(); d = c.d; f = nf; big = f.size > BIG_REC; data = big ? f : c.data;
+            sha = big ? await blobSha(f, p => busy("Opening " + f.name + "… " + p + " %")) : await sha256(data); } }
+        busy("Opening " + f.name + "…");
+      }
+      let meta = sha ? P.proj.files.find(x => x.sha === sha || (x.orig && x.orig.sha === sha)) : null, name = f.name, how = meta ? "same" : "new";
       const named = meta ? null : P.proj.files.find(x => x.name === f.name);
       if (named && !sha) { if (named.size === f.size) { meta = named; how = "same"; } }   // no fingerprint in this browser: the old name + size rule
       else if (named && !named.sha && named.size === f.size && !(await dbGetRaw("pdfs", named.id))) { meta = named; how = "same"; }   // nothing to compare with: re-attached as before
@@ -950,10 +1056,12 @@ async function addFiles(files){
           meta = P.proj.files.find(x => x.id === nid);
         }
       }
+      let reuse = how === "same" && !!(meta && meta.orig && meta.orig.sha === sha);   // the original of a drawing compressed here, added again: the smaller copy kept is used
+      if (reuse && !(await dbGetRaw("pdfs", meta.id).catch(() => null))) { delete meta.orig; reuse = false; }   // (none kept in this browser: the original is kept, as it is)
       const id = meta ? meta.id : uid("F");
-      if (big) busy("Keeping " + f.name + " in this browser…");
+      if (big && !reuse) busy("Keeping " + f.name + " in this browser…");
       let kept = true;
-      try { await dbPut("pdfs", Object.assign({name, size: f.size, data, sha}, big ? {blobs: ["data"]} : {}, cad ? {src: cad.src, scene: cad.scene, pdfSha: await sha256(data)} : {}), id); }   // stored first: a PDF listed in the project is always one that can be opened
+      try { if (!reuse) await dbPut("pdfs", Object.assign({name, size: f.size, data, sha}, big ? {blobs: ["data"]} : {}, cad ? {src: cad.src, scene: cad.scene, pdfSha: await sha256(data)} : {}), id); }   // stored first: a PDF listed in the project is always one that can be opened
       catch (e) { if (!big || !/quota/i.test((e && e.name) + " " + (e && e.message))) throw e; kept = false; }   // (no room left in this browser for a copy of a big PDF: open for this visit only, read from the file itself)
       if (!kept) { const old = await dbGetRaw("pdfs", id).catch(() => null);
         if (old && (sha && old.sha ? old.sha === sha : how === "same")) kept = true;   // the same drawing (by its fingerprint), kept before: that copy is used
@@ -961,11 +1069,11 @@ async function addFiles(files){
           const nid = uid("F"), o = JSON.parse(remapFileId(JSON.stringify(P.proj), meta.id, nid));
           dropFileCache(meta.id); Object.keys(o).forEach(k => { P.proj[k] = o[k]; }); S.undo = []; S.redo = []; S.sel = null; S.selMark = null; S.multi.clear();
           meta = P.proj.files.find(x => x.id === nid); } }
-      if (big && kept) { const back = await dbGetRaw("pdfs", id), o = back && back.data instanceof Blob ? await openPdfData(lib, back.data, f.name, "", pw).catch(() => null) : null;   // read from the browser's copy from now on (the file added may be moved or changed on the disk)
+      if ((big || reuse) && kept) { const back = await dbGetRaw("pdfs", id), o = back && (back.data instanceof Blob || reuse) ? await openPdfData(lib, back.data, f.name, "", pw).catch(() => null) : null;   // read from the browser's copy from now on (the file added may be moved or changed on the disk)
         if (o) { d.destroy(); d = o.d; } }
       const locked = !!pw; pw = null;
-      if (!meta) { meta = {id, name, size: f.size, sha, pages: d.numPages, added: new Date().toISOString()}; if (cad) meta.cad = cad.meta; P.proj.files.push(meta); }
-      else { meta.pages = d.numPages; meta.size = f.size; if (sha) meta.sha = sha; if (how === "replace") meta.replaced = new Date().toISOString(); if (cad) meta.cad = cad.meta; else delete meta.cad; }
+      if (!meta) { meta = {id, name, size: f.size, sha, pages: d.numPages, added: new Date().toISOString()}; if (orig) meta.orig = orig; if (cad) meta.cad = cad.meta; P.proj.files.push(meta); }
+      else { meta.pages = d.numPages; if (!reuse) { meta.size = f.size; if (sha) meta.sha = sha; if (orig) meta.orig = orig; else delete meta.orig; } if (how === "replace") meta.replaced = new Date().toISOString(); if (cad) meta.cad = cad.meta; else delete meta.cad; }
       if (locked) meta.locked = true; else delete meta.locked;   // (locked with a password: no picture of its pages is kept in the browser)
       S.visitOnly = S.visitOnly || new Set(); if (kept) S.visitOnly.delete(meta.id); else S.visitOnly.add(meta.id);   // (open for this visit only: pruneCaches keeps it open)
       if (cad) cadAdopt(meta, cad, how);
@@ -974,7 +1082,8 @@ async function addFiles(files){
       save(); buildPageSel();
       await gotoPage(meta.id, 1);
       toast(how === "replace" ? f.name + " replaced — " + d.numPages + " page" + (d.numPages > 1 ? "s" : "") + " · check the measurements sit on the new drawing"
-        : name + (name !== f.name ? " (added as a new drawing)" : how === "same" ? " (same drawing — re-attached)" : "") + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""), how === "new" && name === f.name ? 2600 : 5000);
+        : name + (name !== f.name ? " (added as a new drawing)" : how === "same" ? " (same drawing — re-attached" + (reuse ? ", its compressed copy kept" : "") + ")" : "") + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""), how === "new" && name === f.name ? 2600 : 5000);
+      if (orig) toast(cmpSaid(name, orig.size, f.size, orig.stats) + " — " + d.numPages + " page" + (d.numPages > 1 ? "s" : ""), 8000);
       if (!kept) setTimeout(() => toast("⚠ " + name + " is open for this visit only — this browser has no room left to keep a copy of a " + fmtBytes(f.size) + " file (free some disk space). Next time, add it again with + PDF: its measurements come back with it.", 20000), 300);
       if (cad) setTimeout(() => { const t = cadSay(name, cad.meta); toast(t, /^⚠/.test(t) ? 30000 : 9000); }, 300);
       else if (how !== "replace") await bbImport(meta.id, {auto: true}).catch(e => toast("Bluebeam markups could not be read: " + (e.message || e), 6000));   // markups taken in Bluebeam: brought in as conditions
@@ -1434,6 +1543,7 @@ function renderHi(now, pn = ACT){
     await overlayCmp(ctx, w, h, v.s * dpr, v.tx * dpr, v.ty * dpr, pn);
     if (pn.renderTask !== task) return;
     pn.renderTask = null; pn.hiWait = false;
+    if (pn.page !== page) return;   // (another project opened meanwhile — its page is not this one: nothing to show or keep)
     c.width = w; c.height = h; c.style.width = st.clientWidth + "px"; c.style.height = st.clientHeight + "px";
     c.getContext("2d").drawImage(off, 0, 0);
     pn.rendered = Object.assign({dpr}, v); if (!cmp0 && rcSig(pn) === sig) rcPut(pn, "hi", off, pn.rendered, sig);
@@ -1533,6 +1643,8 @@ async function indexPage(){
           }
         }
       }
+      const vec0 = segs.length, V = vecSegs(key);   // the lines read off the page's picture (a scan): with the page's own
+      if (V.length) { const vst = new Map(); for (const q of V) { if (segs.length >= 600000) break; sp++; let st = vst.get(q[5]); if (st == null) vst.set(q[5], st = style("0,0,0", q[5])); segs.push([q[0], q[1], q[2], q[3], q[4], sp, st, -1]); } }
       const cell = 24, grid = new Map();
       for (let i = 0; i < segs.length; i++) {
         if ((i & 8191) === 8191) await breathe();
@@ -1541,7 +1653,7 @@ async function indexPage(){
         for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) { const k = x + "," + y; let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(i); }
       }
       if (base.rotation !== pgRot(page)) { busy(""); return; }   // the page was turned while it was read: it is read again at its turn (rotDrop)
-      S.geo[key] = {segs, grid, cell, images, styles, layerIds, file};
+      S.geo[key] = {segs, grid, cell, images, styles, layerIds, file, vec: segs.length - vec0, vec0};
     } catch (e) { S.geo[key] = {segs: [], grid: new Map(), cell: 24, images: 0, styles: [], err: String(e)}; }
     busy("");
   }
@@ -5130,6 +5242,7 @@ function drawNow(){
   if (mkIsTool(S.tool)) dyn.push(mkDraftSvg());
   if (S.tool === "stamp" && S.clip) dyn.push(stampGhostSvg());
   if (["cloud", "arrow", "dimension", "hilite"].indexOf(S.tool) >= 0 && S.draft.length && S.cursor) dyn.push(markSvg({type: S.tool, pts: [S.draft[0], S.cursor], color: S.tool === "dimension" ? "#2b7de9" : "#d03b3b", size: 13, width: 2, arrow: 10}, toScr, 1));
+  if (S.vecShow && S.vecShow.key === S.key && (S.vecShow.on || Date.now() < S.vecShow.until)) dyn.push(vecSvg(toScr));
   if (S.flash && S.flash.key === S.key && Date.now() < S.flash.until) { const q = toScr(S.flash.p); dyn.push(`<circle cx="${q[0]}" cy="${q[1] - 5}" r="26" fill="none" stroke="#ff2d55" stroke-width="3"><animate attributeName="r" values="18;30;18" dur="1s" repeatCount="indefinite"/></circle>`); }
   if (S.flShow && S.flShow.pk === S.key) { const a = toScr([S.flShow.r[0], S.flShow.r[1]]), b = toScr([S.flShow.r[2], S.flShow.r[3]]), w = S.flShow.name.length * 6.4 + 10;   // a found plan shown from the Floors dialog
     dyn.push(`<rect x="${a[0].toFixed(1)}" y="${a[1].toFixed(1)}" width="${(b[0] - a[0]).toFixed(1)}" height="${(b[1] - a[1]).toFixed(1)}" fill="rgba(255,122,0,.06)" stroke="#ff7a00" stroke-width="2.5" stroke-dasharray="10 5" pointer-events="none"/>` + label([a[0] + w / 2 + 4, a[1] - 12], S.flShow.name, "#b85600")); }
@@ -6240,14 +6353,14 @@ function renderPages(){
     return `<div class="pgt${o.key === S.key ? " on" : ""}${on ? " sel" : ""}${o.hid ? " hid" : ""}" data-pg="${esc(o.f.id)}|${o.i}"${po ? ` draggable="true" data-pgdrag="${esc(o.key)}"` : ""} title="${esc(o.f.name)} p.${o.i}${t ? " — " + esc(t) : ""} · scale: ${esc(st.t)}"><input type="checkbox" class="pgck" data-pgck="${esc(o.key)}"${on ? " checked" : ""} title="Tick to export, read or OCR several pages at once (Shift+click: a range)" aria-label="Tick page"><button type="button" class="pgpin${o.pin ? " on" : ""}" data-pin="${esc(o.key)}" title="${o.pin ? "Pinned to the top — click to unpin" : "Pin to the top (bookmark)"}">${o.pin ? "&#9733;" : "&#9734;"}</button><img data-th="${esc(o.key)}" alt="" ${th && th !== "x" ? `src="${th}"` : ""}><div class="pgl">${o.sh.no ? esc(o.sh.no) + " · " : ""}p.${o.i} · ${o.n}</div>${t ? `<div class="pgl pgtt">${esc(t)}</div>` : ""}<div class="pgl ${st.k}">${st.ic} ${esc(st.k === "bad" && !P.proj.scales[o.key] ? "no scale" : st.t.split(" — ")[0])}</div><div class="pgact"><button class="btn sm" data-sheet="${esc(o.f.id)}|${o.i}" title="Edit sheet number, title, revision, discipline, building and floor">Info</button><button class="btn sm" data-ocr="${esc(o.f.id)}|${o.i}" title="Read this sheet’s text (OCR for a scanned page) and suggest its sheet info">Read</button></div><div class="pgact">${cad.has(o.f.id) ? "" : `<button class="btn sm" data-rot="${esc(o.key)}|270" title="Turn the page 90° anticlockwise in this project (its takeoff turns with it; the PDF is not changed)">&#8634;</button><button class="btn sm${r ? " on" : ""}" data-rot="${esc(o.key)}|90" title="Turn the page 90° clockwise in this project${r ? " — turned " + r + "° now" : ""} (its takeoff turns with it; the PDF is not changed)">&#8635;</button>`}<button class="btn sm${o.hid ? " on" : ""}" data-hide="${esc(o.key)}" title="${o.hid ? "Hidden from the page list, the strip and PgUp / PgDn — click to show it again" : "Hide from the page list, the strip and PgUp / PgDn (its takeoff is kept)"}">${o.hid ? "&#9673;" : "&#9711;"}</button>${po ? `<button class="btn sm" data-mv="${esc(o.key)}|up" title="Earlier in the project's page order">&#9650;</button><button class="btn sm" data-mv="${esc(o.key)}|down" title="Later in the project's page order">&#9660;</button>` : ""}</div></div>`; };
   const grid = list => `<div class="pgg">${list.map(card).join("")}</div>`;
   const bar = `<div class="pgbar"><input type="search" id="pgQ" placeholder="Search sheet no., title, PDF…" value="${esc(S.pgQ || "")}" aria-label="Search the pages"><select id="pgF" title="Show only…">${[["", "All pages"], ["tk", "With takeoff"], ["none", "No takeoff yet"], ["noscale", "No scale"], ["unver", "Scale not verified"], ["pin", "★ Pinned"], ["hid", "Hidden pages"], ["ocr", "Read by OCR"]].concat(sets.map(s => ["set:" + s, "Set: " + s])).map(([v, t]) => opt(v, t, F)).join("")}</select><select id="pgSort" title="Order">${[["", "Drawing order"], ["po", "Project order (▲ ▼ / drag)"], ["no", "Sheet no."], ["title", "Title"], ["n", "Most measured"]].map(([v, t]) => opt(v, t, S.pgSort || "")).join("")}</select><button class="btn sm" data-pga="stitch" title="Put 2 – 4 pages side by side or one above another on one new sheet (a new PDF in the project)">&#10697; Stitch…</button></div>
-    <div class="pgsel"><input type="checkbox" data-pgall="1" title="Tick / untick every page shown"${L.length && nShown === L.length ? " checked" : ""}>${ns ? `<b>${ns} ticked</b><button class="btn sm pri" data-pga="export" title="Export the ticked pages — PDF, PNG or JPEG">&#8681; Export…</button><button class="btn sm" data-pga="sheet" title="Read sheet no., title, revision and floor from their title blocks">&#127991; Sheet info</button><button class="btn sm" data-pga="ocr" title="Read the text of scanned pages (OCR)">&#128292; OCR</button><button class="btn sm" data-pga="pin" title="Pin / unpin the ticked pages">&#9733;</button><button class="btn sm" data-pga="hide" title="Hide the ticked pages from the page list, the strip and PgUp / PgDn (or show them again)">&#9711; Hide</button>${ns >= 2 && ns <= 4 ? `<button class="btn sm" data-pga="stitch" title="Put the ticked pages on one new sheet">&#10697; Stitch</button>` : ""}<button class="btn sm" data-pga="clear" title="Untick all">&#10005;</button>`
+    <div class="pgsel"><input type="checkbox" data-pgall="1" title="Tick / untick every page shown"${L.length && nShown === L.length ? " checked" : ""}>${ns ? `<b>${ns} ticked</b><button class="btn sm pri" data-pga="export" title="Export the ticked pages — PDF, PNG or JPEG">&#8681; Export…</button><button class="btn sm" data-pga="sheet" title="Read sheet no., title, revision and floor from their title blocks">&#127991; Sheet info</button><button class="btn sm" data-pga="ocr" title="Read scanned pages (OCR): their words and their lines">&#128292; OCR</button><button class="btn sm" data-pga="pin" title="Pin / unpin the ticked pages">&#9733;</button><button class="btn sm" data-pga="hide" title="Hide the ticked pages from the page list, the strip and PgUp / PgDn (or show them again)">&#9711; Hide</button>${ns >= 2 && ns <= 4 ? `<button class="btn sm" data-pga="stitch" title="Put the ticked pages on one new sheet">&#10697; Stitch</button>` : ""}<button class="btn sm" data-pga="clear" title="Untick all">&#10005;</button>`
       : `<span class="small">${L.length === all.length ? all.length + " page" + (all.length === 1 ? "" : "s") : L.length + " of " + all.length + " pages"} · tick to export or read several</span><span style="flex:1"></span><button class="btn sm" data-pga="tk" title="Tick every page that has takeoff or markups">Tick pages with takeoff</button>`}</div>`;
   let body;
   if (!L.length) body = '<div class="empty">No page matches — clear the search or the filter.</div>';
   else if (!S.pgSort) {   // drawing order: PDF by PDF, pinned pages first
     const pin = L.filter(o => o.pin), rest = L.filter(o => !o.pin);
     body = (pin.length ? `<div class="pgf"><b>&#9733; Pinned</b><span class="small">${pin.length} p.</span></div>` + grid(pin) : "") + P.proj.files.map(f => { const fl = rest.filter(o => o.f.id === f.id); if (!fl.length && (S.pgQ || F || pin.some(o => o.f.id === f.id))) return "";
-      return `<div class="pgf"><b title="${esc(f.name)}">${esc(f.name.replace(/\.pdf$/i, ""))}</b>${f.vset ? `<span class="tag g" title="Version set${f.vdate ? " · issued " + esc(dmy(f.vdate)) : ""}">${esc(f.vset)}</span>` : ""}<span class="small">${f.pages} p.</span><button class="btn sm dng" data-rmpdf="${esc(f.id)}" title="Remove this PDF and its measurements from the project">Remove</button></div>` + grid(fl); }).join("");
+      return `<div class="pgf"><b title="${esc(f.name)}">${esc(f.name.replace(/\.pdf$/i, ""))}</b>${f.vset ? `<span class="tag g" title="Version set${f.vdate ? " · issued " + esc(dmy(f.vdate)) : ""}">${esc(f.vset)}</span>` : ""}<span class="small">${f.pages} p.${f.size ? " · " + fmtBytes(f.size) : ""}</span>${f.orig ? `<span class="tag g" title="Compressed in this app from ${esc(fmtBytes(f.orig.size || 0))} (${esc((CMP_LEVELS[f.orig.level] || [""])[0])}) — lines, layers and snap as before">compressed</span>` : ""}${!f.cad && !f.locked && f.size >= Math.min(CMP_BTN, cmpMin()) ? `<button class="btn sm" data-cmppdf="${esc(f.id)}" title="Make this PDF smaller and quicker to show: only its pictures are made lighter — lines, text, layers, snap and measurements stay the same">Compress</button>` : ""}<button class="btn sm dng" data-rmpdf="${esc(f.id)}" title="Remove this PDF and its measurements from the project">Remove</button></div>` + grid(fl); }).join("");
   } else body = grid(L);
   const top = el.scrollTop, a = document.activeElement, foc = a && a.id === "pgQ", caret = foc ? a.selectionStart : 0;
   el.style.setProperty("--pgw", (PG_SZ[S.pgSz] || PG_SZ.m) + "px");
@@ -9149,7 +9262,7 @@ function pagesShown(){   // the Pages tab's pages after its search, filter and s
   if (q) L = L.filter(o => [o.f.name, o.sh.no, o.sh.title, o.sh.rev, o.sh.disc, o.sh.bldg, o.sh.floor, o.f.vset, "p." + o.i, "page " + o.i].filter(Boolean).join(" · ").toLowerCase().includes(q));
   const sc = o => P.proj.scales[o.key];
   if (F === "tk") L = L.filter(o => o.tk); else if (F === "none") L = L.filter(o => !o.tk); else if (F === "noscale") L = L.filter(o => !sc(o)); else if (F === "unver") L = L.filter(o => sc(o) && !sc(o).verified);
-  else if (F === "pin") L = L.filter(o => o.pin); else if (F === "hid") L = L.filter(o => o.hid); else if (F === "ocr") L = L.filter(o => P.proj.ocr && P.proj.ocr[o.key]); else if (F.startsWith("set:")) L = L.filter(o => (o.f.vset || "") === F.slice(4));
+  else if (F === "pin") L = L.filter(o => o.pin); else if (F === "hid") L = L.filter(o => o.hid); else if (F === "ocr") L = L.filter(o => (P.proj.ocr && P.proj.ocr[o.key]) || (P.proj.vec && P.proj.vec[o.key])); else if (F.startsWith("set:")) L = L.filter(o => (o.f.vset || "") === F.slice(4));
   const nat = (a, b) => !a && !b ? 0 : !a ? 1 : !b ? -1 : String(a).localeCompare(String(b), undefined, {numeric: true, sensitivity: "base"});
   if (S.pgSort === "no") L.sort((a, b) => nat(a.sh.no, b.sh.no)); else if (S.pgSort === "title") L.sort((a, b) => nat(a.sh.title, b.sh.title)); else if (S.pgSort === "n") L.sort((a, b) => b.n - a.n);
   if (S.pgSort && S.pgSort !== "po") L.sort((a, b) => (b.pin ? 1 : 0) - (a.pin ? 1 : 0));   // pinned pages first (a stable sort keeps the order chosen; the project's own order is kept as it is)
@@ -9461,7 +9574,7 @@ function importMenu(x, y){
     {t: "Import measurements into this project…", fn: () => mergeFile(), dis: !P.proj}, {sep: 1},
     {t: "Bluebeam markups → conditions (this PDF)", fn: () => bbImport(S.fileId), dis: !P.proj || !S.fileId || !!cadMeta(S.fileId)},
     {t: "Read sheet info from the title blocks…", fn: () => autoSheetDialog(), dis: !P.proj || !P.proj.files.length},
-    {t: "Read scanned pages (OCR)…", fn: () => ocrDialog(), dis: !P.proj || !P.proj.files.length}], x, y);
+    {t: "Read scanned drawings (OCR) — words and lines…", fn: () => ocrDialog(), dis: !P.proj || !P.proj.files.length}], x, y);
 }
 async function importDialog(files){
   if (!P.proj) return toast("Open or start a project first");
@@ -9691,40 +9804,62 @@ function withOcr(key, T){   // a page's text with its OCR words added (those not
   const on = (a, b) => Math.abs(a.y - b.y) < 0.6 * Math.max(a.h, b.h) && a.x < b.x + b.w + 2 && b.x < a.x + a.w + 2;
   return T.concat(O.filter(o => !T.some(t => on(t, o))));
 }
-async function ocrDialog(keys){
+async function ocrDialog(keys, pre){
   if (!P.proj || !P.proj.files.length) return toast("Add a PDF first");
-  keys = keys && keys.length ? keys : null;
-  const v = await ask("Read scanned pages (OCR)", `<p>Reads the words on scanned or photographed drawings with OCR running in this browser (Tesseract — free, nothing is uploaded; the first run downloads the engine, about 15 MB, kept for next time). The words are then used like a PDF's own text: <b>Find</b> (Ctrl+F), room names and sizes for the agents, scale notes, door / window tags and sheet info.</p>
+  keys = keys && keys.length ? keys : null; pre = pre || {};
+  const v = await ask("Read scanned drawings (OCR)", `<p>Reads a scanned or photographed drawing in this browser — free, nothing is uploaded:</p>
+    <label class="pk" style="margin-top:6px"><input type="checkbox" id="ocW"${pre.words === false ? "" : " checked"}> <b>Words</b> — room names and sizes, door / window tags, beam marks, scale notes, sheet info (Tesseract; the first run downloads the engine, about 15 MB, kept for next time)</label>
+    <label class="pk" style="margin-top:4px"><input type="checkbox" id="ocL"${pre.lines === false ? "" : " checked"}> <b>Lines</b> — walls, beams, columns, dashed lines: so the <b>Walls</b>, <b>Block masonry</b> and <b>Beams</b> agents, snapping and Trace work on the scan as on a CAD drawing</label>
     <div class="grid" style="margin-top:8px"><div class="fg"><label>Pages</label><select id="ocP">${keys ? `<option value="keys">The ${keys.length} page${keys.length > 1 ? "s" : ""} chosen</option>` : ""}${S.page ? '<option value="page">This page</option>' : ""}<option value="scan">Pages with no text layer (scans)</option><option value="pdf">Every page of this PDF</option><option value="all">Every page of the project</option></select></div>
-    <div class="fg"><label>Detail</label><select id="ocD"><option value="200">Normal — 200 DPI</option><option value="300">Fine print — 300 DPI (slower)</option><option value="150">Fast — 150 DPI</option></select></div></div>
+    <div class="fg"><label>Detail</label><select id="ocD"><option value="200">Normal — 200 DPI</option><option value="300">Fine print, thin walls at 1:200 — 300 DPI (slower)</option><option value="150">Fast — 150 DPI</option></select></div></div>
     <label class="pk" style="margin-top:6px"><input type="checkbox" id="ocRe"> Read again pages that were read before</label>
-    <p class="small" style="margin-top:6px">OCR reads level text best: vertical labels and handwriting may be missed, and a misread is possible — check what the agents find. A page with a PDF text layer gains only the words missing from it. About 20–60 s a page.</p>`, "Read the text", () => ({p: $("ocP").value, dpi: +$("ocD").value, re: $("ocRe").checked}));
+    <p class="small" style="margin-top:6px">OCR reads level text best: vertical labels and handwriting may be missed, and a misread is possible — check what the agents find. The lines are read square to the sheet (a scan fed askew is turned straight), letters and specks left out, filled columns and walls read by their outline. A page with a PDF text layer gains only the words missing from it. Words about 20–60 s a page, lines 5–30 s.</p>`, "Read the drawing", () => { const w = $("ocW").checked, l = $("ocL").checked; if (!w && !l) return "Tick words, lines or both"; return {p: $("ocP").value, dpi: +$("ocD").value, re: $("ocRe").checked, words: w, lines: l}; });
   if (!v) return;
   let L = v.p === "keys" ? keys : v.p === "page" ? [S.key] : v.p === "pdf" ? allPages().filter(o => o.f.id === S.fileId).map(o => o.key) : allPages().map(o => o.key);
   if (v.p === "scan") { const o = []; for (const [n, x] of allPages().entries()) { busy("Finding pages with no text… " + (n + 1)); const T = await pageTexts(x.f.id, x.i); if (T.filter(t => !t.ocr).length < 3) o.push(x.key); } busy(""); L = o; if (!L.length) return toast("Every page has a text layer — no OCR needed", 4000); }
-  if (!v.re) { const n0 = L.length; L = L.filter(k => !(P.proj.ocr && P.proj.ocr[k])); if (!L.length) return toast(n0 > 1 ? "Those pages were read before — tick “Read again”" : "This page was read before — tick “Read again”", 4000); }
-  return ocrPages(L, {dpi: v.dpi});
+  L = L.filter(k => !cadMeta(k.split(":")[0]));   // (an AutoCAD drawing has its own lines and text)
+  if (!L.length) return toast("An AutoCAD drawing has its own lines and text — nothing to read", 4000);
+  const skipW = new Set(v.words && !v.re ? L.filter(k => P.proj.ocr && P.proj.ocr[k]) : []), skipL = new Set(v.lines && !v.re ? L.filter(k => P.proj.vec && P.proj.vec[k]) : []);
+  const todo = L.filter(k => (v.words && !skipW.has(k)) || (v.lines && !skipL.has(k)));
+  if (!todo.length) return toast(L.length > 1 ? "Those pages were read before — tick “Read again”" : "This page was read before — tick “Read again”", 4000);
+  return ocrPages(todo, {dpi: v.dpi, words: v.words, lines: v.lines, skipW, skipL});
 }
 async function ocrPages(keys, o){
-  const pr = progress("Reading text (OCR)"); let worker = null, words = 0, done = 0;
+  const wantW = o.words !== false, wantL = !!o.lines, skipW = o.skipW || new Set(), skipL = o.skipL || new Set();
+  const pr = progress(wantW ? "Reading the drawing (OCR)" : "Reading the lines"); let worker = null, words = 0, done = 0, lines = 0, lp = 0, lerr = "";
   try {
-    pr.sub("Loading the OCR engine…");
-    const Tz = await loadTess();
-    worker = await Tz.createWorker("eng", 1, {logger: m => { if (m && m.status && /load|init/i.test(m.status)) pr.sub(m.status + (m.progress ? " " + Math.round(m.progress * 100) + " %" : "")); }});
-    await worker.setParameters({tessedit_pageseg_mode: "11", preserve_interword_spaces: "1", user_defined_dpi: String(o.dpi)});
+    if (wantW && keys.some(k => !skipW.has(k))) {
+      pr.sub("Loading the OCR engine…");
+      try { const Tz = await loadTess();
+        worker = await Tz.createWorker("eng", 1, {logger: m => { if (m && m.status && /load|init/i.test(m.status)) pr.sub(m.status + (m.progress ? " " + Math.round(m.progress * 100) + " %" : "")); }});
+        await worker.setParameters({tessedit_pageseg_mode: "11", preserve_interword_spaces: "1", user_defined_dpi: String(o.dpi)}); }
+      catch (e) { if (!wantL) throw e; if (worker) { try { await worker.terminate(); } catch (e2) {} } worker = null; toast("Words not read: " + (e.message || e) + " — reading the lines only (they need no download)", 6000); }   // (offline: the lines are read by the app's own file)
+    }
     for (const [n, key] of keys.entries()) {
       if (pr.stop) break;
       pr.set(n, keys.length, keyName(key));
-      const items = await ocrPage(worker, key, o, pr); if (pr.stop) break;
-      const v1 = (await (await doc(key.split(":")[0])).getPage(+key.split(":")[1])).getViewport({scale: 1});   // (the page's turn and size it was read at: ocrItems turns the words with the page)
-      P.proj.ocr = P.proj.ocr || {}; P.proj.ocr[key] = {at: new Date().toISOString(), dpi: o.dpi, n: items.length, items, rot: xRot(key), sz: [v1.width, v1.height]}; words += items.length; done++;
-      delete S.texts[key]; if (key === S.key) await indexPage();   // this page: its text again (and a scale note now readable)
+      if (worker && !skipW.has(key)) {
+        const items = await ocrPage(worker, key, o, pr); if (pr.stop) break;
+        const v1 = (await (await doc(key.split(":")[0])).getPage(+key.split(":")[1])).getViewport({scale: 1});   // (the page's turn and size it was read at: ocrItems turns the words with the page)
+        P.proj.ocr = P.proj.ocr || {}; P.proj.ocr[key] = {at: new Date().toISOString(), dpi: o.dpi, n: items.length, items, rot: xRot(key), sz: [v1.width, v1.height]}; words += items.length; done++;
+        delete S.texts[key];
+      }
+      if (wantL && !skipL.has(key)) {   // after the words: their boxes are wiped from the picture before its lines are read
+        const r = await vecPage(key, o, pr); if (pr.stop) break;
+        if (r && r.err) lerr = r.err; else if (r) { lines += r.n; lp++; }
+        delete S.geo[key];
+      }
+      if (key === S.key) await indexPage();   // this page: its text and lines again (and a scale note now readable)
       save();
     }
   } catch (e) { toast("OCR failed: " + (e.message || e), 7000); }
   finally { if (worker) { try { await worker.terminate(); } catch (e) {} } pr.done(); }
-  if (done) { refresh(); toast("OCR: " + words + " text item" + (words === 1 ? "" : "s") + " read on " + done + " page" + (done > 1 ? "s" : "") + " — Find, the agents and sheet info use them now", 5000); }
-  return {pages: done, words};
+  if (lp && keys.includes(S.key) && P.proj.vec && P.proj.vec[S.key]) S.vecShow = {key: S.key, until: Date.now() + 12000, on: S.vecShow && S.vecShow.on};   // the lines just read, shown a while on the page
+  if (done || lp) { refresh(); draw(); if (lp) setTimeout(draw, 12100);
+    toast("Read: " + [done ? words + " text item" + (words === 1 ? "" : "s") + " on " + done + " page" + (done > 1 ? "s" : "") : "", lp ? lines + " line" + (lines === 1 ? "" : "s") + " on " + lp + " page" + (lp > 1 ? "s" : "") + " (shown in pink a moment — Auto takeoff › Show the lines read)" : ""].filter(Boolean).join(" · ")
+      + " — " + (lp ? "the Walls, Block masonry and Beams agents, snapping and Trace use them now" : "Find, the agents and sheet info use them now"), 7000); }
+  if (lerr) toast("Reading the lines: " + lerr, 7000);
+  return {pages: done, words, linePages: lp, lines};
 }
 async function ocrPage(worker, key, o, pr){   // one page -> [[text, x, y (baseline), w, h], …] in page points
   const [f, p] = key.split(":"), pg = await (await doc(f)).getPage(+p), base = pg.getViewport({scale: 1});
@@ -9756,6 +9891,81 @@ function ocrLines(d){   // tesseract.js result -> lines of words, from whichever
   if (!L.length && Array.isArray(d.lines)) d.lines.forEach(l => L.push(l.words || []));
   if (!L.length && Array.isArray(d.words)) L.push(d.words);
   return L;
+}
+
+/* the lines of a scanned or photographed drawing ("line OCR"): scanlines.js reads them off the page's picture in a worker, so the
+   Walls, Block masonry and Beams agents, snapping, Trace and the measuring tools work on a scan as on a PDF exported from CAD.
+   Kept with the project — P.proj.vec[key]: {at, dpi, n, skew, rot, sz, d} with d the lines packed as one base64 string of float32s
+   (x0, y0, x1, y1 page points as read, flags + 32 × thickness in 0.1 pt; flag 16 a pattern line: tile grid, hatch, treads), so a page of 20,000 lines saves as one string — and added to
+   the page's own lines when it is opened (indexPage), turned with the page as OCR words are. */
+const VEC_MAXPX = 28e6;
+let vecWk = null, vecSeq = 0; const vecWait = new Map(), VEC_CACHE = new WeakMap();
+function vecWorker(){
+  if (vecWk) return vecWk;
+  try { vecWk = new Worker(new URL("./scanlines.js" + CADV, import.meta.url), {type: "module"});
+    vecWk.onmessage = e => { const d = e.data || {}, f = vecWait.get(d.id); if (f) { vecWait.delete(d.id); f(d.res); } };
+    vecWk.onerror = () => { vecWait.forEach(f => f({segs: [], err: "the line reader stopped (out of memory?) — try Normal or Fast detail"})); vecWait.clear(); try { vecWk.terminate(); } catch (e) {} vecWk = null; };
+  } catch (e) { vecWk = null; }
+  return vecWk;
+}
+async function vecRead(gray, W, H, o){   // -> scanlines.js readLines(): {segs: [[x0, y0, x1, y1, flags, w]] px, skew…}
+  const w = vecWorker();
+  if (!w) { const M = await import("./scanlines.js" + CADV); return M.readLines(gray, W, H, o); }   // (no module workers: read here, the page waits)
+  return new Promise(ok => { const id = ++vecSeq; vecWait.set(id, ok); w.postMessage({id, gray, W, H, o}, [gray.buffer]); });
+}
+function vecPack(L){ const f = new Float32Array(L.length * 5); L.forEach((q, i) => { f[i * 5] = q[0]; f[i * 5 + 1] = q[1]; f[i * 5 + 2] = q[2]; f[i * 5 + 3] = q[3]; f[i * 5 + 4] = (q[4] & 31) + 32 * Math.max(0, Math.min(9000, Math.round((+q[5] || 0) * 10))); });
+  const b = new Uint8Array(f.buffer); let bin = ""; for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(bin); }
+function vecUnpack(str){ try { const bin = atob(str), b = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
+  const f = new Float32Array(b.buffer, 0, b.length >> 2), out = []; for (let i = 0; i + 4 < f.length; i += 5) { const c = f[i + 4]; if ([f[i], f[i + 1], f[i + 2], f[i + 3]].every(isFinite)) out.push([f[i], f[i + 1], f[i + 2], f[i + 3], c & 31, Math.floor(c / 32) / 10]); } return out; } catch (e) { return []; } }
+function vecSegs(key){   // the lines read off this page's picture, in page points at the page's turn now: [[x0, y0, x1, y1, flags, w pt]]
+  const o = P.proj && P.proj.vec && P.proj.vec[key]; if (!o || typeof o.d !== "string") return [];
+  let L = VEC_CACHE.get(o); if (!L) { L = vecUnpack(o.d); VEC_CACHE.set(o, L); }
+  const sz = Array.isArray(o.sz) && o.sz.length === 2 && o.sz.every(v => +v > 0) ? o.sz.map(Number) : null, d = sz ? ((xRot(key) - (+o.rot || 0)) % 360 + 360) % 360 : 0;   // read before the page was turned: turned with it
+  return d ? L.map(q => { const a = rotPt([q[0], q[1]], d, sz[0], sz[1]), b = rotPt([q[2], q[3]], d, sz[0], sz[1]); return [a[0], a[1], b[0], b[1], q[4], q[5]]; }) : L;
+}
+async function vecPage(key, o, pr){   // read one page's lines and keep them -> {n, skew} | {err} | null (stopped)
+  const [f, p] = key.split(":"), pg = await (await doc(f)).getPage(+p), base = pg.getViewport({scale: 1});
+  const sc = Math.min((+o.dpi || 200) / 72, Math.sqrt(VEC_MAXPX / (base.width * base.height)), 12000 / Math.max(base.width, base.height));
+  const W = Math.ceil(base.width * sc), H = Math.ceil(base.height * sc), cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const ctx = cv.getContext("2d", {willReadFrequently: true}); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  if (pr) pr.sub(keyName(key) + " — the lines: drawing the page…");
+  await loadLayers(f); await sliced(pg.render({...lay(f), canvasContext: ctx, viewport: pg.getViewport({scale: sc})})).promise;
+  if (pr && pr.stop) { cv.width = 0; return null; }
+  const gray = new Uint8Array(W * H);   // (darkest of red, green, blue: a line drawn in colour is ink too)
+  for (let y0 = 0; y0 < H; y0 += 256) { const h = Math.min(256, H - y0), d = ctx.getImageData(0, y0, W, h).data; for (let i = 0, j = y0 * W; i < d.length; i += 4, j++) gray[j] = Math.min(d[i], d[i + 1], d[i + 2]); await breathe(); }
+  cv.width = 0;
+  const words = []; try { (await pageTexts(f, +p)).forEach(t => { const h = +t.h || 0, w = +t.w || 0; if (!(h > 0 && w > 0) || w * h > 0.05 * base.width * base.height) return;
+    const r = +t.r || 0, u = [Math.cos(r), Math.sin(r)], up = [Math.sin(r), -Math.cos(r)], b = [t.x - 0.25 * h * up[0], t.y - 0.25 * h * up[1]];   // the word's box, turned with it: from just under its baseline to its cap height
+    const Q = [b, [b[0] + w * u[0], b[1] + w * u[1]], [b[0] + w * u[0] + 1.25 * h * up[0], b[1] + w * u[1] + 1.25 * h * up[1]], [b[0] + 1.25 * h * up[0], b[1] + 1.25 * h * up[1]]];
+    words.push([Math.min(...Q.map(q => q[0])) * sc, Math.min(...Q.map(q => q[1])) * sc, Math.max(...Q.map(q => q[0])) * sc, Math.max(...Q.map(q => q[1])) * sc]); }); } catch (e) {}
+  if (pr) pr.sub(keyName(key) + " — the lines: reading " + W + " × " + H + " px…");
+  const r = await vecRead(gray, W, H, {dpi: sc * 72, words});
+  if (!r || r.err) return {err: (r && r.err) || "no result"};
+  const L = r.segs.map(q => [q[0] / sc, q[1] / sc, q[2] / sc, q[3] / sc, q[4], q[5] / sc]);
+  P.proj.vec = P.proj.vec || {}; P.proj.vec[key] = {at: new Date().toISOString(), dpi: Math.round(sc * 72), n: L.length, skew: r.skew || 0, rot: xRot(key), sz: [base.width, base.height], d: vecPack(L)};
+  return {n: L.length, skew: r.skew || 0};
+}
+/* an agent that works on the drawing's lines, on a page that is a picture with no lines read yet: read them first -> false to stop */
+async function scanLinesFirst(what){
+  if (!S.page || cadPage() || !P.proj) return true;
+  const g = S.geo[S.key]; if (!g || g.vec || !g.images || g.segs.length >= 1500) return true;   // (a CAD PDF with a picture in it — a logo, a key plan — has its lines)
+  const noText = (S.texts[S.key] || []).filter(t => !t.ocr).length < 3 && !(P.proj.ocr && P.proj.ocr[S.key]);
+  const v = await ask("Read the drawing's lines first?", `<p>This page is a picture (a scan or a photo): it has ${g.segs.length ? "only " + g.segs.length + " drawn line" + (g.segs.length === 1 ? "" : "s") : "no drawn lines"}, so the ${esc(what)} has nothing to work on yet.</p>
+    <p>Read its lines now — free, in this browser, about 5–30 s. They are kept with the project; the agents, snapping and Trace use them.</p>
+    <div class="grid" style="margin-top:8px"><div class="fg"><label>Detail</label><select id="vlD"><option value="200">Normal — 200 DPI</option><option value="300">Fine — 300 DPI (thin walls at 1:200, slower)</option></select></div></div>
+    <label class="pk" style="margin-top:6px"><input type="checkbox" id="vlW"${noText ? " checked" : ""}> Read the words too (OCR) — room names, door / window tags, beam marks${noText ? " — this page has no text layer" : ""}</label>`, "Read the lines", () => ({dpi: +$("vlD").value, words: $("vlW").checked}));
+  if (!v) return false;
+  const r = await ocrPages([S.key], {dpi: v.dpi, words: v.words, lines: true});
+  return !!(r && r.linePages);
+}
+function vecToggle(){ const on = !(S.vecShow && S.vecShow.on); S.vecShow = {key: S.key, until: 0, on}; draw(); toast(on ? "Showing the lines read from the scan (pink; dashed lines dashed, filled shapes orange, tile grids and hatch faint)" : "The lines read are hidden", 3000); }
+function vecSvg(toScr){   // the lines read off the page's picture, over the drawing (the part on screen)
+  const g = S.geo[S.key]; if (!g || !g.vec) return ""; const vr = viewRect(), d = ["", "", "", ""];
+  for (let i = g.vec0; i < g.segs.length; i++) { const q = g.segs[i]; if (vr && (Math.max(q[0], q[2]) < vr[0] || Math.min(q[0], q[2]) > vr[2] || Math.max(q[1], q[3]) < vr[1] || Math.min(q[1], q[3]) > vr[3])) continue;
+    const a = toScr([q[0], q[1]]), b = toScr([q[2], q[3]]), k = q[4] & 4 ? 2 : q[4] & 16 ? 3 : q[4] & 2 ? 1 : 0; d[k] += "M" + a[0].toFixed(1) + " " + a[1].toFixed(1) + "L" + b[0].toFixed(1) + " " + b[1].toFixed(1); }
+  return (d[3] ? `<path d="${d[3]}" fill="none" stroke="#e0218a" stroke-width="1" opacity=".35" pointer-events="none"/>` : "") + (d[0] ? `<path d="${d[0]}" fill="none" stroke="#e0218a" stroke-width="1.6" stroke-linecap="round" opacity=".85" pointer-events="none"/>` : "")
+    + (d[1] ? `<path d="${d[1]}" fill="none" stroke="#e0218a" stroke-width="1.6" stroke-dasharray="6 4" opacity=".85" pointer-events="none"/>` : "")
+    + (d[2] ? `<path d="${d[2]}" fill="none" stroke="#ff7a00" stroke-width="1.8" opacity=".9" pointer-events="none"/>` : "");
 }
 
 /* sheet links (Forma automatic hyperlinks): a sheet no. written on the drawing ("A-301", "3/A-301") opens that sheet —
@@ -10446,6 +10656,8 @@ function autoMenu(){
     {t: "Doors / windows — tags and schedules…", fn: ag("agTags"), dis: !pg}, {t: "Finishes — plaster, paint, skirting, ceiling per room…", fn: ag("agFin"), dis: !pg},
     {t: "Name rooms by contents (this page)", fn: nameRooms, dis: !pg}, {t: "Ceilings / floors by hatch pattern…", fn: () => hatchSplitDialog(), dis: !pg}, {t: "🧠 Apply learned skills — what your team takes off with each room", fn: () => learnApply("page"), dis: !pg}, {t: "🧠 Learned skills — how your team takes off…", fn: () => learnDialog()}, {t: "Count my symbols — WC, basin, light point… kept from Find similar", fn: () => symCountDialog()}, {sep: 1},
     {t: "Earthworks: spot levels — click in, or read those written…", fn: levelsMenu, dis: !pg}, {t: "Earthworks: cut / fill from the spot levels…", fn: () => cutFillDialog(), dis: !pg}, {sep: 1},
+    {t: "Read the drawing (OCR) — words and lines of a scan or photo…", fn: () => ocrDialog(pg ? [S.key] : null), dis: !P.proj || !P.proj.files.length},
+    {t: (S.vecShow && S.vecShow.on ? "✓ " : "") + "Show the lines read from the scan", fn: vecToggle, dis: !pg || !(S.geo[S.key] && S.geo[S.key].vec)}, {sep: 1},
     {t: "Check the takeoff — rooms missed, counted twice…", fn: ag("agCheck")}, {t: "Drawing details — rooms, sizes, tags, levels", fn: ag("aiDetails"), dis: !pg},
     {t: "Ask the takeoff agent (Claude)…", fn: () => { if (!$("aiPanel").classList.contains("on")) $("bClaude").click(); }}], r.left, r.bottom + 4);
 }
@@ -10495,7 +10707,7 @@ async function nosSelDialog(){
    on, whether it follows the tool picked, snap and pick distances, your own shortcuts) are kept under SET_KEY. All of it stays in this
    browser — Settings → Backup & reset saves it to a file for another computer. */
 const SET_KEY = "zdTakeoffSet";
-const SET_DEF = {homeTab: "mine", ribFollow: "smart", openLast: true, snapStart: true, snapPx: 11, hitPx: 7, keys: [], look: "pro", condBtn: false};
+const SET_DEF = {homeTab: "mine", ribFollow: "smart", openLast: true, snapStart: true, snapPx: 11, hitPx: 7, keys: [], look: "pro", condBtn: false, bigPdf: "ask", bigPdfLevel: "balanced"};
 let SETV = null;
 function setPref(){ if (!SETV) { let o = null; try { o = JSON.parse(pref(SET_KEY) || "null"); } catch (e) { o = null; } SETV = Object.assign({}, SET_DEF, o && typeof o === "object" ? o : {}); if (!Array.isArray(SETV.keys)) SETV.keys = []; } return SETV; }
 function setSave(ch){ SETV = Object.assign({}, setPref(), ch); pref(SET_KEY, JSON.stringify(SETV)); setApply(); return SETV; }
@@ -10592,9 +10804,11 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
       {t: "tog", n: "Open the last project when the app starts", d: "off: start on the list of projects", get: () => setPref().openLast !== false, set: v => { setSave({openLast: v}); }},
       {t: "sel", n: "Units", d: "of every figure — labels on the drawing, the conditions, the sheet, the exports; kept with the project, a new one takes the last chosen. Change it any time (the chip by the scale too): every measurement follows", o: [["ft", "Feet — ft, Sft, cft"], ["m", "Metres — m, m², m³"]], get: () => P.proj ? (isM() ? "m" : "ft") : pref("zdTakeoffUnits") === "m" ? "m" : "ft", set: v => setUnits(v)},
       {t: "tog", n: "Load a new version by itself", d: "when the app is opened or you come back to its tab, after saving — no Ctrl + F5; off: a bar offers Reload. The same for every ZD page", get: autoUpd, set: v => pref("zd-auto-update", v ? "" : "0")},
+      {t: "sel", n: "A big PDF being added (" + Math.round(cmpMin() / 1048576) + " MB or more)", d: "compressed first, it shows much quicker: only its pictures are made lighter — lines, text, layers, snap and measurements stay the same. The file on your computer is not changed. A PDF already added: Pages → Compress", o: [["ask", "Ask each time"], ["always", "Always compress it"], ["never", "Never — add it as it is"]], get: () => setPref().bigPdf, set: v => { setSave({bigPdf: v}); }},
+      {t: "sel", n: "Compression level", d: "for a big PDF being added and the first choice in Pages → Compress", o: Object.keys(CMP_LEVELS).map(k => [k, CMP_LEVELS[k][0] + " — " + CMP_LEVELS[k][1]]), get: () => cmpLevel(setPref().bigPdfLevel), set: v => { setSave({bigPdfLevel: cmpLevel(v)}); }},
       {t: "txt", n: "Your name", d: "on markups, checks, comments and legends", get: qaUser, set: v => pref("zdTakeoffUser", String(v).trim().slice(0, 60))},
       {t: "btn", n: "Command palette", d: "every tool, export and dialog by name (Ctrl+K)", b: "Open", fn: openPalette}],
-     reset: () => { setSave({homeTab: SET_DEF.homeTab, ribFollow: SET_DEF.ribFollow, openLast: true}); pref("zd-auto-update", ""); }},
+     reset: () => { setSave({homeTab: SET_DEF.homeTab, ribFollow: SET_DEF.ribFollow, openLast: true, bigPdf: SET_DEF.bigPdf, bigPdfLevel: SET_DEF.bigPdfLevel}); pref("zd-auto-update", ""); }},
     {id: "ribbon", n: "Ribbon & toolbar", d: "the look, tabs, My tools, icons, compact ribbon", rows: [
       {t: "sel", n: "Look", d: "Professional: a slate title bar, a white ribbon, one blue accent · Colourful: a colour for each tool family · Classic: the first look", o: [["pro", "Professional"], ["colourful", "Colourful"], ["classic", "Classic"]], get: lookNow, set: v => { setSave({look: v}); }},
       {t: "tog", n: "Compact ribbon", d: "the same tools, about half the height", get: () => !!pcPref().compact, set: v => pcSave({off: pcPref().off || [], compact: v})},
@@ -13186,7 +13400,7 @@ function paletteCmds(){
   add("Export the pages with takeoff as one PDF…", () => exportPagesDialog({scope: "tk", fmt: "pdf"}), "Export"); add("Export pages as PNG images (high resolution)…", () => exportPagesDialog({fmt: "png"}), "Export");
   add("Takeoff report — print or save as PDF", reportPrint, "Export"); add("Report… — rows by condition, page or floor, your columns, totals — Excel or CSV", reportDialog, "Export");
   add("Import PDFs — choose pages, version set…", () => $("impPdfIn").click(), "Project"); add("Add a folder of PDFs…", () => $("dirIn").click(), "Project"); add("Add photos / scans as pages (JPG, PNG)…", () => $("imgIn").click(), "Project");
-  add("Sheet info from the title blocks (AI read)…", () => autoSheetDialog(), "Page"); add("Read scanned pages — OCR…", () => ocrDialog(), "Page");
+  add("Sheet info from the title blocks (AI read)…", () => autoSheetDialog(), "Page"); add("Read scanned drawings — OCR: words and lines (walls, beams, columns)…", () => ocrDialog(), "Page"); add("Show / hide the lines read from a scan", () => vecToggle(), "View");
   add("Pages panel — search, filter, pin and tick pages", () => wsLayout("pages"), "View");
   [["takeoff", "Workspace: takeoff (all panels)"], ["focus", "Workspace: drawing only"], ["pages", "Workspace: pages + drawing"], ["check", "Workspace: pages + measurement sheet"]].forEach(([l, t]) => add(t, () => wsLayout(l), "View"));
   add("Toolbar: icons only / icons and names", () => wsSet({tb: wsPref().tb === "icons" ? "full" : "icons"}), "View"); add("Minimap on / off", () => wsSet({mini: !wsPref().mini}), "View"); add("Full screen", fullScreen, "View");
@@ -13831,6 +14045,7 @@ function wire(){
     if (si) { e.stopPropagation(); const rd = si.hasAttribute("data-ocr"), [f, p] = si.dataset[rd ? "ocr" : "sheet"].split("|");
       return gotoPage(f, +p).then(() => sheetInfoDialog(rd)).catch(er => toast("Could not open sheet info: " + (er.message || er), 5000)); }
     const rm = e.target.closest("[data-rmpdf]"); if (rm) return removePdf(rm.dataset.rmpdf);
+    const cp = e.target.closest("[data-cmppdf]"); if (cp) { e.stopPropagation(); return compressPdf(cp.dataset.cmppdf).catch(er => { busy(""); toast("Not compressed: " + (er.message || er), 6000); }); }
     const t = e.target.closest("[data-pg]"); if (t) { if (e.ctrlKey || e.metaKey || e.shiftKey) { const k = t.dataset.pg.replace("|", ":"); return pgTick(k, !S.pgSel.has(k), e.shiftKey); } const [f, p] = t.dataset.pg.split("|"); gotoPage(f, +p); } });
   $("pageList").addEventListener("dragstart", e => { const c = e.target.closest && e.target.closest("[data-pgdrag]"); if (!c) return; S.pgDrag = c.dataset.pgdrag; try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", S.pgDrag); } catch (er) {} });
   $("pageList").addEventListener("dragover", e => { if (S.pgDrag && e.target.closest("[data-pgdrag]")) e.preventDefault(); });
@@ -16013,7 +16228,7 @@ async function agentStep(text){
     if (/\b(sheet\s*(?:info|names?|numbers?|nos?\.?|titles?)|title\s*-?\s*blocks?|auto\s*-?\s*names?|bookmarks?|rename\s+(?:the\s+)?(?:pages|sheets))\b/.test(t) && !/\b(export|download|print)\b/.test(t)) return agentSheets(t);
     if (/\b(export|save|download|print)\b/.test(t) && /\b(pdfs?|png|jpe?g|images?|pictures?|pages?|sheets?|drawings?|mark(?:ed)?[\s-]*ups?)\b/.test(t) && !/\b(csv|excel|xlsx|schedule|json|project)\b/.test(t)) return agentExport(t);
     if (/\breport\b/.test(t) && !/\bschedule\b/.test(t)) { aiLog("bot", "Opening the takeoff report in a new tab — print it or save it as PDF."); return reportPrint(); }
-    if (/\bocr\b|\bread\s+(?:the\s+)?(?:text\s+(?:of|on|from)\s+(?:the\s+)?)?scan(?:s|ned(?:\s+pages?)?)?\b/.test(t) && !/\b(measure|count|trace|draw)\b/.test(t)) return agentOcr(t, scope);
+    if (/\bocr\b|\bread\s+(?:the\s+)?(?:text\s+(?:of|on|from)\s+(?:the\s+)?)?scan(?:s|ned(?:\s+(?:pages?|drawings?))?)?\b|\bread\s+(?:the\s+)?(?:lines|drawing)\b|\bvectori[sz]e\b/.test(t) && !/\b(measure|count|trace|draw)\b/.test(t)) return agentOcr(t, scope);
     if (/\b(import|add|load|upload)\b.*\b(pdfs?|drawings?|images?|photos?|scans?|folders?|pages?)\b/.test(t) && !/\b(measure|count)\b/.test(t)) return agentImport();
     { const gm = /\b(?:go\s*to|goto|open|jump\s+to)\s+(?:sheet\s+|drawing\s+)?([A-Za-z]{1,4}\s?[-–._]?\s?\d{1,4}(?:[._-]\d{1,3})?[A-Za-z]?|p(?:age)?\.?\s*\d{1,4})\s*$/i.exec(text.trim()); if (gm && !/apartment|unit|flat/i.test(text)) return agentSheetGo(gm[1]); }
     if (/\b(select|tick|choose)\s+(?:the\s+|all\s+)?(?:pages?|sheets?)\b|\b(?:select|tick)\s+all\s+(?:the\s+)?(?:pages?|sheets?)\b/.test(t)) return agentPages(t);
@@ -16064,8 +16279,9 @@ function agentExport(t){
 }
 function agentOcr(t, scope){
   const keys = scope === "all" ? allPages().map(o => o.key) : scope === "pdf" ? allPages().filter(o => o.f.id === S.fileId).map(o => o.key) : /\bscann?ed\s+pages\b|\bscans\b/.test(t) ? null : [S.key];
-  aiLog("bot", "OCR reads the words on scanned pages in this browser (free). Choose the pages and press <b>Read the text</b>.");
-  return ocrDialog(keys);
+  const onlyL = /\b(lines?|vectori[sz]e|walls?|beams?|columns?)\b/.test(t) && !/\b(words?|text|names?|tags?)\b/.test(t), onlyW = /\b(words?|text)\b/.test(t) && !/\b(lines?|walls?|beams?)\b/.test(t);
+  aiLog("bot", "OCR reads a scanned drawing in this browser (free): its <b>words</b> (names, tags, marks) and its <b>lines</b> (walls, beams, columns — for the Walls, Block masonry and Beams agents and snapping). Choose the pages and press <b>Read the drawing</b>.");
+  return ocrDialog(keys, {words: !onlyL, lines: !onlyW});
 }
 function agentSheets(t){
   const keys = /\bthis\s+(?:page|sheet)\b/.test(t) ? [S.key] : /\bthis\s+pdf\b/.test(t) ? allPages().filter(o => o.f.id === S.fileId).map(o => o.key) : null;
@@ -16368,7 +16584,7 @@ function viewRect(){ const st = stage(), v = S.view; return [Math.max(0, -v.tx /
 function faceLines(rect, k, only, join, minFt){   // straight drawing lines in rect (or the given ids), grouped by direction -> [{u, n, L: [{o, t0, t1}]}]; join: bridge collinear gaps up to this (pt); minFt: shortest line taken (0.4 ft)
   const g = S.geo[S.key]; if (!g || !g.segs.length) return null;
   const ids = only || (rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i)), groups = new Map();
-  ids.forEach(i => { const s = g.segs[i]; if (s[4] & 11) return;   // curves, dashed lines and clip paths are not wall faces
+  ids.forEach(i => { const s = g.segs[i]; if (s[4] & 27) return;   // curves, dashed lines, clip paths and a hatch's pattern lines (a tile grid) are not wall faces
     const dx = s[2] - s[0], dy = s[3] - s[1], L = Math.hypot(dx, dy); if (L < (minFt || 0.4) * k) return;
     let a = Math.atan2(dy, dx); if (a < 0) a += Math.PI; if (a >= Math.PI - 0.0044) a -= Math.PI;
     const key = Math.round(a / 0.0087);   // 0.5° bins
@@ -16391,9 +16607,18 @@ function facePairs(G, dMin, dMax, minOv, fn){   // every two lines of one direct
     const t0 = Math.max(L[i].t0, L[j].t0), t1 = Math.min(L[i].t1, L[j].t1); if (t1 - t0 >= minOv) fn(d, (L[i].o + L[j].o) / 2, t0, t1, L[i], L[j]);
   }
 }
+/* a scan whose walls are drawn solid (poché — 100 ft or more of filled outline in pieces over 3 ft): its walls are those outlines, not
+   the tile grids, brick hatch, furniture and fixtures read with them (a scan has no layers to tell them apart) -> a test for segment ids
+   or null (on a scan the outline carries the line drawn round the fill: a 9" wall reads about 9½") */
+function scanWallFilter(g, k){
+  if (!g || !g.vec || !(k > 0)) return null;
+  if (g.vecWfK !== k) { let L = 0; for (let i = g.vec0; i < g.segs.length; i++) { const q = g.segs[i]; if (!(q[4] & 4)) continue; const d = Math.hypot(q[2] - q[0], q[3] - q[1]); if (d >= 3 * k) L += d; }
+    g.vecWfK = k; g.vecWf = L >= 100 * k ? (i => i < g.vec0 || !!(g.segs[i][4] & 4)) : null; }
+  return g.vecWf;
+}
 function wallLineIds(rect, k){   // the drawing's lines in rect less door swings and leaves (a leaf open against a wall is not a thin wall)
   const g = S.geo[S.key]; if (!g || !g.segs.length) return null;
-  const wf = segRoleFilter(g, new Set(["wall"]));   // the PDF's wall layers, when it has them: no furniture, fixtures or hatch
+  const wf = segRoleFilter(g, new Set(["wall"])) || scanWallFilter(g, k);   // the PDF's wall layers, when it has them: no furniture, fixtures or hatch (a poché scan: its filled walls)
   const off = rect ? null : layerOffIx(g);   // (the whole page: still not the layers switched off — segsIn leaves them out of a box)
   const ids = (rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i)).filter(i => (!wf || wf(i)) && (!off || !off.has(g.segs[i][7]))), door = doorSymbols(g, ids, k);
   const out = ids.filter(i => !door.has(i)); out.doorLines = door.lines || []; return out;   // (the doorways too: the walls agent gives a doorway between a thin and a thick wall to the thin one)
@@ -16403,7 +16628,8 @@ function wallThicknesses(rect){   // the wall thicknesses drawn here, most wall 
   const H = new Map();
   G.forEach(g => facePairs(g, 0.3 * k, 2 * k, 1.5 * k, (d, o, t0, t1) => { const b = Math.round(d / k * 48); H.set(b, (H.get(b) || 0) + (t1 - t0) / k); }));
   const tot = [...H.values()].reduce((a, v) => a + v, 0), out = [];
-  [...H.entries()].sort((a, b) => b[1] - a[1]).forEach(([b, len]) => { if (len < 0.04 * tot || len < 6 || out.some(o => Math.abs(o.b - b) <= 1)) return; out.push({b, t: b / 48, len}); });
+  [...H.entries()].sort((a, b) => b[1] - a[1]).forEach(([b, len]) => { const o0 = out.find(o => Math.abs(o.b - b) <= 1 || Math.abs(o.t - b / 48) <= Math.max(0.04, 0.08 * o.t));   // (within the walls agent's tolerance of a stronger one: the same walls, never taken twice)
+    if (o0 || len < 0.04 * tot || len < 6) return; out.push({b, t: b / 48, len}); });
   return out.slice(0, 5).map(o => ({t: o.t, len: o.len}));
 }
 function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-line runs, page units
@@ -16610,10 +16836,10 @@ function chainRuns(runs, eps){   // runs sharing an end (and only two at that po
 function wallsAgent(o){
   const k = curScale(); if (!k) return {error: "Set the page scale first (K)."};
   if (scaleDoubt()) return {error: "The page scale is doubtful — the drawing measures " + scaleDoubt().label + ", not the note. Settle it first (scale chip)."};
-  if (!S.geo[S.key] || !S.geo[S.key].segs.length) return {error: "This page has no vector lines (scanned?) — walls cannot be found from face lines. Draw them, or use Claude to read them."};
+  if (!S.geo[S.key] || !S.geo[S.key].segs.length) return {error: "This page has no vector lines (a scan?) — walls are found from their face lines" + " — read its lines first: Auto takeoff › Read the drawing (OCR), free, in this browser."};
   const T = +o.t; if (!(T > 0.15 && T < 3)) return {error: "Give the wall thickness in ft, e.g. 0.75 for 9\"."};
   const rect = o.page ? null : viewRect(), runs = findWalls(T, rect, o.bridge == null ? 6 : +o.bridge);
-  if (!runs || !runs.length) return {error: `No walls ${uLenT(T)} thick found ${o.page ? "on this page" : "in this view"}. Found thicknesses: ` + (wallThicknesses(rect).map(w => uLenT(w.t) + " (" + Math.round(uV(w.len, "ft")) + " " + uL("ft") + ")").join(", ") || "none")};
+  if (!runs || !runs.length) return {error: `No walls ${uLenT(T)} thick found ${o.page ? "on this page" : "in this view"}. Found thicknesses: ` + (wallThicknesses(rect).map(w => uLenT(w.t) + " (" + Math.round(uV(w.len, "ft")) + " " + uL("ft") + ")").join(", ") || "none") + (S.geo[S.key].images && !S.geo[S.key].vec ? " — the page is a picture" + " — read its lines first: Auto takeoff › Read the drawing (OCR), free, in this browser." : "")};
   let c = o.cond ? (cond(o.cond) || P.proj.conds.find(x => x.type === "linear" && x.name.toLowerCase() === String(o.cond).toLowerCase())) : null;
   const inch = Math.round(T * 12 * 2) / 2;
   if (!c) { const H = +o.h > 0 ? +o.h : 0;
@@ -16640,6 +16866,7 @@ async function agentWallsCmd(t){
 async function wallsDialog(){
   if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
   if (!curScale()) return aiLog("err", "Set the page scale first (K).");
+  if (!(await scanLinesFirst("walls agent"))) return;
   const found = wallThicknesses(viewRect()), lin = P.proj.conds.filter(c => c.type === "linear");
   const v = await ask("Walls agent", `<p>Finds walls from their two parallel face lines (vector PDFs exported from CAD), marks each run on its centre line and adds it to a length condition.</p>
     <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Wall thickness</label><select id="wlT">${found.map(w => `<option value="${w.t}">${uLenT(w.t)} (${Math.round(w.t * 12 * 2) / 2}") — about ${Math.round(uV(w.len, "ft"))} ${uL("ft")} drawn in this view</option>`).join("")}<option value="">Other — type it</option></select>
@@ -16689,6 +16916,9 @@ const beamScore = (F, k) => (F.runs || []).reduce((a, r) => a + Math.min(Math.hy
 function findBeams(rect, o){   // the page's lines and text handed to beamCore (which works on its own: tested on the JADE drawing outside the browser)
   o = o || {}; const k = curScale(), g = S.geo[S.key]; if (!k || !g || !g.segs.length) return {error: "no lines"};
   const off = layerOffIx(g), ids = (rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i)).filter(i => !off || !off.has(g.segs[i][7]));
+  if (!o.from && (g.vec || o.anyLines) && !beamLayers(g)) {   // a scan's lines read by OCR (g.vec), or every line asked for: any straight line may be an edge, small closed boxes are columns (beamLinesAny)
+    const Ly = beamLinesAny(g, k, ids), T = beamTexts(rect, k), segs = [], kind = []; ids.forEach(i => { const e = Ly.edge(i), s = !e && Ly.sup(i); if (!e && !s) return; const q = g.segs[i]; segs.push([q[0], q[1], q[2], q[3], q[4]]); kind.push(e ? 1 : 2); });
+    return Object.assign(beamCore(segs, kind, T, k, o), {layers: Ly.names, how: g.vec ? "scan" : "lines", tried: 0}); }
   const T = beamTexts(rect, k), src = beamSource(g, ids, k, T, o);
   return Object.assign(beamCore(src.segs, src.kind, T, k, Object.assign({}, o, {loose: src.loose})), {layers: src.names, how: src.how, tried: src.tried || 0});
 }
@@ -16856,6 +17086,27 @@ async function beamPicture(rect, k){
   const R = beamPixLines(gray, W, H, 1 / px, k / px); gray = null;
   const segs = R.segs.map(s => [B[0] + s[0] * px, B[1] + s[1] * px, B[0] + s[2] * px, B[1] + s[3] * px, s[4], s[5], s[6]]);
   const out = {segs, styles: BEAM_PIX_STYLES, px, boxes: R.boxes}; S.beamPix = {[key]: out}; return out;   // (one kept at a time)
+}
+/* no beam layer (a scan's lines, or a framing plan PDF with no layers): any straight line may be a beam's edge; the outlines of filled
+   shapes (a column drawn solid) and small closed boxes (a column drawn as its outline, 4" to 4 ft a side) are the supports, and the lines
+   inside a box (its hatch, its cross) are neither */
+function beamLinesAny(g, k, ids){
+  const B = smallBoxes(g, k, ids), e = k / 12, inR = (r, x, y) => x > r[0] + e && x < r[2] - e && y > r[1] + e && y < r[3] - e, inBox = i => { const q = g.segs[i]; return B.rects.some(r => inR(r, q[0], q[1]) && inR(r, q[2], q[3])); };   // (wholly inside: a beam's edge running past a column is still an edge)
+  const sup = new Set(ids.filter(i => (g.segs[i][4] & 4) || B.has(i))), not = new Set(ids.filter(i => !sup.has(i) && B.rects.length && inBox(i)));
+  return {edge: i => !sup.has(i) && !not.has(i) && !(g.segs[i][4] & 25), sup: i => sup.has(i), names: [g.vec ? "the lines read from the scan" : "every line (no beam layer)"], any: true};
+}
+function smallBoxes(g, k, ids){   // the sides of closed axis-aligned boxes 4" to 4 ft a side -> Set of segment ids, .rects [[x0, y0, x1, y1]]
+  const tol = 1.5 * k / 12, mn = 4 * k / 12, mx = 4 * k, Hs = [], V = new Map(), out = new Set(), cell = Math.max(tol, 1e-6); out.rects = [];
+  ids.forEach(i => { const q = g.segs[i]; if (q[4] & 27) return; const dx = Math.abs(q[2] - q[0]), dy = Math.abs(q[3] - q[1]);
+    if (dy <= 0.02 * dx && dx >= mn - tol && dx <= mx + tol) Hs.push({i, x0: Math.min(q[0], q[2]), x1: Math.max(q[0], q[2]), y: (q[1] + q[3]) / 2});
+    else if (dx <= 0.02 * dy && dy >= mn - tol && dy <= mx + tol) { const v = {i, y0: Math.min(q[1], q[3]), y1: Math.max(q[1], q[3]), x: (q[0] + q[2]) / 2}, c = Math.round(v.x / cell); if (!V.has(c)) V.set(c, []); V.get(c).push(v); } });
+  const side = (x, y0, y1) => { for (let c = Math.round(x / cell) - 1; c <= Math.round(x / cell) + 1; c++) { const v = (V.get(c) || []).find(v2 => Math.abs(v2.x - x) <= tol && Math.abs(v2.y0 - y0) <= tol && Math.abs(v2.y1 - y1) <= tol); if (v) return v; } return null; };
+  Hs.sort((a, b) => a.x0 - b.x0);
+  for (let a = 0; a < Hs.length; a++) for (let b = a + 1; b < Hs.length && Hs[b].x0 - Hs[a].x0 <= tol; b++) { const p = Hs[a], q = Hs[b];
+    if (Math.abs(p.x1 - q.x1) > tol) continue; const y0 = Math.min(p.y, q.y), y1 = Math.max(p.y, q.y); if (y1 - y0 < mn - tol || y1 - y0 > mx + tol) continue;
+    const l = side((p.x0 + q.x0) / 2, y0, y1), r = side((p.x1 + q.x1) / 2, y0, y1); if (!l || !r) continue;
+    [p.i, q.i, l.i, r.i].forEach(i => out.add(i)); out.rects.push([Math.min(p.x0, q.x0), y0, Math.max(p.x1, q.x1), y1]); }
+  return out;
 }
 /* beamCore(segs [[x0, y0, x1, y1, flags]], kind [1 edge | 2 support], texts [{s, x, y, w, h, r}], k pt per ft, o) -> {runs, lonely}.
    Edges may be dashed (a beam under the slab is drawn dashed); curves and clip paths are not edges.
@@ -17042,7 +17293,8 @@ async function beamsAgent(o){
 async function beamsDialog(){
   if (!P.proj || !S.page) return aiLog("err", "Open a drawing page first.");
   if (!curScale()) return aiLog("err", "Set the page scale first (K).");
-  const g = S.geo[S.key], Ly = g && beamLayers(g), Li = g && g.layerIds && g.layerIds.length && g.file && layerInfo(g.file), cnt = new Map();
+  if (!(await scanLinesFirst("beams agent"))) return;
+  const g = S.geo[S.key], Ly = g && beamLayers(g), scan = !!(g && g.vec), Li = g && g.layerIds && g.layerIds.length && g.file && layerInfo(g.file), cnt = new Map();
   if (Li) g.segs.forEach(s => { if (s[7] < 0 || (s[4] & 9)) return; const n = (Li[g.layerIds[s[7]]] || {}).name; if (n) cnt.set(n, (cnt.get(n) || 0) + 1); });   // the page's layers with lines on it
   const lys = [...cnt.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true})), prev = (S.beamFrom || {})[S.fileId] || "";
   const pic = !!g && (g.images > 0 || !g.segs.length), sel = v => prev === v ? " selected" : "";
@@ -17052,7 +17304,8 @@ async function beamsDialog(){
       <div class="fg"><label>Narrowest beam (in)</label><input type="text" id="bmMin" value="4"></div><div class="fg"><label>Widest beam (in)</label><input type="text" id="bmMax" value="48"></div>
       <div class="fg w2"><label>Beam depth for new conditions (ft) — when no label gives it</label><input type="text" id="bmH" placeholder="blank = length only (Rft)"></div>
       <div class="fg w2"><label><input type="checkbox" id="bmP" style="width:auto" checked> Whole page (not only the part on screen)</label></div></div>
-    ${Ly ? "" : `<p class="small" style="margin-top:6px;color:var(--amber)">${lys.length ? "No layer here is named like a beam layer (S-Beam, BEAM, BM)" : "This page has no layers (a PDF plotted flat, or from Revit)"}: the agent finds the beams by their shape — two parallel lines a beam's width apart, in the layer or line style drawn most so${pic ? ", or in the page's picture (Revit prints a whole sheet as a picture when a view on it is shaded)" : ""} — and the columns and walls by their outlines. Check what it draws closely${lys.length ? ", or pick the beams' layer above" : ""}.</p>`}
+    ${Ly || scan ? "" : `<p class="small" style="margin-top:6px;color:var(--amber)">${lys.length ? "No layer here is named like a beam layer (S-Beam, BEAM, BM)" : "This page has no layers (a PDF plotted flat, or from Revit)"}: the agent finds the beams by their shape — two parallel lines a beam's width apart, in the layer or line style drawn most so${pic ? ", or in the page's picture (Revit prints a whole sheet as a picture when a view on it is shaded)" : ""} — and the columns and walls by their outlines. Check what it draws closely${lys.length ? ", or pick the beams' layer above" : ""}.</p>`}
+    ${scan ? '<p class="small" style="margin-top:6px">A scan: the beams are found from the lines read off its picture — dashed edges (a beam under the slab) included. Box the framing plan so dimensions and the title block stay out.</p>' : ""}
     <p class="small" style="margin-top:6px">Each span is marked AI with its beam mark as its name; a span with no mark of its own takes the mark of the span it continues. Run it again to replace what it drew.</p>`, "Draw centre lines",
     () => { const a = +$("bmMin").value, b = +$("bmMax").value, h = $("bmH").value.trim() ? uParse($("bmH").value) : 0; if (!(a > 0) || !(b > a)) return "Give the narrowest and widest beam in inches"; if (isNaN(h)) return "The depth is decimal feet";
       return {group: $("bmG").value, wMin: a, wMax: b, h, page: $("bmP").checked, from: $("bmF") ? $("bmF").value : ""}; });
@@ -17353,7 +17606,7 @@ function blockFix(id, to){
 function blockMasonryAgent(o){
   const k = curScale(); if (!k) return {error: "Set the page scale first (K)."};
   if (scaleDoubt()) return {error: "The page scale is doubtful — the drawing measures " + scaleDoubt().label + ", not the note. Settle it first (scale chip)."};
-  if (!S.geo[S.key] || !S.geo[S.key].segs.length) return {error: "This page has no vector lines (scanned?) — walls cannot be found from face lines."};
+  if (!S.geo[S.key] || !S.geo[S.key].segs.length) return {error: "This page has no vector lines (a scan?) — walls are found from their face lines" + " — read its lines first: Auto takeoff › Read the drawing (OCR), free, in this browser."};
   const rect = o.page ? null : viewRect(), pieces = blockRuns(rect);
   if (!pieces || !pieces.length) return {error: "No 4\" or 8\" walls found " + (o.page ? "on this page" : "in this view") + "."};
   const learnt = (P.proj.blockLearn || []).filter(l => l.file === S.fileId && l.page === S.pageNo);   // the user's corrections on this page
@@ -17389,6 +17642,7 @@ function blockMasonryAgent(o){
 async function blockMasonryDialog(){
   if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
   if (!curScale()) return aiLog("err", "Set the page scale first (K).");
+  if (!(await scanLinesFirst("block masonry agent"))) return;
   const res = await scanTags("page"), plan = (res[0] && res[0].T.plan) || {}, sched = (res[0] && res[0].T.sched) || {};
   const marks = Object.keys(plan).filter(m => /^(D|W|V|SD|FD|RS|KW|BW)\d/i.test(m)).sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
   const size = m => { const s = (P.proj.openings || []).find(x => x.mark.toUpperCase() === m) || sched[m]; if (s && +s.w && +s.h) return [+s.w, +s.h, "schedule"];
@@ -19830,9 +20084,9 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   try { DB = await openDB(); } catch (e) { $("drop").innerHTML = '<div class="box">This browser blocks local storage (private window?) — projects cannot be saved here.</div>'; return; }
   trashPurge().catch(() => {});   // drawings of projects deleted more than 30 days ago
   if (location.protocol !== "file:") learnSeedLoad().finally(() => learnTeamLoad());   // the reference method, then the team's learned method, added to this browser's
-  window.zdTakeoff = {slabsAgent, slabCore, slabLayers, beamsAgent, findBeams, beamCore, beamLayers, beamSource, beamShapes, beamPixLines, beamPicture, beamSnapW, legendSvg, legVal, legAsk, legSmart, legTable, legendCols, editLegend, roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
+  window.zdTakeoff = {compressPdf, cmpRun, cmpAsk, cmpDb: dbGetRaw, cmpSet: setSave, slabsAgent, slabCore, slabLayers, beamsAgent, findBeams, beamCore, beamLayers, beamSource, beamShapes, beamPixLines, beamPicture, beamSnapW, legendSvg, legVal, legAsk, legSmart, legTable, legendCols, editLegend, roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
-    ocrDialog, ocrPages, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
+    ocrDialog, ocrPages, vecSegs, vecPage, vecPack, vecUnpack, vecToggle, vecSvg, scanLinesFirst, smallBoxes, beamLinesAny, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
     cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, openWb, wbMod, wbApi, condQ, billQ, billQty, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
     mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, exportAll, exportAllDialog, importAll, bundleHead, bundleStore, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, verReload, autoUpd, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, unmergeAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
