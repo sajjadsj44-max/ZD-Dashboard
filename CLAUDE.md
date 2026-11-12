@@ -68,6 +68,8 @@
 - Passwords: `123` for Payments on its own (`zameen-developments/?app=pay`), `sa` for everything else
   (the complete Dashboard `?app=all`, `?app=cm`, `?app=ra` (QS Cost Control), `?app=calc`, `?app=prod`, PDF Takeoff, Drawing Tracker, the dashboards list).
   `zameen-developments/` with no `?app=` opens the start screen that picks one of them.
+- QS Cost Control's **GRN Price Register** tab has its own lock on top (`sa`, asked by the owner): it asks every time the
+  tab is shown, on every computer (the trusted one too), and locks again as soon as the tab is left.
 - PDF Takeoff's friends' link `takeoff/?team` asks a **username + password** per friend instead of `sa`
   (checked against `takeoff/users.json`: salted PBKDF2-SHA256 hashes only, never a plain password). The owner
   adds / removes them in Settings › Team logins, which saves users.json to main with a GitHub token asked
