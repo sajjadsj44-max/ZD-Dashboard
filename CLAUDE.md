@@ -28,6 +28,8 @@
 - `takeoff/cad.js` and `takeoff/cad-worker.js` are loaded with takeoff.js's own
   `?v=`, so bump that same `?v=` when either of them changes too. The same for
   `takeoff/trace.js` and `takeoff/trace-worker.js` (the vector trace of a PDF's wall layers).
+  And for `takeoff/compress-worker.js` (Pages → Compress / a big PDF compressed when added: only its pictures are resampled,
+  vectors, layers and markups untouched; `tools/test_takeoff_compress.js`).
   And for `takeoff/measure.js` (the measurement engine: geometry and QS formulas, unit-tested by
   `tools/test_takeoff_measure.js` in plain Node), and `takeoff/workbook.js` (the CostX-style Workbook, Costing → Workbook,
   tested by `tools/test_takeoff_workbook.js`).
