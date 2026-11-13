@@ -7378,13 +7378,25 @@ async function findText(q){
   for (const f of P.proj.files) for (let i = 1; i <= f.pages && hits.length < 300; i++) {
     (await pageTexts(f.id, i)).forEach(t => { if ((ex ? ex.test(t.s.toLowerCase()) : t.s.toLowerCase().includes(ql)) && hits.length < 300) hits.push({f, i, t}); });
   }
-  box.innerHTML = hits.length ? `<div class="fr small" style="flex-direction:row;align-items:center;gap:6px;cursor:default">${hits.length}${hits.length >= 300 ? "+" : ""} found <span style="flex:1"></span>${exactTog()}<button class="btn sm pri" data-cntall="1" title="Put a count marker on every hit">&#10003; Count all</button></div>` + hits.map((h, n) => `<div class="fr" data-hit="${n}" style="flex-direction:row;align-items:center;gap:6px"><span style="flex:1;display:flex;flex-direction:column"><b>${esc(h.t.s.trim().slice(0, 60))}</b><span class="small">${esc(h.f.name.replace(/\.pdf$/i, ""))} p.${h.i}</span></span><button class="btn sm" data-cnt1="${n}" title="Count this one">+1</button></div>`).join("")
+  const sel = new Set();   // ticked hits: "Count selected" counts only these (none ticked = every hit)
+  box.innerHTML = hits.length ? `<div class="fr small" style="flex-direction:row;align-items:center;gap:6px;cursor:default">${hits.length}${hits.length >= 300 ? "+" : ""} found <span style="flex:1"></span>${exactTog()}</div>
+      <div class="fr small" style="flex-direction:row;align-items:center;gap:6px;cursor:default"><label data-selw="1" style="display:flex;align-items:center;gap:4px;cursor:pointer" title="Tick every hit, or none"><input type="checkbox" data-selall="1"> Select all</label><span style="flex:1"></span><button class="btn sm pri" data-cntall="1" title="Put a count marker on every hit (or only on the ticked ones)">&#10003; Count all</button></div>` + hits.map((h, n) => `<div class="fr" data-hit="${n}" style="flex-direction:row;align-items:center;gap:6px"><label data-selw="1" style="padding:4px 2px;cursor:pointer;display:flex" title="Tick to count only the ticked hits"><input type="checkbox" data-sel="${n}"></label><span style="flex:1;display:flex;flex-direction:column"><b>${esc(h.t.s.trim().slice(0, 60))}</b><span class="small">${esc(h.f.name.replace(/\.pdf$/i, ""))} p.${h.i}</span></span><button class="btn sm" data-cnt1="${n}" title="Count this one">+1</button></div>`).join("")
     : '<div class="fr small" style="flex-direction:row;justify-content:flex-end;cursor:default">' + exactTog() + '</div><div class="fr small">Not found in the text of these PDFs. A scanned drawing has no text until it is read: <b>Pages → tick → OCR</b>, or Ctrl+K → OCR.</div>';
-  box.onchange = e => { if (e.target.dataset.exact) { findExact = e.target.checked; try { localStorage.setItem("tkFindExact", findExact ? "1" : "0"); } catch (x) {} findText(q); } };
+  const syncSel = () => {
+    const n = sel.size, btn = box.querySelector("[data-cntall]"), all = box.querySelector("[data-selall]"); if (!btn) return;
+    btn.innerHTML = n ? "&#10003; Count selected (" + n + ")" : "&#10003; Count all";
+    if (all) { all.checked = n > 0 && n === hits.length; all.indeterminate = n > 0 && n < hits.length; }
+    box.querySelectorAll("[data-sel]").forEach(c => { c.checked = sel.has(+c.dataset.sel); c.closest("[data-hit]").style.background = c.checked ? "#eef3ff" : ""; });
+  };
+  box.onchange = e => {
+    const d = e.target.dataset;
+    if (d.exact) { findExact = e.target.checked; try { localStorage.setItem("tkFindExact", findExact ? "1" : "0"); } catch (x) {} findText(q); return; }
+    if (d.selall) { sel.clear(); if (e.target.checked) hits.forEach((_, n) => sel.add(n)); syncSel(); }
+    else if (d.sel) { e.target.checked ? sel.add(+d.sel) : sel.delete(+d.sel); syncSel(); } };
   box.onclick = async e => {
-    if (e.target.closest("[data-exact]")) { e.stopPropagation(); return; }
+    if (e.target.closest("[data-exact],[data-sel],[data-selall],[data-selw]")) { e.stopPropagation(); return; }
     const ca = e.target.closest("[data-cntall],[data-cnt1]");
-    if (ca) { e.stopPropagation(); return countTextHits(q, ca.dataset.cntall ? hits : [hits[+ca.dataset.cnt1]]); }
+    if (ca) { e.stopPropagation(); return countTextHits(q, ca.dataset.cntall ? (sel.size ? hits.filter((_, n) => sel.has(n)) : hits) : [hits[+ca.dataset.cnt1]]); }
     const r = e.target.closest("[data-hit]"); if (!r) return; const h = hits[+r.dataset.hit];
     if (h.f.id !== S.fileId || h.i !== S.pageNo) await gotoPage(h.f.id, h.i);
     const s2 = Math.max(S.view.s, 2.5), st = stage(); S.view = {s: s2, tx: st.clientWidth / 2 - h.t.x * s2, ty: st.clientHeight / 2 - h.t.y * s2}; applyView(); renderHi();
