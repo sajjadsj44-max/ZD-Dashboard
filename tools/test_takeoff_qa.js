@@ -688,6 +688,19 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
       await page.click("#findRes [data-cntall]"); await page.waitForSelector("#ctC"); await page.click("#dlgOk"); await wait(250);
       calc("Count " + tag + " from the drawing text", n, (await total(tag)).net, 0, "Nos");
     }
+    // Find text → tick some hits → "Count selected" counts only those
+    await page.fill("#findIn", "W1"); await page.press("#findIn", "Enter"); await page.waitForSelector("#findRes [data-cntall]", {timeout: 8000});
+    ok(/Count all/.test(await page.innerText("#findRes [data-cntall]")), "Find text: nothing ticked → the button says Count all");
+    await page.click("#findRes [data-sel='0']"); await page.click("#findRes [data-sel='1']");
+    ok(/Count selected \(2\)/.test(await page.innerText("#findRes [data-cntall]")), "Find text: two ticked → Count selected (2)");
+    ok(await page.$eval("#findRes [data-selall]", c => c.indeterminate), "Find text: Select all shows the part-ticked state");
+    ok(await page.$eval("#findRes", b => b.classList.contains("on")), "Find text: ticking a hit leaves the list open");
+    await page.click("#findRes [data-cntall]"); await page.waitForSelector("#ctC");
+    ok(/2 markers go/.test(await page.innerText("#dlgB")), "Count selected counts only the 2 ticked hits (of 5)");
+    await page.click("#dlgCancel"); await wait(150);
+    await page.fill("#findIn", "W1"); await page.press("#findIn", "Enter"); await page.waitForSelector("#findRes [data-selall]", {timeout: 8000});
+    await page.click("#findRes [data-selall]"); ok(/Count selected \(5\)/.test(await page.innerText("#findRes [data-cntall]")), "Select all ticks every hit");
+    await page.click("#findRes [data-selall]"); ok(/Count all/.test(await page.innerText("#findRes [data-cntall]")), "…and ticking it again clears them");
     // the same quantity everywhere: drawing label → sheet → condition list → bill
     const sheet = await page.innerText("#sheet"), conds = await page.innerText("#condList");
     ok(/Total Floor area[\s\S]*1,268\.250 Sft/.test(sheet) && /1,268\.250/.test(conds), "1,268.250 Sft on the sheet total and the condition list");
