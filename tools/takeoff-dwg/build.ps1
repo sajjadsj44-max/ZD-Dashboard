@@ -5,7 +5,8 @@
 # GitHub (MIT) — with acadsharp.patch: a block's objects are read only once something uses the block, so a drawing full of block
 # definitions nothing inserts (the JADE masonry drawing: 770,000 of its 1,016,357 objects) fits the browser's 4 GB, and the
 # paper-space layouts' own objects are never read (the takeoff shows model space only; the Zameen Quadrangle layout plans hold
-# 740,000 objects in blocks only their layouts insert).
+# 740,000 objects in blocks only their layouts insert). The same for AutoCAD 2000 drawings (AC1015), whose blocks chain their objects
+# one to the next: the IVORY working layout plans, 117 MB, 973,000 objects, read in 7 s and 550 MB instead of more than 3 GB.
 # Afterwards bump the ?v= on takeoff.js's <script> in takeoff/index.html: cad.js loads dwg/_framework/dotnet.js with it (the other
 # files there carry their own fingerprint in their names).
 $ErrorActionPreference = "Stop"
