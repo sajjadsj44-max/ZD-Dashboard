@@ -5728,9 +5728,9 @@ function placeLabels(L, opt){   // L: label jobs (measSvg) -> their SVG; a label
     else for (const c of C) { const q2 = lblObb(c, pad); if (free(q2)) { pick = c; q = q2; break; } }
     if (!pick) continue;
     add(q); out.push(lblJobSvg(j, pick));
-    if (j.id && !pick.along) boxes.push({id: j.id, b: lblObb(pick, 0).bb, ao: !j.lo && j.p0 && (pick.lead || Math.hypot(pick.p[0] - j.p0[0], pick.p[1] - j.p0[1]) > 1) && !pick.along ? [(pick.p[0] - j.p0[0]) / j.sp, (pick.p[1] - j.p0[1]) / j.sp] : null});
+    if (j.id && (j.area || j.lo)) boxes.push({id: j.id, b: lblObb(pick, 0).bb, ao: !j.lo && j.p0 && (pick.lead || Math.hypot(pick.p[0] - j.p0[0], pick.p[1] - j.p0[1]) > 1) && !pick.along ? [(pick.p[0] - j.p0[0]) / j.sp, (pick.p[1] - j.p0[1]) / j.sp] : null});
   }
-  if (screen) S.lblBoxes = boxes;   // (a label written along its run is not in it: a press there takes the run or starts a box, never drags the label)
+  if (screen) S.lblBoxes = boxes;   // (a run's label is not in it — unless moved by hand: a press there takes the run or starts a box, never drags the label, as PlanSwift)
   return out.join("");
 }
 function lblAt(sp){   // the label under the mouse (the one drawn last, on top, first) -> {id, it, ao: where it stands from its usual spot when it was put elsewhere}
