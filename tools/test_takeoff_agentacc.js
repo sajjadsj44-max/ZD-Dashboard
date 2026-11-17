@@ -56,7 +56,7 @@ const near = (a, b, e) => Math.abs(a - b) <= (e == null ? 0.01 : e);
       return r.rooms.map(x => ({name: x.name, skirt: x.skirt, wall: x.wallNet, bath: !!x.bath, notes: x.notes})); }, [A.ROOMS, A.PAGES[0]]);
     if (fin.err) ok(false, "finishes: " + fin.err);
     else { const baths = fin.filter(x => /^BATH/.test(x.name)), dry = fin.filter(x => !/^BATH/.test(x.name));
-      ok(baths.length >= 2 && baths.every(x => x.bath && x.skirt === 0 && x.wall === 0 && x.notes.some(n => /tiled/.test(n))), "baths: no skirting and no plaster / paint, a note says they are tiled (" + baths.map(x => x.name).join(", ") + ")");
+      ok(baths.length >= 2 && baths.every(x => x.bath && x.skirt === 0 && x.wall === 0 && !x.notes.length), "baths: no skirting and no plaster / paint, marked tiled, not as an opening left out (" + baths.map(x => x.name).join(", ") + ")");
       ok(dry.every(x => x.skirt > 0 && x.wall > 0), "every other room keeps its skirting and wall finish"); }
     /* the walls agent with a height (H 10): every opening it bridged is deducted at its schedule size — the hand figure from the
        fixture's own geometry (9" walls 140.75 ft × 10 less the entrance 3 × 7 and the windows; 4.5" walls 136.25 × 10 less the
