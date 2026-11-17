@@ -726,6 +726,8 @@ table.sh td,table.sh th{padding-left:5px;padding-right:5px}
 .crow .cq{font-variant-numeric:tabular-nums;color:#1d3fc4;font-weight:600;text-align:right;white-space:nowrap}.crow .cu{width:22px;flex:none;font-size:10px;color:var(--muted)}.crow .cn{min-width:40px}
 .crow .sw{width:13px;height:13px;border-radius:2px;flex:none;border:1px solid rgba(0,0,0,.2);padding:0;cursor:pointer}
 .crow .ed{border:0;background:none;color:#8a98ac;cursor:pointer;font-size:12px;padding:0 2px;flex:none}.crow .bulb.out{filter:grayscale(1);opacity:.35}
+/* the Labels dialog: presets */
+.lbpre{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 10px}
 /* the order of the conditions: ▴ ▾ on a row (on hover), drag a row onto another */
 .cmv{display:none;flex-direction:column;justify-content:center;flex:none}.crow:hover .cmv,.cond:hover .cmv{display:flex}
 .crow .cmv .ed,.cond .cmv .ed{font-size:11px;line-height:10px;height:11px;padding:0 3px;border-radius:2px;color:#4a5a70}.crow .cmv .ed:hover,.cond .cmv .ed:hover{background:#dbe7fb;color:var(--blue)}
@@ -1697,7 +1699,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-11-17a"></script>
+<script type="module" src="takeoff.js?v=2026-11-17b"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
