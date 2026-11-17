@@ -6468,8 +6468,8 @@ function renderConds(){
   const gHead = o => { const t = o.m.reduce((a, c) => a + P.proj.items.filter(x => x.cond === c.id).length, 0), ck = o.m.reduce((a, c) => a + P.proj.items.filter(x => x.cond === c.id && x.qa === "checked").length, 0);
     return `<div class="cgrp2" data-cgrp="${esc(o.g)}" title="Click to fold / unfold this group"><span class="car">${grpOff.has(o.g) ? "&#9656;" : "&#9662;"}</span><b>${o.g ? esc(o.g) : "Ungrouped"}</b><span class="small">${o.m.length} condition${o.m.length === 1 ? "" : "s"} · ${ck}/${t} checked</span></div>`; };
   const cardOf = c => { const i = P.proj.conds.indexOf(c), t = condTotals(c), its = P.proj.items.filter(x => x.cond === c.id), ck = its.filter(x => x.qa === "checked").length;
-    return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none">${condSw(c)}<div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + uLen(+c.h) : ""}${c.t ? " · T " + uLen(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}${its.length ? (ck ? ` · ${ck}/${its.length} checked<i class="pbar" title="${ck} of ${its.length} checked"><i style="width:${Math.round(100 * ck / its.length)}%"></i></i>` : "") : " · no measurements yet"}</span>${(P.proj.cols || []).length ? `<span class="ccols">${colChips(c)}</span>` : ""}</div>
-      <div class="q">${fq(t.net, c.unit)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(uL(c.unit))}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button><button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; };
+    return `<div class="cond${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}" draggable="true"><input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several" style="flex:none">${condSw(c)}<div class="nm"><b>${i < 9 ? (i + 1) + ". " : ""}${esc(c.name)}</b><span>${c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count"}${c.h ? " · H " + uLen(+c.h) : ""}${c.t ? " · T " + uLen(+c.t) : ""}${c.faces > 1 ? " · " + c.faces + " faces" : ""}${its.length ? (ck ? ` · ${ck}/${its.length} checked<i class="pbar" title="${ck} of ${its.length} checked"><i style="width:${Math.round(100 * ck / its.length)}%"></i></i>` : "") : " · no measurements yet"}</span>${(P.proj.cols || []).length ? `<span class="ccols">${colChips(c)}</span>` : ""}</div>
+      <div class="q">${fq(t.net, c.unit)}<br><span style="font-weight:400;color:var(--muted);font-size:10.5px">${esc(uL(c.unit))}</span></div><button class="ed eye" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">${c.hidden ? "&#128065;&#824;" : "&#128065;"}</button>${CMV_HTML}<button class="ed" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`; };
   const vw = condView(), vbar = `<div class="cview" title="How the conditions are listed">${[["tree", "By page", "PlanSwift-style tree: every page with the conditions measured on it and that page's quantity"], ["list", "Compact", "One thin row per condition"], ["cards", "Cards", "Cards with check progress"]].map(([k, n, t]) => `<button data-cview="${k}" class="${vw === k ? "on" : ""}" title="${t}">${n}</button>`).join("")}</div>`;
   const body = !shown.length ? '<div class="empty">No condition matches this filter.</div>' : vw === "tree" ? condTreeHtml(shown)
     : order.map(o => (hasG ? gHead(o) : "") + (hasG && grpOff.has(o.g) ? "" : o.m.map(c => vw === "list" ? condRowHtml(c, condTotals(c).net, 0) : cardOf(c)).join(""))).join("");
@@ -6481,10 +6481,34 @@ function condView(){ const v = S.condView || pref("tkCondView") || "tree"; retur
 function condRowHtml(c, q, lvl, pg){
   const nm = pg && c.flpk === pg ? condShort(c) : c.name;   // (a floor's own condition, under its floor: "Kitchen")
   const its = P.proj.items.filter(x => x.cond === c.id), ck = its.filter(x => x.qa === "checked").length, ty = c.type === "area" ? "Area" : c.type === "linear" ? "Length" : "Count";
-  return `<div class="crow${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"${pg ? ` data-cpg="${esc(pg)}"` : ""} style="padding-left:${4 + 10 * lvl}px" title="${esc(c.name)} — ${ty}${c.h ? " · H " + uLen(+c.h) : ""}${c.t ? " · T " + uLen(+c.t) : ""} · ${its.length} measurement${its.length === 1 ? "" : "s"}${its.length ? ", " + ck + " checked" : ""}${(P.proj.cols || []).length ? "\n" + esc(colTip(c)) : ""}${pg ? "\nClick: this condition on this page" : ""}">
+  return `<div class="crow${c.id === S.cond ? " on" : ""}${c.hidden ? " off" : ""}" data-cond="${esc(c.id)}"${pg ? ` data-cpg="${esc(pg)}"` : ""} draggable="true" style="padding-left:${4 + 10 * lvl}px" title="${esc(c.name)} — ${ty}${c.h ? " · H " + uLen(+c.h) : ""}${c.t ? " · T " + uLen(+c.t) : ""} · ${its.length} measurement${its.length === 1 ? "" : "s"}${its.length ? ", " + ck + " checked" : ""}${(P.proj.cols || []).length ? "\n" + esc(colTip(c)) : ""}${pg ? "\nClick: this condition on this page" : ""}\nDrag, ▴ ▾ or Alt+↑ / Alt+↓: move it up / down the list">
     <input type="checkbox" data-ck="${esc(c.id)}"${S.condSel.has(c.id) ? " checked" : ""} title="Tick to show / hide / delete several"><i class="cic ${c.type}" style="--cc:${esc(c.color)}${c.type === "area" ? ";--cf:" + esc(apOf(c).fill) : ""}"></i><span class="cn">${esc(nm)}</span>
     <span class="cq">${fq(q, c.unit)}</span><span class="cu">${esc(uL(c.unit))}</span>${condSw(c)}
-    <button class="ed eye bulb${c.hidden ? " out" : ""}" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">&#128161;</button><button class="ed pen" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`;
+    <button class="ed eye bulb${c.hidden ? " out" : ""}" title="${c.hidden ? "Hidden — click to show on the drawing" : "Shown — click to hide on the drawing"}" data-eye="${esc(c.id)}">&#128161;</button>${CMV_HTML}<button class="ed pen" title="Edit condition" data-edit="${esc(c.id)}">&#9998;</button></div>`;
+}
+/* the order of the conditions (as PlanSwift): right-click a condition → Move up / down / to the top / to the bottom, the ▴ ▾ on a row,
+   Alt+↑ / Alt+↓ for the selected condition, or drag a row onto another. The list, the By page tree, the ribbon's picker, the 1–9 keys
+   and the exports all follow P.proj.conds. A step goes past the next row shown in the same block (page, floor, group, filter), so a
+   condition always moves where it is seen; a drag stays inside its block. */
+const CMV_HTML = '<span class="cmv"><button class="ed" data-cmv="-1" title="Move up (Alt+↑)">&#9652;</button><button class="ed" data-cmv="1" title="Move down (Alt+↓)">&#9662;</button></span>';
+function condRowEl(id, pg){ const L = [...$("condList").querySelectorAll("[data-cond]")].filter(r => r.dataset.cond === id); return L.find(r => pg ? r.dataset.cpg === pg : r.dataset.cpg === S.key) || L[0] || null; }
+function condBlock(r){ let n = r; while ((n = n.previousElementSibling) && n.matches("[data-cond]")); return n; }   // the header a row sits under
+function condNext(r, dir){ let n = r; while ((n = dir < 0 ? n.previousElementSibling : n.nextElementSibling)) { if (!n.matches("[data-cond]")) return null; if (n.dataset.cond !== r.dataset.cond) return n.dataset.cond; } return null; }
+function condMoveTo(id, ref, after, how){
+  const c = cond(id), r = cond(ref); if (!c || !r || c === r) return false;
+  const pg = (condRowEl(id) || {dataset: {}}).dataset.cpg;
+  mutate(() => { const L = P.proj.conds; L.splice(L.indexOf(c), 1); L.splice(L.indexOf(r) + (after ? 1 : 0), 0, c); }, "Move “" + c.name + "” " + (how || (after ? "below" : "above") + " “" + r.name + "”"));
+  const el = condRowEl(id, pg); if (el) { el.scrollIntoView({block: "nearest"}); el.classList.add("moved"); setTimeout(() => el.classList.remove("moved"), 700); }
+  return true;
+}
+function condMove(id, dir, el){   // dir −1 / 1: one row up / down; −2 / 2: to the top / bottom of the whole list
+  const C = P.proj.conds, c = cond(id); if (!c) return false;
+  if (Math.abs(dir) === 2) return C[dir < 0 ? 0 : C.length - 1] === c ? false : condMoveTo(id, C[dir < 0 ? 0 : C.length - 1].id, dir > 0, dir < 0 ? "to the top" : "to the bottom");
+  if (el && !el.isConnected) el = condRowEl(id, el.dataset.cpg);   // (the list was drawn again meanwhile)
+  el = el || condRowEl(id);
+  const nb = el ? condNext(el, dir) : (C[C.indexOf(c) + dir] || {}).id;
+  if (!nb) { toast(dir < 0 ? "“" + c.name + "” is already at the top" : "“" + c.name + "” is already at the bottom", 1600); return false; }
+  return condMoveTo(id, nb, dir > 0, dir < 0 ? "up" : "down");
 }
 function condTreeHtml(shown){
   const ids = new Set(shown.map(c => c.id)), per = new Map(), used = new Set(), off = S.condGrpOff;
@@ -10701,7 +10725,7 @@ function ribHome(){   // the tab the ribbon opens on: My tools unless Settings �
   if (b && b.style.display !== "none") ribShow(h);
 }
 /* your own shortcuts: Ctrl or Alt with a key, or F1–F12, run any command of the palette (Ctrl+K) by its name; they come before the built-in keys */
-const KEY_BUILTIN = ["Ctrl+K", "Ctrl+S", "Ctrl+P", "Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+Y", "Ctrl+A", "Ctrl+I", "Ctrl+C", "Ctrl+X", "Ctrl+V", "Ctrl+Shift+V", "Ctrl+D", "Ctrl+F", "Ctrl+Shift+L", "Ctrl+\\", "Ctrl+,", "Alt+L", "F2", "F6", "F8", "F10"];
+const KEY_BUILTIN = ["Ctrl+K", "Ctrl+S", "Ctrl+P", "Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+Y", "Ctrl+A", "Ctrl+I", "Ctrl+C", "Ctrl+X", "Ctrl+V", "Ctrl+Shift+V", "Ctrl+D", "Ctrl+F", "Ctrl+Shift+L", "Ctrl+\\", "Ctrl+,", "Alt+L", "Alt+ArrowUp", "Alt+ArrowDown", "F2", "F6", "F8", "F10"];
 function keyCombo(e){   // "Ctrl+Alt+L", "F3", "Ctrl+Shift+1" — "" for a modifier alone
   if (/^(Control|Shift|Alt|Meta|AltGraph|CapsLock|Dead|Unidentified)$/.test(e.key || "")) return "";
   const c = e.code || "", n = /^Key[A-Z]$/.test(c) ? c.slice(3) : /^Digit\d$/.test(c) ? c.slice(5) : e.key === " " ? "Space" : String(e.key).length === 1 ? String(e.key).toUpperCase() : String(e.key);
@@ -11440,8 +11464,10 @@ function ribbonInit(){
   /* left panel: filter and type tabs of the condition list */
   $("pageStrip").addEventListener("click", e => { const t = e.target.closest("[data-pg]"); if (!t) return; const [f, p2] = t.dataset.pg.split("|"); gotoPage(f, +p2); });
   $("condList").addEventListener("contextmenu", e => { const r = e.target.closest("[data-cond]"), c = r && P.proj && cond(r.dataset.cond); if (!c) return; e.preventDefault();   // right-click a condition: its menu
-    const mine = P.proj.items.filter(i => i.cond === c.id && onPage(i));
+    const mine = P.proj.items.filter(i => i.cond === c.id && onPage(i)), C = P.proj.conds;
     ctxShow([{h: c.name, s: fq(condTotals(c).net, c.unit) + " " + uL(c.unit) + ((P.proj.cols || []).length ? " · " + colTip(c).replace(/\n/g, " · ") : "")}, {t: "Edit condition…", fn: () => editCond(c)},
+      {sep: 1}, {t: "Move up", k: "Alt+↑", fn: () => condMove(c.id, -1, r), dis: !condNext(r, -1)}, {t: "Move down", k: "Alt+↓", fn: () => condMove(c.id, 1, r), dis: !condNext(r, 1)},
+      {t: "Move to the top", fn: () => condMove(c.id, -2), dis: C[0] === c}, {t: "Move to the bottom", fn: () => condMove(c.id, 2), dis: C[C.length - 1] === c}, {sep: 1},
       {t: "Apply to pages / typical floors…" + (mine.length ? " (" + mine.length + " on this page)" : " — nothing on this page"), fn: () => copyToPagesDialog(c.id), dis: !mine.length || !S.page},
       {t: "Select all on this page", fn: () => { setTool("select"); S.cond = c.id; setSel(mine.map(i => i.id)); refresh(); }, dis: !mine.length}, {sep: 1}, {t: "Custom columns…", fn: colsDialog}], e.clientX, e.clientY); });
   $("condList").addEventListener("contextmenu", e => { const r = e.target.closest(".ctr.fl[data-flpk]"); if (!r || !P.proj) return; e.preventDefault(); e.stopPropagation(); floorMenu(e.clientX, e.clientY, r.dataset.flpk, r.dataset.fl); }, true);   // right-click a floor: its menu
@@ -11449,6 +11475,15 @@ function ribbonInit(){
     const g = e.target.closest(".ctr.pg[data-cgrp]"); if (!g) return; const [f, p] = g.dataset.cgrp.slice(2).split(":"); gotoPage(f, +p); });
   $("condList").addEventListener("click", e => { const g = e.target.closest("[data-cgrp]"); if (!g || e.target.closest("button")) return; const k = g.dataset.cgrp; if (S.condGrpOff.has(k)) S.condGrpOff.delete(k); else S.condGrpOff.add(k); renderConds();
     if (e.detail === 2 && g.matches(".ctr.fl[data-flpk]")) floorZoom(g.dataset.flpk, g.dataset.fl); });   // (a double-click on a floor: folded and unfolded again, and the view on it — the row was drawn again after the first click, so no dblclick comes)
+  { /* drag a condition row onto another row of the same block: it goes above / below it (condMove) */
+    const cl = $("condList"), dropOff = () => cl.querySelectorAll(".dropb,.dropa").forEach(x => x.classList.remove("dropb", "dropa"));
+    const at = e => { const s = S.condDrag, r = e.target.closest && e.target.closest("[data-cond]"); if (!s || !r || r === s || !s.isConnected || condBlock(r) !== condBlock(s)) return null; const b = r.getBoundingClientRect(); return {r, after: e.clientY >= b.top + b.height / 2}; };
+    cl.addEventListener("dragstart", e => { const r = e.target.closest && e.target.closest("[data-cond]"); if (!r) return; S.condDrag = r; r.classList.add("dragging"); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", r.dataset.cond); } catch (er) {} });
+    cl.addEventListener("dragover", e => { dropOff(); const d = at(e); if (!d) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; d.r.classList.add(d.after ? "dropa" : "dropb"); });
+    cl.addEventListener("dragleave", e => { if (!cl.contains(e.relatedTarget)) dropOff(); });
+    cl.addEventListener("drop", e => { const d = at(e), s = S.condDrag; dropOff(); if (!d) return; e.preventDefault(); e.stopPropagation(); S.condDrag = null; condMoveTo(s.dataset.cond, d.r.dataset.cond, d.after); });
+    cl.addEventListener("dragend", () => { if (S.condDrag) S.condDrag.classList.remove("dragging"); S.condDrag = null; dropOff(); });
+  }
   $("condQ").addEventListener("input", e => { S.condQ = e.target.value; renderConds(); });
   $("condTypes").addEventListener("click", e => { const b = e.target.closest("[data-cty]"); if (!b) return; S.condTy = b.dataset.cty; renderConds(); });
   /* right panel footer and the takeoff-agent bar at the bottom */
@@ -13651,7 +13686,7 @@ function keysDialog(){
     ${G("Markups (Bluebeam)", [["T | Q | N", "text box · callout · note"], ["Shift+L | Y | G", "line · polyline · polygon"], ["Shift+R | Shift+E | U", "rectangle · ellipse · cloud"], ["P | Shift+H", "pen · highlighter pen"], ["X | I", "stamp · image"], ["Markup ▾", "every markup tool: hyperlink, file attachment, redaction, erase…"], ["Dbl-click a markup", "edit its text · open a link or an attached file"], ["Drag a handle", "resize a box, move a line's end or a point"], ["Alt+L", "Markups list: every markup — filter, sort, status, replies, layers, CSV / XML / PDF summary"]])}
     ${G("Command line (status bar)", [[":", "put the cursor in the command line"], ["alias + Enter", "l, rec, ci, pol, tr, ex, f, cha, o, m, co, ro, sc, mi, br, j, x, ar, qs, inv, u, re…"], ["with a number", "pol 8 · ro 37 · sc 1.5 · f 0.5 · cha 0.5 0.75 · o 0.375"], ["Enter on an empty line", "repeat the last command"], ["↑ | ↓", "history"], ["Esc", "leave the command line"]])}
     ${G("Clipboard", [["Ctrl+C | Ctrl+X", "copy / cut the selection"], ["Ctrl+V", "paste at the cursor (same real size)"], ["Ctrl+Shift+V", "paste in place (same spot, any page)"], ["Ctrl+D", "duplicate"], ["Ctrl+arrow", "copy at a distance / array"], ["Ctrl+A", "select all on the page"]])}
-    ${G("Fast takeoff", [["J", "the condition list — the recent ones first, a filter, Quick items, New condition (also the condition button beside the ribbon tabs)"], ["`", "back to the condition used before"], ["1 … 9", "the first nine conditions"], ["*3 | Enter", "while drawing: this shape gets Nos 3 (the ribbon's Nos sets it for every new one)"], ["Enter", "with nothing drawn or selected: the last measuring tool again"]])}
+    ${G("Fast takeoff", [["J", "the condition list — the recent ones first, a filter, Quick items, New condition (also the condition button beside the ribbon tabs)"], ["`", "back to the condition used before"], ["1 … 9", "the first nine conditions"], ["Alt+↑ | Alt+↓", "move the selected condition up / down the list — or the ▴ ▾ on a row, drag a row, right-click → Move up / down / to the top / to the bottom"], ["*3 | Enter", "while drawing: this shape gets Nos 3 (the ribbon's Nos sets it for every new one)"], ["Enter", "with nothing drawn or selected: the last measuring tool again"]])}
     ${G("Drawing", [["A | R | W | E | C", "draw · rectangle · auto area · circle · count"], ["D | O", "deduction · opening"], ["F8 | F10", "Ortho (0° / 90°) · Polar tracking (every 15°…) — Shift frees one click while Ortho is on"], ["Snap ▾ (toolbar)", "choose the object snaps: endpoint, midpoint, intersection, perpendicular, nearest"], ["A (while drawing)", "next click is on an arc, the one after its end"], ["Ctrl+click", "place a point with no snap"], ["Shift", "0° / 90°"], ["Ctrl+Z | Backspace", "take back the last point (or arc)"], ["Ctrl+Y", "put it back"], ["Enter | double-click | right-click", "finish"], ["Esc", "cancel"], ["B", "break a run (Shift+click: delete a segment)"], ["M | Shift+M", "measure · angle (arm, corner, arm) — not saved, Esc clears"], ["Radius (ribbon / Ctrl+K)", "centre, edge → R, Ø, circumference — not saved"]])}
     ${G("View", [["Space+drag | right-drag | H", "pan"], ["Wheel", "zoom"], ["Z", "zoom window"], ["F", "fit page"], ["L | S", "labels · snap"], ["PgUp | PgDn", "page"], ["Home | End", "first / last page"], ["Shift+F", "fit width"], ["Ctrl+F", "find text"], ["Ctrl+S", "save now (also saved on every change)"], ["1–9", "pick a condition"], ["Ctrl+\\", "split window: this drawing in two windows (own zoom each) — again to close"], ["F6", "split window: work in the other window"], ["Split ▾ (toolbar)", "stacked, another project in the second window, sync zoom & pan, link cursor, match, swap"]])}
   </table>`, "Close");
@@ -14166,6 +14201,7 @@ function wire(){
     const ff = e.target.closest("[data-flfind]"); if (ff) { floorsDialog(ff.dataset.flfind); return; }
     const fm = e.target.closest("[data-flmenu]"), fr = fm && fm.closest(".ctr.fl[data-flpk]"); if (fr) { const b = fm.getBoundingClientRect(); floorMenu(b.left, b.bottom, fr.dataset.flpk, fr.dataset.fl); return; }
     const ed = e.target.closest("[data-edit]"); if (ed) return editCond(cond(ed.dataset.edit));
+    const cm = e.target.closest("[data-cmv]"), cmr = cm && cm.closest("[data-cond]"); if (cmr) { condMove(cmr.dataset.cond, +cm.dataset.cmv, cmr); return; }
     const ck = e.target.closest("[data-ck]"); if (ck) { if (ck.checked) S.condSel.add(ck.dataset.ck); else S.condSel.delete(ck.dataset.ck); renderConds(); return; }
     const cka = e.target.closest("[data-cka]"); if (cka) { S.condSel = cka.checked ? new Set(P.proj.conds.map(c => c.id)) : new Set(); renderConds(); return; }
     const ca = e.target.closest("[data-cact]"); if (ca) { const a = ca.dataset.cact, sel = S.condSel;
@@ -14265,6 +14301,7 @@ function wire(){
     if (mod && k === "z") { e.preventDefault(); return e.shiftKey ? redoAny() : undoAny(); }
     if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); return redoAny(); }
     if (e.altKey && S.cmp && /^Arrow/.test(e.key)) { e.preventDefault(); const st2 = (e.shiftKey ? 10 : 1) / S.view.s; S.cmp.dx += e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0; S.cmp.dy += e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0; clearTimeout(S.cmpT); S.cmpT = setTimeout(() => { renderLow(); renderHi(true); }, 120); return; }
+    if (e.altKey && !mod && !e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && S.cond && cond(S.cond)) { e.preventDefault(); condMove(S.cond, e.key === "ArrowUp" ? -1 : 1); return; }   // PlanSwift: the selected condition up / down the list
     if (mod && k === "a") { e.preventDefault(); return S.tool === "cadsel" ? cadSelAct("all") : selectAll(); }
     if (mod && !e.shiftKey && k === "i" && S.tool !== "cadsel") { e.preventDefault(); return invertSel(); }
     if (mod && /^Arrow/.test(e.key) && selIds().size) { e.preventDefault(); return arrayDialog({ArrowRight: "right", ArrowLeft: "left", ArrowUp: "up", ArrowDown: "down"}[e.key]); }   // PlanSwift: Ctrl + arrow copies at a distance
