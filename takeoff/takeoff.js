@@ -3568,7 +3568,7 @@ function rowsOf(it, k){
     const D = rD(2 * dist(it.pts[0], it.pts[1]) / k), H = c.unit === "cft" ? (+it.dep > 0 ? +it.dep : rD(+c.t || 0)) : null, faces = +c.faces || 1;
     if (c.type === "area") rows = [R({nos, A: rA(Math.PI / 4 * D * D), H, how: "circle", D})];
     else { const L = rD(Math.PI * D); rows = [c.unit === "ft" ? R({nos, L, how: "circle", D}) : c.unit === "Sft" ? R({nos: nos * faces, L, H: rD(+c.h || 0), how: "circle", D}) : R({nos, L, W: rD(+c.t || 0), H: rD(+c.h || 0), how: "circle", D})]; }
-    if (it.kind === "ded" && c.type === "area") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0); if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }
+    if (it.kind === "ded" && c.type === "area") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0) / nos; if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }   // (each one against the threshold)
   }
   else if (c.type === "linear") {
     if (it.kind === "open") {
@@ -3590,9 +3590,10 @@ function rowsOf(it, k){
     // one measured shape = one row: a plain rectangle as L × W, any other outline as its plan area (by coordinates)
     const F = it.pts.map(ft), tol = 0.002 * Math.max(1, Math.sqrt(polyArea(F)));
     const parts = rectilinear(F, tol), H = c.unit === "cft" ? (+it.dep > 0 ? +it.dep : rD(+c.t || 0)) : null;   // dep: a cut / fill from spot levels, its own average depth (not rounded: the volume is the one worked out)
-    rows = parts && parts.length === 1 ? [R({nos, L: rD(parts[0].L), W: rD(parts[0].W), H, how: "rect"})]
+    const pa = polyArea(F), sq = parts && parts.length === 1 && Math.abs(parts[0].L * parts[0].W - pa) <= Math.max(0.005, 1e-6 * pa);   // L × W only when it is the outline's area
+    rows = sq ? [R({nos, L: rD(parts[0].L), W: rD(parts[0].W), H, how: "rect"})]
          : [R({nos, A: rA(polyArea(F)), H, how: "poly", sides: F.length})];
-    if (it.kind === "ded") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0); if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }
+    if (it.kind === "ded") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0) / nos; if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }   // (each one against the threshold, not Nos × it)
     if (crossed(it)) rows.forEach(r => { r.bad = "crosses"; });   // its sides cross: no quantity (the area by coordinates is not the area drawn)
   }
   rows.forEach(r => { r.qty = r.below || r.bad ? 0 : qty(r); });
@@ -3678,7 +3679,7 @@ function matWallT(c, m){
   return {T: d / 12, how: ' (T ' + r3(d) + '" ' + (bw ? "the block's width" : "default") + ")"};
 }
 /* materials for a net quantity Q of condition c (Q in the condition's unit) → {basis, rows: [[name, value, unit, note]], err} */
-function matCalc(c, Q){
+function matCalc(c, Q, wa){   // wa: a wall in ft — its net face (wallFace), so each opening goes off at its own height
   const m = matOf(c); if (m.kind === "none") return null;
   const out = {m, rows: [], mats: [], basis: "", err: ""}, H = +c.h || 0, wst = 1 + (+m.wst || 0) / 100, u = c.unit, faces = +c.faces || 1;
   const mat = (k, n, q, un) => out.mats.push({k, n, q, u: un}), nm = (L, v) => (L.find(x => x[0] === v) || [v, v])[1];
@@ -3690,9 +3691,9 @@ function matCalc(c, Q){
     if (parts[2]) { out.rows.push(["Crush (coarse aggregate)", dry * parts[2] / sum, "cft", "dry × " + parts[2] + " / " + sum, cr]); mat("crush:" + cr, nm(MAT_CRUSH, cr), dry * parts[2] / sum, "cft"); } };
   if (Q <= 0) { out.err = "No net quantity measured yet"; return out; }
   if (m.kind === "plaster" || m.kind === "screed" || m.kind === "tile" || m.kind === "paint") {   // a finish: its area (× thickness)
-    const A = u === "Sft" ? Q : u === "ft" ? (H > 0 ? Q * H * faces : NaN) : NaN, what = {plaster: "Plaster", screed: "Screed", tile: "Tiling", paint: "Paint"}[m.kind];
+    const A = u === "Sft" ? Q : u === "ft" ? (H > 0 ? (wa != null ? Math.abs(wa) : Q * H) * faces : NaN) : NaN, what = {plaster: "Plaster", screed: "Screed", tile: "Tiling", paint: "Paint"}[m.kind];
     if (isNaN(A)) { out.err = u === "ft" ? "Type Height H in the box above — " + what.toLowerCase() + " area = L × H" : what + " is taken from an area (Sft) or a length (ft) with H, not " + u; return out; }
-    const aTxt = (u === "ft" ? uLenT(Q) + " × H " + f3(H) + (faces > 1 ? " × " + faces + " faces" : "") + " = " : "") + f3(A) + " Sft";
+    const aTxt = (u === "ft" ? uLenT(Q) + " × H " + f3(H) + (wa != null && Math.abs(Math.abs(wa) - Q * H) > 5e-4 ? " (openings at their own height)" : "") + (faces > 1 ? " × " + faces + " faces" : "") + " = " : "") + f3(A) + " Sft";
     if (m.kind === "tile") {
       const tt = m.tt === "TILE-CER" ? "TILE-CER" : "TILE-POR", ts = m.ts || "24x24", [tl, tw] = ts.split("x").map(x => parseFloat(x) / 12), tj = (m.tj != null && m.tj !== "" && +m.tj >= 0 ? +m.tj : matDef().tileJ) / 12;
       if (!(tl > 0 && tw > 0)) { out.err = "Tile size " + ts + " is not valid"; return out; }
@@ -3726,9 +3727,9 @@ function matCalc(c, Q){
   let V = NaN;
   if (u === "cft") V = Q;
   else if (u === "Sft") V = T > 0 ? Q * T : NaN;
-  else if (u === "ft") V = T > 0 && H > 0 ? Q * H * T : NaN;
+  else if (u === "ft") V = T > 0 && H > 0 ? (wa != null ? Math.abs(wa) : Q * H) * T : NaN;
   if (isNaN(V)) { out.err = u === "ft" ? "Type Height H" + (T > 0 ? "" : " and thickness T") + " in the boxes above — volume = L × H × T" : "Type the thickness T (inches) in the box above — volume = area × T"; return out; }
-  out.basis = u === "cft" ? f3(V) + " cft" : u === "Sft" ? f3(Q) + " Sft × T " + f3(T) + " = " + f3(V) + " cft" : uLenT(Q) + " × H " + f3(H) + " × T " + f3(T) + " = " + f3(V) + " cft";
+  out.basis = u === "cft" ? f3(V) + " cft" : u === "Sft" ? f3(Q) + " Sft × T " + f3(T) + " = " + f3(V) + " cft" : uLenT(Q) + " × H " + f3(H) + (wa != null && Math.abs(Math.abs(wa) - Q * H) > 5e-4 ? " (openings at their own height)" : "") + " × T " + f3(T) + " = " + f3(V) + " cft";
   if (u !== "cft" || m.kind === "block") out.basis += wt.how;
   if (m.kind === "concrete") { const dry = V * 1.54 * wst; out.rows.push(["Concrete", V, "cft", ""], ["Dry volume", dry, "cft", "V × 1.54" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out; }
   const jIn = matJoint(c, m), j = jIn / 12;
@@ -3756,7 +3757,7 @@ function matPriced(r){
 const matQ = (q, u) => u === "Nos" ? fq(q, "Nos") : u === "bags" ? f2(q) : f3(q);
 /* the Materials section of the Properties box: the condition's (or one measurement's) materials, priced from Cost Control, and its settings */
 function matHtml(c, Q, own){
-  const m = matOf(c), r = matCalc(c, Q), mixes = MAT_MIXES[m.kind] || [];
+  const m = matOf(c), r = matCalc(c, Q, !own && c.unit === "ft" ? wallFace(c) : null), mixes = MAT_MIXES[m.kind] || [];
   const sel = (k, opts, v) => `<select data-matk="${k}" style="min-width:0">${opts.map(o => { const [a, b] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(a)}"${String(v) === String(a) ? " selected" : ""}>${esc(b)}</option>`; }).join("")}</select>`;
   const mason = m.kind === "brick" || m.kind === "block", vol = mason || m.kind === "concrete", fin = m.kind === "plaster" || m.kind === "screed" || m.kind === "tile" || m.kind === "paint";
   const bedM = m.kind === "tile" && m.bed === "mortar", mortar = m.kind !== "none" && m.kind !== "paint" && (m.kind !== "tile" || bedM), tName = mason ? matNameIn(c) : 0;
@@ -3797,18 +3798,27 @@ function matHtml(c, Q, own){
    built-up rate of a Rate Analysis code); a rate without them is flagged, never assumed.
    only(it) limits everything to some measurements (one revision's sheets, one floor). */
 function condVars(c, only){
-  const v = {Q: 0, A: 0, P: 0, PD: 0, D: 0, L: 0, N: 0, H: +c.h || 0, T: +c.t || 0};
+  const v = {Q: 0, A: 0, P: 0, PD: 0, D: 0, L: 0, N: 0, OA: 0, H: +c.h || 0, T: +c.t || 0};
   P.proj.items.filter(i => i.cond === c.id && (!only || only(i))).forEach(it => {
-    const k = itemScale(it); if (!k || crossed(it)) return;   // (an outline crossing itself: none of its figures — area, perimeter, count)
+    const k = qScale(it); if (!k || crossed(it)) return;   // (an outline crossing itself: none of its figures — area, perimeter, count; a count needs no scale)
     const rows = rowsOf(it, k), sg = it.kind === "shape" ? 1 : -1, nos = +it.nos || 1;
     rows.forEach(r => { v.Q += r.qty; if (r.below) return;
-      if (c.type === "area") v.A += r.sign * (r.nos || 1) * (r.A != null ? r.A : (r.L || 0) * (r.W || 0)); });
-    if (c.type === "area" && it.kind === "shape") { const per = polyLen(itemPoly(it), true) / k, dr = Math.min(per, doorsOn(it).ft); v.P += nos * per; v.D += nos * dr; v.PD += nos * (per - dr); }
+      if (c.type === "area") v.A += r.sign * (r.nos || 1) * (r.A != null ? r.A : (r.L || 0) * (r.W || 0)) * (r.F || 1); });   // (a sloped area: along the slope, as its quantity)
+    if (c.type === "linear" && it.kind === "open") v.OA += openArea(it, k, c);   // the openings' faces (each its width × its own height) for the wall area and volume
+    if (c.type === "area" && it.kind === "shape") { const per = itemPerimFt(it, k), dr = Math.min(per, doorsOn(it).ft); v.P += nos * per; v.D += nos * dr; v.PD += nos * (per - dr); }
     if (c.type === "linear" && it.kind !== "open") { const p = pitchOf(it, c); v.L += sg * nos * ((it.shape === "circle" ? Math.PI * 2 * dist(it.pts[0], it.pts[1]) : polyLen(it.pts)) / k * (p > 0 ? slopeF(p) : 1) + (it.shape === "circle" ? 0 : Math.abs(+it.rise || 0))); }   // along the slope, with any rise / drop
     if (c.type === "count") v.N += it.pts.length * nos; else if (it.kind === "shape") v.N += nos;
   });
   return v;
 }
+/* an opening's face on its wall (Sft, one face): Nos × its width × its own height — no height given: the wall's (as before); at or under
+   the condition's threshold: none (the house rule, as its row) */
+function openArea(it, k, c){
+  const H = +c.h || 0, w = openW(it, k), h0 = openH(it), h = h0 > 0 ? (H > 0 ? Math.min(h0, H) : h0) : H;
+  return r3(w) * r3(h) <= (+c.dedMin || 0) ? 0 : (+it.nos || 1) * rD(w) * rD(h);
+}
+/* a wall's net face (Sft, one face) over some of its measurements: length × H less every opening — null when it is not a wall with H */
+function wallFace(c, only){ if (!c || c.type !== "linear" || !(+c.h > 0)) return null; const v = condVars(c, only); return v.L * +c.h - v.OA; }
 function evalFormula(src, vars, ref){   // + - * / ^ ( ) numbers, variables, [Condition name].A (another condition's variable), functions; throws on anything else
   src = String(src); const t = [], re = /\s+|\[[^\]]+\]\.[A-Za-z]+|\d*\.?\d+(?:e[+-]?\d+)?|[A-Za-z_]+|[-+*/^(),]/y;
   while (re.lastIndex < src.length) { const m = re.exec(src); if (!m) throw new Error("Only numbers, + - * / ^ ( ) and " + Object.keys(vars).join(" ") + " or [Condition name].A are allowed"); if (!/^\s/.test(m[0])) t.push(m[0]); }
@@ -3976,10 +3986,10 @@ const QT_NAMES = {q: "Quantity", len: "Length", area: "Wall area", vol: "Volume"
 function condQ(c, qt, only, vars){
   const v = vars || condVars(c, only), H = +c.h || 0, T = +c.t || 0, fc = +c.faces || 1, mk = (x, unit) => ({v: x, unit, name: QT_NAMES[qt]});
   if (!qt || qt === "q") return mk(v.Q, c.unit);
-  if (c.type === "linear") { const len = c.unit === "ft" ? v.Q : v.L;
+  if (c.type === "linear") { const len = c.unit === "ft" ? v.Q : v.L, WA = Math.max(0, v.L * H - (v.OA || 0));   // WA: the wall's face — its length × H less every opening at its own height (a door 3 × 7 in a 10 ft wall takes 21 Sft, not 30)
     if (qt === "len") return mk(len, "ft");
-    if (qt === "area") return c.unit === "Sft" ? mk(v.Q, "Sft") : H > 0 ? mk(len * H * fc, "Sft") : null;
-    if (qt === "vol") return c.unit === "cft" ? mk(v.Q, "cft") : H > 0 && T > 0 ? mk(len * H * T, "cft") : null;
+    if (qt === "area") return c.unit === "Sft" ? mk(v.Q, "Sft") : H > 0 ? mk(WA * fc, "Sft") : null;
+    if (qt === "vol") return c.unit === "cft" ? mk(v.Q, "cft") : c.unit === "Sft" ? (T > 0 ? mk(v.Q / fc * T, "cft") : null) : H > 0 && T > 0 ? mk(WA * T, "cft") : null;
     if (qt === "n") return mk(v.N, "Nos"); return null; }
   if (c.type === "area") {
     if (qt === "sarea") return mk(c.unit === "Sft" ? v.Q : v.A, "Sft");
@@ -4045,7 +4055,7 @@ function renderBill(){
 /* the takeoff's materials: every condition's cement, sand, crush, bricks and blocks, totalled per library item and priced from it */
 function matSummary(){
   const per = [], tot = new Map();
-  P.proj.conds.forEach(c => { const t = condTotals(c); if (!(t.net > 0)) return; const r = matCalc(c, t.net); if (!r) return;
+  P.proj.conds.forEach(c => { const t = condTotals(c); if (!(t.net > 0)) return; const r = matCalc(c, t.net, c.unit === "ft" ? wallFace(c) : null); if (!r) return;
     const pr = matPriced(r); per.push({c, r, pr});
     pr.rows.forEach(x => { const k = x.code || x.n + " (" + x.u + ")"; const o = tot.get(k) || {n: x.R.rate ? x.R.name : x.n, u: x.u, q: 0, R: x.R}; o.q += x.q; tot.set(k, o); }); });
   return {per, tot: [...tot.values()]};
@@ -4079,12 +4089,13 @@ const matLine = mats => mats.map(x => esc(x.n) + " <b>" + matQ(x.q, x.u) + "</b>
 /* the materials of some measurements: per condition (in the list's order) their net quantity and its materials */
 function matFor(its){
   const by = new Map(); its.forEach(it => { const c = cond(it.cond); if (!matMeas(c)) return; const q = qtyOf(it); if (q != null) by.set(c.id, (by.get(c.id) || 0) + q); });
-  return P.proj.conds.filter(c => by.has(c.id)).map(c => ({c, Q: by.get(c.id), r: matCalc(c, by.get(c.id))})).filter(o => o.r);
+  const ids = new Set(its.map(i => i.id));
+  return P.proj.conds.filter(c => by.has(c.id)).map(c => ({c, Q: by.get(c.id), r: matCalc(c, by.get(c.id), c.unit === "ft" ? wallFace(c, i => ids.has(i.id)) : null)})).filter(o => o.r);
 }
 /* one measurement's own materials — a deduction or an opening takes its share off (negative) */
 function matItem(it){
   const c = cond(it.cond); if (!matMeas(c)) return null; const q = qtyOf(it); if (q == null || !q) return null;
-  const r = matCalc(c, Math.abs(q)); if (!r) return null; const s = q < 0 ? -1 : 1;
+  const r = matCalc(c, Math.abs(q), c.unit === "ft" ? wallFace(c, i => i.id === it.id) : null); if (!r) return null; const s = q < 0 ? -1 : 1;
   return {c, it, Q: q, r, mats: r.err ? [] : r.mats.map(x => Object.assign({}, x, {q: x.q * s}))};
 }
 /* the measurements with materials in groups: by "kind" (type of work: brick, block, plaster... in that order), "floor" (building · floor,
@@ -5534,17 +5545,20 @@ function apClean(c, v){   // keep only what differs from the condition's standar
   return out;
 }
 /* the totals a condition's measurements add up to, read in its appearance's units */
+const itemAreaFt = (it, k) => it.shape === "circle" ? Math.PI * Math.pow(dist(it.pts[0], it.pts[1]) / k, 2) : polyArea(itemPoly(it)) / k / k;   // a circle exactly (its outline has 72 sides)
+const itemPerimFt = (it, k) => it.shape === "circle" ? 2 * Math.PI * dist(it.pts[0], it.pts[1]) / k : polyLen(itemPoly(it), true) / k;
 function condTotalsList(c, its){
   const a = apOf(c), T0 = {len: 0, ded: 0, area: 0, darea: 0, per: 0, n: 0, pts: 0, segs: 0, noScale: 0, crossed: 0}, out = [];
   its.forEach(it => { const k = qScale(it); if (!k) { T0.noScale++; return; } if (crossed(it)) { T0.crossed++; return; } const poly = itemPoly(it), sgn = it.kind === "ded" || it.kind === "open" ? -1 : 1, nos = +it.nos || 1;
+    if (sgn < 0 && c.type !== "count") { const rs = rowsOf(it, k); if (rs.length && rs.every(r => r.below)) { T0.n++; return; } }   // (at or under the threshold: not taken off, as on the sheet)
     if (c.type === "count") { T0.pts += it.pts.length * nos; return; }
-    if (c.type === "area") { const A = polyArea(poly) / k / k * nos; if (sgn > 0) T0.area += A; else T0.darea += A; T0.per += polyLen(poly, true) / k * nos * (sgn > 0 ? 1 : 0); }
-    else { const L = (it.kind === "open" ? dist(it.pts[0], it.pts[1]) : it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k * nos; if (sgn > 0) T0.len += L; else T0.ded += L; T0.segs += Math.max(1, it.pts.length - 1);
+    if (c.type === "area") { const A = itemAreaFt(it, k) * nos; if (sgn > 0) T0.area += A; else T0.darea += A; T0.per += itemPerimFt(it, k) * nos * (sgn > 0 ? 1 : 0); }
+    else { const L = (it.kind === "open" ? openW(it, k) : it.shape === "circle" ? itemPerimFt(it, k) : polyLen(it.pts) / k) * nos; if (sgn > 0) T0.len += L; else T0.ded += L; T0.segs += Math.max(1, it.pts.length - 1);
       if (it.kind !== "open" && it.shape !== "circle" && +it.rise) T0.rise = (T0.rise || 0) + sgn * Math.abs(+it.rise) * nos; }
     if (it.kind !== "open" && pitchOf(it, c) > 0) T0.sloped = (T0.sloped || 0) + 1;
     T0.n++; });
   const q = condTotals(c);
-  if (c.type === "linear") { out.push(["Length", apLen(T0.len - T0.ded, a)]); if (T0.rise) out.push(["Rise / drop (added)", apLen(T0.rise, a)]); if (T0.ded) out.push(["Gross length", apLen(T0.len, a)], ["Deducted", apLen(T0.ded, a)]); if (+c.h) out.push(["Wall area (× H)", apArea((T0.len - T0.ded) * +c.h * (+c.faces || 1), a)]); if (+c.h && +c.t) out.push(["Volume (× H × T)", apVol((T0.len - T0.ded) * +c.h * +c.t, a)]); out.push(["Segments", String(T0.segs)]); }
+  if (c.type === "linear") { out.push(["Length", apLen(T0.len - T0.ded, a)]); if (T0.rise) out.push(["Rise / drop (added)", apLen(T0.rise, a)]); if (T0.ded) out.push(["Gross length", apLen(T0.len, a)], ["Deducted", apLen(T0.ded, a)]); if (+c.h) { const wa = condQ(c, "area"); if (wa) out.push(["Wall area (× H, less openings)", apArea(wa.v, a)]); } if (+c.h && +c.t) { const vo = condQ(c, "vol"); if (vo) out.push(["Volume (× H × T, less openings)", apVol(vo.v, a)]); } out.push(["Segments", String(T0.segs)]); }
   else if (c.type === "area") { out.push(["Area", apArea(T0.area - T0.darea, a)]); if (T0.darea) out.push(["Gross area", apArea(T0.area, a)], ["Deducted", apArea(T0.darea, a)]); out.push(["Perimeter", apLen(T0.per, a)]); if (+c.t) out.push(["Volume (× T)", apVol((T0.area - T0.darea) * +c.t, a)]); }
   else out.push(["Count", String(T0.pts) + " Nos"]);
   out.push(["Quantity", fq(q.net, c.unit) + " " + uL(c.unit) + (c.unit !== "ft" && c.unit !== "Sft" && c.unit !== "cft" ? "" : a.units !== "ft" ? " (" + apQty(q.net, c.unit, a) + ")" : "")], ["Measurements", String(T0.n)]);
@@ -5558,8 +5572,8 @@ function itemTotalsList(it, c, k){   // one measurement's own totals, in its app
   const a = apOf(c, it); if (!k) return [["Scale", "not set"]];
   const poly = itemPoly(it), nos = +it.nos || 1, rows = rowsOf(it, k), q = rows.reduce((s2, r) => s2 + (r.below ? 0 : r.qty), 0), out = [];
   if (crossed(it)) return [["Area", "— the outline crosses itself"], ["Quantity", "left out of the totals until its points are fixed"]];
-  if (c.type === "area") { out.push(["Area", apArea(polyArea(poly) / k / k * nos, a)], ["Perimeter", apLen(polyLen(poly, true) / k * nos, a)]); if (+c.t) out.push(["Volume", apVol(polyArea(poly) / k / k * +c.t * nos, a)]); }   // (perimeter × Nos, as the area)
-  else if (c.type === "linear") { const L = (it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k; out.push(["Length", apLen(L * nos, a)]); if (+c.h) out.push(["Wall area", apArea(L * +c.h * (+c.faces || 1) * nos, a)]); out.push(["Segments", String(Math.max(1, it.pts.length - 1))]);
+  if (c.type === "area") { out.push(["Area", apArea(itemAreaFt(it, k) * nos, a)], ["Perimeter", apLen(itemPerimFt(it, k) * nos, a)]); if (+c.t) out.push(["Volume", apVol(itemAreaFt(it, k) * +c.t * nos, a)]); }   // (perimeter × Nos, as the area; a circle exactly)
+  else if (c.type === "linear") { const op = it.kind === "open", L = op ? openW(it, k) : it.shape === "circle" ? itemPerimFt(it, k) : polyLen(it.pts) / k; out.push([op ? "Width" : "Length", apLen(L * nos, a)]); if (+c.h) out.push([op ? "Opening area (its own height)" : "Wall area", apArea(op ? openArea(it, k, c) * (+c.faces || 1) : L * +c.h * (+c.faces || 1) * nos, a)]); out.push(["Segments", String(Math.max(1, it.pts.length - 1))]);
     if (it.shape !== "circle" && +it.rise) out.push([+it.rise > 0 ? "Rise" : "Drop", apLen(Math.abs(+it.rise) * nos, a)]); }
   else out.push(["Count", it.pts.length * nos + " Nos"]);
   if (it.shape === "circle") out.push(["Radius / dia", apLen(dist(it.pts[0], it.pts[1]) / k, a) + " / " + apLen(2 * dist(it.pts[0], it.pts[1]) / k, a)]);
@@ -5800,7 +5814,7 @@ function legendRowsOf(list, m){   // one row per condition: its quantity, the pe
   const map = new Map();
   list.forEach(it => { const c = cond(it.cond); if (!c) return; let q = 0, has = false, per = 0;
     if (c.type === 'count') { q = (+it.pts?.length || 0) * Math.max(1, +it.nos || 1); has = true; }
-    else { const k = qScale(it); if (k) { q = rowsOf(it, k).reduce((a, r) => a + (+r.qty || 0), 0); has = true; if (c.type === 'area' && it.kind === 'shape') per = (+it.nos || 1) * polyLen(itemPoly(it), true) / k; } }
+    else { const k = qScale(it); if (k) { q = rowsOf(it, k).reduce((a, r) => a + (+r.qty || 0), 0); has = true; if (c.type === 'area' && it.kind === 'shape') per = (+it.nos || 1) * itemPerimFt(it, k); } }
     if (!has && !q) return;
     const x = map.get(c.id) || {c, q: 0, has: false, per: 0, its: []}; x.q += q; x.has = x.has || has; x.per += per; x.its.push(it); map.set(c.id, x); });
   let rows = [...map.values()].filter(x => x.has || x.q !== 0); rows.forEach(x => { x.ap = legAp(x.c, x.its); });
@@ -5853,9 +5867,10 @@ function legVars(r){   // a row's variables (as a custom column's) and its gross
   if (r._v) return r._v;
   const ids = new Set((r.its || []).map(i => i.id)), only = it => ids.has(it.id), c = r.c, g = {ga: 0, da: 0, gl: 0, dl: 0, n: 0, ck: 0, pg: new Set()};
   (r.its || []).forEach(it => { g.pg.add(keyOf(it.file, it.page)); if (it.kind === "shape") { g.n++; if (it.qa === "checked") g.ck++; }
-    const k = qScale(it); if (!k || c.type === "count") return; const nos = +it.nos || 1, neg = it.kind === "ded" || it.kind === "open", poly = itemPoly(it);
-    if (c.type === "area") { const A = polyArea(poly) / k / k * nos; if (neg) g.da += A; else g.ga += A; }
-    else { const L = (it.kind === "open" ? dist(it.pts[0], it.pts[1]) : it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k * nos; if (neg) g.dl += L; else g.gl += L; } });
+    const k = qScale(it); if (!k || c.type === "count" || crossed(it)) return; const nos = +it.nos || 1, neg = it.kind === "ded" || it.kind === "open";
+    if (neg) { const rs = rowsOf(it, k); if (rs.length && rs.every(r => r.below)) return; }   // (at or under the threshold: not taken off)
+    if (c.type === "area") { const A = itemAreaFt(it, k) * nos; if (neg) g.da += A; else g.ga += A; }
+    else { const L = (it.kind === "open" ? openW(it, k) : it.shape === "circle" ? itemPerimFt(it, k) : polyLen(it.pts) / k) * nos; if (neg) g.dl += L; else g.gl += L; } });
   r._only = only; r._g = g; r._v = condVars(c, only); return r._v;
 }
 const legMoney = (v, m) => { const d = Math.max(0, Math.min(2, Math.round(m.moneyPrecision == null ? 2 : +m.moneyPrecision))); return (+v).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d}); };
@@ -5875,11 +5890,11 @@ function legVal(col, r, m){   // a cell -> {s: as shown, v: its figure (null: no
     case "n": return cnt(g.n);
     case "nos": return cnt(V.N);
     case "length": return c.type === "linear" ? num(V.L, "ft") : c.type === "area" ? num(V.P, "ft") : none;
-    case "area": return c.type === "area" ? num(V.A, "Sft") : c.type === "linear" && H ? num(V.L * H * F, "Sft") : none;
-    case "warea": return c.type === "linear" && H ? num(V.L * H * F, "Sft") : c.type === "area" && H ? num(V.P * H, "Sft") : none;
+    case "area": { if (c.type === "area") return num(V.A, "Sft"); const q = c.type === "linear" ? condQ(c, "area", r._only, V) : null; return q ? num(q.v, "Sft") : none; }
+    case "warea": { if (c.type === "area") return H ? num(V.P * H, "Sft") : none; const q = c.type === "linear" ? condQ(c, "area", r._only, V) : null; return q ? num(q.v, "Sft") : none; }
     case "height": return H ? num(H, "ft") : none;
     case "thick": return T ? num(T, "ft") : none;
-    case "volume": return c.type === "area" && T ? num(V.A * T, "cft") : c.type === "linear" && H && T ? num(V.L * H * T, "cft") : none;
+    case "volume": { if (c.type === "area") return T ? num(V.A * T, "cft") : none; const q = c.type === "linear" ? condQ(c, "vol", r._only, V) : null; return q ? num(q.v, "cft") : none; }
     case "gross": return c.type === "area" ? num(g.ga, "Sft") : c.type === "linear" ? num(g.gl, "ft") : none;
     case "ded": return c.type === "area" && g.da ? num(g.da, "Sft") : c.type === "linear" && g.dl ? num(g.dl, "ft") : none;
     case "pdoor": return c.type === "area" ? num(V.PD, "ft") : none;
@@ -6557,7 +6572,7 @@ function shSorted(its, c){
 function renderSheet(){
   const el = $("sheet");
   if (!P.proj) { el.innerHTML = ""; return; }
-  const missing = P.proj.items.filter(it => !itemScale(it)).length, xc = P.proj.items.filter(it => itemScale(it) && crossed(it)).length;
+  const missing = P.proj.items.filter(it => !qScale(it)).length, xc = P.proj.items.filter(it => itemScale(it) && crossed(it)).length;   // (a count needs no scale)
   const unv = Object.values(P.proj.scales).filter(s => !s.verified && s.how !== "inherited").length, inh = Object.values(P.proj.scales).filter(s => !s.verified && s.how === "inherited").length;
   const wb = $("warnbar"), msgs = [];
   if (missing) msgs.push(missing + " measurement" + (missing > 1 ? "s are" : " is") + " on a page with no scale — set it with <b>K</b>; they are left out of the totals.");
@@ -6573,7 +6588,7 @@ function renderSheet(){
     const t = condTotals(c);
     h += `<tr class="ch"><td colspan="4"><span class="sw" style="background:${c.color}"></span>${c.boq ? `<span class="boq">${esc(c.boq)}</span> ` : ""}${esc(c.name)} <span style="font-weight:400;color:var(--muted)">(${esc(uL(c.unit))})</span>${(P.proj.cols || []).length ? `<span class="ccols">${colChips(c)}</span>` : ""}</td></tr>`;
     its.forEach(it => {
-      const k = itemScale(it), vp = viewportAt(it.file, it.page, it.pts[0]), lt = locText(locOf(it)), pg = pageName(it) + (vp ? " · " + vp.name : "") + (lt ? " · " + lt : "");
+      const k = qScale(it), vp = viewportAt(it.file, it.page, it.pts[0]), lt = locText(locOf(it)), pg = pageName(it) + (vp ? " · " + vp.name : "") + (lt ? " · " + lt : "");
       if (!k) { h += `<tr class="it${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${++n}</td><td>${esc(it.label || kindName(it, c))}<div class="ds">${esc(pg)} · scale not set</div></td><td class="n">—</td><td class="n">—</td></tr>`; return; }
       rowsOf(it, k).forEach((r, i) => {
         const desc = (r.sign < 0 ? "Ded. " : "") + (it.label || kindName(it, c)) + (r.part ? " — part " + String.fromCharCode(96 + r.part) : "") + (r.rise ? " — " + (r.rise > 0 ? "rise" : "drop") : "");
@@ -8789,7 +8804,8 @@ async function exportExcel(){
         rr.getCell(1).value = i === 0 ? ++sn : null;
         rr.getCell(2).value = rowDesc(x);
         rr.getCell(3).value = pageName(it);
-        const W = ww ? (+g.c.t > 0 ? rD(+g.c.t) : null) : r.W, H = ww ? (+g.c.h > 0 ? rD(+g.c.h) : null) : r.H;
+        const oH = ww && it.kind === "open" && +g.c.h > 0 ? (openH(it) > 0 ? rD(Math.min(openH(it), +g.c.h)) : rD(+g.c.h)) : null, oBelow = oH != null && r3(openW(it, qScale(it) || 1)) * r3(oH) <= (+g.c.dedMin || 0);   // an opening: its own height (none given: the wall's)
+        const W = ww ? (+g.c.t > 0 ? rD(+g.c.t) : null) : r.W, H = ww ? (oH != null ? (oBelow ? 0 : oH) : +g.c.h > 0 ? rD(+g.c.h) : null) : r.H;
         (r.bad ? [r.nos, null, null, null] : [r.nos, r.A != null ? uX(r.A, "Sft") : uX(r.L, "ft"), uX(W, "ft"), uX(H, "ft")]).forEach((v, j) => {   // (an outline crossing itself: no dimensions, Qty 0 in yellow)
           const cell = rr.getCell(4 + j);
           if (j === 1 && r.runs && r.runs.length > 1 && !r.bad) cell.value = {formula: r.runs.map(x => isM() ? String(uX(x, "ft")) : f3(x)).join("+"), result: uX(r.L, "ft")};
@@ -8812,9 +8828,9 @@ async function exportExcel(){
         row++;
       });
       const tr = ws.getRow(row); tr.getCell(2).value = "Total " + g.c.name; tr.getCell(9).value = uL(g.c.unit);
-      tr.getCell(8).value = {formula: `SUM(H${first}:H${row - 1})`, result: uV(g.t.net, g.c.unit)}; tr.getCell(8).numFmt = qFmt(g.c.unit);
+      tr.getCell(8).value = row > first ? {formula: `SUM(H${first}:H${row - 1})`, result: uV(g.t.net, g.c.unit)} : {formula: "0", result: 0}; tr.getCell(8).numFmt = qFmt(g.c.unit);   // (no row: 0 — SUM(H9:H8) would take in its own cell)
       if (ww) [[cA, "Sft", +g.c.h > 0], [cV, "cft", +g.c.h > 0 && +g.c.t > 0]].forEach(([n, u, on]) => { if (!on) return; const L1 = xlLetter(n), tc = tr.getCell(n);
-        tc.value = {formula: `SUM(${L1}${first}:${L1}${row - 1})`, result: g.rows.reduce((a, x) => { const v = ws.getRow(first + g.rows.indexOf(x)).getCell(n).value; return a + (v && typeof v.result === "number" ? v.result : 0); }, 0)}; tc.numFmt = qFmt(u); tc.fill = GREY; });
+        tc.value = row <= first ? {formula: "0", result: 0} : {formula: `SUM(${L1}${first}:${L1}${row - 1})`, result: g.rows.reduce((a, x) => { const v = ws.getRow(first + g.rows.indexOf(x)).getCell(n).value; return a + (v && typeof v.result === "number" ? v.result : 0); }, 0)}; tc.numFmt = qFmt(u); tc.fill = GREY; });
       tr.font = {bold: true}; for (let n = 1; n <= 9; n++) tr.getCell(n).fill = GREY;
       totals.push({c: g.c, cell: "H" + row, t: g.t}); row++;
     }
@@ -8971,7 +8987,7 @@ function pageOverlaySvg0(file, page, sc, W, H, legend){
     const c = cond(it.cond); if (!c) return;
     const k = qScale(it), rows = k ? rowsOf(it, k) : [], q = rows.reduce((a, r) => a + r.qty, 0), col = c.color, ded = it.kind === "ded";
     tot[c.id] = (tot[c.id] || 0) + q; (its[c.id] = its[c.id] || []).push(it);
-    if (c.type === "area" && it.kind === "shape" && k && !crossed(it)) per[c.id] = (per[c.id] || 0) + (+it.nos || 1) * polyLen(itemPoly(it), true) / k;   // (as P in the bill)
+    if (c.type === "area" && it.kind === "shape" && k && !crossed(it)) per[c.id] = (per[c.id] || 0) + (+it.nos || 1) * itemPerimFt(it, k);   // (as P in the bill)
     if (c.type === "count") { h.push(countSvg(c, it.pts, T, z, -1)); return; }
     if (it.kind === "open") { const a = T(it.pts[0]), b = T(it.pts[1]); h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${4 * z * wz}" stroke-linecap="round"/>`); return; }
     h.push(measSvg(it, c, {T, z, lz: o.z > 0 ? z : z * lblPageK(file, page), lps: lblPS() && !(o.z > 0), wz, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false}));   // (a plot gives its labels' size on paper)
@@ -12379,7 +12395,7 @@ function qaCounts(){
   const its = P.proj.items, used = new Set(its.map(i => i.cond)), rate = P.proj.conds.reduce((a, c) => a + (used.has(c.id) || (c.asm || []).length ? [c].concat(c.asm || []).filter(o => { const r = rateOf(o, o === c ? c.unit : o.unit); return r.na || !(r.rate > 0); }).length : 0), 0);
   return {n: its.length, checked: its.filter(i => i.qa === "checked").length, recheck: its.filter(i => i.qa === "recheck").length, review: its.filter(needsReview).length,
           boq: P.proj.conds.filter(c => used.has(c.id) && !String(c.boq || "").trim()).length, ai: its.filter(i => i.ai && i.qa !== "checked").length, copied: its.filter(i => i.copied && i.qa !== "checked").length, rate,
-          scale: Object.values(P.proj.scales).filter(s => !s.verified).length + new Set(its.filter(i => !itemScale(i)).map(i => keyOf(i.file, i.page))).size};
+          scale: Object.values(P.proj.scales).filter(s => !s.verified).length + new Set(its.filter(i => !qScale(i)).map(i => keyOf(i.file, i.page))).size};
 }
 function qaFilterOk(it){ const f = S.qaFilter; return !f || (f === "checked" ? it.qa === "checked" : f === "pending" ? it.qa !== "checked" : f === "recheck" ? it.qa === "recheck" : f === "review" ? needsReview(it) : true); }
 /* the next measurement not yet checked, in page order across every PDF (after the selected one); it is opened, selected and zoomed to */
@@ -12516,7 +12532,7 @@ function sizeMismatch(it, k){
 function validate(){
   const out = [], E = (lvl, msg) => out.push({lvl, msg});
   if (!P.proj.items.length) E("WARNING", "Nothing is measured yet");
-  const noSc = new Map(); P.proj.items.forEach(it => { if (!itemScale(it)) noSc.set(keyOf(it.file, it.page), (noSc.get(keyOf(it.file, it.page)) || 0) + 1); });
+  const noSc = new Map(); P.proj.items.forEach(it => { if (!qScale(it)) noSc.set(keyOf(it.file, it.page), (noSc.get(keyOf(it.file, it.page)) || 0) + 1); });
   noSc.forEach((n, k) => E("ERROR", `${keyName(k)}: scale not set — ${n} measurement${n > 1 ? "s" : ""} left out of the totals`));
   Object.entries(P.proj.scales).forEach(([k, sc]) => { if (!sc.verified && P.proj.items.some(it => keyOf(it.file, it.page) === k)) E("WARNING", `${keyName(k)}: scale ${scaleState(sc).t.toLowerCase()} — verify with a known dimension`); });
   P.proj.items.forEach(it => { if (!cond(it.cond)) E("ERROR", `A measurement on ${pageName(it)} belongs to a deleted condition`); });
