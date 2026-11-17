@@ -578,7 +578,9 @@ if (TABCH) TABCH.onmessage = e => { const m = e.data || {}; if (!P.proj || m.tab
   if (m.t === "open") tabSay({t: "here", id: P.proj.id});
   S.otherTab = m.t === "saved" ? "changed in another tab or window at " + dmyHm(m.at).slice(-5) : "also open in another tab or window";
   renderSheet(); };
-const UNDO_KEYS = ["units", "conds", "items", "scales", "viewports", "floors", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd", "bbImp", "cols", "rot", "pageOrder", "pageHide", "flShare"];
+const UNDO_KEYS = ["units", "conds", "items", "scales", "viewports", "floors", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd", "bbImp", "cols", "rot", "pageOrder", "pageHide", "flShare",
+  "levels", "lvUnit", "matDef", "cfF", "finDH", "asmTpl"];   // (not vec: scan lines are large and only change with the PDF)
+const UNDO_OPT = ["units", "levels", "lvUnit", "matDef", "cfF", "finDH", "asmTpl"];   // fields a project may not have yet: taken back to none (the first spot level placed is undone too)
 function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 /* every change goes through mutate(): the project before it is kept for Ctrl+Z (200 steps), with a name for the
    undo / redo buttons ("Undo: Move 3 measurements") */
@@ -635,7 +637,8 @@ function draftBtns(){
 }
 function undo(){ if (!S.undo.length) return; const e = undoEntry(S.undo.pop()); S.redo.push({js: snapshot(), label: e.label}); restore(e.js); toast("Undone" + (e.label ? ": " + e.label : ""), 1600); }
 function redo(){ if (!S.redo.length) return; const e = undoEntry(S.redo.pop()); S.undo.push({js: snapshot(), label: e.label}); restore(e.js); toast("Redone" + (e.label ? ": " + e.label : ""), 1600); }
-function restore(js){ const o = JSON.parse(js), bb0 = P.proj.bbImp || {}, rt0 = Object.assign({}, P.proj.rot); UNDO_KEYS.forEach(k => { if (o[k] !== undefined) P.proj[k] = o[k]; }); if (o.units === undefined) delete P.proj.units; migrate(P.proj);
+function restore(js){ const o = JSON.parse(js), bb0 = P.proj.bbImp || {}, rt0 = Object.assign({}, P.proj.rot); UNDO_KEYS.forEach(k => { if (o[k] !== undefined) P.proj[k] = o[k]; }); UNDO_OPT.forEach(k => { if (o[k] === undefined) delete P.proj[k]; }); migrate(P.proj);
+  if (S.cond && !cond(S.cond)) S.cond = (P.proj.conds[0] || {}).id || null;   // (the condition taken back: the first one, never a missing one)
   const rt1 = P.proj.rot || {}, rtK = Object.keys(Object.assign({}, rt0, rt1)).filter(k => (rt0[k] || 0) !== (rt1[k] || 0)); if (rtK.length) rotDrop(rtK);   // a page's turn taken back: read again at its turn
   bbRedraw(Object.keys(Object.assign({}, bb0, P.proj.bbImp)).filter(id => !!(bb0[id] || {}).off !== !!(P.proj.bbImp[id] || {}).off));   // a Bluebeam import taken back (or redone): the PDF's own markups shown again
   if (S.sel && !P.proj.items.some(i => i.id === S.sel)) { S.sel = null; S.selPt = -1; }
@@ -1148,6 +1151,7 @@ function setLayer(ids, on){
    applied, and the page shown, its key, scale and indexed lines are always set together — never page 2's key with page
    3's drawing */
 async function gotoPage(fileId, pageNo, pn = ACT){
+  if (S.autoPrev && autoPreview.end) autoPreview.end(null);   // an Auto area boundary waiting to be accepted belongs to the page left
   const seq = pn.navSeq = (pn.navSeq || 0) + 1, stale = () => seq !== pn.navSeq || !PANES.includes(pn), proj = pn.sess.proj, here = () => pn === ACT;
   let d;
   try { d = await doc(fileId, true); } catch (e) { if (!stale()) { toast(e.message, 6000); pn.el.drop.style.display = "flex"; } return; }
@@ -3184,6 +3188,7 @@ async function autoAt(p, nc){   // nc: a new area condition, added with the outl
       if (r2.err) toast("With openings up to " + uLenT(g2) + ": " + r2.err + " — the last outline is kept", 5000); else { r2.gap = g2; r2.note = "openings closed up to " + uLenT(g2); res = r2; }
     }
   }
+  if (S.key !== key || !(nc || cond(c.id))) return toast("The page changed — nothing added", 3000);   // (accepted after going to another page: never the room of one page on another)
   const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "", kk = hereScale(p);
   const det = {how: res.trace ? "trace" : "auto", src: res.trace ? trSrc() : autoOpt().src === "vector" ? "vector lines" : "drawing image", gap: +(res.gap || autoOpt().gap), note: res.note || "",
     flag: res.leak ? "leaks — " + res.leak : res.short ? res.short : res.warn ? res.warn : res.rect || (res.holes || []).length ? "" : "not square — check the outline", a0: kk ? +(polyArea(res.pts) / kk / kk).toFixed(4) : null, pts0: res.pts.map(q => q.slice()), at: new Date().toISOString(),
@@ -4504,7 +4509,7 @@ function onDown(e){
   if (S.tool === "gap") return gapClick(sp);
   if (S.tool === "stamp") { stampAt(p); return; }
   if (S.tool === "typref") { if (!(S.typ && S.typ.T)) typClick(p).then(hint); return; }
-  if (S.tool === "count" || (S.tool === "draw" && cond(S.cond).type === "count")) return addCount(p);
+  if (S.tool === "count" || (S.tool === "draw" && (cond(S.cond) || {}).type === "count")) return addCount(p);
   if (S.tool === "rect" || S.tool === "dedrect") { if (!S.draft.length) draftPush([p]); else { const a = S.draft[0]; finish([a, [p[0], a[1]], p, [a[0], p[1]]]); } draftBtns(); draw(); return; }
   if (S.tool === "draw" || S.tool === "ded" || S.tool === "measure" || S.tool === "fence") {
     if (S.arcMode && S.draft.length) return arcClick(p);
@@ -6410,7 +6415,8 @@ async function removePdf(fid, moved){
   savePr = P.proj; await flushSave(); await backupNow("before removing " + f.name).catch(() => {});
   const pr = P.proj, mine = k => String(k).split(":")[0] === fid;
   pr.files = pr.files.filter(x => x.id !== fid); pr.items = pr.items.filter(i => i.file !== fid); pr.marks = (pr.marks || []).filter(m => m.file !== fid);
-  ["scales", "viewports", "floors", "sheets", "ocr", "rot"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) delete pr[n][k]; })); ["pageOrder", "pageHide", "flShare"].forEach(n => { if (pr[n]) pr[n] = pr[n].filter(k => !mine(k)); });
+  ["scales", "viewports", "floors", "sheets", "ocr", "rot", "vec"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) delete pr[n][k]; })); ["pageOrder", "pageHide", "flShare"].forEach(n => { if (pr[n]) pr[n] = pr[n].filter(k => !mine(k)); });
+  ["cadEd", "bbImp"].forEach(n => { if (pr[n]) delete pr[n][fid]; }); if (pr.levels) pr.levels = pr.levels.filter(l => l.file !== fid);   // (its AutoCAD edits, Bluebeam import and spot levels: nothing left of it in the project)
   if (pr.pins) pr.pins = pr.pins.filter(k => !mine(k)); if (S.pgSel) [...S.pgSel].forEach(k => { if (mine(k)) S.pgSel.delete(k); });
   if (pr.layersOff) delete pr.layersOff[fid]; if (pr.last && pr.last.file === fid) pr.last = {};
   S.undo = []; S.redo = []; S.multi.clear(); S.sel = null; S.selMark = null; Object.keys(S.thumbs || {}).forEach(k => { if (mine(k)) delete S.thumbs[k]; });
@@ -6454,7 +6460,7 @@ async function moveFolder(fid){
     tp.files.push(JSON.parse(JSON.stringify(f)));
     its.forEach(i => { const n = JSON.parse(JSON.stringify(i)); n.cond = cmap[i.cond] || n.cond; tp.items.push(n); });
     mks.forEach(m => { const n = JSON.parse(JSON.stringify(m)); if (Array.isArray(n.conds)) n.conds = n.conds.map(id => cmap[id]).filter(Boolean); if (n.layer != null) { if (lmap[n.layer]) n.layer = lmap[n.layer]; else delete n.layer; } (tp.marks = tp.marks || []).push(n); });
-    ["scales", "viewports", "floors", "sheets", "ocr", "rot"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) { (tp[n] = tp[n] || {})[k] = JSON.parse(JSON.stringify(pr[n][k])); } }));
+    ["scales", "viewports", "floors", "sheets", "ocr", "rot", "vec"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) { (tp[n] = tp[n] || {})[k] = JSON.parse(JSON.stringify(pr[n][k])); } }));   // (its scan lines too)
     ["pageOrder", "pageHide", "flShare", "pins"].forEach(n => { const L = (pr[n] || []).filter(mine); if (L.length) tp[n] = (tp[n] || []).concat(L); });
     ["layersOff", "bbImp", "cadEd"].forEach(n => { if (pr[n] && pr[n][fid]) (tp[n] = tp[n] || {})[fid] = JSON.parse(JSON.stringify(pr[n][fid])); });
     if (pr.levels) { const L = pr.levels.filter(l => l.file === fid); if (L.length) tp.levels = (tp.levels || []).concat(JSON.parse(JSON.stringify(L))); }
@@ -9236,6 +9242,7 @@ async function importAll(buf, H){   // a file holding several projects (Export p
       await dbPut("projects", pr);
       if (old) nRep++; else nAdd++;
       if (old && openId === pr.id) reopen = true;
+      if (old) { PANES.forEach(pn => { if (pn.sess && pn.sess.proj && pn.sess.proj.id === pr.id) { pn.sess.proj = pr; pn.sess.undo = []; pn.sess.redo = []; } }); SAVED_AT.set(pr.id, pr.updated); }   // (a window still holding the old copy would write it back on its next save)
       const miss = []; for (const f of pr.files || []) if (await pdfSha(f.id) === null) miss.push(f.name);
       const nf = (pr.files || []).length;
       rows.push({what: pr.name, a: nf + " PDF" + (nf === 1 ? "" : "s") + ", " + pr.items.length + " measurement" + (pr.items.length === 1 ? "" : "s"), b: old ? "replaced" : "added", st: miss.length ? "WARNING" : rep.some(r => /left out|removed/.test(r)) ? "FAIL" : "PASS",
@@ -12718,7 +12725,7 @@ async function backupsDialog(pid){
     if (!ok) return backupsDialog(pid);
     if (P.proj && P.proj.id === pid) { savePr = P.proj; await flushSave(); }
     const cur = await dbGet("projects", pid); if (cur) await backupNow("before restore", cur);
-    old.id = pid; migrate(old); old.updated = new Date().toISOString(); await dbPut("projects", old); SAVED_AT.set(pid, old.updated);
+    old.id = pid; migrate(old); old.updated = new Date().toISOString(); SAVE_PEND.delete(pid); SAVE_ERR.delete(pid); SAVE_FLIGHT.delete(pid); await dbPut("projects", old); SAVED_AT.set(pid, old.updated);
     PANES.forEach(p => { if (p.sess && p.sess.proj && p.sess.proj.id === pid) { p.sess.proj = old; p.sess.undo = []; p.sess.redo = []; } });   // a pane still holding the pre-restore copy would write it back over the restore on its next save — and its old undo steps would too
     if (P.proj && P.proj.id === pid) await openProject(pid); else showStart();
     toast("Restored the backup of " + fmt(bk.at), 4000);
@@ -13974,7 +13981,9 @@ function paneBlank(pn){   // a window left without a drawing (its PDF was remove
 /* the handlers of one window's stage */
 function wireStage(pn){
   const st = pn.el.stage, here = e => { const r = st.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-  pn.host.addEventListener("pointerdown", () => activate(pn), true);   // a click in a window makes it the one worked in — before anything else sees the click
+  pn.host.addEventListener("pointerdown", () => { const a = document.activeElement;   // a Properties / Materials field being typed in: committed to its own object first —
+      if (a && a.closest && a.closest("#props, #propsBox") && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) a.blur();   // (its change event reads the selection, which this click is about to change)
+      activate(pn); }, true);   // a click in a window makes it the one worked in — before anything else sees the click
   st.addEventListener("pointerdown", onDown);
   st.addEventListener("pointermove", e => { if (pn === ACT) onMove(e); });   // (a window that is not the one worked in only shows the cursor link)
   pn.host.addEventListener("pointermove", e => hotMove(pn, e));
@@ -14207,7 +14216,7 @@ function wire(){
     if (o.dataset.del) { const pr = await dbGet("projects", o.dataset.del); const ok = await ask("Delete project", `<p>Delete <b>${esc(pr.name)}</b> with its ${pr.items.length} measurements? Its drawings are kept for ${TRASH_DAYS} days so Recover can bring it back whole (Start → Recover a deleted project…, from its last backups); after that they are removed from this browser.</p>`, "Delete");
       if (!ok) return; try { await trashProject(pr); } catch (e) { return toast("Could not delete the project: " + (e.message || e), 5000); } await dbDel("projects", pr.id);
       if (savePr && savePr.id === pr.id) savePr = null; SAVE_PEND.delete(pr.id); SAVE_ERR.delete(pr.id); SAVE_FLIGHT.delete(pr.id); SAVED_AT.delete(pr.id);   // a retry kept from a failed save must not re-create the deleted project
-      { const g = SPLIT.on && PANES.find(p => p.sess.proj && p.sess.proj.id === pr.id); if (g) splitClose(g); else if (P.proj && P.proj.id === pr.id) P.proj = null; } showStart(); }
+      { const g = SPLIT.on && PANES.find(p => p.sess.proj && p.sess.proj.id === pr.id); if (g) splitClose(g); if (P.proj && P.proj.id === pr.id) P.proj = null; PANES.forEach(pn => { if (pn.sess && pn.sess.proj && pn.sess.proj.id === pr.id) pn.sess.proj = null; }); } showStart(); }
   });
   $("projectSearch").addEventListener("input", () => showStart());  $("condList").addEventListener("click", e => {
     if (e.target.id === "bFirstCond") return editCond(null);
