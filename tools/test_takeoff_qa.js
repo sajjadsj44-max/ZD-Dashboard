@@ -362,7 +362,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tkqa-"));
         const along = side === "top" || side === "bottom" ? m > x0 && m < x1 : m > y0 && m < y1;
         const face = side === "top" ? eq(y0, FX.Y.r1a) : side === "bottom" ? eq(y1, FX.Y.r4b) : side === "left" ? eq(x0, FX.X.a0) : eq(x1, FX.X.c1);
         if (along && face) wa += A; });
-      exp[nm] = {wall: per * 10 - da - wa, skirt: per - dw}; });
+      exp[nm] = /^BATH/.test(nm) ? {wall: 0, skirt: 0} : {wall: per * 10 - da - wa, skirt: per - dw}; });   // (a bath is tiled: no plaster / paint, no skirting)
     const totW = Object.values(exp).reduce((a, e) => a + e.wall, 0), totS = Object.values(exp).reduce((a, e) => a + e.skirt, 0);
     const n0 = await T(() => zdTakeoff.P.proj.items.length), u0 = await T(() => zdTakeoff.S.undo.length);
     let t0 = Date.now();
