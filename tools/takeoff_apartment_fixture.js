@@ -53,7 +53,7 @@ function polyArea(p){ let a = 0; p.forEach((q, i) => { const r = p[(i + 1) % p.l
 function polyPerim(p){ return p.reduce((s, q, i) => { const r = p[(i + 1) % p.length]; return s + Math.hypot(r[0] - q[0], r[1] - q[1]); }, 0); }
 
 /* the plan as PDF content: k pt per ft, building corner at (ox, oy) measured from the page's top-left, page height ph */
-function plan(k, ox, oy, ph, note){
+function plan(k, ox, oy, ph, note, glass){   // glass: the window glass lines' offsets from the outer face (ft), default 0.30 / 0.45
   const L = [], X = x => (ox + x * k).toFixed(3), Y = y => (ph - oy - y * k).toFixed(3);
   const seg = (x0, y0, x1, y1) => L.push(`${X(x0)} ${Y(y0)} m ${X(x1)} ${Y(y1)} l S`);
   const curve = (p0, c1, c2, p1) => L.push(`${X(p0[0])} ${Y(p0[1])} m ${X(c1[0])} ${Y(c1[1])} ${X(c2[0])} ${Y(c2[1])} ${X(p1[0])} ${Y(p1[1])} c S`);
@@ -80,7 +80,7 @@ function plan(k, ox, oy, ph, note){
     else { seg(f0, a0, f1, a0); seg(f0, a1, f1, a1);
       const hx = f1; seg(hx, a0, hx + w, a0); curve([hx + w, a0], [hx + w, a0 + c], [hx + c, a1], [hx, a1]); }
   });
-  WINDOWS.forEach(([side, a, b]) => { for (const o of [0.3, 0.45]) {   // two glass lines in the middle of the outer wall
+  WINDOWS.forEach(([side, a, b]) => { for (const o of glass || [0.3, 0.45]) {   // two glass lines in the middle of the outer wall (or as asked)
     if (side === "top") seg(a, o, b, o); else if (side === "bottom") seg(a, H - o, b, H - o); else if (side === "left") seg(o, a, o, b); else seg(W - o, a, W - o, b); } });
   // furniture (closed boxes inside the rooms, never touching two walls) and fittings in the baths
   box(3.5, 0.75, 8.5, 7.5); box(4, 1.25, 8, 2.5);                       // bed and pillow against BED ROOM 1's top wall
@@ -112,9 +112,9 @@ const PAGES = [
 const toPdf = (i, x, y) => { const g = PAGES[i]; return [g.ox + x * g.k, g.h - g.oy - y * g.k]; };
 /* the Auto-area click for a room: its label spot (its centre, or SEED) */
 const seedOf = nm => { const r = ROOMS.find(q => q[0] === nm), pts = r[1]; return SEED[nm] || [(Math.min(...pts.map(p => p[0])) + Math.max(...pts.map(p => p[0]))) / 2, (Math.min(...pts.map(p => p[1])) + Math.max(...pts.map(p => p[1]))) / 2 + 1.5]; };
-function pdf(){
+function pdf(opt){   // opt.glass: other glass lines (one mid-wall: [0.375])
   const {pdfFrom} = require("./takeoff_qa_fixture.js");
-  return pdfFrom(PAGES.map(g => ({w: g.w, h: g.h, rotate: g.rotate, content: plan(g.k, g.ox, g.oy, g.h, g.note)})));
+  return pdfFrom(PAGES.map(g => ({w: g.w, h: g.h, rotate: g.rotate, content: plan(g.k, g.ox, g.oy, g.h, g.note, opt && opt.glass)})));
 }
 /* rooms drawn turned: a 12 × 14 ft room (168 Sft clear) with 9" walls, turned 3°, 8°, 12° and 30°, one per page at 1/4" = 1'-0".
    Its centre is at (600, 400) pt; TURNED lists the angles in page order */

@@ -16811,10 +16811,26 @@ function wallLineIds(rect, k){   // the drawing's lines in rect less door swings
   const ids = (rect ? segsIn(g, rect[0], rect[1], rect[2], rect[3]) : g.segs.map((_, i) => i)).filter(i => (!wf || wf(i)) && (!off || !off.has(g.segs[i][7]))), door = doorSymbols(g, ids, k);
   const out = ids.filter(i => !door.has(i)); out.doorLines = door.lines || []; return out;   // (the doorways too: the walls agent gives a doorway between a thin and a thick wall to the thin one)
 }
+/* a pair of parallel lines inside a thicker wall's two faces — a window's glass between them, a sill or frame line — is not a wall
+   of its own (one glass line mid-wall made 4.5" walls of every window, +47 %; two made a 6" wall). The wall's faces, a standard
+   thickness apart and both along the whole pair, run on past the inner line at both ends (glass stops within its wall); a plaster
+   line drawn along the wall's whole length does not, so a wall drawn with its plaster is still read as a wall */
+function pairInWall(g, k, F1, F2, t0, t1){
+  if (!F1 || !F2 || !g || !g.L) return false;
+  if (!g._Lo) { g._Lo = g.L.slice().sort((a, b) => a.o - b.o); g._os = g._Lo.map(l => l.o); }
+  const lo = Math.min(F1.o, F2.o), hi = Math.max(F1.o, F2.o), d = hi - lo, len = t1 - t0, e = 0.02 * k, run = 0.4 * k, os = g._os, L = g._Lo;
+  let a = 0, b = os.length; const from = lo - 2 * k; while (a < b) { const m = (a + b) >> 1; if (os[m] < from) a = m + 1; else b = m; }
+  const cover = l => Math.min(t1, l.t1) - Math.max(t0, l.t0) >= 0.8 * len, lows = [], highs = [];
+  for (let i = a; i < os.length && os[i] <= hi + 2 * k; i++) { const l = L[i]; if (!cover(l)) continue; if (l.o <= lo + e) lows.push(l); if (l.o >= hi - e) highs.push(l); }
+  for (const A of lows) for (const B of highs) { const w = B.o - A.o; if (w <= d + 0.1 * k || w > 2 * k || !stdWall(w / k)) continue;
+    const inner = [F1, F2].filter(X => X !== A && X !== B && Math.abs(X.o - A.o) > e && Math.abs(X.o - B.o) > e);
+    if (inner.length && inner.every(X => X.t0 >= Math.max(A.t0, B.t0) + run && X.t1 <= Math.min(A.t1, B.t1) - run)) return true; }
+  return false;
+}
 function wallThicknesses(rect){   // the wall thicknesses drawn here, most wall length first: [{t ft, len ft}]
   const k = curScale(), ids = k && wallLineIds(rect, k), G = ids && faceLines(null, k, ids); if (!k || !G) return [];
   const H = new Map();
-  G.forEach(g => facePairs(g, 0.3 * k, 2 * k, 1.5 * k, (d, o, t0, t1) => { const b = Math.round(d / k * 48); H.set(b, (H.get(b) || 0) + (t1 - t0) / k); }));
+  G.forEach(g => facePairs(g, 0.3 * k, 2 * k, 1.5 * k, (d, o, t0, t1, F1, F2) => { if (pairInWall(g, k, F1, F2, t0, t1)) return; const b = Math.round(d / k * 48); H.set(b, (H.get(b) || 0) + (t1 - t0) / k); }));   // (not a window's glass inside a wall)
   const tot = [...H.values()].reduce((a, v) => a + v, 0), out = [];
   [...H.entries()].sort((a, b) => b[1] - a[1]).forEach(([b, len]) => { const o0 = out.find(o => Math.abs(o.b - b) <= 1 || Math.abs(o.t - b / 48) <= Math.max(0.04, 0.08 * o.t));   // (within the walls agent's tolerance of a stronger one: the same walls, never taken twice)
     if (o0 || len < 0.04 * tot || len < 6) return; out.push({b, t: b / 48, len}); });
@@ -16822,7 +16838,7 @@ function wallThicknesses(rect){   // the wall thicknesses drawn here, most wall 
 }
 function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-line runs, page units
   const k = curScale(), ids = k && wallLineIds(rect, k), G = ids && faceLines(null, k, ids, 0, 0.2); if (!k || !G) return null;   // (short lines too: a nib at a door jamb)
-  const tol = Math.max(0.04, 0.08 * T) * k, bridge = Math.max(1.6 * T, bridgeFt || 0) * k, runs = [], gg = S.geo[S.key];
+  const tol = Math.max(0.04, 0.08 * T) * k, bridge = Math.max(1.6 * T, bridgeFt || 0) * k, runs = [], gg = S.geo[S.key], gaps = [];   // gaps: the openings bridged
   /* a gap is bridged (a door or window opening) only if no other line crosses the wall's band inside it: a cross wall,
      a corridor's partition — then the two pieces are separate walls with a room or passage between them */
   const crossed = (g, o, ta, tb, longOnly) => { const u = g.u, n = g.n, hw = 0.4 * T * k, P = (t, oo) => [u[0] * t + n[0] * oo, u[1] * t + n[1] * oo], a = P(ta, o - hw), b = P(tb, o + hw), c2 = P(ta, o + hw), d2 = P(tb, o - hw);
@@ -16898,7 +16914,7 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
      by length, as wallThicknesses): a pair whose face is, on its other side, the face of a much longer pair of one of those
      thicknesses is not a wall — a WC, basin or shelf drawn a wall's thickness off a wall's face, whose own top line and the
      wall's face make a short band */
-  const TH = []; { const H = new Map(); G.forEach(g => facePairs(g, 0.3 * k, 2 * k, 1.5 * k, (d, o, t0, t1) => { const b = Math.round(d / k * 48); H.set(b, (H.get(b) || 0) + (t1 - t0) / k); }));
+  const TH = []; { const H = new Map(); G.forEach(g => facePairs(g, 0.3 * k, 2 * k, 1.5 * k, (d, o, t0, t1, F1, F2) => { if (pairInWall(g, k, F1, F2, t0, t1)) return; const b = Math.round(d / k * 48); H.set(b, (H.get(b) || 0) + (t1 - t0) / k); }));
     const tot = [...H.values()].reduce((a, v) => a + v, 0); [...H.entries()].sort((a, b) => b[1] - a[1]).forEach(([b, len]) => { if (len >= 0.04 * tot && len >= 6 && !TH.some(t => Math.abs(t * 48 - b) <= 1)) TH.push(b / 48); }); }
   const claimed = (g, F, sg, t0, t1) => { const len = t1 - t0; let hit = false;   // sg: the side of F away from the pair (−1 below it, +1 above)
     near(g, F.o - 2.05 * k, F.o + 2.05 * k, l => { const d = (l.o - F.o) * sg; if (d < 0.25 * k || !TH.some(t => Math.abs(d - t * k) <= Math.max(0.04, 0.08 * t) * k)) return;
@@ -16909,6 +16925,7 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
     const C = [];   // centre lines of this direction
     facePairs(g, T * k - tol, T * k + tol, 0.2 * k, (d, o, t0, t1, F1, F2) => {
       if (F1 && (claimed(g, F1, -1, t0, t1) || claimed(g, F2, 1, t0, t1))) return;
+      if (pairInWall(g, k, F1, F2, t0, t1)) return;   // a window's glass (or frame) line inside a thicker wall and one of its faces: not a thinner wall
       // a third line of this direction between the two faces over half their length: not a wall's two faces (a window's
       // glass beside a bed, a cupboard against a wall) — a wall's hollow is empty but for its windows
       // (counted: lines that run on past the pair at both ends — a window's glass lines stop within its wall, and a door's
@@ -16935,7 +16952,11 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
     const lines = []; C.forEach(c => { const l = lines[lines.length - 1]; if (l && c.o - l.o <= 0.12 * k) { l.iv.push([c.t0, c.t1]); l.o = (l.o * l.n + c.o) / (l.n + 1); l.n++; } else lines.push({o: c.o, n: 1, iv: [[c.t0, c.t1]]}); });
     lines.forEach(l => {
       l.iv.sort((a, b) => a[0] - b[0]); const m = [];
-      l.iv.forEach(v => { const q = m[m.length - 1]; if (q && (v[0] - q[1] <= 0.1 * k || (v[0] - q[1] <= bridge && !crossed(g, l.o, q[1], v[0]) && !throughWall(g, l.o, q[1], v[0])) || (v[0] - q[1] <= 25 * k && windowIn(g, l.o, q[1], v[0])))) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
+      l.iv.forEach(v => { const q = m[m.length - 1]; if (!q) { m.push(v.slice()); return; } const gp = v[0] - q[1];
+        const how = gp <= 0.1 * k ? "join" : gp <= bridge && !crossed(g, l.o, q[1], v[0]) && !throughWall(g, l.o, q[1], v[0]) ? "door" : gp <= 25 * k && windowIn(g, l.o, q[1], v[0]) ? "win" : "";
+        if (!how) { m.push(v.slice()); return; }
+        if (how !== "join" && gp >= 1.25 * k) { const P2 = t => [g.u[0] * t + g.n[0] * l.o, g.u[1] * t + g.n[1] * l.o]; gaps.push({a: P2(q[1]), b: P2(v[0]), win: how === "win" || windowIn(g, l.o, q[1], v[0])}); }   // (an opening: deducted by the walls agent)
+        q[1] = Math.max(q[1], v[1]); });
       m.forEach(v => { if (v[1] - v[0] < 0.2 * k) return; const short = v[1] - v[0] < 0.6 * k, loose = v[1] - v[0] < 2 * k; if (!short) v = [cornerEnd(g, l.o, v[0], -1), cornerEnd(g, l.o, v[1], 1)];
         runs.push({u: g.u, n: g.n, short, loose, a: [g.u[0] * v[0] + g.n[0] * l.o, g.u[1] * v[0] + g.n[1] * l.o], b: [g.u[0] * v[1] + g.n[0] * l.o, g.u[1] * v[1] + g.n[1] * l.o]}); });
     });
@@ -17005,7 +17026,21 @@ function findWalls(T, rect, bridgeFt){   // -> [{a: [x, y], b: [x, y]}] centre-l
       if (!inA || !inB || dist(A.a, X) <= h + 0.05 * k || dist(X, A.b) <= h + 0.05 * k || dist(B.a, X) <= h || dist(X, B.b) <= h) continue;
       const v = [(A.b[0] - A.a[0]) / LA, (A.b[1] - A.a[1]) / LA];
       runs.splice(i, 1, Object.assign({}, A, {b: [X[0] - v[0] * h, X[1] - v[1] * h]}), Object.assign({}, A, {a: [X[0] + v[0] * h, X[1] + v[1] * h]})); changed = true; } }
-  return runs.filter(r => dist(r.a, r.b) >= (r.short ? 0.2 : 0.6) * k);
+  const out = runs.filter(r => dist(r.a, r.b) >= (r.short ? 0.2 : 0.6) * k);
+  out.gaps = gaps.filter(gp => { const mid = [(gp.a[0] + gp.b[0]) / 2, (gp.a[1] + gp.b[1]) / 2]; return out.some(r => distSeg(mid, r.a, r.b) <= 0.15 * k); });   // (on a wall kept)
+  /* a window drawn with the wall's faces running through it: its glass (and frame) lines inside the wall's band, along it, 1 ft or
+     longer and shorter than the wall — each such stretch (lines at several offsets taken together) is a window opening */
+  const hwG = T * k / 2 - 0.03 * k;
+  if (hwG > 0.02 * k) out.forEach(r => { const u = r.u, n = r.n, o = n[0] * r.a[0] + n[1] * r.a[1], ta = u[0] * r.a[0] + u[1] * r.a[1], tb = u[0] * r.b[0] + u[1] * r.b[1], t0 = Math.min(ta, tb), t1 = Math.max(ta, tb);
+    const P = (t, oo) => [u[0] * t + n[0] * oo, u[1] * t + n[1] * oo], cs = [P(t0, o - hwG), P(t1, o + hwG), P(t0, o + hwG), P(t1, o - hwG)], xs = cs.map(c => c[0]), ys = cs.map(c => c[1]), iv = [];
+    segsIn(gg, Math.min(...xs) - 1, Math.min(...ys) - 1, Math.max(...xs) + 1, Math.max(...ys) + 1).forEach(i => { const q = gg.segs[i]; if (q[4] & 11) return;   // (not curves, clip paths or dashed lines)
+      const o1 = n[0] * q[0] + n[1] * q[1], o2 = n[0] * q[2] + n[1] * q[3]; if (Math.abs(o1 - o2) > 0.02 * k || Math.abs((o1 + o2) / 2 - o) > hwG) return;
+      const s1 = u[0] * q[0] + u[1] * q[1], s2 = u[0] * q[2] + u[1] * q[3], a = Math.max(t0, Math.min(s1, s2)), b = Math.min(t1, Math.max(s1, s2));
+      if (b - a >= 1.0 * k && b - a <= 0.9 * (t1 - t0)) iv.push([a, b]); });
+    iv.sort((x, y) => x[0] - y[0]); const m = []; iv.forEach(v => { const q = m[m.length - 1]; if (q && v[0] <= q[1] + 0.1 * k) q[1] = Math.max(q[1], v[1]); else m.push(v.slice()); });
+    m.forEach(([a, b]) => { if (out.gaps.some(gp => { const ga = u[0] * gp.a[0] + u[1] * gp.a[1], gb = u[0] * gp.b[0] + u[1] * gp.b[1]; return Math.abs(n[0] * gp.a[0] + n[1] * gp.a[1] - o) <= 0.15 * k && Math.min(b, Math.max(ga, gb)) - Math.max(a, Math.min(ga, gb)) > 0; })) return;
+      out.gaps.push({a: P(a, o), b: P(b, o), win: true, glass: true}); }); });
+  return out;
 }
 function segXInf(a, b, c, d){ const r = [b[0] - a[0], b[1] - a[1]], s2 = [d[0] - c[0], d[1] - c[1]], den = r[0] * s2[1] - r[1] * s2[0]; if (Math.abs(den) < 1e-9) return null; const t = ((c[0] - a[0]) * s2[1] - (c[1] - a[1]) * s2[0]) / den; return [a[0] + t * r[0], a[1] + t * r[1]]; }
 function chainRuns(runs, eps){   // runs sharing an end (and only two at that point) joined into polylines
@@ -17029,18 +17064,27 @@ function wallsAgent(o){
   const rect = o.page ? null : viewRect(), runs = findWalls(T, rect, o.bridge == null ? 6 : +o.bridge);
   if (!runs || !runs.length) return {error: `No walls ${uLenT(T)} thick found ${o.page ? "on this page" : "in this view"}. Found thicknesses: ` + (wallThicknesses(rect).map(w => uLenT(w.t) + " (" + Math.round(uV(w.len, "ft")) + " " + uL("ft") + ")").join(", ") || "none") + (S.geo[S.key].images && !S.geo[S.key].vec ? " — the page is a picture" + " — read its lines first: Auto takeoff › Read the drawing (OCR), free, in this browser." : "")};
   let c = o.cond ? (cond(o.cond) || P.proj.conds.find(x => x.type === "linear" && x.name.toLowerCase() === String(o.cond).toLowerCase())) : null;
-  const inch = Math.round(T * 12 * 2) / 2;
+  const Tm = +o.tm > 0 ? +o.tm : T, inch = Math.round(Tm * 12 * 2) / 2;   // (found at T as drawn; its condition the masonry Tm — a wall drawn with its plaster)
   if (!c) { const H = +o.h > 0 ? +o.h : 0;
-    c = {id: uid("C"), name: o.name || (T >= 0.6 ? "Brick masonry " + inch + "\" wall" : "Partition wall " + inch + "\" (thickness " + uLenT(T) + ")"), type: "linear", unit: H ? (T >= 0.6 ? "cft" : "Sft") : "ft", color: COLORS[P.proj.conds.length % COLORS.length], h: H || "", t: T, faces: 1, dedMin: 1.0}; }
-  const polys = chainRuns(runs, 0.05 * k);
+    c = {id: uid("C"), name: o.name || (Tm >= 0.6 ? "Brick masonry " + inch + "\" wall" : "Partition wall " + inch + "\" (thickness " + uLenT(Tm) + ")"), type: "linear", unit: H ? (Tm >= 0.6 ? "cft" : "Sft") : "ft", color: COLORS[P.proj.conds.length % COLORS.length], h: H || "", t: Tm, faces: 1, dedMin: 1.0}; }
+  const polys = chainRuns(runs, 0.05 * k), opn = [];   // opn: the openings deducted (a wall with a height)
   let total = 0;
   mutate(() => {
     if (!P.proj.conds.includes(c)) P.proj.conds.push(c);
     P.proj.items = P.proj.items.filter(i => !(i.wallAuto && i.cond === c.id && i.file === S.fileId && i.page === S.pageNo && (!rect || i.pts.every(q => q[0] >= rect[0] && q[0] <= rect[2] && q[1] >= rect[1] && q[1] <= rect[3]))));
     polys.forEach((pts, n) => { total += polyLen(pts) / k; P.proj.items.push({id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "shape", pts, nos: 1, ai: true, wallAuto: true, label: "Wall " + (n + 1)}); });
+    if (c.unit !== "ft" && (runs.gaps || []).length) { const TG = tagsOf(S.texts[S.key] || []), DH = +P.proj.finDH || 0;
+      const schM = m => (P.proj.openings || []).find(x => String(x.mark).toUpperCase() === m) || null;
+      runs.gaps.forEach(gp => { const mid = [(gp.a[0] + gp.b[0]) / 2, (gp.a[1] + gp.b[1]) / 2], fams = gp.win ? ["Windows", "Ventilators"] : ["Doors"];
+        let best = null; Object.entries(TG.plan).forEach(([m, pts]) => { if (!fams.includes(tagKind(m))) return; pts.forEach(q => { const e = dist(q, mid); if (e < 4 * k && (!best || e < best.e)) best = {m, e}; }); });
+        const sc = best ? schM(best.m) : null, rd = best && !sc ? (TG.sched || {})[best.m] : null, w = dist(gp.a, gp.b) / k, h = sc ? +sc.h : rd ? +rd.h : gp.win ? 0 : DH;
+        const it = {id: uid("I"), cond: c.id, file: S.fileId, page: S.pageNo, kind: "open", pts: [gp.a.slice(), gp.b.slice()], nos: 1, ai: true, wallAuto: true, label: best ? best.m : gp.win ? "Window" : "Door", ow: r3(sc ? +sc.w : rd ? +rd.w : w), oh: h > 0 ? r3(h) : 0};
+        if (sc) it.sch = sc.id; P.proj.items.push(it); opn.push(it); }); }
   });
   S.cond = c.id; refresh();
-  return {condition: c.name, unit: c.unit, thickness_ft: T, runs: polys.length, total_length_ft: +total.toFixed(3), needs_height: c.unit === "ft" && T >= 0.3, scope: rect ? "view" : "page"};   // scope: what was searched — the part on screen is not the page's total
+  const noH = opn.filter(o2 => !(+o2.oh > 0)).map(o2 => o2.label);
+  return {condition: c.name, unit: c.unit, thickness_ft: T, runs: polys.length, total_length_ft: +total.toFixed(3), needs_height: c.unit === "ft" && T >= 0.3, scope: rect ? "view" : "page",
+    openings: opn.length, openings_no_height: noH};   // (no height: listed, not deducted — give it in the opening schedule)   // scope: what was searched — the part on screen is not the page's total
 }
 async function agentWallsCmd(t){
   const m = /(\d+(?:\.\d+)?)\s*(?:"|in(?:ch)?|''|”)/.exec(t), f = /(\d*\.\d+|\d+)\s*ft/.exec(t);
@@ -17049,7 +17093,7 @@ async function agentWallsCmd(t){
   const r = wallsAgent({t: T, page: /\b(whole|entire|all|page|sheet|floor)\b/.test(t)});
   if (r.error) return aiLog("err", esc(r.error));
   aiLog("tool", `<b>${esc(r.condition)}</b>: ${r.runs} run${r.runs > 1 ? "s" : ""}, <b>${uLenT(r.total_length_ft)}</b> centre line ${r.scope === "view" ? "<b>in the part on screen only</b> — say <i>walls " + f3(T * 12).replace(/\.?0+$/, "") + "\" whole page</i> for the page's total" : "on the whole page"}`);
-  aiLog("bot", "Wall runs are marked (AI — check them). " + (r.needs_height ? "No wall height yet — edit the condition (✎) to give H and the unit cft, then deduct openings with the <b>Opening</b> tool (O)." : "Deduct door and window openings with the <b>Opening</b> tool (O) — they were bridged."));
+  aiLog("bot", "Wall runs are marked (AI — check them). " + (r.needs_height ? "No wall height yet — edit the condition (✎) to give H and the unit cft, then deduct openings with the <b>Opening</b> tool (O)." : r.openings ? `${r.openings} door / window opening${r.openings > 1 ? "s" : ""} it bridged ${r.openings > 1 ? "are" : "is"} deducted, sized from the opening schedule${r.openings_no_height.length ? ` — <b>${r.openings_no_height.length} with no height</b> (${esc(r.openings_no_height.slice(0, 8).join(", "))}): give it in Bill → Opening schedule, then they come off` : ""}. Check them; add any it missed with the <b>Opening</b> tool (O).` : "Deduct door and window openings with the <b>Opening</b> tool (O) — they were bridged."));
 }
 async function wallsDialog(){
   if (!P.proj || !S.page) return aiLog("err", "Open a PDF page first.");
@@ -17860,6 +17904,11 @@ async function blockMasonryDialog(){
    about, each finding with a button to show or fix it. A whole run is one undo step. */
 const STD_WALLS = [4, 4.5, 5, 6, 8, 9, 10, 12, 13.5, 18];   // inches: thicknesses taken on their own — any other spacing of parallel lines (window glass, a counter) is listed, not measured
 const stdWall = t => STD_WALLS.find(s => Math.abs(t * 12 - s) <= 0.26);
+const PLASTER_DRAWN = {5.5: 4.5, 10: 9, 14.5: 13.5};   // inches drawn → the brick wall's own thickness (½" plaster drawn each side)
+/* a thickness drawn that is a brick wall with its plaster -> {drawn, t (ft, the masonry)} — only when no wall of that masonry is drawn plain
+   on the page (then a 10" is a 10" wall); found: wallThicknesses() */
+function plasterWall(t, found){ const k2 = Object.keys(PLASTER_DRAWN).find(x => Math.abs(t * 12 - x) <= 0.26); if (!k2) return null;
+  const m = PLASTER_DRAWN[k2]; if ((found || []).some(w => Math.abs(w.t * 12 - m) <= 0.26)) return null; return {drawn: +k2, t: m / 12}; }
 const inchOf = t => Math.round(t * 24) / 2 + "\"";
 const natSort = (a, b) => String(a).localeCompare(String(b), undefined, {numeric: true});
 const isRoomArea = i => i.kind === "shape" && !i.finAuto && !i.learnAuto && !i.hatchAuto && (cond(i.cond) || {}).type === "area" && !!String(i.label || "").trim() && i.pts.length >= 2;
@@ -17944,11 +17993,11 @@ async function fullTakeoff(o){   // o: {scope, rooms, walls, doors, fin, H, DH, 
       if (agStopped()) { R.stop = true; continue; }
       if (o.walls) {
         busy(`⚡ Full takeoff — ${R.page}: walls…`); await new Promise(r => setTimeout(r, 10));
-        const found = wallThicknesses(null), seen = new Set(); R.walls = []; R.wallOther = found.filter(w => !stdWall(w.t)).map(w => ({t: w.t, len: w.len}));
-        for (const w of found) { const s = stdWall(w.t); if (!s || seen.has(s)) continue; seen.add(s);
-          const T = s / 12, ex = wallCondFor(T), r = wallsAgent({t: T, page: true, bridge: 6, cond: ex ? ex.id : null});
+        const found = wallThicknesses(null), seen = new Set(); R.walls = []; R.wallOther = found.filter(w => !stdWall(w.t) && !plasterWall(w.t, found)).map(w => ({t: w.t, len: w.len}));
+        for (const w of found) { const pw = plasterWall(w.t, found), s = pw ? Math.round(pw.t * 24) / 2 : stdWall(w.t); if (!s || seen.has(s)) continue; seen.add(s);   // (a wall drawn with its plaster: its masonry)
+          const T = s / 12, ex = wallCondFor(T), r = wallsAgent({t: pw ? pw.drawn / 12 : T, tm: T, page: true, bridge: 6, cond: ex ? ex.id : null});
           if (!r.error && !ex) { const c = P.proj.conds.find(x => x.type === "linear" && x.name === r.condition); if (c) c.agentWall = true; }
-          R.walls.push(r.error ? {t: T, err: r.error} : {t: T, name: r.condition, ft: r.total_length_ft, runs: r.runs, unit: r.unit}); }
+          R.walls.push(r.error ? {t: T, err: r.error} : {t: T, name: r.condition, ft: r.total_length_ft, runs: r.runs, unit: r.unit, drawn: pw ? pw.drawn : 0}); }
       }
       if (agStopped()) { R.stop = true; continue; }
       if (o.doors) {
@@ -17971,10 +18020,10 @@ function fullReport(o, rep, ms){
   const roomsL = R => R.rooms.err ? `<span style="color:var(--red)">${esc(R.rooms.err)}</span>` : !R.rooms.named ? "no room names in the page's text" + (o.filter ? " matching “" + esc(o.filter) + "”" : "")
     : R.rooms.had >= R.rooms.named ? `all ${R.rooms.named} rooms were already measured — left as they are`
     : `<b>${R.rooms.ok + R.rooms.chk.length}</b> of ${R.rooms.named} rooms measured${R.rooms.had ? ` (${R.rooms.had} were already)` : ""}${R.rooms.sft ? ` · <b>${uArea(R.rooms.sft)}</b>` : ""}${R.rooms.chk.length ? ` · <b style="color:var(--amber)">check</b> ${R.rooms.chk.map(esc).join(", ")}` : ""}${R.rooms.bad.length ? `<br><span class="small" style="color:var(--red)">not closed: ${R.rooms.bad.map(esc).join("; ")} — a Fence across the opening, then run again</span>` : ""}`;
-  const wallsL = R => (R.walls.length ? R.walls.map(w => w.err ? `${inchOf(w.t)}: <span style="color:var(--red)">${esc(w.err)}</span>` : `${inchOf(w.t)} <b>${uLenT(w.ft)}</b> <span class="small">(${w.runs} run${w.runs > 1 ? "s" : ""})</span>`).join(" · ") : "no wall faces found (scanned page?)")
+  const wallsL = R => (R.walls.length ? R.walls.map(w => w.err ? `${inchOf(w.t)}: <span style="color:var(--red)">${esc(w.err)}</span>` : `${inchOf(w.t)} <b>${uLenT(w.ft)}</b> <span class="small">(${w.runs} run${w.runs > 1 ? "s" : ""}${w.drawn ? `; drawn ${w.drawn}" with its plaster — measured as ${inchOf(w.t)} masonry` : ""})</span>`).join(" · ") : "no wall faces found (scanned page?)")
     + (R.wallOther.length ? `<br><span class="small">Not taken: ${R.wallOther.map(w => inchOf(w.t) + " (" + Math.round(uV(w.len, "ft")) + " " + uL("ft") + ")").join(", ")} — window glass, counters and the like; 🧱 Walls takes one if it is a wall.</span>` : "");
   const tagsL = R => (Object.keys(R.tags).length ? Object.entries(R.tags).map(([m, n]) => esc(m) + " <b>×" + n + "</b>").join(" · ") : "no door / window tags") + (R.newSch.length ? `<br><span class="small">Sizes of ${R.newSch.map(esc).join(", ")} read from the schedule into the opening schedule.</span>` : "");
-  const finL = R => R.fin.none ? "no rooms measured on this page" : R.fin.error ? `<span style="color:var(--red)">${esc(R.fin.error)}</span>` : `${R.fin.rooms.length} rooms · wall finish <b>${uArea(sum(R.fin.rooms, x => x.wallNet))}</b> net · skirting <b>${uQL(sum(R.fin.rooms, x => x.skirt))}</b>${sum(R.fin.rooms, x => x.notes.length) ? ` · <b style="color:var(--amber)">${sum(R.fin.rooms, x => x.notes.length)} opening${sum(R.fin.rooms, x => x.notes.length) > 1 ? "s" : ""} not deducted</b> <span class="small">(no size — see 🎨 Finishes)</span>` : ""}`;
+  const finL = R => R.fin.none ? "no rooms measured on this page" : R.fin.error ? `<span style="color:var(--red)">${esc(R.fin.error)}</span>` : `${R.fin.rooms.length} rooms${R.fin.rooms.some(x => x.bath) ? ` (${R.fin.rooms.filter(x => x.bath).length} tiled: no plaster / skirting)` : ""} · wall finish <b>${uArea(sum(R.fin.rooms, x => x.wallNet))}</b> net · skirting <b>${uQL(sum(R.fin.rooms, x => x.skirt))}</b>${sum(R.fin.rooms, x => x.notes.length) ? ` · <b style="color:var(--amber)">${sum(R.fin.rooms, x => x.notes.length)} opening${sum(R.fin.rooms, x => x.notes.length) > 1 ? "s" : ""} not deducted</b> <span class="small">(no size — see 🎨 Finishes)</span>` : ""}`;
   const blk = R => `<div style="margin-top:7px"><b>${esc(R.page)}</b>${R.rooms ? "<br>🏠 " + roomsL(R) : ""}${R.walls ? "<br>🧱 " + wallsL(R) : ""}${R.tags ? "<br>🚪 " + tagsL(R) : ""}${R.fin ? "<br>🎨 " + finL(R) : ""}${R.stop ? `<br><span class="small">■ Stopped by you part-way through this page</span>` : ""}</div>`;
   let tot = "";
   if (done.length > 1) {   // the run's totals, and the counts against the schedule's quantities
@@ -18058,6 +18107,7 @@ function finishesRun(o){   // o: {H, DH, cond, ceiling} on this page -> {rooms: 
     if (o.ceiling) [...new Set(rooms.map(i => i.cond))].map(cond).forEach(c => { if (c && !(c.asm || []).some(a => /ceiling/i.test(a.name || ""))) c.asm = (c.asm || []).concat({id: uid("A"), name: "Ceiling finish (plaster / paint)", unit: "Sft", f: "A"}); });
     rooms.forEach((it, n) => {
       const pl = polys[n], name = it.label.trim(), circ = it.shape === "circle", R = {name, nos: +it.nos || 1, it: it.id, doors: [], wins: [], notes: [], w: [], s: []};
+      if (!own && o.bathTile !== false && roomType(name) === "BATH") { R.bath = true; out.push(R); return; }   // (its walls tiled: listed apart in the report — not an opening left out)
       const base = Object.assign({file: S.fileId, page: S.pageNo, nos: R.nos, ai: true, finAuto: true, room: name, rid: it.id}, o.learn ? {learnAuto: true} : {});
       const run = c2 => { const pts = pl.map(p => p.slice()).concat([pl[0].slice()]), x = Object.assign({id: uid("I"), cond: c2, kind: "shape", pts, label: name}, base); if (circ) x.arcs = [[0, pts.length - 1]]; P.proj.items.push(x); return x.id; };
       if (wc) R.w.push(run(wc.id)); if (skc) R.s.push(run(skc.id));
@@ -18097,11 +18147,12 @@ async function finishesDialog(){
     <div class="grid" style="margin-top:8px"><div class="fg w2"><label>Rooms from</label><select id="fnC">${cs.map(c => `<option value="${esc(c.id)}"${c.id === best ? " selected" : ""}>${esc(c.name)} (${byC[c.id]} rooms)</option>`).join("")}${cs.length > 1 ? `<option value="">Every area condition (${rooms.length} rooms)</option>` : ""}</select></div>
     <div class="fg"><label>Room height H (${uL("ft")})</label><input type="text" id="fnH" value="${wc && +wc.h ? uLenIn(+wc.h) : ""}" placeholder="floor to ceiling, from the section"></div>
     <div class="fg"><label>Door height (${uL("ft")}) — doors not in the schedule</label><input type="text" id="fnDH" value="${P.proj.finDH ? uLenIn(P.proj.finDH) : ""}" placeholder="from the door schedule"></div>
-    <div class="fg w2"><label class="pk"><input type="checkbox" id="fnCl" checked> Ceiling finish as an assembly line of the room condition (= its floor area A) — for the Bill</label></div></div>
+    <div class="fg w2"><label class="pk"><input type="checkbox" id="fnCl" checked> Ceiling finish as an assembly line of the room condition (= its floor area A) — for the Bill</label>
+      <label class="pk"><input type="checkbox" id="fnBt" checked> Baths, toilets and WCs are tiled — no plaster / paint and no skirting in them</label></div></div>
     <p class="small" style="margin-top:8px">Doors are found from their swings; a door tag beside one gives its size from the opening schedule (Bill → Opening schedule), else its drawn width × the door height above. Windows are found from their tags and need a size in the opening schedule — a window's height is never on a plan, so one with no size is listed, not deducted. Openings of 1.00 Sft or less are not deducted (house rule). Running it again replaces its own earlier runs on this page.</p>`, "Do finishes",
     () => { const H = uParse($("fnH").value), DH = $("fnDH").value.trim() ? uParse($("fnDH").value) : 0;
       if (!(H > 0)) return "Give the room height H (ft) — floor to ceiling"; if (isNaN(DH)) return "The door height is in feet, e.g. 7 or 7'-0\"";
-      return {H, DH, cond: $("fnC").value || null, ceiling: $("fnCl").checked}; }, "fnH");
+      return {H, DH, cond: $("fnC").value || null, ceiling: $("fnCl").checked, bathTile: $("fnBt").checked}; }, "fnH");
   if (!v) return;
   const r = await asOneStep("Finishes", () => finishesRun(v));
   if (r.error) return aiLog("err", esc(r.error));
@@ -18116,6 +18167,7 @@ function finReport(r){
     ${r.rooms.map(x => `<tr><td>${esc(x.name)}${x.nos > 1 ? " ×" + x.nos : ""}</td><td align="right">${fq(x.floor)}</td><td align="right">${fq(x.wallNet)}</td><td align="right">${fq(x.skirt)}</td><td class="small">${esc(x.doors.concat(x.wins).join(" ")) || "—"}</td></tr>`).join("")}
     <tr><td><b>Total</b></td><td align="right"><b>${fq(tot("floor"))}</b></td><td align="right"><b>${fq(tot("wallNet"))}</b></td><td align="right"><b>${fq(tot("skirt"))}</b></td><td></td></tr></table>
     <span class="small">On the sheet: <b>${esc(r.wall)}</b> (each room's run, its doors and windows as deduction rows) and <b>${esc(r.skirt)}</b> (less the doors)${r.ceiling ? "; the ceiling is an assembly line of the room condition, in the Bill" : ""}.${r.schAdded.length ? " Sizes of " + r.schAdded.map(esc).join(", ") + " read from the drawing's schedule into the opening schedule." : ""}</span>
+    ${r.rooms.some(x => x.bath) ? `<div class="small" style="margin-top:6px">Tiled — no plaster / paint, no skirting: ${r.rooms.filter(x => x.bath).map(x => esc(x.name)).join(", ")} (measure their wall tiles on their own; Finishes › untick “Baths … are tiled” to treat them as the other rooms)</div>` : ""}
     ${notes.length ? `<div style="margin-top:6px;color:#8a5a00"><b>Not deducted (${notes.length})</b> — give the size in Bill → Opening schedule, then run again:<br>${notes.join("<br>")}</div>` : ""}`);
   d.querySelector("[data-cp]").onclick = async () => { try { await navigator.clipboard.writeText(tsv); toast("Copied — paste into Excel"); } catch (e) { toast("Could not copy"); } };
 }
