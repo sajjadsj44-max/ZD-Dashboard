@@ -655,7 +655,7 @@ function pruneCaches(prev){
   if (prev && prev.files && prev.files.reduce((a, f) => a + (+f.size || 0) * (f.cad ? 10 : 1), 0) <= WARM_MB * 1048576) prev.files.forEach(f => keep.add(f.id));   // (an AutoCAD drawing, held as its scene, takes some ten times its file)
   const fid = k => String(k).split(":")[0];
   Object.keys(S.docs || {}).forEach(id => { if (!keep.has(id)) { const d = S.docs[id]; if (d && d.destroy) d.destroy(); delete S.docs[id]; } }); rcDrop(id => keep.has(id));
-  ["geo", "texts", "sizes", "thumbs", "ocgs", "ocBound", "cadSc", "cadP", "cedCache"].forEach(n => { const o = S[n]; if (o) Object.keys(o).forEach(k => { if (!keep.has(fid(k))) delete o[k]; }); });
+  ["geo", "texts", "sizes", "thumbs", "ocgs", "ocBound", "ocBoundW", "cadSc", "cadP", "cedCache"].forEach(n => { const o = S[n]; if (o) Object.keys(o).forEach(k => { if (!keep.has(fid(k))) delete o[k]; }); });
   S.thumbQ = []; rotSync(P.proj);
 }
 async function openProject(id){
@@ -988,7 +988,7 @@ function dropFileCache(fid){
   if (S.docs[fid]) { try { S.docs[fid].destroy(); } catch (e) {} delete S.docs[fid]; }
   const mine = k => String(k).split(":")[0] === fid;
   [S.geo, S.texts, S.sizes, S.thumbs].forEach(o => o && Object.keys(o).forEach(k => { if (mine(k)) delete o[k]; }));
-  if (S.ocgs) delete S.ocgs[fid]; if (S.ocBound) delete S.ocBound[fid]; if (S.pdfVp) delete S.pdfVp[fid]; if (S.cadSc) delete S.cadSc[fid]; if (S.cadP) delete S.cadP[fid];
+  if (S.ocgs) delete S.ocgs[fid]; if (S.ocBound) delete S.ocBound[fid]; if (S.ocBoundW) delete S.ocBoundW[fid]; if (S.pdfVp) delete S.pdfVp[fid]; if (S.cadSc) delete S.cadSc[fid]; if (S.cadP) delete S.cadP[fid];
 }
 async function addFiles(files){
   if (!P.proj) return;
@@ -1088,10 +1088,13 @@ function showDrop(on){ $("drop").style.display = on ? "flex" : "none"; }
    layer switched off (furniture, text, hatch) is gone everywhere. Switched-off layers are saved by name. */
 /* layer roles, from the layer names: what bounds a room (walls, doors and windows, columns, railings) and what does
    not (furniture, fixtures, glass screens, hatch, text, clouds). Used by auto area, the agents and the presets. */
-const ROLES = [["column", /column|^col\b|\bcols\b/i],["hatch", /hatch|patt/i], ["glass", /glass|glaz/i], ["fixture", /^(?!.*\bwalls?\b).*\b(mdf|joinery|wardrobes?)\b/i], ["wall", /\bwalls?\b|r\.?c\.?c|partition|block ?work|masonry|parapet/i],
+const ROLES = [["column", /column|^col\b|\bcols\b/i],["hatch", /hatch|patt/i], ["glass", /glass|glaz|shutter|shop ?front|store ?front|curtain ?wall/i], ["fixture", /^(?!.*\bwalls?\b).*\b(mdf|joinery|wardrobes?)\b/i], ["wall", /\bwalls?\b|r\.?c\.?c|partition|block ?work|masonry|parapet/i],
   ["tag", /^\s*d\s*-\s*w\s*$|tag/i], ["opening", /door|window|gate|vent|\bwin\b|^wn$/i], ["railing", /railing|balcon|metal.*frame|\brall\b/i], ["unit", /apartment|appartment|\bunit\b/i],
   ["text", /text|title|area|size|dim|grid|note|section|seal|cloud|label|tag|lable/i], ["fixture", /fixt|fict|furn|bath|kit|sanit|plant|tree|equip|mep|elect|light|lcd|marble|stair|step|\bwh\b|d\.b|j\.b|access|trap|cupboard|ac |wood|landscape|ramp|parking|ceiling|beam|lintel/i]];
 const BOUND = new Set(["wall", "opening", "column", "railing"]);
+/* the fallback when no closed room is found with BOUND alone: a shop's front is glass or a shutter, often on a layer whose name
+   says nothing ("0", "SHOP", "FACADE") — those count as walls too, never text, hatch, tags or furniture */
+const BOUND_WIDE = new Set([...BOUND, "glass", "other"]);
 function layerRole(name){ for (const [r, rx] of ROLES) if (rx.test(name)) return r; return "other"; }
 function layerInfo(fileId){   // {id: {name, role}} of the PDF's layers, or null
   const cfg = S.ocgs && S.ocgs[fileId]; if (!cfg) return null;
@@ -1103,12 +1106,12 @@ function segRoleFilter(g, roles){   // a test for segment ids: on a layer of one
   if (!ok.some(Boolean)) return null;
   return i => { const li = g.segs[i][7]; return li >= 0 && ok[li]; };
 }
-async function boundCfg(fileId){   // an optional-content config with only the room-boundary layers shown (for auto area's picture)
-  S.ocBound = S.ocBound || {};
-  if (S.ocBound[fileId] !== undefined) return S.ocBound[fileId];
+async function boundCfg(fileId, wide){   // an optional-content config with only the room-boundary layers shown (for auto area's picture)
+  const nm = wide ? "ocBoundW" : "ocBound", RS = wide ? BOUND_WIDE : BOUND; S[nm] = S[nm] || {};
+  if (S[nm][fileId] !== undefined) return S[nm][fileId];
   let cfg = null; try { const L = layerInfo(fileId); if (L && Object.values(L).some(l => l.role === "wall")) { cfg = await (await doc(fileId)).getOptionalContentConfig();
-    Object.keys(L).forEach(id => cfg.setVisibility(id, BOUND.has(L[id].role) && !(((P.proj.layersOff || {})[fileId] || []).includes(L[id].name)))); } } catch (e) { cfg = null; }
-  S.ocBound[fileId] = cfg; return cfg;
+    Object.keys(L).forEach(id => cfg.setVisibility(id, RS.has(L[id].role) && !(((P.proj.layersOff || {})[fileId] || []).includes(L[id].name)))); } } catch (e) { cfg = null; }
+  S[nm][fileId] = cfg; return cfg;
 }
 const ocOn = (cfg, id) => { const g = cfg && cfg.getGroup && cfg.getGroup(id); return !g || g.visible !== false; };   // (isVisible() wants a group object, not an id)
 const bbOffOf = fileId => [P.proj].concat(typeof PANES !== "undefined" ? PANES.map(p => p.sess && p.sess.proj) : []).some(pr => pr && pr.bbImp && pr.bbImp[fileId] && pr.bbImp[fileId].off);
@@ -1143,7 +1146,7 @@ function setLayer(ids, on){
   ids.forEach(id => cfg.setVisibility(id, on));
   P.proj.layersOff = P.proj.layersOff || {};
   P.proj.layersOff[S.fileId] = Object.entries(cfg.getGroups()).filter(([id]) => !ocOn(cfg, id)).map(([, g]) => g.name);
-  if (S.ocBound) delete S.ocBound[S.fileId];
+  if (S.ocBound) delete S.ocBound[S.fileId]; if (S.ocBoundW) delete S.ocBoundW[S.fileId];
   save(); clearTimeout(layT); layT = setTimeout(() => { PANES.forEach(pn => { if (pn.page && pn.fileId === S.fileId) { renderLow(pn); renderHi(true, pn); } }); }, 60);
 }
 
@@ -2958,7 +2961,7 @@ async function autoRoom(seed, over){   // -> {pts} or {err}; over: settings for 
   if (!img && !g.segs.length) return {err: "This page has no vector lines — switch Auto area settings (⚙) to ‘walls from the drawing image’."};
   for (const [half, pxFt] of [[45, 0.06], [110, 0.14], [240, 0.3]]) {
     const px = pxFt * k, W = Math.ceil(2 * half * k / px), H = W, x0 = seed[0] - half * k, y0 = seed[1] - half * k;
-    const bf = o.layers ? segRoleFilter(g, BOUND) : null, ocb = o.layers && bf ? await boundCfg(S.fileId) : null;   // the PDF's wall / door / window / column / railing layers only
+    const bf = o.layers ? segRoleFilter(g, o.wide ? BOUND_WIDE : BOUND) : null, ocb = o.layers && bf ? await boundCfg(S.fileId, !!o.wide) : null;   // the PDF's wall / door / window / column / railing layers only
     const ids = barrierIds(g, segsIn(g, x0, y0, x0 + W * px, y0 + H * px).filter(i => !bf || bf(i)), k, o);
     const raster = (lw, doorsOnly) => {   // barrier lines (and door openings) stroked lw (pt) wide -> 1 = blocked
       const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
@@ -3255,6 +3258,13 @@ async function autoRoomRetried(p){   // the trace retried with wider gaps / dash
       if (!r2.err) { r2.note = "a door wider than the setting: openings up to " + uLenT(g2) + " closed — check the outline"; first = r2; break; }
     }
   }
+  if (first.err && autoOpt().layers !== false) {   // still open: a shop whose front (glass, a shutter) is on a layer not read as a wall — those layers, then every line
+    for (const [over, why] of [[{wide: true, noTrace: true}, "glass / shop-front layers taken as walls"], [{layers: false, noTrace: true}, "every line of the drawing taken as a wall"]]) {
+      busy("No closed room — trying with " + why + "…"); await new Promise(r => setTimeout(r, 10));
+      let r2; try { r2 = await autoRoom(p, over); } catch (e) { r2 = {err: e.message || String(e)}; }
+      if (!r2.err && !r2.partial) { r2.note = why + " — check the outline"; r2.over = over; first = r2; break; }
+    }
+  }
   if (first.err) return first;
   let F = null; try { F = await drawingFacts(S.fileId, S.pageNo); } catch (e) {}
   if (!F || !F.rooms.length) return first;
@@ -3268,7 +3278,7 @@ async function autoRoomRetried(p){   // the trace retried with wider gaps / dash
   let best = {res: first, j};
   for (const over of [{dashBound: true}, {dashBound: true, gap: o.gap * 1.5}, {dashBound: true, gap: o.gap * 2, pocket: Math.max(o.pocket || 0, 1.5)}, {dashBound: true, gap: o.gap * 3, pocket: Math.max(o.pocket || 0, 2)}]) {
     busy("Room leaked into " + j.names.filter(Boolean).slice(0, 3).join(", ") + " — closing wider gaps…"); await new Promise(r => setTimeout(r, 10));
-    const r2 = await autoRoom(p, over); if (r2.err) continue;
+    const r2 = await autoRoom(p, Object.assign({}, first.over || {}, over, first.over ? {noTrace: true} : {})); if (r2.err) continue;
     const j2 = judge(r2);
     if (!j2.bad && j2.n >= 1) { r2.note = "leak closed (gap " + uLenT(over.gap || o.gap) + (over.dashBound ? ", dashed lines as walls" : "") + ")"; return r2; }
     if (j2.n >= 1 && (j2.n < best.j.n || (j2.n === best.j.n && j2.a < best.j.a))) best = {res: r2, j: j2};
