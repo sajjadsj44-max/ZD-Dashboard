@@ -891,6 +891,19 @@ l => { const lw = LW(l), nat = emW(l, F.f) * em; L.push({l, f: F.f, lw, wf: nat 
       for (let i = 0; i < N; i++) { const b = 4 * i; if (BB[b + 2] < E[0] || BB[b] > E[2] || BB[b + 3] < E[1] || BB[b + 1] > E[3]) far++; else grow(C, Math.max(BB[b], E[0]), Math.max(BB[b + 1], E[1]), Math.min(BB[b + 2], E[2]), Math.min(BB[b + 3], E[3])); }
       if (isFinite(C[0])) B = C; else far = 0;
     }
+    // a group far away that is more than 1 % of the drawing (IVORY: 10,500 of its 456,000 pieces — dimensions copied some 30 miles
+    // off) is inside the 1 % / 99 % centres: taken again from the 5 % / 95 % ones, and left off the page when it is under 5 % of the
+    // drawing and the extents reach more than 6 times past it — else the page is laid out at 1:48000 and a room is a speck on it
+    if (!far && N > 2000) {
+      const Xa = q(xs, 0.05), Xb = q(xs, 0.95), Ya = q(ys, 0.05), Yb = q(ys, 0.95), S2 = Math.max(Xb - Xa, Yb - Ya, 1e-9), E2 = [Xa - S2, Ya - S2, Xb + S2, Yb + S2];
+      if (F[2] - F[0] > 6 * (E2[2] - E2[0]) || F[3] - F[1] > 6 * (E2[3] - E2[1])) {
+        const out = b => BB[b + 2] < E2[0] || BB[b] > E2[2] || BB[b + 3] < E2[1] || BB[b + 1] > E2[3];
+        let n2 = 0; for (let i = 0; i < N; i++) if (out(4 * i)) n2++;
+        if (n2 > 0 && n2 <= 0.05 * N) { const C = [Infinity, Infinity, -Infinity, -Infinity];
+          for (let i = 0; i < N; i++) { const b = 4 * i; if (!out(b)) grow(C, Math.max(BB[b], E2[0]), Math.max(BB[b + 1], E2[1]), Math.min(BB[b + 2], E2[2]), Math.min(BB[b + 3], E2[3])); }
+          if (isFinite(C[0])) { B = C; far = n2; } }
+      }
+    }
   }
   if (B[2] - B[0] < 1e-9) { B[0] -= 0.5; B[2] += 0.5; } if (B[3] - B[1] < 1e-9) { B[1] -= 0.5; B[3] += 0.5; }
   /* the page: the drawing at a standard plot scale that fits about A0 (or, read again, exactly the page it was given the first time) */
@@ -1170,13 +1183,14 @@ export async function cadDrawAsync(ctx, pg, v, o, stale){
    as [{s, x, y, w, h, r}] (x, y the baseline's start, r its turn) */
 export function cadIndex(pg, max, ed, o){   // ed: AutoCAD-mode edits — the objects taken out are left out, the edited ones put in; s[8] says where a line came from (its primitive, or -1 - the edited object's index)
   const segs = [], styles = [], six = new Map(), O = pg.ops, X = pg.xy, hp = ed && ed.hp, ht = ed && ed.ht; let sp = 0; max = max || 600000;
+  const mn = Math.min(0.05, Math.max(0.01, 0.06 * (pg.ptPerFt > 0 ? pg.ptPerFt : 1)));   // pieces shorter than this (pt) are left out: 0.05 pt, or 0.06 ft on a drawing laid out small (a wall's 4" end stays in at 1:2400)
   const kix = key => { let si = six.get(key); if (si === undefined) { si = styles.length; styles.push(key); six.set(key, si); } return si; };
   const styleOf = (st, fill) => { const w = fill ? 0 : st.wid > 0 ? st.wid : st.lw * 72 / 25.4; return kix((st.c === INK ? "#000000" : hex6(st.c)) + "|" + Math.round(w * 10) / 10); };
   for (let i = 0; i < pg.n && segs.length < max; i++) {
     const kd = pg.kind[i]; if (kd === 3 || (pg.pf[i] === 1 && !(o && o.hatch)) || (hp && hp[i])) continue;
     const st = pg.styles[pg.sty[i]], fill = kd === 1 || kd === 2, si = styleOf(st, fill);
     const f0 = (fill ? 4 : st.dash ? 2 : 0) | (pg.pf[i] === 1 ? 16 : 0), li = pg.lay[i];
-    const push = (a, b, c, d, f) => { if (Math.abs(a - c) + Math.abs(b - d) > 0.05 && segs.length < max) segs.push([a, b, c, d, f, sp, si, li, i]); };
+    const push = (a, b, c, d, f) => { if (Math.abs(a - c) + Math.abs(b - d) > mn && segs.length < max) segs.push([a, b, c, d, f, sp, si, li, i]); };
     let q = pg.q0[i], cx = 0, cy = 0, sx = 0, sy = 0;
     for (let j = pg.p0[i], e = pg.p0[i + 1]; j < e; j++) { const op = O[j];
       if (op === 0) { cx = sx = X[q]; cy = sy = X[q + 1]; sp++; q += 2; }
