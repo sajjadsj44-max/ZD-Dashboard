@@ -63,6 +63,8 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.05 : t);
 
   console.log("PlanSwift's labels (the default)");
   ok(await T(() => { const o = zdTakeoff.S.lbl; return o.style === "ps" && o.show === "nameqty" && o.lenSel === true; }), "by default labels are PlanSwift's: a name + quantity tag, a run's only when it is clicked");
+  ok(await T(() => { const o = zdTakeoff.S.lbl; return o.fit === "smart" && o.collide === "hide" && o.lenAlong === true && o.shortName === true && o.minPx === 9 && o.maxPx === 14; }), "…sized smart (9 – 14 px on screen), a covered label finds a free spot or hides, lengths along the run, short names");
+  await setLbl({fit: "drawing", lenAlong: false});   // (the PlanSwift preset: sized on the building, a run's tag beside it — checked first)
   /* a wall run 40 ft long (360 pt) under the hall */
   await T(() => { const Z = zdTakeoff, P = Z.P.proj; P.conds.push({id: "CW", name: "Wall", type: "linear", unit: "ft", color: "#2222ff", h: "", t: "", faces: 1, dedMin: 0});
     P.items.push({id: "IW", cond: "CW", file: Z.S.fileId, page: 1, kind: "shape", pts: [[100, 430], [460, 430]], nos: 1}); Z.refresh(); });
@@ -105,7 +107,7 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.05 : t);
   await T(() => { const Z = zdTakeoff, P = Z.P.proj; P.items = P.items.filter(i => i.id !== "IW"); P.conds = P.conds.filter(c => c.id !== "CW"); Z.S.sel = null; Z.refresh(); });
 
   console.log("Classic labels");
-  await setLbl({on: true, small: false, zoom: true, declutter: true, name: true, qty: true, style: "box", show: "full"});
+  await setLbl({on: true, small: false, zoom: true, declutter: true, name: true, qty: true, style: "box", show: "full", fit: "drawing"});
 
   console.log("labels follow the zoom");
   await zoomTo(1); let L = await labels(); const hall1 = L.find(x => x.s === "HALL");
@@ -188,9 +190,10 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.05 : t);
 
   console.log("the Labels dialog and the hover tip");
   await T(() => document.getElementById("bLblSet").click()); await wait(300);
-  const dlg = await T(() => ({zoom: !!document.querySelector('[data-lb="zoom"]'), dec: !!document.querySelector('[data-lb="declutter"]'), zc: (document.querySelector('[data-lb="zoom"]') || {}).checked,
+  const dlg = await T(() => ({fit: (document.querySelector('[data-lbs="fit"]') || {}).value, col: (document.querySelector('[data-lbs="collide"]') || {}).value, pre: document.querySelectorAll("[data-lbp]").length,
+    mn: !!document.querySelector('[data-lbr="minPx"]') && !!document.querySelector('[data-lbr="maxPx"]'), along: !!document.querySelector('[data-lb="lenAlong"]'), short: !!document.querySelector('[data-lb="shortName"]'),
     show: (document.querySelector('[data-lbs="show"]') || {}).value, ded: (document.querySelector('[data-lbs="dedShow"]') || {}).value}));
-  ok(dlg.zoom && dlg.dec && dlg.zc, "View → Labels has both options, “grow and shrink with the zoom” on by default");
+  ok(dlg.fit === "drawing" && dlg.col === "hide" && dlg.pre === 7 && dlg.mn && dlg.along && dlg.short, "View → Labels: size on screen (with the drawing, as set), when labels meet (hide), 7 presets, min – max px, along the run, short names " + JSON.stringify(dlg));
   ok(dlg.show === "full" && dlg.ded === "qty", "…and “every label shows” (full) and “cut-out / deduction labels show” (qty only)");
   await page.keyboard.press("Escape"); await wait(200);
   await zoomTo(0.3); await page.keyboard.press("v");
@@ -211,10 +214,13 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.05 : t);
   ok(m1.lo && Math.abs(m1.lo[0] - 150) < 3 && Math.abs(m1.lo[1] + 60) < 3, "dragging HALL's label 150 px right, 60 up keeps it there (offset " + JSON.stringify(m1.lo) + " pt at 100 %)");
   ok(c1 && Math.abs(c1[0] - c0[0] - 151) < 4 && Math.abs(c1[1] - c0[1] + 60) < 4, "…the label is drawn where it was dropped");
   ok((await T(() => zdTakeoff.S.sel)) === "IB", "…and its object is selected (a label is part of its object)");
-  const lead1 = await T(() => { const g = document.querySelector("#ov g.aplead"); if (!g) return 0; const c = g.querySelector("circle"), l = g.querySelector("line"); return Math.hypot(+l.getAttribute("x2") - +c.getAttribute("cx"), +l.getAttribute("y2") - +c.getAttribute("cy")); });
-  ok(lead1 > 150, "moved away from its room it gets a dashed leader back to it (" + Math.round(lead1) + " px)"); await shot("moved");
+  const leadOf = () => T(() => { const g = document.querySelector("#ov g.aplead"), t = [...document.querySelectorAll("#ov g.aplbl")].find(x => x.querySelector("text").textContent === "HALL"); if (!g || !t) return null; const c = g.querySelector("circle"), l = g.querySelector("line"), r = t.querySelector("rect").getBBox();
+    const cx = +c.getAttribute("cx"), cy = +c.getAttribute("cy"), x2 = +l.getAttribute("x2"), y2 = +l.getAttribute("y2");
+    return {d: Math.hypot(r.x + r.width / 2 - cx, r.y + r.height / 2 - cy), edge: Math.abs(x2 - r.x) < 1 || Math.abs(x2 - r.x - r.width) < 1 || Math.abs(y2 - r.y) < 1 || Math.abs(y2 - r.y - r.height) < 1}; });
+  const L1 = await leadOf(), lead1 = L1 ? L1.d : 0;
+  ok(lead1 > 150 && L1.edge, "moved away from its room it gets a dashed leader back to it, ending at the tag's edge (" + Math.round(lead1) + " px)"); await shot("moved");
   await zoomTo(2);
-  const lead2 = await T(() => { const g = document.querySelector("#ov g.aplead"), c = g.querySelector("circle"), l = g.querySelector("line"); return Math.hypot(+l.getAttribute("x2") - +c.getAttribute("cx"), +l.getAttribute("y2") - +c.getAttribute("cy")); });
+  const lead2 = ((await leadOf()) || {}).d || 0;
   ok(Math.abs(lead2 - 2 * lead1) < 4, "at 200 % it sits twice as far from its room — it stays put on the drawing (" + Math.round(lead2) + " px)");
   await zoomTo(1);
   await page.keyboard.press("Control+z"); await wait(250);
@@ -266,6 +272,61 @@ const near = (a, b, t) => Math.abs(a - b) <= (t == null ? 0.05 : t);
   await T(() => localStorage.setItem("zdTakeoffLbl", JSON.stringify({on: true, show: "full", dedShow: "qty", zoom: true, declutter: true, v2: 1})));
   await page.reload({waitUntil: "load"}); await wait(900);
   ok(await T(() => { const o = zdTakeoff.S.lbl; return o.style === "ps" && o.show === "nameqty" && o.lenSel === true && o.v3 === 1 && o.dedShow === "qty"; }), "labels set before this are switched to PlanSwift's once (name + qty, a run's when clicked), the rest kept");
+
+  ok(await T(() => { const o = zdTakeoff.S.lbl; return o.v4 === 1 && o.fit === "smart" && o.collide === "hide" && o.declutter === true && o.lenAlong === true && o.shortName === true; }), "…and to the professional labels once (smart size, no overlaps, lengths along the run, short names)");
+
+  console.log("professional labels (the default since 17-Nov-2026)");
+  await page.waitForFunction(() => zdTakeoff.S.page && zdTakeoff.P.proj && zdTakeoff.P.proj.items.some(i => i.id === "IB"), null, {timeout: 20000});
+  await page.click('[data-rtab="view"]'); await wait(150); await page.click("#rbLblMenu"); await wait(150);
+  await page.locator("#ctx .ci", {hasText: "Preset"}).first().hover(); await wait(150);
+  const pres = await page.locator("#ctx .ci .cm .ci").allInnerTexts();
+  ok(["Professional", "PlanSwift", "Bluebeam", "AutoCAD", "Colour tags", "Minimal", "Every label shown"].every(t => pres.some(x => x.indexOf(t) >= 0)), "⚙ → Preset lists the 7 looks (" + pres.length + ")");
+  await page.locator("#ctx .ci .cm .ci", {hasText: "Professional"}).first().click(); await wait(250);
+  ok(await T(() => zdTakeoff.S.lbl.preset === "pro" && zdTakeoff.S.lbl.fit === "smart"), "Preset → Professional sets the whole look");
+  const hallFs = async s => { await zoomTo(s); const x = (await labels()).find(y => y.s === "HALL"); return x ? x.fs : 0; };
+  const fz = [await hallFs(0.3), await hallFs(1), await hallFs(6)];
+  ok(near(fz[0], 9, 0.06) && near(fz[1], 9, 0.06) && near(fz[2], 14, 0.06), "smart size: 9 px zoomed out (30 %), 9 px at 100 % (7.65 on the building → kept readable), 14 px at 600 % — never a speck, never huge (" + fz.join(", ") + ")");
+  await setLbl({minPx: 10, maxPx: 12}); const fz2 = [await hallFs(0.3), await hallFs(6)];
+  ok(near(fz2[0], 10, 0.06) && near(fz2[1], 12, 0.06), "…the smallest / largest size are settings (10 – 12: " + fz2.join(", ") + ")"); await setLbl({minPx: 9, maxPx: 14});
+  await zoomTo(1);
+  /* three cut-outs closer than their labels, all selected: before, every selected label was drawn over the others */
+  await T(() => { zdTakeoff.setSel(["D1", "D2", "D3", "IB"]); zdTakeoff.refresh(); }); await wait(200);
+  const boxesNow = () => T(() => [...document.querySelectorAll("#ov g.aplbl")].map(g => { const r = g.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; }));
+  const overl = B => B.some((a, i) => B.some((b, j) => j > i && a[0] < b[2] - 0.5 && a[2] > b[0] + 0.5 && a[1] < b[3] - 0.5 && a[3] > b[1] + 0.5));
+  let B = await boxesNow(); ok(B.length >= 2 && !overl(B), "several objects selected: their labels are still placed without overlaps (" + B.length + " labels)");
+  await T(() => { zdTakeoff.setSel([]); zdTakeoff.refresh(); }); await wait(150);
+  await setLbl({collide: "move", small: false}); B = await boxesNow();
+  const leads = await T(() => document.querySelectorAll("#ov g.aplead").length);
+  ok(B.length === 4 && !overl(B) && leads >= 1, "When labels meet → move aside: all 4 labels shown, none on another, " + leads + " with a leader line");
+  await setLbl({collide: "hide", small: true});
+  await setLbl({minQty: 10, small: false}); let G1 = await groups();
+  ok(G1.length === 1 && G1[0][0] === "HALL", "No label under 10: the 9 Sft cut-outs are left unlabelled, HALL kept (" + G1.length + ")"); await setLbl({minQty: 0, small: true});
+  /* runs: written along the run, a vertical one reading bottom to top; a floor's own condition by its short name */
+  await T(() => { const Z = zdTakeoff, P = Z.P.proj, f = Z.S.fileId, pk = f + ":1"; (P.floors = P.floors || {})[pk] = [{name: "Ground floor"}];
+    P.conds.push({id: "CP", name: "Plaster — Ground floor", src: "CP0", fl: "Ground floor", flpk: pk, type: "linear", unit: "ft", color: "#5a3fb0", h: "", t: "", faces: 1, dedMin: 0});
+    P.items.push({id: "IV", cond: "CP", file: f, page: 1, kind: "shape", pts: [[520, 100], [520, 460]], nos: 1, floor: "Ground floor"}, {id: "IH", cond: "CP", file: f, page: 1, kind: "shape", pts: [[100, 500], [460, 500]], nos: 1, floor: "Ground floor"});
+    Z.S.lbl = Object.assign({}, Z.S.lbl, {lenSel: false}); Z.refresh(); }); await wait(250);
+  const runs = await T(() => [...document.querySelectorAll("#ov g.aplbl")].filter(g => /Plaster/.test(g.textContent)).map(g => ({s: [...g.querySelectorAll("text")].map(t => t.textContent), rot: (g.parentElement.getAttribute("transform") || "").replace(/^rotate\(([-\d.]+).*$/, "$1")})));
+  ok(runs.length === 2 && runs.every(r => r.s.length === 1 && r.s[0] === "Plaster · 40.00 FT"), "a run's label: one line along it, its condition's short name (" + JSON.stringify(runs.map(r => r.s)) + ")");
+  ok(runs.some(r => r.rot === "-90.00") && runs.some(r => r.rot === ""), "…the vertical run's turned to read bottom to top (−90°), the level one level (" + runs.map(r => r.rot || "0").join(", ") + ")");
+  await setLbl({shortName: false}); ok((await T(() => [...document.querySelectorAll("#ov g.aplbl")].some(g => /Plaster — Ground floor/.test(g.textContent)))), "Short names off: “Plaster — Ground floor”"); await setLbl({shortName: true});
+  await setLbl({lenAlong: false}); const tagR = await T(() => [...document.querySelectorAll("#ov g.aplbl")].filter(g => /Plaster/.test(g.textContent)).map(g => g.querySelectorAll("text").length));
+  ok(tagR.length === 2 && tagR.every(n => n === 2), "Along the run off: a two-line tag beside it, as PlanSwift (" + JSON.stringify(tagR) + ")"); await setLbl({lenAlong: true});
+  /* the looks */
+  await setLbl({style: "tag"}); let H = await tagOf("HALL");
+  ok(H && H.fill !== "#dfbf2a" && H.fill !== "#ffffff" && H.stroke === "#2a78d6", "Style: Colour tag — a light tint of the condition's colour, its colour as the border (" + JSON.stringify(H && [H.fill, H.stroke]) + ")");
+  await setLbl({style: "clean"}); const cl = await T(() => { const g = [...document.querySelectorAll("#ov g.aplbl")].find(x => x.querySelector("text").textContent === "HALL"); return g && {rect: !!g.querySelector("rect"), halo: g.querySelector("text").getAttribute("stroke"), fw: g.querySelector("text").getAttribute("font-weight")}; });
+  ok(cl && !cl.rect && cl.halo === "#fff" && cl.fw === "700", "Style: CAD text — no box, bold text with a white halo " + JSON.stringify(cl));
+  await setLbl({style: "ps"});
+  /* the marked-up export places its labels the same way */
+  const ex2 = await T(() => { const Z = zdTakeoff, b = Z.S.base; return Z.pageOverlaySvg(Z.S.fileId, Z.S.pageNo, 1, b.width, b.height, {legend: "none"}); });
+  const nCut = (ex2.match(/>-9\.00 SQ FT</g) || []).length;
+  ok(/>HALL</.test(ex2) && nCut >= 1 && nCut < 3, "the marked-up export leaves out a covered cut-out label too (" + nCut + " of 3), HALL kept");
+  /* Settings › Labels */
+  await T(() => { zdTakeoff.settingsDialog("labels"); }); await wait(400);   // (not awaited: it resolves when the window closes)
+  const st = await T(() => document.getElementById("dlgB") ? document.getElementById("dlgB").innerText : "");
+  ok(/Size on screen/.test(st) && /When labels meet/.test(st) && /Lengths written along the run/.test(st) && /Short names/.test(st) && /Preset/.test(st), "Settings › Labels has the same options");
+  await page.keyboard.press("Escape"); await wait(200);
 
   ok(!errors.length, "no page errors" + (errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""));
   await browser.close();
