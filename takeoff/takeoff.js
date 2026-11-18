@@ -1795,7 +1795,12 @@ function wallScale(key, est){
   const std = STD_SCALES.find(x => Math.abs(x.ptPerFt / best.c - 1) < 0.01);
   return {ptPerFt: std ? std.ptPerFt : best.c, label: std ? std.label : "1 ft = " + best.c.toFixed(3) + " pt", walls: best.nm};
 }
-const scaleDoubt = () => { const sc = P.proj && P.proj.scales[S.key]; return sc && sc.doubt && !sc.verified ? sc.doubt : null; };
+/* a DWG / DXF is drawn to its own units, so its scale can only be wrong by a units mix-up (mm saved as inches, feet as inches…):
+   the ratio is then one of these factors. Any other ratio means the room sizes written on it were misread, not that the drawing is off. */
+const CAD_UNIT_F = [12, 25.4, 304.8, 10, 100, 1000, 2.54, 30.48, 3.28084, 39.3701];
+const cadUnitRatio = r => { if (!(r > 0)) return 0; for (const f of CAD_UNIT_F) for (const x of [f, 1 / f]) if (Math.abs(Math.log(r / x)) < Math.log(1.12)) return x; return 0; };
+const realDoubt = sc => !sc || !sc.doubt || sc.verified || (sc.how === "cad" && !cadUnitRatio(sc.doubt.ratio)) ? null : sc.doubt;
+const scaleDoubt = () => realDoubt(P.proj && P.proj.scales[S.key]);
 
 /* scale notes on the page: 1/8" = 1'-0", 3/16"=1'-0", 1" = 20', 1:100 (with "@ A1" paper size if given) */
 const ISO = {A0: 3370.39, A1: 2383.94, A2: 1683.78, A3: 1190.55, A4: 841.89};
@@ -6439,14 +6444,14 @@ function renderScaleChip(){
   const ch = $("scaleChip"), sc = P.proj && P.proj.scales[S.key];
   if (!S.page) { ch.className = "chip bad"; ch.lastElementChild.textContent = "No page"; return; }
   if (!sc) { ch.className = "chip bad"; ch.lastElementChild.textContent = "Scale not set — press K"; }
-  else { ch.className = "chip " + scaleState(sc).k; ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "pdf" ? sc.text + " · saved in the PDF" : sc.how === "cad" ? sc.text + " · from the drawing" : sc.how === "dims" ? sc.text + " · from dimension strings" : sc.how === "manual" ? sc.text + " · chosen" : sc.how === "inherited" ? ptPerTxt(sc.ptPerFt, 3) + " · inherited from " + keyName(sc.from) : ptPerTxt(sc.ptPerFt, 3) + " · calibrated") + (sc.verified ? " · verified" : sc.doubt ? " · doubtful" : " · not verified"); ch.title = "Page scale: " + scaleState(sc).t + " · " + scaleBoth(sc.ptPerFt) + " — click to set or check"; }
+  else { ch.className = "chip " + scaleState(sc).k; ch.lastElementChild.textContent = (sc.how === "note" ? scaleLabel(sc) + " · from note" : sc.how === "pdf" ? sc.text + " · saved in the PDF" : sc.how === "cad" ? sc.text + " · from the drawing" : sc.how === "dims" ? sc.text + " · from dimension strings" : sc.how === "manual" ? sc.text + " · chosen" : sc.how === "inherited" ? ptPerTxt(sc.ptPerFt, 3) + " · inherited from " + keyName(sc.from) : ptPerTxt(sc.ptPerFt, 3) + " · calibrated") + (sc.verified ? " · verified" : realDoubt(sc) ? " · doubtful" : " · not verified"); ch.title = "Page scale: " + scaleState(sc).t + " · " + scaleBoth(sc.ptPerFt) + " — click to set or check"; }
   markPageSel();
 }
 /* a page's scale status: Verified / Calibrated (both checked against a known length), Inherited (copied from another page,
    not yet checked), From note (read from the drawing's note, not yet checked), Unknown */
 function scaleState(sc){
   if (!sc) return {k: "bad", ic: "✕", t: "Unknown"};
-  if (sc.doubt && !sc.verified) return {k: "bad", ic: "✕", t: "Doubtful — the drawing measures " + sc.doubt.label};
+  if (realDoubt(sc)) return {k: "bad", ic: "✕", t: "Doubtful — the drawing measures " + sc.doubt.label};
   if (sc.how === "inherited") return sc.verified ? {k: "ok", ic: "✓", t: "Inherited · verified"} : {k: "warn", ic: "⚠", t: "Inherited from " + keyName(sc.from)};
   if (sc.how === "calibrated") return {k: "ok", ic: "✓", t: "Calibrated"};
   if (sc.how === "manual") return sc.verified ? {k: "ok", ic: "✓", t: "Chosen · verified"} : {k: "warn", ic: "⚠", t: "Chosen by hand — not verified"};
@@ -19118,7 +19123,9 @@ async function cadUnitsCheck(key){   // the drawing's units against the room siz
   let ev = null; try { ev = await scaleFromRooms(key); } catch (e) { ev = null; }
   if (!ev || ev.agree < 3) return;
   const r = ev.ptPerFt / sc.ptPerFt; if (Math.abs(Math.log(r)) < Math.log(1.15)) return;
-  sc.doubt = {label: "1 ft = " + ev.ptPerFt.toFixed(3) + " pt", ptPerFt: ev.ptPerFt, ratio: +r.toFixed(3), rooms: ev.rooms, agree: ev.agree}; sc.verified = false; save(); refresh();
+  // only a units mix-up can put a CAD drawing off, and then by an exact factor: any other ratio is misread room labels — keep the drawing's scale
+  const f = cadUnitRatio(r); if (!f) return;
+  sc.doubt = {label: "1 ft = " + (sc.ptPerFt * f).toFixed(3) + " pt", ptPerFt: sc.ptPerFt * f, ratio: +f.toFixed(4), rooms: ev.rooms, agree: ev.agree}; sc.verified = false; save(); refresh();
   toast("⚠ " + keyName(key) + ": the drawing's units say " + sc.text + ", but " + ev.agree + " room sizes written on it measure × " + r.toFixed(2) + " — check the scale (chip → Verify)", 9000);
 }
 function cadHidden(fid, sc, proj = P.proj){ const off = new Set(((proj && proj.layersOff) || {})[fid] || []), h = new Uint8Array(sc.layers.length); sc.layers.forEach((l, i) => { if (off.has(l.name)) h[i] = 1; }); return h; }
