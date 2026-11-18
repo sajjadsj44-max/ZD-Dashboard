@@ -1183,6 +1183,7 @@ async function gotoPage(fileId, pageNo, pn = ACT){
   if (here()) indexPage();   // vector lines + scale note, in the background
   if (here()) refresh(); else { draw(); paneStrip(pn); }
   if (SPLIT.on) { paneStrip(pn); if (SPLIT.sync) syncRel(); }
+  { const cm = cadMeta(fileId, proj); if (here() && proj === P.proj && cm && cm.den >= CAD_TINY && !cm.relaid) setTimeout(() => cadRelayout(fileId), 300); }   // laid out too small by an earlier reader: laid out afresh, its takeoff moved with it
 }
 
 /* ------------------------------------------------------------------ rendering */
@@ -19126,12 +19127,72 @@ async function cadImport(f, buf, map){
   }
   const pg = sc.pages[0];
   if (!pg.n && !pg.tn) throw new Error("nothing was found in its model space" + (Object.keys(sc.stats.skipped).length ? " (only " + Object.keys(sc.stats.skipped).join(", ") + ")" : "") + " — is the drawing on a layout (paper space)?");
-  const st = sc.stats, meta = {fmt: sc.fmt, ver: sc.dver, units: sc.units, unitName: sc.unitName, unitHow: sc.unitHow || "", unitFix: !!sc.unitFix, assumed: sc.assumed, den: pg.den, ptPerFt: pg.ptPerFt, conv: C.CAD_VER, map: pg.map,
-    layers: sc.layers.map(l => ({name: l.name, c: l.c, aci: l.aci, off: l.off, frozen: l.frozen, plot: l.plot, lt: l.lt, lw: l.lw})),
-    stats: {ents: st.ents, prims: st.prims, texts: st.texts, skipped: st.skipped, missing: Object.keys(st.missing).length, far: st.far, junk: st.junk || 0, trunc: st.trunc}};
+  const meta = cadMetaOf(sc, C);
   if (via) meta.via = via;   // opened by this computer's AutoCAD (src is then its DXF)
   else if (sc.rdr) meta.rdr = sc.rdr;   // read by the second DWG reader (ACadSharp): LibreDWG could not read it whole
   return {pdf, src: buf, scene: sc, meta};
+}
+function cadMetaOf(sc, C){   // what the project keeps about a drawing's scene (P.proj.files[].cad)
+  const pg = sc.pages[0], st = sc.stats;
+  return {fmt: sc.fmt, ver: sc.dver, units: sc.units, unitName: sc.unitName, unitHow: sc.unitHow || "", unitFix: !!sc.unitFix, assumed: sc.assumed, den: pg.den, ptPerFt: pg.ptPerFt, conv: C.CAD_VER, map: pg.map,
+    layers: sc.layers.map(l => ({name: l.name, c: l.c, aci: l.aci, off: l.off, frozen: l.frozen, plot: l.plot, lt: l.lt, lw: l.lw})),
+    stats: {ents: st.ents, prims: st.prims, texts: st.texts, skipped: st.skipped, missing: Object.keys(st.missing).length, far: st.far, junk: st.junk || 0, trunc: st.trunc}};
+}
+/* A drawing laid out at 1:24000 or smaller by an earlier reader — a group of objects miles from its plans took the page with it
+   (IVORY: 1:48000, a shop a fraction of a point wide, no room Auto area could close). Opened again, it is laid out afresh from its
+   DWG at its plans' size, and everything on it moves with it in the same step: measurements (their points, the outline Auto area
+   found, a label moved by hand), markups, spot levels, floor boxes, viewports and the page's scale. The project is backed up first
+   and Ctrl+Z history is cleared. Left as it is (and said why) when AutoCAD-mode edits are on it (they count its objects one by
+   one), the page is turned, or another project shares the stored drawing; and once tried, a drawing that really reaches that far
+   is not read again. */
+const CAD_TINY = 24000, fileOfKey = k => String(k).split(":")[0];   // ("fileId:page", a trace's "fileId:page#plan")
+async function cadRelayout(fid){
+  const meta = P.proj && P.proj.files.find(f => f.id === fid), m = meta && meta.cad;
+  if (!m || !(m.den >= CAD_TINY) || m.relaid || S.relaying || S.visitOnly && S.visitOnly.has(fid)) return false;
+  const why = t => { m.relaid = t; save(); return false; }, key = keyOf(fid, 1);
+  const ed = P.proj.cadEd && P.proj.cadEd[fid];
+  if (ed && ["hp", "ht", "add", "cp"].some(k => (ed[k] || []).length)) { toast("⚠ " + meta.name + " is laid out at 1:" + m.den + " (too small for Auto area) — not laid out again because it has AutoCAD-mode edits: delete the drawing's measurements and add it again", 12000); return why("edited"); }
+  if (rotOf(P.proj, key)) return why("turned");
+  const shared = (await dbAll("projects").catch(() => [])).some(x => x.id !== P.proj.id && (x.files || []).some(y => y.id === fid));
+  if (shared) { toast("⚠ " + meta.name + " is laid out at 1:" + m.den + " (too small for Auto area) — another project shares it, so it is left as it is: add it again to this project to lay it out afresh", 12000); return why("shared"); }
+  const rec = await dbGet("pdfs", fid).catch(() => null); if (!rec || !(rec.src instanceof ArrayBuffer) || !rec.src.byteLength) return false;   // (dbGet: a big record's Blobs read back as bytes)
+  S.relaying = true; const pid = P.proj.id;
+  busy("Laying out " + meta.name + " again — it was laid out at 1:" + m.den + ", too small for Auto area and snapping…");
+  try {
+    const C = await cadMod(), rn = meta.via ? String(rec.name || "drawing").replace(/\.dwg$/i, ".dxf") : rec.name || meta.name, rd = m.rdr === "ACadSharp" ? "acadsharp" : "";
+    let sc, pdf; const r = await cadWorker(rec.src, rn, null, rd);
+    if (r) { sc = r.scene; pdf = r.pdf.buffer.slice(r.pdf.byteOffset, r.pdf.byteOffset + r.pdf.byteLength); }
+    else { sc = C.cadScene(await C.cadRead(rec.src, rn, {reader: rd})); const b = await C.cadPdf(sc, await loadPdfLib(), {title: meta.name}); pdf = b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); }
+    if (!P.proj || P.proj.id !== pid || !P.proj.files.includes(meta)) return false;   // (the project closed, or the drawing removed, meanwhile)
+    const pg = sc.pages[0], M0 = m.map, M1 = pg.map;
+    if (!(pg.den < m.den) || !M0 || !M1 || !(M0.uIn > 0) || M0.uIn !== M1.uIn) return why("same");   // it does reach that far: kept
+    await backupNow("before " + meta.name + " was laid out again (1:" + m.den + " → 1:" + pg.den + ")").catch(() => {});
+    const k0 = 72 * M0.uIn / M0.den, k1 = 72 * M1.uIn / M1.den, s = k1 / k0;
+    const X = p => [M1.ox + (M0.x0 + (p[0] - M0.ox) / k0 - M1.x0) * k1, M1.oy + (M1.y1 - (M0.y1 - (p[1] - M0.oy) / k0)) * k1];
+    const XP = Q => Q.map(p => Array.isArray(p) && p.length >= 2 ? X(p) : p), XR = q => { const a = X([q[0], q[1]]), b = X([q[2], q[3]]); return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]; };
+    let nI = 0, nM = 0;
+    P.proj.items.forEach(it => { if (it.file !== fid) return; nI++; it.pts = XP(it.pts);
+      if (it.det && Array.isArray(it.det.pts0)) it.det.pts0 = XP(it.det.pts0); if (Array.isArray(it.lo) && it.lo.length === 2) it.lo = it.lo.map(v => v * s); });
+    (P.proj.marks || []).forEach(mk => { if (mk.file !== fid || !Array.isArray(mk.pts)) return; nM++; mk.pts = XP(mk.pts); });
+    (P.proj.levels || []).forEach(l => { if (l.file === fid && Array.isArray(l.p)) l.p = X(l.p); });
+    Object.keys(P.proj.floors || {}).forEach(k => { if (fileOfKey(k) === fid) (P.proj.floors[k] || []).forEach(f => { if (Array.isArray(f.r) && f.r.length === 4) f.r = XR(f.r); }); });
+    Object.keys(P.proj.viewports || {}).forEach(k => { if (fileOfKey(k) === fid) (P.proj.viewports[k] || []).forEach(v => { if (Array.isArray(v.r) && v.r.length === 4) v.r = XR(v.r); if (v.ptPerFt > 0) v.ptPerFt *= s; }); });
+    Object.keys(P.proj.scales || {}).forEach(k => { if (fileOfKey(k) !== fid) return; const c = P.proj.scales[k]; delete c.doubt; delete c.checked;
+      if (c.how === "cad") Object.assign(c, {ptPerFt: pg.ptPerFt, text: "1:" + pg.den + " · units " + sc.unitName + (sc.unitHow ? " (from " + sc.unitHow + ")" : ""), at: new Date().toISOString()}); else c.ptPerFt *= s; });
+    ["ocr", "vec"].forEach(n => { const o = P.proj[n]; if (o && typeof o === "object") Object.keys(o).forEach(k => { if (fileOfKey(k) === fid) delete o[k]; }); });   // (read off the old page: read again)
+    const nm = cadMetaOf(sc, C); if (m.via) nm.via = m.via; else if (sc.rdr) nm.rdr = sc.rdr; nm.relaid = {from: m.den, at: new Date().toISOString()};
+    rec.data = pdf; rec.scene = sc; delete rec.pdfSha; await dbPut("pdfs", rec, fid);
+    try { if (window.caches) { const c = await caches.open(THUMB_CACHE), pre = "/zd-thumb/" + encodeURIComponent(fid + "-"); for (const q of await c.keys()) if (q.url.includes(pre)) await c.delete(q); } } catch (e) {}   // (the old page's picture)
+    meta.cad = nm; Object.keys(TRC).forEach(k => { if (fileOfKey(k) === fid) delete TRC[k]; });
+    if (ed) delete P.proj.cadEd[fid];   // (an empty AutoCAD-mode record counted the old page's objects)
+    dropFileCache(fid); S.cadSc = S.cadSc || {}; S.cadSc[fid] = sc;
+    S.undo = []; S.redo = []; S.sel = null; S.selMark = null; S.multi.clear();
+    save(); buildPageSel();
+    for (const pn of PANES) if (pn.fileId === fid && pn.sess && pn.sess.proj === P.proj) await gotoPage(fid, pn.pageNo || 1, pn);
+    toast(meta.name + " laid out again at 1:" + pg.den + " (it was 1:" + m.den + (sc.stats.far ? ": " + sc.stats.far.toLocaleString() + " objects far from its plans are left off the page" : "") + ")" + (nI + nM ? " — " + (nI ? nI + " measurement" + (nI > 1 ? "s" : "") : "") + (nI && nM ? " and " : "") + (nM ? nM + " markup" + (nM > 1 ? "s" : "") : "") + " moved with it" : "") + ". A backup was taken first.", 12000);
+    return true;
+  } catch (e) { toast("⚠ " + meta.name + " could not be laid out again (" + (e.message || e) + ") — it stays at 1:" + m.den + ": delete its measurements and add it again", 12000); return why("failed"); }   // (not read again on every visit)
+  finally { S.relaying = false; busy(""); }
 }
 function cadAdopt(meta, cad, how){   // a drawing just added: its page's scale from its units; layers off or frozen in the drawing start off
   const key = keyOf(meta.id, 1), m = cad.meta, sc = P.proj.scales[key];
