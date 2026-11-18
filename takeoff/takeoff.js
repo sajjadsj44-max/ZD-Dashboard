@@ -4381,7 +4381,8 @@ function setTool(t){
   if (t !== "typref" && S.typ) { S.typ = null; $("cmpLegend").style.display = "none"; toast("Typical copy stopped — nothing copied"); }
   S.mkd = null;
   if (t !== "stamp" || S.tool !== "stamp") { S.stampBase = null; S.stampN = 0; }
-  if (t !== "cadsel" && t !== "pan" && t !== "zoomwin") S.cadSel = null;
+  if (t !== "cadsel" && t !== "cadxf" && t !== "pan" && t !== "zoomwin") S.cadSel = null;
+  if (t !== "cadxf" && t !== "pan" && t !== "zoomwin") S.cadXf = null;
   S.cbox = null; S.cadHov = -1;
   S.tool = t; draftClear(); S.draftRedo = []; S.measure = t === "measure" ? S.measure : null; S.press = null; S.lasso = null; S.zbox = null; S.hover = null;
   if (ribRepeatable(t)) S.lastTool = t; S.nosOnce = 0;   // (Enter with nothing drawn or selected starts the last measuring tool again; a one-shape *N ends with its tool)
@@ -4402,7 +4403,7 @@ function hint(){
   const c = S.cond ? cond(S.cond) : null, t = S.tool;
   const drawing = " · type a length + Enter (12'-6\") · A: arc · Ctrl+click: no snap · Ctrl+Z / Backspace: last point back · Ctrl+Y: again";
   const H = {select: "Click to select · drag a box left→right (wholly inside) or right→left (touching) · drag a selected object to move it, Ctrl+drag to copy · double-click an edge to add a point, a point to remove it · drag a label to move it (right-click → Reset label position) · right-click for more.",
-    cadsel: "AutoCAD objects: click one to select it · Shift / Ctrl+click adds or takes out · drag a box left→right (wholly inside) or right→left (touching) · Ctrl+A: all · then Take off, Count, Select similar, Layer off… below · Esc clears.",
+    cadsel: "AutoCAD objects: click one to select it · Shift / Ctrl+click adds or takes out · drag a box left→right (wholly inside) or right→left (touching) · Ctrl+A: all · then Take off, Count, Select similar, Layer off… below · Delete erases, Move / Copy / Rotate / Mirror / Scale edit, Ctrl+C then Ctrl+V copies onto any page · Esc clears.",
     lasso: "Lasso: drag round the objects to select (touching counts) · Shift adds to the selection.", pan: "Drag to pan; scroll to zoom.",
     draw: !c ? "" : c.type === "area" ? "Click the corners; click the first point, right-click or press Enter to close." + drawing : c.type === "linear" ? (S.resume ? "Continuing the run — click on; Enter, double-click or right-click to finish." : "Click along the run; Enter, double-click or right-click to finish.") + drawing : "Click each item to count it; Esc when done.",
     linepick: "Line pick: click one line of the drawing — the whole run joined to it is taken off with the active condition (a closed outline: an area). It stops at a junction; Shift+click goes on through it, the straightest way. Ctrl+Z takes it back.",
@@ -4430,6 +4431,7 @@ function hint(){
     match: S.matchSource ? `Matching ${S.matchSource.name} — click compatible area, linear or count objects to apply its properties; Esc finishes.` : "Click a source area, linear or count object (or select one before starting Match), then click compatible targets; Esc finishes."};
   let h = H[t] || MK_HINTS[t] || "";
   if (cedHere()) h = cedHint();
+  if (t === "cadxf") h = cadXfHint();
   if (S.arcMode) h = S.arcMid ? "Arc: click the end of the arc." : "Arc: click a point on the arc (then its end) · A again for straight.";
   { const n = S.nosOnce > 0 ? S.nosOnce : nosNow(); if (n > 1 && nosTool(t)) h = "Nos ×" + n + (S.nosOnce > 0 ? " for this one" : " for each new measurement (ribbon: Nos)") + " · " + h; }
   $("stHint").textContent = h;
@@ -4440,8 +4442,8 @@ function cursorPoint(e, sp){
   let p = raw, s = null;
   const free = e && (e.ctrlKey || e.metaKey) && S.tool !== "select";   // Ctrl: the point goes exactly where clicked, no snap (Bluebeam)
   const ex = S.drag && S.drag.vertex != null ? ((it, i) => it.id === S.drag.item && i === S.drag.vertex) : null;   // a dragged point never snaps onto itself
-  if (!free && (["draw", "rect", "ded", "dedrect", "open", "measure", "angle", "radius", "cal", "circle", "polygon", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp", "stretch"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
-  let last = S.drag ? null : S.tool === "stamp" ? S.stampBase : S.tool === "stretch" ? (S.str && S.str.stage === 3 ? S.str.base : null) : S.draft[S.draft.length - 1];
+  if (!free && (["draw", "rect", "ded", "dedrect", "open", "measure", "angle", "radius", "cal", "circle", "polygon", "vp", "arrow", "dimension", "fence", "typref", "break", "gap", "stamp", "stretch", "cadxf"].indexOf(S.tool) >= 0 || (mkIsTool(S.tool) && S.tool !== "mk_pen" && S.tool !== "mk_hpen") || (S.drag && (S.drag.vertex != null || S.drag.mh != null)))) { s = snapAt(raw, ex); if (s) p = s.p; }
+  let last = S.drag ? null : S.tool === "stamp" ? S.stampBase : S.tool === "cadxf" ? (S.cadXf && S.cadXf.base) || null : S.tool === "stretch" ? (S.str && S.str.stage === 3 ? S.str.base : null) : S.draft[S.draft.length - 1];
   if (S.drag && S.drag.vertex != null) { const it = P.proj.items.find(i => i.id === S.drag.item); if (it) last = S.drag.orig[S.drag.vertex - 1] || S.drag.orig[S.drag.vertex + 1] || null; }
   if (((e && e.shiftKey) !== !!S.ortho) && last && !S.arcMid) { const dx = Math.abs(p[0] - last[0]), dy = Math.abs(p[1] - last[1]); p = dx >= dy ? [p[0], last[1]] : [last[0], p[1]]; if (s) s = Object.assign({}, s, {type: s.type + " + straight"}); }   // Shift, or Ortho (F8; Shift then frees one click)
   else if (S.polar && last && !S.arcMid && !free && !s && !(e && e.shiftKey)) {   // Polar (F10): within 4° of a 15° (5° … 90°) direction -> onto it, the length kept
@@ -4500,6 +4502,7 @@ function onDown(e){
   if (S.tool === "match") return matchClick(sp);
   if (S.tool === "linepick") return lpClick(sp, e);
   const {p} = cursorPoint(e, sp);
+  if (S.tool === "cadxf") return cadXfClick(p, e);   // AutoCAD objects: Move, Copy, Rotate, Mirror, Scale, Paste
   if (mkIsTool(S.tool)) return mkDown(p, sp, e);
   if (cedHere()) return cedClick(sp, p, e);   // AutoCAD mode: the drawing's own objects
   if (S.tool === "break") return breakClick(sp, e);
@@ -5208,7 +5211,9 @@ function drawNow(){
   if (!keep && !S.hideMk) lvHere().forEach(l => { const q = toScr(l.p).map(v => +v.toFixed(1));   // spot levels: a triangle on the point, its level beside it
     h.push(`<g class="splv" pointer-events="none"><path d="M${q[0] - 5} ${q[1] - 9}h10l-5 9z" fill="#0f9d8f" stroke="#fff" stroke-width="1"/><text x="${q[0] + 7}" y="${q[1] - 3}" font-size="11" font-weight="700" fill="#0b6e64" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(lvFmt(l.z))}</text></g>`); });
   if (!keep && !S.hideMk) (P.proj.marks || []).filter(m => m.file === S.fileId && m.page === S.pageNo && !mkHidden(m)).forEach(m => h.push(markSvg(m, toScr, 1)));
-  if (!keep && S.cadSel) h.push(cadSelSvg(cadSelIds()));   // AutoCAD objects selected (Shift+V)
+  if (!keep && S.cadSel) h.push(cadSelSvg(cadSelIds()) + cadXSvg(cadSelXs()));   // AutoCAD objects selected (Shift+V)
+  if (S.tool === "cadsel" && S.cadHovX && !S.cbox && !(S.cadSel && S.cadSel.xs && S.cadSel.xs.has(S.cadHovX))) dyn.push(cadXSvg([S.cadHovX], true));
+  if (S.tool === "cadxf" && S.cadXf) dyn.push(cadXfSvg());
   if (cedHere()) dyn.push(cedSvg());
   if (S.tool === "cadsel" && S.cadHov >= 0 && !S.cbox && !(S.cadSel && S.cadSel.f === S.fileId && S.cadSel.ids.has(S.cadHov))) dyn.push(cadSelSvg([S.cadHov], true));
   if (S.cbox && dist(S.cbox.a, S.cbox.b) >= 4) { const a = S.cbox.a, b = S.cbox.b, cr = b[0] < a[0];   // AutoCAD: window blue and solid, crossing green and dashed
@@ -6823,7 +6828,7 @@ function renderProps(){
   const el = $("props"), it = S.sel && P.proj ? P.proj.items.find(i => i.id === S.sel) : null;
   const mk = !it && S.selMark && P.proj ? (P.proj.marks || []).find(m => m.id === S.selMark) : null;
   if (mk) { el.innerHTML = mkPropsHtml(mk); el.classList.add("on"); $("propsTag").textContent = "markup"; return; }
-  if (!it && S.cadSel) { const ci = cadSelIds(); if (ci.length) { el.innerHTML = cadSelHtml(ci); el.classList.add("on"); $("propsTag").textContent = "AutoCAD selection"; return; } }
+  if (!it && S.cadSel) { const ci = cadSelIds(), cx = cadSelXs(); if (ci.length || cx.length) { el.innerHTML = cadSelHtml(ci, cx); el.classList.add("on"); $("propsTag").textContent = "AutoCAD selection"; return; } }
   if (!it) { const c0 = P.proj && S.cond ? cond(S.cond) : null; if (c0) { el.innerHTML = condDetailHtml(c0); el.classList.add("on"); $("propsTag").textContent = "condition"; } else { el.classList.remove("on"); el.innerHTML = ""; } return; }
   $("propsTag").textContent = "measurement";
   const c = cond(it.cond), k = itemScale(it), poly = itemPoly(it);
@@ -7134,7 +7139,7 @@ function copySel(cut){
   const ids = selIds();
   if (!ids.size) return toast("Select something first (V, click or box), then Ctrl+C");
   const one = selOne(), c1 = one && cond(one.cond), onePt = one && c1 && c1.type === "count" && S.selPt >= 0 && one.pts.length > 1 ? {id: one.id, i: S.selPt} : null;
-  S.clip = clipOf(ids, onePt); if (!S.clip) return;
+  S.clip = clipOf(ids, onePt); if (!S.clip) return; S.clipKind = "items";
   if (cut) { delObjects(ids); toast("Cut " + S.clip.n + " — Ctrl+V pastes at the cursor, Ctrl+Shift+V in the same place", 2600); return; }
   toast("Copied " + (onePt ? "1 count point" : S.clip.n + " object" + (S.clip.n > 1 ? "s" : "")) + " — Ctrl+V at the cursor, Ctrl+Shift+V in the same place, on any page", 2800);
 }
@@ -11682,6 +11687,9 @@ function ribbonInit(){
 }
 function modAct(a){
   if (!P.proj || !S.page) return;
+  if (S.tool === "cadsel" && cadPage() && cadSelAny()) {   // AutoCAD objects selected: the ribbon's Move, Copy, Rotate, Scale, Mirror work on them
+    const X = {move: "move", copy: "copy", rot: "rotate", scalesel: "scale"}; if (X[a]) return cadXfStart(X[a]);
+    if (a === "fh" || a === "fv" || a === "cw" || a === "ccw") return cadXfQuick(a); }
   const items = [...selIds()].map(objById).filter(o => o && onPage(o)), meas = items.filter(o => o.cond);
   const need = () => { setTool("select"); toast("Select what to change first — click it, or drag a box round it", 2800); };
   if (a === "nos") return nosSelDialog();
@@ -13575,6 +13583,8 @@ function paletteCmds(){
   add("Monochrome view on / off", () => setMono(!S.mono), "View");
   add("PDF mode — dimmer 60 %, white, monochrome, line weights; the edit tools work on the takeoff's markups", () => setEdMode("pdf"), "View");
   add("AutoCAD mode — no dimming, black, colours; the edit tools work on the AutoCAD drawing's own lines", () => setEdMode("cad"), "View");
+  add("Erase the selected AutoCAD objects (Delete)", () => cadEditAct("erase"), "Modify"); add("Copy the selected AutoCAD objects to another page…", () => cadEditAct("topage"), "Modify");
+  add("Paste AutoCAD objects (Ctrl+V)", () => cadPasteStart(), "Modify");
   add("AutoCAD edits: put this drawing back as it was read", () => cedRestore(), "Modify");
   if (S.page) { add("Split window: this drawing in two windows (side by side)", () => splitOpen("same", "v"), "View", "Ctrl+\\"); add("Split window: stacked, one above the other", () => splitOpen("same", "h"), "View"); }
   if (P.proj) add("Split window: open another project in a second window…", splitPickProject, "View");
@@ -14476,6 +14486,8 @@ function wire(){
     if (mod && !e.shiftKey && k === "i" && S.tool !== "cadsel") { e.preventDefault(); return invertSel(); }
     if (mod && /^Arrow/.test(e.key) && selIds().size) { e.preventDefault(); return arrayDialog({ArrowRight: "right", ArrowLeft: "left", ArrowUp: "up", ArrowDown: "down"}[e.key]); }   // PlanSwift: Ctrl + arrow copies at a distance
     if (!e.altKey && !mod && /^Arrow/.test(e.key) && selIds().size) { e.preventDefault(); const st2 = e.shiftKey ? 10 : 1; nudgeSel(e.key === "ArrowLeft" ? -st2 : e.key === "ArrowRight" ? st2 : 0, e.key === "ArrowUp" ? -st2 : e.key === "ArrowDown" ? st2 : 0); return; }
+    if (mod && (k === "c" || k === "x") && S.tool === "cadsel" && cadSelAny()) { e.preventDefault(); return cadCopyClip(k === "x"); }   // AutoCAD objects: COPYCLIP / CUTCLIP
+    if (mod && k === "v" && S.clipKind === "cad" && S.cadClip) { e.preventDefault(); return cadPasteStart(e.shiftKey); }
     if (mod && k === "c") { e.preventDefault(); return copySel(); }
     if (mod && k === "x") { e.preventDefault(); return copySel(true); }
     if (mod && k === "v") { e.preventDefault(); return pasteClip(e.shiftKey ? "inplace" : "cursor"); }
@@ -14500,7 +14512,9 @@ function wire(){
     if (e.key === "Escape" && S.tool === "cedjoin" && S.cedJ && S.cedJ.length) { S.cedJ = null; hint(); draw(); return; }
     if (e.key === "Enter" && S.tool === "cedjoin") { e.preventDefault(); cedJoin(S.cedJ); return; }
     if (e.key === "Enter" && (S.tool === "fillet" || S.tool === "chamfer") && !S.fc.first) { e.preventDefault(); fcSetup(S.tool); return; }
-    if (e.key === "Escape" && S.tool === "cadsel") { if (S.cbox) { S.cbox = null; draw(); } else if (cadSelIds().length) cadSelSet([]); else setTool("select"); return; }
+    if (S.tool === "cadxf" && e.key === "Escape") { cadXfEnd(); return; }
+    if (S.tool === "cadxf" && e.key === "Enter" && S.cadXf && S.cadXf.base && (S.cadXf.op === "rotate" || S.cadXf.op === "scale")) { e.preventDefault(); cadXfAsk(); return; }
+    if (e.key === "Escape" && S.tool === "cadsel") { if (S.cbox) { S.cbox = null; draw(); } else if (cadSelAny()) cadSelSet([]); else setTool("select"); return; }
     if (e.key === "Escape" && S.tool === "stamp" && S.stampBase) { S.stampBase = null; $("stMeas").innerHTML = ""; hint(); draw(); return; }
     if (e.key === "Enter" && S.tool === "stamp" && S.clip && !S.stampBase) { e.preventDefault(); S.stampBase = S.clip.anchor.slice(); hint(); draw(); return; }
     if (e.key === "Escape" && S.draft.length === 0 && (S.multi.size || S.box || S.lasso)) { S.multi.clear(); S.box = null; S.lasso = null; refresh(); return; }
@@ -14528,6 +14542,7 @@ function wire(){
       return;
     }
     if (e.key === "Backspace" || e.key === "Delete") {
+      if (S.tool === "cadsel" && cadSelAny()) { e.preventDefault(); return cadErase(); }   // AutoCAD objects: ERASE
       if (S.draft.length || S.arcMode) { draftBack(); e.preventDefault(); return; }
       if (S.selMark || S.sel || S.multi.size) { e.preventDefault(); delSelected(); }
       return;
@@ -19287,11 +19302,12 @@ function cadSelIds(){   // the selected objects that can still be seen (their la
   const hid = cadHidden(S.fileId, S.cadSc[S.fileId]), ed = cedC(S.fileId, pg);
   return [...S.cadSel.ids].filter(ei => { const r = CAD.cadRec(pg, ei); return r && r.L >= 0 && !hid[r.L] && !cedGone(pg, ed, ei); });
 }
-function cadSelSet(ids, how){   // how: "" replaces, "add", "toggle", "remove"
+function cadSelSet(ids, how, xs){   // how: "" replaces, "add", "toggle", "remove"; xs: copies and edited objects (their ids)
   if (!cadPage()) return;
-  const cur = S.cadSel && S.cadSel.f === S.fileId ? S.cadSel.ids : new Set(), next = how ? new Set(cur) : new Set();
-  ids.forEach(ei => { if (how === "remove" || (how === "toggle" && next.has(ei))) next.delete(ei); else next.add(ei); });
-  S.cadSel = {f: S.fileId, ids: next}; S.cadSelV = (S.cadSelV || 0) + 1; S.cadHov = -1;
+  const cur = S.cadSel && S.cadSel.f === S.fileId ? S.cadSel : {ids: new Set(), xs: new Set()}, next = how ? new Set(cur.ids) : new Set(), nx = how ? new Set(cur.xs || []) : new Set();
+  const put = (set, v) => { if (how === "remove" || (how === "toggle" && set.has(v))) set.delete(v); else set.add(v); };
+  ids.forEach(ei => put(next, ei)); (xs || []).forEach(id => put(nx, id));
+  S.cadSel = {f: S.fileId, ids: next, xs: nx}; S.cadSelV = (S.cadSelV || 0) + 1; S.cadHov = -1; S.cadHovX = "";
   renderProps(); draw();
 }
 function cedGone(pg, ed, ei){   // an object every line and text of which the AutoCAD-mode edits took out
@@ -19327,16 +19343,17 @@ function cadSelDown(sp, e){
 }
 function cadSelUp(){
   const B = S.cbox; S.cbox = null; const pg = cadPage(); if (!pg) { draw(); return; }
-  if (dist(B.a, B.b) < 4) { const ei = cadPickAt(B.b, B.add);
+  if (dist(B.a, B.b) < 4) { const x = cadXPick(B.b); if (x) { cadSelSet([], B.add ? "toggle" : "", [x]); return; }   // a copy or an edited object (drawn on top) first
+    const ei = cadPickAt(B.b, B.add);
     if (ei < 0) { if (!B.add) cadSelSet([]); else draw(); return; }
     cadSelSet([ei], B.add ? "toggle" : "");
     const r = CAD.cadRec(pg, ei); if (!B.add && !S.cadDrillTip && r && r.t === "INSERT" && cadPickAt(B.b) !== ei) { S.cadDrillTip = 1; toast("Block " + (r.n || "") + " selected — click a part of it again to pick that hatch, text or line on its own", 5000); }
     return; }
   const a = toBase(B.a[0], B.a[1]), b = toBase(B.b[0], B.b[1]);
-  const ids = CAD.cadBox(pg, Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1]), B.b[0] < B.a[0], cadHidden(S.fileId, S.cadSc[S.fileId]));
-  cadSelSet(ids, B.add ? "add" : "");
+  const bx = [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])], ids = CAD.cadBox(pg, bx[0], bx[1], bx[2], bx[3], B.b[0] < B.a[0], cadHidden(S.fileId, S.cadSc[S.fileId]));
+  cadSelSet(ids, B.add ? "add" : "", cadXBox(bx, B.b[0] < B.a[0]));
 }
-function cadHoverAt(sp){ const ei = S.cbox ? -1 : cadPickAt(sp); if (ei !== S.cadHov) S.cadHov = ei; stage().style.cursor = ei >= 0 ? "pointer" : ""; }
+function cadHoverAt(sp){ const x = S.cbox ? "" : cadXPick(sp, true), ei = S.cbox || x ? -1 : cadPickAt(sp); if (ei !== S.cadHov) S.cadHov = ei; S.cadHovX = x; stage().style.cursor = ei >= 0 || x ? "pointer" : ""; }
 function cadDesc(sc, r){ return (r.t === "INSERT" ? "Block " + (r.n || "") : r.t.charAt(0) + r.t.slice(1).toLowerCase()) + " · " + ((sc.layers[r.L] || {}).name || "0"); }
 function cadHoverText(){
   const pg = cadPage(), r = pg && S.cadHov >= 0 && CAD.cadRec(pg, S.cadHov); if (!r) return "";
@@ -19375,15 +19392,15 @@ function cadSelSum(ids){   // the selection's totals: by type, lengths, areas, b
     else if (/TEXT|ATTRIB|ATTDEF/.test(r.t)) o.txt++; else o.other++; });
   return o;
 }
-function cadSelHtml(ids){
+function cadSelHtml(ids, xs = []){
   const o = cadSelSum(ids), c = S.cond ? cond(S.cond) : null, top = (m, n) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => esc(k) + (v > 1 ? " ×" + v : "")).join(", ") + (m.size > n ? ", …" : "");
   const B = [...o.blocks.values()].reduce((a, v) => a + v, 0), pg = cadPage(), inB = [...new Set(ids.map(ei => cadInBlock(pg, CAD.cadRec(pg, ei))).filter(Boolean))];
   const where = inB.length ? `<div class="row small" style="margin-top:4px">Inside block <b>${esc(inB.slice(0, 3).join(", "))}${inB.length > 3 ? ", …" : ""}</b>${ids.some(ei => cadUp(pg, ei) >= 0) ? ` &nbsp;<button class="btn sm" data-cact="up" title="Select the block it is part of, as AutoCAD picks it">Select its block</button>` : ""}</div>`
     : B && ids.length === 1 ? `<div class="row small" style="margin-top:4px;color:var(--muted)">Click a part of the block again to pick that hatch, text or line on its own</div>` : "";
   const into = c ?"into <b>" + esc(c.name) + "</b> when its type fits, else a condition named after the layer / block" : "into conditions named after each layer / block";
-  return `<h4>AutoCAD objects — ${o.n} selected <span style="font-weight:400;color:var(--muted);font-size:11px">Shift / Ctrl+click adds or takes out · box: left→right window, right→left crossing · Ctrl+A all · Esc clears</span></h4>
+  return `<h4>AutoCAD objects — ${o.n + xs.length} selected <span style="font-weight:400;color:var(--muted);font-size:11px">Shift / Ctrl+click adds or takes out · box: left→right window, right→left crossing · Ctrl+A all · Esc clears</span></h4>
     <div class="row"><span class="small" style="flex:1;min-width:220px">${[o.runs && "<b>Lines</b> " + o.runs + " · " + uLenT(o.len), o.areas && "<b>Closed</b> " + o.areas + " · " + uArea(o.area), B && "<b>Blocks</b> " + B + " (" + top(o.blocks, 4) + ")", o.txt && "<b>Text</b> " + o.txt, o.other && "other " + o.other].filter(Boolean).join(" &nbsp;|&nbsp; ") || "nothing to measure"}<br>
-      <b>Types:</b> ${top(o.types, 6)} &nbsp;·&nbsp; <b>Layers:</b> ${top(o.layers, 6)}</span></div>${where}
+      ${o.n ? `<b>Types:</b> ${top(o.types, 6)} &nbsp;·&nbsp; <b>Layers:</b> ${top(o.layers, 6)}` : ""}${xs.length ? `${o.n ? "<br>" : ""}<b>Copied / edited:</b> ${xs.length} object${xs.length > 1 ? "s" : ""} (moved, copied, pasted or edited here)` : ""}</span></div>${where}
     <div class="row" style="margin-top:6px;gap:4px;flex-wrap:wrap">
       <button class="btn pri sm" data-cact="take" title="Lines → length, closed outlines → area, blocks → count, ${into}"${o.runs || o.areas || B ? "" : " disabled"}>Take off</button>
       <button class="btn sm" data-cact="len" title="Every line, and each closed outline's perimeter, as length"${o.runs || o.areas ? "" : " disabled"}>All as length</button>
@@ -19394,7 +19411,16 @@ function cadSelHtml(ids){
       <button class="btn sm" data-cact="layoff" title="AutoCAD's LAYOFF: switch the selected objects' layers off">Layer off</button>
       <button class="btn sm" data-cact="iso" title="AutoCAD's LAYISO: only the selected objects' layers stay on">Isolate layers</button>
       <button class="btn sm" data-cact="zoom">Zoom to</button>
-      <button class="btn sm" data-cact="clear">Clear</button></div>`;
+      <button class="btn sm" data-cact="clear">Clear</button></div>
+    <div class="row" style="margin-top:6px;gap:4px;flex-wrap:wrap;align-items:center"><span class="small" style="color:var(--muted)">Edit the drawing:</span>
+      <button class="btn sm" data-cact="erase" title="AutoCAD's ERASE (Delete): take the selected objects out of the drawing — Ctrl+Z brings them back; the DWG file itself is not changed">Erase</button>
+      <button class="btn sm" data-cact="move" title="AutoCAD's MOVE (M): click a base point, then where it goes">Move</button>
+      <button class="btn sm" data-cact="copy" title="AutoCAD's COPY (CO): click a base point, then each place for a copy — Esc when done">Copy</button>
+      <button class="btn sm" data-cact="rotate" title="AutoCAD's ROTATE (RO): click the base point, then turn it with the mouse — or Enter to type the angle">Rotate</button>
+      <button class="btn sm" data-cact="mirror" title="AutoCAD's MIRROR (MI): two points of the mirror line — a mirrored copy (Shift+click: the originals go)">Mirror</button>
+      <button class="btn sm" data-cact="scale" title="AutoCAD's SCALE (SC): click the base point, then type the factor">Scale</button>
+      <button class="btn sm" data-cact="clip" title="AutoCAD's COPYCLIP (Ctrl+C): copy to paste with Ctrl+V on this or any other page — a DWG page as AutoCAD objects, a PDF page as markups">Copy to clipboard</button>
+      <button class="btn sm" data-cact="topage" title="Copy the selection onto another page of the project, at the same real size">Copy to page…</button></div>`;
 }
 function cadLayersOnOff(names, on){   // AutoCAD layers by name, on or off (the rest as they are)
   const cfg = S.ocgs && S.ocgs[S.fileId]; if (!cfg) return;
@@ -19410,6 +19436,7 @@ function cadSelAct(act){
   if (act === "clear") return cadSelSet([]);
   if (act === "all") { const A = all(); cadSelSet(A); return toast(A.length + " AutoCAD objects selected (layers that are on)", 2200); }
   if (act === "qsel") return cadQuickSelect();
+  if (CAD_EDIT_ACTS.includes(act)) return cadEditAct(act);
   if (!ids.length) return toast("Select AutoCAD objects first (Shift+V, then click or drag a box)", 3000);
   if (act === "up") { const P = [...new Set(ids.map(ei => { const u = cadUp(pg, ei); return u >= 0 ? u : ei; }))]; cadSelSet(P); return; }
   if (act === "similar") { const key = r => r.t + "|" + r.L + "|" + (r.t === "INSERT" ? r.n || "" : ""), K = new Set(ids.map(ei => key(R(ei)))), A = outer(all(deep).filter(ei => K.has(key(R(ei))))); cadSelSet(A); return toast("Similar: " + A.length + " objects", 2000); }
@@ -19436,10 +19463,13 @@ function cadSelAct(act){
     return got;
   }
 }
-function cadSelCtx(){   // right-click with AutoCAD objects selected
-  const ids = cadSelIds(); if (!ids.length) return [];
-  const o = cadSelSum(ids), A = a => () => cadSelAct(a);
-  return [{h: ids.length + " AutoCAD object" + (ids.length > 1 ? "s" : "") + " selected", s: [o.runs && uLenT(o.len), o.areas && uArea(o.area), o.blocks.size && [...o.blocks.values()].reduce((a, v) => a + v, 0) + " blocks"].filter(Boolean).join(" · ")},
+function cadSelCtx(){   // right-click with AutoCAD objects selected (and Paste, with AutoCAD objects copied)
+  const ids = cadSelIds(), xs = cadSelXs(), pa = S.cadClip && S.clipKind === "cad" ? [{t: "Paste AutoCAD objects", k: "Ctrl+V", fn: () => cadPasteStart()}, {t: "Paste to the same place (PASTEORIG)", k: "Ctrl+Shift+V", fn: () => cadPasteStart(true)}] : [];
+  if (!ids.length && !xs.length) return pa.length ? pa.concat([{sep: 1}]) : [];
+  const o = cadSelSum(ids), A = a => () => cadSelAct(a), n = ids.length + xs.length;
+  return [{h: n + " AutoCAD object" + (n > 1 ? "s" : "") + " selected", s: [o.runs && uLenT(o.len), o.areas && uArea(o.area), o.blocks.size && [...o.blocks.values()].reduce((a, v) => a + v, 0) + " blocks"].filter(Boolean).join(" · ")},
+    {t: "Erase", k: "Del", fn: A("erase"), dng: 1}, {t: "Move", fn: A("move")}, {t: "Copy", fn: A("copy")}, {t: "Rotate", fn: A("rotate")}, {t: "Mirror", fn: A("mirror")}, {t: "Scale", fn: A("scale")},
+    {t: "Copy to clipboard", k: "Ctrl+C", fn: A("clip")}, {t: "Copy to another page…", fn: A("topage")}, ...pa, {sep: 1},
     {t: "Take off the selection", fn: A("take")}, {t: "All as length", fn: A("len")}, {t: "Count them", fn: A("count")}, {t: "Select similar", fn: A("similar")}, {t: "Quick select…", fn: A("qsel")},
     {t: "Layer off (LAYOFF)", fn: A("layoff")}, {t: "Isolate their layers (LAYISO)", fn: A("iso")}, {t: "Zoom to the selection", fn: A("zoom")}, {t: "Clear the selection", k: "Esc", fn: A("clear")}, {sep: 1}];
 }
@@ -19483,7 +19513,7 @@ function cedC(fid, pg, proj = P.proj){   // the edits as cad.js draws them {hp, 
   const c = (S.cedCache = S.cedCache || {})[fid]; if (c && c.r === r && c.v === r.v && c.pg === pg) return c.o;
   const same = r.n === pg.n && r.tn === pg.tn, hp = new Uint8Array(pg.n), ht = new Uint8Array(pg.tn);   // (a drawing read again by a newer reader: what was taken out cannot be found by number)
   if (same) { r.hp.forEach(i => { if (i < pg.n) hp[i] = 1; }); r.ht.forEach(i => { if (i < pg.tn) ht[i] = 1; }); }
-  const A = r.add.filter(a => a.pts && a.pts.length >= 2), o = {hp, ht, ids: A.map(a => a.id), add: A.map(a => ({li: a.li, si: a.si, pts: a.pts, cl: !!a.cl, cv: a.cv, b: plBox(a.pts)}))};
+  const A = r.add.filter(a => a.pts && a.pts.length >= 2), cp = cedInsts(fid, r, pg), o = {hp, ht, ids: A.map(a => a.id).concat(cp.map(ci => ci.cid)), add: A.map(a => ({li: a.li, si: a.si, pts: a.pts, cl: !!a.cl, cv: a.cv, b: plBox(a.pts)})), cp};
   S.cedCache[fid] = {r, v: r.v, pg, o}; return o;
 }
 const cedV = (fid, proj) => { const r = proj && proj.cadEd && proj.cadEd[fid]; return r ? r.v : ""; };
@@ -19578,7 +19608,7 @@ const cedDrop = (rec, a, put) => { const i = rec.add.indexOf(a); if (i >= 0) rec
 /* the drawing's lines (as edited, layers that are on) near a box: [{a, b}] — o itself left out */
 function cedEdges(rec, o, box){
   const g = S.geo && S.geo[S.key]; if (!g || !g.cad) return [];
-  const hid = cadHidden(S.fileId, S.cadSc[S.fileId]), gone = new Set(rec.hp), ids = g.addIds || [], live = new Set(rec.add.filter(a => a !== o).map(a => a.id)), inIx = new Set(ids), E = [];
+  const hid = cadHidden(S.fileId, S.cadSc[S.fileId]), gone = new Set(rec.hp), ids = g.addIds || [], live = new Set(rec.add.filter(a => a !== o).map(a => a.id).concat((rec.cp || []).map(c => c.id))), inIx = new Set(ids), E = [];
   const take = s => { if (hid[s[7]] || (s[8] >= 0 && gone.has(s[8])) || (s[8] < 0 && !live.has(ids[-1 - s[8]]))) return; E.push({a: [s[0], s[1]], b: [s[2], s[3]]}); };   // (o itself, and objects changed since, left out)
   if (box) { const ix = segsIn(g, box[0], box[1], box[2], box[3]); for (let n = 0; n < ix.length; n++) take(g.segs[ix[n]]); }
   else g.segs.forEach(take);
@@ -19832,8 +19862,8 @@ function cedJoinSel(sel){   // the AutoCAD selection joined: each object picked 
   cedJoin(picks); cadSelSet([]);
 }
 function cedRestore(){   // the drawing back as it was read
-  const r = cedRec(); if (!r || (!r.hp.length && !r.add.length)) return toast("No AutoCAD edits on this drawing", 2200);
-  cedMut("Restore the drawing", rec => { rec.hp = []; rec.ht = []; rec.add = []; }) !== null && toast("The drawing is back as it was read — Ctrl+Z undoes this", 3000);
+  const r = cedRec(); if (!r || (!r.hp.length && !r.add.length && !(r.cp && r.cp.length))) return toast("No AutoCAD edits on this drawing", 2200);
+  cedMut("Restore the drawing", rec => { rec.hp = []; rec.ht = []; rec.add = []; delete rec.cp; delete rec.sn; }) !== null && toast("The drawing is back as it was read — Ctrl+Z undoes this", 3000);
 }
 /* what the AutoCAD-mode tools show: the object under the cursor, the first pick of Fillet / Offset, the objects picked to join */
 function cedPkPath(pk){
@@ -19864,6 +19894,256 @@ function cedHint(){
     : t === "fillet" ? "AutoCAD Fillet (radius " + uLenT(S.fc.r) + "): click the first line near the corner, then the second · Enter: change the radius · Esc when done." : "AutoCAD Chamfer (" + uLen(S.fc.d1) + " × " + uLenT(S.fc.d2) + "): click the first line, then the second · Enter: change the distances · Esc when done.";
   if (t === "cedoffset") return S.cedO ? "AutoCAD Offset " + uLenT(S.cedOD) + ": click the side to put the copy on · Esc: pick another." : "AutoCAD Offset " + uLenT(S.cedOD) + ": click the line, polyline, arc or circle to offset · Esc when done.";
   return (CED_HINTS[t] || "") + (t === "cedjoin" && n ? " — " + n + " picked" : "");
+}
+
+/* ------------------------------------------------------------------ AutoCAD objects: Erase, Move, Copy, Rotate, Mirror, Scale, and Copy / Paste
+   onto another page (AutoCAD's ERASE, MOVE, COPY, ROTATE, MIRROR, SCALE, COPYCLIP, PASTECLIP, PASTEORIG) — on the selection of Select
+   AutoCAD objects (Shift+V), in PDF mode or AutoCAD mode. What is moved or copied becomes a copy (cad.js cadSnip / cadInst): the objects
+   as they are drawn — lines, arcs, fills, hatches and texts in their own colours, lineweights and layers — with a transform; Move takes
+   the originals out. Copies are kept with the drawing's edits (Ctrl+Z steps back), drawn, plotted and snapped to (so they can be measured),
+   and picked again — each as one object — to erase, move or copy again. On a PDF page a paste becomes markups (polylines and texts).
+   The DWG file itself is never changed. */
+const CAD_EDIT_ACTS = ["erase", "move", "copy", "rotate", "mirror", "scale", "clip", "topage"];
+const XF_NAME = {move: "Move", copy: "Copy", rotate: "Rotate", mirror: "Mirror", scale: "Scale", paste: "Paste"};
+const XF_I = [1, 0, 0, 1, 0, 0];
+const xfRot = (b, a) => { const c = Math.cos(a), s = Math.sin(a); return [c, s, -s, c, b[0] - (c * b[0] - s * b[1]), b[1] - (s * b[0] + c * b[1])]; };
+const xfScale = (b, k) => [k, 0, 0, k, b[0] - k * b[0], b[1] - k * b[1]];
+function xfMir(p1, p2){ const L = dist(p1, p2) || 1, ux = (p2[0] - p1[0]) / L, uy = (p2[1] - p1[1]) / L, a = 2 * ux * ux - 1, b = 2 * ux * uy, d = 2 * uy * uy - 1;
+  return [a, b, b, d, p1[0] - (a * p1[0] + b * p1[1]), p1[1] - (b * p1[0] + d * p1[1])]; }
+const cadLix = sc => { const m = new Map(); (sc && sc.layers || []).forEach((l, i) => { if (!m.has(l.name)) m.set(l.name, i); }); return nm => m.has(nm) ? m.get(nm) : -1; };
+const CPI = new Map();   // the copies as pages: drawing file | copy | snip | transform -> {pg, sc, inst}
+function cedInsts(fid, r, pg){
+  const sc = S.cadSc && S.cadSc[fid]; if (!r.cp || !r.cp.length || !sc) return [];
+  let lix = null; if (CPI.size > 800) CPI.clear();
+  return r.cp.map(c => { const sn = r.sn && r.sn[c.s]; if (!sn || !c.m) return null; const key = fid + "|" + c.id + "|" + c.s + "|" + c.m.join(",");
+    let I = CPI.get(key); if (!I || I.pg !== pg || I.sc !== sc) { lix = lix || cadLix(sc); I = {pg, sc, inst: CAD.cadInst(sn, c.m, lix, pg.w, pg.h)}; I.inst.cid = c.id; CPI.set(key, I); }
+    return I.inst; }).filter(Boolean);
+}
+function cedPrune(rec){ if (!rec.sn) return; const used = new Set((rec.cp || []).map(c => c.s)); Object.keys(rec.sn).forEach(k => { if (!used.has(k)) delete rec.sn[k]; }); }
+function cadSelXs(){   // the copies and edited objects selected (ids) that are still there, on layers that are on
+  const pg = cadPage(), r = cedRec(); if (!pg || !r || !S.cadSel || S.cadSel.f !== S.fileId || !S.cadSel.xs || !S.cadSel.xs.size) return [];
+  const hid = cadHidden(S.fileId, S.cadSc[S.fileId]), have = new Set(r.add.filter(a => !hid[a.li]).map(a => a.id)); (r.cp || []).forEach(c => have.add(c.id));
+  return [...S.cadSel.xs].filter(id => have.has(id));
+}
+const cadSelAny = () => cadSelIds().length + cadSelXs().length;
+/* the copy or edited object under a screen point -> its id, or "" (hover: a drawing with very many edited objects skips them) */
+function cadXPick(sp, hover){
+  const pg = cadPage(), r = cedRec(); if (!pg || !r) return "";
+  const q = toBase(sp[0], sp[1]), tol = 7 / S.view.s, hid = cadHidden(S.fileId, S.cadSc[S.fileId]), ed = cedC(S.fileId, pg); let best = null;
+  (ed && ed.cp || []).forEach(ci => { const b = ci.b; if (q[0] < b[0] - tol || q[0] > b[2] + tol || q[1] < b[1] - tol || q[1] > b[3] + tol) return;
+    const h = CAD.cadHit(ci, q[0], q[1], tol, hid, null); if (h && (!best || h.d < best.d)) best = {id: ci.cid, d: h.d}; });
+  if (!(hover && r.add.length > 5000)) r.add.forEach(a => { if (hid[a.li] || !a.pts || a.pts.length < 2) return; const h = plNear(a, q); if (h && h.d <= tol && (!best || h.d < best.d)) best = {id: a.id, d: h.d}; });
+  return best ? best.id : "";
+}
+function cadXBox(bx, crossing){   // the copies and edited objects a box selects (window: wholly inside; crossing: their box meets it)
+  const pg = cadPage(), r = cedRec(); if (!pg || !r) return [];
+  const hid = cadHidden(S.fileId, S.cadSc[S.fileId]), ed = cedC(S.fileId, pg), out = [];
+  const t = b => (b[0] >= bx[0] && b[2] <= bx[2] && b[1] >= bx[1] && b[3] <= bx[3]) || (crossing && !(b[2] < bx[0] || b[0] > bx[2] || b[3] < bx[1] || b[1] > bx[3]));
+  r.add.forEach(a => { if (!hid[a.li] && a.pts && a.pts.length >= 2 && t(plBox(a.pts))) out.push(a.id); });
+  (ed && ed.cp || []).forEach(ci => { if (t(ci.b)) out.push(ci.cid); });
+  return out;
+}
+function cadXSvg(xs, hover){   // copies and edited objects selected (blue) or under the cursor (yellow)
+  const pg = cadPage(), r = cedRec(); if (!pg || !r || !xs.length) return "";
+  const X = new Set(xs), ed = cedC(S.fileId, pg), d = []; let pts = 0;
+  const line = (P, cl) => { if (P.length < 2) return; pts += P.length; d.push(P.map((p, n) => { const q = toScr(p); return (n ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1); }).join("") + (cl ? "Z" : "")); };
+  const rect = b => line([[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]], true);
+  r.add.forEach(a => { if (X.has(a.id)) line(a.pts, a.cl); });
+  (ed && ed.cp || []).forEach(ci => { if (!X.has(ci.cid)) return; if (pts > 150000) return rect(ci.b);
+    for (let i = 0; i < ci.n && pts < 150000; i++) if (ci.pf[i] !== 1) CAD.primPaths(ci, i).forEach(P => line(P, P.closed));
+    for (let t = 0; t < ci.tn; t++) rect(ci.tB.subarray(4 * t, 4 * t + 4)); });
+  if (!d.length) return ""; const path = d.join("");
+  return hover ? `<path d="${path}" fill="none" stroke="rgba(255,196,0,.85)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`
+    : `<g class="cadsel"><path d="${path}" fill="none" stroke="rgba(47,139,255,.38)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><path d="${path}" fill="none" stroke="#2f8bff" stroke-width="1.8" stroke-dasharray="7 4"/></g>`;
+}
+function cadEditAct(act){
+  if (!cadPage()) return toast("Open an AutoCAD drawing page (DWG / DXF added with + PDF) first", 3500);
+  if (!cadSelAny()) return toast("Select AutoCAD objects first (Shift+V, then click or drag a box)", 3000);
+  if (act === "erase") return cadErase();
+  if (act === "clip") return cadCopyClip();
+  if (act === "topage") return cadCopyToPage();
+  return cadXfStart(act);
+}
+/* ERASE: the selected drawing objects taken out (as Trim takes a line out), the selected copies and edited objects removed */
+function cadErase(quiet){
+  const pg = cadPage(); if (!pg) return; const ids = cadSelIds(), xs = cadSelXs(), E = CAD.cadEnts(pg);
+  if (!ids.length && !xs.length) return toast("Select AutoCAD objects first (Shift+V), then Delete", 2600);
+  const ok = cedMut("Erase (AutoCAD)", rec => { const hp = new Set(rec.hp), ht = new Set(rec.ht), X = new Set(xs);
+    ids.forEach(ei => { for (let j = E.ps[ei]; j < E.ps[ei + 1]; j++) { const i = E.pl[j]; if (!hp.has(i)) { hp.add(i); rec.hp.push(i); } }
+      for (let j = E.ts[ei]; j < E.ts[ei + 1]; j++) { const t = E.tl[j]; if (!ht.has(t)) { ht.add(t); rec.ht.push(t); } } });
+    rec.add = rec.add.filter(a => !X.has(a.id)); if (rec.cp) rec.cp = rec.cp.filter(c => !X.has(c.id)); cedPrune(rec); return true; });
+  if (ok === null) return;
+  const n = ids.length + xs.length; S.cadSel = {f: S.fileId, ids: new Set(), xs: new Set()}; renderProps(); draw();
+  if (!quiet) toast("Erased " + n + " object" + (n > 1 ? "s" : "") + " — Ctrl+Z brings " + (n > 1 ? "them" : "it") + " back (the DWG file is not changed)", 3200);
+}
+/* the selection as snips to copy: {parts: [{sn, m}], box} — the drawing's objects (and edited ones) as one snip, each copy as its own */
+function cadSelParts(){
+  const pg = cadPage(), sc = S.cadSc[S.fileId], r = cedRec(), ids = cadSelIds(), xs = new Set(cadSelXs()), E = CAD.cadEnts(pg), ed = cedC(S.fileId, pg);
+  const hp = ed && ed.hp, ht = ed && ed.ht, ps = new Set(), ts = new Set(), B = [Infinity, Infinity, -Infinity, -Infinity];
+  const grow = b => { if (!(b[0] <= b[2])) return; B[0] = Math.min(B[0], b[0]); B[1] = Math.min(B[1], b[1]); B[2] = Math.max(B[2], b[2]); B[3] = Math.max(B[3], b[3]); };
+  ids.forEach(ei => { for (let j = E.ps[ei]; j < E.ps[ei + 1]; j++) { const i = E.pl[j]; if (!(hp && hp[i])) ps.add(i); }
+    for (let j = E.ts[ei]; j < E.ts[ei + 1]; j++) { const t = E.tl[j]; if (!(ht && ht[t])) ts.add(t); } grow(E.eb.subarray(4 * ei, 4 * ei + 4)); });
+  const adds = r ? r.add.filter(a => xs.has(a.id)) : [], parts = []; adds.forEach(a => grow(plBox(a.pts)));
+  if (ps.size || ts.size || adds.length) parts.push({sn: CAD.cadSnip(pg, li => (sc.layers[li] || {}).name || "0", [...ps].sort((a, b) => a - b), [...ts].sort((a, b) => a - b), adds), m: XF_I.slice()});
+  if (r && r.cp) r.cp.forEach(c => { if (xs.has(c.id) && r.sn && r.sn[c.s]) parts.push({sn: r.sn[c.s], m: c.m.slice()}); });
+  (ed && ed.cp || []).forEach(ci => { if (xs.has(ci.cid)) grow(ci.b); });
+  return {parts, box: B, ps, ts};
+}
+function cadGhost(parts){   // the parts' outlines, page points before the command's transform (a very big selection: its first 40,000 points)
+  const out = []; let n = 0;
+  for (const pt of parts) { const ci = CAD.cadInst(pt.sn, pt.m, () => -1, 1, 1);
+    for (let i = 0; i < ci.n && n < 40000; i++) { if (ci.pf[i] === 1) continue; CAD.primPaths(ci, i, 4).forEach(P => { if (P.length < 2) return; out.push(P.closed ? P.concat([P[0]]) : P); n += P.length; }); }
+    for (let t = 0; t < ci.tn && n < 40000; t++) { const b = ci.tB.subarray(4 * t, 4 * t + 4); out.push([[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]], [b[0], b[1]]]); n += 5; } }
+  return out;
+}
+/* the commands: S.cadXf {op, fid, base, ids, xs, parts, ghost} while the tool "cadxf" picks the points (they snap, Shift / F8 straight) */
+function cadXfStart(op, paste){
+  const X = {op, fid: S.fileId, base: null, ids: [], xs: []};
+  if (op === "paste") { X.parts = paste.parts; X.base = paste.base; X.r = paste.r || 1; }
+  else { if (!cadPage()) return; X.ids = cadSelIds(); X.xs = cadSelXs(); const s = cadSelParts(); if (!s.parts.length) return toast("Nothing to " + XF_NAME[op].toLowerCase() + " — select AutoCAD objects first", 2600); X.parts = s.parts; X.box = s.box; }
+  X.ghost = cadGhost(X.parts); setTool("cadxf"); S.cadXf = X; hint(); draw();
+}
+function cadXfEnd(){ S.cadXf = null; setTool(cadPage() ? "cadsel" : "select"); hint(); draw(); }
+function cadXfM(X, p){   // the command's transform with the cursor at p
+  const b = X.base; if (!b) return null;
+  if (X.op === "move" || X.op === "copy") return [1, 0, 0, 1, p[0] - b[0], p[1] - b[1]];
+  if (X.op === "paste") { const r = X.r || 1; return [r, 0, 0, r, p[0] - r * b[0], p[1] - r * b[1]]; }
+  if (dist(p, b) < 1e-9) return XF_I.slice();
+  if (X.op === "rotate") return xfRot(b, Math.atan2(p[1] - b[1], p[0] - b[0]));
+  if (X.op === "mirror") return xfMir(b, p);
+  return XF_I.slice();
+}
+function cadXfClick(p, e){
+  const X = S.cadXf; if (!X) return cadXfEnd();
+  if (X.op !== "paste" && X.fid !== S.fileId) return cadXfEnd();
+  if (!X.base) { X.base = p; hint(); draw(); if (X.op === "scale") cadXfAsk(); return; }
+  if (X.op === "scale") return cadXfAsk();
+  if (X.op === "mirror" && dist(p, X.base) < 1e-9) return toast("Click the second point of the mirror line, away from the first", 2400);
+  cadXfDo(cadXfM(X, p), X.op === "copy" || (X.op === "mirror" && !(e && e.shiftKey)));
+}
+function cadXfDo(M, keep){
+  const X = S.cadXf; if (!X || !M) return;
+  if (X.op === "paste") { cadPasteAt(M); S.cadXf = null; setTool(cadPage() ? "cadsel" : "select"); hint(); draw(); return; }
+  const made = cadXfApply(X, M, keep, XF_NAME[X.op] + " (AutoCAD)"); if (!made) return;
+  if (X.op === "copy") { X.n = (X.n || 0) + 1; hint(); draw(); return toast("Copy " + X.n + " placed — click the next place, or Esc when done", 2200); }
+  S.cadXf = null; setTool("cadsel"); cadSelSet([], "", made); hint();
+  toast(XF_NAME[X.op] + (X.op === "mirror" ? (keep ? ": mirrored copy added" : ": mirrored, the originals erased") : "d") + " — Ctrl+Z takes it back", 2400);
+}
+/* the transform M applied to the command's objects: the drawing's own as a copy (Move: the originals taken out), the copies' transforms
+   and the edited objects' points changed (keep: new ones beside them) -> the ids made / moved, or null */
+function cadXfApply(X, M, keep, label){
+  const pg = cadPage(); if (!pg) return null; const sc = S.cadSc[S.fileId], E = CAD.cadEnts(pg), made = [];
+  const res = cedMut(label, rec => {
+    const hp = new Set(rec.hp), ht = new Set(rec.ht), prims = [], texts = [];
+    X.ids.forEach(ei => { for (let j = E.ps[ei]; j < E.ps[ei + 1]; j++) { const i = E.pl[j]; if (!hp.has(i) && prims.indexOf(i) < 0) prims.push(i); }
+      for (let j = E.ts[ei]; j < E.ts[ei + 1]; j++) { const t = E.tl[j]; if (!ht.has(t) && texts.indexOf(t) < 0) texts.push(t); } });
+    if (prims.length || texts.length) {
+      rec.sn = rec.sn || {}; rec.cp = rec.cp || [];
+      let sid = X.sid && rec.sn[X.sid] ? X.sid : "";   // (Copy, again and again: the copies share one snip)
+      if (!sid) { sid = uid("S"); rec.sn[sid] = CAD.cadSnip(pg, li => (sc.layers[li] || {}).name || "0", prims.sort((a, b) => a - b), texts.sort((a, b) => a - b)); if (keep) X.sid = sid; }
+      const c = {id: uid("C"), s: sid, m: M.map(v => Math.round(v * 1e9) / 1e9)}; rec.cp.push(c); made.push(c.id);
+      if (!keep) { prims.forEach(i => rec.hp.push(i)); texts.forEach(t => rec.ht.push(t)); }
+    }
+    X.xs.forEach(id => {
+      const a = rec.add.find(x => x.id === id);
+      if (a) { const pts = a.pts.map(p => rp(CAD.xfPt(M, p))); if (keep) { const n = Object.assign({}, a, {id: uid("A"), pts}); if (a.cv) n.cv = a.cv.slice(); rec.add.push(n); made.push(n.id); } else { a.pts = pts; made.push(a.id); } return; }
+      const c = (rec.cp || []).find(x => x.id === id);
+      if (c) { const m2 = CAD.xfMul(M, c.m).map(v => Math.round(v * 1e9) / 1e9); if (keep) { const n = {id: uid("C"), s: c.s, m: m2}; rec.cp.push(n); made.push(n.id); } else { c.m = m2; made.push(c.id); } } });
+    if (!keep) X.ids = [];   // (moved: what is selected now are the copies)
+    if (!made.length) return "Nothing to " + XF_NAME[X.op].toLowerCase() + " — the objects have changed, select them again";
+    if (!keep) X.xs = made.slice();
+    return true;
+  });
+  return res === null ? null : made;
+}
+async function cadXfAsk(){   // Rotate: the angle typed (Enter); Scale: the factor
+  const X = S.cadXf; if (!X || !X.base) return;
+  if (X.op === "rotate") {
+    const v = await ask("Rotate — AutoCAD objects", `<p class="small">Turn the selection about the base point, as AutoCAD's ROTATE: a positive angle turns it anticlockwise.</p><div class="grid" style="margin-top:8px"><div class="fg"><label>Angle (degrees)</label><input type="text" id="cxRo" value="${S.cxRo != null ? S.cxRo : 90}"></div><div class="fg"><label class="pk"><input type="checkbox" id="cxRoK" style="width:auto"> Keep the original (a turned copy)</label></div></div>`, "Rotate",
+      () => { const a = parseFloat($("cxRo").value); return isFinite(a) ? {a, keep: $("cxRoK").checked} : "Enter an angle in degrees, e.g. 90 or -45"; }, "cxRo");
+    if (!v || S.cadXf !== X) return; S.cxRo = v.a; return cadXfDo(xfRot(X.base, -v.a * Math.PI / 180), v.keep);
+  }
+  if (X.op === "scale") {
+    const v = await ask("Scale — AutoCAD objects", `<p class="small">Enlarge or shrink the selection about the base point, as AutoCAD's SCALE (2: twice the size, 0.5: half).</p><div class="grid" style="margin-top:8px"><div class="fg"><label>Scale factor</label><input type="text" id="cxSc" value="${S.cxSc || 2}"></div><div class="fg"><label class="pk"><input type="checkbox" id="cxScK" style="width:auto"> Keep the original (a scaled copy)</label></div></div>`, "Scale",
+      () => { const k = parseFloat($("cxSc").value); return k > 0 && isFinite(k) ? {k, keep: $("cxScK").checked} : "Enter a factor more than 0, e.g. 2 or 0.5"; }, "cxSc");
+    if (S.cadXf !== X) return; if (!v) return cadXfEnd(); S.cxSc = v.k; return cadXfDo(xfScale(X.base, v.k), v.keep);
+  }
+}
+function cadXfQuick(a){   // Rotate 90° / Mirror H / V buttons of the ribbon, on an AutoCAD selection: about its middle, in place
+  const s = cadSelParts(); if (!s.parts.length || !(s.box[0] <= s.box[2])) return;
+  const c = [(s.box[0] + s.box[2]) / 2, (s.box[1] + s.box[3]) / 2], M = a === "fh" ? [-1, 0, 0, 1, 2 * c[0], 0] : a === "fv" ? [1, 0, 0, -1, 0, 2 * c[1]] : xfRot(c, a === "cw" ? Math.PI / 2 : -Math.PI / 2);
+  const X = {op: a === "fh" || a === "fv" ? "mirror" : "rotate", fid: S.fileId, ids: cadSelIds(), xs: cadSelXs()}, made = cadXfApply(X, M, false, (a === "fh" || a === "fv" ? "Mirror" : "Rotate") + " (AutoCAD)");
+  if (made) cadSelSet([], "", made);
+}
+function cadXfSvg(){   // the objects where they would go, and the line from the base point
+  const X = S.cadXf, p = S.cursor; if (!X || !p) return "";
+  const M = cadXfM(X, p); if (!M) return "";
+  const d = X.ghost.map(P => P.map((q, n) => { const s = toScr(CAD.xfPt(M, q)); return (n ? "L" : "M") + s[0].toFixed(1) + " " + s[1].toFixed(1); }).join("")).join("");
+  let extra = ""; if (X.op !== "paste" && X.op !== "scale") { const a = toScr(X.base), b = toScr(p); extra = `<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="#ff9f0a" stroke-width="1.2" stroke-dasharray="6 4"/><circle cx="${a[0].toFixed(1)}" cy="${a[1].toFixed(1)}" r="4" fill="none" stroke="#ff9f0a" stroke-width="1.5"/>`; }
+  return `<g pointer-events="none"><path d="${d}" fill="none" stroke="#ff9f0a" stroke-width="1.3" stroke-linejoin="round" opacity=".95"/>${extra}</g>`;
+}
+function cadXfHint(){
+  const X = S.cadXf; if (!X) return ""; const nm = XF_NAME[X.op];
+  if (X.op === "paste") return "Paste: click where the copied objects' lower-left corner goes" + (X.r && Math.abs(X.r - 1) > 1e-6 ? " (sized ×" + f3(X.r) + " to this page's scale)" : "") + " · it snaps to the drawing · Esc cancels.";
+  if (!X.base) return nm + " (AutoCAD): click the " + (X.op === "mirror" ? "first point of the mirror line" : "base point") + " — it snaps to the drawing · Esc cancels.";
+  return {move: "Move: click where the base point goes · Shift / F8: straight · Esc cancels.", copy: "Copy: click each place for a copy" + (X.n ? " (" + X.n + " placed)" : "") + " · Shift / F8: straight · Esc when done.",
+    rotate: "Rotate: turn it with the mouse and click — or Enter to type the angle · Esc cancels.", mirror: "Mirror: click the second point of the mirror line — a mirrored copy (Shift+click: the originals go) · Esc cancels.", scale: "Scale: type the factor · Esc cancels."}[X.op] || "";
+}
+/* COPYCLIP / PASTECLIP: the selection kept to paste on this or another page, at the same real size (the two pages' scales) */
+function cadCopyClip(cut, quiet){
+  if (!cadPage()) return; const s = cadSelParts(); if (!s.parts.length) return toast("Nothing to copy — select AutoCAD objects first (Shift+V)", 2600);
+  const base = [s.box[0], s.box[3]], n = cadSelAny();   // the lower-left corner, as AutoCAD's COPYCLIP
+  S.cadClip = {parts: JSON.parse(JSON.stringify(s.parts)), base, k: hereScale(base) || 0, from: S.fileId, n}; S.clipKind = "cad";
+  if (cut) cadErase(true);
+  if (!quiet) toast((cut ? "Cut " : "Copied ") + n + " AutoCAD object" + (n > 1 ? "s" : "") + " — Ctrl+V pastes on this or another page (a PDF page: as markups), Ctrl+Shift+V in the same place", 3600);
+}
+function cadPasteStart(same){
+  const cl = S.cadClip; if (!cl) return toast("Nothing copied — select AutoCAD objects (Shift+V), then Ctrl+C", 2600);
+  if (!S.page) return;
+  const kt = hereScale(S.cursor || cl.base), r = cl.k > 0 && kt > 0 ? kt / cl.k : 1;
+  if (cl.k > 0 !== kt > 0) toast("One of the two pages has no scale — pasted at the size it was drawn" + (kt > 0 ? "" : " (set this page's scale with K)"), 4000);
+  if (same) { const M = xfScale(cl.base, r); if (cadPage()) cadPasteAt(M); else cadPasteMarks(M); return; }
+  cadXfStart("paste", {parts: cl.parts, base: cl.base, r});
+}
+function cadPasteAt(M){
+  if (!cadPage()) return cadPasteMarks(M);
+  const cl = S.cadClip, made = [];
+  const ok = cedMut("Paste (AutoCAD)", rec => { rec.sn = rec.sn || {}; rec.cp = rec.cp || [];
+    cl.parts.forEach(pt => { const sid = uid("S"); rec.sn[sid] = JSON.parse(JSON.stringify(pt.sn)); const c = {id: uid("C"), s: sid, m: CAD.xfMul(M, pt.m).map(v => Math.round(v * 1e9) / 1e9)}; rec.cp.push(c); made.push(c.id); });
+    return made.length ? true : "Nothing to paste"; });
+  if (ok === null) return;
+  setTool("cadsel"); cadSelSet([], "", made);
+  toast("Pasted " + cl.n + " AutoCAD object" + (cl.n > 1 ? "s" : "") + " — selected: Move, Erase … · Ctrl+Z takes it back", 3000);
+}
+/* onto a PDF page: the objects as markups — each line, polyline, arc and outline a polyline / polygon, each text a text box (upright) */
+async function cadPasteMarks(M){
+  const cl = S.cadClip; if (!cl || !S.page) return;
+  const at = new Date().toISOString(), out = [], hexc = c => c == null || c === CAD.INK ? "#000000" : CAD.hex6(c);
+  const base = (type, pts, o) => Object.assign(JSON.parse(JSON.stringify(MK_STYLE0[type] || {})), {id: uid("M"), type, file: S.fileId, page: S.pageNo, pts, text: "", subject: "AutoCAD paste", author: qaUser(), status: "", at}, o);
+  cl.parts.forEach(pt => { const ci = CAD.cadInst(pt.sn, CAD.xfMul(M, pt.m), () => -1, 1, 1);
+    for (let i = 0; i < ci.n; i++) { if (ci.pf[i] === 1 || ci.kind[i] === 3) continue; const st = ci.styles[ci.sty[i]] || {}, col = hexc(st.c), fill = ci.kind[i] === 1 || ci.kind[i] === 2;
+      CAD.primPaths(ci, i, 8).forEach(P => { if (P.length < 2) return; const cl2 = P.closed || fill, pts = P.map(rp);
+        out.push(base(cl2 ? "polygon" : "polyline", pts, {color: col, width: 1, fill: fill ? col : "", fillOp: fill ? 0.35 : 0})); }); }
+    for (let t = 0; t < ci.tn; t++) { const m = 6 * t, em = Math.hypot(ci.tM[m + 2], ci.tM[m + 3]), w = Math.hypot(ci.tM[m], ci.tM[m + 1]) * (ci.tW[t] || String(ci.tS[t]).length * 0.6); if (!(em > 0) || !String(ci.tS[t]).trim()) continue;
+      const x = ci.tM[m + 4], y = ci.tM[m + 5]; out.push(base("text", [[x, y - em * 1.25], [x + Math.max(w, em) + em * 0.5, y + em * 0.3]], {text: ci.tS[t], color: hexc(ci.tC[t]), fill: "", fillOp: 0, width: 0, fs: Math.round(em * 100) / 100})); } });
+  if (!out.length) return toast("Nothing in what was copied to paste as markups", 2600);
+  if (out.length > 4000 && !(await ask("Paste " + out.length + " markups?", `<p>On a PDF page AutoCAD objects become markups — ${out.length} of them, which slows this page down. Paste fewer objects (a smaller selection) for a lighter page, or go on.</p>`, "Paste them"))) return;
+  mutate(() => { (P.proj.marks = P.proj.marks || []).push(...out); }, "Paste AutoCAD objects as markups");
+  toast("Pasted as " + out.length + " markups (polylines and texts) — this is a PDF page · Markups list (Alt+L) · Ctrl+Z takes them back", 4500);
+}
+async function cadCopyToPage(){
+  const s = cadSelParts(); if (!s.parts.length) return toast("Select AutoCAD objects first (Shift+V)", 2600);
+  const opts = []; P.proj.files.forEach(f => { for (let i = 1; i <= (f.pages || 1); i++) { if (keyOf(f.id, i) === S.key) continue; opts.push(`<option value="${esc(f.id)}|${i}">${esc(f.name)}${f.pages > 1 ? " — p." + i : ""}${f.cad ? " (AutoCAD)" : ""}</option>`); } });
+  if (!opts.length) return toast("This project has no other page — + PDF adds a drawing (PDF, DWG or DXF)", 3500);
+  const n = cadSelAny();
+  const v = await ask("Copy to another page", `<p class="small">The ${n} selected object${n > 1 ? "s" : ""} copied onto another page of the project, at the same real size (by the two pages' scales). On an AutoCAD drawing they are AutoCAD objects you can move, copy or erase again; on a PDF page they become markups (polylines and texts). This drawing is not changed.</p>
+    <div class="fg w2" style="margin-top:8px"><label>Page</label><select id="cxPg" style="width:100%">${opts.join("")}</select></div>
+    <div class="fg w2"><label class="pk"><input type="radio" name="cxAt" value="pick" checked style="width:auto"> Then click where to put them (their lower-left corner follows the cursor)</label><label class="pk"><input type="radio" name="cxAt" value="same" style="width:auto"> In the same place on that page (the same page coordinates)</label></div>`, "Copy",
+    () => ({pg: $("cxPg").value, at: (document.querySelector("input[name=cxAt]:checked") || {}).value || "pick"}));
+  if (!v) return;
+  cadCopyClip(false, true);
+  const j = v.pg.lastIndexOf("|"); await gotoPage(v.pg.slice(0, j), +v.pg.slice(j + 1));
+  cadPasteStart(v.at === "same");
 }
 
 async function cadQuickSelect(){   // AutoCAD's QSELECT: by layer, type, block name, length and area
@@ -20327,7 +20607,7 @@ async function verCheck(force, now){   // -> the new version when one is out (lo
   window.zdTakeoff = {compressPdf, cmpRun, cmpDb: dbGetRaw, cmpSet: setSave, slabsAgent, slabCore, slabLayers, beamsAgent, findBeams, beamCore, beamLayers, beamSource, beamShapes, beamPixLines, beamPicture, beamSnapW, legendSvg, legVal, legAsk, legSmart, legTable, legendCols, editLegend, roomType, learnSkills, learnStore, learnSeedLoad, addToLegend, legendRows, moveFolder, setUnits, matFor, matGroups, matItem, matWorkbook, renderMatView, matShow, matSetupDialog, matDefDialog, matDef, matJoint, matWallT, rView, exportMatExcel, sheetGo, uDim, markSvg, isM, uParse, uV, uL, uR, scaleBoth, ptPerTxt, renderBill, renderSheet, agentDo, agentStop, qsExec, qsParse, QS_COMMANDS, qsChecks, reviewStatus, undoAgentRun, rejectItems, agentRun, roomPhrases, qtyOf, scaleAt, itemScale, qScale, viewportAt, get MEAS(){ return MEAS; }, measReady, finishDraft: finish, boostInk, legendRows, legSym, legAp, legendSvg0, createLegend, loadLbl, traceGet, traceAt, traceWindow, traceFloorTakeoff, agentTraceFloor, TRACE_LAYERS, segRows, exportSegmentsCsv, sizeMismatch, verOf, verOk, VER_NAMES, qaMoved, mergeProjectOpt: (t, o) => mergeProject(t, undefined, o), bbRead, bbImport, bbQty, bbShowPdf, inkSnap, houseRule, blockFix, renderProps, blockRuns, blockMasonryAgent, blockMasonryDialog, scanTags, kpiLog, kpiAll, kpiDialog, kbSearch, kbDocs, kbDialog, autoAreaPage, aiRunTool3, autoRoomGuarded, autoRoom, scaleState, textLines, agentCount, LOC, locHealth, locSetup, aiSendLocal, aiEngine, locCalls, toolArgsCheck, aiRunTool, aiRunTool2, rulesActive, rulesOf, rulesPut, ruleTeach, ruleConflicts, ruleEffects, rulesDialog, autoPreview, detEdited, autoAt, locBenchmark, AI_TOOLS_ALL, aiSend, invertSel, quickSelect, qsHit, polyPts, polySides, cmdRun, cmdFind, boqMatches, boqGroups, raLib, raConnect, raFresh, editCond, areaOf, areaClip, areaSnap, clipRun, askArea, boxArea, areaThen, editCond, wheelPx, grayPixels, canvasFilterOk, expLegendSvg, legendRows, legendWidths, matCalc, matOf, matPriced, matSummary, condView, snapAt, curveChain, curveCentres, revisionDiff, diffCells, bandCells, flagByChange, dimEstimates, scaleFromDims, detectDrawingType, dtypeCondSpecs, typeDialog, curveTangent, curveCentre, refresh, rotateBy, scaleBy, dxfBuild, stretchOf, setXh, trimRun, extendRun, palTyped, palScore, PANES, SPLIT, activate, splitOpen, splitClose, paneOpenProject, get ACT(){ return ACT; }, snapKinds, dupFind, floorGaps, pdfVpRead, pdfScalesOn, applyPdfScales, fullTakeoff, finishesRun, agentCheck, agentCmd, agentAnswer, cmdSteps, nameLike, doorLines, overlapSft, save, pageOverlaySvg, mkBlend, svgOnto, svgBlendSplit, applyView, renderHi, pageDraw, viewOps, hiFromLow, lblPS, lblPsZ, psQty, lenLblOff, legPS, legendPsInit, legendPsSvg, editLegend, inPerFtOf, selfCross, fitWidth, removePdf, flushSave, fq, renderPages, P, S, rowsOf, condTotals, parseFt, scaleCandidates, rectilinear, triangles, gotoPage, openProject, segsIn, doorSymbols, barrierIds, autoRoom, evalFormula, autoRoomGuarded, deTab, drawingFacts, textLines, pageTexts, freeV: () => AI.freeView, migrate, importProject, condVars, billLines, doorsOn, validation, raPrice, rateOf, revRows, backupNow, backupsOf, simT, typCommit, scaleState, locOf, setQa, qaCounts, wallsAgent, unitsOf, agentUnit, wallThicknesses, findWalls, wallLineIds, faceLines, layerInfo, segRoleFilter, scaleFromRooms, checkScale, roomNameAt, viewRect, capLines, delSelected, agentMeasure, agentCount, setTool, setSel, selIds, copySel, pasteClip, duplicateSel, breakRun, delSegment, cutGap, joinRuns, addPoint, delPoint, toRun, toArea, transformSel, lockSel, orderSel, arcPts, undoAny, redoAny, ctxOpen, ctxClose, selectSimilar, placeClip, clipOf, tagsOf, tagParse, sizePair, doorSwings, scanTags, doorWinDialog, agentSwings, keysDialog, indexPage, findSimilar, nextUnchecked, openPalette, paletteCmds, explodeRun, closeRun, offsetItem, offsetRun, typedPoint,
     pagesShown, pagesWithTakeoff, pgTick, pinPages, pageSeq, pageMove, pageHideSet, rotatePage, rotPt, xRot, stitchDialog, stitchPages, stitchLayout, exportPagesDialog, runExport, zipBlob, crc32, parseRange, rangeText, importDialog, subsetPdf, imagesToPdf, imgDpi, sheetGuess, autoSheetDialog,
     ocrDialog, ocrPages, vecSegs, vecPage, vecPack, vecUnpack, vecToggle, vecSvg, scanLinesFirst, smallBoxes, beamLinesAny, withOcr, sheetRefsNear, sheetIndex, cutTargets, cutOutOf, overlapPoly, clipPoly, wsLayout, wsSet, wsPref, miniUpdate, reportPrint, allPages, keyName, pickTitleBlock, dragBox, importMenu, wsMenu,
-    cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, openWb, wbMod, wbApi, condQ, billQ, billQty, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
+    cadLoad, cadMod, cadWorker, cadPage, cadOn, cadHidden, openWb, wbMod, wbApi, condQ, billQ, billQty, setEdMode, cedRec, cedRestore, cedC, cedPick, cadQtyDialog, cadTakeoff, cadPick, cadCtxItems, cadIsolate, cadSelSet, cadSelIds, cadSelAct, cadSelXs, cadEditAct, cadErase, cadXfStart, cadXfClick, cadXfDo, cadXfQuick, cadCopyClip, cadPasteStart, cadSelParts, cadXPick, cadSelSum, cadQuickSelect, cadLayersOnOff, cadUnitsCheck, plotDialog, plotPdf, plotPng, plotPngDpi, plotWin, plotLayout, pickWindow, printPdf, ocFix, setBg, setMono, darkNow, inkMap, addFiles, cadMeta: fid => cadMeta(fid),
     mkStyle, mkClean, mkSanitize, mkFit, mkWrap, stampSub, assetRec, mkAssetsFor, mkMenu, exportPdf, exportBundle, importBundle, exportAll, exportAllDialog, importAll, bundleHead, bundleStore, migrate, mlToggle, mlRows, mkLayers, mkSpaceOf, mlSummary, recoverDialog, orphanBackups, backupPids, squareToWalls, squareUpSel, autoAreaWindow, rasterRooms, parsePitch, pitchOf, slopeF, pitchIn, pitchText, dimText, rowDesc, measText, cornerDeg, exportExcel, exportCsv, itemTotalsList, condTotalsList, backupsDialog, showStart, dmyHm, mergeFile, mergeBuf, mergeProject, bundleUnpack, verCheck, verReload, autoUpd, APP_V, trashProject, trashBack, trashPurge, liveKeys, TRASH_DAYS, unmeasured, unmToggle, unmHit, roomKind, kindNamer, nameRooms, colVals, colsDialog, colXl, colKey, colsOf, copyToPagesDialog, dupOnPage, polyBool, boolArea, floorFin, overlapCheck, overlapFix, overlapDialog, combineAreas, unmergeAreas, zoomTo, pdfPreview, prevAlways, pdfMerge, expSave, plotTkOpts, plotShow, plotInfo, PLOT_LBL, plotPref, reportBuild, reportHtml, reportDialog, reportExcel, reportCsv, repPref, xlCol, setMag, magDraw, MAG, rotSync, rotOf, vpOf, ovPlan, unmAuto, unmAt, unmGeo, pvSig,
     settingsDialog, setPages, setPref, setSave, setKeys, keyCombo, keyOk, keyCmd, ribHome, ribShow,
     floorsOf, floorAt, floorOf, floorTotals, floorAdd, floorMove, floorRename, floorDelete, floorSetBox, floorOrder, floorSplitCounts, floorSplitConds, floorShareSet, condShort, floorTitleName, floorDetect, floorRank, keyOf, mutate, renderConds,

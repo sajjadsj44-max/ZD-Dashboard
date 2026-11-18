@@ -1002,6 +1002,8 @@ function pdfOps(pg, o, w){
     const lw = st.wid > 0 ? st.wid : (o.thin ? 0.25 : st.lw * 72 / 25.4) * (o.lwk || 1); if (lw !== w0) { w.v(lw).s("w\n"); w0 = lw; }
     const d = st.dash || null; if (d !== d0) { if (d) { w.s("["); d.forEach(x => w.v(x)); w.s("] 0 d\n"); } else w.s("[] 0 d\n"); d0 = d; }
     a.pts.forEach((p, j) => w.v(p[0]).v(H - p[1]).s(j ? "l " : "m ")); w.s(a.cl ? "h S\n" : "S\n"); });
+  if (ed && ed.cp && ed.cp.length) { alpha(1); if (open >= 0) { w.s("EMC\n"); open = -1; }   // the copies, each a page of its own (its colours set again after)
+    ed.cp.forEach(ci => pdfOps(ci, Object.assign({}, o, {ed: null, A: null, oc: false}), w)); sk = ""; fk = ""; w0 = -1; d0 = 0; }
   alpha(1);
   for (let i = 0; i < pg.tn; i++) {
     if ((hid && hid[pg.tL[i]]) || (ht && ht[i])) continue;
@@ -1105,7 +1107,7 @@ function addPath(ctx, pg, i){
    at a time between frames (cadDrawAsync), with its own buckets so a frame drawn meanwhile does not disturb it */
 function* drawSteps(ctx, pg, v, o){
   const g = cadPrep(pg), s = v.s, dark = !!o.dark, mono = !!o.mono, hid = o.hidden || new Uint8Array(0), dpr = o.dpr || 1;
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.fillStyle = dark ? "#000000" : "#ffffff"; ctx.fillRect(0, 0, v.W, v.H);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.setLineDash([]); if (!o.nobg) { ctx.fillStyle = dark ? "#000000" : "#ffffff"; ctx.fillRect(0, 0, v.W, v.H); }
   const x0 = -v.tx / s, y0 = -v.ty / s, x1 = (v.W - v.tx) / s, y1 = (v.H - v.ty) / s, all = x0 <= 0 && y0 <= 0 && x1 >= pg.w && y1 >= pg.h;
   const ids = all ? null : cand(pg, g, x0, y0, x1, y1), cnt = ids ? ids.length : pg.n, at = j => ids ? ids[j] : j;
   const ck = (dark ? 1 : 0) + (mono ? 2 : 0), css = g.css[ck] || (g.css[ck] = pg.styles.map(st => cadCss(st.c, dark, mono)));
@@ -1136,6 +1138,8 @@ function* drawSteps(ctx, pg, v, o){
       L.forEach(a => { const Q = a.pts; ctx.moveTo(Q[0][0], Q[0][1]); for (let k = 1; k < Q.length; k++) ctx.lineTo(Q[k][0], Q[k][1]); if (a.cl) ctx.lineTo(Q[0][0], Q[0][1]); });
       ctx.stroke(); }
     ctx.globalAlpha = 1; yield; page(); }
+  if (ed && ed.cp) for (const ci of ed.cp) { const b = ci.b; if (!b || b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1) continue;   // the copies (Move, Copy, Paste …): each a page of its own, drawn over
+    yield* drawSteps(ctx, ci, v, Object.assign({}, o, {ed: null, nobg: true, own: true})); ctx.globalAlpha = 1; page(); }
   ctx.setLineDash([]);
   if (!o.fast) { const r = 0.6 * px * dpr; /* a point: a pixel-sized dot, as AutoCAD shows one (PDMODE 0) */ for (let j = 0, n = 0; j < cnt; j++) { const i = at(j); if (K[i] !== 3 || !vis(i)) continue; ctx.fillStyle = css[St[i]]; const q = pg.q0[i]; ctx.fillRect(pg.xy[q] - r, pg.xy[q + 1] - r, 2 * r, 2 * r); if (++n % 5000 === 0) { yield; page(); } } }
   if (pg.tn) {
@@ -1166,7 +1170,8 @@ export async function cadDrawAsync(ctx, pg, v, o, stale){
    as [{s, x, y, w, h, r}] (x, y the baseline's start, r its turn) */
 export function cadIndex(pg, max, ed, o){   // ed: AutoCAD-mode edits — the objects taken out are left out, the edited ones put in; s[8] says where a line came from (its primitive, or -1 - the edited object's index)
   const segs = [], styles = [], six = new Map(), O = pg.ops, X = pg.xy, hp = ed && ed.hp, ht = ed && ed.ht; let sp = 0; max = max || 600000;
-  const styleOf = (st, fill) => { const w = fill ? 0 : st.wid > 0 ? st.wid : st.lw * 72 / 25.4, key = (st.c === INK ? "#000000" : hex6(st.c)) + "|" + Math.round(w * 10) / 10; let si = six.get(key); if (si === undefined) { si = styles.length; styles.push(key); six.set(key, si); } return si; };
+  const kix = key => { let si = six.get(key); if (si === undefined) { si = styles.length; styles.push(key); six.set(key, si); } return si; };
+  const styleOf = (st, fill) => { const w = fill ? 0 : st.wid > 0 ? st.wid : st.lw * 72 / 25.4; return kix((st.c === INK ? "#000000" : hex6(st.c)) + "|" + Math.round(w * 10) / 10); };
   for (let i = 0; i < pg.n && segs.length < max; i++) {
     const kd = pg.kind[i]; if (kd === 3 || (pg.pf[i] === 1 && !(o && o.hatch)) || (hp && hp[i])) continue;
     const st = pg.styles[pg.sty[i]], fill = kd === 1 || kd === 2, si = styleOf(st, fill);
@@ -1181,9 +1186,62 @@ export function cadIndex(pg, max, ed, o){   // ed: AutoCAD-mode edits — the ob
   }
   if (ed && ed.add) ed.add.forEach((a, ai) => { const st = pg.styles[a.si]; if (!st) return; const si = styleOf(st, false), f0 = st.dash ? 2 : 0, Q = a.pts, n = a.cl ? Q.length : Q.length - 1; sp++;
     for (let j = 0; j < n && segs.length < max; j++) { const p = Q[j], q = Q[(j + 1) % Q.length]; if (Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) > 1e-6) segs.push([p[0], p[1], q[0], q[1], f0 | (a.cv && a.cv[j] ? 1 : 0), sp, si, a.li, -1 - ai]); } });
-  const texts = [];
+  const texts = [], nA = ed && ed.add ? ed.add.length : 0;
+  if (ed && ed.cp) ed.cp.forEach((ci, k) => { if (segs.length >= max) return; const ix = cadIndex(ci, max - segs.length, null, o), sp0 = sp; let top = 0;   // the copies: s[8] -1 - (edited objects + k)
+    ix.segs.forEach(g => { if (g[5] > top) top = g[5]; segs.push([g[0], g[1], g[2], g[3], g[4], sp0 + g[5], kix(ix.styles[g[6]]), g[7], -1 - (nA + k)]); }); sp = sp0 + top + 1;
+    ix.texts.forEach(t => texts.push(t)); });
   for (let i = 0; i < pg.tn; i++) { if (ht && ht[i]) continue; const m = 6 * i, M = pg.tM, em = Math.hypot(M[m + 2], M[m + 3]); texts.push({s: pg.tS[i], x: M[m + 4], y: M[m + 5], w: Math.hypot(M[m], M[m + 1]) * pg.tW[i], h: em || 6, r: Math.atan2(M[m + 1], M[m]), li: pg.tL[i]}); }   // r: the baseline's turn on the page, as a PDF's text has it
   return {segs, styles, texts};
+}
+
+/* ------------------------------------------------------------------ copies: AutoCAD-mode Move, Copy, Rotate, Mirror and Scale, and Paste
+   from another drawing. A snip is some of a drawing's objects as they are drawn: their own primitives (lines, curves, fills, hatch
+   lines), texts, styles and layer names, as plain arrays (kept in the project and its undo history, which are JSON). A copy is a snip
+   and a transform m = [a, b, c, d, e, f] (x' = a x + c y + e, y' = b x + d y + f, page points); cadInst makes it a page of its own that
+   is drawn, plotted, snapped to and picked as the drawing is. */
+const r4 = v => Math.round(v * 1e4) / 1e4;
+export const LAY_X = 1e6;   // a copy's layer the drawing has not got: LAY_X + its place in the snip's layer names (never hidden)
+export function cadSnip(pg, lname, prims, texts, adds){   // lname(layer index) -> its name; adds: AutoCAD-mode edited objects {li, si, pts, cl}
+  const ln = [], lx = new Map(), st = [], sx = new Map();
+  const L = li => { const n = String(lname(li) == null ? "0" : lname(li)); let k = lx.get(n); if (k === undefined) { k = ln.length; ln.push(n); lx.set(n, k); } return k; };
+  const S = si => { let k = sx.get(si); if (k === undefined) { k = st.length; st.push(JSON.parse(JSON.stringify(pg.styles[si] || {c: INK, lw: 0.25, a: 1}))); sx.set(si, k); } return k; };
+  const o = {ln, st, op: [], xy: [], p0: [0], k: [], s: [], l: [], f: [], ts: [], tm: [], tf: [], tc: [], tl: [], tw: [], tb: []};
+  (prims || []).forEach(i => { let q = pg.q0[i];
+    for (let j = pg.p0[i]; j < pg.p0[i + 1]; j++) { const op = pg.ops[j], c = op === 2 ? 6 : op === 3 ? 0 : 2; o.op.push(op); for (let u = 0; u < c; u++) o.xy.push(r4(pg.xy[q + u])); q += c; }
+    o.p0.push(o.op.length); o.k.push(pg.kind[i]); o.s.push(S(pg.sty[i])); o.l.push(L(pg.lay[i])); o.f.push(pg.pf ? pg.pf[i] : 0); });
+  (adds || []).forEach(a => { if (!a.pts || a.pts.length < 2) return;
+    a.pts.forEach((p, j) => { o.op.push(j ? 1 : 0); o.xy.push(r4(p[0]), r4(p[1])); }); if (a.cl) o.op.push(3);
+    o.p0.push(o.op.length); o.k.push(0); o.s.push(S(a.si)); o.l.push(L(a.li)); o.f.push(0); });
+  (texts || []).forEach(t => { o.ts.push(pg.tS[t]); for (let u = 0; u < 6; u++) o.tm.push(r4(pg.tM[6 * t + u])); for (let u = 0; u < 4; u++) o.tb.push(r4(pg.tB[4 * t + u]));
+    o.tf.push(pg.tF ? pg.tF[t] : 0); o.tc.push(pg.tC[t]); o.tl.push(L(pg.tL[t])); o.tw.push(pg.tW ? r4(pg.tW[t]) : 0); });
+  return o;
+}
+export const xfPt = (m, p) => [m[0] * p[0] + m[2] * p[1] + m[4], m[1] * p[0] + m[3] * p[1] + m[5]];
+export const xfMul = (A, B) => [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1], A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3], A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
+/* a snip put down with transform m, as a page w x h; lix(layer name) -> the drawing's layer index, or -1 */
+export function cadInst(sn, m, lix, w, h){
+  const [a, b, c, d, e, f] = m, n = sn.k.length, tn = sn.ts.length, ops = Uint8Array.from(sn.op), xy = new Float64Array(sn.xy.length), p0 = Uint32Array.from(sn.p0), q0 = new Uint32Array(n + 1), bb = new Float64Array(4 * n);
+  for (let q = 0; q < xy.length; q += 2) { const x = sn.xy[q], y = sn.xy[q + 1]; xy[q] = a * x + c * y + e; xy[q + 1] = b * x + d * y + f; }
+  const B = [Infinity, Infinity, -Infinity, -Infinity], grow = (x, y) => { if (x < B[0]) B[0] = x; if (y < B[1]) B[1] = y; if (x > B[2]) B[2] = x; if (y > B[3]) B[3] = y; };
+  let q = 0;
+  for (let i = 0; i < n; i++) { q0[i] = q; let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let j = p0[i]; j < p0[i + 1]; j++) { const cnt = ops[j] === 2 ? 6 : ops[j] === 3 ? 0 : 2;
+      for (let u = 0; u < cnt; u += 2) { const x = xy[q + u], y = xy[q + u + 1]; if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; } q += cnt; }
+    if (!(x0 <= x1)) x0 = y0 = x1 = y1 = 0; else { grow(x0, y0); grow(x1, y1); }
+    bb[4 * i] = x0; bb[4 * i + 1] = y0; bb[4 * i + 2] = x1; bb[4 * i + 3] = y1; }
+  q0[n] = q;
+  const k = Math.sqrt(Math.abs(a * d - b * c)) || 1, styles = sn.st.map(s0 => k === 1 ? s0 : Object.assign({}, s0, s0.wid > 0 ? {wid: s0.wid * k} : {}, s0.dash ? {dash: s0.dash.map(x => x * k)} : {}));
+  const lmap = sn.ln.map((nm, i) => { const t = lix(nm); return t >= 0 ? t : LAY_X + i; });
+  const tM = new Float64Array(6 * tn), tB = new Float64Array(4 * tn), mir = a * d - b * c < 0;
+  for (let t = 0; t < tn; t++) { const M = sn.tm.slice(6 * t, 6 * t + 6);
+    let c1 = [a * M[0] + c * M[1], b * M[0] + d * M[1]], o = xfPt(m, [M[4], M[5]]); const c2 = [a * M[2] + c * M[3], b * M[2] + d * M[3]];
+    if (mir) { const tw = sn.tw[t] || 0; o = [o[0] + c1[0] * tw, o[1] + c1[1] * tw]; c1 = [-c1[0], -c1[1]]; }   // a mirrored text still reads left to right (AutoCAD's MIRRTEXT 0)
+    tM.set([c1[0], c1[1], c2[0], c2[1], o[0], o[1]], 6 * t);
+    const X = sn.tb.slice(4 * t, 4 * t + 4), P = [[X[0], X[1]], [X[2], X[1]], [X[2], X[3]], [X[0], X[3]]].map(p => xfPt(m, p));
+    const bx = [Math.min(...P.map(p => p[0])), Math.min(...P.map(p => p[1])), Math.max(...P.map(p => p[0])), Math.max(...P.map(p => p[1]))]; tB.set(bx, 4 * t); grow(bx[0], bx[1]); grow(bx[2], bx[3]); }
+  return {w, h, n, ops, xy, p0, q0, bb, kind: Uint8Array.from(sn.k), sty: Uint32Array.from(sn.s), lay: Uint32Array.from(sn.l.map(i => lmap[i])), pf: Uint8Array.from(sn.f), styles,
+    tn, tS: sn.ts.slice(), tM, tB, tF: Uint8Array.from(sn.tf), tC: Int32Array.from(sn.tc), tL: Uint32Array.from(sn.tl.map(i => lmap[i])), tW: Float64Array.from(sn.tw),
+    ent: new Int32Array(n), tE: new Int32Array(tn), ents: [{t: "COPY", L: 0}], ln: sn.ln, b: B[0] <= B[2] ? B : [0, 0, 0, 0]};
 }
 
 /* ------------------------------------------------------------------ picking and quantities */
