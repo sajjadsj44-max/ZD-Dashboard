@@ -578,7 +578,9 @@ if (TABCH) TABCH.onmessage = e => { const m = e.data || {}; if (!P.proj || m.tab
   if (m.t === "open") tabSay({t: "here", id: P.proj.id});
   S.otherTab = m.t === "saved" ? "changed in another tab or window at " + dmyHm(m.at).slice(-5) : "also open in another tab or window";
   renderSheet(); };
-const UNDO_KEYS = ["units", "conds", "items", "scales", "viewports", "floors", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd", "bbImp", "cols", "rot", "pageOrder", "pageHide", "flShare"];
+const UNDO_KEYS = ["units", "conds", "items", "scales", "viewports", "floors", "marks", "sheets", "openings", "mkLayers", "mkStatuses", "mkFilters", "cadEd", "bbImp", "cols", "rot", "pageOrder", "pageHide", "flShare",
+  "levels", "lvUnit", "matDef", "cfF", "finDH", "asmTpl"];   // (not vec: scan lines are large and only change with the PDF)
+const UNDO_OPT = ["units", "levels", "lvUnit", "matDef", "cfF", "finDH", "asmTpl"];   // fields a project may not have yet: taken back to none (the first spot level placed is undone too)
 function snapshot(){ const o = {}; UNDO_KEYS.forEach(k => { o[k] = P.proj[k]; }); return JSON.stringify(o); }
 /* every change goes through mutate(): the project before it is kept for Ctrl+Z (200 steps), with a name for the
    undo / redo buttons ("Undo: Move 3 measurements") */
@@ -635,7 +637,8 @@ function draftBtns(){
 }
 function undo(){ if (!S.undo.length) return; const e = undoEntry(S.undo.pop()); S.redo.push({js: snapshot(), label: e.label}); restore(e.js); toast("Undone" + (e.label ? ": " + e.label : ""), 1600); }
 function redo(){ if (!S.redo.length) return; const e = undoEntry(S.redo.pop()); S.undo.push({js: snapshot(), label: e.label}); restore(e.js); toast("Redone" + (e.label ? ": " + e.label : ""), 1600); }
-function restore(js){ const o = JSON.parse(js), bb0 = P.proj.bbImp || {}, rt0 = Object.assign({}, P.proj.rot); UNDO_KEYS.forEach(k => { if (o[k] !== undefined) P.proj[k] = o[k]; }); if (o.units === undefined) delete P.proj.units; migrate(P.proj);
+function restore(js){ const o = JSON.parse(js), bb0 = P.proj.bbImp || {}, rt0 = Object.assign({}, P.proj.rot); UNDO_KEYS.forEach(k => { if (o[k] !== undefined) P.proj[k] = o[k]; }); UNDO_OPT.forEach(k => { if (o[k] === undefined) delete P.proj[k]; }); migrate(P.proj);
+  if (S.cond && !cond(S.cond)) S.cond = (P.proj.conds[0] || {}).id || null;   // (the condition taken back: the first one, never a missing one)
   const rt1 = P.proj.rot || {}, rtK = Object.keys(Object.assign({}, rt0, rt1)).filter(k => (rt0[k] || 0) !== (rt1[k] || 0)); if (rtK.length) rotDrop(rtK);   // a page's turn taken back: read again at its turn
   bbRedraw(Object.keys(Object.assign({}, bb0, P.proj.bbImp)).filter(id => !!(bb0[id] || {}).off !== !!(P.proj.bbImp[id] || {}).off));   // a Bluebeam import taken back (or redone): the PDF's own markups shown again
   if (S.sel && !P.proj.items.some(i => i.id === S.sel)) { S.sel = null; S.selPt = -1; }
@@ -1148,6 +1151,7 @@ function setLayer(ids, on){
    applied, and the page shown, its key, scale and indexed lines are always set together — never page 2's key with page
    3's drawing */
 async function gotoPage(fileId, pageNo, pn = ACT){
+  if (S.autoPrev && autoPreview.end) autoPreview.end(null);   // an Auto area boundary waiting to be accepted belongs to the page left
   const seq = pn.navSeq = (pn.navSeq || 0) + 1, stale = () => seq !== pn.navSeq || !PANES.includes(pn), proj = pn.sess.proj, here = () => pn === ACT;
   let d;
   try { d = await doc(fileId, true); } catch (e) { if (!stale()) { toast(e.message, 6000); pn.el.drop.style.display = "flex"; } return; }
@@ -3184,6 +3188,7 @@ async function autoAt(p, nc){   // nc: a new area condition, added with the outl
       if (r2.err) toast("With openings up to " + uLenT(g2) + ": " + r2.err + " — the last outline is kept", 5000); else { r2.gap = g2; r2.note = "openings closed up to " + uLenT(g2); res = r2; }
     }
   }
+  if (S.key !== key || !(nc || cond(c.id))) return toast("The page changed — nothing added", 3000);   // (accepted after going to another page: never the room of one page on another)
   const id = uid("I"), nm = S.lbl.autoName ? roomNameAt(res.pts) : "", kk = hereScale(p);
   const det = {how: res.trace ? "trace" : "auto", src: res.trace ? trSrc() : autoOpt().src === "vector" ? "vector lines" : "drawing image", gap: +(res.gap || autoOpt().gap), note: res.note || "",
     flag: res.leak ? "leaks — " + res.leak : res.short ? res.short : res.warn ? res.warn : res.rect || (res.holes || []).length ? "" : "not square — check the outline", a0: kk ? +(polyArea(res.pts) / kk / kk).toFixed(4) : null, pts0: res.pts.map(q => q.slice()), at: new Date().toISOString(),
@@ -3568,7 +3573,7 @@ function rowsOf(it, k){
     const D = rD(2 * dist(it.pts[0], it.pts[1]) / k), H = c.unit === "cft" ? (+it.dep > 0 ? +it.dep : rD(+c.t || 0)) : null, faces = +c.faces || 1;
     if (c.type === "area") rows = [R({nos, A: rA(Math.PI / 4 * D * D), H, how: "circle", D})];
     else { const L = rD(Math.PI * D); rows = [c.unit === "ft" ? R({nos, L, how: "circle", D}) : c.unit === "Sft" ? R({nos: nos * faces, L, H: rD(+c.h || 0), how: "circle", D}) : R({nos, L, W: rD(+c.t || 0), H: rD(+c.h || 0), how: "circle", D})]; }
-    if (it.kind === "ded" && c.type === "area") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0); if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }
+    if (it.kind === "ded" && c.type === "area") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0) / nos; if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }   // (each one against the threshold)
   }
   else if (c.type === "linear") {
     if (it.kind === "open") {
@@ -3590,9 +3595,10 @@ function rowsOf(it, k){
     // one measured shape = one row: a plain rectangle as L × W, any other outline as its plan area (by coordinates)
     const F = it.pts.map(ft), tol = 0.002 * Math.max(1, Math.sqrt(polyArea(F)));
     const parts = rectilinear(F, tol), H = c.unit === "cft" ? (+it.dep > 0 ? +it.dep : rD(+c.t || 0)) : null;   // dep: a cut / fill from spot levels, its own average depth (not rounded: the volume is the one worked out)
-    rows = parts && parts.length === 1 ? [R({nos, L: rD(parts[0].L), W: rD(parts[0].W), H, how: "rect"})]
+    const pa = polyArea(F), sq = parts && parts.length === 1 && Math.abs(parts[0].L * parts[0].W - pa) <= Math.max(0.005, 1e-6 * pa);   // L × W only when it is the outline's area
+    rows = sq ? [R({nos, L: rD(parts[0].L), W: rD(parts[0].W), H, how: "rect"})]
          : [R({nos, A: rA(polyArea(F)), H, how: "poly", sides: F.length})];
-    if (it.kind === "ded") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0); if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }
+    if (it.kind === "ded") { const tot = rows.reduce((a, r) => a + Math.abs(qty(r)), 0) / nos; if (tot <= (+c.dedMin || 0)) rows.forEach(r => { r.below = true; }); }   // (each one against the threshold, not Nos × it)
     if (crossed(it)) rows.forEach(r => { r.bad = "crosses"; });   // its sides cross: no quantity (the area by coordinates is not the area drawn)
   }
   rows.forEach(r => { r.qty = r.below || r.bad ? 0 : qty(r); });
@@ -3678,7 +3684,7 @@ function matWallT(c, m){
   return {T: d / 12, how: ' (T ' + r3(d) + '" ' + (bw ? "the block's width" : "default") + ")"};
 }
 /* materials for a net quantity Q of condition c (Q in the condition's unit) → {basis, rows: [[name, value, unit, note]], err} */
-function matCalc(c, Q){
+function matCalc(c, Q, wa){   // wa: a wall in ft — its net face (wallFace), so each opening goes off at its own height
   const m = matOf(c); if (m.kind === "none") return null;
   const out = {m, rows: [], mats: [], basis: "", err: ""}, H = +c.h || 0, wst = 1 + (+m.wst || 0) / 100, u = c.unit, faces = +c.faces || 1;
   const mat = (k, n, q, un) => out.mats.push({k, n, q, u: un}), nm = (L, v) => (L.find(x => x[0] === v) || [v, v])[1];
@@ -3690,9 +3696,9 @@ function matCalc(c, Q){
     if (parts[2]) { out.rows.push(["Crush (coarse aggregate)", dry * parts[2] / sum, "cft", "dry × " + parts[2] + " / " + sum, cr]); mat("crush:" + cr, nm(MAT_CRUSH, cr), dry * parts[2] / sum, "cft"); } };
   if (Q <= 0) { out.err = "No net quantity measured yet"; return out; }
   if (m.kind === "plaster" || m.kind === "screed" || m.kind === "tile" || m.kind === "paint") {   // a finish: its area (× thickness)
-    const A = u === "Sft" ? Q : u === "ft" ? (H > 0 ? Q * H * faces : NaN) : NaN, what = {plaster: "Plaster", screed: "Screed", tile: "Tiling", paint: "Paint"}[m.kind];
+    const A = u === "Sft" ? Q : u === "ft" ? (H > 0 ? (wa != null ? Math.abs(wa) : Q * H) * faces : NaN) : NaN, what = {plaster: "Plaster", screed: "Screed", tile: "Tiling", paint: "Paint"}[m.kind];
     if (isNaN(A)) { out.err = u === "ft" ? "Type Height H in the box above — " + what.toLowerCase() + " area = L × H" : what + " is taken from an area (Sft) or a length (ft) with H, not " + u; return out; }
-    const aTxt = (u === "ft" ? uLenT(Q) + " × H " + f3(H) + (faces > 1 ? " × " + faces + " faces" : "") + " = " : "") + f3(A) + " Sft";
+    const aTxt = (u === "ft" ? uLenT(Q) + " × H " + f3(H) + (wa != null && Math.abs(Math.abs(wa) - Q * H) > 5e-4 ? " (openings at their own height)" : "") + (faces > 1 ? " × " + faces + " faces" : "") + " = " : "") + f3(A) + " Sft";
     if (m.kind === "tile") {
       const tt = m.tt === "TILE-CER" ? "TILE-CER" : "TILE-POR", ts = m.ts || "24x24", [tl, tw] = ts.split("x").map(x => parseFloat(x) / 12), tj = (m.tj != null && m.tj !== "" && +m.tj >= 0 ? +m.tj : matDef().tileJ) / 12;
       if (!(tl > 0 && tw > 0)) { out.err = "Tile size " + ts + " is not valid"; return out; }
@@ -3726,9 +3732,9 @@ function matCalc(c, Q){
   let V = NaN;
   if (u === "cft") V = Q;
   else if (u === "Sft") V = T > 0 ? Q * T : NaN;
-  else if (u === "ft") V = T > 0 && H > 0 ? Q * H * T : NaN;
+  else if (u === "ft") V = T > 0 && H > 0 ? (wa != null ? Math.abs(wa) : Q * H) * T : NaN;
   if (isNaN(V)) { out.err = u === "ft" ? "Type Height H" + (T > 0 ? "" : " and thickness T") + " in the boxes above — volume = L × H × T" : "Type the thickness T (inches) in the box above — volume = area × T"; return out; }
-  out.basis = u === "cft" ? f3(V) + " cft" : u === "Sft" ? f3(Q) + " Sft × T " + f3(T) + " = " + f3(V) + " cft" : uLenT(Q) + " × H " + f3(H) + " × T " + f3(T) + " = " + f3(V) + " cft";
+  out.basis = u === "cft" ? f3(V) + " cft" : u === "Sft" ? f3(Q) + " Sft × T " + f3(T) + " = " + f3(V) + " cft" : uLenT(Q) + " × H " + f3(H) + (wa != null && Math.abs(Math.abs(wa) - Q * H) > 5e-4 ? " (openings at their own height)" : "") + " × T " + f3(T) + " = " + f3(V) + " cft";
   if (u !== "cft" || m.kind === "block") out.basis += wt.how;
   if (m.kind === "concrete") { const dry = V * 1.54 * wst; out.rows.push(["Concrete", V, "cft", ""], ["Dry volume", dry, "cft", "V × 1.54" + (wst > 1 ? " × " + f3(wst) : "")]); mixRows(dry); return out; }
   const jIn = matJoint(c, m), j = jIn / 12;
@@ -3756,7 +3762,7 @@ function matPriced(r){
 const matQ = (q, u) => u === "Nos" ? fq(q, "Nos") : u === "bags" ? f2(q) : f3(q);
 /* the Materials section of the Properties box: the condition's (or one measurement's) materials, priced from Cost Control, and its settings */
 function matHtml(c, Q, own){
-  const m = matOf(c), r = matCalc(c, Q), mixes = MAT_MIXES[m.kind] || [];
+  const m = matOf(c), r = matCalc(c, Q, !own && c.unit === "ft" ? wallFace(c) : null), mixes = MAT_MIXES[m.kind] || [];
   const sel = (k, opts, v) => `<select data-matk="${k}" style="min-width:0">${opts.map(o => { const [a, b] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(a)}"${String(v) === String(a) ? " selected" : ""}>${esc(b)}</option>`; }).join("")}</select>`;
   const mason = m.kind === "brick" || m.kind === "block", vol = mason || m.kind === "concrete", fin = m.kind === "plaster" || m.kind === "screed" || m.kind === "tile" || m.kind === "paint";
   const bedM = m.kind === "tile" && m.bed === "mortar", mortar = m.kind !== "none" && m.kind !== "paint" && (m.kind !== "tile" || bedM), tName = mason ? matNameIn(c) : 0;
@@ -3797,18 +3803,27 @@ function matHtml(c, Q, own){
    built-up rate of a Rate Analysis code); a rate without them is flagged, never assumed.
    only(it) limits everything to some measurements (one revision's sheets, one floor). */
 function condVars(c, only){
-  const v = {Q: 0, A: 0, P: 0, PD: 0, D: 0, L: 0, N: 0, H: +c.h || 0, T: +c.t || 0};
+  const v = {Q: 0, A: 0, P: 0, PD: 0, D: 0, L: 0, N: 0, OA: 0, H: +c.h || 0, T: +c.t || 0};
   P.proj.items.filter(i => i.cond === c.id && (!only || only(i))).forEach(it => {
-    const k = itemScale(it); if (!k || crossed(it)) return;   // (an outline crossing itself: none of its figures — area, perimeter, count)
+    const k = qScale(it); if (!k || crossed(it)) return;   // (an outline crossing itself: none of its figures — area, perimeter, count; a count needs no scale)
     const rows = rowsOf(it, k), sg = it.kind === "shape" ? 1 : -1, nos = +it.nos || 1;
     rows.forEach(r => { v.Q += r.qty; if (r.below) return;
-      if (c.type === "area") v.A += r.sign * (r.nos || 1) * (r.A != null ? r.A : (r.L || 0) * (r.W || 0)); });
-    if (c.type === "area" && it.kind === "shape") { const per = polyLen(itemPoly(it), true) / k, dr = Math.min(per, doorsOn(it).ft); v.P += nos * per; v.D += nos * dr; v.PD += nos * (per - dr); }
+      if (c.type === "area") v.A += r.sign * (r.nos || 1) * (r.A != null ? r.A : (r.L || 0) * (r.W || 0)) * (r.F || 1); });   // (a sloped area: along the slope, as its quantity)
+    if (c.type === "linear" && it.kind === "open") v.OA += openArea(it, k, c);   // the openings' faces (each its width × its own height) for the wall area and volume
+    if (c.type === "area" && it.kind === "shape") { const per = itemPerimFt(it, k), dr = Math.min(per, doorsOn(it).ft); v.P += nos * per; v.D += nos * dr; v.PD += nos * (per - dr); }
     if (c.type === "linear" && it.kind !== "open") { const p = pitchOf(it, c); v.L += sg * nos * ((it.shape === "circle" ? Math.PI * 2 * dist(it.pts[0], it.pts[1]) : polyLen(it.pts)) / k * (p > 0 ? slopeF(p) : 1) + (it.shape === "circle" ? 0 : Math.abs(+it.rise || 0))); }   // along the slope, with any rise / drop
     if (c.type === "count") v.N += it.pts.length * nos; else if (it.kind === "shape") v.N += nos;
   });
   return v;
 }
+/* an opening's face on its wall (Sft, one face): Nos × its width × its own height — no height given: the wall's (as before); at or under
+   the condition's threshold: none (the house rule, as its row) */
+function openArea(it, k, c){
+  const H = +c.h || 0, w = openW(it, k), h0 = openH(it), h = h0 > 0 ? (H > 0 ? Math.min(h0, H) : h0) : H;
+  return r3(w) * r3(h) <= (+c.dedMin || 0) ? 0 : (+it.nos || 1) * rD(w) * rD(h);
+}
+/* a wall's net face (Sft, one face) over some of its measurements: length × H less every opening — null when it is not a wall with H */
+function wallFace(c, only){ if (!c || c.type !== "linear" || !(+c.h > 0)) return null; const v = condVars(c, only); return v.L * +c.h - v.OA; }
 function evalFormula(src, vars, ref){   // + - * / ^ ( ) numbers, variables, [Condition name].A (another condition's variable), functions; throws on anything else
   src = String(src); const t = [], re = /\s+|\[[^\]]+\]\.[A-Za-z]+|\d*\.?\d+(?:e[+-]?\d+)?|[A-Za-z_]+|[-+*/^(),]/y;
   while (re.lastIndex < src.length) { const m = re.exec(src); if (!m) throw new Error("Only numbers, + - * / ^ ( ) and " + Object.keys(vars).join(" ") + " or [Condition name].A are allowed"); if (!/^\s/.test(m[0])) t.push(m[0]); }
@@ -3976,10 +3991,10 @@ const QT_NAMES = {q: "Quantity", len: "Length", area: "Wall area", vol: "Volume"
 function condQ(c, qt, only, vars){
   const v = vars || condVars(c, only), H = +c.h || 0, T = +c.t || 0, fc = +c.faces || 1, mk = (x, unit) => ({v: x, unit, name: QT_NAMES[qt]});
   if (!qt || qt === "q") return mk(v.Q, c.unit);
-  if (c.type === "linear") { const len = c.unit === "ft" ? v.Q : v.L;
+  if (c.type === "linear") { const len = c.unit === "ft" ? v.Q : v.L, WA = Math.max(0, v.L * H - (v.OA || 0));   // WA: the wall's face — its length × H less every opening at its own height (a door 3 × 7 in a 10 ft wall takes 21 Sft, not 30)
     if (qt === "len") return mk(len, "ft");
-    if (qt === "area") return c.unit === "Sft" ? mk(v.Q, "Sft") : H > 0 ? mk(len * H * fc, "Sft") : null;
-    if (qt === "vol") return c.unit === "cft" ? mk(v.Q, "cft") : H > 0 && T > 0 ? mk(len * H * T, "cft") : null;
+    if (qt === "area") return c.unit === "Sft" ? mk(v.Q, "Sft") : H > 0 ? mk(WA * fc, "Sft") : null;
+    if (qt === "vol") return c.unit === "cft" ? mk(v.Q, "cft") : c.unit === "Sft" ? (T > 0 ? mk(v.Q / fc * T, "cft") : null) : H > 0 && T > 0 ? mk(WA * T, "cft") : null;
     if (qt === "n") return mk(v.N, "Nos"); return null; }
   if (c.type === "area") {
     if (qt === "sarea") return mk(c.unit === "Sft" ? v.Q : v.A, "Sft");
@@ -4045,7 +4060,7 @@ function renderBill(){
 /* the takeoff's materials: every condition's cement, sand, crush, bricks and blocks, totalled per library item and priced from it */
 function matSummary(){
   const per = [], tot = new Map();
-  P.proj.conds.forEach(c => { const t = condTotals(c); if (!(t.net > 0)) return; const r = matCalc(c, t.net); if (!r) return;
+  P.proj.conds.forEach(c => { const t = condTotals(c); if (!(t.net > 0)) return; const r = matCalc(c, t.net, c.unit === "ft" ? wallFace(c) : null); if (!r) return;
     const pr = matPriced(r); per.push({c, r, pr});
     pr.rows.forEach(x => { const k = x.code || x.n + " (" + x.u + ")"; const o = tot.get(k) || {n: x.R.rate ? x.R.name : x.n, u: x.u, q: 0, R: x.R}; o.q += x.q; tot.set(k, o); }); });
   return {per, tot: [...tot.values()]};
@@ -4079,12 +4094,13 @@ const matLine = mats => mats.map(x => esc(x.n) + " <b>" + matQ(x.q, x.u) + "</b>
 /* the materials of some measurements: per condition (in the list's order) their net quantity and its materials */
 function matFor(its){
   const by = new Map(); its.forEach(it => { const c = cond(it.cond); if (!matMeas(c)) return; const q = qtyOf(it); if (q != null) by.set(c.id, (by.get(c.id) || 0) + q); });
-  return P.proj.conds.filter(c => by.has(c.id)).map(c => ({c, Q: by.get(c.id), r: matCalc(c, by.get(c.id))})).filter(o => o.r);
+  const ids = new Set(its.map(i => i.id));
+  return P.proj.conds.filter(c => by.has(c.id)).map(c => ({c, Q: by.get(c.id), r: matCalc(c, by.get(c.id), c.unit === "ft" ? wallFace(c, i => ids.has(i.id)) : null)})).filter(o => o.r);
 }
 /* one measurement's own materials — a deduction or an opening takes its share off (negative) */
 function matItem(it){
   const c = cond(it.cond); if (!matMeas(c)) return null; const q = qtyOf(it); if (q == null || !q) return null;
-  const r = matCalc(c, Math.abs(q)); if (!r) return null; const s = q < 0 ? -1 : 1;
+  const r = matCalc(c, Math.abs(q), c.unit === "ft" ? wallFace(c, i => i.id === it.id) : null); if (!r) return null; const s = q < 0 ? -1 : 1;
   return {c, it, Q: q, r, mats: r.err ? [] : r.mats.map(x => Object.assign({}, x, {q: x.q * s}))};
 }
 /* the measurements with materials in groups: by "kind" (type of work: brick, block, plaster... in that order), "floor" (building · floor,
@@ -4493,7 +4509,7 @@ function onDown(e){
   if (S.tool === "gap") return gapClick(sp);
   if (S.tool === "stamp") { stampAt(p); return; }
   if (S.tool === "typref") { if (!(S.typ && S.typ.T)) typClick(p).then(hint); return; }
-  if (S.tool === "count" || (S.tool === "draw" && cond(S.cond).type === "count")) return addCount(p);
+  if (S.tool === "count" || (S.tool === "draw" && (cond(S.cond) || {}).type === "count")) return addCount(p);
   if (S.tool === "rect" || S.tool === "dedrect") { if (!S.draft.length) draftPush([p]); else { const a = S.draft[0]; finish([a, [p[0], a[1]], p, [a[0], p[1]]]); } draftBtns(); draw(); return; }
   if (S.tool === "draw" || S.tool === "ded" || S.tool === "measure" || S.tool === "fence") {
     if (S.arcMode && S.draft.length) return arcClick(p);
@@ -4764,7 +4780,7 @@ function selectDown(sp, e){
     const sg = segAt(one, sp); if (sg) return addPoint(one, sg.i, sg.p);
   }
   if (!shift && !ctrl) { const lb = lblAt(sp);   // Bluebeam: drag a measurement's label to put it where it reads best (a click selects its object)
-    if (lb) { if (!selIds().has(lb.id)) setSel([lb.id]); if (!lb.it.locked) S.drag = {lbl: lb.id, sp0: sp, lo0: (lb.it.lo || [0, 0]).slice(), moved: false}; refresh(); return; } }
+    if (lb) { if (!selIds().has(lb.id)) setSel([lb.id]); if (!lb.it.locked) S.drag = {lbl: lb.id, sp0: sp, lo0: (lb.it.lo || lb.ao || [0, 0]).slice(), moved: false}; refresh(); return; } }
   const mk = markAt(sp), hi = mk ? null : hitInfo(sp), id = mk ? mk.id : hi ? hi.it.id : null, ids = selIds(), inSel = !!id && ids.has(id);
   if (shift) {   // add to / take out of the selection; a drag from here adds a box
     if (S.sel) S.multi.add(S.sel); if (S.selMark) S.multi.add(S.selMark); S.sel = null; S.selMark = null;
@@ -5242,7 +5258,7 @@ function drawNow(){
       const a = toScr(it.pts[0]), b = toScr(it.pts[1]);
       h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${sel ? 6 : Math.max(1, +c.sw || 4)}" stroke-linecap="round" opacity=".85"/>`);
       if (k) { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], r = rowsOf(it, k)[0]; h.push(label(m, (it.label ? it.label + " " : "") + uLen(r.L) + " × " + uLen(+it.oh || 0), "#9b2222")); }
-    } else h.push(measSvg(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, {T: toScr, z: 1, lz, lps: lblPS() && S.lbl.zoom !== false, lblOut: LB, lo: LD && LD.id === it.id ? LD.lo : undefined, sp: S.view.s, sel, k, lbl: S.lbl.on, seg: S.lbl.on && S.lbl.seg, small: S.lbl.small, screen: true}));   // as its appearance says (the exports draw it the same way)
+    } else h.push(measSvg(it._pts ? Object.assign({}, it, {pts: it._pts}) : it, c, {T: toScr, z: 1, lz, lps: lblPS() && S.lbl.zoom !== false, lblOut: LB, lo: LD && LD.id === it.id ? LD.lo : undefined, sp: S.view.s, sel: sel && S.multi.size <= 1, selMany: sel && S.multi.size > 1, k, lbl: S.lbl.on, seg: S.lbl.on && S.lbl.seg, small: S.lbl.small, screen: true}));   // as its appearance says (the exports draw it the same way)
     if (sel && !S.multi.size) {
       (it._pts || it.pts).forEach((p, i) => { const q = toScr(p); h.push(`<rect x="${(q[0] - 4).toFixed(1)}" y="${(q[1] - 4).toFixed(1)}" width="8" height="8" fill="${it.locked ? "#e8ecf1" : i === S.selPt ? "#0b0b0b" : "#fff"}" stroke="${it.locked ? "#8a97a6" : i === S.selPt ? "#0b0b0b" : col}" stroke-width="2"/>`); });
       if (!it.locked && editPts(it) && S.tool === "select") { const n = closedOf(it) ? it.pts.length : it.pts.length - 1;   // a "+" at the middle of each side: drag it to add a point
@@ -5251,7 +5267,7 @@ function drawNow(){
       if (it.locked) { const q = toScr((it._pts || it.pts)[0]); h.push(lockBadge([q[0] + 10, q[1] - 14])); }
     }
   });
-  if (LB) h.push(placeLabels(LB, S.lbl.declutter !== false));
+  if (LB) h.push(placeLabels(LB, {screen: true}));
   { const it = S.hover && S.tool === "select" && !S.drag && !S.hideMk ? P.proj.items.find(i => i.id === S.hover) : null;   // hover glow (Bluebeam), drawn with the cursor so a hover never redraws the takeoff
     if (it && it.file === S.fileId && it.page === S.pageNo && !hiddenItem(it) && !(S.multi.size && (it.id === S.sel || S.multi.has(it.id)))) dyn.push(hoverGlow(it)); }
   const c = S.cond ? cond(S.cond) : null, cur = S.cursor;
@@ -5348,10 +5364,11 @@ const AP_BLEND = {normal: "Normal", multiply: "Multiply — lines show through"}
 const apBlendG = (a, svg) => a.blend === "multiply" && svg ? `<g data-blend="multiply" style="mix-blend-mode:multiply">${svg}</g>` : svg;
 const AP_FRAC = {0: "1\"", 2: "1/2\"", 4: "1/4\"", 8: "1/8\"", 16: "1/16\""};
 function apBase(c){   // what a condition looks like with nothing set: the look the app has always had
-  const area = c && c.type === "area", cnt = c && c.type === "count", ps = lblPS();   // ps: PlanSwift's label (View → Labels), a yellow tag with a black border
+  const area = c && c.type === "area", cnt = c && c.type === "count", ps = lblPS(), st = S.lbl && S.lbl.style;   // ps: PlanSwift's label (View → Labels), a yellow tag with a black border
+  const tag = st === "tag", cad = st === "clean";   // a tag in the condition's colour (a light tint, its colour as the border) · CAD text: no box, bold in a deeper shade of the colour
   return {col: "", lineOp: area || cnt ? 100 : 85, dash: "solid", sw: swN(c && c.sw, area ? 1.6 : cnt ? 2.5 : 3), swU: "px", h0: "none", h1: "none", hs: 1,
-    fill: "", fillOp: cnt ? 30 : 22, hatch: "none", hcol: "", hsp: 8, units: "ft", dec: 3, frac: 8, font: ps ? "Arial" : "Segoe UI", fsz: 11.5, fcol: ps ? "#000000" : "#0b0b0b", fb: false, fi: false, fu: false,
-    lpos: "center", lbg: true, lbgCol: ps ? "#dfbf2a" : "#ffffff", lbgOp: ps ? 100 : 88, lbd: ps, seg: "auto", vtx: false, csz: ({s: 7, m: 10, l: 14})[c && c.sz] || 10, blend: "normal"};
+    fill: "", fillOp: cnt ? 30 : 22, hatch: "none", hcol: "", hsp: 8, units: "ft", dec: 3, frac: 8, font: ps ? "Arial" : "Segoe UI", fsz: 11.5, fcol: cad ? lblMix(c && c.color, 0, 0.45) : tag ? "#0f1f33" : ps ? "#000000" : "#0b0b0b", fb: cad, fi: false, fu: false,
+    lpos: "center", lbg: !cad, lbgCol: tag ? lblMix(c && c.color, 255, 0.82) : ps ? "#dfbf2a" : "#ffffff", lbgOp: ps ? 100 : 88, lbd: ps && !cad, seg: "auto", vtx: false, csz: ({s: 7, m: 10, l: 14})[c && c.sz] || 10, blend: "normal"};
 }
 function apOf(c, it){   // the appearance a measurement is drawn with: its condition's, then its own
   const a = Object.assign(apBase(c), c && c.ap || {}, it && it.ap || {});
@@ -5439,7 +5456,7 @@ function apLabel(p, lines, a, col, z){
   z = z || 1; const {fs, lh, w, hh, ps} = apLabelDims(lines, a, z), y0 = p[1] - hh / 2;
   const fam = esc(a.font || "Segoe UI") + ",Arial,sans-serif", deco = a.fu ? ' text-decoration="underline"' : "", it = a.fi ? ' font-style="italic"' : "";
   if (ps) {   // PlanSwift's: square corners, a hairline border in the text's colour, plain (not bold) text
-    const bw = Math.max(0.6, fs / 16), box = a.lbg !== false ? `<rect x="${(p[0] - w / 2).toFixed(1)}" y="${y0.toFixed(1)}" width="${w.toFixed(1)}" height="${hh.toFixed(1)}" fill="${esc(a.lbgCol || "#dfbf2a")}" fill-opacity="${((+a.lbgOp || 0) / 100).toFixed(2)}"${a.lbd ? ` stroke="${esc(col)}" stroke-width="${bw.toFixed(2)}"` : ""}/>` : "";
+    const bw = Math.max(0.6, fs / 16), bc = S.lbl && S.lbl.style === "tag" ? a.col : col, box = a.lbg !== false ? `<rect x="${(p[0] - w / 2).toFixed(1)}" y="${y0.toFixed(1)}" width="${w.toFixed(1)}" height="${hh.toFixed(1)}" fill="${esc(a.lbgCol || "#dfbf2a")}" fill-opacity="${((+a.lbgOp || 0) / 100).toFixed(2)}"${a.lbd ? ` stroke="${esc(bc)}" stroke-width="${(S.lbl && S.lbl.style === "tag" ? bw * 1.6 : bw).toFixed(2)}"` : ""}/>` : "";
     const halo = a.lbg === false ? ` stroke="#fff" stroke-width="${(fs / 4).toFixed(1)}" paint-order="stroke"` : "";
     return `<g class="aplbl">${box}` + lines.map((t, i) => `<text x="${p[0].toFixed(1)}" y="${(y0 + 0.33 * fs + lh * (i + 0.8)).toFixed(1)}" text-anchor="middle" font-family="${esc(a.font || "Arial")},Arial,sans-serif" font-size="${fs.toFixed(1)}" font-weight="${a.fb ? 700 : 400}"${it}${deco} fill="${esc(col)}"${halo}>${esc(t)}</text>`).join("") + "</g>"; }
   const box = a.lbg !== false ? `<rect x="${(p[0] - w / 2).toFixed(1)}" y="${y0.toFixed(1)}" width="${w.toFixed(1)}" height="${hh.toFixed(1)}" rx="${4 * z}" fill="${esc(a.lbgCol || "#ffffff")}" fill-opacity="${((+a.lbgOp || 0) / 100).toFixed(2)}"${a.lbd ? ` stroke="${esc(col)}" stroke-width="${z}"` : ""}/>` : "";
@@ -5474,19 +5491,22 @@ function measSvg(it, c, o){
   if (a.vtx) (it.shape === "circle" ? [] : it.pts.map(T)).forEach(q => out.push(`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(Math.max(2.2, w0 * 0.9)).toFixed(1)}" fill="#fff" stroke="${esc(col)}" stroke-width="${(1.2 * z).toFixed(2)}"/>`));
   if (a.blend === "multiply" && out.length) out.splice(0, out.length, apBlendG(a, out.join("")));
   const ks = (+S.lbl.scale || 1) * (ded ? +S.lbl.dedScale || 1 : 1), lo = o.lo !== undefined ? o.lo : it.lo;   // ks: View → Labels size (cut-outs have their own); lo: the label moved by hand (Bluebeam), its offset in page units
-  const k = o.k, lz = o.lps && k > 0 ? lblPsZ(sp, k) : o.lz || z, lzs = o.sel ? Math.max(lz * ks, LBL_SEL_Z) : lz * ks;   // lz: the labels' size (on screen it follows the zoom; lps: PlanSwift's, sized on the building), z: the lines'; the selected object's label stays readable
-  if (k && o.lbl && a.lpos !== "none" && !lenLblOff(c, o.sel) && (!o.screen || (+a.fsz || 11.5) * lzs >= (o.lps ? LBL_PS_MIN_PX : LBL_MIN_PX))) {   // on screen smaller than that it could not be read: left out (hover still tells) — a PlanSwift tag stays down to a speck, as there
-    const big = area ? polyArea(scr) > 2500 * lz * lz : polyLen(scr) > 60 * lz;
-    if (big || o.sel || !o.small || lo) { const L = capLines(it, c, k, a);
-      if (L.length) { const d = apLabelDims(L, a, lzs), p0 = apLabelPt(scr, area, a, lzs, d), p = lo ? [p0[0] + lo[0] * sp, p0[1] + lo[1] * sp] : p0, lc = ded ? "#9b2222" : a.fcol;
-        const lead = lo && Math.hypot(p[0] - p0[0], p[1] - p0[1]) > d.hh * 0.9 + 6 * lzs ?   // moved well away: a leader back to its object
-          `<g class="aplead"><line x1="${p0[0].toFixed(1)}" y1="${p0[1].toFixed(1)}" x2="${p[0].toFixed(1)}" y2="${p[1].toFixed(1)}" stroke="${esc(lc)}" stroke-width="${Math.max(0.8, lzs).toFixed(2)}" stroke-dasharray="${(4 * lzs).toFixed(1)} ${(3 * lzs).toFixed(1)}" opacity=".75"/><circle cx="${p0[0].toFixed(1)}" cy="${p0[1].toFixed(1)}" r="${(2.5 * lzs).toFixed(1)}" fill="${esc(lc)}"/></g>` : "";
-        const svg = lead + apLabel(p, L, a, lc, lzs);
-        if (o.lblOut) o.lblOut.push({svg, id: it.id, sel: o.sel ? 1 : 0, pin: lo ? 1 : 0, pri: area ? polyArea(scr) : polyLen(scr) * 20 * lz, b: [p[0] - d.w / 2, p[1] - d.hh / 2, p[0] + d.w / 2, p[1] + d.hh / 2]});
-        else out.push(svg); } }
+  const k = o.k, fit = o.screen ? lblFit() : "drawing", fs0 = +a.fsz || 11.5, lz = o.lps && k > 0 && fit !== "screen" ? lblPsZ(sp, k) : o.lz || z;   // lz: the labels' size (on screen it follows the zoom; lps: PlanSwift's, sized on the building), z: the lines'
+  let lzs = lz * ks;
+  if (fit === "smart") { const mn = Math.max(5, +S.lbl.minPx || 9), mx = Math.max(mn, +S.lbl.maxPx || 14); lzs = Math.min(mx, Math.max(mn, fs0 * lz)) / fs0 * ks; }   // smart: kept between min and max px on screen (× the set size)
+  if (o.sel) lzs = Math.max(lzs, LBL_SEL_Z);   // the selected object's label stays readable
+  if (k && o.lbl && a.lpos !== "none" && !lenLblOff(c, o.sel || o.selMany) && (!o.screen || fit === "smart" || fs0 * lzs >= (o.lps ? LBL_PS_MIN_PX : LBL_MIN_PX))) {   // on screen smaller than that it could not be read: left out (hover still tells) — a PlanSwift tag stays down to a speck, as there
+    const L = capLines(it, c, k, a), mq = +S.lbl.minQty || 0;
+    if (L.length && !(mq > 0 && !o.sel && !lo && Math.abs(rowsOf(it, k).reduce((s2, r) => s2 + r.qty, 0)) < mq)) {   // View → Labels: no label for a piece under that quantity
+      const d = apLabelDims(L, a, lzs), sc2 = area ? polyArea(scr) : polyLen(scr);
+      const big = fit === "smart" ? (area ? sc2 >= 0.45 * d.w * d.hh : sc2 >= 0.6 * Math.min(d.w, apLabelDims([L.join(" · ")], a, lzs).w)) : area ? sc2 > 2500 * lz * lz : sc2 > 60 * lz;   // smart: an object at least about as big as its label
+      if (big || o.sel || !o.small || lo) {
+        const along = !area && !lo && a.lpos === "center" && S.lbl.lenAlong !== false && it.shape !== "circle", LA = along ? [L.join(" · ")] : null;   // a run's label along the run, as CAD text
+        const job = {id: it.id, sel: o.sel ? 1 : 0, many: o.selMany ? 1 : 0, pin: lo ? 1 : 0, pri: area ? sc2 : sc2 * 20 * lz, L, LA, dA: LA && apLabelDims(LA, a, lzs), d, a, lc: ded ? "#9b2222" : a.fcol, z: lzs, sp, area, scr, p0: apLabelPt(scr, area, a, lzs, d), lo, lw: w};
+        if (o.lblOut) o.lblOut.push(job); else { const C = lblCands(job, "overlap"); out.push(lblJobSvg(job, C[0])); } } }
   }
   const segOn = a.seg === "on" || (a.seg !== "off" && (o.seg || o.sel));
-  if (k && segOn && it.shape !== "circle" && (!o.screen || (+a.fsz || 11.5) * 0.87 * lzs >= LBL_MIN_PX * 0.85)) out.push(segLabels(it.pts.map(T), it.pts, k, area, lzs, a));
+  if (k && segOn && it.shape !== "circle" && (!o.screen || (+a.fsz || 11.5) * 0.87 * lzs >= LBL_MIN_PX * 0.85)) { const sg = segLabels(it.pts.map(T), it.pts, k, area, lzs, a, o.lblOut ? {pri: o.sel ? 1 : 0} : null); if (o.lblOut) o.lblOut.push(...sg); else out.push(sg); }
   return out.join("");
 }
 
@@ -5534,17 +5554,20 @@ function apClean(c, v){   // keep only what differs from the condition's standar
   return out;
 }
 /* the totals a condition's measurements add up to, read in its appearance's units */
+const itemAreaFt = (it, k) => it.shape === "circle" ? Math.PI * Math.pow(dist(it.pts[0], it.pts[1]) / k, 2) : polyArea(itemPoly(it)) / k / k;   // a circle exactly (its outline has 72 sides)
+const itemPerimFt = (it, k) => it.shape === "circle" ? 2 * Math.PI * dist(it.pts[0], it.pts[1]) / k : polyLen(itemPoly(it), true) / k;
 function condTotalsList(c, its){
   const a = apOf(c), T0 = {len: 0, ded: 0, area: 0, darea: 0, per: 0, n: 0, pts: 0, segs: 0, noScale: 0, crossed: 0}, out = [];
   its.forEach(it => { const k = qScale(it); if (!k) { T0.noScale++; return; } if (crossed(it)) { T0.crossed++; return; } const poly = itemPoly(it), sgn = it.kind === "ded" || it.kind === "open" ? -1 : 1, nos = +it.nos || 1;
+    if (sgn < 0 && c.type !== "count") { const rs = rowsOf(it, k); if (rs.length && rs.every(r => r.below)) { T0.n++; return; } }   // (at or under the threshold: not taken off, as on the sheet)
     if (c.type === "count") { T0.pts += it.pts.length * nos; return; }
-    if (c.type === "area") { const A = polyArea(poly) / k / k * nos; if (sgn > 0) T0.area += A; else T0.darea += A; T0.per += polyLen(poly, true) / k * nos * (sgn > 0 ? 1 : 0); }
-    else { const L = (it.kind === "open" ? dist(it.pts[0], it.pts[1]) : it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k * nos; if (sgn > 0) T0.len += L; else T0.ded += L; T0.segs += Math.max(1, it.pts.length - 1);
+    if (c.type === "area") { const A = itemAreaFt(it, k) * nos; if (sgn > 0) T0.area += A; else T0.darea += A; T0.per += itemPerimFt(it, k) * nos * (sgn > 0 ? 1 : 0); }
+    else { const L = (it.kind === "open" ? openW(it, k) : it.shape === "circle" ? itemPerimFt(it, k) : polyLen(it.pts) / k) * nos; if (sgn > 0) T0.len += L; else T0.ded += L; T0.segs += Math.max(1, it.pts.length - 1);
       if (it.kind !== "open" && it.shape !== "circle" && +it.rise) T0.rise = (T0.rise || 0) + sgn * Math.abs(+it.rise) * nos; }
     if (it.kind !== "open" && pitchOf(it, c) > 0) T0.sloped = (T0.sloped || 0) + 1;
     T0.n++; });
   const q = condTotals(c);
-  if (c.type === "linear") { out.push(["Length", apLen(T0.len - T0.ded, a)]); if (T0.rise) out.push(["Rise / drop (added)", apLen(T0.rise, a)]); if (T0.ded) out.push(["Gross length", apLen(T0.len, a)], ["Deducted", apLen(T0.ded, a)]); if (+c.h) out.push(["Wall area (× H)", apArea((T0.len - T0.ded) * +c.h * (+c.faces || 1), a)]); if (+c.h && +c.t) out.push(["Volume (× H × T)", apVol((T0.len - T0.ded) * +c.h * +c.t, a)]); out.push(["Segments", String(T0.segs)]); }
+  if (c.type === "linear") { out.push(["Length", apLen(T0.len - T0.ded, a)]); if (T0.rise) out.push(["Rise / drop (added)", apLen(T0.rise, a)]); if (T0.ded) out.push(["Gross length", apLen(T0.len, a)], ["Deducted", apLen(T0.ded, a)]); if (+c.h) { const wa = condQ(c, "area"); if (wa) out.push(["Wall area (× H, less openings)", apArea(wa.v, a)]); } if (+c.h && +c.t) { const vo = condQ(c, "vol"); if (vo) out.push(["Volume (× H × T, less openings)", apVol(vo.v, a)]); } out.push(["Segments", String(T0.segs)]); }
   else if (c.type === "area") { out.push(["Area", apArea(T0.area - T0.darea, a)]); if (T0.darea) out.push(["Gross area", apArea(T0.area, a)], ["Deducted", apArea(T0.darea, a)]); out.push(["Perimeter", apLen(T0.per, a)]); if (+c.t) out.push(["Volume (× T)", apVol((T0.area - T0.darea) * +c.t, a)]); }
   else out.push(["Count", String(T0.pts) + " Nos"]);
   out.push(["Quantity", fq(q.net, c.unit) + " " + uL(c.unit) + (c.unit !== "ft" && c.unit !== "Sft" && c.unit !== "cft" ? "" : a.units !== "ft" ? " (" + apQty(q.net, c.unit, a) + ")" : "")], ["Measurements", String(T0.n)]);
@@ -5558,8 +5581,8 @@ function itemTotalsList(it, c, k){   // one measurement's own totals, in its app
   const a = apOf(c, it); if (!k) return [["Scale", "not set"]];
   const poly = itemPoly(it), nos = +it.nos || 1, rows = rowsOf(it, k), q = rows.reduce((s2, r) => s2 + (r.below ? 0 : r.qty), 0), out = [];
   if (crossed(it)) return [["Area", "— the outline crosses itself"], ["Quantity", "left out of the totals until its points are fixed"]];
-  if (c.type === "area") { out.push(["Area", apArea(polyArea(poly) / k / k * nos, a)], ["Perimeter", apLen(polyLen(poly, true) / k * nos, a)]); if (+c.t) out.push(["Volume", apVol(polyArea(poly) / k / k * +c.t * nos, a)]); }   // (perimeter × Nos, as the area)
-  else if (c.type === "linear") { const L = (it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k; out.push(["Length", apLen(L * nos, a)]); if (+c.h) out.push(["Wall area", apArea(L * +c.h * (+c.faces || 1) * nos, a)]); out.push(["Segments", String(Math.max(1, it.pts.length - 1))]);
+  if (c.type === "area") { out.push(["Area", apArea(itemAreaFt(it, k) * nos, a)], ["Perimeter", apLen(itemPerimFt(it, k) * nos, a)]); if (+c.t) out.push(["Volume", apVol(itemAreaFt(it, k) * +c.t * nos, a)]); }   // (perimeter × Nos, as the area; a circle exactly)
+  else if (c.type === "linear") { const op = it.kind === "open", L = op ? openW(it, k) : it.shape === "circle" ? itemPerimFt(it, k) : polyLen(it.pts) / k; out.push([op ? "Width" : "Length", apLen(L * nos, a)]); if (+c.h) out.push([op ? "Opening area (its own height)" : "Wall area", apArea(op ? openArea(it, k, c) * (+c.faces || 1) : L * +c.h * (+c.faces || 1) * nos, a)]); out.push(["Segments", String(Math.max(1, it.pts.length - 1))]);
     if (it.shape !== "circle" && +it.rise) out.push([+it.rise > 0 ? "Rise" : "Drop", apLen(Math.abs(+it.rise) * nos, a)]); }
   else out.push(["Count", it.pts.length * nos + " Nos"]);
   if (it.shape === "circle") out.push(["Radius / dia", apLen(dist(it.pts[0], it.pts[1]) / k, a) + " / " + apLen(2 * dist(it.pts[0], it.pts[1]) / k, a)]);
@@ -5652,13 +5675,35 @@ function tmpMeasSvg(m, k){   // a temporary angle (arms dashed, an arc at the co
 }
 /* measurement captions, as Bluebeam's "show caption": which values a label shows is set once (🏷 ▾) and used on screen
    and in the marked-up exports. Areas: name, quantity, area, perimeter, L × W; lengths: name, length, quantity, H / T. */
-const LBL_DEF = {on: true, name: true, qty: true, area: true, perim: true, len: true, dims: false, cond: false, seg: false, units: true, small: true, autoName: true, zoom: true, declutter: true, show: "nameqty", dedShow: "qty", scale: 1, dedScale: 1, style: "ps", lenSel: true, v2: 1, v3: 1};
-/* the labels' look (View → Labels): PlanSwift's — a yellow tag with a thin black border, its name over its quantity in plain black Arial,
-   sized on the building (its text 0.85 ft high at the drawing's scale, so as big as the drawing's own room names on any paper and small
-   when zoomed out, as in PlanSwift) — or the classic white box of a set size. A run's label (a wall's length) shows only on the run
-   clicked, as PlanSwift's: lenSel. */
-const LBL_STYLE = {ps: "PlanSwift — yellow tag, sized with the drawing", box: "Classic — white box, one set size"};
+const LBL_DEF = {on: true, name: true, qty: true, area: true, perim: true, len: true, dims: false, cond: false, seg: false, units: true, small: true, autoName: true, zoom: true, declutter: true, show: "nameqty", dedShow: "qty", scale: 1, dedScale: 1, style: "ps", lenSel: true,
+  fit: "smart", minPx: 9, maxPx: 14, collide: "hide", lenAlong: true, shortName: true, minQty: 0, v2: 1, v3: 1, v4: 1};
+/* the labels' look (View → Labels): PlanSwift's — a yellow tag with a thin black border, its name over its quantity in plain black Arial —,
+   a tag in the condition's own colour, CAD text (no box, a white halo) or the classic white box. A run's label (a wall's length) shows only
+   on the run clicked, as PlanSwift's: lenSel. */
+const LBL_STYLE = {ps: "PlanSwift — yellow tag", tag: "Colour tag — in the condition's colour", clean: "CAD text — no box, white halo", box: "Classic — white box"};
 const LBL_PS_FT = 0.85, LBL_PS_MIN_PX = 2, lblPS = () => !S.lbl || S.lbl.style !== "box";
+/* how labels are sized on screen (an export is always sized on its paper):
+   smart — with the zoom, as the drawing's text, but never smaller than minPx or larger than maxPx: readable zoomed out, not huge zoomed in;
+   drawing — sized on the building at every zoom (PlanSwift: specks zoomed out, big zoomed in); screen — one size at every zoom.
+   Labels that would cover one another (lblCollide): the smaller object's tries other free spots in its own object and is left out when
+   none is free (hover still names it), or moves aside with a leader line, or they may overlap. */
+const LBL_FIT = {smart: "Smart — follows the zoom, kept readable (min – max size)", drawing: "With the drawing — sized on the building (PlanSwift)", screen: "One size on screen at every zoom"};
+const LBL_COLLIDE = {hide: "Find a free spot in its object, else hide it", move: "Move it aside with a leader line", overlap: "Allow labels to overlap"};
+const lblFit = () => !S.lbl ? "smart" : S.lbl.zoom === false ? "screen" : LBL_FIT[S.lbl.fit] ? S.lbl.fit : "smart";
+const lblCollide = () => !S.lbl ? "hide" : S.lbl.declutter === false ? "overlap" : LBL_COLLIDE[S.lbl.collide] ? S.lbl.collide : "hide";
+const lblCondName = c => S.lbl && S.lbl.shortName === false ? c.name : condShort(c);   // "Plaster — Lower ground floor" reads "Plaster": the floor is in the tree and the legend
+/* presets (View → Labels ⚙ and the Labels dialog): a whole look in one click */
+const LBL_PRESETS = {
+  pro: ["Professional (recommended)", {style: "ps", fit: "smart", minPx: 9, maxPx: 14, collide: "hide", declutter: true, zoom: true, lenAlong: true, shortName: true, show: "nameqty", small: true, seg: false}],
+  planswift: ["PlanSwift — tags sized with the drawing", {style: "ps", fit: "drawing", collide: "hide", declutter: true, zoom: true, lenAlong: false, shortName: false, show: "nameqty", lenSel: true, small: true}],
+  bluebeam: ["Bluebeam — white captions, full detail", {style: "box", fit: "smart", minPx: 9, maxPx: 15, collide: "hide", declutter: true, zoom: true, lenAlong: false, shortName: true, show: "full", small: true}],
+  cad: ["AutoCAD — text along the lines, no boxes", {style: "clean", fit: "smart", minPx: 9, maxPx: 13, collide: "hide", declutter: true, zoom: true, lenAlong: true, shortName: true, show: "inline", small: true}],
+  colour: ["Colour tags — each in its condition's colour", {style: "tag", fit: "smart", minPx: 9, maxPx: 14, collide: "hide", declutter: true, zoom: true, lenAlong: true, shortName: true, show: "nameqty", small: true}],
+  minimal: ["Minimal — quantities only", {style: "clean", fit: "smart", minPx: 8, maxPx: 12, collide: "hide", declutter: true, zoom: true, lenAlong: true, shortName: true, show: "qty", small: true}],
+  leaders: ["Every label shown — moved aside with leaders", {style: "ps", fit: "smart", minPx: 9, maxPx: 14, collide: "move", declutter: true, zoom: true, lenAlong: true, shortName: true, show: "nameqty", small: false}]};
+function lblPreset(k){ const p = LBL_PRESETS[k]; if (!p) return; lblSet(Object.assign({}, p[1], {preset: k})); toast("Labels: " + p[0].split(" — ")[0].replace(/ \(.*\)/, ""), 1600); }
+const lblHex = v => /^#[0-9a-f]{6}$/i.test(v || "") ? v : "#2a78d6";
+const lblMix = (hex, to, t) => { const h = lblHex(hex), n = i => parseInt(h.slice(i, i + 2), 16), m = i => Math.round(n(i) + (to - n(i)) * t).toString(16).padStart(2, "0"); return "#" + m(1) + m(3) + m(5); };   // toward white (255) or black (0)
 const lblPsZ = (sp, k) => sp * LBL_PS_FT * k / 11.5;   // a label's size, × its set size (11.5), at sp px per page pt on a sheet of k pt per ft
 const lenLblOff = (c, sel) => c.type === "linear" && !sel && !!S.lbl && S.lbl.lenSel !== false;   // a run's label waits for a click
 /* a quantity as PlanSwift's labels read it: 2 decimals, SQ FT / FT / CU FT / EA (the sheet and the bill keep Sft, ft, cft, Nos); a project
@@ -5680,7 +5725,7 @@ function lblStep(v, d){ v = +v || 1; const L = LBL_SIZES; if (d > 0) return L.fi
 function lblSize(key, d){ const v = lblStep(S.lbl[key], d); lblSet({[key]: v}); toast((key === "dedScale" ? "Cut-out labels " : "Labels ") + Math.round(v * 100) + " %", 1300); }
 /* what a label shows: full (the ticks in View → Labels), name + quantity, quantity only, name only — cut-outs / deductions have their own
    choice, which can also hide them (their quantity stays on the sheet) */
-const LBL_SHOW = {full: "Full", nameqty: "Name + qty", qty: "Qty only", name: "Name only"}, LBL_DED = {full: "Full", nameqty: "Name + qty", qty: "Qty only", off: "Hidden"};
+const LBL_SHOW = {full: "Full", nameqty: "Name + qty", inline: "Name · qty on one line", qty: "Qty only", name: "Name only"}, LBL_DED = {full: "Full", nameqty: "Name + qty", qty: "Qty only", off: "Hidden"};
 /* labels are sized on the sheet, as Bluebeam's: on screen they grow and shrink with the zoom at every zoom (100 % = their set size), in
    step with the drawing, and are left out below 6 px, where they could not be read; View → Labels can keep them one size. The selected
    object's label stays readable. An AutoCAD drawing's sheet is laid at the plot scale that fits its whole model space (1:960 for one of
@@ -5689,13 +5734,27 @@ const LBL_MIN_PX = 6, LBL_SEL_Z = 0.85, LBL_CAD_PPF = 9;
 function lblPageK(fid, pn){ const m = pn === 1 && cadMeta(fid); return m && m.ptPerFt > 0 ? Math.min(1, m.ptPerFt / LBL_CAD_PPF) : 1; }   // a label's size on this sheet, × its set size
 function lblZ(s){ return S.lbl && S.lbl.zoom === false ? 1 : s * lblPageK(S.fileId, S.pageNo); }
 /* labels that would sit on one another: the selected object's and then the biggest object's stay, the others are left out (hover still shows them) */
-function placeLabels(L, dec){   // a label placed by hand is never left out; every label drawn is remembered (S.lblBoxes) so it can be grabbed
-  const put = [], pad = 2; L.sort((a, b) => (b.sel - a.sel) || (b.pin - a.pin) || (b.pri - a.pri)); S.lblBoxes = [];
-  return L.filter(x => { const b = x.b; if (dec && !x.sel && !x.pin && put.some(q => b[0] < q[2] + pad && b[2] > q[0] - pad && b[1] < q[3] + pad && b[3] > q[1] - pad)) return false; put.push(b); S.lblBoxes.push({id: x.id, b}); return true; }).map(x => x.svg).join("");
+function placeLabels(L, opt){   // L: label jobs (measSvg) -> their SVG; a label placed by hand is never left out; on screen every label drawn is remembered (S.lblBoxes) so it can be grabbed
+  opt = opt === true || opt === false ? {mode: opt ? lblCollide() : "overlap"} : opt || {};
+  const mode = opt.mode || lblCollide(), screen = opt.screen !== false, pad = 2, G = 64, grid = new Map(), out = [], boxes = [];
+  L.sort((a, b) => (b.sel - a.sel) || (b.pin - a.pin) || (b.many - a.many) || (b.pri - a.pri));
+  const cells = (bb, f) => { for (let gx = Math.floor(bb[0] / G), gx1 = Math.floor(bb[2] / G); gx <= gx1; gx++) for (let gy = Math.floor(bb[1] / G), gy1 = Math.floor(bb[3] / G); gy <= gy1; gy++) if (f(gx + "," + gy) === false) return; };
+  const free = q => { let ok = true; cells(q.bb, key => { const A = grid.get(key); if (A && A.some(r => lblHit(q, r))) { ok = false; return false; } }); return ok; };
+  const add = q => cells(q.bb, key => { let A = grid.get(key); if (!A) grid.set(key, A = []); A.push(q); });
+  for (const j of L) {
+    const C = lblCands(j, mode); let pick = null, q = null;
+    if (j.sel || j.pin || mode === "overlap") { pick = C[0]; q = lblObb(pick, pad); }
+    else for (const c of C) { const q2 = lblObb(c, pad); if (free(q2)) { pick = c; q = q2; break; } }
+    if (!pick) continue;
+    add(q); out.push(lblJobSvg(j, pick));
+    if (j.id && (j.area || j.lo)) boxes.push({id: j.id, b: lblObb(pick, 0).bb, ao: !j.lo && j.p0 && (pick.lead || Math.hypot(pick.p[0] - j.p0[0], pick.p[1] - j.p0[1]) > 1) && !pick.along ? [(pick.p[0] - j.p0[0]) / j.sp, (pick.p[1] - j.p0[1]) / j.sp] : null});
+  }
+  if (screen) S.lblBoxes = boxes;   // (a run's label is not in it — unless moved by hand: a press there takes the run or starts a box, never drags the label, as PlanSwift)
+  return out.join("");
 }
-function lblAt(sp){   // the label under the mouse (the one drawn last, on top, first)
+function lblAt(sp){   // the label under the mouse (the one drawn last, on top, first) -> {id, it, ao: where it stands from its usual spot when it was put elsewhere}
   const L = S.lblBoxes || []; for (let i = L.length - 1; i >= 0; i--) { const b = L[i].b; if (sp[0] < b[0] - 2 || sp[0] > b[2] + 2 || sp[1] < b[1] - 2 || sp[1] > b[3] + 2) continue;
-    const it = P.proj && P.proj.items.find(x => x.id === L[i].id); if (it && onPage(it) && !hiddenItem(it)) return {id: it.id, it}; }
+    const it = P.proj && P.proj.items.find(x => x.id === L[i].id); if (it && onPage(it) && !hiddenItem(it)) return {id: it.id, it, ao: L[i].ao}; }
   return null;
 }
 function resetLabelPos(ids){   // labels moved by hand go back into their objects (these, or every one on this page)
@@ -5704,18 +5763,20 @@ function resetLabelPos(ids){   // labels moved by hand go back into their object
 }
 function loadLbl(){ let o = null; try { o = JSON.parse(pref("zdTakeoffLbl") || "null"); } catch (e) { o = null; } S.lbl = Object.assign({}, LBL_DEF, o || {});
   if (o && !o.v2) Object.assign(S.lbl, {area: true, perim: true, v2: 1});   // an area's label shows its area and perimeter: switched on once for labels set before (switched off again, it stays off)
-  if (o && !o.v3) Object.assign(S.lbl, {style: "ps", show: "nameqty", lenSel: true, v3: 1}); }   // PlanSwift's labels: switched to once for labels set before (Classic in View → Labels brings the old look back)
+  if (o && !o.v3) Object.assign(S.lbl, {style: "ps", show: "nameqty", lenSel: true, v3: 1});   // PlanSwift's labels: switched to once for labels set before (Classic in View → Labels brings the old look back)
+  if (o && !o.v4) Object.assign(S.lbl, {fit: "smart", minPx: 9, maxPx: 14, collide: "hide", declutter: true, zoom: true, lenAlong: true, shortName: true, v4: 1}); }   // the professional labels (17-Nov-2026): readable at every zoom, never on one another — switched to once
 function capLines(it, c, k, ap){
   const o = S.lbl, out = [], u = t => o.units ? " " + t : "", rows = rowsOf(it, k), q = rows.reduce((a, r) => a + r.qty, 0), poly = itemPoly(it);
   const own = x => x && x.ap && (x.ap.units != null || x.ap.dec != null), ps = lblPS() && !own(c) && !own(it);   // PlanSwift's figures, unless units or decimals are set on the condition / measurement
   const A0 = ap || null, fL = v => ps ? psQty(v, "ft") : A0 ? apLen(v, A0) : uLen(v) + u(uL("ft")), fA = v => ps ? psQty(v, "Sft") : A0 ? apArea(v, A0) : fq(v, "Sft") + u(uL("Sft")), fQ = v => ps ? psQty(v, c.unit) : A0 ? apQty(v, c.unit, A0) : fq(v, c.unit) + u(uL(c.unit));
   const ded = it.kind === "ded", mode = ded ? (LBL_DED[o.dedShow] ? o.dedShow : "qty") : (LBL_SHOW[o.show] ? o.show : "full");
   if (mode === "off") return [];
-  if (mode !== "full") { const nm = it.label || (ded ? (c.type === "area" ? "Cut-out" : "Deduction") : c.name);
+  if (mode !== "full") { const nm = it.label || (ded ? (c.type === "area" ? "Cut-out" : "Deduction") : lblCondName(c));
     const L = lblPS() && c.type === "linear" && c.unit !== "ft" && mode !== "name" ? [fL((it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k * (ded ? -1 : 1))] : [];   // a wall in Sft (plaster): its length too
+    if (mode === "inline") return [[nm, ...L, fQ(q)].filter(Boolean).join(" · ")];   // one line: "Kitchen · 120.00 SQ FT"
     return (mode === "name" ? [nm] : mode === "qty" ? [...L, fQ(q)] : [nm, ...L, fQ(q)]).filter(Boolean); }
   if (o.name && it.label) out.push(it.label);
-  if (o.cond) out.push(c.name);
+  if (o.cond) out.push(lblCondName(c));
   if (c.type === "area") {
     const A = polyArea(poly) / k / k * (it.kind === "ded" ? -1 : 1), P = polyLen(poly, true) / k, r = rows[0];
     if (o.qty) out.push(fQ(q));
@@ -5756,24 +5817,111 @@ function lineLabelPt(P, z, d){   // beside the middle of the longest run, clear 
   const a = P[bi - 1], b = P[bi] || a, L = dist(a, b) || 1, n = [(b[1] - a[1]) / L, -(b[0] - a[0]) / L], off = Math.max((S.lbl.seg ? 34 : 18) * z, d ? d.hh / 2 + 6 * z : 0), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   return Math.abs(n[0]) > Math.abs(n[1]) ? [m[0] + (n[0] < 0 ? -1 : 1) * Math.max(off + 30 * z, d ? d.w / 2 + 6 * z : 0), m[1]] : [m[0], m[1] - off];
 }
-function segLabels(scr, pts, k, closed, z, ap){   // the length of every side, at its middle (Bluebeam "show segment values")
-  const out = [], n = closed ? pts.length : pts.length - 1, fam = ap ? esc(ap.font || "Segoe UI") + ",Arial" : "Segoe UI,Arial", fs = ap ? Math.max(6, (+ap.fsz || 11.5) * 0.87) : 10, fc = ap ? esc(ap.fcol || "#33475b") : "#33475b";
-  for (let i = 0; i < n; i++) { const a = scr[i], b = scr[(i + 1) % scr.length]; if (dist(a, b) < 46 * z) continue;
-    const d = dist(pts[i], pts[(i + 1) % pts.length]) / k, t = ap && apU(ap) !== "ft" ? apLen(d, ap) : uLen(d), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    out.push(`<text x="${m[0].toFixed(1)}" y="${(m[1] - 4 * z).toFixed(1)}" text-anchor="middle" font-family="${fam}" font-size="${(fs * z).toFixed(1)}" font-weight="600" fill="${fc}" stroke="#fff" stroke-width="${3 * z}" paint-order="stroke">${esc(t)}</text>`); }
-  return out.join("");
+function segLabels(scr, pts, k, closed, z, ap, jobs){   // the length of every side, written along it just off its middle (Bluebeam "show segment values", AutoCAD's aligned dimension text)
+  const out = [], n = closed ? pts.length : pts.length - 1, fam = ap ? esc(ap.font || "Segoe UI") + ",Arial" : "Segoe UI,Arial", fs = ap ? Math.max(6, (+ap.fsz || 11.5) * 0.87) : 10, fc = ap ? esc(ap.fcol || "#33475b") : "#33475b", f = fs * z;
+  for (let i = 0; i < n; i++) { const a = scr[i], b = scr[(i + 1) % scr.length], sl = dist(a, b); if (sl < 46 * z) continue;
+    const d = dist(pts[i], pts[(i + 1) % pts.length]) / k, t = ap && apU(ap) !== "ft" ? apLen(d, ap) : uLen(d), tw = lblTextW(t, fam, 600, f);
+    if (tw > sl - 4 * z) continue;   // (no room along this side: left out rather than spilling over the corners)
+    const ang = lblUp(Math.atan2(b[1] - a[1], b[0] - a[0]));   // upright: read left to right
+    const off = f * 0.62 + 2 * z, m = [(a[0] + b[0]) / 2 + Math.sin(ang) * off, (a[1] + b[1]) / 2 - Math.cos(ang) * off], deg = (ang * 180 / Math.PI).toFixed(2);   // just above the side
+    const svg = `<text x="${m[0].toFixed(1)}" y="${(m[1] + f * 0.35).toFixed(1)}" text-anchor="middle" font-family="${fam}" font-size="${f.toFixed(1)}" font-weight="600" fill="${fc}" stroke="#fff" stroke-width="${3 * z}" paint-order="stroke"${Math.abs(ang) > 1e-3 ? ` transform="rotate(${deg} ${m[0].toFixed(1)} ${m[1].toFixed(1)})"` : ""}>${esc(t)}</text>`;
+    if (jobs) out.push({seg: 1, id: null, sel: 0, many: jobs.pri ? 1 : 0, pin: 0, pri: jobs.pri ? 1e12 : -1, fixed: {p: m, ang, w: tw + 2 * z, h: f * 1.15}, svg}); else out.push(svg); }
+  return jobs ? out : out.join("");
+}
+/* ---- label placement, as a professional takeoff / CAD package does it: every label is a box (turned with its run when written along it);
+   the selected object's, the labels placed by hand and then the biggest objects' are placed first; each next label takes the first of its
+   candidate spots that is free — its usual spot, other spots in its own object (inside the room, along another side of the run), and with
+   "move aside" spots round the object with a leader line — or is left out (hover still names the object). */
+function lblCands(j, mode){   // -> [{p, ang, w, h, along, lead}] best first
+  if (j.fixed) return [j.fixed];
+  const d = j.d, z = j.z, C = [], hz = {p: null, ang: 0, w: d.w, h: d.hh};
+  if (j.lo) { const p = [j.p0[0] + j.lo[0] * j.sp, j.p0[1] + j.lo[1] * j.sp]; return [Object.assign({}, hz, {p, lead: Math.hypot(p[0] - j.p0[0], p[1] - j.p0[1]) > d.hh * 0.9 + 6 * z ? j.p0 : null})]; }
+  const S0 = j.scr, segs = [];
+  if (!j.area) { for (let i = 1; i < S0.length; i++) segs.push([S0[i - 1], S0[i], dist(S0[i - 1], S0[i])]); segs.sort((x, y) => y[2] - x[2]); }
+  if (j.LA) {   // along the run: the longest sides first, at their middle then a third in, the side above (or to the left) first
+    const dA = j.dA, gap = dA.hh / 2 + (j.lw || 2) / 2 + 1.5 * z;
+    segs.slice(0, 5).forEach(([a, b, l]) => { if (l < dA.w + 6 * z) return; const ang = lblUp(Math.atan2(b[1] - a[1], b[0] - a[0]));
+      const n = [Math.sin(ang), -Math.cos(ang)];   // the upper side's normal
+      [0.5, 0.3, 0.7].forEach(t => { if (t !== 0.5 && l < dA.w * 1.9) return; const m = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        [1, -1, 0].forEach(s => C.push({p: [m[0] + n[0] * gap * s, m[1] + n[1] * gap * s], ang, w: dA.w, h: dA.hh, along: 1})); }); });   // above, below, then on the run (a tag over its line, as PlanSwift's)
+  }
+  C.push(Object.assign({}, hz, {p: j.p0}));   // its usual spot
+  if (mode === "overlap") return C;
+  if (j.area) {   // other free spots inside the room: a grid through it, nearest first, the box's left and right ends inside too
+    const xs = S0.map(p => p[0]), ys = S0.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), st = Math.max(d.hh * 0.75, 8);
+    if ((x1 - x0) * (y1 - y0) < 4e6) { const G = [];
+      for (let y = y0 + d.hh / 2; y <= y1 - d.hh / 2; y += st) for (let x = x0 + d.w / 2; x <= x1 - d.w / 2; x += st) { const p = [x, y];
+        if (pointInPoly(p, S0) && pointInPoly([x - d.w / 2, y], S0) && pointInPoly([x + d.w / 2, y], S0) && pointInPoly([x, y - d.hh / 2], S0) && pointInPoly([x, y + d.hh / 2], S0)) G.push(p); }
+      G.sort((p, q) => dist(p, j.p0) - dist(q, j.p0)); G.slice(0, 40).forEach(p => C.push(Object.assign({}, hz, {p}))); }
+  } else {   // beside the other long sides of the run
+    const g = d.hh / 2 + 6 * z;
+    segs.slice(0, 4).forEach(([a, b, l]) => { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], n = [(b[1] - a[1]) / (l || 1), -(b[0] - a[0]) / (l || 1)], hor = Math.abs(n[0]) > Math.abs(n[1]);
+      [1, -1].forEach(s => C.push(Object.assign({}, hz, {p: hor ? [m[0] + s * (d.w / 2 + 6 * z), m[1]] : [m[0], m[1] + s * g]}))); });
+  }
+  if (mode === "move") {   // round the object, further out ring by ring, with a leader back to it
+    const xs = S0.map(p => p[0]), ys = S0.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const an = j.area ? j.p0 : null;
+    for (let r = 1; r <= 4; r++) { const e = r * (d.hh + 8 * z);
+      [[cx, y0 - e - d.hh / 2], [cx, y1 + e + d.hh / 2], [x1 + e + d.w / 2, cy], [x0 - e - d.w / 2, cy], [x1 + e * 0.7 + d.w / 2, y0 - e * 0.7 - d.hh / 2], [x0 - e * 0.7 - d.w / 2, y0 - e * 0.7 - d.hh / 2], [x1 + e * 0.7 + d.w / 2, y1 + e * 0.7 + d.hh / 2], [x0 - e * 0.7 - d.w / 2, y1 + e * 0.7 + d.hh / 2]]
+        .forEach(p => C.push(Object.assign({}, hz, {p, lead: an || lblNearOn(S0, p)}))); }
+  }
+  return C;
+}
+function lblUp(ang){ if (ang >= Math.PI / 2 - 1e-6) ang -= Math.PI; else if (ang < -Math.PI / 2 - 1e-6) ang += Math.PI; return ang; }   // text upright, a vertical one reading bottom to top (as CAD)
+function lblNearOn(P, p){ let best = P[0], bd = Infinity; for (let i = 1; i < P.length; i++) { const a = P[i - 1], b = P[i], dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy, t = L ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L)) : 0, q = [a[0] + t * dx, a[1] + t * dy], e = dist(q, p); if (e < bd) { bd = e; best = q; } } return best; }   // the run's point nearest p
+function lblObb(c, pad){   // a label's box (turned): its corners and the box round them
+  const hw = c.w / 2 + pad, hh = c.h / 2 + pad, ca = Math.cos(c.ang || 0), sa = Math.sin(c.ang || 0), p = c.p;
+  const K = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => [p[0] + x * ca - y * sa, p[1] + x * sa + y * ca]), xs = K.map(q => q[0]), ys = K.map(q => q[1]);
+  return {K, ang: c.ang || 0, bb: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]};
+}
+function lblHit(A, B){   // do two (turned) boxes overlap — separating axes
+  if (A.bb[0] > B.bb[2] || A.bb[2] < B.bb[0] || A.bb[1] > B.bb[3] || A.bb[3] < B.bb[1]) return false;
+  if (Math.abs(A.ang) < 1e-3 && Math.abs(B.ang) < 1e-3) return true;
+  for (const Q of [A, B]) for (let i = 0; i < 2; i++) { const a = Q.K[i], b = Q.K[i + 1], ax = [b[1] - a[1], a[0] - b[0]];
+    const pr = K => { let mn = Infinity, mx = -Infinity; K.forEach(q => { const v = q[0] * ax[0] + q[1] * ax[1]; if (v < mn) mn = v; if (v > mx) mx = v; }); return [mn, mx]; };
+    const p1 = pr(A.K), p2 = pr(B.K); if (p1[1] < p2[0] || p2[1] < p1[0]) return false; }
+  return true;
+}
+function lblJobSvg(j, c){   // a placed label: its tag (turned with its run), and a leader back to its object when it stands away from it
+  if (j.fixed) return j.svg;
+  const L = c.along ? j.LA : j.L, z = j.z, lc = j.lc;
+  let lead = "";
+  if (c.lead) { const q = c.lead, b = lblObb(c, 0).bb, dx = c.p[0] - q[0], dy = c.p[1] - q[1], t = Math.min(dx ? (Math.abs(dx) - (b[2] - b[0]) / 2) / Math.abs(dx) : 1, dy ? (Math.abs(dy) - (b[3] - b[1]) / 2) / Math.abs(dy) : 1), e = [q[0] + dx * Math.max(0, t), q[1] + dy * Math.max(0, t)];   // to the box's edge, not under the text
+    lead = `<g class="aplead"><line x1="${q[0].toFixed(1)}" y1="${q[1].toFixed(1)}" x2="${e[0].toFixed(1)}" y2="${e[1].toFixed(1)}" stroke="${esc(lc)}" stroke-width="${Math.max(0.8, z).toFixed(2)}" stroke-dasharray="${(4 * z).toFixed(1)} ${(3 * z).toFixed(1)}" opacity=".75"/><circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${(2.5 * z).toFixed(1)}" fill="${esc(lc)}"/></g>`; }
+  const body = apLabel(c.p, L, j.a, lc, z);
+  return lead + (Math.abs(c.ang || 0) > 1e-3 ? `<g transform="rotate(${(c.ang * 180 / Math.PI).toFixed(2)} ${c.p[0].toFixed(1)} ${c.p[1].toFixed(1)})">${body}</g>` : body);
 }
 async function labelDialog(){
-  const o = S.lbl, cb = (k2, t) => `<label class="pk"><input type="checkbox" data-lb="${k2}"${o[k2] ? " checked" : ""}> ${t}</label>`;
+  const o = S.lbl, cb = (k2, t, on) => `<label class="pk"><input type="checkbox" data-lb="${k2}"${(on == null ? o[k2] : on) ? " checked" : ""}> ${t}</label>`;
   const sl = (k2, O, v0) => `<select data-lbs="${k2}">${Object.entries(O).map(([x, t]) => `<option value="${x}"${x === v0 ? " selected" : ""}>${t}</option>`).join("")}</select>`;
-  const v = await ask("Labels on the drawing", `<div class="grid"><div class="fg w2"><label>Label style</label>${sl("style", LBL_STYLE, lblPS() ? "ps" : "box")}</div><div class="fg"><label>Every label shows</label>${sl("show", LBL_SHOW, LBL_SHOW[o.show] ? o.show : "full")}</div>
+  let preK = o.preset || "";   // the preset chosen in the dialog (kept by Save)
+  const raw = (k2, v0, mn, mx, st) => `<input type="number" data-lbr="${k2}" min="${mn}" max="${mx}" step="${st}" value="${v0}" style="width:76px">`;
+  const pre = `<div class="lbpre">${Object.entries(LBL_PRESETS).map(([k2, p]) => `<button type="button" class="btn sm${o.preset === k2 ? " pri" : ""}" data-lbp="${k2}" title="${esc(p[0])}">${esc(p[0].split(" — ")[0].replace(/ \(.*\)/, ""))}</button>`).join("")}</div>`;
+  const pr = ask("Labels on the drawing", `<p class="small" style="margin:0 0 6px">Presets — a whole look in one click (then Save):</p>${pre}
+    <div class="grid"><div class="fg"><label>Label style</label>${sl("style", LBL_STYLE, LBL_STYLE[o.style] ? o.style : "ps")}</div><div class="fg"><label>Every label shows</label>${sl("show", LBL_SHOW, LBL_SHOW[o.show] ? o.show : "full")}</div>
+    <div class="fg"><label>Size on screen</label>${sl("fit", LBL_FIT, lblFit())}</div><div class="fg"><label>Smart size: smallest – largest text (px)</label><span style="display:flex;gap:6px;align-items:center">${raw("minPx", +o.minPx || 9, 5, 20, 1)} – ${raw("maxPx", +o.maxPx || 14, 6, 40, 1)}</span></div>
+    <div class="fg"><label>When labels meet</label>${sl("collide", LBL_COLLIDE, lblCollide())}</div><div class="fg"><label>No label under this quantity (0: every piece)</label>${raw("minQty", +o.minQty || 0, 0, 100000, 0.5)}</div>
     <div class="fg"><label>Cut-out / deduction labels show</label>${sl("dedShow", LBL_DED, LBL_DED[o.dedShow] ? o.dedShow : "qty")}</div>
     <div class="fg"><label>Label size % ( [ ] )</label><input type="number" data-lbn="scale" min="50" max="300" step="5" value="${Math.round((+o.scale || 1) * 100)}"></div>
-    <div class="fg"><label>Cut-out label size % ( Shift + [ ] )</label><input type="number" data-lbn="dedScale" min="50" max="300" step="5" value="${Math.round((+o.dedScale || 1) * 100)}"></div><div class="fg"><label>Show on every label</label>${cb("name", "Name (room / label)")}${cb("cond", "Condition name")}${cb("qty", "Quantity in the condition's unit")}${cb("units", "Units (Sft, ft, cft, Nos)")}</div>
+    <div class="fg"><label>Cut-out label size % ( Shift + [ ] )</label><input type="number" data-lbn="dedScale" min="50" max="300" step="5" value="${Math.round((+o.dedScale || 1) * 100)}"></div><div class="fg"><label>Show on every label</label>${cb("name", "Name (room / label)")}${cb("cond", "Condition name")}${cb("shortName", "Short names — “Plaster”, not “Plaster — Lower ground floor”", o.shortName !== false)}${cb("qty", "Quantity in the condition's unit")}${cb("units", "Units (Sft, ft, cft, Nos)")}</div>
     <div class="fg"><label>Areas</label>${cb("area", "Area Sft (when the unit is not Sft — in Sft the quantity is the area)")}${cb("perim", "Perimeter ft — shown as P (the outline's length)")}${cb("dims", "L × W of rectangles · Ø of circles · H / T of walls")}
-      <label style="margin-top:6px">Lengths</label>${cb("len", "Length ft")}${cb("lenSel", "Only on the run clicked — walls show no label until selected, as PlanSwift")}</div>
-    <div class="fg w2"><label>Display</label>${cb("seg", "Length of every side / segment (always shown on the selected one)")}${cb("small", "Hide labels on shapes too small to read at this zoom")}${cb("zoom", "Labels grow and shrink with the zoom, as the drawing's own text (off: always one size on screen)")}${cb("declutter", "Leave out a label that would cover another (the bigger object's label stays)")}${cb("autoName", "Name new areas from the room name written inside them (manual, rectangle, auto area, Claude)")}</div></div>
-    <p class="small" style="margin-top:8px">The same labels go on the marked-up PNG / PDF exports. <b>L</b> shows or hides all labels.</p>`, "Save", () => { const n = {on: o.on}; document.querySelectorAll("[data-lb]").forEach(x => { n[x.dataset.lb] = x.checked; }); document.querySelectorAll("[data-lbs]").forEach(x => { n[x.dataset.lbs] = x.value; }); document.querySelectorAll("[data-lbn]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) n[x.dataset.lbn] = Math.max(0.5, Math.min(3, v / 100)); }); return n; });
+      <label style="margin-top:6px">Lengths</label>${cb("len", "Length ft")}${cb("lenSel", "Only on the run clicked — walls show no label until selected, as PlanSwift")}${cb("lenAlong", "Written along the run, as CAD text", o.lenAlong !== false)}</div>
+    <div class="fg w2"><label>Display</label>${cb("seg", "Length of every side / segment (always shown on the selected one)")}${cb("small", "Hide labels on shapes smaller than their label at this zoom")}${cb("autoName", "Name new areas from the room name written inside them (manual, rectangle, auto area, Claude)")}</div></div>
+    <p class="small" style="margin-top:8px">The same labels go on the marked-up PNG / PDF exports (sized on the paper, placed the same way). <b>L</b> shows or hides all labels · drag a label to move it, right-click → Reset label position.</p>`, "Save", () => {
+      const n = {on: o.on}; document.querySelectorAll("[data-lb]").forEach(x => { n[x.dataset.lb] = x.checked; }); document.querySelectorAll("[data-lbs]").forEach(x => { n[x.dataset.lbs] = x.value; });
+      document.querySelectorAll("[data-lbn]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) n[x.dataset.lbn] = Math.max(0.5, Math.min(3, v / 100)); });
+      document.querySelectorAll("[data-lbr]").forEach(x => { const v = parseFloat(x.value); if (isFinite(v)) n[x.dataset.lbr] = Math.max(+x.min, Math.min(+x.max, v)); });
+      if (n.maxPx < n.minPx) n.maxPx = n.minPx;
+      if (n.fit === "screen") { n.zoom = false; delete n.fit; } else n.zoom = true;
+      if (n.collide === "overlap") { n.declutter = false; delete n.collide; } else n.declutter = true;
+      n.preset = preK; return n; });
+  $("dlgB").querySelectorAll("[data-lbp]").forEach(b => b.onclick = () => {   // a preset fills the dialog in; Save keeps it
+    const p = (LBL_PRESETS[b.dataset.lbp] || [])[1] || {}; preK = b.dataset.lbp; $("dlgB").querySelectorAll("[data-lbp]").forEach(x => x.classList.toggle("pri", x === b));
+    Object.entries(p).forEach(([k2, v]) => { const sel = $("dlgB").querySelector(`[data-lbs="${k2}"]`), ck = $("dlgB").querySelector(`[data-lb="${k2}"]`), r = $("dlgB").querySelector(`[data-lbr="${k2}"]`);
+      if (sel) sel.value = v; if (ck) ck.checked = !!v; if (r) r.value = v; });
+    const f = $("dlgB").querySelector('[data-lbs="fit"]'), c = $("dlgB").querySelector('[data-lbs="collide"]');
+    if (f) f.value = p.zoom === false ? "screen" : p.fit || "smart"; if (c) c.value = p.declutter === false ? "overlap" : p.collide || "hide"; });
+  const v = await pr;
   if (!v) return;
   lblSet(v);
   if (P.proj && S.page) { const n = P.proj.items.filter(i => i.file === S.fileId && i.page === S.pageNo && !i.label && i.kind === "shape" && (cond(i.cond) || {}).type === "area").length;
@@ -5800,7 +5948,7 @@ function legendRowsOf(list, m){   // one row per condition: its quantity, the pe
   const map = new Map();
   list.forEach(it => { const c = cond(it.cond); if (!c) return; let q = 0, has = false, per = 0;
     if (c.type === 'count') { q = (+it.pts?.length || 0) * Math.max(1, +it.nos || 1); has = true; }
-    else { const k = qScale(it); if (k) { q = rowsOf(it, k).reduce((a, r) => a + (+r.qty || 0), 0); has = true; if (c.type === 'area' && it.kind === 'shape') per = (+it.nos || 1) * polyLen(itemPoly(it), true) / k; } }
+    else { const k = qScale(it); if (k) { q = rowsOf(it, k).reduce((a, r) => a + (+r.qty || 0), 0); has = true; if (c.type === 'area' && it.kind === 'shape') per = (+it.nos || 1) * itemPerimFt(it, k); } }
     if (!has && !q) return;
     const x = map.get(c.id) || {c, q: 0, has: false, per: 0, its: []}; x.q += q; x.has = x.has || has; x.per += per; x.its.push(it); map.set(c.id, x); });
   let rows = [...map.values()].filter(x => x.has || x.q !== 0); rows.forEach(x => { x.ap = legAp(x.c, x.its); });
@@ -5853,9 +6001,10 @@ function legVars(r){   // a row's variables (as a custom column's) and its gross
   if (r._v) return r._v;
   const ids = new Set((r.its || []).map(i => i.id)), only = it => ids.has(it.id), c = r.c, g = {ga: 0, da: 0, gl: 0, dl: 0, n: 0, ck: 0, pg: new Set()};
   (r.its || []).forEach(it => { g.pg.add(keyOf(it.file, it.page)); if (it.kind === "shape") { g.n++; if (it.qa === "checked") g.ck++; }
-    const k = qScale(it); if (!k || c.type === "count") return; const nos = +it.nos || 1, neg = it.kind === "ded" || it.kind === "open", poly = itemPoly(it);
-    if (c.type === "area") { const A = polyArea(poly) / k / k * nos; if (neg) g.da += A; else g.ga += A; }
-    else { const L = (it.kind === "open" ? dist(it.pts[0], it.pts[1]) : it.shape === "circle" ? polyLen(poly, true) : polyLen(it.pts)) / k * nos; if (neg) g.dl += L; else g.gl += L; } });
+    const k = qScale(it); if (!k || c.type === "count" || crossed(it)) return; const nos = +it.nos || 1, neg = it.kind === "ded" || it.kind === "open";
+    if (neg) { const rs = rowsOf(it, k); if (rs.length && rs.every(r => r.below)) return; }   // (at or under the threshold: not taken off)
+    if (c.type === "area") { const A = itemAreaFt(it, k) * nos; if (neg) g.da += A; else g.ga += A; }
+    else { const L = (it.kind === "open" ? openW(it, k) : it.shape === "circle" ? itemPerimFt(it, k) : polyLen(it.pts) / k) * nos; if (neg) g.dl += L; else g.gl += L; } });
   r._only = only; r._g = g; r._v = condVars(c, only); return r._v;
 }
 const legMoney = (v, m) => { const d = Math.max(0, Math.min(2, Math.round(m.moneyPrecision == null ? 2 : +m.moneyPrecision))); return (+v).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d}); };
@@ -5875,11 +6024,11 @@ function legVal(col, r, m){   // a cell -> {s: as shown, v: its figure (null: no
     case "n": return cnt(g.n);
     case "nos": return cnt(V.N);
     case "length": return c.type === "linear" ? num(V.L, "ft") : c.type === "area" ? num(V.P, "ft") : none;
-    case "area": return c.type === "area" ? num(V.A, "Sft") : c.type === "linear" && H ? num(V.L * H * F, "Sft") : none;
-    case "warea": return c.type === "linear" && H ? num(V.L * H * F, "Sft") : c.type === "area" && H ? num(V.P * H, "Sft") : none;
+    case "area": { if (c.type === "area") return num(V.A, "Sft"); const q = c.type === "linear" ? condQ(c, "area", r._only, V) : null; return q ? num(q.v, "Sft") : none; }
+    case "warea": { if (c.type === "area") return H ? num(V.P * H, "Sft") : none; const q = c.type === "linear" ? condQ(c, "area", r._only, V) : null; return q ? num(q.v, "Sft") : none; }
     case "height": return H ? num(H, "ft") : none;
     case "thick": return T ? num(T, "ft") : none;
-    case "volume": return c.type === "area" && T ? num(V.A * T, "cft") : c.type === "linear" && H && T ? num(V.L * H * T, "cft") : none;
+    case "volume": { if (c.type === "area") return T ? num(V.A * T, "cft") : none; const q = c.type === "linear" ? condQ(c, "vol", r._only, V) : null; return q ? num(q.v, "cft") : none; }
     case "gross": return c.type === "area" ? num(g.ga, "Sft") : c.type === "linear" ? num(g.gl, "ft") : none;
     case "ded": return c.type === "area" && g.da ? num(g.da, "Sft") : c.type === "linear" && g.dl ? num(g.dl, "ft") : none;
     case "pdoor": return c.type === "area" ? num(V.PD, "ft") : none;
@@ -6226,11 +6375,17 @@ function dedLblToggle(){ const o = S.lbl; lblSet(o.dedShow === "off" ? {dedShow:
 function lblMenu(anchor){
   const r = anchor.getBoundingClientRect(), o = S.lbl, sh = LBL_SHOW[o.show] ? o.show : "full", dd = LBL_DED[o.dedShow] ? o.dedShow : "qty";
   const lo = t => t.charAt(0).toLowerCase() + t.slice(1);
+  const st = LBL_STYLE[o.style] ? o.style : "ps", fit = lblFit(), col = lblCollide();
   ctxShow([{h: "Labels", s: "what they show and how they are sized"},
+    {t: "Preset", sub: Object.entries(LBL_PRESETS).map(([k2, p]) => ({t: p[0], fn: () => lblPreset(k2), on: o.preset === k2}))}, {sep: 1},
     ...Object.entries(LBL_SHOW).map(([v, t]) => ({t: "Labels: " + lo(t), fn: () => lblSet({show: v}), on: sh === v})), {sep: 1},
     ...Object.entries(LBL_DED).map(([v, t]) => ({t: "Cut-outs: " + lo(t), fn: () => v === "off" ? (dd !== "off" && dedLblToggle()) : lblSet({dedShow: v}), on: dd === v})), {sep: 1},
-    ...Object.entries(LBL_STYLE).map(([v, t]) => ({t: "Style: " + t, fn: () => lblSet({style: v}), on: (lblPS() ? "ps" : "box") === v})),
-    {t: "Lengths only on the run clicked", fn: () => lblSet({lenSel: o.lenSel === false}), on: o.lenSel !== false}, {sep: 1},
+    ...Object.entries(LBL_STYLE).map(([v, t]) => ({t: "Style: " + t, fn: () => lblSet({style: v}), on: st === v})),
+    {t: "Lengths only on the run clicked", fn: () => lblSet({lenSel: o.lenSel === false}), on: o.lenSel !== false},
+    {t: "Lengths written along the run (CAD)", fn: () => lblSet({lenAlong: o.lenAlong === false}), on: o.lenAlong !== false},
+    {t: "Short names (no “— floor” after them)", fn: () => lblSet({shortName: o.shortName === false}), on: o.shortName !== false}, {sep: 1},
+    {t: "Size on screen", sub: Object.entries(LBL_FIT).map(([v, t]) => ({t, fn: () => lblSet(v === "screen" ? {zoom: false} : {zoom: true, fit: v}), on: fit === v}))},
+    {t: "When labels meet", sub: Object.entries(LBL_COLLIDE).map(([v, t]) => ({t, fn: () => lblSet(v === "overlap" ? {declutter: false} : {declutter: true, collide: v}), on: col === v}))},
     {t: "Follow the zoom (sized as the drawing's text)", fn: () => lblSet({zoom: o.zoom === false}), on: o.zoom !== false},
     {t: "No overlap (leave out a covered label)", fn: () => lblSet({declutter: o.declutter === false}), on: o.declutter !== false},
     {t: "Hide labels on small shapes", fn: () => lblSet({small: !o.small}), on: !!o.small}, {sep: 1},
@@ -6395,7 +6550,8 @@ async function removePdf(fid, moved){
   savePr = P.proj; await flushSave(); await backupNow("before removing " + f.name).catch(() => {});
   const pr = P.proj, mine = k => String(k).split(":")[0] === fid;
   pr.files = pr.files.filter(x => x.id !== fid); pr.items = pr.items.filter(i => i.file !== fid); pr.marks = (pr.marks || []).filter(m => m.file !== fid);
-  ["scales", "viewports", "floors", "sheets", "ocr", "rot"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) delete pr[n][k]; })); ["pageOrder", "pageHide", "flShare"].forEach(n => { if (pr[n]) pr[n] = pr[n].filter(k => !mine(k)); });
+  ["scales", "viewports", "floors", "sheets", "ocr", "rot", "vec"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) delete pr[n][k]; })); ["pageOrder", "pageHide", "flShare"].forEach(n => { if (pr[n]) pr[n] = pr[n].filter(k => !mine(k)); });
+  ["cadEd", "bbImp"].forEach(n => { if (pr[n]) delete pr[n][fid]; }); if (pr.levels) pr.levels = pr.levels.filter(l => l.file !== fid);   // (its AutoCAD edits, Bluebeam import and spot levels: nothing left of it in the project)
   if (pr.pins) pr.pins = pr.pins.filter(k => !mine(k)); if (S.pgSel) [...S.pgSel].forEach(k => { if (mine(k)) S.pgSel.delete(k); });
   if (pr.layersOff) delete pr.layersOff[fid]; if (pr.last && pr.last.file === fid) pr.last = {};
   S.undo = []; S.redo = []; S.multi.clear(); S.sel = null; S.selMark = null; Object.keys(S.thumbs || {}).forEach(k => { if (mine(k)) delete S.thumbs[k]; });
@@ -6439,7 +6595,7 @@ async function moveFolder(fid){
     tp.files.push(JSON.parse(JSON.stringify(f)));
     its.forEach(i => { const n = JSON.parse(JSON.stringify(i)); n.cond = cmap[i.cond] || n.cond; tp.items.push(n); });
     mks.forEach(m => { const n = JSON.parse(JSON.stringify(m)); if (Array.isArray(n.conds)) n.conds = n.conds.map(id => cmap[id]).filter(Boolean); if (n.layer != null) { if (lmap[n.layer]) n.layer = lmap[n.layer]; else delete n.layer; } (tp.marks = tp.marks || []).push(n); });
-    ["scales", "viewports", "floors", "sheets", "ocr", "rot"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) { (tp[n] = tp[n] || {})[k] = JSON.parse(JSON.stringify(pr[n][k])); } }));
+    ["scales", "viewports", "floors", "sheets", "ocr", "rot", "vec"].forEach(n => Object.keys(pr[n] || {}).forEach(k => { if (mine(k)) { (tp[n] = tp[n] || {})[k] = JSON.parse(JSON.stringify(pr[n][k])); } }));   // (its scan lines too)
     ["pageOrder", "pageHide", "flShare", "pins"].forEach(n => { const L = (pr[n] || []).filter(mine); if (L.length) tp[n] = (tp[n] || []).concat(L); });
     ["layersOff", "bbImp", "cadEd"].forEach(n => { if (pr[n] && pr[n][fid]) (tp[n] = tp[n] || {})[fid] = JSON.parse(JSON.stringify(pr[n][fid])); });
     if (pr.levels) { const L = pr.levels.filter(l => l.file === fid); if (L.length) tp.levels = (tp.levels || []).concat(JSON.parse(JSON.stringify(L))); }
@@ -6557,7 +6713,7 @@ function shSorted(its, c){
 function renderSheet(){
   const el = $("sheet");
   if (!P.proj) { el.innerHTML = ""; return; }
-  const missing = P.proj.items.filter(it => !itemScale(it)).length, xc = P.proj.items.filter(it => itemScale(it) && crossed(it)).length;
+  const missing = P.proj.items.filter(it => !qScale(it)).length, xc = P.proj.items.filter(it => itemScale(it) && crossed(it)).length;   // (a count needs no scale)
   const unv = Object.values(P.proj.scales).filter(s => !s.verified && s.how !== "inherited").length, inh = Object.values(P.proj.scales).filter(s => !s.verified && s.how === "inherited").length;
   const wb = $("warnbar"), msgs = [];
   if (missing) msgs.push(missing + " measurement" + (missing > 1 ? "s are" : " is") + " on a page with no scale — set it with <b>K</b>; they are left out of the totals.");
@@ -6573,7 +6729,7 @@ function renderSheet(){
     const t = condTotals(c);
     h += `<tr class="ch"><td colspan="4"><span class="sw" style="background:${c.color}"></span>${c.boq ? `<span class="boq">${esc(c.boq)}</span> ` : ""}${esc(c.name)} <span style="font-weight:400;color:var(--muted)">(${esc(uL(c.unit))})</span>${(P.proj.cols || []).length ? `<span class="ccols">${colChips(c)}</span>` : ""}</td></tr>`;
     its.forEach(it => {
-      const k = itemScale(it), vp = viewportAt(it.file, it.page, it.pts[0]), lt = locText(locOf(it)), pg = pageName(it) + (vp ? " · " + vp.name : "") + (lt ? " · " + lt : "");
+      const k = qScale(it), vp = viewportAt(it.file, it.page, it.pts[0]), lt = locText(locOf(it)), pg = pageName(it) + (vp ? " · " + vp.name : "") + (lt ? " · " + lt : "");
       if (!k) { h += `<tr class="it${it.id === S.sel ? " sel" : ""}" data-item="${esc(it.id)}"><td>${++n}</td><td>${esc(it.label || kindName(it, c))}<div class="ds">${esc(pg)} · scale not set</div></td><td class="n">—</td><td class="n">—</td></tr>`; return; }
       rowsOf(it, k).forEach((r, i) => {
         const desc = (r.sign < 0 ? "Ded. " : "") + (it.label || kindName(it, c)) + (r.part ? " — part " + String.fromCharCode(96 + r.part) : "") + (r.rise ? " — " + (r.rise > 0 ? "rise" : "drop") : "");
@@ -8789,7 +8945,8 @@ async function exportExcel(){
         rr.getCell(1).value = i === 0 ? ++sn : null;
         rr.getCell(2).value = rowDesc(x);
         rr.getCell(3).value = pageName(it);
-        const W = ww ? (+g.c.t > 0 ? rD(+g.c.t) : null) : r.W, H = ww ? (+g.c.h > 0 ? rD(+g.c.h) : null) : r.H;
+        const oH = ww && it.kind === "open" && +g.c.h > 0 ? (openH(it) > 0 ? rD(Math.min(openH(it), +g.c.h)) : rD(+g.c.h)) : null, oBelow = oH != null && r3(openW(it, qScale(it) || 1)) * r3(oH) <= (+g.c.dedMin || 0);   // an opening: its own height (none given: the wall's)
+        const W = ww ? (+g.c.t > 0 ? rD(+g.c.t) : null) : r.W, H = ww ? (oH != null ? (oBelow ? 0 : oH) : +g.c.h > 0 ? rD(+g.c.h) : null) : r.H;
         (r.bad ? [r.nos, null, null, null] : [r.nos, r.A != null ? uX(r.A, "Sft") : uX(r.L, "ft"), uX(W, "ft"), uX(H, "ft")]).forEach((v, j) => {   // (an outline crossing itself: no dimensions, Qty 0 in yellow)
           const cell = rr.getCell(4 + j);
           if (j === 1 && r.runs && r.runs.length > 1 && !r.bad) cell.value = {formula: r.runs.map(x => isM() ? String(uX(x, "ft")) : f3(x)).join("+"), result: uX(r.L, "ft")};
@@ -8812,9 +8969,9 @@ async function exportExcel(){
         row++;
       });
       const tr = ws.getRow(row); tr.getCell(2).value = "Total " + g.c.name; tr.getCell(9).value = uL(g.c.unit);
-      tr.getCell(8).value = {formula: `SUM(H${first}:H${row - 1})`, result: uV(g.t.net, g.c.unit)}; tr.getCell(8).numFmt = qFmt(g.c.unit);
+      tr.getCell(8).value = row > first ? {formula: `SUM(H${first}:H${row - 1})`, result: uV(g.t.net, g.c.unit)} : {formula: "0", result: 0}; tr.getCell(8).numFmt = qFmt(g.c.unit);   // (no row: 0 — SUM(H9:H8) would take in its own cell)
       if (ww) [[cA, "Sft", +g.c.h > 0], [cV, "cft", +g.c.h > 0 && +g.c.t > 0]].forEach(([n, u, on]) => { if (!on) return; const L1 = xlLetter(n), tc = tr.getCell(n);
-        tc.value = {formula: `SUM(${L1}${first}:${L1}${row - 1})`, result: g.rows.reduce((a, x) => { const v = ws.getRow(first + g.rows.indexOf(x)).getCell(n).value; return a + (v && typeof v.result === "number" ? v.result : 0); }, 0)}; tc.numFmt = qFmt(u); tc.fill = GREY; });
+        tc.value = row <= first ? {formula: "0", result: 0} : {formula: `SUM(${L1}${first}:${L1}${row - 1})`, result: g.rows.reduce((a, x) => { const v = ws.getRow(first + g.rows.indexOf(x)).getCell(n).value; return a + (v && typeof v.result === "number" ? v.result : 0); }, 0)}; tc.numFmt = qFmt(u); tc.fill = GREY; });
       tr.font = {bold: true}; for (let n = 1; n <= 9; n++) tr.getCell(n).fill = GREY;
       totals.push({c: g.c, cell: "H" + row, t: g.t}); row++;
     }
@@ -8965,17 +9122,18 @@ function pageOverlaySvg0(file, page, sc, W, H, legend){
   const o = legend && typeof legend === "object" ? legend : {legend: legend ? "tl" : "none"}, ox = +o.ox || 0, lblOn = o.lbl == null ? S.lbl.on : !!o.lbl;
   const T = p => [p[0] * sc + ox, p[1] * sc], z = o.z > 0 ? o.z : Math.max(1, sc / 1.6), wz = o.wz > 0 ? o.wz : 1, h = [];
   const ps = P => P.map(p => T(p).map(v => v.toFixed(1)).join(",")).join(" ");
-  const tot = {}, per = {}, its = {}, shown = it => o.conds ? o.conds.has(it.cond) : !hiddenItem(it);
+  const tot = {}, per = {}, its = {}, shown = it => o.conds ? o.conds.has(it.cond) : !hiddenItem(it), LBX = [];   // LBX: the labels, placed together after every object (none on another)
   if (ox) h.push(`<rect x="0" y="0" width="${ox.toFixed(1)}" height="${H}" fill="#fff"/><line x1="${ox.toFixed(1)}" y1="0" x2="${ox.toFixed(1)}" y2="${H}" stroke="#9fb0c6" stroke-width="${z}"/>`);
   if (o.meas !== false) P.proj.items.filter(i => i.file === file && i.page === page && shown(i)).forEach(it => {
     const c = cond(it.cond); if (!c) return;
     const k = qScale(it), rows = k ? rowsOf(it, k) : [], q = rows.reduce((a, r) => a + r.qty, 0), col = c.color, ded = it.kind === "ded";
     tot[c.id] = (tot[c.id] || 0) + q; (its[c.id] = its[c.id] || []).push(it);
-    if (c.type === "area" && it.kind === "shape" && k && !crossed(it)) per[c.id] = (per[c.id] || 0) + (+it.nos || 1) * polyLen(itemPoly(it), true) / k;   // (as P in the bill)
+    if (c.type === "area" && it.kind === "shape" && k && !crossed(it)) per[c.id] = (per[c.id] || 0) + (+it.nos || 1) * itemPerimFt(it, k);   // (as P in the bill)
     if (c.type === "count") { h.push(countSvg(c, it.pts, T, z, -1)); return; }
     if (it.kind === "open") { const a = T(it.pts[0]), b = T(it.pts[1]); h.push(`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="#d03b3b" stroke-width="${4 * z * wz}" stroke-linecap="round"/>`); return; }
-    h.push(measSvg(it, c, {T, z, lz: o.z > 0 ? z : z * lblPageK(file, page), lps: lblPS() && !(o.z > 0), wz, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false}));   // (a plot gives its labels' size on paper)
+    h.push(measSvg(it, c, {T, z, lz: o.z > 0 ? z : z * lblPageK(file, page), lps: lblPS() && !(o.z > 0), wz, sp: sc, k, lbl: lblOn, seg: lblOn && S.lbl.seg, small: false, lblOut: LBX}));   // (a plot gives its labels' size on paper)
   });
+  if (LBX.length) h.push(placeLabels(LBX, {screen: false}));
   (P.proj.marks || []).filter(m => m.file === file && m.page === page && (m.type === "redact" || (o.mk !== false && m.type !== "fence" && !mkHidden(m)))).forEach(m => h.push(markSvg(Object.assign({}, m, {id: ""}), T, z)));
   const sh = (P.proj.sheets || {})[keyOf(file, page)] || {}, lz = z * ({s: 0.8, m: 1, l: 1.3}[o.lsz] || 1), pos = o.legend || "none";
   if (pos !== "none") h.push(expLegendSvg(o, pos, tot, file, page, sh, W, H, z, lz, ox, {per, its}));
@@ -9220,6 +9378,7 @@ async function importAll(buf, H){   // a file holding several projects (Export p
       await dbPut("projects", pr);
       if (old) nRep++; else nAdd++;
       if (old && openId === pr.id) reopen = true;
+      if (old) { PANES.forEach(pn => { if (pn.sess && pn.sess.proj && pn.sess.proj.id === pr.id) { pn.sess.proj = pr; pn.sess.undo = []; pn.sess.redo = []; } }); SAVED_AT.set(pr.id, pr.updated); }   // (a window still holding the old copy would write it back on its next save)
       const miss = []; for (const f of pr.files || []) if (await pdfSha(f.id) === null) miss.push(f.name);
       const nf = (pr.files || []).length;
       rows.push({what: pr.name, a: nf + " PDF" + (nf === 1 ? "" : "s") + ", " + pr.items.length + " measurement" + (pr.items.length === 1 ? "" : "s"), b: old ? "replaced" : "added", st: miss.length ? "WARNING" : rep.some(r => /left out|removed/.test(r)) ? "FAIL" : "PASS",
@@ -10897,6 +11056,15 @@ function setPages(){   // [{id, n (name), d (what it holds), rows, reset}] — a
      reset: () => saveToolDefaults(Object.assign(toolDefaults(), ...["markColor", "markWidth", "dimColor", "dimWidth", "dimSize", "dimArrow", "dimOffset", "hiliteColor", "hiliteOpacity"].map(k => ({[k]: DEFAULTS[k]}))))},
     {id: "labels", n: "Labels", d: "what labels on the drawing show, and their size", rows: [
       {t: "tog", n: "Labels on the drawing", d: "L shows or hides them", get: () => !!S.lbl.on, set: v => setLblOn(v)},
+      {t: "sel", n: "Preset", d: "a whole look in one click — the settings below follow", o: [["", "(as set below)"]].concat(Object.entries(LBL_PRESETS).map(([k2, p]) => [k2, p[0]])), get: () => LBL_PRESETS[S.lbl.preset] ? S.lbl.preset : "", set: v => { if (v) lblPreset(v); else lblSet({preset: ""}); }},
+      {t: "sel", n: "Style", o: Object.entries(LBL_STYLE), get: () => LBL_STYLE[S.lbl.style] ? S.lbl.style : "ps", set: v => lblSet({style: v, preset: ""})},
+      {t: "sel", n: "Size on screen", d: "Smart: with the zoom, never smaller or larger than the sizes below", o: Object.entries(LBL_FIT), get: lblFit, set: v => lblSet(v === "screen" ? {zoom: false, preset: ""} : {zoom: true, fit: v, preset: ""})},
+      {t: "num", n: "Smallest label text", d: "Smart size: zoomed out", u: "px", min: 5, max: 20, step: 1, get: () => +S.lbl.minPx || 9, set: v => lblSet({minPx: v, preset: ""})},
+      {t: "num", n: "Largest label text", d: "Smart size: zoomed in", u: "px", min: 6, max: 40, step: 1, get: () => +S.lbl.maxPx || 14, set: v => lblSet({maxPx: v, preset: ""})},
+      {t: "sel", n: "When labels meet", d: "the selected object's, the moved ones and the bigger objects' are placed first", o: Object.entries(LBL_COLLIDE), get: lblCollide, set: v => lblSet(v === "overlap" ? {declutter: false, preset: ""} : {declutter: true, collide: v, preset: ""})},
+      {t: "tog", n: "Lengths written along the run", d: "as CAD text, on the run's longest free side", get: () => S.lbl.lenAlong !== false, set: v => lblSet({lenAlong: v, preset: ""})},
+      {t: "tog", n: "Short names", d: "“Plaster”, not “Plaster — Lower ground floor” (the floor is in the tree and the legend)", get: () => S.lbl.shortName !== false, set: v => lblSet({shortName: v, preset: ""})},
+      {t: "num", n: "No label under this quantity", d: "small pieces stay unlabelled (0: every piece); the selected one is always labelled", u: "", min: 0, max: 100000, step: 0.5, get: () => +S.lbl.minQty || 0, set: v => lblSet({minQty: Math.max(0, +v || 0)})},
       {t: "sel", n: "Every label shows", o: Object.entries(LBL_SHOW), get: () => LBL_SHOW[S.lbl.show] ? S.lbl.show : "full", set: v => lblSet({show: v})},
       {t: "sel", n: "Cut-out / deduction labels show", o: Object.entries(LBL_DED), get: () => LBL_DED[S.lbl.dedShow] ? S.lbl.dedShow : "qty", set: v => lblSet({dedShow: v})},
       {t: "num", n: "Label size", d: "[ and ] step it", u: "%", min: 50, max: 300, step: 5, get: () => Math.round((+S.lbl.scale || 1) * 100), set: v => lblSet({scale: v / 100})},
@@ -12379,7 +12547,7 @@ function qaCounts(){
   const its = P.proj.items, used = new Set(its.map(i => i.cond)), rate = P.proj.conds.reduce((a, c) => a + (used.has(c.id) || (c.asm || []).length ? [c].concat(c.asm || []).filter(o => { const r = rateOf(o, o === c ? c.unit : o.unit); return r.na || !(r.rate > 0); }).length : 0), 0);
   return {n: its.length, checked: its.filter(i => i.qa === "checked").length, recheck: its.filter(i => i.qa === "recheck").length, review: its.filter(needsReview).length,
           boq: P.proj.conds.filter(c => used.has(c.id) && !String(c.boq || "").trim()).length, ai: its.filter(i => i.ai && i.qa !== "checked").length, copied: its.filter(i => i.copied && i.qa !== "checked").length, rate,
-          scale: Object.values(P.proj.scales).filter(s => !s.verified).length + new Set(its.filter(i => !itemScale(i)).map(i => keyOf(i.file, i.page))).size};
+          scale: Object.values(P.proj.scales).filter(s => !s.verified).length + new Set(its.filter(i => !qScale(i)).map(i => keyOf(i.file, i.page))).size};
 }
 function qaFilterOk(it){ const f = S.qaFilter; return !f || (f === "checked" ? it.qa === "checked" : f === "pending" ? it.qa !== "checked" : f === "recheck" ? it.qa === "recheck" : f === "review" ? needsReview(it) : true); }
 /* the next measurement not yet checked, in page order across every PDF (after the selected one); it is opened, selected and zoomed to */
@@ -12516,7 +12684,7 @@ function sizeMismatch(it, k){
 function validate(){
   const out = [], E = (lvl, msg) => out.push({lvl, msg});
   if (!P.proj.items.length) E("WARNING", "Nothing is measured yet");
-  const noSc = new Map(); P.proj.items.forEach(it => { if (!itemScale(it)) noSc.set(keyOf(it.file, it.page), (noSc.get(keyOf(it.file, it.page)) || 0) + 1); });
+  const noSc = new Map(); P.proj.items.forEach(it => { if (!qScale(it)) noSc.set(keyOf(it.file, it.page), (noSc.get(keyOf(it.file, it.page)) || 0) + 1); });
   noSc.forEach((n, k) => E("ERROR", `${keyName(k)}: scale not set — ${n} measurement${n > 1 ? "s" : ""} left out of the totals`));
   Object.entries(P.proj.scales).forEach(([k, sc]) => { if (!sc.verified && P.proj.items.some(it => keyOf(it.file, it.page) === k)) E("WARNING", `${keyName(k)}: scale ${scaleState(sc).t.toLowerCase()} — verify with a known dimension`); });
   P.proj.items.forEach(it => { if (!cond(it.cond)) E("ERROR", `A measurement on ${pageName(it)} belongs to a deleted condition`); });
@@ -12702,7 +12870,7 @@ async function backupsDialog(pid){
     if (!ok) return backupsDialog(pid);
     if (P.proj && P.proj.id === pid) { savePr = P.proj; await flushSave(); }
     const cur = await dbGet("projects", pid); if (cur) await backupNow("before restore", cur);
-    old.id = pid; migrate(old); old.updated = new Date().toISOString(); await dbPut("projects", old); SAVED_AT.set(pid, old.updated);
+    old.id = pid; migrate(old); old.updated = new Date().toISOString(); SAVE_PEND.delete(pid); SAVE_ERR.delete(pid); SAVE_FLIGHT.delete(pid); await dbPut("projects", old); SAVED_AT.set(pid, old.updated);
     PANES.forEach(p => { if (p.sess && p.sess.proj && p.sess.proj.id === pid) { p.sess.proj = old; p.sess.undo = []; p.sess.redo = []; } });   // a pane still holding the pre-restore copy would write it back over the restore on its next save — and its old undo steps would too
     if (P.proj && P.proj.id === pid) await openProject(pid); else showStart();
     toast("Restored the backup of " + fmt(bk.at), 4000);
@@ -13958,7 +14126,9 @@ function paneBlank(pn){   // a window left without a drawing (its PDF was remove
 /* the handlers of one window's stage */
 function wireStage(pn){
   const st = pn.el.stage, here = e => { const r = st.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-  pn.host.addEventListener("pointerdown", () => activate(pn), true);   // a click in a window makes it the one worked in — before anything else sees the click
+  pn.host.addEventListener("pointerdown", () => { const a = document.activeElement;   // a Properties / Materials field being typed in: committed to its own object first —
+      if (a && a.closest && a.closest("#props, #propsBox") && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) a.blur();   // (its change event reads the selection, which this click is about to change)
+      activate(pn); }, true);   // a click in a window makes it the one worked in — before anything else sees the click
   st.addEventListener("pointerdown", onDown);
   st.addEventListener("pointermove", e => { if (pn === ACT) onMove(e); });   // (a window that is not the one worked in only shows the cursor link)
   pn.host.addEventListener("pointermove", e => hotMove(pn, e));
@@ -14191,7 +14361,7 @@ function wire(){
     if (o.dataset.del) { const pr = await dbGet("projects", o.dataset.del); const ok = await ask("Delete project", `<p>Delete <b>${esc(pr.name)}</b> with its ${pr.items.length} measurements? Its drawings are kept for ${TRASH_DAYS} days so Recover can bring it back whole (Start → Recover a deleted project…, from its last backups); after that they are removed from this browser.</p>`, "Delete");
       if (!ok) return; try { await trashProject(pr); } catch (e) { return toast("Could not delete the project: " + (e.message || e), 5000); } await dbDel("projects", pr.id);
       if (savePr && savePr.id === pr.id) savePr = null; SAVE_PEND.delete(pr.id); SAVE_ERR.delete(pr.id); SAVE_FLIGHT.delete(pr.id); SAVED_AT.delete(pr.id);   // a retry kept from a failed save must not re-create the deleted project
-      { const g = SPLIT.on && PANES.find(p => p.sess.proj && p.sess.proj.id === pr.id); if (g) splitClose(g); else if (P.proj && P.proj.id === pr.id) P.proj = null; } showStart(); }
+      { const g = SPLIT.on && PANES.find(p => p.sess.proj && p.sess.proj.id === pr.id); if (g) splitClose(g); if (P.proj && P.proj.id === pr.id) P.proj = null; PANES.forEach(pn => { if (pn.sess && pn.sess.proj && pn.sess.proj.id === pr.id) pn.sess.proj = null; }); } showStart(); }
   });
   $("projectSearch").addEventListener("input", () => showStart());  $("condList").addEventListener("click", e => {
     if (e.target.id === "bFirstCond") return editCond(null);
