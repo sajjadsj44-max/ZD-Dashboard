@@ -3276,11 +3276,15 @@ async function autoRoomRetried(p){   // the trace retried with wider gaps / dash
   if (!j.bad && j.small && !first.short) first.short = "smaller than the size written in it (" + j.own.size + " = " + uArea(j.own.sft) + ", traced " + uArea(j.a) + ") — furniture or fittings in the wall pen may cut it: Pick a wall (⚙) or adjust the outline";
   if (!j.bad) return first;
   let best = {res: first, j};
-  for (const over of [{dashBound: true}, {dashBound: true, gap: o.gap * 1.5}, {dashBound: true, gap: o.gap * 2, pocket: Math.max(o.pocket || 0, 1.5)}, {dashBound: true, gap: o.gap * 3, pocket: Math.max(o.pocket || 0, 2)}]) {
-    busy("Room leaked into " + j.names.filter(Boolean).slice(0, 3).join(", ") + " — closing wider gaps…"); await new Promise(r => setTimeout(r, 10));
+  // a shop open to the corridor through its glass front (a shop-front / glass layer, not read as a wall): those layers as walls first —
+  // the front is the shop's edge, a wider door gap is not; then the wider gaps
+  const Li = o.layers !== false && !first.over ? layerInfo(S.fileId) : null, glassL = !!(Li && Object.values(Li).some(l => l.role === "glass" || l.role === "other"));
+  const tries = (glassL ? [{wide: true, noTrace: true}] : []).concat([{dashBound: true}, {dashBound: true, gap: o.gap * 1.5}, {dashBound: true, gap: o.gap * 2, pocket: Math.max(o.pocket || 0, 1.5)}, {dashBound: true, gap: o.gap * 3, pocket: Math.max(o.pocket || 0, 2)}]);
+  for (const over of tries) {
+    busy("Room leaked into " + j.names.filter(Boolean).slice(0, 3).join(", ") + (over.wide ? " — trying with glass / shop-front layers as walls…" : " — closing wider gaps…")); await new Promise(r => setTimeout(r, 10));
     const r2 = await autoRoom(p, Object.assign({}, first.over || {}, over, first.over ? {noTrace: true} : {})); if (r2.err) continue;
     const j2 = judge(r2);
-    if (!j2.bad && j2.n >= 1) { r2.note = "leak closed (gap " + uLenT(over.gap || o.gap) + (over.dashBound ? ", dashed lines as walls" : "") + ")"; return r2; }
+    if (!j2.bad && j2.n >= 1) { r2.note = over.wide ? "glass / shop-front layers taken as walls — check the outline" : "leak closed (gap " + uLenT(over.gap || o.gap) + (over.dashBound ? ", dashed lines as walls" : "") + ")"; return r2; }
     if (j2.n >= 1 && (j2.n < best.j.n || (j2.n === best.j.n && j2.a < best.j.a))) best = {res: r2, j: j2};
   }
   best.res.leak = best.j.n > 1 ? "takes in " + best.j.names.join(" + ") : "much bigger than its written size";
@@ -19138,7 +19142,10 @@ function cadSay(name, m){
   const off = m.layers.filter(l => l.off || l.frozen).length, sk = Object.entries(m.stats.skipped || {}).map(([t, n]) => n + " " + t).join(", ");
   /* both of the browser's DWG readers can lose part of a drawing that AutoCAD reads without fault (its objects come back empty): said first, with the way round it */
   const jk = m.stats.junk || 0, lost = m.fmt === "DWG" && jk > 0.1 * (jk + (m.stats.ents || 0));
-  return (lost ? "⚠ Only part of this drawing could be read — " + jk.toLocaleString() + " objects came out empty in the browser's DWG readers. Start the AutoCAD helper on this computer (it opens every DWG whole — set it up once with tools\\cad-bridge-setup.cmd) and add the drawing again, or in AutoCAD use SAVEAS → DXF and add the .dxf. " : "") + name + (m.via ? " — opened by " + m.via + " on this computer" : m.rdr ? " — read by the second DWG reader (" + m.rdr + ")" : "") + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
+  /* laid out at 1:24000 or smaller (the drawing reaches tens of miles — a group of objects far from the plans): a room is a
+     fraction of a point on the page, too small for snapping and Auto area. Kept so when measurements sit on it (they stay put) */
+  const tiny = m.den >= 24000 ? "⚠ Laid out at 1:" + m.den + " — this drawing reaches " + Math.round(m.map && m.map.w ? (m.map.w - 2 * m.map.ox) * m.den / 72 / 12 / 5280 : 0) + " miles or more, so its rooms are tiny on the page and snapping / Auto area cannot find them. In AutoCAD, Zoom Extents shows the far objects: delete them and add the drawing again. (With measurements on it, a drawing added again keeps the page it was first given: delete them first to lay it out afresh.) " : "";
+  return tiny + (lost ? "⚠ Only part of this drawing could be read — " + jk.toLocaleString() + " objects came out empty in the browser's DWG readers. Start the AutoCAD helper on this computer (it opens every DWG whole — set it up once with tools\\cad-bridge-setup.cmd) and add the drawing again, or in AutoCAD use SAVEAS → DXF and add the .dxf. " : "") + name + (m.via ? " — opened by " + m.via + " on this computer" : m.rdr ? " — read by the second DWG reader (" + m.rdr + ")" : "") + " — AutoCAD" + (CAD && CAD.VERS[m.ver] ? " " + CAD.VERS[m.ver] : "") + " model space, 1:" + m.den + " from its units (" + m.unitName + (m.unitHow ? ", read from " + m.unitHow : "") + ")" +
     (m.assumed ? " — ⚠ the drawing has no units set: check the scale (chip → Verify)" : m.unitFix ? " — ⚠ its dimensions disagree with its units setting: check the scale (chip → Verify)" : " — scale exact") +
     " · " + m.layers.length + " layers" + (off ? " (" + off + " off / frozen)" : "") + " · " + (m.stats.ents || 0).toLocaleString() + " objects" +
     (sk ? " · not shown: " + sk : "") + (m.stats.missing ? " · " + m.stats.missing + " block(s) missing (xrefs?)" : "") + (m.stats.far ? " · " + m.stats.far + " far-off object(s) left off the page" : "") + (m.stats.junk ? " · " + m.stats.junk + " damaged object(s) left out" : "") + (m.stats.trunc ? " · ⚠ very large: shown in part" : "");
