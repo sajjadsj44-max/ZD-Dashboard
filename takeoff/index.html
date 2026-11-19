@@ -1410,6 +1410,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
         </div><div class="rgl">Zoom</div></div>
         <div class="rg"><div class="rgb">
           <button class="tool" data-px="bHideMk" title="Show / hide all markups and measurements"><svg class="ic"><use href="#i-eye"/></svg><span class="tl">Markups</span></button>
+          <button class="tool on" id="rbDimHide" title="Hide all dimensions (Dimension markups and the drawing's dimension layers); click again to show"><svg class="ic"><use href="#i-dim"/></svg><span class="tl">Dimensions</span></button>
           <button class="tool" data-px="bLbl" title="Show / hide measurement labels (L)"><svg class="ic"><use href="#i-tag"/></svg><span class="tl">Labels</span></button>
           <button class="tool tsm" id="rbLblMenu" title="Label options: what labels show (full, name + qty, qty only, name only), cut-out labels, sizes A+ / A− ( [ ] — Shift for cut-outs), follow the zoom, no overlap. Drag a label to move it."><svg class="ic"><use href="#i-cog"/></svg></button>
           <button class="tool" id="rbLblDed" title="Cut-out labels: show / hide the labels of cut-outs and deductions — their quantity stays on the sheet (⚙: what they show)"><svg class="ic"><use href="#i-tagminus"/></svg><span class="tl">Cut-outs</span></button>
@@ -1699,7 +1700,7 @@ html[data-look="pro"] :is(.rrow .rgb,#mineBox){gap:1px}
 
 <!-- ?v= changes with every release of takeoff.js: GitHub Pages lets a browser keep a file for 10 minutes, and a new
      page must never run under the old script -->
-<script type="module" src="takeoff.js?v=2026-11-18f"></script>
+<script type="module" src="takeoff.js?v=2026-11-19a"></script>
 <script>if ("serviceWorker" in navigator && location.protocol !== "file:") addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });   /* offline use on site: see sw.js */</script>
 <script>
 /* ZD Dashboard lock. The password is asked every time a page is opened, and again when the browser brings a page back with
