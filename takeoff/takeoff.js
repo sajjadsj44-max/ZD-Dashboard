@@ -5212,7 +5212,7 @@ function drawNow(){
      what follows the cursor (the shape being drawn, snap marker, selection box). A mouse move over a page with a
      thousand measurements then redraws only the cursor layer. */
   let k = curScale(); const h = [], dyn = [];
-  const sig = [P.proj.id, S.ver, S.key, S.sel, S.selMark, [...S.multi].join(","), S.selPt, S.tool, S.hideMk, JSON.stringify(S.lbl), (S.drag && !S.drag.pan) || S.typ ? Math.random() : 0, S.autoShow ? S.autoShow.key + S.autoShow.url.length : "", S.unm && S.unm.url ? S.unm.key + S.unm.url.length + "/" + S.unm.sft : "", S.cadSel ? S.cadSelV + "|" + cadKey(ACT) : ""].join("|");
+  const sig = [P.proj.id, S.ver, S.key, S.sel, S.selMark, [...S.multi].join(","), S.selPt, S.tool, S.hideMk, S.hideDim, JSON.stringify(S.lbl), (S.drag && !S.drag.pan) || S.typ ? Math.random() : 0, S.autoShow ? S.autoShow.key + S.autoShow.url.length : "", S.unm && S.unm.url ? S.unm.key + S.unm.url.length + "/" + S.unm.sft : "", S.cadSel ? S.cadSelV + "|" + cadKey(ACT) : ""].join("|");
   const vk = S.view.s + "," + S.view.tx + "," + S.view.ty, t0 = performance.now();
   let keep = sig === S.ovSig && svg.__vk === vk;
   if (!keep && sig === S.ovSig && ovMove(svg, vk)) keep = true;   // only the view moved and the takeoff is heavy to draw: the layer follows the zoom / pan as drawn
@@ -6432,7 +6432,7 @@ function setLegendOn(on){
 function renderLiveLegend(){ const el=$("takeoffLegend"); if(el){ el.classList.remove("on"); el.innerHTML=""; } }
 
 /* the View button shows a dot while something is dimmed, thinned or hidden — so a hidden markup is never a surprise */
-function viewMark(){ const b = $("bView"); if (b) b.classList.toggle("mod", !!(S.dim || S.thin || S.hideMk || (S.lbl && !S.lbl.on))); }
+function viewMark(){ const b = $("bView"); if (b) b.classList.toggle("mod", !!(S.dim || S.thin || S.hideMk || S.hideDim || (S.lbl && !S.lbl.on))); }
 /* the room name written inside an outline (BEDROOM 2, LOUNGE…), from the PDF's own text; "" if none */
 function roomNameAt(poly, key){
   const T = S.texts[key || S.key]; if (!T || !T.length || !poly || poly.length < 3) return "";
@@ -8293,7 +8293,7 @@ function mlSet(ch){ pref(ML_KEY, JSON.stringify(Object.assign(mlPref(), ch))); }
 S.ml = {q: "", type: "", status: "", author: "", layer: "", space: "", ticked: new Set(), focus: null};
 const mkLayers = () => (P.proj && P.proj.mkLayers) || [];
 const mkLayerOf = m => m && m.layer ? mkLayers().find(l => l.id === m.layer) || null : null;
-const mkHidden = m => { const l = mkLayerOf(m); return !!(l && l.hidden); };
+const mkHidden = m => { if (S.hideDim && m.type === "dimension") return true; const l = mkLayerOf(m); return !!(l && l.hidden); };   // (Dimensions button: every dimension markup off)
 function mkCommon(m){   // the fields every markup can carry (any kind, any age), checked when a project is opened
   ["subject", "author", "status"].forEach(k => { if (m[k] != null) m[k] = String(m[k]).slice(0, 200); });
   if (m.layer != null) m.layer = String(m.layer).slice(0, 40);
@@ -14340,6 +14340,13 @@ function wire(){
   if ($("rbLblDed")) $("rbLblDed").onclick = dedLblToggle;   // View ribbon: Cut-out labels on / off, and ⚙ for the rest
   if ($("rbLblMenu")) $("rbLblMenu").onclick = e => { e.stopPropagation(); lblMenu(e.currentTarget); };
   $("bLbl").onclick = () => setLblOn(!S.lbl.on); $("bLblSet").onclick = () => { vOpen(false); labelDialog(); }; $("bLegend").onclick = () => legendButton();
+  if ($("rbDimHide")) $("rbDimHide").onclick = () => {   // View ribbon: hide / show every dimension (the Dimension markups, and a DWG's own dimension layers)
+    S.hideDim = !S.hideDim; $("rbDimHide").classList.toggle("on", !S.hideDim);
+    $("rbDimHide").title = S.hideDim ? "Dimensions hidden — click to show them again" : "Hide all dimensions (Dimension markups and the drawing's dimension layers); click again to show";
+    const cfg = S.ocgs && S.ocgs[S.fileId], dn = cfg ? Object.values(cfg.getGroups()).map(g => g.name).filter(n => /dim/i.test(n)) : [];
+    if (dn.length) cadLayersOnOff(dn, !S.hideDim);
+    viewMark(); draw(); toast(S.hideDim ? "All dimensions hidden" : "Dimensions shown", 1500);
+  };
   $("bHideMk").onclick = () => { S.hideMk = !S.hideMk; $("bHideMk").classList.toggle("on", !S.hideMk); $("bHideMk").title = S.hideMk ? "Markups hidden — click to show all" : "Hide all markups (measurements and notes) to see the drawing"; viewMark(); draw(); toast(S.hideMk ? "All markups hidden" : "Markups shown", 1500); };
   $("bLayers").onclick = () => { vOpen(false); S.lHide = false; setPanels(); leftTab(true); if (!(S.ocgs && S.ocgs[S.fileId])) toast("This PDF has no layers — AutoCAD keeps them when plotted with DWG To PDF.pc3 and “Include layer information”", 5000); };
   $("bDel").onclick = () => delSelected();
