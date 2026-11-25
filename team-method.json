@@ -1,6 +1,6 @@
 {
  "about": "PDF Takeoff: how this team takes off, learned by the takeoff agent in every browser of the team and merged by tools/learn_archive.py. Item names, heights, room kinds and counts only.",
- "at": "2026-11-22T12:03:48.929Z",
+ "at": "2026-11-25T17:45:46.527Z",
  "projects": {
   "vvvcknb84sev:17a5e3f04bec": {
    "at": "2026-10-31T10:49:48.438Z",
@@ -1155,7 +1155,7 @@
  },
  "senders": {
   "vvvcknb84sev": {
-   "at": "2026-11-11T18:41:41.153Z",
+   "at": "2026-11-25T17:45:46.527Z",
    "missed": {
     "BED ROOM": 3,
     "OPEN": 1
@@ -1163,27 +1163,35 @@
    "rejects": {
     "BATH": {
      "del": 2,
-     "made": 27
+     "made": 36
     },
     "BED ROOM": {
      "del": 0,
-     "made": 16
+     "made": 34
     },
     "HALL": {
      "del": 0,
-     "made": 5
+     "made": 12
     },
     "KITCHEN": {
      "del": 2,
-     "made": 17
+     "made": 26
+    },
+    "LOUNGE": {
+     "del": 0,
+     "made": 3
     },
     "ROOM": {
      "del": 2,
-     "made": 23
+     "made": 30
+    },
+    "STAND POST": {
+     "del": 0,
+     "made": 3
     },
     "STORE": {
      "del": 2,
-     "made": 15
+     "made": 17
     }
    },
    "words": {
